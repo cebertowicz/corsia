@@ -9,13 +9,12 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from core.skills_registry import resolve_effective_skills
+from core.skills_registry import resolve_effective_skills, skill_origin
 from host_access import browser_cli, browser_control
 from host_access.browser_domain import registrable_domain
 from infra import config
 from infra.database import get_db
 from infra.system_package import SYSTEM_VERSION
-from library.installed import read_origin
 from tools.base import Tool
 from tools.browser_runtime import BrowserOwnerError, _execution_context, _run_owned
 
@@ -64,7 +63,7 @@ def _load(steps: str, thread_id: str, project_id: str | None) -> tuple[dict[str,
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, RuntimeError, json.JSONDecodeError):
         return None, "unknown steps file"
-    origin = read_origin(folder) or {}
+    origin = skill_origin(skill) or {}
     version = SYSTEM_VERSION if skill.scope == "system" else origin.get("version") or origin.get("sha256") or skill.metadata.get("version") or "unversioned"
     logger.info("browser setup steps source={} skill={} version={}", "system" if skill.scope == "system" else "installed", skill.name, version)
     return data, _validate(data)
@@ -201,16 +200,9 @@ async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str 
     message = url.removeprefix("Error: ") if url.startswith("Error:") else ""
     if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
-    safe_title, safe_url = _field(title, "title"), _field(url, "url")
+    safe_title = browser_cli.rendered_field(title, "title") or ""
+    safe_url = browser_cli.rendered_field(url, "url") or ""
     return {"title": safe_title, "url_path": urlparse(safe_url).path, "missing": expected}, safe_url, None
-
-
-def _field(rendered: str, key: str) -> str:
-    """One value from the session's rendered result: agent-browser's `data` object, unwrapped."""
-    if rendered.startswith("Error:"):
-        return ""
-    value = browser_cli.json_object(rendered).get(key)
-    return (value if isinstance(value, str) else rendered).strip()
 
 
 async def _miss(thread_id: str, identifier: str, says: str, expected: str) -> str:

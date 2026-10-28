@@ -120,7 +120,7 @@ def _system_unavailable_source() -> ContextSourceEntry:
     )
 
 
-def _skill_origin(row: SkillRow) -> dict | None:
+def skill_origin(row: SkillRow) -> dict | None:
     """The safe origin projection for one validated adopted skill copy."""
     origin = row.corsia.get("origin") if isinstance(row.corsia, dict) else None
     if not isinstance(origin, dict):
@@ -151,7 +151,7 @@ def _listed_skills(
             "listed": form,
             "lesson_id": trial_ids.get((row.scope, row.scope_id, row.name)),
         }
-        if origin := _skill_origin(row):
+        if origin := skill_origin(row):
             item["origin"] = origin
         listed.append(item)
     return listed

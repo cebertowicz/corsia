@@ -7,6 +7,7 @@ import pytest
 
 from host_access import browser_control
 from host_access.browser_sessions import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
+from tests.skill_sidecar_helpers import POINTER
 from tools import browser_run_steps, browser_runtime
 
 
@@ -344,7 +345,14 @@ def test_installed_skill_rejects_script_and_reference(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_installed_skill_runs_and_logs_origin(tmp_path, monkeypatch):
     steps = installed_skill(tmp_path, monkeypatch)
-    (steps.parent / "corsia.yaml").write_text("origin:\n  source: example\n  version: '2.1'\n", encoding="utf-8")
+    # As the library installer writes it: SKILL.md points at the sidecar that carries the origin.
+    (steps.parent / "SKILL.md").write_text(
+        f"---\nname: example\ndescription: Use for example setup.\n{POINTER}---\nSetup.\n", encoding="utf-8",
+    )
+    (steps.parent / "corsia.yaml").write_text(
+        f"origin:\n  source: example\n  sha256: '{'a' * 64}'\n  adopted_at: '2026-10-28T00:00:00Z'\n  version: '2.1'\n",
+        encoding="utf-8",
+    )
     (steps / "run.json").write_text(json.dumps({"domains": ["example.com"], "steps": [
         {"id": "click", "says": "Click", "action": "click", "selector": "#go"}
     ]}), encoding="utf-8")

@@ -70,6 +70,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/browser-bin"
           ln -sf "$CORSIA_NATIVE_BROWSER_BINARY" "$RUNNER_TEMP/browser-bin/agent-browser"
           # Same as the native owner fixture: without CI, stock native keeps Chrome's sandbox.
+          set -o pipefail
           PATH="$RUNNER_TEMP/browser-bin:$PATH" env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
             "backend/tests/test_browser_shared_e2e.py::test_installed_setup_steps_run_in_native_browser" \
             "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
