@@ -33,10 +33,7 @@ from registry.identity_bridge import (
 from registry.identity_metadata import parse_metadata
 from registry.shared_principals import is_under_shared_roots, shared_roots
 from registry.reconcile import apply_for_thread, preview_for_thread
-from registry.retirement_predicate import (
-    RETIREMENT_NOT_EXEMPT_CLAUSE,
-    bind_shared_documents,
-)
+from registry.retirement_predicate import RETIREMENT_NOT_EXEMPT_CLAUSE
 
 
 def pane_for_thread(thread_id: str) -> dict:
@@ -172,7 +169,6 @@ def _not_exempt_artifact_ids(db, thread_id: str) -> set[str]:
     predicate (registry.retirement_predicate.RETIREMENT_NOT_EXEMPT_CLAUSE)
     instead of a hand-copied Python mirror.
     """
-    bind_shared_documents(db)
     where, where_params = _pane_visible_where()
     rows = db.execute(
         f"""SELECT r.artifact_id FROM artifact_registrations AS r
