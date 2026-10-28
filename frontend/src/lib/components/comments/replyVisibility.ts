@@ -1,3 +1,16 @@
+/** The height of the screen a reply can show in: the viewport narrowed by every scroll container around it, so a drawer or sheet shorter than the viewport counts as the whole visible area. */
+function visibleAreaHeight(element: HTMLElement, viewport: DOMRectReadOnly): number {
+	let top = viewport.top;
+	let bottom = viewport.top + viewport.height;
+	for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+		if (!/auto|scroll|overlay/.test(getComputedStyle(parent).overflowY)) continue;
+		const rect = parent.getBoundingClientRect();
+		top = Math.max(top, rect.top);
+		bottom = Math.min(bottom, rect.bottom);
+	}
+	return bottom - top;
+}
+
 /** Keeps one viewport observer per rendered unread reply across comment projections. */
 export function createReplyVisibility(onVisible: (id: string) => void, onHidden: (id: string) => void, onClear: () => void) {
 	const observers = new Map<string, { element: HTMLElement; observer: IntersectionObserver }>();
@@ -21,7 +34,8 @@ export function createReplyVisibility(onVisible: (id: string) => void, onHidden:
 			if (observers.has(id)) continue;
 			const observer = new IntersectionObserver((entries) => {
 				const entry = entries.at(-1);
-				const fillsRoot = entry?.rootBounds && entry.rootBounds.height > 0 && entry.intersectionRect.height >= entry.rootBounds.height - 1;
+				const area = entry?.rootBounds ? visibleAreaHeight(element, entry.rootBounds) : 0;
+				const fillsRoot = !!entry && area > 0 && entry.intersectionRect.height >= area - 1;
 				if (entry?.isIntersecting && (entry.intersectionRatio === 1 || fillsRoot)) onVisible(id);
 				else onHidden(id);
 			}, { threshold: Array.from({ length: 21 }, (_, index) => index / 20) });
