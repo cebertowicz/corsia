@@ -207,7 +207,7 @@ async def test_callback_completes_the_sign_in_and_stores_all_three_entries(googl
         response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert response.status_code == 200
     assert REFRESH not in response.text and SECRET not in response.text
-    assert _credentials() == {"client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
+    assert _credentials() == {"client": "own", "client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
     exchange = google.token_forms[0]
     assert exchange["grant_type"] == "authorization_code" and exchange["code"] == "auth-code"
     account = _only_account()
@@ -901,6 +901,12 @@ async def test_published_callback_and_refresh(google, conductor, monkeypatch, ca
     result = await sign_out_account(account_id, actor=("person", "person"))
     assert result["state"] == "signed_out"
     assert _credentials() is None
+    from connections.connected_accounts import account_client
+    db = get_db()
+    try:
+        assert account_client(account_id, db=db) == {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID}
+    finally:
+        db.close()
     url, _ = await oauth.start_sign_in(actor=("person", "person"), account_id=account_id)
     assert parse_qs(urlparse(url).query)["client_id"] == [oauth.PUBLISHED_CLIENT_ID]
 

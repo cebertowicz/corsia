@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from connections.account_provider import AccountProvider
-from connections.google.client import TIMEOUT_SECONDS
+from connections.google.client import TIMEOUT_SECONDS, uses_published
 
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 #: The revoke results that show the person the manual Google Account step: Google could not be
@@ -42,12 +42,12 @@ GOOGLE_BUNDLE_FIELDS = frozenset(("client_id", "client_secret", "refresh_token")
 
 
 def _required_for(bundle: dict) -> frozenset[str]:
-    return GOOGLE_BUNDLE_FIELDS - {"client_secret"} if bundle.get("client") == "published" else GOOGLE_BUNDLE_FIELDS
+    return GOOGLE_BUNDLE_FIELDS - {"client_secret"} if uses_published(bundle) else GOOGLE_BUNDLE_FIELDS
 
 
 GOOGLE = AccountProvider(
     name="google", display_name="Google", capabilities=("mail", "calendar", "files"),
     bundle_fields=GOOGLE_BUNDLE_FIELDS, scopes_required=False, required_for=_required_for,
-    client_fields=frozenset(("client_id", "client_secret")), optional_bundle_fields=frozenset(("client",)),
+    client_fields=frozenset(("client", "client_id", "client_secret")), optional_bundle_fields=frozenset(("client",)),
     revoke=revoke, release=_release,
 )

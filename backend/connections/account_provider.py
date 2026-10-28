@@ -67,9 +67,11 @@ class AccountProvider:
         """A stored bundle: ``required`` (default: a usable sign-in) present, nothing unknown."""
         if not isinstance(bundle, dict):
             return False
-        needed = required if required is not None else (
-            self.required_for(bundle) if self.required_for is not None else self.required_fields
-        )
+        try:
+            provider_fields = self.required_for(bundle) if self.required_for is not None else self.required_fields
+        except ValueError:
+            return False
+        needed = required if required is not None else provider_fields
         allowed = self.bundle_fields | self.optional_bundle_fields | {SCOPES_FIELD}
         if not needed <= set(bundle) or set(bundle) - allowed:
             return False

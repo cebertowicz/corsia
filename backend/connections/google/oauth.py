@@ -92,6 +92,7 @@ class _Pending:
     reach: AppReach | None
     scopes: tuple[str, ...]
     verifier: str | None
+    client: str
     client_id: str
     client_secret: str | None
     redirect_uri: str
@@ -114,15 +115,7 @@ def redirect_uri() -> str:
 read_client_file = client.read_client_file
 
 
-def _client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
-    """Use an explicit client file or this row's saved client, never another row's."""
-    from connections.connected_accounts import account_client
-
-    if client_file:
-        return client.read_client_file(client_file)
-    if account_id is not None and (material := account_client(account_id, db=db)):
-        return material["client_id"], material["client_secret"]
-    return None
+_client_for = client.client_for
 
 
 def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-def]
@@ -150,13 +143,19 @@ def _begin(
         credentials = _client_for(account_id, client_file, db)
     finally:
         db.close()
-    client_id, client_secret = credentials or (PUBLISHED_CLIENT_ID, None)
-    verifier = secrets.token_urlsafe(64) if credentials else None
+    kind = "own" if credentials is not None else "published"
+    published = client.uses_published({"client": kind})
+    if published:
+        client_id, client_secret = PUBLISHED_CLIENT_ID, None
+    else:
+        assert credentials is not None
+        client_id, client_secret = credentials
+    verifier = None if published else secrets.token_urlsafe(64)
     pending = _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()),
         adding=account_id is None, actor=actor, adding_thread_id=adding_thread_id, reach=reach,
-        starting_thread_id=starting_thread_id, scopes=SCOPES if credentials else PUBLISHED_SCOPES,
-        verifier=verifier, client_id=client_id,
+        starting_thread_id=starting_thread_id, scopes=PUBLISHED_SCOPES if published else SCOPES,
+        verifier=verifier, client=kind, client_id=client_id,
         client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
     with _pending_lock:
@@ -170,12 +169,13 @@ def _begin(
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
         "scope": " ".join(pending.scopes), "state": pending.state, "access_type": "offline", "prompt": "consent",
     }
-    if verifier is None:
+    if client.uses_published(pending):
         params["redirect_uri"] = PUBLISHED_URL
         params["state"] = base64.b64encode(json.dumps({
             "uri": pending.redirect_uri, "manual": False, "csrf": pending.state,
         }).encode()).decode()
     else:
+        assert verifier is not None
         params["code_challenge"] = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
         params["code_challenge_method"] = "S256"
     return AUTH_URL + "?" + urlencode(params), pending
@@ -282,10 +282,8 @@ def _store(
     from connections.connected_accounts import ConnectedAccountError, get_account, store_credentials
     from connections.account_state import mark_signed_in, record_audit
 
-    bundle = {"client_id": pending.client_id, "refresh_token": refresh_token, "scopes": scopes}
-    if pending.client_secret is None:
-        bundle["client"] = "published"
-    else:
+    bundle: dict[str, object] = {"client": pending.client, "client_id": pending.client_id, "refresh_token": refresh_token, "scopes": scopes}
+    if not client.uses_published(pending):
         bundle["client_secret"] = pending.client_secret
     with write_transaction(None, scope="google_sign_in_store") as conn:
         if pending.adding:
@@ -327,7 +325,8 @@ async def complete_sign_in(code: object, state: object, *, access_token: object 
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
     try:
-        if pending.client_secret:
+        published = client.uses_published(pending)
+        if not published:
             from connections.google.oauth_exchange import exchange
 
             grant = await exchange(
@@ -340,11 +339,11 @@ async def complete_sign_in(code: object, state: object, *, access_token: object 
             refresh_token = key_store.validated_value(grant["refresh_token"])
             access = key_store.validated_value(grant["access_token"])
             scopes = sorted(str(grant.get("scope") or "").split())
-            required = REQUIRED_SCOPES if pending.client_secret else PUBLISHED_REQUIRED_SCOPES
+            required = PUBLISHED_REQUIRED_SCOPES if published else REQUIRED_SCOPES
             if not set(required) <= set(scopes):
-                message = MISSING_SCOPES if pending.client_secret else PUBLISHED_MISSING_SCOPES
+                message = PUBLISHED_MISSING_SCOPES if published else MISSING_SCOPES
                 raise GoogleSignInError(message, browser_message=BROWSER_MISSING_SCOPES)
-            provider_subject = client.id_token_subject(grant.get("id_token")) if pending.client_secret else await client.token_subject(access)
+            provider_subject = await client.token_subject(access) if published else client.id_token_subject(grant.get("id_token"))
             profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
             email = str(profile["emailAddress"])
         except GoogleError:

@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Connecting Google no longer needs your own Google Cloud project: sign in through Google's service for its Workspace tools.
+- Google sign-in can now be done with one Allow, through Google's sign-in service for its Workspace tools; the setup guide moves to it in a later change.
 
 - Measurement labels and messages are clearer about what is shown.
 - Provider and model settings use clearer wording for connection, account and usage states.

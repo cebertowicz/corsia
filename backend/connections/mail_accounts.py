@@ -56,7 +56,7 @@ def _mail_host_usable(account: dict, db: sqlite3.Connection) -> dict:
 
 
 def _usable(account: dict, db: sqlite3.Connection) -> dict:
-    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts._google_usable(account, db)
+    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts.usable(account, db)
 
 
 REFUSALS = Refusals(NO_EMAIL_ACCOUNT, NONE_AVAILABLE, CHOOSE, UNKNOWN)

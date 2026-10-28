@@ -86,6 +86,14 @@ class GoogleRequestFailed(GoogleError):
         super().__init__(UNREACHABLE if status is None else f"Google refused the request (HTTP {status}).")
 
 
+def uses_published(source: object) -> bool:
+    """Select the saved Google client; old bundles without a discriminator use their own client."""
+    kind = source.get("client", "own") if isinstance(source, dict) else getattr(source, "client", "own")
+    if kind not in ("published", "own"):
+        raise ValueError("invalid Google client")
+    return kind == "published"
+
+
 def read_client_file(raw_path: object) -> tuple[str, str]:
     """Read a downloaded Desktop OAuth client file, or raise an actionable sign-in error."""
     from tools.conductor_api_paths import forbidden_path
@@ -106,6 +114,25 @@ def read_client_file(raw_path: object) -> tuple[str, str]:
         raise
     except Exception:
         raise GoogleSignInError(BAD_CLIENT_FILE) from None
+
+
+def client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
+    """Use an explicit client file or this row's saved client, never another row's."""
+    from connections.connected_accounts import _stored_bundle, account_client
+
+    stored = _stored_bundle(account_id, db=db) if account_id is not None else None
+    try:
+        published = uses_published(stored[1]) if stored is not None else True
+    except ValueError:
+        raise GoogleSignInError("The saved Google client is invalid. Remove and reconnect this account.") from None
+    if client_file:
+        return read_client_file(client_file)
+    if account_id is not None and not published:
+        material = account_client(account_id, db=db)
+        if material is None:
+            raise GoogleSignInError(NEEDS_CLIENT_FILE)
+        return material["client_id"], material["client_secret"]
+    return None
 
 
 def id_token_subject(value: object) -> str | None:
@@ -163,16 +190,25 @@ def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # typ
     return resolve_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
 
 
-def sign_in_recovery(account_id: str, *, db) -> str:  # type: ignore[no-untyped-def]
-    """Choose recovery instructions for the account's saved client."""
+def _published_account(account_id: str, *, db) -> bool:  # type: ignore[no-untyped-def]
     from connections.connected_accounts import resolve_credentials
 
     stored = resolve_credentials(account_id, db=db)
-    return PUBLISHED_SIGN_IN_RECOVERY if stored and stored.get("client") == "published" else SIGN_IN_RECOVERY
+    if stored is None:
+        raise GoogleNotConnected()
+    return uses_published(stored)
 
 
-async def access_token(account_id: str) -> str:
-    """A fresh access token for this one account, for the one request that uses it.
+def sign_in_recovery(account_id: str, *, db) -> str:  # type: ignore[no-untyped-def]
+    """Choose recovery instructions for the account's saved client."""
+    from connections.connected_accounts import _stored_bundle
+
+    stored = _stored_bundle(account_id, db=db)
+    return PUBLISHED_SIGN_IN_RECOVERY if stored and uses_published(stored[1]) else SIGN_IN_RECOVERY
+
+
+async def _access_token(account_id: str) -> tuple[str, bool]:
+    """A fresh token and its client selection for this account.
 
     A refused refresh marks only this account ``needs_sign_in``; no other account changes.
     """
@@ -184,7 +220,7 @@ async def access_token(account_id: str) -> str:
         raise GoogleNotConnected()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            if stored.get("client") == "published":
+            if uses_published(stored):
                 response = await http.post(PUBLISHED_REFRESH_URL, json={"refresh_token": stored["refresh_token"]})
             else:
                 response = await http.post(TOKEN_URL, data={
@@ -198,7 +234,7 @@ async def access_token(account_id: str) -> str:
     if response.status_code in (400, 401):
         # invalid_grant or an unauthorized client: this account's saved sign-in no longer works.
         await run_in_db(_on_account, mark_needs_sign_in, account_id, stored["refresh_token"])
-        raise GoogleSignInRejected(published=stored.get("client") == "published")
+        raise GoogleSignInRejected(published=uses_published(stored))
     if response.status_code != 200:
         raise GoogleRequestFailed(response.status_code)
     try:
@@ -212,6 +248,12 @@ async def access_token(account_id: str) -> str:
         raise GoogleRequestFailed(response.status_code)
     if provider_subject is not None:
         await run_in_db(_on_account, backfill_subject, account_id, provider_subject)
+    return token, uses_published(stored)
+
+
+async def access_token(account_id: str) -> str:
+    """Return a fresh access token for this account."""
+    token, _ = await _access_token(account_id)
     return token
 
 
@@ -227,7 +269,7 @@ async def request_json(
 
     if token is None and account_id is None:
         raise GoogleNotConnected()
-    bearer = token or await access_token(str(account_id))
+    bearer, published = (token, None) if token else await _access_token(str(account_id))
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.request(
@@ -237,9 +279,10 @@ async def request_json(
         raise GoogleRequestFailed(never_sent=isinstance(exc, _NEVER_SENT)) from None
     if response.status_code == 401:
         if account_id is not None:
+            if published is None:
+                published = await run_in_db(_on_account, _published_account, account_id)
             await run_in_db(_on_account, mark_needs_sign_in, account_id)
-            recovery = await run_in_db(_on_account, sign_in_recovery, account_id)
-            raise GoogleSignInRejected(published=recovery == PUBLISHED_SIGN_IN_RECOVERY)
+            raise GoogleSignInRejected(published=published)
         raise GoogleSignInRejected()
     if response.status_code >= 400:
         raise GoogleRequestFailed(response.status_code)
