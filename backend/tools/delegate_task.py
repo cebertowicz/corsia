@@ -257,7 +257,6 @@ async def _native_read_dirs(
 
     if confinement == CONFINEMENT_NONE:
         return ()
-
     working_dir, _project = await run_in_db(resolve_spawn_working_dir, parent_thread_id)
     try:
         return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir)

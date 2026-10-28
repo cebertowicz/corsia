@@ -17,7 +17,6 @@ from subagents.codex_destination import (
     build_prepared_codex_destination,
     validate_live_compaction,
 )
-
 from subagents.codex_runtime_errors import CodexPreparedContextStale
 from subagents.codex_runtime_state import (
     _APP_SESSIONS,
@@ -51,7 +50,6 @@ def codex_destination_scope(
     ).fetchone()
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
-
     selected_model = target_catalog_id if expected_selected_model is None else expected_selected_model
     if str(row["model"] or "") != selected_model:
         raise CodexPreparedContextStale(
