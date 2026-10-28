@@ -110,6 +110,7 @@ def test_registration_failure_is_recoverable_without_overwrite(monkeypatch, tmp_
     monkeypatch.setattr(registration_writer, "register_artifact", fail_registration)
     first = fetch_pack(item, "owner", "project", tmp_path, object())
     assert first["error"] == "registration_failed"
+    assert "registration failed" not in first["message"]
     folder = tmp_path / "thread" / "packs" / "demo" / "1.0.0"
     before = (folder / "manifest.yaml").stat().st_ino
     monkeypatch.setattr(registration_writer, "register_artifact", lambda **kwargs: registrations.append(kwargs) or {"id": "artifact"})
@@ -130,3 +131,13 @@ def test_refuses_unauthorized_connector_and_byte_mismatch(monkeypatch, tmp_path)
     files["CHANGELOG.md"] = b"tampered"
     assert fetch_pack(item, "owner", "project", tmp_path, object())["error"] == "integrity"
     assert not (tmp_path / "thread").exists()
+
+
+def test_pack_state_reports_update_only_when_every_held_version_is_older():
+    from library.pack_fetch import pack_state
+
+    item = {"name": "demo", "version": "1.1.0"}
+    assert pack_state(item, {"demo": {"1.0.0"}}) == "update_available"
+    assert pack_state(item, {"demo": {"1.0.0", "2.0.0"}}) == "not_fetched"
+    assert pack_state(item, {"demo": {"1.1.0", "1.0.0"}}) == "fetched"
+    assert pack_state(item, {}) == "not_fetched"

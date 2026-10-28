@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import stat
@@ -15,6 +16,8 @@ from registry.models import SURFACING_QUIET
 
 _PACK_REGISTRATION_SQL = INSTALLED_ROWS_SQL + """ AND identities.external_id=? AND identities.path=?
     AND registrations.parent_thread_id=? AND registrations.surfacing=? LIMIT 1"""
+
+logger = logging.getLogger(__name__)
 
 
 def can_fetch(thread_id: str, project_id: str | None, db) -> bool:
@@ -35,19 +38,19 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
     if not can_fetch(thread_id, project_id, db):
         return {"error": "not_conductor", "message": "Only the designated project conductor or workspace CORSIA agent can fetch a blueprint. Ask the conductor; if none exists, continue without the pack."}
     if item.get("kind") != "pack" or item.get("pack_kind") != "blueprint":
-        return {"error": "not_blueprint", "message": "Only blueprint packs can be fetched."}
+        return {"error": "not_blueprint", "message": "Only blueprint packs can be fetched; install a single skill with install instead."}
     if item["withdrawn"]:
-        return {"error": "withdrawn", "message": item["withdrawn_reason"]}
+        return {"error": "withdrawn", "message": f"{item['withdrawn_reason']}; do not adopt it, and search for another blueprint."}
     try:
         files = fetch_bundle(item)
         validate_pack(item, files)
     except LibraryItemUnavailableError as error:
-        return {"error": "library_unreachable", "message": str(error)}
+        return {"error": "library_unreachable", "message": f"{error}; continue without the pack and try again later"}
     except (LibraryIntegrityError, LibraryItemError) as error:
-        return {"error": "integrity", "message": str(error)}
+        return {"error": "integrity", "message": f"{error}; nothing was saved, so report it to the conductor and do not retry"}
     root = skill_scope_root(scope="thread", thread_id=thread_id, project_id=project_id, workspace=workspace, db=db)
     if root is None:
-        return {"error": "scope_unavailable", "message": "The thread's project root is unavailable."}
+        return {"error": "scope_unavailable", "message": "This thread has no project folder to save the pack in; fetch it from a thread inside the project."}
     try:
         root.mkdir(parents=True, exist_ok=True)
         dest = publish_pack(root, item["name"], item["version"], files)
@@ -57,13 +60,15 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
             return {"error": "copy_differs", "path": str(dest), "message": f"The folder at {dest} does not match the published bytes. Remove that folder to allow a fresh fetch."}
         if _registered(thread_id, item["name"], item["version"], dest, db):
             return {"outcome": "already_fetched", "name": item["name"], "version": item["version"], "path": str(dest)}
-    except (OSError, ValueError, AtomicRenameUnavailableError) as error:
-        return {"error": "publication_failed", "message": str(error)}
+    except (OSError, ValueError, AtomicRenameUnavailableError):
+        logger.exception("blueprint publication failed for %s@%s", item["name"], item["version"])
+        return {"error": "publication_failed", "message": "The pack could not be saved in the project's packs folder, and nothing was adopted; continue without it and try the fetch again later."}
     try:
         artifact = register_artifact(integration=LIBRARY_INTEGRATION, type=INSTALLED_PACK_TYPE, external_id=f"{thread_id}/{item['name']}/{item['version']}", parent_thread_id=thread_id, path=str(dest / "manifest.yaml"), db=db)
         update_surfacing(artifact["id"], surfacing=SURFACING_QUIET, parent_thread_id=thread_id, actor_thread_id=thread_id, db=db)
-    except (OSError, ValueError, sqlite3.Error) as error:
-        return {"error": "registration_failed", "message": f"The verified pack is present at {dest}, but registration failed: {error}. Do not overwrite it; registration needs repair."}
+    except (OSError, ValueError, sqlite3.Error):
+        logger.exception("blueprint registration failed for %s@%s", item["name"], item["version"])
+        return {"error": "registration_failed", "message": f"The verified pack is saved at {dest} but not yet registered; do not change that folder, and fetch again to register it."}
     return {"outcome": "fetched", "name": item["name"], "version": item["version"], "path": str(dest), "next": "Read manifest.yaml at the returned path and propose to the person which parts to adopt, never all of it."}
 
 
@@ -88,12 +93,14 @@ def pack_state(item: dict[str, Any], versions: dict[str, set[str]]) -> str:
     if item["version"] in held:
         return "fetched"
     current = semver.Version.parse(item["version"])
+    parsed = []
     for version in held:
         try:
-            if semver.Version.parse(version) < current:
-                return "update_available"
+            parsed.append(semver.Version.parse(version))
         except ValueError:
             continue
+    if parsed and max(parsed) < current:
+        return "update_available"
     return "not_fetched"
 
 
