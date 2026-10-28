@@ -67,6 +67,40 @@ def _dependency_endpoints(connection, node_id: str, depends_on_node_id: str):
     return node, prerequisite
 
 
+def _would_cycle(connection, node_id: str, depends_on_node_id: str) -> bool:
+    """Whether the edge would leave work waiting on itself.
+
+    A wait runs along three links: a node's own edge, an ancestor's edge it
+    inherits (``node_waits.inherited_sql``), and a parent finishing only after
+    its children. The walk follows all three from the prerequisite; ``full``
+    is 0 on an ancestor reached only to read its inherited edges, whose other
+    children do not hold the walk. The new edge holds the dependent and, for
+    a prerequisite outside it, every node beneath it, so reaching any of those
+    is a cycle.
+    """
+    return connection.execute(
+        f"""WITH RECURSIVE
+              down(id,plan_id) AS (
+                SELECT id,plan_id FROM plan_nodes WHERE id=?1
+                UNION SELECT c.id,c.plan_id FROM down
+                CROSS JOIN plan_nodes c ON c.plan_id=down.plan_id AND c.parent_id=down.id),
+              reach(id,full) AS (
+                SELECT ?2,1
+                UNION SELECT d.depends_on_node_id,1 FROM reach r
+                  JOIN plan_node_dependencies d ON d.node_id=r.id
+                  WHERE r.full=1 OR {node_waits.inherited_sql('d.depends_on_node_id', 'r.id')}
+                UNION SELECT n.parent_id,0 FROM reach r JOIN plan_nodes n ON n.id=r.id
+                  WHERE n.parent_id IS NOT NULL
+                UNION SELECT c.id,1 FROM reach r CROSS JOIN plan_nodes n ON n.id=r.id
+                  CROSS JOIN plan_nodes c ON c.plan_id=n.plan_id AND c.parent_id=n.id
+                  WHERE r.full=1)
+            SELECT 1 FROM reach WHERE full=1
+              AND (id=?1 OR (id IN (SELECT id FROM down) AND ?2 NOT IN (SELECT id FROM down)))
+            LIMIT 1""",
+        (node_id, depends_on_node_id),
+    ).fetchone() is not None
+
+
 def add_dependency(node_id: str, depends_on_node_id: str, *, actor_id: str | None = None,
                    provenance: str = "plan_service", expected_revision: int | None = None,
                    causing_executor: str | None = None, db=None) -> None:
@@ -87,15 +121,7 @@ def add_dependency(node_id: str, depends_on_node_id: str, *, actor_id: str | Non
         )
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
-        cycle = connection.execute(
-            "WITH RECURSIVE prerequisites(id) AS ("
-            " SELECT depends_on_node_id FROM plan_node_dependencies WHERE node_id=?"
-            " UNION SELECT d.depends_on_node_id FROM plan_node_dependencies d "
-            "JOIN prerequisites p ON d.node_id=p.id) "
-            "SELECT 1 FROM prerequisites WHERE id=? LIMIT 1",
-            (depends_on_node_id, node_id),
-        ).fetchone()
-        if cycle is not None:
+        if _would_cycle(connection, node_id, depends_on_node_id):
             raise PlanError("dependency would create a cycle")
         before = material_events.blocked_snapshot(connection, (node_id,))
         inserted = connection.execute(

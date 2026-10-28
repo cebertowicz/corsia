@@ -13,6 +13,7 @@ import json
 import sqlite3
 
 from infra.packed_rows import fetch_all
+from plans import node_states
 
 #: The node states in which a dependency or a hold keeps work from starting.
 WAITABLE_STATES = frozenset({"pending", "active"})
@@ -25,6 +26,23 @@ def encoded_ids(node_ids) -> str:
 
 #: Deeper than any real plan; it only bounds the walk if a parent link ever loops.
 _MAX_ANCESTOR_DEPTH = 64
+
+
+def inherited_sql(prerequisite: str, ancestor: str) -> str:
+    """An ``ancestor``'s edge to ``prerequisite`` holds its descendants, as SQL.
+
+    Only a prerequisite outside the ancestor's own subtree is inherited: a
+    phase that depends on one of its own steps restates that it finishes after
+    it, and handing that edge down would make the step wait on itself. Both
+    arguments are SQL expressions for node ids. The read below and the cycle
+    check in ``plans.dependencies`` share this one rule.
+    """
+    return (
+        f"NOT EXISTS (WITH RECURSIVE above(id) AS ("
+        f" SELECT parent_id FROM plan_nodes WHERE id={prerequisite}"
+        f" UNION SELECT a.parent_id FROM plan_nodes a JOIN above ON a.id=above.id)"
+        f" SELECT 1 FROM above WHERE above.id={ancestor})"
+    )
 
 
 def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
@@ -53,8 +71,9 @@ def unmet_prerequisites(
         return {}
     unmet = "" if include_met else "AND p.state NOT IN ('accepted','accepted_with_followup')"
     # A node's own edges (depth 0), then those of its open ancestors: an
-    # ancestor's dependency holds its descendants too. Nearest first, so a
-    # prerequisite reached at several levels keeps the nearest one.
+    # ancestor's dependency on work outside it holds its descendants too.
+    # Nearest first, so a prerequisite reached at several levels keeps the
+    # nearest one.
     touched = set()
     for row in fetch_all(
         connection,
@@ -80,7 +99,7 @@ def unmet_prerequisites(
             JOIN plan_nodes p ON p.id=d.depends_on_node_id
             JOIN plans pl ON pl.id=p.plan_id
             LEFT JOIN threads t ON t.id=pl.owner_id
-            WHERE n.state IN ('pending','active','review_requested') AND n.archived_at IS NULL {unmet}
+            WHERE {node_states.open_sql('n')} AND {inherited_sql('p.id', 'up.id')} {unmet}
             ORDER BY 1,depth,order_key,2""",
         (encoded_ids(ids),),
     ):

@@ -106,6 +106,58 @@ def test_nested_phase_dependency_blocks_inner_task_until_accepted(db):
     assert started["admission"]["condition"] == "running"
 
 
+def _task(db, plan, title, parent):
+    return _mutate(db, plan.id, "add", {"title": title, "acceptance_criteria": "Done", "size": "S", "parent_id": parent})["node"]
+
+
+def _events(db, node_id, event):
+    return db.execute("SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND event=?", (node_id, event)).fetchone()[0]
+
+
+def test_phase_dependency_on_its_own_step_is_not_inherited(db):
+    from plans import admission, node_waits
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _phase(db, plan, "Outer", "outer")
+    step = _task(db, plan, "Step", phase["id"])
+    other = _task(db, plan, "Other", phase["id"])
+    service.add_dependency(phase["id"], step["id"], db=db)
+    assert node_waits.unmet_prerequisites(db, [step["id"], other["id"]]) == {}
+    assert admission.project(step["id"], db=db)["condition"] == "ready"
+
+
+def test_cycles_through_inheritance_or_containment_are_refused(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _phase(db, plan, "Outer", "outer")
+    step = _task(db, plan, "Step", phase["id"])
+    outside = _task(db, plan, "Outside", None)
+    service.add_dependency(phase["id"], outside["id"], db=db)
+    with pytest.raises(service.PlanError, match="cycle"):
+        service.add_dependency(outside["id"], step["id"], db=db)
+    with pytest.raises(service.PlanError, match="cycle"):
+        service.add_dependency(step["id"], phase["id"], db=db)
+    later = _phase(db, plan, "Later", "outer")
+    later_step = _task(db, plan, "Later step", later["id"])
+    service.add_dependency(outside["id"], later_step["id"], db=db)
+    with pytest.raises(service.PlanError, match="cycle"):
+        service.add_dependency(later["id"], phase["id"], db=db)
+
+
+def test_phase_dependency_records_blocked_on_its_steps(db):
+    from tests.plan_review_helpers import submit_review_evidence
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _phase(db, plan, "Outer", "outer")
+    step = _task(db, plan, "Step", phase["id"])
+    before = _task(db, plan, "Before", None)
+    service.add_dependency(phase["id"], before["id"], db=db)
+    assert _events(db, step["id"], "blocked_raised") == 1
+    service.transition_node(before["id"], "active", actor_id="owner", provenance="test", db=db)
+    submit_review_evidence(before["id"], db=db, actor_id="owner")
+    service.transition_node(before["id"], "accepted", actor_id="owner", provenance="test", verification_result="passed", verified_by="reviewer", db=db)
+    assert _events(db, step["id"], "blocked_cleared") == 1
+
+
 def test_nested_versions_use_each_reference(db, monkeypatch, tmp_path):
     from tools import workflow_task_fields as fields
 
