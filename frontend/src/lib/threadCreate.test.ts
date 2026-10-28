@@ -23,9 +23,10 @@ describe('session creation helpers', () => {
 		expect(createAccountRefusal(400, 'usage_limited; retry', clear)).toBe('limited');
 		expect(createAccountRefusal(400, 'account_project_denied; retry', clear)).toBe('Your provider settings don’t allow this chat’s account.');
 		expect(createAccountRefusal(400, 'account_removed; retry', clear)).toBe(PIN_FAILED);
-		expect(clear).toHaveBeenCalledTimes(5);
+		expect(createAccountRefusal(400, 'account does not exist for this provider', clear)).toBe(PIN_FAILED);
+		expect(clear).toHaveBeenCalledTimes(6);
 		expect(createAccountRefusal(500, 'account_removed; retry', clear)).toBeNull();
-		expect(clear).toHaveBeenCalledTimes(5);
+		expect(clear).toHaveBeenCalledTimes(6);
 	});
 
 	it('builds the create-session payload from selected project and model state', () => {

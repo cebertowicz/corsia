@@ -13,7 +13,8 @@ export function draftAccountForModel(accountId: string | null, modelId: string |
 
 export function createAccountRefusal(status: number, detail: unknown, clearChoice: () => void): string | null {
 	const reason = reasonOf(detail);
-	if (status !== 400 || !reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')) return null;
+	const missingAccount = detail === 'account does not exist for this provider';
+	if (status !== 400 || (!missingAccount && (!reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')))) return null;
 	clearChoice();
 	if (reason === 'account_signed_out') return ACCOUNT_SIGNED_OUT;
 	if (reason === 'usage_limited') return ACCOUNT_LIMITED;
