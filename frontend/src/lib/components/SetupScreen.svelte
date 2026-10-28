@@ -305,6 +305,7 @@
 		} catch { accountError = 'Couldn’t save your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
+	/** A failed strict check (GitHub, an endpoint) still leaves the tools it did check readable, so a picked install can start. */
 	async function refreshSources(strict = false) {
 		const current = get(token); if (!current) return;
 		try {
@@ -312,7 +313,7 @@
 			connectFlow.sourcesChanged();
 			catalog = await setupCatalog(current);
 			sourceError = '';
-		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
+		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
 	}
 	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
 	function finishSetup() {

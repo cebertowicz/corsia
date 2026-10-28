@@ -288,6 +288,24 @@ describe('SetupScreen', () => {
 		} finally { vi.useRealTimers(); }
 	});
 
+	it('starts the chosen install when an unrelated source check fails', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		// The recheck writes Claude Code's row, then fails on another source's check.
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			return new Response('{}', { status: 503 });
+		});
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
 	it('shows Retry if detection fails while an unchecked source is present', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
 		await passFolder();
