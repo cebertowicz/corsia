@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
