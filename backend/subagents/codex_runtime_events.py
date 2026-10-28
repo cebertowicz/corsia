@@ -5,9 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 from automation.turn_end_effects import (
     deliver_turn_end_after,
@@ -28,6 +26,10 @@ from registry.observer import observe_settled_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed, register_codex_thread
 from subagents.assistant_step_display import assistant_step_payload
+from subagents.codex_runtime_support import (
+    CodexOnEventContext as _CodexOnEventContext,
+    reasoning_representation_kind as _reasoning_representation_kind,
+)
 from tools.tool_display import SettledResult, tool_done_frame, tool_start_frame
 from subagents.codex_runtime_terminal import (
     provider_reported_model_id as _provider_reported_model_id,
@@ -45,23 +47,6 @@ _PROVIDER_MISSING_TOOL_RESULT = (
     "Codex did not provide a result for this tool call. "
     "CORSIA will rebuild provider context before the next turn."
 )
-
-
-def _reasoning_representation_kind(
-    current: dict | None,
-    incoming: dict,
-) -> str:
-    """Preserve summary evidence when a later Codex item is opaque."""
-    existing = current if isinstance(current, dict) else {}
-    kinds = {
-        provenance.get("representation_kind")
-        for provenance in (existing, incoming)
-    }
-    if "codex_reasoning_summary" in kinds:
-        return "codex_reasoning_summary"
-    if "opaque" in kinds:
-        return "opaque"
-    return incoming.get("representation_kind", "unknown")
 
 
 async def _observe_tool_result(
@@ -139,6 +124,7 @@ async def settle_committed_tool_result(
     name = live.tool_names.pop(tool_id, canonical.name)
     live.tool_step_ids.pop(tool_id)
     if not live.tool_step_ids:
+        live.open_tool_step_id = None
         live.tools_settled.set()
     meta = {
         "tool_call_id": tool_id,
@@ -215,7 +201,10 @@ async def settle_missing_tool_results(
         for tool_id, _name in calls:
             live.tool_names.pop(tool_id, None)
             live.tool_step_ids.pop(tool_id, None)
+    live.open_tool_step_id = None
     live.tools_settled.set()
+
+
 def make_on_event(
     live,
     thread_id: str,
@@ -248,21 +237,6 @@ def make_on_event(
         persist_tool_use=persist_tool_use,
     )
     return functools.partial(_dispatch_on_event, ctx)
-
-
-@dataclass(frozen=True)
-class _CodexOnEventContext:
-    """Values the lifted Codex event handlers close over."""
-    live: Any
-    thread_id: Any
-    bcast: Any
-    dead_set: Any
-    thread_registry: Any
-    bind_tool_result_echo: Any
-    read_bound_tool_result: Any
-    load_assistant_step_display: Any
-    persist_assistant_text: Any
-    persist_tool_use: Any
 
 
 def _event_identity(ctx, ev: dict) -> TurnIdentity:
@@ -367,6 +341,7 @@ async def _on_assistant_text(ctx, ev: dict) -> None:
     }))
     ctx.live.last_text = text
     ctx.live.last_assistant_message_id = mid
+    ctx.live.open_tool_step_id = mid
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
     ctx.live.turn_has_assistant_row = True
@@ -404,6 +379,8 @@ async def _on_tool_use(ctx, ev: dict) -> None:
     args = ev.get("input") or {}
     hint = name[:80]
     model_id = _provider_reported_model_id(ctx.live)
+    # Pending calls share the open Step until the last result settles.
+    append_step_id = ctx.live.open_tool_step_id
     step_id = await run_in_db(
         ctx.persist_tool_use,
         ctx.thread_id, tool_id=tool_id, name=name,
@@ -415,9 +392,11 @@ async def _on_tool_use(ctx, ev: dict) -> None:
         provider="codex",
         model=model_id,
         expected_model=getattr(ctx.live, "expected_reported_model", None),
+        assistant_step_id=append_step_id,
     )
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
+    ctx.live.open_tool_step_id = step_id
     ctx.live.tool_names[tool_id] = name
     ctx.live.tool_step_ids[tool_id] = step_id
     ctx.live.tools_settled.clear()

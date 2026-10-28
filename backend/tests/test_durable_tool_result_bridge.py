@@ -263,6 +263,7 @@ def test_execution_retry_requires_exact_canonical_lineage(
         name="read_file",
         arguments={"path": "README.md"},
         provider_turn_id="provider-turn-1",
+        assistant_step_id=assistant_step_id,
         db=db,
     ) == assistant_step_id
     request = {

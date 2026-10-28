@@ -97,6 +97,7 @@ def test_bound_sibling_refuses_declared_undispatched_echo_in_same_step(
     assert persist_tool_use(
         "thread-1", turn_id="turn-1", provider_turn_id="provider-turn-1",
         tool_id="second-call", name="write_file", arguments={"path": "two"}, db=db,
+        assistant_step_id=step_id,
     ) == step_id
 
     with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
@@ -133,6 +134,7 @@ def test_provisional_sibling_still_refuses_undeclared_echo(isolated_db) -> None:
     assert persist_tool_use(
         "thread-1", turn_id="turn-1", provider_turn_id="provider-turn-1",
         tool_id="second-call", name="write_file", arguments={"path": "two"}, db=db,
+        assistant_step_id=step_id,
     ) == step_id
 
     with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
@@ -164,6 +166,7 @@ def test_unknown_invocation_marker_still_refuses_same_step_fallback(isolated_db)
     assert persist_tool_use(
         "thread-1", turn_id="turn-1", provider_turn_id="provider-turn-1",
         tool_id="second-call", name="write_file", arguments={"path": "two"}, db=db,
+        assistant_step_id=step_id,
     ) == step_id
 
     with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
@@ -213,6 +216,7 @@ def test_malformed_or_contradictory_bound_sibling_refuses_fallback(
     assert persist_tool_use(
         "thread-1", turn_id="turn-1", provider_turn_id="provider-turn-1",
         tool_id="second-call", name="write_file", arguments={"path": "two"}, db=db,
+        assistant_step_id=step_id,
     ) == step_id
 
     with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
@@ -224,12 +228,53 @@ def test_malformed_or_contradictory_bound_sibling_refuses_fallback(
 
 
 @pytest.mark.asyncio
-async def test_grouped_codex_second_completion_refuses_after_zero_step_settlement(
+async def test_codex_old_turn_completion_is_ignored_after_restart(isolated_db, monkeypatch):
+    from codex_runtime_fixtures import _admit_active_turn
+    from infra.database import get_db
+    from shared_send_fixtures import _insert_session
+    from subagents.codex_app_server import CodexAppServerSession
+    from subagents.codex_runtime_event_delivery import runtime_event_handler
+    from subagents.codex_runtime_state import _LiveCodex
+
+    thread_id = "restart-thread"
+    _insert_session(thread_id, model="codex/gpt-5-codex", spawned_by=None)
+    identity = _admit_active_turn(thread_id, turn_id="restart-turn")
+    session = CodexAppServerSession(
+        binary="unused", task=None, codex_thread_id="restart-provider",
+        corsia_thread_id=thread_id, corsia_turn_identity=identity, tool_registry=object(),
+    )
+    session._track_active_turn("new-provider-turn")
+    assert session._tool_requests is not None
+
+    live = _LiveCodex(
+        codex_thread_id="restart-provider", session=session, parent_thread_id=None,
+        name="codex", corsia_turn=identity,
+    )
+    live.bind_app_server_session(session)
+    def unexpected_binding(**_kwargs):
+        pytest.fail("old-turn echo reached binding")
+    monkeypatch.setattr("core.tool_result_binding.bind_tool_result_echo", unexpected_binding)
+    session.set_callbacks(on_event=runtime_event_handler(live, thread_id, lambda *_: None))
+    await _complete_late_call(
+        session, call_id="old-call", provider_thread_id="restart-provider",
+        provider_turn_id="old-provider-turn",
+    )
+
+    db = get_db()
+    try:
+        assert db.execute(
+            "SELECT count(*) FROM messages WHERE thread_id=? AND role='tool'", (thread_id,),
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_codex_pre_execution_rejections_settle_on_separate_steps(
     isolated_db,
 ) -> None:
-    """The real Codex handler only authors an undispatched result for zero rows."""
+    """Callbacks refused before execution settle as undispatched on separate steps."""
     from codex_runtime_fixtures import _admit_active_turn
-    from core._tool_result_delivery_support import ToolResultBindingError
     from shared_send_fixtures import _insert_session
     from subagents.codex_app_server import CodexAppServerSession
     from subagents.codex_runtime_event_delivery import runtime_event_handler
@@ -274,13 +319,14 @@ async def test_grouped_codex_second_completion_refuses_after_zero_step_settlemen
         session, request_id=2, call_id=call_ids[1],
         provider_thread_id=provider_thread_id, provider_turn_id=provider_turn_id,
     )
-    assert live.tool_step_ids == {call_ids[1]: first_step_id}
-    with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
-        await _complete_late_call(
-            session, call_id=call_ids[1], provider_thread_id=provider_thread_id,
-            provider_turn_id=provider_turn_id,
-        )
-    assert live.tool_step_ids == {call_ids[1]: first_step_id}
+    second_step_id = live.tool_step_ids[call_ids[1]]
+    assert second_step_id != first_step_id
+
+    await _complete_late_call(
+        session, call_id=call_ids[1], provider_thread_id=provider_thread_id,
+        provider_turn_id=provider_turn_id,
+    )
+    assert live.tool_step_ids == {}
 
     from infra.database import get_db
 
@@ -291,7 +337,11 @@ async def test_grouped_codex_second_completion_refuses_after_zero_step_settlemen
         ).fetchall()
     finally:
         db.close()
-    assert {json.loads(row["metadata"])["tool_call_id"] for row in rows} == {call_ids[0]}
+    assert {json.loads(row["metadata"])["tool_call_id"] for row in rows} == set(call_ids)
+    assert {json.loads(row["metadata"])["assistant_step_id"] for row in rows} == {
+        first_step_id, second_step_id,
+    }
+
 
 
 @pytest.mark.asyncio

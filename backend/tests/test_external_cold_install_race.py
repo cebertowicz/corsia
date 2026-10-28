@@ -12,11 +12,11 @@ from core.turn_core import TurnIdentity
 from test_external_cold_tool_debt import _context, debt_db  # noqa: F401
 
 
-def _codex_events(db):
+def _codex_events(db, open_step="older-step"):
     from subagents.codex_runtime_events import make_on_event
     from subagents.codex_runtime_state import _LiveCodex
 
-    # Match the boundary's existing Step, so real persist_tool_use appends there.
+    # A late call reaches the pre-cut Step through the owner's open text Step.
     row = db.execute("SELECT metadata FROM messages WHERE id='older-step'").fetchone()
     metadata = json.loads(row["metadata"])
     metadata["provider_turn_id"] = "provider-turn"
@@ -31,6 +31,7 @@ def _codex_events(db):
         codex_thread_id="provider-thread",
         session=SimpleNamespace(active_turn_id="provider-turn"),
         parent_thread_id=None, name="test", corsia_turn=TurnIdentity("current", 1),
+        open_tool_step_id=open_step,
     )
     on_event = make_on_event(live, "debt", lambda *_: None, dead_set=set(), thread_registry={})
     return live, on_event
