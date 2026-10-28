@@ -17,6 +17,7 @@ from typing import IO, Literal, Sequence
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from host_access import browser_identity as identity
+from host_access.browser_protocol import close_request as close_request, json_object as json_object
 from infra.platform_paths import app_bundle_root
 
 logger = logging.getLogger(__name__)
@@ -197,14 +198,7 @@ def resolve_native(binary: str) -> tuple[str, str]:
         ) from exc
 
 
-def json_object(raw: str) -> dict:
-    """Decode exactly one object; partial/noisy output is never protocol evidence."""
-    try:
-        value = json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
+# JSON decoding and the close acknowledgement are owned by browser_protocol.
 
 def render_model_result(result: CommandResult, *, redactions: dict[str, str]) -> str:
     """Preserve readable tool strings while redacting private ownership facts."""
@@ -395,18 +389,3 @@ _LOCAL_MODE_REQUIRED = (
     "managed browser requires the verified local Chrome/CDP mode; remove provider, engine, "
     "CDP, auto-connect and --config settings from the command, environment and agent-browser config"
 )
-
-
-async def close_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, request_id: str) -> None:
-    """Consume the local-CDP producer acknowledgement; transport EOF is not success."""
-    try:
-        writer.write((json.dumps({"id": request_id, "action": "close"}) + "\n").encode())
-        await writer.drain()
-        response = json_object((await reader.readline()).decode("utf-8"))
-        data = response.get("data")
-        if (response.get("id") != request_id or response.get("success") is not True
-                or not isinstance(data, dict) or data.get("closed") is not True):
-            raise identity.BrowserIdentityError("browser producer did not acknowledge close")
-    finally:
-        writer.close()
-        await writer.wait_closed()
