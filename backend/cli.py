@@ -319,10 +319,6 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Run the CORSIA first-run and maintenance command parser."""
     words = sys.argv[1:] if argv is None else argv
-    if words[:2] == ["github", "read"]:
-        from cli_github import read
-
-        return read(words[2:])
     parser = argparse.ArgumentParser(prog="corsia-cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
     _add_bootstrap_commands(sub)

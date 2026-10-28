@@ -1,12 +1,13 @@
 """The workflow shipped with the GitHub screening rule set."""
 
 import hashlib
+from pathlib import Path
 
 from core.injection_rules import injection_rule_text
 from core.skill_registry_types import SkillRow
 from core.skill_validation import validate_skill_file
-from events.connectors.github_screen.result import WORKFLOW_DIR
 
+WORKFLOW_DIR = Path(__file__).parent / "github-pr-screen"
 WORKFLOW_NAME = "github-pr-screen"
 
 

@@ -153,7 +153,7 @@ def _configure_repo_api(monkeypatch, module, workspace: Path, db) -> None:
     monkeypatch.setattr(module, "_workspace_dir_for", lambda _id: workspace)
     monkeypatch.setattr(module, "run_in_db", _run_now)
     monkeypatch.setattr(module, "get_db", lambda: _NoClose(db))
-    monkeypatch.setattr(module, "_sync", lambda *_args: None)
+    monkeypatch.setattr(module, "sync_sources", lambda *_args: None)
 
 
 
@@ -382,9 +382,9 @@ async def test_add_repo_response_failure_rolls_back_policy_and_source_link(
         "INSERT INTO projects (id, doc_roots) VALUES ('p1', 'before')"
     )
     db.commit()
-    real_sync = project_repos._sync
+    real_sync = project_repos.sync_sources
     _configure_repo_api(monkeypatch, project_repos, workspace, db)
-    monkeypatch.setattr(project_repos, "_sync", real_sync)
+    monkeypatch.setattr(project_repos, "sync_sources", real_sync)
     monkeypatch.setattr(
         project_repos,
         "_with_policy",
@@ -1308,7 +1308,7 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "_workspace_dir_for", lambda _id: workspace)
     monkeypatch.setattr(project_repos, "run_in_db", _run_in_thread)
     monkeypatch.setattr(project_repos, "get_db", _connection)
-    monkeypatch.setattr(project_repos, "_sync", lambda *_args: None)
+    monkeypatch.setattr(project_repos, "sync_sources", lambda *_args: None)
 
     monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
 

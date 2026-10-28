@@ -19,7 +19,7 @@ from connections.github_broker import GithubReadBroker
 from events.connectors.github_read_budget import budget
 
 THREAD = os.environ.get("CORSIA_THREAD_ID", "test-thread")
-CLI = Path(__file__).resolve().parents[1] / "cli.py"
+CLI = Path(__file__).resolve().parents[1] / "cli_github.py"
 
 
 @pytest.fixture(autouse=True)

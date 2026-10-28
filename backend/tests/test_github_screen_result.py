@@ -2,10 +2,12 @@
 
 import json
 
-import pytest
+# Validation assertions below run through the production settlement entry point.
 
-from core.workflow_result import ResultInvalid
-from events.connectors.github_screen.result import screen_result
+from automation.worker_settle import verdict
+from events.connectors.github_screen.workflow import workflow
+
+SCREEN_SCHEMA = workflow("project").corsia["workflow"]["result"]
 
 
 def answer(payload, signs=None):
@@ -45,7 +47,7 @@ def _context(facts=None):
 
 def test_captured_floor_cannot_be_changed_by_worker(tmp_path):
     from automation.worker_settle import verdict
-    from events.connectors.github_screen.result import SCREEN_SCHEMA, capture_floor
+    from events.connectors.github_screen.result import capture_floor
 
     record = tmp_path / "floor.json"
     record.write_text(json.dumps({"paths": ["a"], "floor_hit": ["floor.github_dir"]}))
@@ -65,25 +67,19 @@ def test_captured_floor_cannot_be_changed_by_worker(tmp_path):
     assert verdict({"status": "completed"}, "invalid", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
 
 
-def test_hook_cannot_remove_categories_or_recover_invalid(monkeypatch):
-    from automation.worker_settle import verdict
-    from events.connectors.github_screen.result import SCREEN_SCHEMA
+def test_validator_defect_does_not_recover_invalid(monkeypatch):
+    def raises(_payload, _record):
+        raise RuntimeError("unreadable")
 
-    def weaken(payload, _record):
-        payload["payload"]["categories"] = []
-        return payload
-
-    monkeypatch.setattr("events.connectors.github_screen.result.apply_captured_floor", weaken)
+    monkeypatch.setattr("events.connectors.github_screen.result.validate_captured_result", raises)
     context = _context()
     context["record"] = {}
     check = {"result_context": context}
     text = answer({"verdict": "flagged", "categories": ["credential reach"], "findings": []})
-    assert verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)[0] == "no_result"
+    outcome, facts = verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)
+    assert outcome == "no_result" and "Couldn’t" in facts["reason"]
+    assert "Check the backend log" in facts["reason"]
     assert verdict({"status": "completed"}, "not a result", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
-    def raises(_payload, _record):
-        raise RuntimeError("unreadable")
-    monkeypatch.setattr("events.connectors.github_screen.result.apply_captured_floor", raises)
-    assert verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)[0] == "no_result"
 
 
 def test_screen_envelope_keeps_identity_and_unknown_signs():
@@ -117,35 +113,47 @@ def test_remove_screen_staging_keeps_other_requests(tmp_path):
     assert not first.exists() and second.is_dir()
 
 
+def _screen_verdict(text, paths, floor_hits):
+    context = _context()
+    context["record"] = {"paths": list(paths), "floor_hit": list(floor_hits)}
+    return verdict({"status": "completed"}, text, SCREEN_SCHEMA, {"result_context": context})
+
+
+def _validated(text, paths, floor_hits):
+    outcome, facts = _screen_verdict(text, paths, floor_hits)
+    assert outcome == "returned", facts
+    return {"payload": json.loads(facts["result"]), "injection_signs": facts["injection_signs"]}
+
+
 def test_floor_cannot_be_cleared_by_model():
     text = answer({"verdict": "safe", "categories": [], "findings": []})
-    result = screen_result(text, {"src/a.py"}, {"floor.github_dir"})["payload"]
+    result = _validated(text, {"src/a.py"}, {"floor.github_dir"})["payload"]
     assert result == {"verdict": "flagged", "categories": ["floor.github_dir"],
                       "findings": [], "floor_hit": ["floor.github_dir"]}
 
 
 def test_floor_preserves_unsafe_verdict():
     text = answer({"verdict": "unsafe", "categories": [], "findings": []})
-    result = screen_result(text, {"a"}, {"floor.binary"})["payload"]
+    result = _validated(text, {"a"}, {"floor.binary"})["payload"]
     assert result["verdict"] == "unsafe"
     assert result["floor_hit"] == ["floor.binary"]
 
 
 def test_signs_raise_safe_to_flagged_and_must_be_unique():
     payload = {"verdict": "safe", "categories": [], "findings": []}
-    result = screen_result(answer(payload, ["R1"]), {"a"}, set())
+    result = _validated(answer(payload, ["R1"]), {"a"}, set())
     assert result["payload"]["verdict"] == "flagged"
     assert result["injection_signs"] == ["R1"]
     for signs in (["R1", "R1"], ["none"], ["R6"]):
-        with pytest.raises(ResultInvalid):
-            screen_result(answer(payload, signs), {"a"}, set())
+        outcome, facts = _screen_verdict(answer(payload, signs), {"a"}, set())
+        assert outcome == "invalid" and facts["reason"] == "invalid"
 
 
 def test_finding_path_must_name_staged_file():
     text = answer({"verdict": "flagged", "categories": ["hidden payload"],
                    "findings": [{"path": "src/missing.py", "text": "payload"}]})
-    with pytest.raises(ResultInvalid):
-        screen_result(text, {"src/a.py"}, set())
+    outcome, facts = _screen_verdict(text, {"src/a.py"}, set())
+    assert outcome == "invalid" and "outside the staged diff" in facts["detail"]
 
 
 def test_unexpected_content_is_invalid():
@@ -154,5 +162,4 @@ def test_unexpected_content_is_invalid():
         {"verdict": "safe", "categories": [], "findings": [{"path": "a", "text": "x", "extra": "text"}]},
         {"verdict": "safe", "categories": [], "findings": [{"path": "a", "text": "x" * 201}]},
     ]:
-        with pytest.raises(ResultInvalid):
-            screen_result(answer(result), {"a"}, set())
+        assert _screen_verdict(answer(result), {"a"}, set())[0] == "invalid"

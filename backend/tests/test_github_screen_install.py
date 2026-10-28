@@ -21,7 +21,7 @@ def test_designation_installs_screen_and_observe_sync_preserves_it(isolated_db, 
     db = get_db()
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('screen-project','Screen','t','t')")
     db.commit()
-    monkeypatch.setattr(install, "_repos", lambda conn, project: ["example/repo"])
+    monkeypatch.setattr(install, "tracked_github_repositories", lambda project: ["example/repo"])
     monkeypatch.setattr(install, "owner_root", lambda owner, project, conn: tmp_path / owner)
     assert set_project_conductor("screen-project", "screen-owner", db=db)
     rows = _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
@@ -40,7 +40,7 @@ def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path,
     db.commit()
     REGISTRY.reset()
     repos = []
-    monkeypatch.setattr(install, "_repos", lambda conn, project: list(repos))
+    monkeypatch.setattr(install, "tracked_github_repositories", lambda project: list(repos))
     monkeypatch.setattr(install, "owner_root", lambda owner, project, conn: tmp_path / owner)
     assert set_project_conductor("screen-project", "screen-owner", db=db)
     install.sync(db, "screen-project")
@@ -66,8 +66,9 @@ def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path,
             assert not rules.matches(rule, {"repo": "example/other", "author_origin": "outside"})
     namespace = install._namespace("screen-project")
     assert rule_declarations.declared_event(db, namespace, "pr_staged")[1].owner == "screen-owner"
-    config = json.loads((tmp_path / "screen-owner" / "github-screen" / install._key("screen-project") / "config.json").read_text())
-    assert config["repositories"] == repos
+    folder = tmp_path / "screen-owner" / "github-screen" / install._key("screen-project")
+    assert not (folder / "config.json").exists()
+    assert (folder / "stage.py").read_bytes() == (install.PACKAGE / "stage.py").read_bytes()
     install.sync(db, "screen-project")
     assert rows == _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))
     assert schedules == _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
@@ -86,7 +87,7 @@ def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path,
     with pytest.raises(RuntimeError):
         with write_transaction(db, scope="test_screen_rollback"):
             assert set_project_conductor("screen-project", None, db=db)
-            install.sync(db, "screen-project")
+            assert len(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))) == 3
             raise RuntimeError("roll back designation")
     assert rule_declarations.declared_event(db, namespace, "pr_staged")[1].owner == "screen-new-owner"
     assert len(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))) == 3

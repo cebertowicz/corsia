@@ -296,7 +296,7 @@ async def _registry_register(
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: workspace.parent.parent))
     monkeypatch.setattr(project_repos, "_workspace_dir_for", lambda _id: workspace)
     monkeypatch.setattr(project_repos, "get_db", lambda: _NoClose(db))
-    monkeypatch.setattr(project_repos, "_sync", lambda *_args: None)
+    monkeypatch.setattr(project_repos, "sync_sources", lambda *_args: None)
     monkeypatch.setattr(project_repos, "run_in_db", _run_inline)
     monkeypatch.setattr("infra.db_async.run_in_db", _run_inline, raising=False)
     monkeypatch.setattr("tools.dispatch_ownership.run_in_db", _run_inline, raising=False)

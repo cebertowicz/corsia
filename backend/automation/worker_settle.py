@@ -108,7 +108,7 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
         return INVALID, {"reason": "invalid", "detail": str(exc)[:500]}
     except Exception:  # noqa: BLE001 - a CORSIA defect must release, not consume, the identity
         logger.exception("CORSIA could not validate the worker result")
-        return NO_RESULT, {"reason": "CORSIA could not validate the workflow result"}
+        return NO_RESULT, {"reason": "Couldn’t validate the workflow result. Check the backend log, then send the event again."}
     if len(payload.encode()) > MAX_RESULT:
         return INVALID, {"reason": "invalid", "detail": f"the result is over {MAX_RESULT} bytes"}
     return RETURNED, {"result": payload, **({"injection_signs": signs} if signs is not None else {})}

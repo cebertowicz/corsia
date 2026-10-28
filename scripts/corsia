@@ -493,7 +493,7 @@ case "${1:-status}" in
         cd "$BACKEND_DIR" || exit 1
         exec "$PYTHON" -m cli "$@"
         ;;
-    user|token|github)
+    user|token)
         cd "$BACKEND_DIR" || exit 1
         exec "$PYTHON" -m cli "$@"
         ;;

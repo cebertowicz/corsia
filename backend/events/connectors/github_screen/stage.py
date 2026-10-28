@@ -98,12 +98,9 @@ def stage(event: dict, project: str, root: Path, tracked_repo: str | None, read=
 
 def main() -> None:
     event = json.load(sys.stdin)
-    config = json.loads((Path(__file__).parent / "config.json").read_text())
-    repo = event["facts"]["repo"]
-    tracked = next((item for item in config["repositories"]
-                    if isinstance(repo, str) and item.casefold() == repo.casefold()), None)
-    facts = stage(event, config["project_id"], Path(config["staging_root"]), tracked)
-    print(json.dumps({"event": {"type": config["staged_type"], "facts": facts}}))
+    context = event["context"]
+    facts = stage(event, context["project_id"], Path(context["staging_root"]), context["github_repo"])
+    print(json.dumps({"event": {"type": context["event_type"], "facts": facts}}))
 
 
 if __name__ == "__main__":

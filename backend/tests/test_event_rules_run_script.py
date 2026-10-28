@@ -386,8 +386,12 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
 ])
 def test_a_rule_run_reads_github_only_for_the_repository_its_stored_event_names(
         world, spawned, monkeypatch, stored, repo):
-    from events import rule_runs
+    from dataclasses import replace
+    from events import connectors, rule_runs
 
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda _project: frozenset({"o/r"})))
     rule = _rule(_script(world, "bound.sh"))
     _emit()
     if stored is not None:

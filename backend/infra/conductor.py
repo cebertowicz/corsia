@@ -297,8 +297,9 @@ def set_project_conductor(project_id: str, thread_id: str | None, db=None) -> bo
         )
         bump_context_epochs(_db, (previous, thread_id), now)
         from events.connectors.github_screen.install import sync
+        from infra.write_effects import after_commit
 
-        sync(_db, project_id)
+        after_commit(_db, lambda: sync(_db, project_id))
         return True
 
 

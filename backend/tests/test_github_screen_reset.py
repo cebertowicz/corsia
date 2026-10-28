@@ -99,7 +99,8 @@ async def test_floor_capture_failure_does_not_start_worker(screen, monkeypatch):
     assert await worker_runner.drive() == 0
     spawn.assert_not_awaited()
     row = starts(screen["key"] + "_start")[0]
-    assert row[0] == "refused" and "capture" in row[1]
+    assert row[0] == "refused" and "Couldn’t read" in row[1]
+    assert "Check the backend log" in row[1]
     event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.no_result")
     assert event["facts"]["source"] == "outside" and event["facts"]["injection_signs"] is None
     assert not list((screen["folder"] / "staging").glob("screen-*"))
@@ -112,12 +113,12 @@ async def test_validator_defect_is_corsia_failure_not_model_invalid(screen, monk
     def broken(*_args):
         raise TypeError("CORSIA validator defect")
 
-    monkeypatch.setattr(result, "apply_captured_floor", broken)
+    monkeypatch.setattr(result, "validate_captured_result", broken)
     await _route(screen["state"]["sha"])
     await run_scripts()
     await settle_all()
     row = starts(screen["key"] + "_start")[0]
-    assert row[0] == "no_result" and "CORSIA" in row[1]
+    assert row[0] == "no_result" and "Couldn’t validate" in row[1]
     event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.no_result")
     assert event["facts"]["reason"] != "invalid"
 
@@ -216,3 +217,21 @@ async def test_model_repo_field_cannot_rebind_result_consumer(screen, monkeypatc
     assert bound_repo == "o/r"
     assert event["facts"]["repo"] == "o/r"
     assert json.loads(event["facts"]["result"])["repo"] == "other/private"
+
+
+@pytest.mark.asyncio
+async def test_remote_change_refuses_queued_screen_before_opening_channel(screen):
+    import subprocess
+    from infra.database import get_db
+
+    await _route(screen["state"]["sha"])
+    subprocess.run(["git", "-C", str(screen["root"] / "source" / "repo"), "remote", "set-url",
+                    "origin", "https://github.com/other/current.git"], check=True)
+    await run_scripts()
+    [(outcome, reason, _, _)] = starts(screen["key"] + "_opened")
+    assert outcome == "failed" and "no longer registered" in reason
+    assert screen["state"]["calls"] == []
+    assert starts(screen["key"] + "_start") == []
+    row = get_db().execute('SELECT "match" FROM event_rules WHERE id=?',
+                           (screen["key"] + "_opened",)).fetchone()
+    assert json.loads(row[0])[0]["value"] == ["o/r"]

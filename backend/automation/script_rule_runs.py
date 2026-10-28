@@ -43,6 +43,36 @@ class RuleRun:
         return f"{KEY_PREFIX}{self.decision_id}"
 
 
+def execution_input(schedule: Schedule, run: RuleRun) -> bytes:
+    """Bind the claimed repository against the connector's live project scope, off-lock.
+
+    Shipped event producers also receive their output declaration and current
+    staging root in stdin, rather than a copied configuration file.
+    """
+    from automation.script_sandbox import ScriptSandboxError
+    from automation.worker_inputs import owner_root
+    from events.connectors import get_manifest
+    from infra.database import get_db
+
+    repository = None
+    if run.github_repo is not None:
+        resolve = get_manifest("github").project_repositories
+        repositories = resolve(schedule.scope_id) if resolve is not None else None
+        if repositories is None:
+            raise ScriptSandboxError("Couldn’t read this project's repositories. Check its registered repositories and try again.")
+        repository = next((repo for repo in repositories if repo.casefold() == run.github_repo.casefold()), None)
+        if repository is None:
+            raise ScriptSandboxError("Couldn’t read GitHub for this event: its repository is no longer registered. Check the project's repositories and try again.")
+    event_type = (schedule.payload or {}).get("event_type")
+    if event_type is None:
+        return run.stdin
+    event = json.loads(run.stdin)
+    root = owner_root(schedule.thread_id, schedule.scope_id, get_db())
+    event["context"] = {"project_id": schedule.scope_id, "staging_root": str(root / "staging"),
+                        "event_type": event_type, "github_repo": repository}
+    return json.dumps(event, ensure_ascii=False).encode()
+
+
 def live_decisions(keys: set[str]) -> set[int]:
     """The decision ids of the rule runs this process holds."""
     return {int(key[len(KEY_PREFIX):]) for key in keys if key.startswith(KEY_PREFIX)}

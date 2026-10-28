@@ -3,24 +3,7 @@
 import json
 from pathlib import Path
 
-import yaml
-
-from core.workflow_result import ResultInvalid, check_result
-
-WORKFLOW_DIR = Path(__file__).parent / "github-pr-screen"
-SCREEN_SCHEMA = yaml.safe_load((WORKFLOW_DIR / "corsia.yaml").read_text())["workflow"]["result"]
-
-
-def apply_floor(payload: dict, paths: set[str], floor_hits: set[str]) -> dict:
-    """Check paths against the staged diff, then apply the earlier fixed floor."""
-    if any(finding["path"] not in paths for finding in payload["findings"]):
-        raise ResultInvalid("a finding names a path outside the staged diff")
-    floor = sorted(floor_hits)
-    if floor and payload["verdict"] == "safe":
-        payload["verdict"] = "flagged"
-    payload["categories"] = sorted(set(payload["categories"]) | floor_hits)
-    payload["floor_hit"] = floor
-    return payload
+from core.workflow_result import ResultInvalid
 
 
 def capture_floor(staging: str) -> dict:
@@ -34,32 +17,17 @@ def capture_floor(staging: str) -> dict:
     return record
 
 
-def apply_captured_floor(result: dict, record: dict) -> dict:
+def validate_captured_result(result: dict, record: dict) -> dict:
+    """Check the model's paths and signs, then apply the earlier fixed floor once."""
     signs = result["injection_signs"]
     if len(signs) != len(set(signs)):
         raise ResultInvalid("injection signs must be unique")
-    payload = apply_floor(result["payload"], set(record["paths"]), set(record["floor_hit"]))
-    if signs and payload["verdict"] == "safe":
+    payload = result["payload"]
+    if any(finding["path"] not in record["paths"] for finding in payload["findings"]):
+        raise ResultInvalid("a finding names a path outside the staged diff")
+    floor = set(record["floor_hit"])
+    if (floor or signs) and payload["verdict"] == "safe":
         payload["verdict"] = "flagged"
+    payload["categories"] = sorted(set(payload["categories"]) | floor)
+    payload["floor_hit"] = sorted(floor)
     return result
-
-
-def validate_captured_result(result: dict, record: dict) -> dict:
-    """The screen may add caution but cannot rewrite the model's other fields."""
-    original = json.loads(json.dumps(result))
-    checked = apply_captured_floor(result, record)
-    before, after = original["payload"], checked["payload"]
-    if ({key: value for key, value in checked.items() if key != "payload"}
-            != {key: value for key, value in original.items() if key != "payload"}
-            or {key: value for key, value in after.items() if key not in {"verdict", "categories", "floor_hit"}}
-            != {key: value for key, value in before.items() if key not in {"verdict", "categories"}}
-            or not set(before["categories"]).issubset(after["categories"])
-            or after["verdict"] not in ({"safe", "flagged"} if before["verdict"] == "safe" else {before["verdict"]})):
-        raise RuntimeError("the screen validator weakened or changed the model result")
-    return checked
-
-
-def screen_result(text: str, paths: set[str], floor_hits: set[str]) -> dict:
-    """Validate the model result, then apply the earlier deterministic floor."""
-    return apply_captured_floor(check_result(text, SCREEN_SCHEMA),
-                                {"paths": list(paths), "floor_hit": list(floor_hits)})

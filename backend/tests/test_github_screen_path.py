@@ -89,10 +89,10 @@ def screen(world, tmp_path, monkeypatch):
         return broker(args + [endpoint]).stdout
 
     async def run(_thread_id, _project_id, script_path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None, github_repo=None):
-        config = json.loads((Path(script_path).parent / 'config.json').read_text())
         event = json.loads(stdin)
-        facts = stage.stage(event, config['project_id'], Path(config['staging_root']), 'o/r', read)
-        return ScriptRun(0, (json.dumps({'event': {'type': config['staged_type'], 'facts': facts}}) + '\n').encode(), b'', False)
+        context = event['context']
+        facts = stage.stage(event, context['project_id'], Path(context['staging_root']), context['github_repo'], read)
+        return ScriptRun(0, (json.dumps({'event': {'type': context['event_type'], 'facts': facts}}) + '\n').encode(), b'', False)
 
     monkeypatch.setattr(script_runner, 'run_script', run)
     world['reply'].write_text(fenced({'payload': {'verdict': 'safe', 'categories': [], 'findings': []}, 'injection_signs': []}))

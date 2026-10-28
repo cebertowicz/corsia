@@ -3,21 +3,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from automation.script_schedules import DEFAULT_TIMEOUT_SECONDS, UNBOUNDED_RUNS, file_sha256
 from automation.worker_inputs import owner_root
 from events.connectors import get_manifest
-from events.connectors.github_notifications_feed import github_repositories_for_policy
+from events.connectors.github_notifications_feed import FeedError, tracked_github_repositories
 from infra.database import write_transaction
 from infra.measure_registry import REGISTRY, persist_declaration
-from infra.project_repo_policy import list_registered_repo_policies
-from infra.write_effects import after_commit
 
 ORIGIN_PREFIX = "rule_set:github@"
 WORKFLOW = "github-pr-screen"
 PACKAGE = Path(__file__).parent
+log = logging.getLogger(__name__)
 
 
 def origin() -> str:
@@ -38,11 +38,6 @@ def _write_if_changed(path: Path, data: bytes) -> None:
         path.write_bytes(data)
 
 
-def _repos(db, project: str) -> list[str]:
-    policies = list_registered_repo_policies(project_id=project, db=db)
-    return sorted({repo for policy in policies for repo in github_repositories_for_policy(policy)}, key=str.casefold)
-
-
 def _declaration(project: str) -> tuple[str, str]:
     namespace = _namespace(project)
     spec = {"attributes": {"repo": "id", "pr_number": "count", "item_version": "id",
@@ -59,7 +54,8 @@ def _retire_declaration(db, project: str, owner: str, path: str) -> None:
 def _schedule(db, project: str, owner: str, script: Path, now: str) -> str:
     schedule_id = _key(project) + "_script"
     digest = file_sha256(script)
-    payload = json.dumps({"series": [], "workflow": None}, sort_keys=True)
+    payload = json.dumps({"series": [], "workflow": None,
+                          "event_type": _namespace(project) + ".pr_staged"}, sort_keys=True)
     db.execute(
         "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,"
         "payload_json,created_by_actor,created_at,updated_at,script_path,script_sha256,timeout_seconds) "
@@ -106,36 +102,45 @@ def _rule(db, *, rule_id: str, project: str, owner: str, connector: str, event_t
 
 
 def sync(db, project: str | None = None) -> None:
-    """Reconcile all projects, or one after its designation or repository changed."""
+    """Reconcile all projects, or one after its designation or repository changed.
+
+    Called at boot or after commit, outside the caller's write transaction.
+    """
     projects = ([project] if project else [row[0] for row in db.execute("SELECT id FROM projects")])
+    refresh_registry = False
     for project_id in projects:
         row = db.execute("SELECT conductor_thread_id FROM projects WHERE id=?", (project_id,)).fetchone()
         owner = row[0] if row else None
-        repos = _repos(db, project_id) if owner else []
+        try:
+            repos = sorted(tracked_github_repositories(project_id), key=str.casefold) if owner else []
+        except FeedError as exc:
+            log.warning("GitHub screen repository scope unavailable for project %s: %s", project_id, exc)
+            continue
         key = _key(project_id)
         old = db.execute("SELECT created_by FROM event_rules WHERE id=? AND origin LIKE ?", (key + "_start", ORIGIN_PREFIX + "%")).fetchone()
         previous = old[0] if old else None
+        root = owner_root(owner, project_id, db) if owner and repos else None
+        folder = root / "github-screen" / key if root else None
+        if folder is not None:
+            # The installed package may be under the private ~/.corsia root. Keep
+            # sandbox-readable copies, refreshed only here at boot/after commit.
+            for name in ("stage.py", "floor.py"):
+                _write_if_changed(folder / name, (PACKAGE / name).read_bytes())
+            (folder / "config.json").unlink(missing_ok=True)
         with write_transaction(db, scope="sync_github_screen") as conn:
             if previous and (previous != owner or not repos):
                 root = owner_root(previous, project_id, conn)
                 _retire_declaration(conn, project_id, previous, str(root / "github-screen" / key / "measures.yaml"))
-                after_commit(conn, lambda: REGISTRY.rebuild(db))
-            if not owner or not repos:
+                refresh_registry = True
+            if not owner or folder is None:
                 conn.execute("DELETE FROM event_rules WHERE id IN (?,?,?) AND origin LIKE ?",
                              (key + "_opened", key + "_synchronize", key + "_start", ORIGIN_PREFIX + "%"))
                 conn.execute("DELETE FROM automation_schedules WHERE id=?", (key + "_script",))
                 continue
-            root = owner_root(owner, project_id, conn)
-            folder = root / "github-screen" / key
-            for name in ("stage.py", "floor.py"):
-                _write_if_changed(folder / name, (PACKAGE / name).read_bytes())
             namespace, spec = _declaration(project_id)
-            config = {"project_id": project_id, "repositories": repos, "staging_root": str(root / "staging"),
-                      "staged_type": namespace + ".pr_staged"}
-            _write_if_changed(folder / "config.json", json.dumps(config, sort_keys=True).encode())
             path = str(folder / "measures.yaml")
             persist_declaration(conn, owner, path, namespace, [("event", namespace + ".pr_staged", spec)], "shipped")
-            after_commit(conn, lambda: REGISTRY.rebuild(db))
+            refresh_registry = True
             now = datetime.now(timezone.utc).isoformat()
             schedule = _schedule(conn, project_id, owner, folder / "stage.py", now)
             tests: list[dict] = [{"field": "repo", "op": "in", "value": repos},
@@ -147,3 +152,5 @@ def sync(db, project: str | None = None) -> None:
             _rule(conn, rule_id=key + "_start", project=project_id, owner=owner,
                   connector=namespace, event_type="pr_staged", tests=[tests[0]], action="start_worker",
                   script_id=None, now=now)
+    if refresh_registry:
+        REGISTRY.rebuild(db)

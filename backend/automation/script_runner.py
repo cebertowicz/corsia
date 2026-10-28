@@ -318,10 +318,11 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:
+        stdin = await run_off_db(script_rule_runs.execution_input, schedule, rule_run) if rule_run else None
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"stdin": rule_run.stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
+            **({"stdin": stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
                 "github_repo": rule_run.github_repo} if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
