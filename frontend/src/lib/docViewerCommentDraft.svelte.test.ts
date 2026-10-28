@@ -2,6 +2,7 @@ import { flushSync } from 'svelte';
 import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { commentDraft, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
+import { SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
 import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
@@ -131,7 +132,7 @@ it('keeps the draft and reports the selection lost when the live session is repl
 	commentDraft.update(draft => draft && { ...draft, body: 'Unfinished' }); flushSync();
 	current.set({ replaceSession: true });
 	expect(current.controller.draft?.body).toBe('Unfinished');
-	expect(current.controller.reason).toContain('The document reconnected');
+	expect(current.controller.reason).toBe(SELECTION_RECONNECTED);
 });
 
 describe('the pending mark before and while the composer is open', () => {

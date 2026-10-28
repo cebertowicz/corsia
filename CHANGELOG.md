@@ -7,7 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Your comment draft stays open when the document reconnects, and closing a comment clears the text selection, so typing can't replace your text.
+- Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
+- The shared browser asks you for a password only on sign-in pages, not on pages that display a hidden secret.
 - Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
