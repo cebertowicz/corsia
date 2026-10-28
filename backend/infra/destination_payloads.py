@@ -143,6 +143,7 @@ async def _render_native_destination(
         replay_selection=selection,
         user_source_content=current_user_source_content,
         agent_envelope=agent_envelope,
+        thread_context=dict(thread_row),
         runtime_context_epoch=int(
             thread_row["runtime_context_epoch"]
             if hasattr(thread_row, "keys")

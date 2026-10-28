@@ -138,6 +138,54 @@ def _insert_ambiguous_message(
         db.close()
 
 
+@pytest.mark.parametrize("state", ["failed", "ambiguous"])
+def test_retry_accepts_vendor_login_stamped_input(isolated_db, monkeypatch, state) -> None:
+    """Retry passes through the real API and input writer without replaying a private stamp."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import thread_messages
+    from infra.database import get_db
+
+    _insert_session("retry-account")
+    _insert_ambiguous_message("retry-account", "account-input")
+    db = get_db()
+    try:
+        # A model-less thread holds the new input without launching a provider.
+        db.execute("UPDATE threads SET model='' WHERE id='retry-account'")
+        db.execute(
+            "UPDATE messages SET delivery_state=?, metadata=? WHERE id='account-input'",
+            (state, json.dumps({
+                "_corsia_vendor_login": {
+                    "turn_id": "turn-0", "account_revision": 1, "login_seq": 1,
+                },
+                "annotation": "keep",
+            })),
+        )
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(thread_messages, "authenticate", lambda _token: {"id": "user-1"})
+    app = FastAPI()
+    app.include_router(thread_messages.router)
+    with TestClient(app) as client:
+        response = client.post("/api/threads/retry-account/messages/account-input/retry")
+    assert response.status_code == 200, response.text
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT metadata FROM messages WHERE id=?",
+            (response.json()["revived_message_id"],),
+        ).fetchone()
+    finally:
+        db.close()
+    metadata = json.loads(row["metadata"])
+    assert metadata["annotation"] == "keep"
+    assert metadata["retried_from_message_id"] == "account-input"
+    assert "_corsia_vendor_login" not in metadata
+    assert bool(metadata.get("possible_duplicate")) == (state == "ambiguous")
+
+
 def test_retry_drops_the_ended_attempts_turn_and_input_identity() -> None:
     """A retried row must be a new Turn input and a distinct UI message."""
     from api.thread_inbox_actions import _retry_content

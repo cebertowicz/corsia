@@ -142,6 +142,18 @@ def user_in_project(project_id: str, user_id: str, db=None) -> bool:
     ).fetchone() is not None
 
 
+def get_native_turn_thread_context(thread_id: str, db=None) -> Any | None:
+    """Read only the thread fields needed to prepare a native turn."""
+    conn = db if db is not None else get_db()
+    try:
+        return conn.execute(
+            "SELECT project_id, confinement, confined_read_dirs FROM threads WHERE id=?", (thread_id,)
+        ).fetchone()
+    finally:
+        if db is None:
+            conn.close()
+
+
 def get_thread_project_id(thread_id: str, db=None) -> str | None:
     """Return the project_id for a thread, or None."""
     _db = db if db is not None else get_db()

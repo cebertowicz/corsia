@@ -5,9 +5,10 @@ so the rule's row in ``event_route_decisions`` is the start's durable queue, its
 request identity (R24) and, once started, its worker's record. Evaluation records it
 ``queued`` with the start's input and the identity, or ``skipped`` (a duplicate
 request, a loop, a missing identity, or ``queue full`` once its rule already has
-``rule_runs.QUEUE_CAP`` starts waiting, as a ``run_script`` rule's runs). It stays ``queued`` while the Claude Code limit
-is full (R23): no worker exists until the runner claims it with a free slot and makes
-it ``started``, or ends it ``skipped`` or ``refused``. The worker's result settles it
+``rule_runs.QUEUE_CAP`` starts waiting, as a ``run_script`` rule's runs). It stays
+``queued`` while the worker limit (Claude Code workers and rule workers) is full (R23):
+no worker exists until the runner claims it with a free slot and makes it ``started``,
+or ends it ``skipped`` or ``refused``. The worker's result settles it
 once as ``returned``, ``invalid`` or ``no_result``.
 
 R24: while a request's start is queued, started, or has returned a result (valid or
@@ -162,6 +163,13 @@ _START = ("SELECT d.id, d.rule_id, d.thread_id, d.worker_thread_id, d.request_id
           "d.connector, d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
           "d.run_input, r.workflow_id FROM event_route_decisions d "
           "LEFT JOIN event_rules r ON r.id=d.rule_id ")
+
+
+def started_workers(db: sqlite3.Connection) -> set[str]:
+    """Worker IDs holding a rule-worker slot until settlement."""
+    return {row[0] for row in db.execute(
+        "SELECT worker_thread_id FROM event_route_decisions "
+        "WHERE outcome=? AND worker_thread_id IS NOT NULL", (STARTED,))}
 
 
 def with_workers(db: sqlite3.Connection) -> list[Mapping[str, Any]]:

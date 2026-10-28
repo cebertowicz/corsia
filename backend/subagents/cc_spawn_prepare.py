@@ -95,15 +95,22 @@ def _register_lineage(
     child_id: str,
     name: str,
 ) -> int:
-    create_child_thread(
-        user_id=user_id,
-        parent_thread_id=request.parent_thread_id,
-        thread_id=child_id,
-        title=name,
-        model=request.target.catalog_id,
-        project_id=request.project_id,
-        account_id=request.account_id,
-    )
+    from infra import thread_confinement
+
+    with write_transaction(None, scope="cc_spawn_child") as connection:
+        create_child_thread(
+            user_id=user_id,
+            parent_thread_id=request.parent_thread_id,
+            thread_id=child_id,
+            title=name,
+            model=request.target.catalog_id,
+            project_id=request.project_id,
+            account_id=request.account_id,
+            db=connection,
+        )
+        # On the row too, so no later model switch launches it unconfined.
+        if request.confinement != CONFINEMENT_NONE:
+            thread_confinement.record(connection, child_id, request.confinement, request.add_dirs)
     from host_access.supervisor import register_host_access_descendant
 
     register_host_access_descendant(
