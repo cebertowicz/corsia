@@ -195,7 +195,7 @@ async def test_same_commitment_successor_runs_while_the_turn_keeps_its_first_att
 
 def _plan_display(db, plan_id: str) -> tuple[dict, dict]:
     """Project one plan's leaf distribution and its overview display."""
-    from plans import operator_node_state, operator_plan_display
+    from plans import operator_display_state, operator_node_state, operator_plan_display
 
     rows = db.execute("SELECT * FROM plan_nodes WHERE plan_id=?", (plan_id,)).fetchall()
     plan_row = service._plan_row(db, plan_id)
@@ -206,6 +206,7 @@ def _plan_display(db, plan_id: str) -> tuple[dict, dict]:
          "review": None,
          "display": operator_node_state._display(
              {**dict(row), "child_plan": None}, projection[str(row["id"])], None,
+             asks_user=operator_display_state.row_asks_user(dict(row), None, projection[str(row["id"])]),
          )}
         for row in rows
     ]

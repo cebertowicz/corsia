@@ -264,7 +264,7 @@ def test_paused_only_human_review_leaves_chat_list_unowed(db):
     _node_lifecycle(db, plan.id, review.id, "request_review", evidence="Ready")
     _node_lifecycle(db, plan.id, review.id, "pause_node")
     row = _pane_row(db, review.id)
-    assert row["display"]["label_key"] == "waiting"
+    assert row["display"] == {"label_key": "needs_you", "tone_key": "human-review"}
     # The row names the pause, not the review it defers.
     assert row["status_reason"] == user_steering.USER_PAUSE_REASON
 
