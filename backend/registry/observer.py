@@ -194,11 +194,10 @@ def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
 
 def _extract_observation(rule, args, content, app, db, thread_id, told):
     if app is not None:
-        if not connectors.app_matches(app, rule.connector):
-            return False, None
-        extract = _extractor(rule, db, thread_id, told)
-        return (True, extract(content)) if extract else (False, None)
-    if not command_matches_rule(args.get(rule.command_arg), rule):
+        matches = connectors.app_matches(app, rule.connector)
+    else:
+        matches = command_matches_rule(args.get(rule.command_arg), rule)
+    if not matches:
         return False, None
     extract = _extractor(rule, db, thread_id, told)
     return (True, extract(content)) if extract else (False, None)

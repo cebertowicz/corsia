@@ -32,6 +32,20 @@ def record_result(thread_id: str | None, result: object) -> None:
             )
 
 
+def delivery_is_self_caused(connector: str, delivery_id: str | None, thread_id: str) -> bool:
+    """Resolve a delivery's source identity and check the caller's marker."""
+    if not delivery_id:
+        return False
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT object_key FROM webhook_deliveries WHERE delivery_id=?", (delivery_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    return bool(row and row[0] and is_self_caused(connector, row[0], thread_id))
+
+
 def is_self_caused(connector: str, event_key: str, thread_id: str) -> bool:
     from events.rules import RETENTION
 

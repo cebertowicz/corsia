@@ -128,6 +128,28 @@ async def test_registry_marks_before_return_for_native_and_harness_paths(isolate
     assert is_self_caused("github", "issue_comment:123", "a")
 
 
+def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeypatch):
+    from events.connectors import ObservedArtifactDecl
+    from registry import connected_app_observation as observation
+    from registry.observer import CommandArtifactRegistrationError
+
+    artifact = ObservedArtifactDecl(integration="github", type="pull-request", external_id="owner/repo#7")
+    changed = {"id": "partial"}
+    notified = []
+
+    def fail(*args, **kwargs):
+        kwargs["changed"].append(changed)
+        raise CommandArtifactRegistrationError(artifact, ValueError("registration failed"))
+
+    monkeypatch.setattr(observation, "observe_command_result", fail)
+    monkeypatch.setattr(observation, "notify_changed", notified.append)
+    notices = notice_for_result("a", "turn", {}, result("create_pull_request", "output"))
+    assert len(notices) == 1
+    assert "external_id='owner/repo#7'" in notices[0]
+    assert "registration failed" in notices[0]
+    assert notified == [changed]
+
+
 def test_wrong_app_never_marks(isolated_db):
     _agent("a")
     output = '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}'

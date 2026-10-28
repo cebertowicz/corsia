@@ -1,12 +1,12 @@
 """Observe an in-memory stamped connected-app result."""
 from __future__ import annotations
 
-from infra.database import get_db
 from infra.tool_result_errors import is_error_result
-from registry.observer import observe_command_result
+from registry.observer import CommandArtifactRegistrationError, observe_command_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed
 from tools.mcp_stamp import result_stamp
+from tools.shell_output import registration_warning as build_registration_warning
 
 
 def observe_current_result(result: object, args: dict) -> object:
@@ -25,30 +25,39 @@ def observe_current_result(result: object, args: dict) -> object:
         logger.exception("Could not record connected-app event identity")
         notices.append("Couldn't record this result's event identity. Your own event may wake you again.")
     if thread_id and turn is not None:
-        try:
-            notices.extend(notice_for_result(thread_id, turn.turn_id, args, result))
-        except Exception:
-            logger.exception("connected-app observation failed")
-            notices.append("Couldn't check whether to register this result. Register it manually if needed.")
+        notices.extend(notice_for_result(thread_id, turn.turn_id, args, result))
     return restamp(result, str(result) + "\n\n" + "\n".join(notices)) if notices else result
+
+
+def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: str,
+                         *, observe=None, notify_change=None, **kwargs):
+    """Observe once, returning notices and a warning while notifying partial changes."""
+    import logging
+
+    logger = logging.getLogger("tools.shell")
+    observe = observe or observe_command_result
+    notify_change = notify_change or notify_changed
+    told: list[str] = []
+    changed: list[dict] = []
+    warning = None
+    try:
+        observe(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
+    except CommandArtifactRegistrationError as exc:
+        logger.exception("connector command artifact registration failed in %s", thread_id)
+        warning = build_registration_warning(exc.artifact, exc.error)
+    except Exception as exc:
+        logger.exception("connector command observation failed in %s", thread_id)
+        warning = build_registration_warning(None, exc)
+    finally:
+        for artifact in changed:
+            notify_change(artifact)
+    return told, warning
 
 
 def notice_for_result(thread_id: str, turn_id: str, args: dict, result: object) -> list[str]:
     """Keep an observer failure from withholding a completed tool result."""
-    db = get_db()
-    changed: list[dict] = []
-    told: list[str] = []
-    try:
-        observe_command_result(thread_id, None, args, str(result), metadata=result_stamp(result),
-                               db=db, told=told, changed=changed, is_error=is_error_result(result),
-                               origin=RegistrationOrigin(thread_id, turn_id, "observe_rule"))
-    except Exception:
-        from loguru import logger
-
-        logger.exception("connected-app observation failed")
-        return ["Couldn't check whether to register this result. Register it manually if needed."]
-    finally:
-        db.close()
-    for artifact in changed:
-        notify_changed(artifact)
-    return told
+    told, warning = observe_with_warning(
+        thread_id, None, args, str(result), metadata=result_stamp(result),
+        is_error=is_error_result(result), origin=RegistrationOrigin(thread_id, turn_id, "observe_rule"),
+    )
+    return told + ([warning] if warning else [])
