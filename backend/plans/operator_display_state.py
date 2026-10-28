@@ -112,45 +112,20 @@ def asks_user_from_facts(
     )
 
 
-def needs_user_from_facts(
-    state: str,
-    condition: str,
-    assignee: str | None,
-    review_kind: str | None,
-    *,
-    has_attention: bool,
-    plan_paused: bool = False,
-    node_paused: bool = False,
-) -> bool:
-    """Return whether compact node facts expose a concrete user action now.
+def row_asks_user(node: dict, review: dict | None, execution: dict) -> bool:
+    """``asks_user_from_facts`` for a full node row: its look in the plan.
 
-    Every plan-owned ask is deferred under a plan or item pause (``ask_deferred``).
+    The ask is owed now (``requires_user_action``) only while ``ask_deferred`` is false.
     """
-    return not ask_deferred(plan_paused=plan_paused, node_paused=node_paused) and asks_user_from_facts(
-        state, condition, assignee, review_kind, has_attention=has_attention,
-    )
-
-
-def row_needs_user(node: dict, review: dict | None, execution: dict, *, deferred: bool = True) -> bool:
-    """Whether this open row has a concrete action the user can take now.
-
-    ``deferred`` drops an ask its pause defers (Needs you, counts); the plan row
-    reads it undeferred, so a paused ask keeps its look there.
-    """
-    facts = (
+    return asks_user_from_facts(
         str(node["state"]), str(execution["condition"]),
         None if node.get("assignee") is None else str(node["assignee"]),
         None if review is None else str(review["kind"]),
-    )
-    has_attention = any(
-        link["role"] == "attention" and link.get("attention_state") == "raised"
-        for link in node.get("artifact_links", [])
-    )
-    if not deferred:
-        return asks_user_from_facts(*facts, has_attention=has_attention, causes=execution["causes"])
-    return needs_user_from_facts(
-        *facts, has_attention=has_attention,
-        plan_paused=plan_paused(execution), node_paused=node_paused(execution),
+        has_attention=any(
+            link["role"] == "attention" and link.get("attention_state") == "raised"
+            for link in node.get("artifact_links", [])
+        ),
+        causes=execution["causes"],
     )
 
 
@@ -163,18 +138,17 @@ def display_from_facts(
     child_working: bool = False,
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
-    plan_paused: bool = False,
-    node_paused: bool = False,
 ) -> dict[str, str]:
-    """Reduce compact lifecycle facts into the canonical four-state display."""
+    """Reduce compact lifecycle facts into the canonical four-state display.
+
+    ``needs_user`` is ``asks_user_from_facts``: a pause defers an ask's attention, never its look.
+    """
     if state in TERMINAL_DISPLAY:
         return dict(TERMINAL_DISPLAY[state])
     if needs_user:
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}
-    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
-        return {"label_key": "waiting", "tone_key": "waiting"}
     if condition == "review":
         kind = review_kind or "parent_agent"
         return {

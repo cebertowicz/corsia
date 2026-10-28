@@ -1,7 +1,9 @@
 """Paused asks retain their pane display without raising attention."""
 import pytest
 
-from plans import artifact_links, holds, operator_projection, service, user_steering
+from plans import (
+    activity_projection, activity_reducer, artifact_links, holds, operator_projection, service, user_steering,
+)
 from registry import attention as registry_attention, models
 from tests.test_plan_decisions import _task
 from tests.test_plan_pause_defers_person_ask import (
@@ -52,6 +54,18 @@ def test_paused_ask_stays_orange(db, kind, pause, monkeypatch):
     assert projected[node_id]["status_reason"] == user_steering.USER_PAUSE_REASON
     parent_named = projected[parent_id]["status_reason"] == user_steering.USER_PAUSE_REASON
     assert parent_named == (pause == "plan")
+    # The compact Activity reduction reads the same look and owes the same nothing.
+    compact = {}
+    reduce_node = activity_reducer.reduce_node
+
+    def spy(row, *args, **kwargs):
+        compact[str(row["id"])] = reduced = reduce_node(row, *args, **kwargs)
+        return reduced
+
+    monkeypatch.setattr(activity_reducer, "reduce_node", spy)
+    activity_projection.read_workspace(actor=_human(), db=db)
+    assert compact[node_id].label_key == projected[node_id]["display"]["label_key"]
+    assert not compact[node_id].requires_user_action
     if pause == "item":
         _node_lifecycle(db, plan.id, node_id, "resume_node")
     else:
