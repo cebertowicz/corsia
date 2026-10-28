@@ -1,6 +1,7 @@
 """The shared saved sign-in profile, its concurrent copies, the agent-route refusals and headless stealth."""
 from pathlib import Path
 import sqlite3
+import sys
 
 import pytest
 from infra.config import STATE_ROOT
@@ -83,9 +84,11 @@ async def test_a_visible_browser_keeps_chromes_own_user_agent(synthetic_browser,
 
 
 async def test_the_environments_own_launch_args_survive(synthetic_browser, chrome154, monkeypatch):
-    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox\n--disable-extensions")
     await synthetic_browser.owner.run("a", ["open", "about:blank"])
-    assert "--no-sandbox" in synthetic_browser.chrome_calls[0]
+    args = synthetic_browser.chrome_calls[0]
+    assert ("--no-sandbox" in args) is (sys.platform != "linux")
+    assert "--disable-extensions" in args
     await synthetic_browser.owner.shutdown()
 
 
