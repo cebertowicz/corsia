@@ -56,6 +56,7 @@ GITHUB_ROUTED_EVENTS = {
     "pr.merged": "webhook.github.pr_merged",
     "pr.closed": "webhook.github.pr_closed",
     "check.completed": "webhook.github.check_suite_completed",
+    "issue.opened": "webhook.github.issue_opened",
     "issue_comment.created": "webhook.github.issue_comment",
     "pr_comment.created": "webhook.github.pr_comment",
 }
@@ -307,7 +308,8 @@ MANIFEST = register(ConnectorManifest(
         "pr.unlabeled": EventTypeDecl(
             "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
-        **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE)
+        **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
+                                 routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
         **{name: EventTypeDecl(name, ("repo", "item_version"), _CONTENT_FILTERABLE,
                                 routed_event=GITHUB_ROUTED_EVENTS.get(name))

@@ -12,11 +12,11 @@ from core.turn_core import TurnIdentity
 from test_external_cold_tool_debt import _context, debt_db  # noqa: F401
 
 
-def _codex_events(db, open_step="older-step"):
+def _codex_events(db, open_step=None):
     from subagents.codex_runtime_events import make_on_event
     from subagents.codex_runtime_state import _LiveCodex
 
-    # A late call reaches the pre-cut Step through the owner's open text Step.
+    # The older Step is settled; a later declaration starts a new Step.
     row = db.execute("SELECT metadata FROM messages WHERE id='older-step'").fetchone()
     metadata = json.loads(row["metadata"])
     metadata["provider_turn_id"] = "provider-turn"
@@ -103,7 +103,7 @@ async def _prepare_racing(context, live, on_event, monkeypatch, *, deferred, req
     try:
         assert await asyncio.to_thread(entered.wait, 10), "cold guard seam not reached"
         await on_event(_event("tool_use", call_id))
-        assert live.tool_step_ids == {call_id: "older-step"}
+        assert live.tool_step_ids[call_id] != "older-step"
     finally:
         release.set()
     result = await task
@@ -118,7 +118,8 @@ async def _prepare_racing(context, live, on_event, monkeypatch, *, deferred, req
 @pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
 @pytest.mark.parametrize("required", [False, True], ids=["optional", "required"])
 @pytest.mark.asyncio
-async def test_declaration_after_guard_refuses_cold_install(debt_db, monkeypatch, deferred, required):
+async def test_declaration_after_guard_stays_in_tail(debt_db, monkeypatch, deferred, required):
+    from core.tool_result_debt import thread_tool_debt_through
     from history.projection import render_portable_history
     from infra import checkpoint_queries
 
@@ -128,25 +129,46 @@ async def test_declaration_after_guard_refuses_cold_install(debt_db, monkeypatch
         context, live, on_event, monkeypatch, deferred=deferred, required=required,
     )
     assert admission.request.mode == "cold" and admission.request.through_seq == 3
-    # The cut remains legal, but its Step gained a durably declared unpaid call.
     render_portable_history("debt", db=debt_db, through=context.boundary, include_unfinished_turn=True)
+    step = live.tool_step_ids["late"]
+    assert debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0] > context.boundary.seq
+    debt = thread_tool_debt_through("debt", context.boundary.seq, db=debt_db)
+    assert not debt.unsettled and not debt.unpayable
     record = await _install(admission, previous=not deferred)
-    assert record.status == "overtaken"
-    assert "tool" in record.error
-    previous = checkpoint_queries.current_installed("debt", db=debt_db)
-    if deferred:
-        assert previous is None
-    else:
-        assert previous.id == "previous" and previous.through_seq == 1
-    assert debt_db.execute("SELECT count(*) FROM messages WHERE id='checkpoint-receipt:race'").fetchone()[0] == 0
+    assert record.status == "installed"
+    assert checkpoint_queries.current_installed("debt", db=debt_db).id == "race"
+    assert live.tool_step_ids == {"late": step}
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
 @pytest.mark.asyncio
-async def test_late_settlement_invalidates_frozen_cut_before_install(debt_db, monkeypatch, deferred):
-    from core._tool_result_delivery_support import ToolResultBindingError
+async def test_open_text_step_is_after_cold_cut(debt_db, monkeypatch, deferred):
+    from subagents.harness_checkpoint_context import read_external_checkpoint_context
+
+    context = _context(debt_db, monkeypatch, "codex", outstanding=False)
+    live, on_event = _codex_events(debt_db)
+    text_event = _event("assistant_text", "text")
+    text_event["text"] = "open text"
+    await on_event(text_event)
+    step = live.open_tool_step_id
+    context = read_external_checkpoint_context(
+        "debt", context.target.catalog_id, "codex", current_turn_id="current",
+    )
+    step_seq = debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0]
+    assert context.boundary.seq < step_seq
+    admission = await _prepare_racing(
+        context, live, on_event, monkeypatch, deferred=deferred, required=True,
+    )
+    assert live.tool_step_ids["late"] == step
+    assert admission.request.through_seq == context.boundary.seq
+    assert (await _install(admission, previous=not deferred)).status == "installed"
+
+
+@pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
+@pytest.mark.asyncio
+async def test_late_settlement_stays_in_tail_after_frozen_cut(debt_db, monkeypatch, deferred):
+    from core.tool_result_debt import thread_tool_debt_through
     from history.projection import render_portable_history
-    from history.types import PortableHistoryError
     from infra import checkpoint_queries
     from subagents.codex_runtime_events import settle_missing_tool_results
 
@@ -155,19 +177,20 @@ async def test_late_settlement_invalidates_frozen_cut_before_install(debt_db, mo
     admission = await _prepare_racing(
         context, live, on_event, monkeypatch, deferred=deferred, required=True,
     )
-    with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
-        await on_event(_event("tool_result", "late"))
-    assert live.tool_step_ids == {"late": "older-step"}
+    step = live.tool_step_ids["late"]
+    assert debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0] > context.boundary.seq
     await settle_missing_tool_results(
         live=live, thread_id="debt", identity=live.corsia_turn, bcast=lambda *_args: None,
     )
     assert not live.tool_step_ids
-    with pytest.raises(PortableHistoryError, match="history boundary is not"):
-        render_portable_history("debt", db=debt_db, through=context.boundary, include_unfinished_turn=True)
+    render_portable_history("debt", db=debt_db, through=context.boundary, include_unfinished_turn=True)
+    debt = thread_tool_debt_through("debt", context.boundary.seq, db=debt_db)
+    assert not debt.unsettled and not debt.unpayable
     record = await _install(admission)
-    assert record.status == "overtaken"
-    assert "boundary" in record.error
-    assert checkpoint_queries.current_installed("debt", db=debt_db) is None
+    assert record.status == "installed"
+    assert checkpoint_queries.current_installed("debt", db=debt_db).id == "race"
+    result = debt_db.execute("SELECT metadata FROM messages WHERE role='tool' AND thread_id='debt' ORDER BY seq DESC LIMIT 1").fetchone()
+    assert json.loads(result["metadata"])["assistant_step_id"] == step
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude-code"])
@@ -186,7 +209,7 @@ async def test_settled_external_cold_still_installs(debt_db, monkeypatch, harnes
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
 @pytest.mark.asyncio
-async def test_preexisting_precut_call_settling_after_admission_refuses_install(debt_db, monkeypatch, deferred):
+async def test_precut_call_settling_after_context_snapshot_refuses_install(debt_db, monkeypatch, deferred):
     from infra import checkpoint_queries
 
     from infra.db_async import run_in_db
@@ -194,19 +217,34 @@ async def test_preexisting_precut_call_settling_after_admission_refuses_install(
     from subagents.harness_checkpoint_context import read_external_checkpoint_context
 
     context = _context(debt_db, monkeypatch, "codex", outstanding=True)
-    await run_in_db(persist_assistant_text, "debt", "latest", turn_id="current")
+    latest = await run_in_db(persist_assistant_text, "debt", "latest", turn_id="current")
     context = read_external_checkpoint_context(
         "debt", context.target.catalog_id, "codex", current_turn_id="current",
     )
     # The cut is on a LATER group; an older result raises the cumulative head_max.
     assert context.boundary.seq == 5
-    live, on_event = _codex_events(debt_db)
-    admission = await _prepare_racing(
-        context, live, on_event, monkeypatch, deferred=deferred, required=True, call_id="older",
+    from subagents.codex_runtime_events import settle_missing_tool_results
+    from subagents.harness_checkpoint_resume import _prepare_external_checkpoint
+    from core.checkpoint_cold_fallback import build_cold_request
+    from infra.checkpoints import create_running
+
+    live, _ = _codex_events(debt_db, open_step=latest)
+    live.tool_step_ids["older"] = "older-step"
+    live.tool_names["older"] = "bash"
+    await settle_missing_tool_results(
+        live=live, thread_id="debt", identity=live.corsia_turn, bcast=lambda *_args: None,
     )
-    assert admission.request.through_seq == 5
-    await on_event(_event("tool_result", "older"))
     assert not live.tool_step_ids
+    admission = await _prepare_external_checkpoint(
+        "race", context=context, live=live, identity=live.corsia_turn,
+        warm_source=SimpleNamespace(harness="codex") if deferred else None, required=True,
+    )
+    if deferred:
+        from dataclasses import replace
+        await run_in_db(create_running, admission.request)
+        provider_request = await build_cold_request(admission.provider_request)
+        admission = replace(admission, request=replace(admission.request, mode="cold"), provider_request=provider_request)
+    assert admission.request.through_seq == 5
     record = await _install(admission, previous=not deferred)
     assert record.status == "overtaken" and "boundary" in record.error
     previous = checkpoint_queries.current_installed("debt", db=debt_db)

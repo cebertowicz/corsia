@@ -26,8 +26,7 @@ from events.connectors.github import (
 from events.github_mapper import pr_terminal_state
 from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
-    prepare_route_ordered,
-    settle_routed_delivery,
+    _chip_line, prepare_route_ordered, settle_routed_delivery, summary_facts,
 )
 from infra.product_events import emit_product_event
 from infra.worktree_reaper_pr import schedule_merged_pr_reap
@@ -36,9 +35,7 @@ from registry.pr_lifecycle import record_pull_request_ended
 
 _CHECK_EVENTS = CHECK_SUITE_COMPLETED_EVENTS
 
-_TERMINAL_FAILURE_CONCLUSIONS = frozenset({
-    "failure", "timed_out", "action_required",
-})
+_TERMINAL_FAILURE_CONCLUSIONS = frozenset({"failure", "timed_out", "action_required"})
 
 
 class RouteOutcome(str, Enum):
@@ -161,16 +158,11 @@ def _self_authored_result(
         "event-routing: suppressing {} — authored by bot/self ({})",
         internal_event, author.get("login", "?"),
     )
-    return _suppressed_result(internal_event, "self_authored", author=author.get("login"))
-
-
-def _suppressed_result(internal_event: str, reason: str, *, thread_id: str | None = None,
-                       external_id: str | None = None, author: str | None = None) -> RouteResult:
-    emit_product_event("event_route", "suppressed", properties={
-        "internal_event": internal_event, "reason": reason, "thread_id": thread_id,
-        "external_id": external_id, "author": author,
-    })
-    return RouteResult(RouteOutcome.SUPPRESSED, thread_id=thread_id, external_id=external_id, reason=reason)
+    emit_product_event(
+        "event_route", "suppressed",
+        properties={"internal_event": internal_event, "author": author.get("login")},
+    )
+    return RouteResult(RouteOutcome.SUPPRESSED)
 
 
 def _unowned_check_result(
@@ -251,6 +243,8 @@ def _select_route(
             and routing_state.get("triage") is None):
         return _unowned_check_result(
             internal_event, payload, external_id, selected_pr), routing_state
+    if identity is None and internal_event == "webhook.github.issue_opened":  # only rules route it
+        return RouteResult(RouteOutcome.PARKED, reason="issue_opened_unruled"), routing_state
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 
@@ -355,46 +349,52 @@ def _record_source_facts(
         schedule_merged_pr_reap(payload)
 
 
-def _summarize(internal_event: str, payload: dict[str, Any], external_id: str | None) -> tuple[str, dict[str, Any]]:
+def _summarize(
+    internal_event: str, payload: dict[str, Any], external_id: str | None,
+    facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Build a one-line summary and structured details for the thread input."""
     repo = (payload.get("repository") or {}).get("full_name", "")
     pr = payload.get("pull_request") or {}
     comment = payload.get("comment") or {}
     details: dict[str, Any] = {"repo": repo, "external_id": external_id}
+    issue = payload.get("issue") or {}
+    facts = summary_facts(payload, facts)
+    if facts:
+        details.update({k: facts[k] for k in ("author", "author_origin", "item_version") if k in facts})
+    if comment or pr or issue:
+        details["action"] = payload.get("action", "")
 
     if comment:
         author = (comment.get("user") or {}).get("login", "?")
-        body = (comment.get("body") or "")[:280]
-        details.update({"author": author, "comment": body,
-                        "url": comment.get("html_url")})
-        return f"{external_id} comment from {author}: {body[:100]}", details
+        details.update({"author": author, "url": comment.get("html_url")})
+        summary = f"{external_id} comment from {author}"
+        if facts and facts.get("author_origin") == "inside":
+            body = (comment.get("body") or "")[:280]
+            details["comment"] = body
+            summary += f": {body[:100]}"
+        return summary, details
 
     if pr:
-        details.update({"pr_title": pr.get("title"),
-                        "head_sha": (pr.get("head") or {}).get("sha"),
+        details.update({"head_sha": (pr.get("head") or {}).get("sha"),
                         "base_ref": (pr.get("base") or {}).get("ref"),
                         "url": pr.get("html_url")})
         action = payload.get("action", "")
-        return f"{external_id} {action}: {pr.get('title', '')}", details
+        summary = f"{external_id} {action}"
+        if facts and facts.get("author_origin") == "inside":
+            details["pr_title"] = pr.get("title")
+            summary += f": {pr.get('title', '')}"
+        return summary, details
+
+    if issue:
+        details["url"] = issue.get("html_url")
 
     check_suite = payload.get("check_suite") or {}
     if check_suite:
         conclusion = check_suite.get("conclusion") or "completed"
-        details.update({
-            "check_suite_id": check_suite.get("id"),
-            "head_sha": check_suite.get("head_sha"),
-            "check_suite_updated_at": check_suite.get("updated_at"),
-        })
+        details.update({"check_suite_id": check_suite.get("id"),
+                        "head_sha": check_suite.get("head_sha"),
+                        "check_suite_updated_at": check_suite.get("updated_at")})
         return f"{internal_event} on {external_id or repo} ({conclusion})", details
 
     return f"{internal_event} on {external_id or repo}", details
-
-
-def _chip_line(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
-    """The chip's line for a routed event (``summary`` is the agent's): only the
-    check-suite summary reads as machine text, the rest are already sentences."""
-    suite = payload.get("check_suite") or {}
-    if suite and not (payload.get("comment") or payload.get("pull_request")):
-        target = external_id or (payload.get("repository") or {}).get("full_name", "")
-        return f"CI {suite.get('conclusion') or 'completed'} on {target}"
-    return summary

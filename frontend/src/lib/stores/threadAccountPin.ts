@@ -15,7 +15,7 @@ const REFUSALS: Record<string, string> = {
 export const PIN_FAILED = "Couldn't switch accounts. Try again.";
 
 /** The refusal's reason code, which the backend writes first in its detail (`<code>; <advice>`). */
-function reasonOf(detail: unknown): string | null {
+export function reasonOf(detail: unknown): string | null {
 	return typeof detail === 'string' ? detail.trim().match(/^[a-z0-9]+(?:_[a-z0-9]+)+/)?.[0] ?? null : null;
 }
 
