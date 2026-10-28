@@ -1,7 +1,6 @@
 """Linux protected mounts, rendered from the existing host-path inventory."""
 from __future__ import annotations
 
-import errno
 import hashlib
 import logging
 import os
@@ -86,9 +85,7 @@ def _prepare_home_caches(home: Path, protected_cache: Path | None = None) -> Non
                     os.fchmod(current, 0o700)
         except OSError as exc:
             if required:
-                raise ValueError('Cannot protect the CORSIA runtime cache: check that its path is accessible and contains no symlinks.') from exc
-            if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
-                raise
+                raise ValueError(f"Couldn't protect CORSIA's cache folder {path}: check that you can open it and that it isn't a symlink.") from exc
             logger.warning('Skipping unavailable cache path %s: %s', path, exc)
         finally:
             if current is not None:

@@ -22,7 +22,7 @@ _MISSING = (
     'Nothing ran. Install it with "sudo apt install bubblewrap", then restart CORSIA.'
 )
 _FAILURE = (
-    'Error: the Linux sandbox (bubblewrap) is installed but could not complete its startup check. '
+    "Error: the Linux sandbox (bubblewrap) is installed but couldn't complete its startup check. "
     'Nothing ran. On Ubuntu 24.04 or later, rerun the CORSIA installer to add '
     'its AppArmor rule, then restart CORSIA.'
 )

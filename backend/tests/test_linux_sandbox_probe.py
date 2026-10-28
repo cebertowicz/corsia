@@ -11,7 +11,7 @@ MISSING = ('Error: the Linux sandbox (bubblewrap) is not installed on this compu
 
 
 def failure(detail):
-    return ('Error: the Linux sandbox (bubblewrap) is installed but could not complete its startup check. '
+    return ("Error: the Linux sandbox (bubblewrap) is installed but couldn't complete its startup check. "
             'Nothing ran. On Ubuntu 24.04 or later, rerun the CORSIA installer to add its '
             'AppArmor rule, then restart CORSIA.')
 

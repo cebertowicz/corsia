@@ -116,7 +116,7 @@ def test_symlinked_protected_runtime_cache_refuses_command(tmp_path, monkeypatch
     cache = home / '.cache/corsia'
     cache.symlink_to(outside, target_is_directory=True)
     policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia', write_roots=(cache,))
-    with pytest.raises(ValueError, match='Cannot protect the CORSIA runtime cache'):
+    with pytest.raises(ValueError, match="Couldn't protect CORSIA's cache folder"):
         build_protected_argv('true', home, path_policy=policy, rw_roots=[home], ro_roots=[],
             readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
     assert not list(outside.iterdir())
@@ -135,6 +135,19 @@ def test_cache_creation_skips_symlink_ancestor(tmp_path, caplog):
     assert 'Skipping unavailable cache path' in caplog.text
     assert str(outside) not in argv
     assert list(outside.iterdir()) == []
+
+
+def test_cache_creation_skips_unwritable_optional_cache(tmp_path, caplog):
+    home = tmp_path / 'home'
+    (home / '.cache').mkdir(parents=True)
+    (home / '.cache').chmod(0o500)
+    policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
+    try:
+        build_protected_argv('true', home, path_policy=policy, rw_roots=[], ro_roots=[],
+            readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    finally:
+        (home / '.cache').chmod(0o700)
+    assert 'Skipping unavailable cache path' in caplog.text
 
 
 def test_home_grant_does_not_create_missing_persistence_paths(linux_sandbox_root):
