@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -35,6 +36,44 @@ class PaneAppearance:
         if data.get("scheme") not in {"light", "dark"}:
             return None
         return cls(int(width), int(height), round(scale, 2), data["scheme"])
+
+
+async def watch_targets(thread_id: str, notify: Callable[[], None], known: list[set[str] | None]) -> None:
+    """Observe tab lifecycle while a pane is connected.
+
+    Only page targets count: frames and workers (a captcha's, say) come and go constantly, and
+    each notice restarts the pane's streams. Chrome replays existing targets before it answers
+    discovery; those seed the known pages without a notice. `known` outlives one connection, so
+    a reconnect whose replay differs from the pages last seen notifies once: a tab opened or
+    closed while the watch was down.
+    """
+    from host_access.browser_session_commands import browser_endpoint
+    # A pane that leaves cancels this watch mid-read; cancelling a running command resets the shared session.
+    endpoint = await asyncio.shield(browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id))
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        discovery = await cdp.send("Target.setDiscoverTargets", discover=True)
+        discovering = False
+        seen = known[0]
+        pages: set[str] = set()
+        while True:
+            event = json.loads(await cdp.socket.recv())
+            if event.get("id") == discovery:
+                discovering = True
+                if seen is not None and pages != seen:
+                    notify()
+                known[0] = pages
+                continue
+            method = event.get("method")
+            params = event.get("params") if isinstance(event.get("params"), dict) else {}
+            info = params.get("targetInfo") if isinstance(params.get("targetInfo"), dict) else {}
+            if method == "Target.targetCreated" and info.get("type") == "page":
+                pages.add(info.get("targetId"))
+            elif method == "Target.targetDestroyed" and params.get("targetId") in pages:
+                pages.discard(params.get("targetId"))
+            else:
+                continue
+            if discovering:
+                notify()
 
 
 async def watch_page_metadata(thread_id: str, connection_token: str, report: Callable[[dict], Awaitable[None]]) -> None:
