@@ -107,7 +107,7 @@ async def verify_version(binary: str | None = None) -> None:
     version = output.decode(errors="replace").strip()
     if process.returncode != 0 or version != CAPTURED_CODEX_VERSION:
         raise ConfinementRefused(
-            f"Couldn’t start this read-only agent on {version or 'Codex (version unknown)'}: "
+            f"Couldn’t start this read-only agent on Codex {version.removeprefix('codex-cli ') or '(version unknown)'}: "
             "read-only agents run only on Codex 0.162.1 for now. "
             "Switch Codex to 0.162.1, or choose another model."
         )
