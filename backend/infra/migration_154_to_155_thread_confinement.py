@@ -1,4 +1,4 @@
-"""Schema 153 -> 154: a thread's launch confinement, read by every harness."""
+"""Schema 154 -> 155: a thread's launch confinement, read by every harness."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ _DAMAGED_RECORD = """
 """
 
 
-def migrate_153_to_154(conn: sqlite3.Connection) -> None:
+def migrate_154_to_155(conn: sqlite3.Connection) -> None:
     """Add each thread's write-once confinement and read dirs, and carry over the
     confinement of every Claude Code review child made before them."""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}

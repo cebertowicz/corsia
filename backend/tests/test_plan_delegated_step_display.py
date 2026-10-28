@@ -12,7 +12,9 @@ and a child plan with nothing running leaves the step's usual label (a ready
 step in a free slot reads `next`). Motion is not masked by attention: a child
 plan that reads needs-review because one step awaits review still moves the
 parent while another of its steps runs. A step delegated again below the child
-reads in progress at every level above the running work.
+reads in progress at every level above the running work. "Runs" means its
+worker's Turn is running: a selected step whose worker has no Turn and no
+queued input is between turns, and the step waits on it instead.
 """
 
 from __future__ import annotations
@@ -65,11 +67,17 @@ def _task(plan_id: str, title: str, *, db, **kwargs):
 
 
 def _run(db, node_id: str, actor_id: str) -> None:
-    """Select a step for its plan owner, as activate does."""
+    """Select a step for its worker, as activate does, while the worker's Turn runs."""
     row = service._node_row(db, node_id)
     admission.activate(
         node_id, expected_revision=row["revision"],
         actor_id=actor_id, provenance="test.delegated_display", db=db,
+    )
+    db.execute(
+        """INSERT OR IGNORE INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+           VALUES (?,?,0,'native/model','running','2000-01-01T00:00:00','boot-1')""",
+        (f"turn-{actor_id}", actor_id),
     )
 
 
