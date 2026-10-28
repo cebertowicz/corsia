@@ -1,7 +1,7 @@
 """Paused asks retain their pane display without raising attention."""
 import pytest
 
-from plans import artifact_links, operator_projection, service, user_steering
+from plans import artifact_links, holds, operator_projection, service, user_steering
 from registry import attention as registry_attention, models
 from tests.test_plan_decisions import _task
 from tests.test_plan_pause_defers_person_ask import (
@@ -48,9 +48,10 @@ def test_paused_ask_stays_orange(db, kind, pause, monkeypatch):
     assert projected[parent_id]["display"] == orange
     assert not projected[node_id]["requires_user_action"]
     assert not projected[parent_id]["requires_user_action"]
-    # One state, one mark: the row and its parent name the pause, item or whole plan.
+    # One state, one mark: the row names the pause; its parent too when the pause is the plan's.
     assert projected[node_id]["status_reason"] == user_steering.USER_PAUSE_REASON
-    assert projected[parent_id]["status_reason"] == user_steering.USER_PAUSE_REASON
+    parent_named = projected[parent_id]["status_reason"] == user_steering.USER_PAUSE_REASON
+    assert parent_named == (pause == "plan")
     if pause == "item":
         _node_lifecycle(db, plan.id, node_id, "resume_node")
     else:
@@ -58,6 +59,20 @@ def test_paused_ask_stays_orange(db, kind, pause, monkeypatch):
     resumed = rows()
     assert resumed[node_id]["requires_user_action"]
     assert resumed[node_id]["status_reason"] != user_steering.USER_PAUSE_REASON
+
+
+def test_agent_placed_pause_is_not_the_users(db):
+    """A legacy agent pause defers nothing, so the row keeps its own reason."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Ask", assignee="user", db=db)
+    db.commit()
+    revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (node.id,)).fetchone()[0]
+    holds.pause(node.id, "Held by the agent", expected_revision=revision, actor_id="owner", provenance="test", db=db)
+    db.commit()
+    rows = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]["nodes"]
+    row = next(row for row in rows if row["id"] == node.id)
+    assert row["display"]["label_key"] == "waiting"
+    assert row["status_reason"] == "Held by the agent"
 
 
 def test_paused_user_task_with_dependency_stays_waiting(db):

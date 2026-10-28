@@ -135,13 +135,16 @@ _REASONED_CONDITIONS = frozenset({"waiting", "blocked", "paused"})
 
 
 def _status_reason(
-    execution: dict, sequenced_after: str | None, stopped: str | None,
+    execution: dict, sequenced_after: str | None, stopped: str | None, *, deferred_ask: bool = False,
 ) -> str | None:
     """The one specific cause a row names under its title, if it has one."""
     if stopped is not None:
         return stopped
     if sequenced_after is not None:
         return sequenced_after
+    if deferred_ask:
+        # A paused ask keeps its look in the plan, so it names the user's pause, item or plan.
+        return user_steering.USER_PAUSE_REASON
     if execution["condition"] == "review" and node_paused(execution):
         # Pausing a raised review defers its ask, so the row names the pause.
         return user_steering.placed_pause(execution["causes"]).get("reason")
@@ -257,12 +260,14 @@ def project(
             stopped = operator_stopped.at(
                 stops.get(executor_id), node, item.plan, execution,
             )
+            needs_user = row_needs_user(node, review, execution)
+            deferred_ask = not needs_user and row_needs_user(node, review, execution, deferred=False)
             states[node["id"]] = {
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
-                    execution, sequenced_after, stopped) or _sent_back(node),
+                    execution, sequenced_after, stopped, deferred_ask=deferred_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
@@ -271,7 +276,7 @@ def project(
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
-                "requires_user_action": row_needs_user(node, review, execution),
+                "requires_user_action": needs_user,
             }
     return states
 

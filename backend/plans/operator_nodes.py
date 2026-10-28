@@ -299,10 +299,9 @@ def _apply_branches(
             node["display"] = branch_display(
                 own, needs_user=asks_user[node["id"]], working=working[node["id"]],
             )
-    for node in nodes:
-        # An ask its pause defers keeps its look and names the pause, item or whole plan.
-        if node["display"]["label_key"] == "needs_you" and not node["requires_user_action"]:
-            node["status_reason"] = user_steering.USER_PAUSE_REASON
+            if node["display"]["label_key"] == "needs_you" and display_state.plan_paused(node["execution"]):
+                # Under the user's plan pause a branch keeps its asks' look and names the pause.
+                node["status_reason"] = node["status_reason"] or user_steering.USER_PAUSE_REASON
     plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
     roots = [node for node in nodes if node["parent_id"] not in ids]
     for node in roots:

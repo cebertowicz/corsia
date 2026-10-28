@@ -7,8 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- A paused item you owe stays orange in the plan, and so does the task above it; pausing only clears its flag and count in the left menu.
-- An agent can now finish or close a plan step whose worker was stopped, instead of it staying stuck, and a finished worker's documents pass to the agent that started it.
+- A paused task, review or decision you owe stays orange in the plan, and so does the task above it; pausing only clears its flag and count in the left menu.
+- An agent can finish or close a task it handed to another agent that was stopped, instead of it staying stuck, and a finished agent's documents pass to the agent that started it.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
 
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.

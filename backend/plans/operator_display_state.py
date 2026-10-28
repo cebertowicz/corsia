@@ -98,9 +98,12 @@ def asks_user_from_facts(
     state: str, condition: str, assignee: str | None, review_kind: str | None,
     *, has_attention: bool, causes: list[dict] | None = None,
 ) -> bool:
-    """Whether the row asks the person, independently of its pause."""
-    pause_only = causes is not None and bool(causes) and all(
-        cause.get("kind") == "paused" and cause.get("reason_key") in {"manual_pause", "plan_paused"}
+    """Whether the row asks the person, independently of a pause ``ask_deferred`` counts."""
+    from plans import user_steering
+
+    pause_only = bool(causes) and all(
+        cause.get("reason_key") == "plan_paused"
+        or (cause.get("placed") and user_steering.is_user_pause(cause))
         for cause in causes
     )
     return state not in TERMINAL_DISPLAY and bool(
