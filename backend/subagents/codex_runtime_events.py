@@ -393,7 +393,6 @@ async def _on_tool_use(ctx, ev: dict) -> None:
         provider="codex",
         model=model_id,
         expected_model=getattr(ctx.live, "expected_reported_model", None),
-
         assistant_step_id=append_step_id,
     )
     ctx.live.thinking_buf = ""

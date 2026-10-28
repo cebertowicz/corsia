@@ -40,7 +40,7 @@
     "backend/subagents/child_thread.py": 560,
     "backend/subagents/codex_app_server.py": 908,
     "backend/subagents/codex_runtime.py": 2307,
-    "backend/subagents/codex_runtime_events.py": 661,
+    "backend/subagents/codex_runtime_events.py": 660,
     "backend/tools/delegation.py": 507,
     "backend/tools/filesystem_effects.py": 659,
     "backend/tools/grep.py": 455,
