@@ -314,8 +314,7 @@ async def handle_process_exit(
                 child_thread_id, live, broadcast, db,
                 finalize_callback, emit_closed,
             )
-    settlement = None
-    publication_error = None
+    settlement = publication_error = None
     try:
         retired, settlement = await _settle_active_exit(
             child_thread_id, live, identity, code, stderr, broadcast, db, finish_callback,
@@ -337,6 +336,8 @@ async def handle_process_exit(
                 except BaseException as error:
                     if settlement is None:
                         raise
+                    if _LIVE.get(child_thread_id) is live:  # its successor stays undriven: log it
+                        log.error("cc_runtime: %s settled turn %s but kept its exited process", child_thread_id, identity.turn_id, exc_info=error)
                     assert _LIVE.get(child_thread_id) is not live, "CC terminal retained runtime"
                     publication_error = publication_error or error
     if publication_error is not None:  # nothing awaits the exit observer: this is the only trace

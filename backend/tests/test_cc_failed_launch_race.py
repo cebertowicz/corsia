@@ -121,6 +121,7 @@ async def test_failed_process_retires_before_driving_queued_successor(
             with pytest.raises(AssertionError, match="retained runtime"):
                 await asyncio.wait_for(session._reader, 5)
             assert drives == []
+            assert f"settled turn {batch.turn_id} but kept its exited process" in caplog.text
             return
         elif failure:
             with pytest.raises(RuntimeError, match=f"{failure} failed"):
