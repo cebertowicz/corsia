@@ -117,7 +117,7 @@ def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> lis
             )[1]
         scope = projects[project_id] if project_id else workspace
         if scope is None:
-            raise TrialRefused("invalid-output", "Trial owner trays could not be resolved; try again when available.")
+            continue
         for path in skill_files(resolver.root(scope, row["id"])):
             try:
                 current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))

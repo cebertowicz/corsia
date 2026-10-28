@@ -1150,6 +1150,18 @@ def test_workspace_owner_counts_trials_from_other_projects(env: Env) -> None:
     assert "two trials" in reply
 
 
+def test_missing_project_root_does_not_block_admission(env: Env) -> None:
+    _seed_thread(env.db, "other-owner")
+    env.db.execute(
+        "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES('missing','Missing',?,'t','t')",
+        (str(env.workspace / "projects" / "missing"),),
+    )
+    env.db.execute("UPDATE threads SET project_id='missing' WHERE id='other-owner'")
+    env.db.commit()
+    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Fresh"))
+    assert "queued" in reply
+
+
 @pytest.mark.parametrize("owner", [THREAD, "other-owner"])
 def test_unreadable_skill_does_not_fail_admission(env: Env, monkeypatch, owner: str) -> None:
     if owner != THREAD:
