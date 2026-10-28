@@ -300,7 +300,7 @@ async def test_delegate_task_refuses_a_read_path_outside_the_parents_scope(
 
 
 @pytest.mark.asyncio
-async def test_delegate_task_review_needs_paths_and_a_claude_code_model(child_db, monkeypatch):
+async def test_delegate_task_review_needs_paths_on_every_model(child_db, monkeypatch):
     from tools import delegate_task
 
     _seed_parent(child_db)
@@ -327,7 +327,7 @@ async def test_delegate_task_review_needs_paths_and_a_claude_code_model(child_db
         "parent", {}, "task",
         {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": ["/w"]},
     )
-    assert codex.startswith("Error: refused: Couldn’t start this read-only agent on ")
+    assert codex.startswith("Error: read path /w refused:")
 
 
 def test_unconfined_launch_is_unchanged():

@@ -179,7 +179,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     from llm.locality import locality_refusal
     from llm.model_status import scoped_status_rows
     from llm.resolution import catalog_row
-    from subagents.cc_confinement import unsupported_model_message
+
     from tools.workflow_task_fields import _workflow_version
 
     db = get_db()
@@ -200,8 +200,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     if cause == "project_cloud_off":
         raise inputs.StartRefused(f"refused: this project has cloud models off and your model {name} is a "
                                   "cloud model. Choose a local model, or allow cloud models for this project.")
-    if model_row and model_row.get("harness") == "codex":
-        raise inputs.StartRefused(f"refused: {unsupported_model_message(name)}")
+
     if status_row is None:
         raise inputs.StartRefused("refused: this model can't be found. Choose another model for this chat.")
     if effective_status(status_row)[0] != "ready":

@@ -179,21 +179,28 @@ async def test_a_paused_owner_skips_and_a_request_after_resume_starts(world, mon
 
 # 12 -- a Local only owner's start runs local or is refused: test_rule_workers_local_only.
 
-# A Codex owner: Codex has no confined launch, so the start is refused and the owner told.
+# Codex owners pass the same preparation contract; launch enforces confinement.
 @pytest.mark.asyncio
-async def test_an_owner_on_a_harness_without_a_confined_launch_is_refused(world):
+async def test_codex_owner_prepares_a_confined_worker(world):
+    from automation import worker_runner
     from infra.database import get_db, write_transaction
+    from infra.db_async import run_in_db
 
-    other = get_db().execute("SELECT id FROM models WHERE harness='codex' AND available=1 "
-                             "ORDER BY id LIMIT 1").fetchone()
-    rule = await make_rule()
-    with write_transaction(None, scope="rule_worker_model") as db:
-        db.execute("UPDATE threads SET model=? WHERE id=?", (other[0], OWNER))
-    await request()
-    await settle_all()
-    outcome, reason = starts(rule)[0][:2]
-    assert outcome == "refused" and reason.startswith("Couldn’t start this read-only agent on")
-    assert _workers() == [] and "Couldn’t start this read-only agent on" in owner_wakes()[0]
+    def prepare():
+        other = get_db().execute("SELECT id FROM models WHERE harness='codex' AND available=1 "
+                                 "ORDER BY id LIMIT 1").fetchone()
+        with write_transaction(None, scope="rule_worker_model") as db:
+            db.execute("UPDATE threads SET model=? WHERE id=?", (other[0], OWNER))
+        found = worker_runner._prepare(
+            {"thread_id": OWNER, "workflow_id": "worker-flow"},
+            {"event": {"facts": {"staging_path": "req"}}},
+        )
+        assert found["model"] == other[0]
+        assert found["staging"] == str(world["staging"].resolve())
+        assert found["schema"]
+
+    await run_in_db(prepare)
+    assert _workers() == []
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

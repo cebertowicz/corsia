@@ -88,7 +88,7 @@ def check(given: Path, resolved: Path, *, for_write: bool) -> None:
             )
 
 
-async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:
+def advertised_definitions(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:
     """The provider-facing tools for the already loaded thread row.
 
     A damaged record advertises nothing; the boundary refuses every call anyway.
@@ -103,3 +103,8 @@ async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) ->
     if roots is None:
         return definitions
     return tuple(d for d in definitions if d["function"]["name"] in REVIEW_READ_TOOLS)
+
+
+async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:
+    """Async turn-context adapter for the same synchronous preflight projection."""
+    return advertised_definitions(registry, thread_context)

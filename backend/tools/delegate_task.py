@@ -51,8 +51,8 @@ class DelegateTaskTool(Tool):
             "message workflow; use the smaller delegate_* tools when you need "
             "separate steps. The worker takes over your current plan task unless "
             "plan_node_id names another task or 'none'; the result's plan_task says "
-            "which. 'review' confines Claude Code, native and local models to file "
-            "reads in read_paths; Codex is refused. The result is its final message."
+            "which. 'review' confines Claude Code, Codex, native and local models to file "
+            "reads in read_paths. The result is its final message."
         )
 
     @property
@@ -90,7 +90,7 @@ class DelegateTaskTool(Tool):
                     "type": ["string", "null"], "enum": [*CONFINEMENTS, None],
                     "description": (
                         "Default 'none': usual tools. 'review': file reads in read_paths "
-                        "on Claude Code, native, local; Codex refused."
+                        "on Claude Code, Codex, native and local models."
                     ),
                 },
                 "read_paths": {
@@ -248,23 +248,16 @@ async def _spawn_native_child(
 async def _native_read_dirs(
     parent_thread_id: str, model: str, confinement: str, read_paths: list[str],
 ) -> tuple[str, ...] | str:
-    """A confined native or local worker's read dirs, checked as the parent's own reads.
+    """A confined worker's read dirs, checked as the parent's own reads.
 
-    ``()`` when unconfined. Codex reads the whole disk in its read-only sandbox and
-    runs its own file reads, so it has no confined launch.
+    ``()`` when unconfined; every harness preserves the stored read boundary.
     """
-    from infra.execution_class import is_codex_backed
     from infra.fresh_threads import resolve_spawn_working_dir
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
 
     if confinement == CONFINEMENT_NONE:
         return ()
-    if is_codex_backed({"model": model}):
-        from llm.catalog import get_display_name
-        from subagents.cc_confinement import unsupported_model_message
 
-        name = await run_in_db(get_display_name, model)
-        return f"Error: refused: {unsupported_model_message(name)}"
     working_dir, _project = await run_in_db(resolve_spawn_working_dir, parent_thread_id)
     try:
         return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir)

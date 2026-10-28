@@ -53,11 +53,13 @@ def build_tool_registry(working_dir: str | None = None) -> ToolRegistry:
     return agent.tools
 
 
-def dynamic_tool_definitions(registry: ToolRegistry) -> tuple[dict[str, Any], ...]:
-    """Return the advertised tool list for Claude Code (MCP) and Codex (dynamic)."""
-    from tools.catalog import advertised_tool_definitions
+def dynamic_tool_definitions(
+    registry: ToolRegistry, thread_context: dict | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Return the shared confinement-aware provider-facing tool projection."""
+    from tools.confined_reads import advertised_definitions
 
-    return advertised_tool_definitions(registry)
+    return advertised_definitions(registry, thread_context)
 
 
 def write_cc_mcp_config(

@@ -305,6 +305,7 @@ def test_prepare_codex_destination_payload_exposes_exact_preflight_surface() -> 
             "codex_destination_scope",
             return_value=("project-1", "/workspace"),
         ),
+        patch("subagents.codex_confinement.thread_context", return_value={}),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
             thread_id="prepared-session",
@@ -402,6 +403,7 @@ def test_prepare_codex_destination_payload_freezes_provider_resume_boundary() ->
             "codex_destination_scope",
             return_value=("project-1", "/workspace"),
         ),
+        patch("subagents.codex_confinement.thread_context", return_value={}),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
             thread_id="prepared-session",
@@ -450,6 +452,7 @@ def test_prepare_codex_destination_payload_freezes_persisted_resume_registry() -
             "codex_destination_scope",
             return_value=("project-1", "/workspace"),
         ),
+        patch("subagents.codex_confinement.thread_context", return_value={}),
         patch(
             "subagents.harness_tool_bridge.build_tool_registry",
             return_value=registry,
@@ -578,6 +581,7 @@ def test_prepare_live_destination_ignores_reported_model_without_target_evidence
             "codex_destination_scope",
             return_value=("project-1", "/workspace"),
         ),
+        patch("subagents.codex_confinement.thread_context", return_value={}),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
             thread_id="prepared-session",
