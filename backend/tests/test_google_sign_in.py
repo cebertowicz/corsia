@@ -55,11 +55,12 @@ class FakeGoogle:
         self.refresh_status = 200
         self.scope = " ".join(oauth.SCOPES)
         self.id_token: str | None = None
+        self.token_subject: str | None = "published-subject"
         self.email = EMAIL
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        if url == oauth.TOKEN_URL:
+        if url == google_client.TOKEN_URL:
             form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
             self.token_forms.append(form)
             if form["grant_type"] == "refresh_token":
@@ -76,6 +77,10 @@ class FakeGoogle:
             if self.id_token is not None:
                 grant["id_token"] = self.id_token
             return httpx.Response(200, json=grant)
+        if url == google_client.TOKEN_INFO_URL:
+            assert request.method == "POST" and parse_qs(request.content.decode())["access_token"] == [ACCESS]
+            subject = google_client.id_token_subject(self.id_token) if self.id_token else self.token_subject
+            return httpx.Response(200, json={"sub": subject})
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": self.email})
         return httpx.Response(200, json={"ok": True})
@@ -202,7 +207,7 @@ async def test_callback_completes_the_sign_in_and_stores_all_three_entries(googl
         response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert response.status_code == 200
     assert REFRESH not in response.text and SECRET not in response.text
-    assert _credentials() == {"client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
+    assert _credentials() == {"client": "own", "client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
     exchange = google.token_forms[0]
     assert exchange["grant_type"] == "authorization_code" and exchange["code"] == "auth-code"
     account = _only_account()
@@ -301,10 +306,11 @@ async def test_not_connected_text_and_status_shape(google, conductor):
 
 
 async def test_connect_when_connected_and_without_a_client_file(google, conductor, client_file):
-    out = await GoogleConnectTool().execute(_thread_id=conductor)
-    assert out == f"Error: {oauth.NEEDS_CLIENT_FILE}"
-    assert "If none exists yet, follow skill `google-setup`" in out
-    assert "Never create a second project when one already exists." in out
+    out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))
+    query = parse_qs(urlparse(out["url"]).query)
+    assert query["client_id"] == [oauth.PUBLISHED_CLIENT_ID]
+    assert query["redirect_uri"] == [oauth.PUBLISHED_URL]
+    assert "code_challenge" not in query
     account_id = await _connect(google, conductor, client_file)
     out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
     assert out == {
@@ -314,10 +320,15 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     [status] = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))["accounts"]
     assert status["status"] == "connected" and status["email"] == EMAIL
     assert status["account_id"] == account_id and "needs_action" not in status
-    # Adding the same Google identity again stores nothing and says where to manage it.
-    _, state = await _start(google, conductor, None)
+    # A new add uses the published client, even when another row has its own client.
+    url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
+    query = parse_qs(urlparse(url).query)
+    assert query["client_id"] == [oauth.PUBLISHED_CLIENT_ID]
+    state = json.loads(base64.b64decode(query["state"][0]))["csrf"]
     async with _http() as http:
-        again = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+        again = await http.get("/api/google/oauth/callback", params={
+            "access_token": ACCESS, "refresh_token": REFRESH, "scope": " ".join(oauth.PUBLISHED_SCOPES), "state": state,
+        })
     assert again.status_code == 400 and f"{EMAIL} is already connected." in again.text
     assert [account["id"] for account in _accounts()] == [account_id]
 
@@ -400,7 +411,7 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
     with pytest.raises(oauth.GoogleSignInError) as refused:
         await _account_reply(account_id, launch_agent)
     assert str(refused.value) == refusal
-    _, state = await _start_for_thread(google, launch_agent, None)
+    _, state = await _start_for_thread(google, launch_agent, client_file)
     async with _http() as http:
         duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert duplicate.status_code == 400 and (
@@ -420,13 +431,13 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
         await _account_reply(account_id, outside_agent)
     assert str(refused.value) == refusal
 
-    _, state = await _start_for_thread(google, outside_agent, None)
+    _, state = await _start_for_thread(google, outside_agent, client_file)
     async with _http() as http:
         duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert duplicate.status_code == 400 and oauth.ALREADY_CONNECTED.format(address=EMAIL, reach="") in duplicate.text
 
     # CORSIA is the workspace case even if a test fixture later changes its row.
-    _, state = await _start(google, conductor, None)
+    _, state = await _start(google, conductor, client_file)
     async with _http() as http:
         duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert duplicate.status_code == 400 and all_projects_reply in duplicate.text
@@ -449,8 +460,12 @@ async def test_person_readding_connected_account_gets_already_connected_reply(go
         started = await http.post("/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
         assert started.status_code == 200
         query = parse_qs(urlparse(started.json()["url"]).query)
-        google.challenge = query["code_challenge"][0]
-        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": query["state"][0]})
+        assert query["client_id"] == [oauth.PUBLISHED_CLIENT_ID]
+        state = json.loads(base64.b64decode(query["state"][0]))["csrf"]
+        duplicate = await http.get("/api/google/oauth/callback", params={
+            "state": state, "access_token": ACCESS, "refresh_token": REFRESH,
+            "scope": " ".join(oauth.PUBLISHED_SCOPES),
+        })
 
     assert duplicate.status_code == 400
     assert f"{EMAIL} is already connected." in duplicate.text
@@ -785,7 +800,7 @@ def _begin_for_test() -> str | None:
 async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
     errors = (
         oauth.GoogleSignInError(oauth.DENIED, browser_message=oauth.BROWSER_DENIED),
-        oauth.GoogleSignInError(oauth.MISSING_SCOPES, browser_message=oauth.BROWSER_MISSING_SCOPES),
+        oauth.GoogleSignInError(oauth.missing_scopes(oauth.OPTIONAL_SCOPES), browser_message=oauth.BROWSER_MISSING_SCOPES),
         oauth.GoogleSignInError(
             oauth.TOO_MANY, browser_message="Too many Google sign-ins are waiting. Go back to CORSIA and try again later.",
         ),
@@ -836,3 +851,124 @@ async def test_routes_need_a_signed_in_caller(google):
         assert (await http.get("/api/google/status")).status_code == 401
         ok = await http.get("/api/google/status", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
     assert ok.status_code == 200 and ok.json() == {"accounts": []}
+
+
+async def test_published_callback_and_refresh(google, conductor, monkeypatch, caplog):
+    url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
+    query = parse_qs(urlparse(url).query)
+    state = json.loads(base64.b64decode(query["state"][0]))
+    assert state == {"uri": oauth.redirect_uri(), "manual": False, "csrf": state["csrf"]}
+    assert query["scope"][0].split() == list(oauth.PUBLISHED_SCOPES)
+    params = {"state": state["csrf"], "access_token": ACCESS, "refresh_token": REFRESH,
+              "scope": " ".join(oauth.PUBLISHED_SCOPES)}
+    async with _http() as http:
+        wrong = await http.get("/api/google/oauth/callback", params={**params, "state": "wrong"})
+        assert wrong.status_code == 400
+        response = await http.get("/api/google/oauth/callback", params=params)
+    assert response.status_code == 200
+    assert ACCESS not in response.text and REFRESH not in response.text
+    assert ACCESS not in caplog.text and REFRESH not in caplog.text
+    assert _credentials() == {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID, "refresh_token": REFRESH}
+    assert _only_account()["provider_subject"] == "published-subject"
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"access_token": ACCESS})
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _REAL_CLIENT(*args, **kwargs)
+
+    monkeypatch.setattr(google_client.httpx, "AsyncClient", factory)
+    account_id = str(_only_account()["id"])
+    assert await google_client.access_token(account_id) == ACCESS
+    assert str(calls[0].url) == google_client.PUBLISHED_REFRESH_URL
+    assert json.loads(calls[0].content) == {"refresh_token": REFRESH}
+
+    def refused(request):
+        return httpx.Response(400, json={"echo": REFRESH})
+
+    monkeypatch.setattr(google_client.httpx, "AsyncClient", lambda *a, **kw: _REAL_CLIENT(transport=httpx.MockTransport(refused)))
+    with pytest.raises(google_client.GoogleSignInRejected) as error:
+        await google_client.access_token(account_id)
+    assert str(error.value) == google_client.PUBLISHED_SIGN_IN_RECOVERY
+    assert _only_account()["state"] == "needs_sign_in"
+    assert REFRESH not in str(error.value)
+
+    from connections.account_actions import sign_out_account
+
+    result = await sign_out_account(account_id, actor=("person", "person"))
+    assert result["state"] == "signed_out"
+    assert _credentials() is None
+    from connections.connected_accounts import account_client
+    db = get_db()
+    try:
+        assert account_client(account_id, db=db) == {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID}
+    finally:
+        db.close()
+    url, _ = await oauth.start_sign_in(actor=("person", "person"), account_id=account_id)
+    assert parse_qs(urlparse(url).query)["client_id"] == [oauth.PUBLISHED_CLIENT_ID]
+
+
+@pytest.mark.parametrize("missing", ["refresh_token", "scope"])
+async def test_published_callback_rejects_missing_required_grant(google, conductor, missing):
+    url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
+    query = parse_qs(urlparse(url).query)
+    state = json.loads(base64.b64decode(query["state"][0]))["csrf"]
+    params = {"state": state, "access_token": ACCESS, "refresh_token": REFRESH,
+              "scope": " ".join(oauth.PUBLISHED_REQUIRED_SCOPES)}
+    if missing == "scope":
+        params["scope"] = oauth.PUBLISHED_REQUIRED_SCOPES[0]
+    else:
+        del params[missing]
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params=params)
+    assert response.status_code == 400
+    assert _only_account() is None
+    assert ACCESS not in response.text and REFRESH not in response.text
+
+
+async def test_published_callback_refuses_missing_subject(google, conductor):
+    google.token_subject = None
+    url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
+    query = parse_qs(urlparse(url).query)
+    state = json.loads(base64.b64decode(query["state"][0]))["csrf"]
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={
+            "state": state, "access_token": ACCESS, "refresh_token": REFRESH,
+            "scope": " ".join(oauth.PUBLISHED_REQUIRED_SCOPES),
+        })
+    assert response.status_code == 400
+    assert "Google did not provide an account identity" in response.text
+    assert ACCESS not in response.text and REFRESH not in response.text
+    assert _only_account() is None
+
+
+async def test_callback_unexpected_error_does_not_log_or_render_credentials(monkeypatch, caplog):
+    async def fail(*args, **kwargs):
+        raise RuntimeError(REFRESH)
+
+    monkeypatch.setattr(oauth, "complete_sign_in", fail)
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={
+            "state": "nonce", "access_token": ACCESS, "refresh_token": REFRESH,
+        })
+    assert response.status_code == 500
+    assert REFRESH not in response.text and ACCESS not in response.text
+    assert REFRESH not in caplog.text and ACCESS not in caplog.text
+    assert "RuntimeError" in caplog.text and "test_google_sign_in.py" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_google_bundle_requires_secret_except_published():
+    from connections.google.provider import GOOGLE
+
+    own = {"client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
+    assert GOOGLE.valid_bundle(own)
+    assert not GOOGLE.valid_bundle({"client_id": CLIENT_ID, "refresh_token": REFRESH})
+    published = {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID, "refresh_token": REFRESH}
+    assert GOOGLE.valid_bundle(published)
+    assert not GOOGLE.valid_bundle(published, GOOGLE.client_fields)
+    assert not GOOGLE.valid_bundle({"client": "other", "client_id": CLIENT_ID, "refresh_token": REFRESH})
+    assert not GOOGLE.valid_bundle(None)

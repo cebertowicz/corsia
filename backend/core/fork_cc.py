@@ -66,7 +66,7 @@ def _identity_from_live(live: Any):
         return None
     definitions = getattr(live, "tool_definitions", None)
     return (provider_id, invocation, claude_dir, transcript, getattr(session, 'vendor_account_receipt', None),
-            tuple(definitions) if definitions is not None else None)
+            tuple(definitions) if definitions is not None else None, invocation.confinement)
 
 
 async def _live_identity(thread_id: str):
@@ -89,16 +89,19 @@ def _registered_identity(thread_id: str):
     try:
         provider_id = _artifact_cc_session_id(thread_id, db)
         invocation = _artifact_cc_session_invocation(thread_id, db)
+        if not provider_id or not isinstance(invocation, ClaudeInvocation):
+            return None
+        from subagents.cc_confinement import launch_confinement
+
+        confinement = launch_confinement(thread_id, None, db)
         receipt = thread_login(thread_id, "claude-code", db=db)
         claude_dir = thread_claude_dir(thread_id, db=db)
     finally:
         db.close()
-    if not provider_id or not isinstance(invocation, ClaudeInvocation):
-        return None
     transcript = _transcript_path(provider_id, claude_dir)
     if transcript is None:
         return None
-    return provider_id, invocation, claude_dir, transcript, receipt, None
+    return provider_id, invocation, claude_dir, transcript, receipt, None, confinement.mode
 
 
 def _read_prefix(path: Path, prefix_bytes: int | None) -> bytes:
@@ -139,7 +142,7 @@ async def capture_warm_source(
         return warm_capture_refused(thread_id, "claude-code", "prefix_past_transcript")
     if not prefix:
         return warm_capture_refused(thread_id, "claude-code", "empty_prefix")
-    if invocation.confinement != CONFINEMENT_NONE:
+    if identity[6] != CONFINEMENT_NONE:
         # A confined launch has no CORSIA tools a fork could use, and resuming
         # its session must never widen what it may read.
         return warm_capture_refused(thread_id, "claude-code", "confined_launch")
@@ -158,7 +161,7 @@ async def capture_warm_source(
         invocation,
         claude_dir,
         restored_seed_text,
-        *(tuple(identity[4:]) + (None, None))[:2],
+        *identity[4:6],
     )
 
 

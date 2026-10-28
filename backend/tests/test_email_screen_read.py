@@ -470,7 +470,7 @@ async def test_not_connected_says_to_call_google_connect(isolated_db, tmp_path, 
     out = await EmailSearchTool().execute(_thread_id=thread_id, query="x")
     assert out == (
         "Error: No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
-        "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+        "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, call google_connect; "
         "any other host follows mail-host-setup."
     )
 

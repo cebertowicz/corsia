@@ -148,6 +148,18 @@ def pack_members() -> dict[str, tuple[str, ...]]:
     return {pack: tuple(names) for pack, names in members.items()}
 
 
+def pack_index_lines(pack: str, names: tuple[str, ...]) -> list[str]:
+    """One pack's index lines: its header, named tools, then a count of account-bound ones."""
+    if not names:
+        return []
+    named = [name for name in names if not TOOL_CATALOG[name].account_bound]
+    lines = [f"[{pack}] {TOOL_PACKS[pack]}"]
+    lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in named)
+    if bound := len(names) - len(named):
+        lines.append(f'- {bound} more for a connected account: tools_load(pack="{pack}")')
+    return lines
+
+
 def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
     """Return the one provider-facing tool list for every harness.
 

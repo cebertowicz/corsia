@@ -8,12 +8,16 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
+- Every agent's always-on tool list now counts the mail, calendar and file actions in one line per pack instead of naming each one, so agents that don't handle mail stop paying for them.
+- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
+- Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
 - The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.
+- When an added Claude Code account loses its sign-in, CORSIA signs out that account so you can sign it in again, and no longer marks the provider's other accounts as signed out.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.

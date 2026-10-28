@@ -18,14 +18,17 @@ def test_the_skill_is_named_and_never_handles_a_password() -> None:
     front = SKILL.split("---")[1]
     assert "name: mail-host-setup" in front and "the host is unknown or not Gmail or Microsoft" in front
     google_front = (SKILLS / "google-setup/SKILL.md").read_text(encoding="utf-8").split("---")[1]
-    assert "description: Use when the person wants Gmail or Google Calendar connected" in google_front
+    assert "description: Use only when the person says Google blocked the sign-in from `google_connect`" in google_front
+    assert "they ask to connect using their own Google Cloud project" in google_front
     assert "Never ask for, type, read, print or paste a password." in SKILL
     assert "Never open the host's app-password page with `browser_open`." in SKILL
     assert "never repeat it; tell them to delete that app password" in SKILL
 
 
 def test_the_skill_hands_gmail_and_microsoft_to_their_own_skills_and_posts_the_offer_verbatim() -> None:
-    assert "follow `microsoft-setup`" in SKILL and "follow `google-setup` from its step 2" in SKILL
+    assert "follow `microsoft-setup`" in SKILL and "then `google_connect` and post its link" in SKILL
+    assert "one Allow, no Google Cloud project" in SKILL
+    assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in SKILL
     assert "I can look after your <host> mail and calendar. <host> needs an app password for that" in SKILL
     assert "<host> needs an app password for that, made on <host>'s site." in SKILL and "just for CORSIA" not in SKILL
     assert "Ask me any time to connect your email." in SKILL

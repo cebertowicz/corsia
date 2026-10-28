@@ -187,7 +187,7 @@ async def test_claude_code_idle_fold_is_admitted_warm_by_claude_message_id(
     )
     monkeypatch.setattr(
         "core.fork_cc._registered_identity",
-        lambda tid: ("live-session", invocation, None, str(transcript))
+        lambda tid: ("live-session", invocation, None, str(transcript), None, None, invocation.confinement)
         if tid == thread_id else None,
     )
     launched, events = _patch_idle_environment(
@@ -231,7 +231,7 @@ async def test_claude_message_split_across_rows_folds_after_its_whole_group(
     )
     monkeypatch.setattr(
         "core.fork_cc._registered_identity",
-        lambda tid: ("live-session", invocation, None, str(transcript))
+        lambda tid: ("live-session", invocation, None, str(transcript), None, None, invocation.confinement)
         if tid == thread_id else None,
     )
     launched, events = _patch_idle_environment(
