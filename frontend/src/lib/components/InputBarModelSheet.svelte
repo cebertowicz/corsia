@@ -5,7 +5,7 @@
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
 	import { accountSegments, canonicalName, groupModels, groupStatusSegments, rowNote, usageBreakdown, type ModelGroup } from '$lib/stores/modelGroups';
-	import { loadPickerPolicy, pickerAccounts, policyFor, vendorRows, type PickerAccount } from '$lib/stores/accountPicker';
+	import { loadPickerPolicy, markDraftAccount, pickerAccounts, policyFor, vendorRows, type PickerAccount } from '$lib/stores/accountPicker';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import AccountPickerRows from './AccountPickerRows.svelte';
 	import CurrentCheck from './CurrentCheck.svelte';
@@ -165,7 +165,7 @@
 				{#each groups as group (group.key)}
 					{@const vendor = vendorRows(group.key, sel.models, $vendorAccounts)}
 					{@const policy = $policyFor(activeThread?.project_id, group.key)}
-					{@const accountRows = pickerAccounts(group.key, sel.models, $vendorAccounts, policy, sel.modelId)}
+					{@const accountRows = markDraftAccount(pickerAccounts(group.key, sel.models, $vendorAccounts, policy, sel.modelId), sel.accountChoices[group.key])}
 					{@const accountBacked = group.rows.some((model) => model.runs_on !== undefined)}
 					{@const open = isOpen(group, accountRows.length > 0)}
 					{@const usable = group.state === 'ready'}

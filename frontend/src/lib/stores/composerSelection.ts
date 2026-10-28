@@ -1,9 +1,13 @@
-import { derived, type Readable } from 'svelte/store';
+import { derived, writable, type Readable } from 'svelte/store';
 import { activeModelId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { threadModelFor, threadModelVersion, type Model } from './models';
 import { unknownStatus } from './modelsLoad';
 import { subagentMeta, subagentThreadRows } from './subagents';
 import { activeThreadId, reasoningEffort, threads, type Thread } from './threads';
+
+/** Account choices belong to the open draft only, keyed by vendor. */
+export const draftAccountChoices = writable<Record<string, string>>({});
+activeThreadId.subscribe((id) => { if (id !== null) draftAccountChoices.set({}); });
 
 export type ComposerThreadRow = Partial<Pick<
 	Thread,
@@ -21,6 +25,7 @@ export interface ComposerSelection {
 	thread: ComposerThreadRow | undefined;
 	modelId: string | null;
 	effort: string | null;
+	accountChoices: Record<string, string>;
 	/** The catalog read on this thread's account; a thread not yet read has every status unknown. */
 	models: Model[];
 }
@@ -31,19 +36,19 @@ export interface ComposerSelection {
  * An omitted id means the open thread.
  */
 export const composerSelectionFor: Readable<(threadId?: string | null) => ComposerSelection> = derived(
-	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows, threadModelVersion, models, threadCatalogs, workspaceModels],
-	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows, , $models, $catalogs, $workspaceModels]) =>
+	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows, threadModelVersion, models, threadCatalogs, workspaceModels, draftAccountChoices],
+	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows, , $models, $catalogs, $workspaceModels, $draftAccountChoices]) =>
 		(threadId?: string | null): ComposerSelection => {
 			const id = threadId ?? $activeThreadId;
 			const worker = $subagentMeta.get(id ?? '');
 			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
 				?? (worker ? { ...$workerRows.get(worker.childThreadId), model: threadModelFor(worker.childThreadId) } : undefined);
 			if (id === null || id === $activeThreadId) {
-				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort, models: $models };
+				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort, models: $models, accountChoices: id === null ? $draftAccountChoices : {} };
 			}
 			return {
 				threadId: id, isOpen: false, thread,
-				modelId: thread?.model ?? null, effort: thread?.reasoning_effort ?? null,
+				modelId: thread?.model ?? null, effort: thread?.reasoning_effort ?? null, accountChoices: {},
 				models: $catalogs.get(id) ?? unknownStatus($workspaceModels),
 			};
 		},
