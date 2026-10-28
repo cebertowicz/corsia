@@ -56,6 +56,7 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
     thread = {"project_id": "blueprint-project"}
     search = skill_library._execute("search", owner, thread, "project blueprint", None, False)
     assert {result["name"] for result in search["results"]} == {"demo", "helper"}
+    assert next(result for result in search["results"] if result["name"] == "demo")["state"] == "not_fetched"
     assert skill_library._execute("search", owner, thread, "helper", None, False)["results"][0]["name"] == "helper"
     assert skill_library._execute("install", owner, thread, None, "helper", False)["outcome"] == "installed"
     assert skill_library._execute("fetch_pack", owner, thread, None, "connector", False)["error"] == "not_in_library"
@@ -63,6 +64,8 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
     assert denied["error"] == "not_conductor"
     result = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
     assert result["outcome"] == "fetched"
+    assert skill_library._execute("search", owner, thread, "demo", None, False)["results"][0]["state"] == "fetched"
+    assert skill_library._execute("search", worker, thread, "demo", None, False)["results"][0]["state"] == "not_fetched"
     folder = project_root / ".threads" / owner / "packs" / "demo" / "1.0.0"
     assert Path(result["path"]) == folder
     assert {path.relative_to(folder).as_posix(): path.read_bytes() for path in folder.rglob("*") if path.is_file()} == files
@@ -78,6 +81,7 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
         db.close()
 
     catalog["skills"] = [{**row, "version": "2.0.0", "digest": "a" * 64}, skill, connector]
+    assert skill_library._execute("search", owner, thread, "demo", None, False)["results"][0]["state"] == "update_available"
     assert producer.produce_once() == 1
     db = get_db()
     try:

@@ -88,11 +88,14 @@ def test_fetch_and_retry_never_overwrite(monkeypatch, tmp_path):
     folder = tmp_path / "thread" / "packs" / "demo" / "1.0.0"
     assert (folder / "manifest.yaml").read_bytes() == files["manifest.yaml"]
     assert registrations[0]["parent_thread_id"] == "owner"
-    assert fetch_pack(item, "owner", "project", tmp_path, object())["error"] == "already_exists"
+    retry = fetch_pack(item, "owner", "project", tmp_path, object())
+    assert retry["outcome"] == "already_fetched" and retry["path"] == str(folder)
     assert len(registrations) == 1
-    (folder / "manifest.yaml").chmod(0o644)
     (folder / "manifest.yaml").write_text("changed")
-    assert fetch_pack(item, "owner", "project", tmp_path, object())["error"] == "already_exists"
+    mismatch = fetch_pack(item, "owner", "project", tmp_path, object())
+    assert mismatch["error"] == "copy_differs" and mismatch["path"] == str(folder)
+    assert "does not match the published bytes" in mismatch["message"]
+    assert "Remove that folder" in mismatch["message"]
     assert (folder / "manifest.yaml").read_text() == "changed"
 
 

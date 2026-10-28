@@ -29,7 +29,7 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
     from library.items import LibraryIntegrityError, LibraryItemError, LibraryItemUnavailableError, fetch_bundle
     from library.pack_publish import publish_pack
     from library.pack_validation import validate_pack
-    from registry.models import SURFACING_QUIET, update_surfacing
+    from registry.models import update_surfacing
     from registry.registration_writer import register_artifact
 
     if not can_fetch(thread_id, project_id, db):
@@ -53,8 +53,10 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
         dest = publish_pack(root, item["name"], item["version"], files)
     except FileExistsError:
         dest = root / "packs" / item["name"] / item["version"]
-        if not _matches_published(dest, files) or _registered(thread_id, item["name"], item["version"], dest, db):
-            return {"error": "already_exists", "message": "This pack version already exists and was not overwritten."}
+        if not _matches_published(dest, files):
+            return {"error": "copy_differs", "path": str(dest), "message": f"The folder at {dest} does not match the published bytes. Remove that folder to allow a fresh fetch."}
+        if _registered(thread_id, item["name"], item["version"], dest, db):
+            return {"outcome": "already_fetched", "name": item["name"], "version": item["version"], "path": str(dest)}
     except (OSError, ValueError, AtomicRenameUnavailableError) as error:
         return {"error": "publication_failed", "message": str(error)}
     try:
@@ -62,7 +64,37 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
         update_surfacing(artifact["id"], surfacing=SURFACING_QUIET, parent_thread_id=thread_id, actor_thread_id=thread_id, db=db)
     except (OSError, ValueError, sqlite3.Error) as error:
         return {"error": "registration_failed", "message": f"The verified pack is present at {dest}, but registration failed: {error}. Do not overwrite it; registration needs repair."}
-    return {"outcome": "fetched", "name": item["name"], "version": item["version"], "path": str(dest), "next": "Read the pack with conductor-bootstrap and propose the parts to adopt."}
+    return {"outcome": "fetched", "name": item["name"], "version": item["version"], "path": str(dest), "next": "Read manifest.yaml at the returned path and propose to the person which parts to adopt, never all of it."}
+
+
+def fetched_pack_versions(thread_id: str, db) -> dict[str, set[str]]:
+    rows = db.execute(INSTALLED_ROWS_SQL + " AND registrations.parent_thread_id=?",
+                      (LIBRARY_INTEGRATION, INSTALLED_PACK_TYPE, thread_id)).fetchall()
+    versions: dict[str, set[str]] = {}
+    for row in rows:
+        external_id = row["external_id"]
+        if not isinstance(external_id, str):
+            continue
+        parts = external_id.rsplit("/", 2)
+        if len(parts) == 3 and parts[0] == thread_id:
+            versions.setdefault(parts[1], set()).add(parts[2])
+    return versions
+
+
+def pack_state(item: dict[str, Any], versions: dict[str, set[str]]) -> str:
+    import semver
+
+    held = versions.get(item["name"], set())
+    if item["version"] in held:
+        return "fetched"
+    current = semver.Version.parse(item["version"])
+    for version in held:
+        try:
+            if semver.Version.parse(version) < current:
+                return "update_available"
+        except ValueError:
+            continue
+    return "not_fetched"
 
 
 def _registered(owner: str, name: str, version: str, folder: Path, db) -> bool:
@@ -78,18 +110,18 @@ def _matches_published(folder: Path, expected: dict[str, bytes]) -> bool:
     """Only repair registration when every existing entry matches verified bytes."""
     try:
         mode = folder.lstat().st_mode
-        if not stat.S_ISDIR(mode) or mode & 0o222:
+        if not stat.S_ISDIR(mode):
             return False
         found: dict[str, bytes] = {}
         for root, directories, names in os.walk(folder, followlinks=False):
             for name in directories:
                 mode = (Path(root) / name).lstat().st_mode
-                if not stat.S_ISDIR(mode) or mode & 0o222:
+                if not stat.S_ISDIR(mode):
                     return False
             for name in names:
                 path = Path(root) / name
                 info = path.lstat()
-                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o222 or info.st_nlink != 1:
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     return False
                 found[path.relative_to(folder).as_posix()] = path.read_bytes()
         return found == expected

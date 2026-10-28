@@ -147,11 +147,9 @@ def _validate_item(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise LibraryIndexValidationError("library index item must be an object")
     kind = row.get("kind", "skill")
-    if not isinstance(kind, str) or kind not in {"skill", "pack"}:
+    if not isinstance(kind, str):
         raise LibraryIndexValidationError("library index item kind must be skill or pack")
     if kind == "pack":
-        if row.get("pack_kind") != "blueprint":
-            raise LibraryIndexValidationError("library pack kind must be blueprint")
         if row.get("type") != "corsia-blueprint":
             raise LibraryIndexValidationError("library blueprint type must be corsia-blueprint")
         if not isinstance(row.get("digest"), str) or not _SHA256.fullmatch(row["digest"]):

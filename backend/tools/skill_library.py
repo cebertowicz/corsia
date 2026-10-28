@@ -91,7 +91,7 @@ def _execute(
                 if action == "search":
                     result = (_error("query_required", "search requires query; pass a few words describing the job")
                               if not isinstance(query, str) or not query.strip()
-                              else _search(query, owner_id, project_id, db))
+                              else _search(query, owner_id, project_id, db, thread_id=thread_id))
                 elif not isinstance(name, str) or not name.strip():
                     result = _error("name_required", f"{action} requires name from a search result or your skills index")
                 elif action == "fetch_pack":
@@ -149,18 +149,21 @@ def _source(item: dict[str, Any]) -> str:
     return source_ref(item)
 
 
-def _search(query: str, owner_id: str, project_id: str | None, db) -> dict[str, Any]:
+def _search(query: str, owner_id: str, project_id: str | None, db, *, thread_id: str | None = None) -> dict[str, Any]:
     from library.items import search_items, source_ref
+    from library.pack_fetch import fetched_pack_versions, pack_state
 
     index = _index()
     origins = _installed_library_origins(owner_id, db)
+    items = search_items(index.items, query)
+    pack_versions = fetched_pack_versions(thread_id or owner_id, db) if any(item.get("kind") == "pack" for item in items) else {}
     results = []
-    for item in search_items(index.items, query):
+    for item in items:
         kind = item.get("kind", "skill")
         result = {
             "name": item["name"], "description": item["description"], "version": item["version"],
             "license": item.get("license"), "source": source_ref(item), "files": len(item["files"]),
-            "state": _state(item, origins) if kind == "skill" else "available",
+            "state": _state(item, origins) if kind == "skill" else pack_state(item, pack_versions),
         }
         if kind == "pack":
             result["kind"] = "pack"

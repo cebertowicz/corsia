@@ -181,7 +181,7 @@ def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db
 
     emitted = []
     monkeypatch.setattr(skill_library, "_persistent_owner", lambda *_args: "owner")
-    monkeypatch.setattr(skill_library, "_search", lambda *_args: {"results": []})
+    monkeypatch.setattr(skill_library, "_search", lambda *_args, **_kwargs: {"results": []})
     monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: emitted.append((args, kwargs)))
 
     assert skill_library._execute("search", "thread", {}, "pdf", None, False) == {"results": []}

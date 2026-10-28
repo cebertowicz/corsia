@@ -5,7 +5,7 @@ DESCRIPTION = (
     "Search takes query; install, update and remove take a skill name. "
     "Only the actual project conductor or workspace CORSIA agent may use fetch_pack with a blueprint name; "
     "it fetches the current index version into that agent's thread. If there is no conductor, continue without the pack. "
-    "After fetching, use conductor-bootstrap to consider which parts to adopt. "
+    "After fetching, read manifest.yaml at the returned path and propose to the person which parts to adopt, never all of it. "
     "Skills are installed in your persistent owner's thread; updates and withdrawals are reported, and copies are not changed without your action."
 )
 
