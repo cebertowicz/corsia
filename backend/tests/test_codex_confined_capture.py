@@ -1,8 +1,8 @@
 """Capture the full model tools array on the installed admitted Codex version.
 
-CI captures the newest version. The digest test requires every listed version
-be recaptured when the launch surface changes. No subscription, API key,
-external service, or production state is used.
+CI captures the newest version. The digest test detects launch or tool surface
+changes; recapture every listed version before updating the digest. No subscription,
+API key, external service, or production state is used.
 """
 from __future__ import annotations
 

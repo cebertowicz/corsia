@@ -14,13 +14,12 @@ from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
 from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
-# test_captured_versions_match_launch_surface requires a capture for each digest.
-CAPTURED_CODEX_VERSIONS = {
-    "codex-cli 0.162.1": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
-    "codex-cli 0.163.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
-    "codex-cli 0.164.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
-    "codex-cli 0.165.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
-}
+# The digest test detects launch and tool surface changes since these captures.
+# On a change, recapture every listed version before updating the digest.
+CAPTURED_CODEX_VERSIONS = frozenset({
+    "codex-cli 0.162.1", "codex-cli 0.163.0", "codex-cli 0.164.0", "codex-cli 0.165.0",
+})
+CAPTURED_SURFACE_DIGEST = "b195c8acd057f11488e061ec38458593100d1dc52a3cb428101eb97866785906"
 # Each listed version passed the full-array capture on start and resume.
 # CONFIG keys appear in core/config.schema.json for every listed version;
 # tools/spec_plan.rs and the capture cover tool planning and observed requests.
