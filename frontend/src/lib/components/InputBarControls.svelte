@@ -17,7 +17,6 @@
 		measuredFor,
 		measuredHydratedThreads,
 		previewIdentity,
-		samePreviewModel,
 	} from '$lib/stores/contextUsageByThread';
 	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
 	import { loadComposerModels } from '$lib/stores/modelsLoad';
@@ -184,23 +183,16 @@
 	// The preview read for this thread, model and measured turn, if any; a
 	// newer measured turn or another model leaves it unowned and unshown.
 	const ownedPreview = $derived(
-		previewIds && boundPreview?.owner === previewIds.owner && (!boundPreview.retained || boundPreview.loading)
-			? boundPreview : undefined,
+		previewIds && boundPreview?.owner === previewIds.owner ? boundPreview : undefined,
 	);
 	// One reading for the donut and the sheet headline (#1952): the owned
 	// preview, else the last measured usage, so opening never waits on the
 	// fetch (#1953) and closing the sheet changes nothing.
 	const sheetUsage = $derived(
-		previewIds
-			? (boundPreview?.retained && samePreviewModel(boundPreview.owner, previewIds.owner)
-				? (boundPreview.loading && sheetView === 'context' ? boundPreview.usage ?? measuredReading : measuredReading)
-				: contextReading(ownedPreview, previewIds.owner, measuredReading))
-			: null,
+		previewIds ? contextReading(ownedPreview, previewIds.owner, measuredReading) : null,
 	);
 	const contextChipSummary = $derived(chipSummaryFor(sheetUsage));
-	const contextPreviewLoading = $derived(
-		!!(boundPreview?.loading && previewIds && samePreviewModel(boundPreview.owner, previewIds.owner)),
-	);
+	const contextPreviewLoading = $derived(ownedPreview?.loading ?? false);
 	const contextPreviewError = $derived(ownedPreview?.error ?? '');
 	let sheetWasOpen = false;
 	$effect(() => {
@@ -227,6 +219,7 @@
 			modelId: previewModelId,
 			...ids,
 			retryError: opening,
+			carry: sheetOpen && !opening,
 		});
 	});
 	function openSheet(view: Exclude<SheetView, null>) {

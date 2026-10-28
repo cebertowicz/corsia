@@ -279,19 +279,42 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 		await vi.waitFor(() => expect(previewCalls()).toHaveLength(3));
 	});
 
-	it('shows the receipt in the donut when the sheet closes during refresh', async () => {
+	it('keeps the carried reading when the sheet closes during refresh until the read lands', async () => {
 		const composer = mountComposer();
 		setContextUsage('thread-a', measured('thread-a', 420) as never);
 		composer.props.sheetView = 'context';
 		flushSync();
 		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
-		fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+		let finish!: (response: unknown) => void;
+		fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
 		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
 		flushSync();
 		expect(composer.donut()).toBe('~30%');
 		composer.props.sheetView = null;
 		flushSync();
-		expect(composer.donut()).toBe('51%');
+		expect(composer.donut()).toBe('~30%');
+		finish({ ok: true, json: async () => ({ preview: {
+			...measured('thread-a', 640), token_source: 'estimated', token_usage_available: false, preview: true,
+		} }) });
+		await vi.waitFor(() => expect(composer.donut()).toBe('~64%'));
+	});
+
+	it('shows the newest receipt on reopening after a closed turn', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+		composer.props.sheetView = null;
+		flushSync();
+		recordMeasuredUsage('thread-a', measured('thread-a', 800) as never);
+		flushSync();
+		fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+		composer.props.sheetView = 'context';
+		flushSync();
+		expect(composer.donut()).toBe('80%');
+		expect(composer.headline()).toContain('80%');
+		expect(previewCalls()).toHaveLength(2);
 	});
 
 	it('returns to the receipt and shows the error when refresh fails', async () => {
@@ -362,6 +385,21 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 });
 
 describe('a reading kept past an unmeasurable turn', () => {
+	it('refreshes an old preview after an unmeasured turn while closed', async () => {
+		const composer = mountComposer();
+		beginThreadEntry('thread-a');
+		adoptThreadSnapshot('thread-a', [receiptRow('thread-a', 'm1', measured('thread-a', 420))] as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+		composer.props.sheetView = null;
+		flushSync();
+		previewTotal = 640;
+		recordMeasuredUsage('thread-a', { ...measured('thread-a', 0), total_used: null, token_usage_available: false } as never);
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~64%'));
+	});
+
 	it('stays on screen, then a fresh estimate replaces it', async () => {
 		const composer = mountComposer();
 		beginThreadEntry('thread-a');

@@ -63,7 +63,7 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 		const installed = checkpoint('c1', 'installed');
 		const { owner, key } = previewIdentity('viewed', null, measured, installed);
 		contextPreviewByThread.set(new Map([['viewed', {
-			owner, key, usage: null, loading: false, error: '',
+			owner, key, modelId: null, generation: 0, sourceOwner: null, usage: null, loading: false, error: '',
 		}]]));
 
 		expect(shownReading('viewed', installed)).toBe(measured);
@@ -136,7 +136,8 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 		const installed = checkpoint('c1', 'installed');
 		const { owner, key } = previewIdentity('viewed', null, measured, null);
 		contextPreviewByThread.set(new Map([['viewed', {
-			owner, key, usage: { ...preview, total_used: 90_000 } as never, loading: false, error: '',
+			owner, key, modelId: null, generation: 0, sourceOwner: owner,
+			usage: { ...preview, total_used: 90_000 } as never, loading: false, error: '',
 		}]]));
 		mockPreview();
 		await refreshUsageAfterInstall('viewed', 'tok', [installed]);

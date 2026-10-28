@@ -212,8 +212,7 @@ describe('context sheet preview requests during a multi-step turn', () => {
 		mountControls();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(1));
 
-		// `stale` is not part of the preview identity. This used to leave the
-		// discarded request's loading entry behind forever.
+		// The unmeasured frame invalidates the in-flight read; it must be replaced.
 		recordMeasuredUsage('session-ctx', {
 			...measuredNoSnapshot,
 			token_usage_available: false,
