@@ -26,7 +26,7 @@ async def clipboard_selection(endpoint: str, request: str) -> str:
         result = await cdp.call("Runtime.evaluate", expression=f"window.__corsiaCopyRequest = {json.dumps(request)}; {_SELECTION}", returnByValue=True)
     value = result.get("result", {}).get("value")
     if result.get("exceptionDetails") or not isinstance(value, str):
-        raise BrowserSessionError("This page's selection couldn't be copied")
+        raise BrowserSessionError("This page's selection couldn’t be copied")
     return value
 
 
@@ -59,9 +59,9 @@ async def clipboard_cut(endpoint: str, text: str, request: str) -> None:
  if (!sameRange || selected !== {expected} || !selected) return false;
  const editable = (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)
   ? !node.readOnly && !node.disabled && node.type !== 'password' : node.isContentEditable;
- return editable && document.execCommand('delete');
+ return !editable || document.execCommand('delete');
 }})()"""
     async with CdpClient(endpoint) as cdp:
         result = await cdp.call("Runtime.evaluate", expression=expression, returnByValue=True)
     if result.get("exceptionDetails") or result.get("result", {}).get("value") is not True:
-        raise BrowserSessionError("This page's selection couldn't be cut")
+        raise BrowserSessionError("This page's selection couldn’t be cut")

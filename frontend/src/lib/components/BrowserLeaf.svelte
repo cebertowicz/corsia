@@ -26,6 +26,7 @@
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
 	let status = $state('');
+	let paneError = $state('');
 	let ended = $state(false);
 	let announcement = $state('');
 	const agent = new BrowserAgentPresence();
@@ -122,7 +123,8 @@
 		} catch {
 			return;
 		}
-		if (clipboardReply(message, clipboard, error => { status = error; })) return;
+		if (message.type === 'pane_error' && message.error === null) { paneError = ''; return; }
+		if (clipboardReply(message, clipboard, error => { paneError = error; })) return;
 		if (message.type === 'browser_target_changed') {
 			lastAppearance = '';
 			sendAppearance();
@@ -151,6 +153,7 @@
 			else {
 				applyPageMetadata(message.url, message.title, message.domain);
 				status = '';
+				paneError = '';
 			}
 			return;
 		}
@@ -205,16 +208,13 @@
 		const { bounds, scale, left, top } = placement();
 		const backingWidth = Math.round(bounds.width * devicePixelRatio);
 		const backingHeight = Math.round(bounds.height * devicePixelRatio);
-		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
+		// Resizing clears the backing store, so leave it intact for ordinary frames.
 		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-			canvas.width = backingWidth;
-			canvas.height = backingHeight;
+			canvas.width = backingWidth; canvas.height = backingHeight;
 		}
 		const context = canvas.getContext('2d');
 		if (!context) return;
-		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
-		// store so no strip of the earlier picture survives beside the new one.
-		// Predicted scroll also moves the visible rectangle, so it needs the same clear.
+		// Page size or predicted scroll moves the visible rectangle; clear the previous picture.
 		context.setTransform(1, 0, 0, 1, 0, 0);
 		context.clearRect(0, 0, canvas.width, canvas.height);
 		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -285,7 +285,7 @@
 		if (clipboardKey(event, clipboardKeys, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
-		), error => { status = error ?? "CORSIA couldn't access the clipboard. Allow clipboard access in your browser and try again."; })) return;
+		), error => { paneError = error ?? 'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.'; }, () => { paneError = ''; })) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
@@ -377,7 +377,7 @@
 			</span>
 		{/if}
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		<BrowserPageStatus {status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
+		<BrowserPageStatus status={streaming ? paneError || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>

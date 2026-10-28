@@ -5,6 +5,7 @@ import json
 
 import pytest
 from fastapi import WebSocketDisconnect
+from websockets.exceptions import WebSocketException
 
 from tests.test_browser_pane import FakePane, screencast  # noqa: F401 - autouse fixture: no real page screencast
 from ws import browser_stream
@@ -78,7 +79,7 @@ async def test_refused_pane_fit_is_sent_to_the_connected_pane(monkeypatch):
     pane = Pane([json.dumps({'type': 'appearance', 'width': 700, 'height': 900, 'scale': 1, 'scheme': 'dark'})])
     with pytest.raises(WebSocketDisconnect):
         await asyncio.wait_for(browser_stream._relay(pane, 'fit-thread', 'user'), 1)
-    assert any(json.loads(item).get('error') == "CORSIA couldn't fit the page to the pane. Try resizing the pane again."
+    assert any(json.loads(item).get('error') == "CORSIA couldn’t fit the page to the pane. Try resizing the pane again."
                for item in pane.text)
 
 
@@ -129,9 +130,30 @@ async def test_clipboard_failure_suggests_a_next_step(monkeypatch):
                  {'type': 'clipboard_cut', 'id': 1, 'text': 'text'}, {'type': 'clipboard_paste', 'text': 'text'}):
         await browser_clipboard.handle('thread', 'pane', data, messages.append)
     assert [message['error'] for message in messages] == [
-        "CORSIA couldn't copy from the page. Select the text again and copy.",
-        "CORSIA couldn't cut the text. Select it again and cut.",
-        "CORSIA couldn't paste into the page. Try pasting again.",
+        "CORSIA couldn’t copy from the page. Select the text again and copy.",
+        "CORSIA couldn’t cut the text. Select it again and cut.",
+        "CORSIA couldn’t paste into the page. Try pasting again.",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [OSError('CDP disconnected'), WebSocketException('message too big')])
+async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkeypatch, failure):
+    from ws import browser_clipboard
+    calls = 0
+    async def selection(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise failure
+        return 'recovered'
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', selection)
+    messages = []
+    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
+    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 2}, messages.append)
+    assert messages == [
+        {'type': 'clipboard_selection', 'id': 1, 'error': 'CORSIA couldn’t copy from the page. Select the text again and copy.'},
+        {'type': 'clipboard_selection', 'id': 2, 'text': 'recovered'},
     ]
 
 

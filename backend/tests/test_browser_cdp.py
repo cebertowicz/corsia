@@ -228,6 +228,13 @@ async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
       eval(copy);
       window.__corsiaCopyRequest = 'another:1';
       if (eval(cut) !== false || deleted) process.exit(3);
+      node.selectionStart = 0; node.selectionEnd = 4; node.readOnly = true;
+      eval(copy);
+      if (eval(cut) !== true || deleted) process.exit(4);
+      node.readOnly = false;
+      document.execCommand = () => false;
+      eval(copy);
+      if (eval(cut) !== false) process.exit(5);
     """
     subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
 

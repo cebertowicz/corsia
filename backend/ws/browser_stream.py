@@ -29,7 +29,6 @@ log = logging.getLogger(__name__)
 PANE_RETRY_DELAYS = (0.5, 1.0, 2.0)
 PANE_RETRY_RESET_SECONDS = 30.0
 
-
 async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
     """Relay one owned thread's private stream without joining chat socket state."""
     await ws.accept()
@@ -220,9 +219,13 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                     # overtake the click that focuses its field.
                     await browser_pane.mouse_event(thread_id, data, connection_token)
                     browser_control.person_input(thread_id)
+                    if data.get("eventType") == "mousePressed":
+                        report({"type": "pane_error", "error": None})
                 elif kind == "input_keyboard":
                     await browser_pane.key_event(thread_id, data, connection_token)
                     browser_control.person_input(thread_id)
+                    if data.get("eventType") in {"keyDown", "rawKeyDown"}:
+                        report({"type": "pane_error", "error": None})
                 elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_cut"}:
                     await browser_clipboard.handle(thread_id, connection_token, data, report)
 
@@ -254,15 +257,11 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
 
 
 async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
-    """The pane's messages in the order sent, less each pointer move a later queued move replaces.
+    """Keep input ordered while replacing queued pointer moves that otherwise delay clicks.
 
-    Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
-    sends one per animation frame; delivered one at a time, moves pile up and a click behind them
-    lands seconds late. So the pane is read while earlier messages are delivered, and a move that
-    arrives right behind a queued move replaces it, so a stalled page never holds more than one
-    waiting move. Nothing else is dropped or reordered, and the pane's disconnect is raised only
-    after everything it sent first. A page that answers no input while the backlog reaches
-    `_MAX_QUEUED_INPUT` is stalled: the pane is closed, as an overflowing output path closes it.
+    Chrome answers moves after its next frame, slower than the pane sends them. Read ahead so
+    adjacent queued moves replace each other; nothing else is dropped or reordered. A stalled
+    page closes on input overflow; disconnect is raised only after its queued input.
     """
     received: collections.deque[dict | Exception] = collections.deque()
     arrived = asyncio.Event()
@@ -322,10 +321,8 @@ async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
         await pane.close(code=1013)
 
 
-# Page commands wait behind any running browser command, so one runner per thread runs them beside
-# every input loop. Only the newest appearance from any pane connection is applied, and at most one
-# navigation waits: a newer one replaces it. A running command is never cancelled: cancelling it
-# resets the shared session. A navigation carries its own pane's report, so no relay owns the runner.
+# One runner per thread serializes page commands; only the latest appearance and navigation wait.
+# Never cancel a running command: that resets the session. Navigation carries its pane's report.
 _latest_appearance: dict[str, tuple[str, browser_pane.PaneAppearance, Callable[[dict], None]]] = {}
 _pending_navigation: dict[str, tuple[str, dict, Callable[[dict], None]]] = {}
 _runners: dict[str, asyncio.Task] = {}
@@ -366,9 +363,10 @@ async def _run_pending(thread_id: str) -> None:
             connection_token, appearance, report = queued
             try:
                 await browser_pane.match_pane(thread_id, appearance)
+                report({"type": "pane_error", "error": None})
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
-                report({"type": "pane_error", "error": "CORSIA couldn't fit the page to the pane. Try resizing the pane again."})
+                report({"type": "pane_error", "error": "CORSIA couldn’t fit the page to the pane. Try resizing the pane again."})
         else:
             return
 

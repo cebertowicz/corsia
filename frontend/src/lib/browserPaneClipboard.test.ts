@@ -7,7 +7,15 @@ describe('browser pane clipboard', () => {
   const fail = vi.fn();
   clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
   clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard, fail);
-  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn't copy from the page. Select the text again and copy."));
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn’t copy from the page. Select the text again and copy."));
+ });
+ it('reports selection errors even when Chromium rejects the promised clipboard data', async () => {
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => {
+   try { await items[0]['text/plain']; } catch { throw new Error('clipboard write rejected'); }
+  }), readText: vi.fn() }, data => data);
+  const result = clipboard.copy(false);
+  clipboard.fail(1, 'Selection failed');
+  await expect(result).rejects.toThrow('Selection failed');
  });
  it('starts clipboard write during copy, then supplies the page selection', async () => {
   const send = vi.fn();
@@ -46,6 +54,10 @@ describe('browser pane clipboard', () => {
   const copy = clipboard.copy(false);
   clipboard.selection(1, '');
   await expect(copy).rejects.toThrow();
+ });
+ it('reports clipboard refusal even if the page never replies', async () => {
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new Error('denied')), readText: vi.fn() }, data => data);
+  await expect(clipboard.copy(false)).rejects.toThrow('denied');
  });
  it('does not delete on clipboard write refusal', async () => {
   const send = vi.fn();
