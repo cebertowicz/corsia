@@ -59,7 +59,6 @@ grows long enough that squashing it before release becomes its own project,
 this mechanism is not paying for itself and should be reconsidered rather than
 extended.
 """
-
 from __future__ import annotations
 
 import logging
@@ -71,7 +70,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-
 import infra.startup_progress as startup_progress
 from infra.checkpoint_schema import CHECKPOINT_ENTRY_SEARCH_SCHEMA_SQL
 from infra.database import write_transaction
@@ -216,6 +214,7 @@ from infra.migration_155_to_156_chat_comments import migrate_155_to_156
 from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
 from infra.migration_157_to_158_error_cause_kinds import migrate_157_to_158
 from infra.migration_158_to_159_unconfine_main_agents import migrate_158_to_159
+from infra.migration_159_to_160_untrusted_confinement import migrate_159_to_160
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -863,6 +862,7 @@ MIGRATIONS[155] = migrate_155_to_156
 MIGRATIONS[156] = migrate_156_to_157
 MIGRATIONS[157] = migrate_157_to_158
 MIGRATIONS[158] = migrate_158_to_159
+MIGRATIONS[159] = migrate_159_to_160
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

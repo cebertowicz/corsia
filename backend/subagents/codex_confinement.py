@@ -1,4 +1,4 @@
-"""Codex's version-pinned, bridge-only review-worker launch boundary.
+"""Codex's version-pinned, bridge-only untrusted-worker launch boundary.
 
 0.162.1 exposes no full model-request tools readback in app-server. The
 credential-free capture test checks the entire Responses tools array, including
@@ -12,7 +12,7 @@ import asyncio
 from infra.database import get_db
 from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
-from tools.confined_reads import REVIEW_READ_TOOLS
+from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
 CAPTURED_CODEX_VERSION = "codex-cli 0.162.1"
 # Verified against rust-v0.162.1 core/config.schema.json and tools/spec_plan.rs.
@@ -59,12 +59,12 @@ def assert_tools(definitions) -> None:
     names = []
     for definition in definitions:
         tool = definition.get("function", definition)
-        if definition.get("type") != "function" or tool.get("name") not in REVIEW_READ_TOOLS:
+        if definition.get("type") != "function" or tool.get("name") not in UNTRUSTED_READ_TOOLS:
             raise ConfinementRefused(
                 "Couldn’t start this read-only agent on Codex: CORSIA supplied an unsafe tool. Choose another model."
             )
         names.append(tool["name"])
-    if len(names) != len(REVIEW_READ_TOOLS) or set(names) != REVIEW_READ_TOOLS:
+    if len(names) != len(UNTRUSTED_READ_TOOLS) or set(names) != UNTRUSTED_READ_TOOLS:
         raise ConfinementRefused(
             "Couldn’t start this read-only agent on Codex: CORSIA supplied the wrong tools. Choose another model."
         )
