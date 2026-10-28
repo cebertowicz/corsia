@@ -8,6 +8,8 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Shared documents leave the artifact pane when the work that touched them finishes; pin one to keep it, and the document itself stays.
+- Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
+- In the shared browser, an agent's click on a button's own text or icon reaches the button.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.
