@@ -140,6 +140,22 @@ def test_synced_manifest_detects_personal_skills_without_exposing_them(tmp_path,
     assert [(row["name"], row["state"]) for row in offers] == [("mine", "new")]
 
 
+def test_uploaded_claude_skill_is_found_and_offered(tmp_path, monkeypatch):
+    from onboarding import agent_import_skills
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    roots = Roots.for_user()
+    bucket = roots.claude / "skills" / "synced" / "org_account"
+    _write(bucket / "uploaded-skill" / "SKILL.md", "---\nname: uploaded-skill\ndescription: personal\n---\n")
+    _write(bucket / "manifest.json", json.dumps({"skills": [
+        {"name": "uploaded-skill", "source": "plugin", "updatedAt": "2026-10-20T12:00:00Z"},
+    ]}))
+    assert reader.found_tools(roots) == ["claude-code"]
+    offers = agent_import_skills.skill_offers(roots, ["claude-code"], tmp_path / "workspace")
+    assert [(row["name"], row["state"]) for row in offers] == [("uploaded-skill", "new")]
+
+
 def test_no_tool_folders_means_nothing_found(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert reader.found_tools(Roots.for_user()) == []
