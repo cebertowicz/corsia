@@ -125,7 +125,7 @@
 				return;
 			}
 			drillRootId = drilled;
-			focusNotice = 'That item is no longer in this plan';
+			focusNotice = 'That task isn’t in this plan.';
 			return;
 		}
 		const instructions = personStepInstructionsDocument(node);
@@ -159,7 +159,7 @@
 	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
 		if (outcome === 'requested') return;
 		if (outcome === 'empty') {
-			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
+			decisionMessage = 'That decision is closed. Refreshing the plan.';
 			query.retry();
 			return;
 		}
@@ -228,20 +228,10 @@
 			<span class="spinner" aria-hidden="true"></span>
 			<strong>Loading plan…</strong>
 		</div>
-	{:else if query.status === 'unauthorized' && !hasPayload}
+	{:else if (query.status === 'unauthorized' || query.status === 'forbidden' || query.status === 'not-found') && !hasPayload}
+		<!-- The plans store words these states; the pane shows its message as is. -->
 		<div class="plan-state error" role="alert">
-			<strong>Sign in to see this plan</strong>
-			<p>Your session expired before the plan could load.</p>
-		</div>
-	{:else if query.status === 'forbidden' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>You don’t have access to this plan.</p>
-		</div>
-	{:else if query.status === 'not-found' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>It may have been removed or is no longer shared with you.</p>
+			<strong>{query.errorMessage}</strong>
 		</div>
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">

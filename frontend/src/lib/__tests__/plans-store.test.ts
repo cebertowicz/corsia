@@ -243,7 +243,7 @@ describe('auth', () => {
 		token.set(null);
 		await refresh(T1);
 		expect(entryFor('thread:t1').status).toBe('unauthorized');
-		expect(entryFor('thread:t1').errorMessage).toBe('Sign-in required.');
+		expect(entryFor('thread:t1').errorMessage).toBe('Sign in to see this plan.');
 	});
 });
 
@@ -293,15 +293,32 @@ describe('errors', () => {
 	it('preserves 401, 403, and 404 as distinct scope conditions', async () => {
 		const net = controllableFetch();
 		for (const [status, expected, message] of [
-			[401, 'unauthorized', 'Sign-in required.'],
-			[403, 'forbidden', 'You do not have access to this scope.'],
-			[404, 'not-found', 'This selected scope is no longer available.'],
+			[401, 'unauthorized', 'Sign in to see this plan.'],
+			[403, 'forbidden', 'You don’t have access to this chat. Choose another.'],
+			[404, 'not-found', 'This chat isn’t available. Choose another.'],
 		] as const) {
 			const p = refresh(T1);
 			net.pending.at(-1)!.fail(status);
 			await p;
 			expect(entryFor('thread:t1').status).toBe(expected);
 			expect(entryFor('thread:t1').errorMessage).toBe(message);
+		}
+	});
+
+	it('names the selected project or workspace in unavailable and forbidden messages', async () => {
+		const net = controllableFetch();
+		for (const [key, entry, place] of [
+			[{ kind: 'workspace' } as const, 'workspace', 'workspace'],
+			[{ kind: 'project', id: 'p1' } as const, 'project:p1', 'project'],
+		] as const) {
+			for (const status of [403, 404]) {
+				const p = refresh(key);
+				net.pending.at(-1)!.fail(status);
+				await p;
+				expect(entryFor(entry).errorMessage).toBe(status === 403
+					? `You don’t have access to this ${place}. Choose another.`
+					: `This ${place} isn’t available. Choose another.`);
+			}
 		}
 	});
 

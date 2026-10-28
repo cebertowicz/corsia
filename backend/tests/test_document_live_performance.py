@@ -81,6 +81,7 @@ async def test_maximum_backlog_three_busy_waits_and_rename_inside_native_join(tm
     print(f"maximum-backlog-with-three-capped-waits={elapsed:.3f}s")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_maximum_text_flush_empirical_p99(tmp_path):
     import time
