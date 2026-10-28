@@ -77,6 +77,7 @@ def surface_exit_error(
     *,
     insert_message_fn: Callable,
     logger,
+    emit_terminal: bool = True,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -107,7 +108,7 @@ def surface_exit_error(
             msg_id=str(uuid.uuid4()), db=db,
         )
         broadcast_stored_message(thread_id, mid, db=db, broadcast=bcast)
-        if turn_identity is not None:
+        if emit_terminal and turn_identity is not None:
             bcast(thread_id, {
                 "type": "turn_complete",
                 "thread_id": thread_id,

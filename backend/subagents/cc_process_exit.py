@@ -110,7 +110,7 @@ def _surface_process_exit(
 ) -> str | None:
     return surface_exit_error(
         child_thread_id, code, detail, broadcast, db, identity,
-        insert_message_fn=insert_message, logger=log,
+        insert_message_fn=insert_message, logger=log, emit_terminal=False,
     )
 
 
@@ -168,7 +168,7 @@ async def _publish_process_exit(
     db,
 ) -> None:
     marker_id = live.tool_boundary_marker_id or _surface_process_exit(
-        child_thread_id, code, detail, broadcast, db, None
+        child_thread_id, code, detail, broadcast, db, identity
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,
