@@ -177,7 +177,7 @@ async def test_a_paused_owner_skips_and_a_request_after_resume_starts(world, mon
     assert len(_workers()) == 1
 
 
-# 12 -- a Local only owner's start runs local or waits: test_rule_workers_local_only.
+# 12 -- a Local only owner's start runs local or is refused: test_rule_workers_local_only.
 
 # A Codex owner: Codex has no confined launch, so the start is refused and the owner told.
 @pytest.mark.asyncio
@@ -192,8 +192,8 @@ async def test_an_owner_on_a_harness_without_a_confined_launch_is_refused(world)
     await request()
     await settle_all()
     outcome, reason = starts(rule)[0][:2]
-    assert outcome == "refused" and reason.startswith("Couldn't start this read-only agent on")
-    assert _workers() == [] and "Couldn't start this read-only agent on" in owner_wakes()[0]
+    assert outcome == "refused" and reason.startswith("Couldn’t start this read-only agent on")
+    assert _workers() == [] and "Couldn’t start this read-only agent on" in owner_wakes()[0]
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

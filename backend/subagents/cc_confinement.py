@@ -19,7 +19,7 @@ class ConfinementRefused(ValueError):
 
 def unsupported_model_message(model_name: str) -> str:
     """The shared refusal for a model unable to launch a read-only worker."""
-    return f"Couldn't start this read-only agent on {model_name}: it can't run on a Codex model. Choose another model."
+    return f"Couldn’t start this read-only agent on {model_name}: it can’t run on a Codex model. Choose another model."
 
 
 def review_working_dir(thread_id: str, project_id: str | None, db) -> str:

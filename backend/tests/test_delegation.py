@@ -221,7 +221,7 @@ class TestCreateThread:
         deleg_db.execute("UPDATE threads SET local_only = 1 WHERE id = 'sender-self'")
         deleg_db.commit()
         monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "claude-code/sonnet")
-        monkeypatch.setattr(local_only, "ready_local_selectors", lambda: ("omlx@local/qwen",))
+        monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/qwen",))
 
         response = client.post(
             "/api/delegation/threads",

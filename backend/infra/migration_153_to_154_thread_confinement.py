@@ -45,7 +45,7 @@ def migrate_153_to_154(conn: sqlite3.Connection) -> None:
     # fail-closed behavior even when another valid record exists for the thread.
     conn.execute(
         "UPDATE threads SET confinement='review', confined_read_dirs='[]' "
-        "WHERE confinement IS NULL AND EXISTS ("
+        "WHERE confinement IS NULL AND spawned_by IS NOT NULL AND EXISTS ("
         "SELECT 1 FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id "
         "WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' "
         f"AND i.type='session' AND ({_DAMAGED_RECORD}))"

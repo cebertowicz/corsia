@@ -165,7 +165,7 @@ def test_local_only_child_refuses_non_local_initial_model(fresh_db, monkeypatch)
     from infra.local_only import LocalityRefused
 
     monkeypatch.setattr("infra.local_only._is_cloud", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr("infra.local_only.ready_local_selectors", lambda: ())
+    monkeypatch.setattr("infra.local_only._ready_local_selectors", lambda: ())
 
     with pytest.raises(LocalityRefused):
         fresh_threads.create_fresh_thread(

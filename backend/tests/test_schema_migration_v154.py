@@ -80,11 +80,25 @@ def test_v154_carries_an_older_claude_code_review_childs_confinement_onto_its_ro
         db.close()
 
 
+def test_damaged_top_level_session_stays_unconfined() -> None:
+    db = _legacy_db()
+    try:
+        _cc_session(db, "old", "broken-top", {}, "1")
+        db.execute("UPDATE artifact_identities SET metadata='not json' WHERE id='broken-top'")
+        db.commit()
+        migrate_to_current(db, SCHEMA_VERSION)
+        assert thread_confinement.read_dirs("old", db) is None
+    finally:
+        db.close()
+
+
 def test_damaged_legacy_session_refuses_launch() -> None:
     from subagents.cc_confinement import ConfinementRefused, launch_confinement
 
     db = _legacy_db()
     try:
+        db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('parent','u','t','t','t')")
+        db.execute("UPDATE threads SET spawned_by='parent' WHERE id='old'")
         _cc_session(db, "old", "broken", {}, "1")
         db.execute("UPDATE artifact_identities SET metadata='not json' WHERE id='broken'")
         db.commit()
@@ -107,6 +121,8 @@ def test_unknown_or_malformed_legacy_confinement_refuses_launch(invocation) -> N
 
     db = _legacy_db()
     try:
+        db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('parent','u','t','t','t')")
+        db.execute("UPDATE threads SET spawned_by='parent' WHERE id='old'")
         _cc_session(db, "old", "odd", invocation, "2")
         _cc_session(db, "old", "plain", {"confinement": "none", "add_dirs": []}, "1")
         db.commit()
