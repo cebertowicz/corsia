@@ -40,16 +40,26 @@ def test_nested_phase_counts_and_terminal(db):
     outer = _phase(db, plan, "Outer", "outer")
     inner = _phase(db, plan, "Inner", "inner", outer["id"], "design")
     phase = db.execute("SELECT * FROM plan_nodes WHERE id=?", (outer["id"],)).fetchone()
-    workflows = {"outer": Workflow(("design",))}
+    workflows = {"outer": Workflow(("design",), nested={"design": "inner"})}
     assert _missing_required_steps(db, phase, workflows) == ()
     assert not _run_tasks_are_terminal(db, outer["id"])
     closed = _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Finished"})["node"]
     assert _run_tasks_are_terminal(db, outer["id"])
     result = {}
-    append_close_notice(result, node_id=inner["id"], db=db, workflows={"outer": Workflow(("design", "review"))})
+    append_close_notice(result, node_id=inner["id"], db=db, workflows={"outer": Workflow(("design", "review"), nested={"design": "inner"})})
     assert result["notice"] == "Required step review has no task in this outer run."
     _mutate(db, plan.id, "archive_node", {"node_id": inner["id"], "expected_revision": closed["revision"]})
     assert _missing_required_steps(db, phase, workflows) == ("design",)
+
+
+def test_only_a_phase_running_the_declared_workflow_counts(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    outer = _phase(db, plan, "Outer", "outer")
+    _phase(db, plan, "Other", "other", outer["id"], "design")
+    _phase(db, plan, "Bare", None, outer["id"], "review")
+    phase = db.execute("SELECT * FROM plan_nodes WHERE id=?", (outer["id"],)).fetchone()
+    workflows = {"outer": Workflow(("design", "review"), nested={"design": "inner"})}
+    assert _missing_required_steps(db, phase, workflows) == ("design", "review")
 
 
 def test_closing_nested_phase_checks_its_own_run(db):
@@ -64,7 +74,7 @@ def test_closing_nested_phase_checks_its_own_run(db):
     inner = db.execute("SELECT * FROM plan_nodes WHERE id=?", (inner["id"],)).fetchone()
     _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Done"})
     result = {}
-    workflows = {"outer": Workflow(("design",)), "inner": Workflow(("draft", "check"))}
+    workflows = {"outer": Workflow(("design",), nested={"design": "inner"}), "inner": Workflow(("draft", "check"))}
     append_close_notice(result, node_id=inner["id"], db=db, workflows=workflows)
     assert result["notice"] == "Required step check has no task in this inner run."
 
@@ -76,7 +86,10 @@ def test_same_workflow_ancestor_notice(db):
     inner = _phase(db, plan, "Repeat", "outer", middle["id"], "repeat")
     result = {"node": inner}
     append_add_notice(result, db, {"outer": Workflow((), version="a"), "inner": Workflow((), version="b")})
-    assert "Workflow outer already runs above this one; a workflow inside itself repeats." in result["notice"]
+    assert (
+        "Workflow outer is already running above this phase, so its steps will be planned twice. "
+        "If you didn't mean to nest it, use the outer run."
+    ) in result["notice"]
 
 
 def test_phase_dependencies_both_directions(db):
@@ -110,14 +123,11 @@ def test_nested_phase_dependency_blocks_inner_task_until_accepted(db):
     start = _mutate(db, plan.id, "start", {"node_id": child["id"], "expected_revision": child["revision"]})
     assert start["admission"]["condition"] == "blocked"
     assert start["admission"]["selection"] is None
-    with pytest.raises(service.PlanInputError, match=inner["id"]):
-        service.remove_dependency(child["id"], before["id"], db=db)
+    assert service.remove_dependency(child["id"], before["id"], db=db) is False
     service.transition_node(before["id"], "active", actor_id="owner", provenance="test", db=db)
     submit_review_evidence(before["id"], db=db, actor_id="owner")
     service.transition_node(before["id"], "accepted", actor_id="owner", provenance="test", verification_result="passed", verified_by="reviewer", db=db)
     assert admission.project(child["id"], db=db)["condition"] == "ready"
-    with pytest.raises(service.PlanInputError, match=inner["id"]):
-        service.remove_dependency(child["id"], before["id"], db=db)
     current = service.get_node(child["id"], db=db)
     started = _mutate(db, plan.id, "start", {"node_id": child["id"], "expected_revision": current.revision})
     assert started["admission"]["condition"] == "running"
@@ -160,7 +170,7 @@ def test_cycles_through_inheritance_or_containment_are_refused(db):
         service.add_dependency(later["id"], phase["id"], db=db)
 
 
-def test_phase_dependency_records_blocked_on_its_steps(db):
+def test_phase_dependency_is_recorded_on_the_phase_and_derived_on_its_steps(db):
     from tests.plan_review_helpers import submit_review_evidence
 
     plan = service.ensure_plan("thread", "owner", db=db)
@@ -168,11 +178,14 @@ def test_phase_dependency_records_blocked_on_its_steps(db):
     step = _task(db, plan, "Step", phase["id"])
     before = _task(db, plan, "Before", None)
     service.add_dependency(phase["id"], before["id"], db=db)
-    assert _events(db, step["id"], "blocked_raised") == 1
+    assert _events(db, phase["id"], "blocked_raised") == 1
+    assert _events(db, step["id"], "blocked_raised") == 0
+    assert service.get_node(step["id"], db=db).unmet_dependencies == [before["id"]]
     service.transition_node(before["id"], "active", actor_id="owner", provenance="test", db=db)
     submit_review_evidence(before["id"], db=db, actor_id="owner")
     service.transition_node(before["id"], "accepted", actor_id="owner", provenance="test", verification_result="passed", verified_by="reviewer", db=db)
-    assert _events(db, step["id"], "blocked_cleared") == 1
+    assert _events(db, phase["id"], "blocked_cleared") == 1
+    assert service.get_node(step["id"], db=db).unmet_dependencies == []
 
 
 def test_nested_versions_use_each_reference(db, monkeypatch, tmp_path):

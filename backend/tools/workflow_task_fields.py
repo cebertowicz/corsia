@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,8 @@ class Workflow:
     required_steps: tuple[str, ...]
     version: str | None = None
     skill: Any = None
+    #: Step id -> the workflow its ``workflow:`` key names; that step runs as a child phase.
+    nested: dict[str, str] = field(default_factory=dict)
 
 
 _PROMPTING_OPERATIONS = frozenset({"add", "insert", "accept", "accept_with_follow_up", "fail", "close_node"})
@@ -77,7 +79,14 @@ def effective_workflows(actor, db) -> dict[str, Workflow]:
             and step.get("required") is True
             and isinstance(step.get("id"), str)
         )
-        workflows[skill.name] = Workflow(required_steps=required, skill=skill)
+        nested = {
+            step["id"]: step["workflow"]
+            for step in steps
+            if isinstance(step, dict)
+            and isinstance(step.get("id"), str)
+            and isinstance(step.get("workflow"), str)
+        }
+        workflows[skill.name] = Workflow(required_steps=required, skill=skill, nested=nested)
     return workflows
 
 
@@ -142,7 +151,11 @@ def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
             if parent is None:
                 break
             if parent["kind"] == "phase" and parent["workflow_ref"] == reference:
-                _append_notice(result, f"Workflow {reference} already runs above this one; a workflow inside itself repeats.")
+                _append_notice(
+                    result,
+                    f"Workflow {reference} is already running above this phase, so its steps "
+                    "will be planned twice. If you didn't mean to nest it, use the outer run.",
+                )
                 break
             parent_id = parent["parent_id"]
     phase = _phase_for_node(db, str(node["id"]))
@@ -218,14 +231,21 @@ def _missing_required_steps(
     workflow = workflows.get(phase["workflow_ref"])
     if workflow is None:
         return None
+    # A step is planned by a task of this run, or, for a step that names a
+    # workflow, by a child phase running exactly that workflow.
     planned = {
         row["workflow_step"]
         for row in db.execute(
-            "SELECT workflow_step FROM plan_nodes WHERE parent_id=? "
-            "AND archived_at IS NULL AND ((kind='task' AND workflow_ref=?) OR kind='phase')",
-            (phase["id"], phase["workflow_ref"]),
+            "SELECT kind,workflow_ref,workflow_step FROM plan_nodes WHERE parent_id=? "
+            "AND archived_at IS NULL AND kind IN ('task','phase')",
+            (phase["id"],),
         ).fetchall()
         if isinstance(row["workflow_step"], str)
+        and isinstance(row["workflow_ref"], str)
+        and row["workflow_ref"] == (
+            phase["workflow_ref"] if row["kind"] == "task"
+            else workflow.nested.get(row["workflow_step"])
+        )
     }
     return tuple(step for step in workflow.required_steps if step not in planned)
 

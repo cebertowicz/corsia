@@ -56,12 +56,16 @@ def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
 
 
 def unmet_prerequisites(
-    connection: sqlite3.Connection, node_ids, *, compact: bool = False, include_met: bool = False,
+    connection: sqlite3.Connection, node_ids, *, compact: bool = False,
 ) -> dict[str, list]:
     """Each node's prerequisites that are not accepted yet, in plan order.
 
     A dependency is met only by an accepted prerequisite. A failed one is
     unmet and never will be met; the caller names that as its own cause.
+    An open ancestor's edges hold its descendants too (``via`` names that
+    ancestor). This read is the one place that inheritance lives: writers
+    change and record only the edges a node owns, so a step's inherited
+    wait is derived here, never stored or evented on the step.
     For a prerequisite in another plan (#1552), ``foreign_owner`` is the
     thread owning it and ``foreign_label`` that thread's title; else None.
     """
@@ -69,7 +73,7 @@ def unmet_prerequisites(
     found: dict[str, list] = defaultdict(list)
     if not ids:
         return {}
-    unmet = "" if include_met else "AND p.state NOT IN ('accepted','accepted_with_followup')"
+    unmet = "AND p.state NOT IN ('accepted','accepted_with_followup')"
     # A node's own edges (depth 0), then those of its open ancestors: an
     # ancestor's dependency on work outside it holds its descendants too.
     # Nearest first, so a prerequisite reached at several levels keeps the

@@ -172,15 +172,6 @@ def remove_dependency(node_id: str, depends_on_node_id: str, *,
         )
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
-        direct = connection.execute(
-            "SELECT 1 FROM plan_node_dependencies WHERE node_id=? AND depends_on_node_id=?",
-            (node_id, depends_on_node_id),
-        ).fetchone()
-        if direct is None:
-            rows = node_waits.unmet_prerequisites(connection, [node_id], include_met=True).get(node_id, [])
-            inherited = next((row for row in rows if row["id"] == depends_on_node_id and row["via"]), None)
-            if inherited is not None:
-                raise PlanInputError(f"Dependency is inherited from ancestor {inherited['via']}; remove it there")
         before = material_events.blocked_snapshot(connection, (node_id,))
         deleted = connection.execute(
             "DELETE FROM plan_node_dependencies "

@@ -26,6 +26,26 @@ def test_settling_child_keeps_ancestor_edge_and_sibling_blocked(db):
     assert service.get_node(sibling.id, db=db).unmet_dependencies == [before.id]
 
 
+@pytest.mark.parametrize("retire", ["close", "archive"])
+def test_retiring_a_phase_prerequisite_releases_its_open_steps(db, retire):
+    from plans import archival, closure
+
+    plan = owner_plan(db)
+    before = _node(db, plan, "Before")
+    phase = _node(db, plan, "Phase", "phase")
+    step = _node(db, plan, "Step", parent=phase.id)
+    service.add_dependency(phase.id, before.id, db=db)
+    assert service.get_node(step.id, db=db).unmet_dependencies == [before.id]
+
+    if retire == "close":
+        closure.close_node(before.id, reason="Not needed", db=db)
+    else:
+        archival.archive_node(before.id, db=db)
+
+    assert service.get_node(phase.id, db=db).unmet_dependencies == []
+    assert service.get_node(step.id, db=db).unmet_dependencies == []
+
+
 def test_inherited_rows_deduplicate_prefer_nearest_and_allow_direct_removal(db):
     plan = owner_plan(db)
     before = _node(db, plan, "Before")
@@ -43,5 +63,5 @@ def test_inherited_rows_deduplicate_prefer_nearest_and_allow_direct_removal(db):
     assert service.remove_dependency(child.id, before.id, db=db)
     rows = node_waits.unmet_prerequisites(db, [child.id])[child.id]
     assert [(r["id"], r["via"]) for r in rows] == [(before.id, inner.id), (other.id, inner.id)]
-    with pytest.raises(service.PlanInputError, match=inner.id):
-        service.remove_dependency(child.id, before.id, db=db)
+    # The inherited edge is the ancestor's; removing it from the child changes nothing.
+    assert service.remove_dependency(child.id, before.id, db=db) is False
