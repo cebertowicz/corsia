@@ -8,7 +8,7 @@ Last reviewed: 2026-10-28
 
 - **Protected tools** — filesystem tools gate paths using the shared sandbox configuration. Safehouse (macOS) or bubblewrap (Linux) wraps shell calls. On Linux the protected shell runs in separate user, PID, IPC and UTS namespaces, with bind mounts and masked paths built from the same path inventory, and refuses to run without bubblewrap.
 - **Workspace and repositories** — the configured workspace and registered repositories form the ordinary access scope. Protected base checkouts are read-only; their verified `.worktrees` are read/write.
-- **Private state and commands** — protected mode denies access to the CORSIA state root and private roots. A reviewed, time-bounded host-access lease can open the state root for a specific action. The key store (`<state root>/keys`, a 0700 folder of 0600 files) and the saved browser profile are never opened, by a lease or otherwise. On macOS, protected mode also blocks direct execution of privileged commands including `sudo`, `su`, `shutdown` and `pmset`.
+- **Private state and commands** — protected mode denies access to the CORSIA state root and private roots. A reviewed, time-bounded host-access lease can open the state root for a specific action. The key store (`<state root>/keys`, a 0700 folder of 0600 files) and the saved browser profile are never opened, by a lease or otherwise. Protected mode refuses commands that invoke privileged tools including `sudo`, `su`, `shutdown` and `pmset`; on macOS the Safehouse profile also denies executing those binaries directly.
 - **SSH** — protected mode blocks SSH private material while allowing reads of SSH configuration and reads and writes of `known_hosts`.
 
 ### Dependency Pinning
