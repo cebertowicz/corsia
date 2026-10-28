@@ -182,6 +182,7 @@ async def test_native_pane_clipboard_selection_and_paste(native_owner, monkeypat
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').value", returnByValue=True)
         assert result['result']['value'] == 'Pasted text'
-        assert len(replies) == 1
+        # A successful paste reports no error: it clears any the pane is showing.
+        assert replies[1:] == [{'type': 'pane_error', 'error': None}]
     finally:
         browser_pane.clear_page_endpoint(thread, connection)
