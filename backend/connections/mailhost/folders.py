@@ -21,9 +21,11 @@ _LINE = re.compile(rb'^\((?P<flags>[^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(?P<na
 _cache: dict[tuple[str, str], dict[str, str]] = {}
 
 
-def _listing(conn: imaplib.IMAP4) -> list[tuple[set[bytes], str]]:
+def _listing(conn: imaplib.IMAP4, *, strict: bool = False) -> list[tuple[set[bytes], str]]:
     status, data = conn.list()
     if status != "OK":
+        if strict:
+            raise imaplib.IMAP4.error("LIST failed")
         return []
     found = []
     for line in data:
@@ -39,11 +41,11 @@ def _listing(conn: imaplib.IMAP4) -> list[tuple[set[bytes], str]]:
     return found
 
 
-def resolve(conn: imaplib.IMAP4, key: tuple[str, str], kind: str) -> str | None:
+def resolve(conn: imaplib.IMAP4, key: tuple[str, str], kind: str, *, strict: bool = False) -> str | None:
     """The folder name for ``kind`` (``DRAFTS`` or ``SENT``) on this account, or None when the host shows none."""
     if cached := _cache.get(key, {}).get(kind):
         return cached
-    listing = _listing(conn)
+    listing = _listing(conn, strict=strict)
     names = {name.lower(): name for _, name in listing}
     for each in (DRAFTS, SENT):
         flagged = next((name for flags, name in listing if _FLAGS[each] in flags), None)

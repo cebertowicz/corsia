@@ -25,7 +25,7 @@ MAILBOX = "INBOX"
 _TRANSPORT = (OSError, EOFError, ssl.SSLError, socket.timeout, imaplib.IMAP4.error)
 _IMAP_OFF = re.compile(r"imap.{0,40}(disabled|not enabled|turned off|not allowed|not activated)|disabled.{0,40}imap", re.I)
 _TEMPORARY = re.compile(r"\[(?:UNAVAILABLE|SERVERBUG|LIMIT|INUSE)\]|too many connections|try again later", re.I)
-_FETCHED = re.compile(rb"UID (\d+)")
+FETCHED = re.compile(rb"UID (\d+)")
 # What the person's own mail app sets: a draft it can open and edit, and sent mail already read.
 _APPEND_FLAGS = {folders.DRAFTS: r"(\Draft \Seen)", folders.SENT: r"(\Seen)"}
 _locks: dict[str, threading.Lock] = {}
@@ -38,7 +38,7 @@ def account_lock(account_id: str) -> threading.Lock:
         return _locks.setdefault(account_id, threading.Lock())
 
 
-def _unreachable(ep: Endpoints) -> MailHostError:
+def unreachable(ep: Endpoints) -> MailHostError:
     return MailHostError(SERVER_UNREACHABLE, host=ep.imap.host)
 
 
@@ -50,14 +50,14 @@ def _open(ep: Endpoints) -> imaplib.IMAP4:
             conn = imaplib.IMAP4(host, port, timeout=TIMEOUT_SECONDS)
             if "STARTTLS" not in conn.capabilities:
                 conn.shutdown()
-                raise _unreachable(ep)
+                raise unreachable(ep)
             conn.starttls(ssl_context=tls.context())
             return conn
         return imaplib.IMAP4_SSL(host, port, ssl_context=tls.context(), timeout=TIMEOUT_SECONDS)
     except MailHostError:
         raise
     except _TRANSPORT:
-        raise _unreachable(ep) from None
+        raise unreachable(ep) from None
 
 
 def _login_failure(ep: Endpoints, reply: object) -> MailHostError:
@@ -67,7 +67,7 @@ def _login_failure(ep: Endpoints, reply: object) -> MailHostError:
         for part in (reply if isinstance(reply, tuple) else (reply,))
     )
     if _TEMPORARY.search(text):
-        return _unreachable(ep)
+        return unreachable(ep)
     if _IMAP_OFF.search(text):
         return MailHostError(IMAP_OFF, name=ep.name)
     return MailHostError(PASSWORD_REFUSED, name=ep.name)
@@ -81,14 +81,14 @@ def session(ep: Endpoints, username: str, password: str) -> Iterator[imaplib.IMA
         try:
             conn.login(username, password)
         except imaplib.IMAP4.abort:
-            raise _unreachable(ep) from None
+            raise unreachable(ep) from None
         except imaplib.IMAP4.error as exc:
             raise _login_failure(ep, exc.args) from None
         except _TRANSPORT:
-            raise _unreachable(ep) from None
+            raise unreachable(ep) from None
         yield conn
     except (OSError, EOFError, ssl.SSLError, imaplib.IMAP4.error):
-        raise _unreachable(ep) from None
+        raise unreachable(ep) from None
     finally:
         try:
             conn.logout()
@@ -110,22 +110,22 @@ def check_login(ep: Endpoints, password: str) -> str:
     raise refused or MailHostError(PASSWORD_REFUSED, name=ep.name)
 
 
-def _select(conn: imaplib.IMAP4, ep: Endpoints) -> int:
-    """Open the inbox read-only; return its UIDVALIDITY."""
-    status, _ = conn.select(MAILBOX, readonly=True)
+def select(conn: imaplib.IMAP4, ep: Endpoints, folder: str = MAILBOX) -> int:
+    """Open a folder read-only; return its UIDVALIDITY."""
+    status, _ = conn.select(quoted(folder), readonly=True)
     validity = conn.response("UIDVALIDITY")[1]
     if status != "OK" or not validity or not validity[0]:
-        raise _unreachable(ep)
+        raise unreachable(ep)
     return int(validity[0])
 
 
-def _items(data: list) -> Iterator[tuple[int, bytes]]:
+def items(data: list) -> Iterator[tuple[int, bytes]]:
     """``(uid, literal bytes)`` for every message a FETCH answered."""
     for index, part in enumerate(data):
         if isinstance(part, tuple):
             # A server may send the UID before the literal or after it.
             after = data[index + 1] if index + 1 < len(data) and isinstance(data[index + 1], bytes) else b""
-            found = _FETCHED.search(part[0]) or _FETCHED.search(after)
+            found = FETCHED.search(part[0]) or FETCHED.search(after)
             if found:
                 yield int(found.group(1)), part[1]
 
@@ -133,26 +133,26 @@ def _items(data: list) -> Iterator[tuple[int, bytes]]:
 def search(ep: Endpoints, username: str, password: str, criteria: list[str], limit: int) -> tuple[int, list[tuple[int, bytes]]]:
     """``(uidvalidity, [(uid, header bytes)])`` for the newest matches in the inbox, newest first."""
     with session(ep, username, password) as conn:
-        validity = _select(conn, ep)
+        validity = select(conn, ep)
         status, found = conn.uid("SEARCH", *criteria)
         if status != "OK":
-            raise _unreachable(ep)
+            raise unreachable(ep)
         uids = (found[0] or b"").split()[-limit:][::-1]
         if not uids:
             return validity, []
         status, data = conn.uid("FETCH", b",".join(uids).decode(), "(UID BODY.PEEK[HEADER.FIELDS (FROM TO CC DATE SUBJECT)])")
         if status != "OK":
-            raise _unreachable(ep)
-        by_uid = dict(_items(data))
+            raise unreachable(ep)
+        by_uid = dict(items(data))
         return validity, [(int(uid), by_uid[int(uid)]) for uid in uids if int(uid) in by_uid]
 
 
-def _quoted(folder: str) -> str:
+def quoted(folder: str) -> str:
     """imaplib sends an APPEND mailbox name as given, so a name with a space needs its quotes."""
     return '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _folder_key(ep: Endpoints, username: str) -> tuple[str, str]:
+def folder_key(ep: Endpoints, username: str) -> tuple[str, str]:
     return f"{ep.imap.host}:{ep.imap_port()}", username
 
 
@@ -163,11 +163,11 @@ def append(ep: Endpoints, username: str, password: str, kind: str, raw: bytes) -
     unreachable server.
     """
     with session(ep, username, password) as conn:
-        key = _folder_key(ep, username)
+        key = folder_key(ep, username)
         folder = folders.resolve(conn, key, kind)
         if folder is None:
             return False
-        status, _ = conn.append(_quoted(folder), _APPEND_FLAGS[kind], None, raw)
+        status, _ = conn.append(quoted(folder), _APPEND_FLAGS[kind], None, raw)
         if status != "OK":
             folders.forget(key)
             raise MailHostError(COPY_REFUSED, name=ep.name)
@@ -180,6 +180,21 @@ def _uidplus(conn: imaplib.IMAP4) -> bool:
     return status == "OK" and b"UIDPLUS" in b" ".join(part for part in data if isinstance(part, bytes)).upper().split()
 
 
+def has_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> bool:
+    """Search once for a provider-created copy by its Message-ID."""
+    with session(ep, username, password) as conn:
+        folder = folders.resolve(conn, folder_key(ep, username), kind)
+        if folder is None:
+            return False
+        status, _ = conn.select(quoted(folder), readonly=True)
+        if status != "OK":
+            raise unreachable(ep)
+        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", quoted(message_id))
+        if status != "OK":
+            raise unreachable(ep)
+        return bool(found and found[0] and found[0].split())
+
+
 def remove_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> None:
     """Delete CORSIA's own copy, found by its Message-ID, from the host's Drafts or Sent folder.
 
@@ -187,21 +202,21 @@ def remove_copy(ep: Endpoints, username: str, password: str, kind: str, message_
     left flagged: a plain EXPUNGE would also purge every message the person deleted and hasn't purged.
     """
     with session(ep, username, password) as conn:
-        folder = folders.resolve(conn, _folder_key(ep, username), kind)
+        folder = folders.resolve(conn, folder_key(ep, username), kind)
         if folder is None:
             return
-        status, _ = conn.select(_quoted(folder))
+        status, _ = conn.select(quoted(folder))
         if status != "OK":
-            raise _unreachable(ep)
-        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", _quoted(message_id))
+            raise unreachable(ep)
+        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", quoted(message_id))
         if status != "OK":
-            raise _unreachable(ep)
+            raise unreachable(ep)
         uids = ",".join(uid.decode() for uid in (found[0] or b"").split())
         if not uids:
             return
         status, _ = conn.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
         if status != "OK":
-            raise _unreachable(ep)
+            raise unreachable(ep)
         if _uidplus(conn):
             conn.uid("EXPUNGE", uids)
 
@@ -210,25 +225,25 @@ def reply_headers(ep: Endpoints, username: str, password: str, validity: int, ui
     """The threading and address headers of one inbox message, or None when it is gone or its mailbox was rebuilt."""
     fields = "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID REFERENCES REPLY-TO FROM SUBJECT)])"
     with session(ep, username, password) as conn:
-        if _select(conn, ep) != validity:
+        if select(conn, ep) != validity:
             return None
         status, data = conn.uid("FETCH", str(uid), fields)
         if status != "OK":
-            raise _unreachable(ep)
-        return dict(_items(data)).get(uid)
+            raise unreachable(ep)
+        return dict(items(data)).get(uid)
 
 
 def _last_uid(conn: imaplib.IMAP4, ep: Endpoints) -> int:
     status, found = conn.uid("SEARCH", "ALL")
     if status != "OK":
-        raise _unreachable(ep)
+        raise unreachable(ep)
     return max((int(uid) for uid in (found[0] or b"").split()), default=0)
 
 
 def inbox_cursor(ep: Endpoints, username: str, password: str) -> tuple[int, int]:
     """The inbox UIDVALIDITY and current last UID, used as a no-replay poll floor."""
     with session(ep, username, password) as conn:
-        validity = _select(conn, ep)
+        validity = select(conn, ep)
         return validity, _last_uid(conn, ep)
 
 
@@ -240,14 +255,14 @@ def added_after(
 ) -> tuple[int, int, list[tuple[int, bytes]]]:
     """Fetch one bounded, oldest-first batch newer than the durable UID cursor."""
     with session(ep, username, password) as conn:
-        current_validity = _select(conn, ep)
+        current_validity = select(conn, ep)
         if current_validity != validity:
             # A rebuilt mailbox: the old cursor means nothing here, so take the whole mailbox's
             # last UID as the new no-replay floor.  Rare, so the full search is acceptable.
             return current_validity, _last_uid(conn, ep), []
         status, found = conn.uid("SEARCH", "UID", f"{last_uid + 1}:*")
         if status != "OK":
-            raise _unreachable(ep)
+            raise unreachable(ep)
         # RFC 3501 permits a range starting beyond the current highest UID to include
         # that highest UID, so enforce the durable cursor again client-side.
         wanted = sorted(uid for uid in (int(uid) for uid in (found[0] or b"").split()) if uid > last_uid)[:POLL_BATCH_SIZE]
@@ -255,17 +270,17 @@ def added_after(
             return current_validity, last_uid, []
         status, data = conn.uid("FETCH", ",".join(str(uid) for uid in wanted), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
         if status != "OK":
-            raise _unreachable(ep)
-        by_uid = dict(_items(data))
+            raise unreachable(ep)
+        by_uid = dict(items(data))
         return current_validity, wanted[-1], [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
 
 
-def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int) -> bytes | None:
+def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int, folder: str = MAILBOX) -> bytes | None:
     """One inbox message's raw bytes (up to ``max_bytes``), or None when it is gone or its mailbox was rebuilt."""
     with session(ep, username, password) as conn:
-        if _select(conn, ep) != validity:
+        if select(conn, ep, folder) != validity:
             return None
         status, data = conn.uid("FETCH", str(uid), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
         if status != "OK":
-            raise _unreachable(ep)
-        return dict(_items(data)).get(uid)
+            raise unreachable(ep)
+        return dict(items(data)).get(uid)

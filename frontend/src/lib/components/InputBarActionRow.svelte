@@ -311,7 +311,7 @@
 			{#if contextUtilization !== null}
 				<svg class="ctx-ring" width="14" height="14" viewBox="0 0 16 16">
 					<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" opacity="0.22" stroke-width="2.4"/>
-					<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="2.4"
+					<circle class="ctx-ring-fill" cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="2.4"
 						stroke-linecap="round"
 						stroke-dasharray={2 * Math.PI * 5.5}
 						stroke-dashoffset={2 * Math.PI * 5.5 * (1 - Math.min(1, contextUtilization))}

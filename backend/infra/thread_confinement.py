@@ -4,8 +4,8 @@ A confined spawn writes it once, in the transaction that creates the thread, so
 no launch of that thread on any harness, by any later model switch, can find it
 unconfined. The readers are the tool boundary (``tools.confined_reads``), the
 Claude Code launch (``subagents.cc_confinement.launch_confinement``) and the
-Codex launch, which refuses it. A damaged record fails closed: it could be the
-one that said ``review``.
+Codex launch (``subagents.codex_confinement``). A damaged record fails closed:
+it could be the one that said ``review``.
 """
 
 from __future__ import annotations

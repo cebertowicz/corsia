@@ -318,7 +318,7 @@ async def test_login_abort_is_unreachable_and_does_not_demote_the_row(connected,
         raise MailHostError(SERVER_UNREACHABLE, host=endpoints.imap.host)
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, before, unreachable)
+        await mailhost_read.guarded(connected.account_id, before, unreachable)
     assert store.read(connected.account_id, db=get_db())[1] == before
 
 
@@ -406,7 +406,7 @@ async def test_refusal_does_not_revoke_a_key_replaced_after_credentials_were_rea
         raise MailHostError(PASSWORD_REFUSED, name="mail.test")
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+        await mailhost_read.guarded(connected.account_id, snapshot, refused)
     await check.wait_for_checks()
     _saved, current = store.read(connected.account_id, db=get_db())
     assert current != snapshot and current["status"] == store.OK
@@ -426,7 +426,7 @@ async def test_refusal_does_not_restore_servers_saved_after_credentials_were_rea
         raise MailHostError(PASSWORD_REFUSED, name="mail.test")
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+        await mailhost_read.guarded(connected.account_id, snapshot, refused)
     await check.wait_for_checks()
     endpoints, current = store.read(connected.account_id, db=get_db())
     assert endpoints is not None and endpoints.imap.host == "127.0.0.1" and endpoints.imap.port == replacement.imap.port

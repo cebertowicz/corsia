@@ -43,7 +43,7 @@ def draft_target(row: dict[str, Any] | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _working_root(thread_id: str) -> Path:
+def working_root(thread_id: str) -> Path:
     workspace = _workspace_root()
     db = get_db()
     try:
@@ -74,7 +74,7 @@ def _draft_path(
     if existing:
         path = _workspace_root() / str(existing["path"])
     else:
-        path = _working_root(thread_id) / prefix / f"{kind}-{uuid.uuid4().hex[:12]}{extension}"
+        path = working_root(thread_id) / prefix / f"{kind}-{uuid.uuid4().hex[:12]}{extension}"
     return path, _relative(path)
 
 
