@@ -51,8 +51,10 @@ class MailBackend(Protocol):
     ) -> tuple[dict, str | None, str]:
         """``(target, reply label, signature)`` for a draft about to be saved."""
 
-    async def guard_data(self, account_id: str, message_id: str) -> tuple[Message, list[Message], list[Message]]:
-        """Read the reply target, its thread, and the sender's messages."""
+    async def guard_data(
+        self, account_id: str, message_id: str, since: datetime | None = None,
+    ) -> tuple[Message, list[Message], list[Message], int]:
+        """Read the target, relevant arrivals and the sender's 30-day email count."""
 
     async def fetch_body(self, account_id: str, message_id: str) -> str:
         """Fetch the body for one guard evidence message or reply quote."""

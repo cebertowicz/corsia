@@ -6,7 +6,7 @@ from typing import Any
 
 from tools.base import Tool
 from tools.filesystem_effects import match_relative_glob, walk_bound_files
-from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
+from tools.filesystem_gate import resolve_path, _resolve_path_for_action
 from tools.glob_result import other_thread_result, render_glob_result
 from tools.glob_walk import Traversal, select_matches
 from tools.search_scope import SearchScope, keep_path, pattern_components, scoped_match
@@ -140,7 +140,7 @@ class GlobTool(Tool):
                 resolved_match = match.resolve(strict=False)
                 if not resolved_match.is_relative_to(search_dir):
                     try:
-                        resolved_match = _resolve_path(
+                        resolved_match = resolve_path(
                             str(match), self._workspace, self._allowed_dir
                         )
                     except PermissionError:

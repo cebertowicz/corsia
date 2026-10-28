@@ -277,7 +277,8 @@ class FakeImap(_LineServer):
             data = raw.split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n" if headers_only else raw
             section = "BODY[HEADER.FIELDS (FROM TO CC DATE SUBJECT)]" if headers_only else "BODY[]<0>"
             flags = " FLAGS (\\Seen)" if "FLAGS" in items.upper() else ""
-            conn.send(f"* {uid} FETCH (UID {uid}{flags} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
+            arrival = ' INTERNALDATE "01-Jan-2020 00:00:00 +0000"' if "INTERNALDATE" in items.upper() else ""
+            conn.send(f"* {uid} FETCH (UID {uid}{flags}{arrival} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
         conn.send(f"{tag} OK done")
 
 

@@ -227,7 +227,7 @@ async def test_a_reply_target_is_shown_in_the_document_and_a_plain_draft_shows_n
     head = (mail.workspace / saved["path"]).read_text().split("\n\n")[0].split("\n")
     assert "Subject: Lunch" in head
     assert 'In reply to: "Lunch plans" from Pat Kim <pat@mail.example>' in head
-    assert any("thread(s) from" in line for line in head)
+    assert any("emails from" in line for line in head)
     # Display only: the send threads with the stored target, and the line is not a send input.
     assert json.loads(_row(saved["draft_id"])["target_json"])["reply_to"] == "m-100"
     assert email_document.parse_document((mail.workspace / saved["path"]).read_text())["subject"] == "Lunch"
@@ -241,7 +241,7 @@ async def test_a_reply_target_with_no_readable_headers_is_refused(mail):
     out = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account,
                                          to=["sam@example.com"], subject="Lunch", body="Noon?",
                                          reply_to_message_id="m-100")
-    assert "Not saved:" in out
+    assert "Draft not saved:" in out and "Message-ID" in out and "new email" in out
     assert get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0] == 0
 
 

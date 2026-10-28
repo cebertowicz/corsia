@@ -12,7 +12,7 @@ from typing import Any
 from infra.constants import GREP_OUTPUT_CHAR_CAP
 from tools.base import Tool
 from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_bound_files
-from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
+from tools.filesystem_gate import resolve_path, _resolve_path_for_action
 from tools.glob_walk import select_grep_files
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges, render
 from tools.grep_ripgrep import search_ripgrep
@@ -446,7 +446,7 @@ class GrepTool(Tool):
             resolved = candidate.resolve(strict=False)
             if not resolved.is_relative_to(search_dir):
                 try:
-                    resolved = _resolve_path(
+                    resolved = resolve_path(
                         str(candidate), self._workspace, self._allowed_dir
                     )
                 except PermissionError:

@@ -36,7 +36,7 @@ async def test_sent_copy_check_and_fallback(monkeypatch, caplog, search, append,
             raise MailHostError(SERVER_UNREACHABLE)
         return append
 
-    monkeypatch.setattr(outbound.read, "_guarded", guarded)
+    monkeypatch.setattr(outbound.read, "guarded", guarded)
     monkeypatch.setattr(outbound.smtp, "send_message", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(outbound.imap, "has_copy", has_copy)
     monkeypatch.setattr(outbound, "_keep_copy", keep_copy)
@@ -66,7 +66,7 @@ async def test_programming_errors_are_not_silenced(monkeypatch, phase):
     async def keep_copy(*_args):
         raise ValueError("bug")
 
-    monkeypatch.setattr(outbound.read, "_guarded", guarded)
+    monkeypatch.setattr(outbound.read, "guarded", guarded)
     monkeypatch.setattr(outbound.smtp, "send_message", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(outbound.imap, "has_copy", has_copy)
     monkeypatch.setattr(outbound, "_keep_copy", keep_copy)

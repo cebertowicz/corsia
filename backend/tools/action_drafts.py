@@ -75,17 +75,6 @@ def record_draft(
     return {"draft_id": draft_id, "revision": revision, "recorded_at": now}
 
 
-def record_seen_newer(draft_id: str, revision: str, *, db: sqlite3.Connection | None = None) -> None:
-    """Record a stale-target acknowledgement on the open draft without changing its approved bytes."""
-    with write_transaction(db, scope="action_draft_seen_newer") as conn:
-        cursor = conn.execute(
-            "UPDATE action_drafts SET target_json=json_set(target_json, '$.seen_newer', json('true')) "
-            "WHERE id=? AND state='open' AND recorded_revision=?", (draft_id, revision),
-        )
-        if cursor.rowcount != 1:
-            raise DraftError("The draft changed. Save it again and show the person.")
-
-
 def _transition(draft_id: str, before: str, after: str, db, **columns) -> None:
     """Move one draft ``before`` -> ``after``; any other current state is refused."""
     sets = ", ".join(["state=?", *(f"{name}=?" for name in columns)])

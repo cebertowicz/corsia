@@ -11,7 +11,7 @@ from mailhost_helpers import authority, env, servers  # noqa: F401
 from test_mailhost_send import _draft as host_draft, _send, make_host  # noqa: F401
 from test_mailhost_threads_folders_invites import ORIGINAL, _id
 from tools.google_email import EmailDraftTool, EmailSendTool
-from tools.reviewed_drafts import _working_root
+from tools.reviewed_drafts import working_root
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,8 +76,8 @@ async def test_host_missing_and_advertised_oversize_attachments_refused(make_hos
     common = dict(_thread_id=host.thread, account_id=host.account_id, to=['pat@example.com'], subject='Files', body='Here')
     missing = await EmailDraftTool().execute(**common, attachments=['missing.txt'])
     assert 'missing' in missing.lower() and not smtp.sent
-    _working_root(host.thread).mkdir(parents=True, exist_ok=True)
-    (_working_root(host.thread) / 'large.txt').write_bytes(b'0123456789')
+    working_root(host.thread).mkdir(parents=True, exist_ok=True)
+    (working_root(host.thread) / 'large.txt').write_bytes(b'0123456789')
     too_large = await EmailDraftTool().execute(**common, attachments=['large.txt'])
     assert ('large' in too_large.lower() or 'size' in too_large.lower()) and too_large.startswith('Error'), too_large
     assert not smtp.sent and not host.built.imap.appended
@@ -98,8 +98,8 @@ async def test_host_detected_font_plain_alternative_and_attachment_send(make_hos
             return conn.send(f'* 77 FETCH (UID 77 BODY[]<0> {{{len(sample)}}}'.encode() + b'\r\n' + sample + b')', f'{tag} OK done')
         return original(conn, tag, args, folder)
     monkeypatch.setattr(imap, '_copy_uid', copy_uid)
-    _working_root(host.thread).mkdir(parents=True, exist_ok=True)
-    (_working_root(host.thread) / 'report.txt').write_text('attached report')
+    working_root(host.thread).mkdir(parents=True, exist_ok=True)
+    (working_root(host.thread) / 'report.txt').write_text('attached report')
     saved = await host_draft(host, attachments=['report.txt'])
     document = (host.workspace / saved['path']).read_text()
     assert 'report.txt' in document and '15 bytes' in document

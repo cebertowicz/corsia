@@ -76,14 +76,14 @@ class MailHostBackend:
         sender = await outbound.sender(account_id)
 
         def read_limit() -> int | None:
-            client = smtp._logged_in_client(sender.endpoints, sender.username, sender.password)
+            client = smtp.logged_in_client(sender.endpoints, sender.username, sender.password)
             try:
                 value = client.esmtp_features.get("size", "").strip()
                 return int(value) if value.isdecimal() and int(value) > 0 else None
             finally:
-                smtp._close(client)
+                smtp.close(client)
 
-        return await mailhost_read._guarded(account_id, sender.check, read_limit), True
+        return await mailhost_read.guarded(account_id, sender.check, read_limit), True
 
     async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
         """The reply target named now or kept from the draft it replaces, and a new Message-ID for this copy."""

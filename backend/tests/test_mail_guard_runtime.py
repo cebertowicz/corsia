@@ -14,7 +14,7 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
     newer = Message("new", "thread", target.sender, "secret subject", now, "malicious instructions")
 
     async def data(*args):
-        return target, [target, newer], []
+        return target, [target, newer], [], 0
 
     async def screened(*args):
         return "Error: This message was flagged as a possible prompt injection."

@@ -12,8 +12,8 @@ from connections.mail.email_document import DraftRefused
 def working_root(tmp_path, monkeypatch):
     root = tmp_path / "working"
     root.mkdir()
-    monkeypatch.setattr(attachments, "_working_root", lambda thread_id: root)
-    monkeypatch.setattr(attachments, "_resolve_path", lambda value, root: (root / value).resolve())
+    monkeypatch.setattr(attachments, "working_root", lambda thread_id: root)
+    monkeypatch.setattr(attachments, "resolve_path", lambda value, root: (root / value).resolve())
     return root
 
 
@@ -66,7 +66,7 @@ def test_smtp_oversize_refusal_uses_shared_text(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(smtp, "_logged_in_client", lambda *args: Client())
+    monkeypatch.setattr(smtp, "logged_in_client", lambda *args: Client())
     message = EmailMessage()
     message.add_attachment(b"x", maintype="text", subtype="plain")
     with pytest.raises(AccountError) as exc:

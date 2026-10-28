@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from connections.mail.email_document import DraftRefused
-from tools.filesystem_gate import _resolve_path
-from tools.reviewed_drafts import _working_root
+from tools.filesystem_gate import resolve_path
+from tools.reviewed_drafts import working_root
 
 OVERSIZE = "the attachments are too large for this account. Send fewer or smaller files, or share a link instead."
 
@@ -22,12 +22,12 @@ def inspect(thread_id: str, paths: Any, limit: int | None) -> list[dict[str, Any
         return []
     if not isinstance(paths, list) or not all(isinstance(item, str) and item.strip() for item in paths):
         raise DraftRefused("Attachments must be a list of workspace file paths.")
-    root = _working_root(thread_id).resolve()
+    root = working_root(thread_id).resolve()
     files: list[tuple[Path, int]] = []
     total = 0
     for value in paths:
         try:
-            path = _resolve_path(value, root)
+            path = resolve_path(value, root)
             if not path.is_relative_to(root) or not path.is_file():
                 raise OSError
             size = path.stat().st_size
@@ -52,10 +52,10 @@ def inspect(thread_id: str, paths: Any, limit: int | None) -> list[dict[str, Any
 
 
 def add(thread_id: str, message: EmailMessage, entries: list[dict[str, Any]]) -> None:
-    root = _working_root(thread_id).resolve()
+    root = working_root(thread_id).resolve()
     for entry in entries:
         try:
-            path = _resolve_path(str(entry["path"]), root)
+            path = resolve_path(str(entry["path"]), root)
             size = entry["size"]
             if not path.is_relative_to(root) or not isinstance(size, int) or size < 0 or not path.is_file():
                 raise OSError

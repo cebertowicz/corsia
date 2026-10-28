@@ -1,13 +1,14 @@
 """Gmail reads needed by the shared reply guard."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote
 
 from connections.google import client, gmail_read
 from connections.google.email_gmail import GMAIL
+from connections.mail.email_document import DraftRefused, reply_addresses
 from tools.mail_guard import Message
 
 
@@ -52,36 +53,38 @@ async def _search(account_id: str, query: str, limit: int | None = None) -> list
             return ids[:limit] if limit is not None else ids
 
 
-async def guard_data(account_id: str, message_id: str) -> tuple[Message, list[Message], list[Message]]:
+async def guard_data(account_id: str, message_id: str, since: datetime | None = None) -> tuple[Message, list[Message], list[Message], int]:
     target = _message(await _metadata(account_id, message_id))
     if not target.thread_id:
-        raise ValueError("The target has no Gmail thread.")
+        raise DraftRefused("The original message has no thread. Send a new email instead.")
     raw_thread = await client.request_json("GET", f"{GMAIL}/threads/{quote(target.thread_id, safe='')}",
                                            account_id=account_id, params={"format": "metadata"})
     thread = [_message(item) for item in raw_thread.get("messages", []) if "DRAFT" not in item.get("labelIds", [])]
-    name, address = parseaddr(target.sender)
-    # The guard applies exact timestamps after these inclusive provider searches.
-    cutoffs = {target.date, datetime.now(timezone.utc) - timedelta(days=30)}
-    senders = []
-    if name:
-        senders.append(f'from:"{name.replace(chr(34), "").replace(chr(92), "")}"')
-    if address:
-        senders.append(f"from:{address}")
-    ids: set[str] = set()
-    for cutoff in cutoffs:
-        after = int(cutoff.timestamp()) - 1
-        for sender in senders:
-            ids.update(await _search(account_id, f"{sender} after:{after}"))
+    _, address = parseaddr(target.sender)
+    if not address:
+        recipients = reply_addresses(target.reply_to, '')
+        if recipients:
+            raise DraftRefused(f"This message has no sender address, so later mail from them can't be checked. Write a new email to {recipients[0]} instead.")
+        raise DraftRefused("The original message has no usable reply address. Send a new email to the correct address instead.")
+    cutoff = since.replace(microsecond=0) if since is not None else target.date
+    ids = await _search(account_id, f"from:{address} after:{int(cutoff.timestamp()) - 1}")
+    count = len(set(await _search(account_id, f"from:{address} newer_than:30d"))) if since is None else 0
     by_id = {item.message_id: item for item in thread}
-    missing = ids.difference(by_id)
-    for mid in sorted(missing):
+    for mid in sorted(set(ids).difference(by_id)):
         raw = await _metadata(account_id, mid)
         if "DRAFT" not in raw.get("labelIds", []):
             by_id[str(raw["id"])] = _message(raw)
-    return target, thread, [by_id[mid] for mid in ids if mid in by_id]
+    sender = [by_id[mid] for mid in ids if mid in by_id
+              and parseaddr(by_id[mid].sender)[1].casefold() == address.casefold()]
+    if since is not None:
+        thread = [item for item in thread if item.message_id != target.message_id and item.date >= cutoff]
+        sender = [item for item in sender if item.message_id != target.message_id and item.date >= cutoff]
+    else:
+        sender = [item for item in sender if item.date >= cutoff]
+    return target, thread, sender, count
 
 
 async def sent_html(account_id: str) -> list[str]:
     ids = await _search(account_id, "in:sent", limit=5)
     messages = [await _full(account_id, mid) for mid in ids]
-    return ["\n".join(gmail_read._parts(raw.get("payload") or {}, "text/html")) for raw in messages]
+    return ["\n".join(gmail_read.parts(raw.get("payload") or {}, "text/html")) for raw in messages]

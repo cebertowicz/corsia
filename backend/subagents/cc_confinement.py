@@ -42,7 +42,7 @@ def require_readable_dirs(paths: list[str], workspace: str | None) -> tuple[str,
     These are the checks every filesystem tool applies to the parent: the
     protected host-path denial, then the workspace and repository scope.
     """
-    from tools.filesystem_gate import _resolve_path
+    from tools.filesystem_gate import resolve_path
 
     base = Path(workspace) if workspace else None
     resolved: list[str] = []
@@ -50,7 +50,7 @@ def require_readable_dirs(paths: list[str], workspace: str | None) -> tuple[str,
         if not isinstance(raw, str) or not raw.strip():
             raise ConfinementRefused("read_paths entries must be non-empty paths")
         try:
-            path = _resolve_path(raw, base, for_write=False)
+            path = resolve_path(raw, base, for_write=False)
         except PermissionError as error:
             raise ConfinementRefused(f"read path {raw} refused: {error}") from error
         if not path.is_dir():

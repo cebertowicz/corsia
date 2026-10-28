@@ -353,7 +353,7 @@ def test_filesystem_gate_enforces_boundary_without_safehouse(
     monkeypatch, tmp_path
 ):
     from tools import sandbox_config
-    from tools.filesystem_gate import _resolve_path
+    from tools.filesystem_gate import resolve_path
 
     workspace, _repo = _registered_external_repo(tmp_path)
     outside = tmp_path / "private" / "secret.txt"
@@ -361,14 +361,14 @@ def test_filesystem_gate_enforces_boundary_without_safehouse(
     monkeypatch.setattr(sandbox_config, "is_safehouse_available", lambda: False)
 
     with pytest.raises(PermissionError, match="outside the sandbox"):
-        _resolve_path(str(outside))
+        resolve_path(str(outside))
 
 
 def test_filesystem_gate_allows_registered_repo_outside_legacy_allowed_dir(
     monkeypatch, tmp_path
 ):
     from tools import sandbox_config
-    from tools.filesystem_gate import _resolve_path
+    from tools.filesystem_gate import resolve_path
 
     workspace, repo = _registered_external_repo(tmp_path)
     _configure_sandbox(
@@ -379,7 +379,7 @@ def test_filesystem_gate_allows_registered_repo_outside_legacy_allowed_dir(
     )
     monkeypatch.setattr(sandbox_config, "is_safehouse_available", lambda: False)
 
-    assert _resolve_path(str(repo / "app.py"), workspace, workspace) == (
+    assert resolve_path(str(repo / "app.py"), workspace, workspace) == (
         repo / "app.py"
     ).resolve()
 
@@ -388,7 +388,7 @@ def test_filesystem_gate_rejects_outside_alias_into_workspace(
     monkeypatch, tmp_path
 ):
     from tools import sandbox_config
-    from tools.filesystem_gate import _resolve_path
+    from tools.filesystem_gate import resolve_path
 
     workspace = tmp_path / "workspace"
     target = workspace / "projects" / "demo" / "shared" / "inside.txt"
@@ -399,7 +399,7 @@ def test_filesystem_gate_rejects_outside_alias_into_workspace(
     _configure_sandbox(monkeypatch, sandbox_config, workspace, [])
 
     with pytest.raises(PermissionError, match="outside the sandbox"):
-        _resolve_path(str(outside_alias / target.name))
+        resolve_path(str(outside_alias / target.name))
 
 
 def test_canonical_policy_rows_not_raw_git_links_define_repo_grants(

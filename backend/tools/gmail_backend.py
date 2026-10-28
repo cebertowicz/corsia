@@ -73,7 +73,7 @@ class GmailBackend:
         return (await gmail_read.fetch(account_id, message_id)).body
 
     async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
-        return 25_000_000, False
+        return 25_000_000, True
 
     async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
         """The reply target named now or kept from the draft it replaces, and the account's signature."""

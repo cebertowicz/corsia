@@ -19,7 +19,7 @@ def _join_relative_to_workspace(path: str, workspace: Path | None) -> Path:
 
     The one join rule every tool's target-path computation shares: relative
     paths resolve against the caller's own workspace, not any other notion
-    of "current directory". Both ``join_and_resolve`` and ``_resolve_path``
+    of "current directory". Both ``join_and_resolve`` and ``resolve_path``
     call this same function for the join step, so there is exactly one
     place that decision is made — neither can silently diverge from it.
     """
@@ -33,7 +33,7 @@ def join_and_resolve(path: str, workspace: Path | None = None) -> Path:
     """Join a possibly-relative path onto ``workspace`` and canonicalize it.
 
     Carries no authorization decision — callers needing the sandbox
-    boundary use ``_resolve_path``, which joins the same way (through
+    boundary use ``resolve_path``, which joins the same way (through
     ``_join_relative_to_workspace``) and then applies it.
     """
     return _join_relative_to_workspace(path, workspace).resolve(strict=False)
@@ -55,7 +55,7 @@ def canonical_target_path(path: str, workspace: Path | None = None) -> str:
     return str(resolved)
 
 
-def _resolve_path(
+def resolve_path(
     path: str,
     workspace: Path | None = None,
     allowed_dir: Path | None = None,
@@ -138,7 +138,7 @@ async def _resolve_path_for_action(
         # Repository policy behind the boundary reads SQLite and runs Git.
         return AuthorizedPath(
             resolved=await asyncio.to_thread(
-                _resolve_path,
+                resolve_path,
                 path,
                 workspace,
                 allowed_dir,

@@ -40,7 +40,9 @@ async def test_guard_reads_are_repeated_per_draft_and_send(monkeypatch):
         verdict, _ = await mail_guard_runtime.guarded_reply(
             backend, {'id': 'account', 'address': 'me@example.org'}, 'target', 'reply', [])
         assert verdict.stale
-    assert len([c for c in calls if c[0].endswith('/messages')]) == 8
+    assert len([c for c in calls if c[0].endswith('/messages')]) == 4
     assert len([c for c in calls if '/messages/' in c[0]]) == 4
     assert len([c for c in calls if '/threads/' in c[0]]) == 2
-    assert [c for c in calls if c[0] == 'body'] == [('body', 'other'), ('body', 'other')]
+    assert [c for c in calls if c[0] == 'body'] == [
+        ('body', 'other'), ('body', 'target'), ('body', 'other'), ('body', 'target'),
+    ]

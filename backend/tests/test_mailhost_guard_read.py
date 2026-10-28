@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 import re
 
@@ -68,7 +69,9 @@ class FakeIMAP:
             raw, flags = self.mail[self.folder][uid]
             if 'HEADER.FIELDS' in args[1]:
                 raw = raw.split(b'\n\n')[0] + b'\n\n'
-            output.extend([(f'1 (UID {uid} FLAGS ('.encode() + flags + b') BODY[]', raw), b')'])
+            arrival = parsedate_to_datetime(str(BytesParser(policy=policy.default).parsebytes(self.mail[self.folder][uid][0])['Date']))
+            stamp = arrival.strftime('%d-%b-%Y %H:%M:%S %z').encode()
+            output.extend([(f'1 (UID {uid} INTERNALDATE "'.encode() + stamp + b'" FLAGS (' + flags + b') BODY[]', raw), b')'])
         return 'OK', output
 
 
@@ -86,14 +89,15 @@ def provider(monkeypatch):
         return call()
     monkeypatch.setattr(guard_read.imap, 'session', session)
     monkeypatch.setattr(guard_read, 'run_in_db', in_db)
-    monkeypatch.setattr(read, '_guarded', guarded)
+    monkeypatch.setattr(read, 'guarded', guarded)
     yield conn
     folders.forget(('mock:993', 'user'))
 
 
 @pytest.mark.asyncio
 async def test_batched_search_thread_seen_sender_and_lazy_body(provider):
-    target, thread, sender = await guard_read.guard_data('account', read.mint_message_id('account', 42, 1))
+    target, thread, sender, count = await guard_read.guard_data('account', read.mint_message_id('account', 42, 1))
+    assert count == 3
     assert len(thread) == 3
     assert len({m.thread_id for m in thread}) == 1
     assert len(sender) == 3
@@ -107,7 +111,7 @@ async def test_batched_search_thread_seen_sender_and_lazy_body(provider):
     sender_searches = [c for c in searches if c[2] == 'FROM' and c[4] == 'SINCE']
     assert len(sender_searches) == 4
     assert {c[5] for c in sender_searches} == {
-        '26-Oct-2026', (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%d-%b-%Y')
+        '25-Oct-2026', (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%d-%b-%Y')
     }
     assert all('References' in c[2] and 'In-Reply-To' in c[2] and 'Message-ID' in c[2]
                for c in searches if c[2] != 'FROM')

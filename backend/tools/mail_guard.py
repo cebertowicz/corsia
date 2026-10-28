@@ -37,6 +37,7 @@ class Verdict:
     stale: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
+    evidence_ids: list[dict[str, str]] = field(default_factory=list)
 
 
 def normalize_subject(subject: str) -> str:
@@ -53,38 +54,32 @@ def _identity(sender: str) -> tuple[str, str]:
 
 
 def same_sender(left: str, right: str) -> bool:
-    """Display names distinguish people sharing a relay address when both are present."""
-    ln, la = _identity(left)
-    rn, ra = _identity(right)
-    if ln and rn and ln == rn:
-        return True
-    return bool(la and la == ra and (not ln or not rn or ln == rn))
+    """Match mail addresses, independent of display names."""
+    _, left_address = _identity(left)
+    _, right_address = _identity(right)
+    return bool(left_address and left_address == right_address)
 
 
 def evidence(message: Message) -> str:
     state = "unread" if message.unread else "read"
-    return (f"{message.sender} | {message.date.isoformat()} | {state} | "
-            f"thread {message.thread_id} | message {message.message_id}\n"
-            + (message.visible_evidence or "Text withheld; use email_read or ask the person to look in their mail app."))
+    return (f"{message.sender} | {message.date.isoformat()} | {state}\n"
+            + (message.visible_evidence or "Message text withheld."))
 
 
 def check_reply(
-    target: Message | None, thread: list[Message], sender_messages: list[Message],
-    own_address: str, body: str, requested_to: list[str], now: datetime,
+    target: Message, thread: list[Message], sender_messages: list[Message],
+    own_address: str, body: str, requested_to: list[str], now: datetime, sender_count: int,
 ) -> Verdict:
-    """Return stops, overridable stale stops, warnings and the sender's 30-day thread count."""
+    """Return stops, stale evidence, warnings and the sender's 30-day email count."""
     result = Verdict()
     if not body.strip():
         result.stops.append("The message body is empty.")
-    if target is None:
-        result.stops.append("Couldn't read the message being replied to.")
-        return result
     _, sender_address = _identity(target.sender)
     recipients = reply_addresses(target.reply_to, target.sender)
     if not recipients:
-        result.stops.append("The original message has no usable reply address.")
+        result.stops.append("The original message has no usable reply address. Send a new email to the correct address instead.")
     elif not target.reply_to and _NO_REPLY.search(sender_address.split("@", 1)[0]):
-        result.stops.append(f"The sender {sender_address} is a no-reply address with no Reply-To.")
+        result.stops.append(f"The sender {sender_address} is a no-reply address with no Reply-To. Send a new email to a working address instead.")
     else:
         result.recipients = recipients
         if requested_to and [x.casefold() for x in requested_to] != [x.casefold() for x in recipients]:
@@ -109,7 +104,5 @@ def check_reply(
             result.stale.append(detail)
         else:
             result.warnings.append(detail)
-    threads = {message.thread_id for message in sender_messages
-               if message.date >= now - timedelta(days=30) and same_sender(message.sender, target.sender)}
-    result.info.append(f"{len(threads)} thread(s) from {target.sender} in the last 30 days.")
+    result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
     return result

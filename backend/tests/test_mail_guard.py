@@ -8,12 +8,12 @@ TARGET = Message("a", "thread-a", "Taylor <taylor@example.test>", "Budget", NOW 
 
 
 def check(target=TARGET, thread=None, sender=None, body="hello", to=None):
-    return check_reply(target, thread or [], sender or [], "me@example.test", body, to or [], NOW)
+    return check_reply(target, thread or [], sender or [], "me@example.test", body, to or [], NOW, len(sender or []))
 
 
-def test_missing_target_and_empty_body_stop():
-    result = check(target=None, body=" ")
-    assert len(result.stops) == 2
+def test_empty_body_stops():
+    result = check(body=" ")
+    assert len(result.stops) == 1
 
 
 def test_reply_to_wins_and_different_requested_address_warns():
@@ -54,10 +54,17 @@ def test_cross_thread_same_conversation_unread_recent_stops_otherwise_warns():
     assert not check(sender=[replace(other, subject="Other")]).stale
 
 
-def test_relay_sender_name_and_thread_count():
+def test_same_display_name_at_different_address_is_not_same_sender():
+    impostor = replace(TARGET, message_id='other', sender='Taylor <other@example.test>', date=NOW)
+    result = check(thread=[impostor])
+    assert not result.stale
+    assert result.warnings
+
+
+def test_relay_address_matching_and_email_count():
     relay = replace(TARGET, sender="Taylor <relay@example.test>")
     newer = replace(relay, message_id="b", thread_id="thread-b", date=NOW, unread=True)
     other = replace(newer, message_id="c", thread_id="thread-c", sender="Jordan <relay@example.test>")
     result = check(target=relay, sender=[relay, newer, other])
-    assert len(result.stale) == 1
-    assert result.info[0].startswith("2 thread(s)")
+    assert len(result.stale) == 2
+    assert result.info[0].startswith("3 emails")
