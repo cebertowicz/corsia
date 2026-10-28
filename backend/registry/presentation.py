@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from registry.provider_continuity import HARNESS_CONTINUITY_TYPES
+
 CAPABILITY_LEAF_PACKAGE = "leaf-package"
 CAPABILITY_EXTERNAL_LINK = "external-link"
 CAPABILITY_DOWNLOAD = "download"
@@ -65,8 +67,7 @@ _DESCRIPTORS: dict[tuple[str, str], PresentationDescriptor] = {
 #: registers for delivered mail. Kept alongside the descriptor table because
 #: both encode "what a type is", not pane-projection control flow.
 NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
-    ("claude-code", "session"),
-    ("codex", "thread"),
+    *HARNESS_CONTINUITY_TYPES.values(),
     ("gmail", "email-thread"),
     ("local", "plan-decision"),
 })

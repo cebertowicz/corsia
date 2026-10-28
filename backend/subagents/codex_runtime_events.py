@@ -98,9 +98,7 @@ async def settle_committed_tool_result(
         )
     tool_id = canonical.provider_tool_call_id
     if not isinstance(tool_id, str) or not tool_id:
-        raise ToolResultBindingError(
-            "canonical Codex tool result lacks provider call identity"
-        )
+        raise ToolResultBindingError("canonical Codex tool result lacks provider call identity")
     step_id = live.tool_step_ids.get(tool_id)
     if step_id is None:
         existing = await run_in_db(
@@ -123,8 +121,9 @@ async def settle_committed_tool_result(
         )
     name = live.tool_names.pop(tool_id, canonical.name)
     live.tool_step_ids.pop(tool_id)
-    if not live.tool_step_ids:
+    if live.open_tool_step_id == step_id and step_id not in live.tool_step_ids.values():
         live.open_tool_step_id = None
+    if not live.tool_step_ids:
         live.tools_settled.set()
     meta = {
         "tool_call_id": tool_id,
@@ -201,7 +200,8 @@ async def settle_missing_tool_results(
         for tool_id, _name in calls:
             live.tool_names.pop(tool_id, None)
             live.tool_step_ids.pop(tool_id, None)
-    live.open_tool_step_id = None
+        if live.open_tool_step_id == step_id and step_id not in live.tool_step_ids.values():
+            live.open_tool_step_id = None
     live.tools_settled.set()
 
 

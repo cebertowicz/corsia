@@ -380,9 +380,9 @@ def persist_tool_use(
 ) -> str:
     """Persist a tool call as a canonical intermediate assistant row.
 
-    Shape matches the main chat's LLM format: empty content plus
-    ``metadata.llm_tool_calls`` and ``step_type='tool_calls'``. The row remains
-    its own durable Assistant Step and owns its result lineage.
+    A new Step has empty content and ``metadata.llm_tool_calls``.
+    When ``assistant_step_id`` is provided, append the call to that existing
+    Step and return its id.
     """
     with write_transaction(db, scope="persist_provider_tool_use") as connection:
         if assistant_step_id is not None:

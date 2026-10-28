@@ -343,7 +343,6 @@ async def test_codex_pre_execution_rejections_settle_on_separate_steps(
     }
 
 
-
 @pytest.mark.asyncio
 async def test_codex_call_declared_behind_input_settlement_binds_its_step(
     isolated_db, monkeypatch,

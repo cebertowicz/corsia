@@ -15,7 +15,7 @@ import { token } from '$lib/stores/auth';
 import { pickerPolicy, pickerPolicyProject } from '$lib/stores/accountPicker';
 import { activeModelId, models, type Model } from '$lib/stores/models';
 import type { RunsOn } from '$lib/stores/modelTurn';
-import { activeThreadId, threads } from '$lib/stores/threads';
+import { activeThreadId, draftAccountId, threads } from '$lib/stores/threads';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { providerCardRequest, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { vendorAccounts, type VendorAccount, type VendorAccountUsage } from '$lib/stores/vendorAccounts';
@@ -310,14 +310,20 @@ describe('model picker account rows', () => {
 		expect(host.querySelector('.recovery')).toBeNull();
 	});
 
-	it('shows the rows read-only in a chat with no thread yet, and sends nothing', async () => {
+	it('marks a draft account choice without sending a pin request', async () => {
 		activeThreadId.set(null);
 		open();
 		const rows = accountRows();
 		expect(rows).toHaveLength(2);
-		expect(host.querySelectorAll('.account-usage-row.picker button, button.account-usage-row.picker')).toHaveLength(0);
+		expect(host.querySelectorAll('button.account-usage-row.picker')).toHaveLength(2);
 		rows[1].click();
 		await settle();
+		expect(get(draftAccountId)).toBe('personal');
+		// This component test mocks the catalog loader; supply the server's selected row.
+		models.set(CATALOG.map((item) => ({ ...item, runs_on: item.runs_on?.map((run) => ({ ...run, selected: run.account_id === 'personal' })) })));
+		await settle();
+		expect(rows[0].getAttribute('aria-pressed')).toBe('false');
+		expect(rows[1].getAttribute('aria-pressed')).toBe('true');
 		expect(puts()).toHaveLength(0);
 	});
 
