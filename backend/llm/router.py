@@ -8,6 +8,7 @@ from typing import Any, Awaitable
 import litellm
 
 from llm.error_cause import mark_own_server
+from llm.providers.omlx_messages import shape_messages
 
 litellm.suppress_debug_info = True
 
@@ -317,11 +318,8 @@ async def chat_completion(
     )
 
     from llm.base import base_completion
-    if is_omlx:
-        from llm.providers.omlx_messages import shape_messages
-        messages = shape_messages(messages, model, omlx_server_id)
     response = await _observed(api_base, base_completion(
-        messages, tools,
+        shape_messages(messages, model, omlx_server_id, is_omlx=is_omlx), tools,
         model=model, **output_budget,
         api_key=api_key, api_base=api_base, omlx_server_id=omlx_server_id,
         on_reasoning_chunk=on_reasoning_chunk,

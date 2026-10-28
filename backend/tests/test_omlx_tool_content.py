@@ -5,7 +5,8 @@ import json
 import pytest
 
 from llm.base import sanitize_empty_content
-from llm.catalog_network_models import _apply_admin_model, _network_model_payload, _parse_omlx_status
+from llm.catalog_network_models import _network_model_payload, _parse_omlx_status
+from llm.omlx_capabilities import apply_admin_model
 from llm.providers.omlx_messages import shape_messages
 
 
@@ -29,7 +30,7 @@ def test_discovered_family_survives_catalog_payload():
             return {"models": [{"id": "renamed", "config_model_type": "gemma4"}]}
 
     canonical = _parse_omlx_status(Response())
-    _apply_admin_model(canonical, {"id": "renamed", "config_model_type": "gemma4_unified"})
+    apply_admin_model(canonical, {"id": "renamed", "config_model_type": "gemma4_unified"})
     row = _network_model_payload("server", {}, "omlx", canonical["renamed"], {}, None)
     assert json.loads(row["metadata_json"])["config_model_type"] == "gemma4_unified"
 
