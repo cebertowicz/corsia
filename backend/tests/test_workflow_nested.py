@@ -11,7 +11,7 @@ from tests.skill_sidecar_helpers import POINTER
 from tests.test_workflow_task_fields import _mutate, db
 from plans import service
 from tools.workflow_task_fields import (
-    Workflow, _missing_required_steps, _run_tasks_are_terminal, append_add_notice, append_close_notice,
+    Workflow, _missing_required_steps, _run_steps_are_terminal, append_add_notice, append_close_notice,
     creation_version, with_referenced_version,
 )
 
@@ -42,9 +42,9 @@ def test_nested_phase_counts_and_terminal(db):
     phase = db.execute("SELECT * FROM plan_nodes WHERE id=?", (outer["id"],)).fetchone()
     workflows = {"outer": Workflow(("design",), nested={"design": "inner"})}
     assert _missing_required_steps(db, phase, workflows) == ()
-    assert not _run_tasks_are_terminal(db, outer["id"])
+    assert not _run_steps_are_terminal(db, outer["id"])
     closed = _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Finished"})["node"]
-    assert _run_tasks_are_terminal(db, outer["id"])
+    assert _run_steps_are_terminal(db, outer["id"])
     result = {}
     append_close_notice(result, node_id=inner["id"], db=db, workflows={"outer": Workflow(("design", "review"), nested={"design": "inner"})})
     assert result["notice"] == "Required step review has no task in this outer run."

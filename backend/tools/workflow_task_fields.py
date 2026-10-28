@@ -142,9 +142,8 @@ def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
     if workflow is not None and workflow.version is None:
         _append_notice(result, "Workflow version unavailable; recorded null.")
     if node.get("kind") == "phase" and isinstance(reference, str):
-        parent_id, seen = node.get("parent_id"), {node["id"]}
-        while parent_id is not None and parent_id not in seen:
-            seen.add(parent_id)
+        parent_id = node.get("parent_id")
+        while parent_id is not None:
             parent = db.execute(
                 "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?", (parent_id,),
             ).fetchone()
@@ -188,7 +187,7 @@ def append_close_notice(
         phases.append(_phase_for_node(db, str(node["parent_id"])))
     notices = []
     for phase in phases:
-        if phase is None or not _run_tasks_are_terminal(db, str(phase["id"])):
+        if phase is None or not _run_steps_are_terminal(db, str(phase["id"])):
             continue
         missing = _missing_required_steps(db, phase, workflows)
         run = f"this {phase['workflow_ref']} run" if nested else "this run"
@@ -257,7 +256,8 @@ def _unavailable_workflow_notice(phase) -> str:
     )
 
 
-def _run_tasks_are_terminal(db, phase_id: str) -> bool:
+def _run_steps_are_terminal(db, phase_id: str) -> bool:
+    """Whether every step of a run has finished: its tasks and its nested phases."""
     rows = db.execute(
         "SELECT state,archived_at FROM plan_nodes WHERE parent_id=? AND kind IN ('task','phase')",
         (phase_id,),

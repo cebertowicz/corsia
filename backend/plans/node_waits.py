@@ -24,10 +24,6 @@ def encoded_ids(node_ids) -> str:
     return json.dumps(list(dict.fromkeys(str(node_id) for node_id in node_ids)))
 
 
-#: Deeper than any real plan; it only bounds the walk if a parent link ever loops.
-_MAX_ANCESTOR_DEPTH = 64
-
-
 def inherited_sql(prerequisite: str, ancestor: str) -> str:
     """An ``ancestor``'s edge to ``prerequisite`` holds its descendants, as SQL.
 
@@ -78,7 +74,8 @@ def unmet_prerequisites(
     # A node's own edges (depth 0), then those of its open ancestors: an
     # ancestor's dependency on work outside it holds its descendants too.
     # Nearest first, so a prerequisite reached at several levels keeps the
-    # nearest one.
+    # nearest one. A parent link is set once, at insert, to a node that
+    # already exists, so the walk up always ends at a root.
     touched = set()
     inherited = f"""UNION ALL
             SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
@@ -96,7 +93,7 @@ def unmet_prerequisites(
                 WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL
                 UNION ALL
                 SELECT up.root,a.parent_id,up.depth+1 FROM up JOIN plan_nodes a ON a.id=up.id
-                WHERE a.parent_id IS NOT NULL AND up.depth<{_MAX_ANCESTOR_DEPTH}
+                WHERE a.parent_id IS NOT NULL
             )
             SELECT {_prerequisite_columns('d.node_id', 'n', compact)},NULL AS via,p.order_key AS order_key,0 AS depth
             FROM plan_node_dependencies d
