@@ -32,7 +32,7 @@ def _classify(raw: dict[str, Any]) -> str:
 def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     keys = ("account_id", "from", "to", "label", "thread_id", "message_id", "date", "history_id",
             "subject", "screen_status", "needs_person", "injection", "injection_rule", "kind",
-            "screen_model", "author_origin")
+            "screen_model")
     return {**{k: raw[k] for k in keys if raw.get(k) is not None}, "author_origin": "outside"}
 
 

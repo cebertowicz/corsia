@@ -75,10 +75,15 @@ def test_unknown_and_suppression_share_author():
     assert MANIFEST.extract_facts(raw, None)["author_origin"] == "outside"
 
 
-def test_own_sender_acting_on_outside_pr_is_not_suppressed():
-    raw = payload("pr", "labeled")
-    assert raw["sender"]["login"] == "inside"
+@pytest.mark.parametrize("action", ["closed", "synchronize", "ready_for_review", "labeled"])
+def test_suppression_follows_the_actor_not_the_pr_author(action):
+    raw = payload("pr", action, login="inside")
+    raw["sender"] = {"login": "outside"}
     assert not guard.is_bot_or_self_authored(raw)
+    raw["pull_request"]["user"] = {"login": "dependabot[bot]", "type": "Bot"}
+    assert not guard.is_bot_or_self_authored(raw)
+    raw = payload("pr", action)
+    assert guard.is_bot_or_self_authored(raw)
     assert MANIFEST.extract_facts(raw, None)["author_origin"] == "outside"
 
 
@@ -102,6 +107,19 @@ def test_identity_view_once_per_delivery(monkeypatch, login, expected_calls):
     assert view.call_count == expected_calls
 
 
+def test_no_rule_reads_no_identity(monkeypatch):
+    from connections import github_agent
+    from events.connectors import github_content_facts, github_ownership, github_rules
+
+    monkeypatch.setattr(github_content_facts, "is_own", github_ownership.is_own)
+    view = Mock(return_value=SimpleNamespace(ready=False))
+    monkeypatch.setattr(github_agent, "view", view)
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (False, False))
+    scope = github_rules.rule_scope("webhook.github.pr_opened", payload("pr", "opened"), None)
+    assert not scope.any_rule and scope.envelope is None
+    assert view.call_count == 0
+
+
 def test_normalized_outside_pr_and_comment_contain_no_text():
     for kind, action in (("pr", "opened"), ("pr_comment", "created")):
         event = normalize("github", payload(kind, action))
@@ -122,7 +140,7 @@ async def test_existing_webhook_route_normalizes_outside_content(main_db, monkey
     monkeypatch.setattr("events.connectors.github_rules.rule_scope", lambda *args: RuleScope())
     monkeypatch.setattr("events.connectors.github_rules.apply_webhook_rules_sync", lambda envelope, *args, **kwargs: captured.append(envelope))
     monkeypatch.setattr("events.delivery.deliver_and_resolve_to_thread", AsyncMock(return_value=True))
-    raw = payload(kind, action)
+    raw = {**payload(kind, action), "sender": {"login": "outside"}}  # the outside author acts
     await dispatch_github_webhook_for_replay(event_type, raw, delivery_id=f"test-{kind}")
     assert len(captured) == 1
     facts = captured[0].facts

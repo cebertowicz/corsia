@@ -114,7 +114,7 @@ def declaration_facts(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def is_own(login: str) -> bool:
-    """Whether a verified login of CORSIA's own wrote this PR: the host's, else the agents' account.
+    """Whether ``login`` is a verified login of CORSIA's own: the host's, else the agents' account.
 
     The agents' account is read only for another author: one indexed read and one
     ``stat``, no subprocess. An unknown or unverified identity matches nothing.

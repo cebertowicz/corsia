@@ -82,11 +82,6 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
     """Return the internal event name for a GitHub webhook payload."""
     action = payload.get("action", "")
 
-    # Edited and review types are declared but await rule-only admission without
-    # a default owner leg in the outside-content rule set (O3).
-    if action == "edited" or event_type == "pull_request_review":
-        return None
-
     if event_type == "pull_request":
         if action == "opened":
             return GITHUB_ROUTED_EVENTS["pr.opened"]

@@ -7,7 +7,7 @@ this guard exists to prevent.
 
 Two signals, both checked:
 
-1. **Structural** — the content author is a Bot account
+1. **Structural** — the GitHub sender/comment author is a Bot account
    (``user.type == "Bot"`` or login ending in ``[bot]``). GitHub Apps (the
    reviewer posts via one) always carry this.
 2. **Configured identity** — a settings-managed allowlist of logins that ARE
@@ -62,17 +62,26 @@ def event_author(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _acting_author(payload: dict[str, Any]) -> dict[str, Any]:
+    """The user whose action could loop: the comment author, else the sender.
+
+    Not :func:`event_author`: a human merging, closing or pushing to a PR an
+    agent wrote must still wake its owner, so a PR's or issue's author never
+    decides suppression.
+    """
+    comment = payload.get("comment") or {}
+    if comment.get("user"):
+        return comment["user"]
+    return payload.get("sender") or {}
+
+
 def is_bot_or_self_authored(payload: dict[str, Any]) -> bool:
     """True when the event was authored by a bot or CORSIA's own identity.
 
     Used by the router to SUPPRESS the event before it routes — a suppressed
     event never reaches a thread, so the reviewer/bot cannot trigger itself.
     """
-    user = event_author(payload)
-    # Non-content events such as check suites still suppress their bot sender.
-    if not any(key in payload for key in ("comment", "review", "pull_request", "issue")):
-        sender = payload.get("sender")
-        user = sender if isinstance(sender, dict) else {}
+    user = _acting_author(payload)
     login = str(user.get("login", "")).lower()
     user_type = str(user.get("type", "")).lower()
 

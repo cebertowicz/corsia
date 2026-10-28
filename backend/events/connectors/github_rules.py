@@ -84,15 +84,17 @@ def rule_scope(
     if event_type is None:
         return RuleScope(any_rule=False)
     try:
-        envelope = _envelope(internal_event, payload, selected_pr)
-    except MalformedEventError as exc:
-        logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
-        return RuleScope(any_rule=False)
-    try:
         any_rule, self_rule = rule_reads.type_rules(MANIFEST.connector, event_type)
     except Exception:
         # Rules only add: a failed read costs this webhook its rules, never its routing.
         logger.exception("event rules: no rule evaluated {}: rule read failed", internal_event)
+        return RuleScope(any_rule=False)
+    if not any_rule:
+        return RuleScope(any_rule=False)
+    try:
+        envelope = _envelope(internal_event, payload, selected_pr)
+    except MalformedEventError as exc:
+        logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
         return RuleScope(any_rule=False)
     if not self_rule:
         return RuleScope(any_rule=any_rule, envelope=envelope)
