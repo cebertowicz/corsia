@@ -28,6 +28,14 @@ function render(points: BarPoint[]): HTMLElement {
 const texts = (root: Element, cls: string) => [...root.querySelectorAll(`text.${cls}`)].map((n) => n.textContent);
 
 describe('MeasurementBarChart', () => {
+	it('keeps a single digit upright on the phone chart', () => {
+		const chart = render([point(0, 8, 50), point(1, 12, 50)]);
+		const labels = chart.querySelectorAll('.mob svg text.vl');
+		expect(labels[0].textContent).toBe('8');
+		expect(labels[0].hasAttribute('transform')).toBe(false);
+		expect(labels[1].getAttribute('transform')).toMatch(/^rotate\(-90 /);
+	});
+
 	it('draws axis title, ticks, a zero baseline, a value on every bar, the n row and a caption', () => {
 		const chart = render([point(0, 30, 50), point(1, 45, 80), point(2, 92, 1349)]);
 		const phone = chart.querySelector('.mob svg')!;
