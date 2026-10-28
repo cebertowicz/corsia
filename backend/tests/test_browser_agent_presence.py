@@ -68,23 +68,28 @@ async def test_only_an_agent_command_the_guard_lets_through_puts_the_agent_in_th
 
 
 @pytest.mark.asyncio
-async def test_native_ref_click_is_refused_before_input_when_person_has_control(monkeypatch):
+async def test_ref_click_is_refused_before_input_when_person_has_control(monkeypatch):
     owner = _owner(monkeypatch, {"shown": False})
     browser_control.pane_connected("thread-1", "pane-1")
-    native_calls = []
+    input_calls = []
 
     async def refuse_person_step(_thread_id, _probe, _args, **_kwargs):
         raise BrowserSessionError(browser_control.PERSON_STEP)
 
     async def native_input(_runtime, args, **_kwargs):
-        native_calls.append(args)
+        input_calls.append(args)
         return CommandResult(0, "{}", ""), False
+
+    async def shared_input(*args):
+        input_calls.append(args)
+        return "ok"
 
     monkeypatch.setattr(browser_control, "require_page_access", refuse_person_step)
     monkeypatch.setattr(owner, "_run_admitted", native_input)
+    monkeypatch.setattr(browser_dom_write, "shared_action", shared_input)
     with pytest.raises(BrowserSessionError, match=browser_control.PERSON_STEP):
         await owner.run("thread-1", ("click", "@e1"), session="existing")
-    assert native_calls == []
+    assert input_calls == []
 
 
 @pytest.mark.asyncio
@@ -228,11 +233,22 @@ async def test_css_target_uses_hit_identity(uncovered, expected):
     assert found and node == expected
 
 
-@pytest.mark.parametrize("selector", ["@e1", "e1", "ref=e1"])
-def test_ref_click_uses_native_actionability(selector):
-    assert browser_dom_write.native_ref_click(("click", selector))
-    assert not browser_dom_write.native_ref_click(("fill", selector, "value"))
-    assert not browser_dom_write.native_ref_click(("click", "#button"))
+@pytest.mark.asyncio
+async def test_ref_hit_walks_to_the_matching_ancestor(monkeypatch):
+    class AncestorCdp(FakeCdp):
+        async def call(self, method, **params):
+            if method == "DOM.getNodeForLocation":
+                return {"backendNodeId": 8}
+            if method == "DOM.getBoxModel" and params.get("backendNodeId") == 8:
+                return {"model": {"border": [70, 65, 120, 65, 120, 85, 70, 85]}}
+            if method == "Runtime.callFunctionOn" and "getRootNode" in params.get("functionDeclaration", ""):
+                return {"result": {"objectId": "parent"}}
+            return await super().call(method, **params)
+
+    cdp = AncestorCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert "DOM.resolveNode" in cdp.calls
 
 
 @pytest.mark.asyncio

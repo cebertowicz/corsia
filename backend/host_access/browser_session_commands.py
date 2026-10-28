@@ -172,8 +172,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
     # A pane command is never a DOM write (_PANE_COMMANDS), so a marked field is always the agent's.
-    shared_write = (browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
-                    and not browser_dom_write.native_ref_click(args))
+    shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
     if guarded:

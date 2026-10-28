@@ -40,11 +40,6 @@ def is_dom_write(args: Sequence[str]) -> bool:
     return len(args) >= 2 and args[0] in DOM_WRITES
 
 
-def native_ref_click(args: Sequence[str]) -> bool:
-    """The native daemon owns ref identities and checks their click point itself."""
-    return len(args) == 2 and args[0] == "click" and bool(re.fullmatch(r"(?:@|ref=)?e\d+", args[1].strip()))
-
-
 async def shared_action(run: RunCommand, endpoint: str, args: Sequence[str],
                         on_field: FieldTarget | None = None) -> str:
     """Perform a click, fill, type or select inside the page without moving the shared focus or pointer.
@@ -189,18 +184,35 @@ async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
         # Chrome reports no node at a point nothing hit-tests at.
         return None
     node = protocol_int(location.get("backendNodeId"))
-    return node if await _matching_box(cdp, node, box) else None
+    return await _matching_ancestor(cdp, node, box)
 
 
-async def _matching_box(cdp: CdpClient, node: int, expected: dict) -> bool:
-    description = await cdp.call("DOM.describeNode", backendNodeId=node, depth=20, pierce=True)
-    current = description.get("node")
-    while isinstance(current, dict):
-        backend = protocol_int(current.get("backendNodeId"))
-        if await _box_matches(cdp, backend, expected):
-            return True
-        current = current.get("parent")
-    return False
+async def _matching_ancestor(cdp: CdpClient, node: int, expected: dict) -> int | None:
+    """Walk from the hit to a matching ancestor, including shadow hosts.
+
+    Refs expose geometry but not identity; a same-sized overlay can still match.
+    """
+    context = None
+    while node:
+        if await _box_matches(cdp, node, expected):
+            return node
+        try:
+            if context is None:
+                context = await _isolated_context(cdp)
+            resolved = await cdp.call("DOM.resolveNode", backendNodeId=node, executionContextId=context)
+            parent = await cdp.call(
+                "Runtime.callFunctionOn", objectId=_object_id(resolved), returnByValue=False, silent=True,
+                functionDeclaration="function() { return this.parentElement || this.getRootNode().host || null; }",
+            )
+            object_id = parent.get("result", {}).get("objectId")
+            if not isinstance(object_id, str):
+                return None
+            description = await cdp.call("DOM.describeNode", objectId=object_id)
+            node = protocol_int(description.get("node", {}).get("backendNodeId"))
+        except BrowserSessionError:
+            # An inaccessible frame kept the old refusal when its hit box did not match.
+            return None
+    return None
 
 
 async def _box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
