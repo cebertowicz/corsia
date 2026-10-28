@@ -160,11 +160,9 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         owner._queued_actions -= 1
     try:
         rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
-        if (show_window or pane) and not runtime.record.shared and not rendered.startswith("Error:"):
-            runtime.record = replace(runtime.record, shared=True)
-            if not pane:
-                browser_control.announce_browser_opened(thread_id)
-                await asyncio.to_thread(emit_product_event, "browser_pane", "shared_on_demand", thread_id=thread_id)
+        if (show_window or pane) and not rendered.startswith("Error:"):
+            # A connected pane already shows the page, so only an agent's share reveals it.
+            await _share(runtime, thread_id, reveal=not pane)
         if notice and not pane and runtime.record.profile_notice and not runtime.profile_notice_sent:
             runtime.profile_notice_sent = True
             rendered += "\n" + runtime.record.profile_notice
@@ -227,11 +225,21 @@ async def browser_endpoint(owner: Any, thread_id: str) -> str:
     """Resolve the browser-level CDP endpoint for target-change notifications."""
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
-    result = await _command(owner, runtime, None, ("get", "cdp-url"), 10)
-    endpoint = browser_cdp._data_field(result, "cdpUrl")
-    if endpoint is None or not endpoint.startswith("ws"):
-        raise BrowserSessionError("This browser couldn't be checked")
-    return endpoint
+    return await browser_cdp.browser_endpoint(partial(_command, owner, runtime, None), "This browser couldn't be checked")
+
+
+async def _share(runtime: Any, thread_id: str, *, reveal: bool) -> None:
+    """The one transition of a running session from headless to shared with the person's pane.
+
+    A session starts shared only when created with show_window (_admit), and that first open reveals
+    the pane itself (_run_action). Every later share comes through here, after its command succeeded.
+    """
+    if runtime.record.shared:
+        return
+    runtime.record = replace(runtime.record, shared=True)
+    if reveal:
+        browser_control.announce_browser_opened(thread_id)
+        await asyncio.to_thread(emit_product_event, "browser_pane", "shared_on_demand", thread_id=thread_id)
 
 
 async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> None:
@@ -240,13 +248,11 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
     command = partial(_command, owner, runtime, None)
     endpoint = await browser_cdp.page_endpoint(command)
-    if not runtime.record.shared:
-        runtime.record = replace(runtime.record, shared=True)
-        browser_control.announce_browser_opened(thread_id)
-        await asyncio.to_thread(emit_product_event, "browser_pane", "shared_on_demand", thread_id=thread_id)
     await browser_control.declare_person_step(
         thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
     )
+    # Shared only once the step exists, so a refused declaration leaves the session as it was.
+    await _share(runtime, thread_id, reveal=True)
 
 
 async def close_thread(owner: Any, thread_id: str) -> str:

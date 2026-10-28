@@ -129,6 +129,37 @@ async def test_sharing_does_not_relaunch_or_unshare(synthetic_browser, monkeypat
     await fake.owner.shutdown()
 
 
+@pytest.mark.parametrize("declared", [True, False])
+async def test_person_step_shares_only_once_declared(synthetic_browser, monkeypatch, declared):
+    from host_access import browser_control, browser_session_commands
+    from host_access.browser_session_state import BrowserSessionError
+    events, opened = [], []
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append(args))
+    monkeypatch.setattr(browser_control, 'announce_browser_opened', opened.append)
+
+    async def endpoint(_run):
+        return 'ws://page.test'
+
+    async def declare(*_args, **_kwargs):
+        if not declared:
+            raise BrowserSessionError("declined")
+
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', endpoint)
+    monkeypatch.setattr(browser_control, 'declare_person_step', declare)
+    fake = synthetic_browser
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=False)
+    if declared:
+        await fake.owner.declare_person_step("thread", "Solve the check")
+    else:
+        with pytest.raises(BrowserSessionError):
+            await fake.owner.declare_person_step("thread", "Solve the check")
+    # A refused declaration leaves the session headless and unannounced.
+    assert fake.owner._sessions["thread"].record.shared is declared
+    assert opened == (["thread"] if declared else [])
+    assert events == ([('browser_pane', 'shared_on_demand')] if declared else [])
+    await fake.owner.shutdown()
+
+
 async def test_active_count_includes_running_and_queued(synthetic_browser, monkeypatch):
     fake = synthetic_browser
     await fake.owner.run('thread', ['snapshot'])

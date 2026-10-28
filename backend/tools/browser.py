@@ -6,6 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -85,7 +86,7 @@ class BrowserOpenTool(Tool):
         )
         if result.startswith("Error"):
             return result
-        if share_existing and browser_cli.json_object(result).get("url") == effective_url:
+        if share_existing and _same_page_url(browser_cli.json_object(result).get("url"), effective_url):
             return f"Shared the current page in the person's CORSIA pane: {effective_url}"
 
         navigation_result = await _run(
@@ -107,6 +108,22 @@ class BrowserOpenTool(Tool):
             )
             return f"{navigation_result}\n{wait_result}".strip()
         return navigation_result
+
+
+def _same_page_url(reported: object, wanted: str) -> bool:
+    """Whether Chrome's reported address is the requested one, as Chrome canonicalizes it.
+
+    Chrome lowercases the scheme and host and reports an empty path as "/", so
+    "https://Example.com" is already showing when it reports "https://example.com/".
+    """
+    if not isinstance(reported, str):
+        return False
+
+    def canonical(url: str) -> tuple[str, str, str, str, str]:
+        parts = urlsplit(url)
+        return (parts.scheme.lower(), parts.netloc.lower(), parts.path or "/", parts.query, parts.fragment)
+
+    return canonical(reported) == canonical(wanted)
 
 
 class BrowserScreenshotTool(Tool):

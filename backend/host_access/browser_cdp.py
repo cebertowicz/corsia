@@ -228,12 +228,18 @@ async def page_endpoint(run: RunCommand) -> str:
     It picks the page matching agent-browser's active URL and title. Pages with the same
     URL and title remain indistinguishable because the native CLI exposes no target ID.
     """
-    browser_endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
-    if browser_endpoint is None or not browser_endpoint.startswith("ws"):
-        raise BrowserSessionError("This page couldn't be checked")
+    endpoint = await browser_endpoint(run, "This page couldn't be checked")
     current_url = _data_field(await run(("get", "url"), 10), "url")
     current_title = _data_field(await run(("get", "title"), 10), "title")
-    return await asyncio.to_thread(_page_endpoint, browser_endpoint, current_url, current_title)
+    return await asyncio.to_thread(_page_endpoint, endpoint, current_url, current_title)
+
+
+async def browser_endpoint(run: RunCommand, refusal: str) -> str:
+    """The session's browser-level CDP endpoint, refused with the caller's own wording."""
+    endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
+    if endpoint is None or not endpoint.startswith("ws"):
+        raise BrowserSessionError(refusal)
+    return endpoint
 
 
 def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:

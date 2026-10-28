@@ -48,6 +48,18 @@ async def test_same_url_only_skips_navigation_for_first_share(monkeypatch, show_
         assert result == "Shared the current page in the person's CORSIA pane: https://example.com/"
 
 
+@pytest.mark.parametrize(('requested', 'reported', 'same'), [
+    ('https://example.com', 'https://example.com/', True),
+    ('https://Example.com/a?b=1', 'https://example.com/a?b=1', True),
+    ('https://example.com/a', 'https://example.com/a/', False),
+    ('https://example.com/?b=1', 'https://example.com/', False),
+    ('https://example.com/', None, False),
+])
+def test_share_compares_addresses_as_chrome_reports_them(requested, reported, same):
+    # A host-root share must not reload the page it is sharing (and lose a captcha or form in progress).
+    assert browser._same_page_url(reported, requested) is same
+
+
 @pytest.mark.asyncio
 async def test_snapshot_lists_and_switches_only_existing_tab_refs(monkeypatch):
     calls = []
@@ -195,5 +207,59 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     assert cleared == [('thread', 'pane')]
-    assert events == [(('browser_pane', 'tab_followed'), {'thread_id': 'thread'})]
+    assert events == [(('browser_pane', 'target_changed'), {'thread_id': 'thread'})]
     assert 'thread' not in browser_pane_state._target_changes
+
+
+@pytest.mark.asyncio
+async def test_lost_target_watch_keeps_the_pane_on_its_current_tab(monkeypatch):
+    from host_access.browser_session_state import BrowserSessionError
+    started = []
+    restarted = asyncio.Event()
+    watched = []
+
+    async def stream(*_args):
+        started.append(True)
+        if len(started) >= 4:
+            restarted.set()
+        await asyncio.Future()
+
+    async def watch(_thread, _notify, _pages):
+        watched.append(True)
+        raise BrowserSessionError('target watch down')
+
+    monkeypatch.setattr(browser_stream, 'PANE_RETRY_DELAYS', ())
+    monkeypatch.setattr(browser_stream, 'emit_product_event', lambda *args, **kwargs: None)
+    monkeypatch.setattr(browser_stream, '_screencast_events', stream)
+    monkeypatch.setattr(browser_stream, '_metadata_events', stream)
+    monkeypatch.setattr(browser_pane, 'watch_targets', watch)
+    monkeypatch.setattr(browser_pane, 'clear_page_endpoint', lambda *args: None)
+    task = asyncio.create_task(browser_stream._follow_page('thread', 'pane', object(), lambda _m: None))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    # The watch gave up, yet the pane still streams its tab without a restart or an error.
+    assert watched == [True] and len(started) == 2 and not task.done()
+    # An agent's own tab switch still moves the pane.
+    browser_pane_state.target_changed('thread')
+    await asyncio.wait_for(restarted.wait(), 1)
+    assert not task.done()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_queued_pointer_moves_collapse_as_they_arrive():
+    move = lambda x: {'type': 'input_mouse', 'eventType': 'mouseMoved', 'x': x}  # noqa: E731
+    click = {'type': 'input_mouse', 'eventType': 'mousePressed', 'x': 3}
+    sent = asyncio.Queue()
+    for message in (move(1), move(2), move(3), click, move(4)):
+        sent.put_nowait(json.dumps(message))
+
+    class Pane:
+        async def receive_text(self):
+            return await sent.get()
+
+    messages = browser_stream._pane_messages(Pane())
+    # A stalled page holds at most one waiting move: moves behind a move replace it, a click never does.
+    assert [await anext(messages) for _ in range(3)] == [move(3), click, move(4)]
+    await messages.aclose()

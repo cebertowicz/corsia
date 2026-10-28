@@ -133,16 +133,26 @@ async def _metadata_events(thread_id: str, connection_token: str, report: Callab
     )
 
 
+async def _watch_targets(thread_id: str, connection_token: str, changed: asyncio.Event,
+                         pages: list[set[str] | None]) -> None:
+    """Report tab changes; once retries run out the pane keeps showing its current tab."""
+    try:
+        await _retry_pane_connection(
+            thread_id, connection_token, "target watch", "target watch ended",
+            lambda: browser_pane.watch_targets(thread_id, changed.set, pages),
+        )
+    except BrowserSessionError as exc:
+        # Agent tab switches still reach the pane through target_changed; only browser-opened tabs go unfollowed.
+        log.warning("browser pane %s stopped watching tabs and keeps its current tab: %s", thread_id, exc)
+
+
 async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames,
                        report: Callable[[dict], None]) -> None:
     """Restart both page streams on a target change without reconnecting the pane."""
     changed = asyncio.Event()
     browser_pane_state.watch_target_changes(thread_id, connection_token, changed.set)
     pages: list[set[str] | None] = [None]
-    watcher = asyncio.create_task(_retry_pane_connection(
-        thread_id, connection_token, "target watch", "The shared browser stopped following tabs",
-        lambda: browser_pane.watch_targets(thread_id, changed.set, pages),
-    ))
+    watcher = asyncio.create_task(_watch_targets(thread_id, connection_token, changed, pages))
     streams: set[asyncio.Task] = set()
     try:
         while True:
@@ -152,13 +162,17 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
                 asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
                 change_wait,
             }
-            done, _ = await asyncio.wait(streams | {watcher}, return_when=asyncio.FIRST_COMPLETED)
+            while True:
+                waiting = streams if watcher.done() else streams | {watcher}
+                done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+                if done != {watcher}:
+                    break
             for task in done:
-                if task is change_wait:
+                if task is change_wait or task is watcher:
                     continue
                 task.result()
             changed.clear()
-            await asyncio.to_thread(emit_product_event, "browser_pane", "tab_followed", thread_id=thread_id)
+            await asyncio.to_thread(emit_product_event, "browser_pane", "target_changed", thread_id=thread_id)
             for task in streams:
                 if not task.done():
                     task.cancel()
@@ -238,9 +252,10 @@ async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
 
     Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
     sends one per animation frame; delivered one at a time, moves pile up and a click behind them
-    lands seconds late. So the pane is read while earlier messages are delivered, and a move with
-    another move queued right behind it is dropped. Nothing else is dropped or reordered, and the
-    pane's disconnect is raised only after everything it sent first.
+    lands seconds late. So the pane is read while earlier messages are delivered, and a move that
+    arrives right behind a queued move replaces it, so a stalled page never holds more than one
+    waiting move. Nothing else is dropped or reordered, and the pane's disconnect is raised only
+    after everything it sent first.
     """
     received: collections.deque[dict | Exception] = collections.deque()
     arrived = asyncio.Event()
@@ -254,8 +269,6 @@ async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
                 data = received.popleft()
                 if isinstance(data, Exception):
                     raise data
-                if _is_move(data) and received and _is_move(received[0]):
-                    continue
                 yield data
     finally:
         reader.cancel()
@@ -271,7 +284,10 @@ async def _receive_pane_messages(pane: WebSocket, received: collections.deque[di
             except (TypeError, ValueError):
                 continue
             if isinstance(data, dict):
-                received.append(data)
+                if _is_move(data) and received and _is_move(received[-1]):
+                    received[-1] = data
+                else:
+                    received.append(data)
                 arrived.set()
     except Exception as exc:
         received.append(exc)
