@@ -129,11 +129,14 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     if not is_direct_loopback(request):
         raise HTTPException(403, "The Google sign-in callback is loopback-only")
     try:
-        await oauth.complete_sign_in(code, state)
+        await oauth.complete_sign_in(
+            code, state, access_token=request.query_params.get("access_token"),
+            refresh_token=request.query_params.get("refresh_token"), scope=request.query_params.get("scope"),
+        )
     except GoogleError as exc:
         return _page(_callback_message(exc), 400)
-    except Exception:
-        log.exception("Google sign-in callback failed")
+    except Exception as error:
+        log.error("Google sign-in callback failed (%s)", type(error).__name__)
         return _page("Google sign-in failed. Go back to CORSIA and try again.", 500)
     return _page(CONNECTED_PAGE)
 

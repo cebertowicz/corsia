@@ -76,6 +76,7 @@ def surface_exit_error(
     *,
     insert_message_fn: Callable,
     logger,
+    added_signed_out: bool = False,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -83,7 +84,8 @@ def surface_exit_error(
         (line for line in reversed((stderr or "").splitlines()) if line.strip()),
         f"Claude Code exited with code {code}.",
     )
-    reconcile_expired_login(stderr, logger)
+    if not added_signed_out:
+        reconcile_expired_login(stderr, logger)
     text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
     try:
         meta = {
