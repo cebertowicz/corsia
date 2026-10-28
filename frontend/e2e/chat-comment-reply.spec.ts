@@ -57,7 +57,8 @@ test('reply from the thread and edit the pending highlight before sending', asyn
   await expect(page.getByRole('button', { name: /Edit reply/ })).toBeVisible();
   await expect(chatComposer(page)).toBeFocused();
   await row.locator('.cm-comment-pending').first().evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  await row.locator('.cm-comment-pending').first().click();
+  if ((page.viewportSize()?.width ?? 0) <= 768) await row.locator('.cm-comment-pending').first().tap();
+  else await row.locator('.cm-comment-pending').first().click();
   await page.getByRole('textbox', { name: 'Reply' }).fill('Edited reply');
   await capture('edit');
   await page.getByRole('button', { name: 'Save', exact: true }).click();

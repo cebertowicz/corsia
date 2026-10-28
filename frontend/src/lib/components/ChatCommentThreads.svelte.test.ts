@@ -26,7 +26,7 @@ it('shows a comment and its shared answer in the thread, and leaves an unanswere
 	expect(threads[1].textContent).not.toContain('New');
 });
 
-it('stamps only each fully visible unread agent answer, even with a later user reply', async () => {
+it('stamps each visible unread answer, including a tall answer filling the viewport', async () => {
 	vi.useFakeTimers();
 	class Observer {
 		static all: Observer[] = [];
@@ -34,7 +34,7 @@ it('stamps only each fully visible unread agent answer, even with a later user r
 		constructor(private callback: IntersectionObserverCallback) { Observer.all.push(this); }
 		observe(target: Element) { this.target = target; }
 		disconnect() { this.target = undefined; }
-		report(visible: boolean) { if (this.target) this.callback([{ target: this.target, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+		report(visible: boolean, tall = false) { if (this.target) this.callback([{ target: this.target, isIntersecting: visible, intersectionRatio: visible ? (tall ? 0.5 : 1) : 0, rootBounds: new DOMRect(0, 0, 300, 400), boundingClientRect: new DOMRect(0, 0, 300, 800), intersectionRect: new DOMRect(0, 0, 300, visible ? 400 : 0) } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
 	}
 	vi.stubGlobal('IntersectionObserver', Observer);
 	const fetcher = vi.fn().mockResolvedValue({ ok: true });
@@ -54,7 +54,7 @@ it('stamps only each fully visible unread agent answer, even with a later user r
 	expect(rows[2].textContent).toContain('user reply');
 	const first = Observer.all.find(item => item.target === rows[0])!;
 	const second = Observer.all.find(item => item.target === rows[1])!;
-	first.report(true); second.report(false);
+	first.report(true, true); second.report(false);
 	await vi.advanceTimersByTimeAsync(1499);
 	expect(fetcher).not.toHaveBeenCalled();
 	await vi.advanceTimersByTimeAsync(1);

@@ -2,6 +2,7 @@
 	import { resolveParticipant, userParticipant } from '$lib/stores/participants';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import NewMarker from './NewMarker.svelte';
+	import { onScreen, replyVisibilityThresholds } from './replyVisibility';
 
 	export type CommentReplyData = {
 		id?: string;
@@ -46,7 +47,7 @@
 		const cancel = () => { if (timer !== undefined) window.clearTimeout(timer); timer = undefined; };
 		const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
 			const entry = entries.at(-1);
-			if (!enabled || stamped || document.visibilityState !== 'visible' || !entry?.isIntersecting || entry.intersectionRatio !== 1) { cancel(); return; }
+			if (!enabled || stamped || document.visibilityState !== 'visible' || !entry?.isIntersecting || !onScreen(entry, node)) { cancel(); return; }
 			if (timer !== undefined) return;
 			timer = window.setTimeout(() => {
 				timer = undefined;
@@ -54,7 +55,7 @@
 				stamped = true;
 				onUnreadViewed?.(node.dataset.replyId).catch((err) => { stamped = false; console.warn('Could not record the viewed reply', err); });
 			}, 1_500);
-		}, { root: null, threshold: 1 });
+		}, { root: null, threshold: replyVisibilityThresholds });
 		const refresh = () => {
 			cancel(); observer?.disconnect();
 			if (enabled && document.visibilityState === 'visible') observer?.observe(node);

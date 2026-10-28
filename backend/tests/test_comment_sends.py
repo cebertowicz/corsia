@@ -122,6 +122,10 @@ def test_replies_are_admitted_and_answered_in_the_root_thread(thread_rows):
         with pytest.raises(RejectedComments):
             _admit(db, 'bad-send', _meta({'comments': [bad]}))
     _admit(db, 'reply-send', _meta({'comments': [reply, {**reply, 'id': 'reply-two', 'note': 'another'}]}))
+    from core.reply_context import reply_context_lines
+    stored = json.loads(db.execute("SELECT metadata FROM messages WHERE id='reply-send'").fetchone()[0])[KEY]
+    assert stored['comments'][0]['root_cid'] == 'c1.1'
+    assert 'c2.1. On #5 (reply to c1.1):' in reply_context_lines(stored)
     # Queued inputs receive a transcript sequence when delivered to the agent.
     db.execute("UPDATE messages SET seq=41 WHERE id='reply-send'")
     db.execute("UPDATE threads SET next_message_seq=42 WHERE id=?", (THREAD,))

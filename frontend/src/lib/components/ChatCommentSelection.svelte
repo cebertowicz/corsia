@@ -174,16 +174,13 @@
 	}
 	async function submit(note: string) {
 		const currentDraft = draft; const currentEditing = editing;
-		await new Promise<void>(resolve => {
-			afterClose = () => {
-				if (currentDraft) onChange([...comments, { id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }]);
-				else if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));
-				returnFocus = null; close();
-				void tick().then(() => surface?.querySelector<HTMLElement>('[contenteditable="plaintext-only"]')?.focus());
-				resolve();
-			};
-			closing = true;
-		});
+		if (currentDraft) onChange([...comments, { id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }]);
+		else if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));
+		afterClose = () => {
+			returnFocus = null; close();
+			void tick().then(() => surface?.querySelector<HTMLElement>('[contenteditable="plaintext-only"]')?.focus());
+		};
+		closing = true;
 	}
 </script>
 

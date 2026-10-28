@@ -52,7 +52,10 @@ def _comments_lines(comments: object) -> str:
     if not isinstance(comments, list):
         return ""
     rows = [
-        f' {item["cid"]}. On #{item["seq"]}: "{item["quote"]}" | note: {item["note"]}'
+        f' {item["cid"]}. On #{item["seq"]}'
+        + (" (reply to {})".format(item["root_cid"]) if isinstance(item.get("root_cid"), str) else "")
+        +
+        f': "{item["quote"]}" | note: {item["note"]}'
         for item in comments
         if isinstance(item, dict) and isinstance(item.get("cid"), str)
         and _is_int(item.get("seq")) and isinstance(item.get("quote"), str)
