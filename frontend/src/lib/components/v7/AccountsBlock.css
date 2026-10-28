@@ -31,9 +31,7 @@
 .account-manager .accounts .btn.ghost { padding-inline: 0; }
 /* A settings link lands on this button: the ring Connected apps draws on its linked row's action. */
 .account-manager .link-target { display: contents; }
-/* Room above the row's Sign in, so its ring clears the Signed out line; the status line already centres its button beside its text. */
-.account-manager .link-target .btn { margin-top: var(--space-2); }
-.account-manager .signin-state .link-target .btn { margin-top: 0; }
+/* The signed-out row's Sign in sits in AccountUsageRow's controls slot; that component places it. */
 .account-manager .link-target.deep-link-focus .btn { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* A touch screen gets the 44px target on the buttons a link lands on. */
 @media (pointer: coarse) { .account-manager .link-target .btn.sm { height: var(--touch-target); } }

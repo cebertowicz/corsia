@@ -348,6 +348,10 @@
 					<div class="account-main">
 						<div class="account-copy">
 							<AccountUsageRow {account} compact marker={account.is_default ? 'Workspace account' : null} order={rolloverActive && unit ? position + 1 : null}>
+								<!-- The row's right-hand controls slot, first in it; a signed-in row shows its usage figures there. -->
+								{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
+									<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
+								{/if}
 								{#if unit}
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
@@ -367,9 +371,6 @@
 						</div>
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>
-					{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
-						<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
-					{/if}
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
 					<!-- The shared Menu below owns positioning, focus, and escape. -->

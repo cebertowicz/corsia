@@ -86,6 +86,8 @@
 		border-bottom: 1px solid var(--border-subtle);
 		gap: 2px;
 		overflow-x: auto;
+		/* overflow-x makes this a scroll container, so its automatic minimum height is 0: in the dialog's column a tall body squeezes it. */
+		flex-shrink: 0;
 	}
 	.tab {
 		padding: 12px 14px;
