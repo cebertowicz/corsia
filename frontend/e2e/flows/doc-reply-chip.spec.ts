@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -979,6 +980,102 @@ test.describe('reply chip motion evidence', () => {
 				expect(exit?.keyframes.every(frame => frame.transform === undefined)).toBe(true);
 			});
 		}
+	}
+});
+
+test.describe('round five composed evidence', () => {
+	for (const theme of ['light', 'dark'] as const) {
+		test(`${TAG} round5 held Send 393 ${theme}`, async ({ page, request }, info) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
+			await page.setViewportSize({ width: 393, height: 852 });
+			await page.emulateMedia({ colorScheme: theme });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `r5-send-${theme}`, 'launch-plan.md', [8, 10]);
+			await holdDocumentComments(request);
+			const from = TEXT.indexOf(SECTIONS[0].anchor);
+			await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from, to: from + SECTIONS[0].anchor.length });
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '2 new replies');
+			const send = headerSend(page);
+			await expect(send).toBeVisible();
+			await page.waitForTimeout(500); // Let the sender's entrance slot finish before measuring.
+			const geometry = await send.evaluate(node => {
+				const rect = node.getBoundingClientRect(), hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+				return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, hit: !!hit && (node === hit || node.contains(hit)) };
+			});
+			expect(geometry.x).toBeGreaterThanOrEqual(0);
+			expect(geometry.x + geometry.width).toBeLessThanOrEqual(393);
+			expect(geometry.y).toBeGreaterThanOrEqual(0);
+			expect(geometry.y + geometry.height).toBeLessThanOrEqual(852);
+			expect(geometry.hit).toBe(true);
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
+			const { root } = await cdp.send('DOM.getDocument');
+			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button' });
+			expect(nodeId).toBeGreaterThan(0);
+			const beforeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
+			const before = await page.screenshot({ scale: 'css', animations: 'disabled' });
+			await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] });
+			expect(await send.evaluate(node => node.matches(':active'))).toBe(true);
+			await page.waitForTimeout(200);
+			const activeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
+			const active = await page.screenshot({ scale: 'css', animations: 'disabled' });
+			const md5 = (buffer: Buffer) => createHash('md5').update(buffer).digest('hex');
+			if (screenshotDir) {
+				const dir = path.join(screenshotDir, 'round5'); mkdirSync(dir, { recursive: true });
+				writeFileSync(path.join(dir, `send-before-${theme}-393.png`), before);
+				writeFileSync(path.join(dir, `send-active-${theme}-393.png`), active);
+				writeFileSync(path.join(dir, `send-${theme}-393.json`), JSON.stringify({ geometry, beforeColor, activeColor, beforeMd5: md5(before), activeMd5: md5(active) }));
+			}
+			await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] }); await cdp.detach();
+			expect(activeColor).not.toBe(beforeColor);
+			expect(md5(active)).not.toBe(md5(before));
+		});
+	}
+
+	for (const reduced of [false, true]) {
+		test(`${TAG} round5 modal outro 393 ${reduced ? 'reduced' : 'standard'}`, async ({ page, request }, info) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
+			await page.setViewportSize({ width: 393, height: 852 });
+			await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `r5-scrim-${reduced}`, 'launch-plan.md', [8, 10]);
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '2 new replies');
+			await page.evaluate(() => {
+				const chip = document.querySelector<HTMLElement>('[data-doc-reply-chip]')!;
+				const button = chip.querySelector('button')!;
+				button.addEventListener('click', () => {
+					const rect = chip.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+					const frames: unknown[] = [];
+					(window as unknown as { __r5Frames: unknown[] }).__r5Frames = frames;
+					const sample = (time: number) => {
+						const current = document.querySelector<HTMLElement>('[data-doc-reply-chip]');
+						const scrim = document.querySelector<HTMLElement>('.drawer-backdrop:not(.outro-shield)');
+						const top = document.elementFromPoint(x, y);
+						const stack = document.elementsFromPoint(x, y);
+						const chipIndex = current ? stack.findIndex(node => node === current || current.contains(node)) : -1;
+						const scrimIndex = scrim ? stack.findIndex(node => node === scrim || scrim.contains(node)) : -1;
+						frames.push({ time, chipPresent: !!current, chipOpacity: current ? getComputedStyle(current).opacity : null, chipPointerEvents: current ? getComputedStyle(current).pointerEvents : null, scrimPresent: !!scrim, scrimOpacity: scrim ? getComputedStyle(scrim).opacity : null, scrimZ: scrim ? getComputedStyle(scrim).zIndex : null, top: top ? `${top.tagName}.${top.className}` : null, hitChip: !!current && !!top && (current === top || current.contains(top)), chipIndex, scrimIndex, chipAheadInHitStack: chipIndex >= 0 && (scrimIndex < 0 || chipIndex < scrimIndex) });
+						if (current || !scrim) requestAnimationFrame(sample);
+						else (window as unknown as { __r5Done: boolean }).__r5Done = true;
+					};
+					requestAnimationFrame(sample);
+				}, { once: true, capture: true });
+			});
+			await chipButton(page).click();
+			await page.waitForFunction(() => (window as unknown as { __r5Done?: boolean }).__r5Done === true, null, { timeout: 5000 });
+			const frames = await page.evaluate(() => (window as unknown as { __r5Frames: Array<{ chipPresent: boolean; scrimPresent: boolean; hitChip: boolean; chipAheadInHitStack: boolean }> }).__r5Frames);
+			if (screenshotDir) { const dir = path.join(screenshotDir, 'round5'); mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `modal-outro-393-${reduced ? 'reduced' : 'standard'}.json`), JSON.stringify(frames, null, 2)); }
+			expect(frames.some(frame => frame.chipPresent)).toBe(true);
+			expect(frames.every(frame => frame.scrimPresent && !frame.hitChip && !frame.chipAheadInHitStack)).toBe(true);
+		});
 	}
 });
 
