@@ -1,17 +1,17 @@
 """Start and settle the workers ``start_worker`` rules queue (R19, R23, R24; §7.4).
 
-The runner's claim alone decides who gets the next Claude Code slot: no worker exists
+The runner's claim alone decides who gets the next worker slot: no worker exists
 until a start is claimed with a slot free. Each pass runs under one lock, which every
 spawn it makes runs inside, so no start is claimed twice:
 
 1. a started start a restart cut short (no worker, or a worker with no turn, no queued
    input and no process) settles ``no_result`` and releases its identity;
-2. with ``n`` slots free under the Claude Code limit, the ``n`` oldest queued starts are
-   claimed, each checked when it would start: its rule turned off or gone, or its owner
+2. with ``n`` slots free under the worker limit (Claude Code workers and rule workers),
+   the ``n`` oldest queued starts are claimed, each checked when it would start: its rule turned off or gone, or its owner
    gone or paused, skips it (no replay; the identity is released) and takes no slot. At
    no free slot nothing is claimed or written, and the starts wait in the queue. A
    claimed start's inputs and brief are made (``automation.worker_inputs``) and it starts
-   through ``delegate_task``'s own capped spawn with the ``review`` confinement on the
+   through ``delegate_task`` with the ``review`` confinement on the
    owner's model. Local only owners run on their own local model. A model that cannot
    run now is refused and reported through ``worker.no_result``. Spawn records the worker
    on the start (``rule_start``) before its first turn can run. If another spawn took the
@@ -137,11 +137,11 @@ def _skip(conn: sqlite3.Connection, row: Mapping[str, Any]) -> str | None:
 
 
 def _free(conn: sqlite3.Connection) -> int:
-    """Claude Code slots free now, by the count spawn's own limit check uses."""
+    """Slots free under the shared worker limit."""
     from infra.subagent_caps import get_max_concurrent_live
     from subagents.cc_idle_retirement import working_thread_ids
 
-    return get_max_concurrent_live() - len(working_thread_ids(db=conn))
+    return get_max_concurrent_live() - len(set(working_thread_ids(db=conn)) | worker_starts.started_workers(conn))
 
 
 def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
@@ -174,23 +174,42 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     from infra.local_only import inherited_local_only
     from infra.queries import get_thread
     from events.rule_actions import reachable_workflows
+    from llm.account_catalog import effective_status
+    from llm.delegation_model import dispatch_scope
     from llm.locality import locality_refusal
+    from llm.model_status import scoped_status_rows
     from llm.resolution import catalog_row
+    from subagents.cc_confinement import unsupported_model_message
     from tools.workflow_task_fields import _workflow_version
 
     db = get_db()
     owner = dict(get_thread(row["thread_id"], db=db))
     project = owner.get("project_id")
     model = owner.get("model")
-    model_row = catalog_row(model, db=db) if model else None
+    if not model:
+        raise inputs.StartRefused("refused: this chat has no model. Choose a model for this chat.")
+    model_row = catalog_row(model, db=db)
+    rows = scoped_status_rows(**dispatch_scope({}, project))
+    status_row = next((item for item in rows if model in (item.get("id"), item.get("litellm_model"))), None)
+    name = (status_row or {}).get("display_name") or (model_row or {}).get("display_name") or model
     cause = locality_refusal(model_row, thread_local_only=inherited_local_only((owner["id"],), db=db),
                              project_id=project, db=db) if model_row else None
     if cause == "thread_local_only":
-        raise inputs.StartRefused(f"refused: this chat is set to Local only and your model {model} is a "
+        raise inputs.StartRefused(f"refused: this chat is set to Local only and your model {name} is a "
                                   "cloud model. Choose a local model for this chat, or turn off Local only.")
     if cause == "project_cloud_off":
-        raise inputs.StartRefused(f"refused: this project has cloud models off and your model {model} is a "
+        raise inputs.StartRefused(f"refused: this project has cloud models off and your model {name} is a "
                                   "cloud model. Choose a local model, or allow cloud models for this project.")
+    if model_row and model_row.get("harness") == "codex":
+        raise inputs.StartRefused(f"refused: {unsupported_model_message(name)}")
+    if status_row is None:
+        raise inputs.StartRefused("refused: this model can't be found. Choose another model for this chat.")
+    if effective_status(status_row)[0] != "ready":
+        if status_row.get("is_local"):
+            raise inputs.StartRefused(f"refused: your model {name} is not loaded. "
+                                      "Load it, or choose a local model that is loaded.")
+        raise inputs.StartRefused(f"refused: your model {name} can't run now. "
+                                  "Choose a model that is ready for this chat.")
     # A skill whose declared result fails validation is not included, so one found here is valid.
     skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
@@ -250,20 +269,8 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
         return await _refuse(row, run_input, _FAILED, waited)
     if isinstance(started, str):
-        cause = started.removeprefix("Error: ")
-        if cause.startswith("No model for delegated thread:"):
-            cause = "refused: this chat has no model. Choose a model for this chat."
-        elif cause.startswith(("model ", "account ")):
-            model = found["model"]
-            if "not loaded" in cause.lower() or "but is available" in cause:
-                cause = (f"refused: your model {model} is not loaded. "
-                         "Load it, or choose a local model that is loaded.")
-            else:
-                cause = f"refused: {cause} Choose another model."
-        elif not cause.startswith(worker_settle.REFUSAL_PREFIX):
-            logger.warning("worker start {} was refused: {}", row["id"], started)
-            cause = _SPAWN_FAILED
-        return await _refuse(row, run_input, cause, waited)
+        logger.warning("worker start {} was refused: {}", row["id"], started)
+        return await _refuse(row, run_input, _SPAWN_FAILED, waited)
     return 1
 
 

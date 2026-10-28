@@ -22,12 +22,17 @@ def local_model(world, monkeypatch):
                    "metadata_json,last_seen_at,created_at,updated_at) VALUES "
                    "('local','omlx','managed','local','local',8000,'online','{\"private\": true}','t','t','t')")
         db.execute("UPDATE threads SET model=? WHERE id=?", (LOCAL, OWNER))
-    state = {"eligible": True, "bound": []}
+    state = {"status": "ready", "bound": []}
 
     def eligible(model, **_scope):
         state["bound"].append(model)
-        return (model, None) if state["eligible"] else (None, f"model {model} is not loaded")
+        return model, None
 
+    monkeypatch.setattr("llm.model_status.scoped_status_rows", lambda **_: [{
+        "id": LOCAL, "litellm_model": LOCAL, "display_name": "Local Qwen",
+        "is_local": True, "status": state["status"],
+    }])
+    monkeypatch.setattr("llm.account_catalog.effective_status", lambda row: (row["status"], None))
     monkeypatch.setattr(delegate_task, "eligible_delegation_model", eligible)
     monkeypatch.setattr(delegate_task, "send_thread_input", AsyncMock(side_effect=_admit))
     return state
@@ -84,34 +89,82 @@ async def test_unloaded_owner_model_is_refused_with_same_repair(local_model, mon
     monkeypatch.setattr(intake, "admit_event", capture_event)
     with write_transaction(None, scope="owner_unloaded") as db:
         db.execute("UPDATE threads SET local_only=? WHERE id=?", (int(restricted), OWNER))
-    local_model["eligible"] = False
+    local_model["status"] = "available"
     sent = AsyncMock()
+    spawn = AsyncMock()
     monkeypatch.setattr(delegate_task, "send_thread_input", sent)
+    monkeypatch.setattr(delegate_task, "_spawn", spawn)
     rule = await make_rule()
     await request()
     assert await worker_runner.drive() == 0
     outcome, reason, _, worker = starts(rule)[0]
     assert outcome == "refused" and worker is None
-    assert reason == f"your model {LOCAL} is not loaded. Load it, or choose a local model that is loaded."
+    assert reason == "your model Local Qwen is not loaded. Load it, or choose a local model that is loaded."
     assert [kind for kind, _ in worker_events()] == ["worker.no_result"]
     assert admitted[0]["reason"] == f"refused: {reason}"
     assert not get_db().execute("SELECT 1 FROM threads WHERE spawned_by=?", (OWNER,)).fetchone()
     sent.assert_not_awaited()
+    spawn.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_real_eligibility_available_status_is_reported_as_not_loaded(local_model, monkeypatch):
+async def test_available_status_is_reported_as_not_loaded(local_model):
     from automation import worker_runner
-    from llm import delegation_model
-    from tools import delegate_task
-    monkeypatch.setattr(delegate_task, "eligible_delegation_model", delegation_model.eligible_delegation_model)
-    monkeypatch.setattr(delegation_model, "_scoped_rows", lambda *_: ([{"id": LOCAL, "status": "available"}], None))
+    local_model["status"] = "available"
     rule = await make_rule()
     await request()
     assert await worker_runner.drive() == 0
     outcome, reason, _, worker = starts(rule)[0]
     assert outcome == "refused" and worker is None
-    assert reason == f"your model {LOCAL} is not loaded. Load it, or choose a local model that is loaded."
+    assert reason == "your model Local Qwen is not loaded. Load it, or choose a local model that is loaded."
+
+
+@pytest.mark.asyncio
+async def test_native_workers_hold_slots_until_settled_and_mixed_handles_count_once(local_model, monkeypatch):
+    from automation import worker_runner
+    from events import worker_starts
+    from infra.database import get_db, write_transaction
+
+    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: 2)
+    handles = set()
+    monkeypatch.setattr("subagents.cc_idle_retirement.working_thread_ids", lambda **_: handles)
+    rule = await make_rule()
+    await request("first")
+    await request("second")
+    assert await worker_runner.drive() == 2
+    workers = [row[3] for row in starts(rule)]
+    handles.add(workers[0])
+    assert worker_runner._free(get_db()) == 0
+    await request("third")
+    assert await worker_runner.drive() == 0
+    assert starts(rule)[2][0] == "queued"
+    with write_transaction(None, scope="settle_native") as db:
+        decision = db.execute("SELECT id FROM event_route_decisions WHERE worker_thread_id=?", (workers[1],)).fetchone()[0]
+        worker_starts.end(db, decision, "no_result")
+    assert await worker_runner.drive() == 1
+    assert starts(rule)[2][0] == "started"
+
+
+@pytest.mark.asyncio
+async def test_account_spawn_error_is_logged_and_refused_generically(local_model, monkeypatch):
+    from automation import worker_runner
+    from loguru import logger
+    from tools import delegate_task
+
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)))
+    try:
+        monkeypatch.setattr(delegate_task, "_spawn", AsyncMock(return_value="Error: account unavailable"))
+        rule = await make_rule()
+        await request()
+        assert await worker_runner.drive() == 0
+        outcome, reason, _, worker = starts(rule)[0]
+        assert outcome == "refused" and worker is None
+        assert reason == "the start failed (delegation error)"
+        assert "Choose another model" not in reason
+        assert any("account unavailable" in message for message in messages)
+    finally:
+        logger.remove(sink)
 
 
 @pytest.mark.asyncio

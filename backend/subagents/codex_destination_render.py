@@ -10,13 +10,13 @@ from core.context_replay import checkpoint_prompt
 from core.tool_result_projection import HARNESS_TOOL_RESULT_BUDGET_TOKENS
 from history.types import PORTABLE_HISTORY_FORMAT_VERSION, PortableHistoryProjection
 from infra.database import get_db
+from llm.catalog import get_display_name
 from llm.resolution import ExecutionTarget
 from subagents.codex_destination import (
     build_prepared_codex_destination,
     validate_live_compaction,
 )
 from subagents.cc_confinement import ConfinementRefused, unsupported_model_message
-from thread.model_row import _display_model
 from subagents.codex_runtime_errors import CodexPreparedContextStale
 from subagents.codex_runtime_state import (
     _APP_SESSIONS,
@@ -51,7 +51,7 @@ def codex_destination_scope(
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
     if row["confinement"] is not None:
-        raise ConfinementRefused(unsupported_model_message(_display_model(db, target_catalog_id)))
+        raise ConfinementRefused(unsupported_model_message(get_display_name(target_catalog_id)))
     selected_model = target_catalog_id if expected_selected_model is None else expected_selected_model
     if str(row["model"] or "") != selected_model:
         raise CodexPreparedContextStale(

@@ -51,9 +51,8 @@ class DelegateTaskTool(Tool):
             "message workflow; use the smaller delegate_* tools when you need "
             "separate steps. The worker takes over your current plan task unless "
             "plan_node_id names another task or 'none'; the result's plan_task says "
-            "which. confinement 'review' starts a Claude Code worker that can only "
-            "read the read_paths directories, with no CORSIA tools, shell, web or "
-            "credentials; its result is its final message."
+            "which. 'review' confines Claude Code, native and local models to file "
+            "reads in read_paths; Codex is refused. The result is its final message."
         )
 
     @property
@@ -90,8 +89,8 @@ class DelegateTaskTool(Tool):
                 "confinement": {
                     "type": ["string", "null"], "enum": [*CONFINEMENTS, None],
                     "description": (
-                        "Default 'none': the worker has its usual tools. 'review': "
-                        "read-only over read_paths; Claude Code models only."
+                        "Default 'none': usual tools. 'review': file reads in read_paths "
+                        "on Claude Code, native, local; Codex refused."
                     ),
                 },
                 "read_paths": {

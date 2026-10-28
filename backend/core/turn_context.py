@@ -150,10 +150,10 @@ async def prepare_turn_context(
     ``snapshot_out`` the effective snapshot; neither enters the published usage.
     """
     from core.thread_history import prepare_history_for_llm
-    import tools.confined_reads as confined_reads
+    from tools.catalog import advertised_tool_definitions
 
     frozen_tools = native_prefix._selected_tool_definitions(
-        await confined_reads.advertised(agent.tools, None)
+        advertised_tool_definitions(agent.tools)
         if tool_definitions is None else tool_definitions
     )
     source_content = (
