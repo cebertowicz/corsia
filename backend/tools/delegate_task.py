@@ -51,8 +51,10 @@ class DelegateTaskTool(Tool):
             "message workflow; use the smaller delegate_* tools when you need "
             "separate steps. The worker takes over your current plan task unless "
             "plan_node_id names another task or 'none'; the result's plan_task says "
-            "which. 'review' confines Claude Code, Codex, native and local models to file "
-            "reads in read_paths. The result is its final message."
+            "which. Confinement 'review' is only for a worker that reads outside, untrusted "
+            "content (a contributor's PR, inbound mail, web pages); it limits the worker to "
+            "file reads in read_paths. Routine reviews of your own project's work use the "
+            "default. The result is its final message."
         )
 
     @property
@@ -89,8 +91,8 @@ class DelegateTaskTool(Tool):
                 "confinement": {
                     "type": ["string", "null"], "enum": [*CONFINEMENTS, None],
                     "description": (
-                        "Default 'none': usual tools. 'review': file reads in read_paths "
-                        "on Claude Code, Codex, native and local models."
+                        "Default 'none': usual tools, also for routine reviews. 'review': "
+                        "file reads in read_paths, only for outside, untrusted content; any model."
                     ),
                 },
                 "read_paths": {
