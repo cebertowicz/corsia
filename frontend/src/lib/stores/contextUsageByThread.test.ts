@@ -28,7 +28,7 @@ describe('preview refresh', () => {
 		fetchPreview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
 		recordMeasuredUsage('a', usage(500));
 		const next = request('a', 'model-a', usage(500));
-		const pending = ensureContextPreview(next);
+		const pending = ensureContextPreview({ ...next, carry: true });
 		const loading = get(contextPreviewByThread).get('a');
 		expect(loading?.loading).toBe(true);
 		expect(contextReading(loading, next.owner, usage(500))?.total_used).toBe(300);
@@ -37,16 +37,36 @@ describe('preview refresh', () => {
 		expect(contextReading(get(contextPreviewByThread).get('a'), next.owner, usage(500))?.total_used).toBe(600);
 	});
 
+	it('falls back to the latest receipt if a coalesced refresh fails', async () => {
+		fetchPreview.mockResolvedValueOnce(usage(300));
+		await ensureContextPreview(request('a', 'model-a', usage(400)));
+		let finish!: (value: ReturnType<typeof usage>) => void;
+		let fail!: (error: Error) => void;
+		fetchPreview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		fetchPreview.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+		recordMeasuredUsage('a', usage(500));
+		const pending = ensureContextPreview({ ...request('a', 'model-a', usage(500)), carry: true });
+		recordMeasuredUsage('a', usage(600));
+		const latest = request('a', 'model-a', usage(600));
+		void ensureContextPreview({ ...latest, carry: true });
+		expect(contextReading(get(contextPreviewByThread).get('a'), latest.owner, usage(600))?.total_used).toBe(300);
+		finish(usage(700));
+		await vi.waitFor(() => expect(fetchPreview).toHaveBeenCalledTimes(3));
+		fail(new Error('failed'));
+		await pending;
+		expect(contextReading(get(contextPreviewByThread).get('a'), latest.owner, usage(600))?.total_used).toBe(600);
+	});
+
 	it('does not carry a preview to another model or thread', async () => {
 		fetchPreview.mockResolvedValueOnce(usage(300));
 		await ensureContextPreview(request('a', 'model-a', usage(400)));
 		recordMeasuredUsage('a', usage(500));
 		fetchPreview.mockImplementation(() => new Promise(() => {}));
 		const switched = request('a', 'model-b', usage(500));
-		void ensureContextPreview(switched);
+		void ensureContextPreview({ ...switched, carry: true });
 		expect(contextReading(get(contextPreviewByThread).get('a'), switched.owner, usage(500))?.total_used).toBe(500);
 		const other = request('b', 'model-a', usage(200));
-		void ensureContextPreview(other);
+		void ensureContextPreview({ ...other, carry: true });
 		expect(contextReading(get(contextPreviewByThread).get('b'), other.owner, usage(200))?.total_used).toBe(200);
 	});
 });
