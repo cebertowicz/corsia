@@ -2,8 +2,7 @@
 	import type { MessageCard } from '$lib/api/messageCards';
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 
-	// The one unread-reply notice, drawn the same in the chat and over the document it counts: a content-width
-	// attachment chip, "N new replies", with the shared New marker. Each caller says where tapping it goes.
+	// The document notice uses the same attachment chip and New marker as the chat notice.
 	let { artifactId, path, threadId, count, where = null, onOpen }: {
 		artifactId: string;
 		path: string | null;
@@ -41,3 +40,16 @@
 		<AttachmentRow {card} threadId={threadId ?? artifactId} variant="chip" chipWidth="content" newMarker />
 	</section>
 {/if}
+
+<style>
+	/* Extend the button's hit area without changing the shared chip face. */
+	.reply-chip-notice :global(button.tile.chip) { position: relative; }
+	.reply-chip-notice :global(button.tile.chip)::after {
+		content: '';
+		position: absolute;
+		inset-inline: 0;
+		top: 50%;
+		height: var(--touch-target);
+		transform: translateY(-50%);
+	}
+</style>

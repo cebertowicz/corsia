@@ -254,6 +254,14 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opened at the top: both replies are below the fold, the document says so once, in the chat's own chip.
 			await expectChip(page, '2 new replies');
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
+			// Probe the actual hit target at both vertical edges, outside the visual chip face.
+			const edgeHits = await chipButton(page).evaluate((button) => {
+				const box = button.getBoundingClientRect();
+				const x = box.left + box.width / 2;
+				const center = box.top + box.height / 2;
+				return [-21, 21].map((offset) => button.contains(document.elementFromPoint(x, center + offset)));
+			});
+			expect(edgeHits).toEqual([true, true]);
 			await shot(page, `01-text-document-chip-${theme}-${width}`);
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
 			await holdDwell(page, true);

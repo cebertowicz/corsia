@@ -56,6 +56,14 @@ describe('UnreadReplyChip', () => {
 		expect(tabs).not.toHaveBeenCalled();
 	});
 
+	it('uses the supplied destination even when the document has no path', () => {
+		const onOpen = render({ path: null });
+		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
+		expect(chip).not.toBeNull();
+		chip!.click();
+		expect(onOpen).toHaveBeenCalledOnce();
+	});
+
 	it('stays a tappable button when the document has no thread of its own', () => {
 		const onOpen = render({ threadId: null });
 		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
