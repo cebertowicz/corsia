@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -100,8 +101,11 @@ def safehouse_subprocess_env(
         env["CORSIA_THREAD_ID"] = str(thread_id)
     if thread_id and isinstance(invocation_id, str) and invocation_id.strip():
         env["CORSIA_TOOL_INVOCATION_ID"] = invocation_id
-    # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
-    env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
+    if sys.platform == "darwin":
+        # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
+        env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
+    elif sys.platform == "linux":
+        env.pop("AGENT_BROWSER_ARGS", None)
     env.update(agent_shell_tools.shell_environment(env.get("PATH", ""), thread_id))
     return env
 
