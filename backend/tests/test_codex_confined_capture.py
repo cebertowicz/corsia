@@ -1,16 +1,16 @@
-"""Capture the full model tools array on the installed admitted Codex version.
+"""Capture the full model tools array on every admitted Codex version.
 
-CI captures the newest version. The digest test detects launch or tool surface
-changes; recapture every listed version before updating the digest. No subscription,
-API key, external service, or production state is used.
+No subscription, API key, external service, or production state is used.
 """
 from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -71,12 +71,21 @@ def definitions():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.skipif(shutil.which("codex") is None, reason="optional installed Codex binary required")
-async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version", sorted(confinement.CAPTURED_CODEX_VERSIONS))
+async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, monkeypatch, version):
     from infra import config
 
+    root = os.environ.get("CORSIA_CODEX_CAPTURE_ROOT")
+    if root is not None:
+        binary = str(Path(root) / version.removeprefix("codex-cli ") / "node_modules" / ".bin" / "codex")
+        assert Path(binary).is_file(), f"Missing capture binary: {binary}"
+        assert subprocess.check_output([binary, "--version"], text=True).strip() == version
+    else:
+        binary = shutil.which("codex")
+        if binary is None or subprocess.check_output([binary, "--version"], text=True).strip() != version:
+            pytest.skip(f"Optional installed Codex {version} required")
+
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
-    binary = shutil.which("codex")
     await confinement.verify_version(binary)
     monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path / "runtime")
     staging = tmp_path / "attacker-repo" / "stage"
