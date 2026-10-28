@@ -167,10 +167,11 @@ def plan_state(
         if row["state"] not in service._TERMINAL_STATES
     ]
     conditions = [item.condition for item in incomplete]
+    delegated_moving = any(item.child_working for item in incomplete)
     moving = any(
         item.condition == "running" and not item.executor_stalled
         for item in incomplete
-    ) or any(item.child_working for item in incomplete)
+    ) or delegated_moving
     held = any(item.condition == "blocked" and not item.liveness_quiet for item in incomplete)
     return PlanState(
         progress=Progress(
@@ -182,6 +183,7 @@ def plan_state(
             ),
         ),
         moving=moving,
+        delegated_moving=delegated_moving,
     )
 
 
