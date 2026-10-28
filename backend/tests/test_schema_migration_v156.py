@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_155_to_156_runtime_registrations import migrate_155_to_156
+from infra.migration_155_to_156_rehome_repair import migrate_155_to_156
 from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
 from infra import thread_confinement
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
@@ -187,7 +187,7 @@ def test_persistent_parent_recovers_own_session_after_review_worker_rehome():
 
 
 @pytest.mark.parametrize("own_review", [False, True])
-def test_backfilled_spawned_parent_is_repaired_even_with_own_record(own_review):
+def test_backfilled_spawned_parent_is_repaired_unless_its_own_record_is_review(own_review):
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
@@ -208,12 +208,35 @@ def test_backfilled_spawned_parent_is_repaired_even_with_own_record(own_review):
     migrate_154_to_155(db)
     assert thread_confinement.read_dirs("parent", db) == ("/src",)
     migrate_155_to_156(db)
-    assert thread_confinement.read_dirs("parent", db) is None
+    # A thread's own review record keeps it closed, children or not.
+    assert thread_confinement.read_dirs("parent", db) == (("/src",) if own_review else None)
     assert thread_confinement.read_dirs("worker", db) == ("/src",)
     db.close()
 
 
-def test_v155_damaged_parent_backfill_is_cleared_and_leaf_kept():
+def test_root_with_moved_review_record_is_cleared():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread, parent in (("root", None), ("worker", "root")):
+        db.execute("INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) "
+                   "VALUES (?,'u',?,'t','t')", (thread, parent))
+    db.commit()
+    child = dict(integration="claude-code", type="session", external_id="child")
+    models.register_artifact(**child, parent_thread_id="worker", db=db, metadata={
+        "claude_invocation": {"confinement": "review", "add_dirs": ["/src"]}})
+    rehome_artifact(**child, new_owner_thread_id="root", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    migrate_154_to_155(db)
+    assert thread_confinement.read_dirs("root", db) == ("/src",)
+    migrate_155_to_156(db)
+    assert thread_confinement.read_dirs("root", db) is None
+    db.close()
+
+
+@pytest.mark.parametrize("damaged_moved", [True, False])
+def test_v155_damaged_parent_backfill_clears_only_a_moved_record(damaged_moved):
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
@@ -227,15 +250,24 @@ def test_v155_damaged_parent_backfill_is_cleared_and_leaf_kept():
     rehome_artifact(**artifact, new_owner_thread_id="parent", actor_thread_id=None,
                     authority="thread_lifecycle", reason="thread_ended:archived",
                     source_path="registry.ownership.rehome_on_thread_end", db=db)
-    models.register_artifact(integration="claude-code", type="session", external_id="bad",
-                             parent_thread_id="parent", db=db)
-    db.execute("UPDATE artifact_identities SET metadata='bad json' WHERE external_id='bad'")
+    if damaged_moved:
+        db.execute("UPDATE artifact_identities SET metadata='bad json' WHERE external_id='child'")
+    else:
+        models.register_artifact(integration="claude-code", type="session", external_id="bad",
+                                 parent_thread_id="parent", db=db)
+        db.execute("UPDATE artifact_identities SET metadata='bad json' WHERE external_id='bad'")
     migrate_154_to_155(db)
     with pytest.raises(thread_confinement.ConfinementRecordDamaged):
         thread_confinement.read_dirs("parent", db)
     migrate_155_to_156(db)
-    assert thread_confinement.read_dirs("parent", db) is None
-    assert thread_confinement.read_dirs("worker", db) == ("/src",)
+    if damaged_moved:
+        assert thread_confinement.read_dirs("parent", db) is None
+    else:
+        # Its own damaged record keeps 154 -> 155's fail-closed copy.
+        with pytest.raises(thread_confinement.ConfinementRecordDamaged):
+            thread_confinement.read_dirs("parent", db)
+    if not damaged_moved:
+        assert thread_confinement.read_dirs("worker", db) == ("/src",)
     before = db.total_changes
     migrate_155_to_156(db)
     assert db.total_changes == before

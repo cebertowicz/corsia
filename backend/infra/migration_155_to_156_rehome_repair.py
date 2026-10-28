@@ -1,25 +1,52 @@
-"""Release provider registrations created by thread-end ownership rehoming."""
+"""Schema 155 -> 156: undo what thread-end ownership rehoming did to a parent.
+
+A worker's review session moved to its parent made 154 -> 155 copy the worker's
+confinement onto the parent's row, and left the parent resuming the worker's
+session. This clears that copied confinement and releases those registrations.
+"""
 
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 
 
+# A review or damaged Claude Code record the thread holds that no thread-end rehome
+# moved to it: its own launch record, which keeps 154 -> 155's fail-closed copy.
+_OWN_CLOSED_RECORD = """
+    SELECT 1 FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id
+    WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' AND i.type='session'
+      AND (NOT json_valid(i.metadata)
+           OR (json_extract(i.metadata, '$.claude_invocation.confinement') IS NOT NULL
+               AND (json_type(i.metadata, '$.claude_invocation.confinement') <> 'text'
+                    OR json_extract(i.metadata, '$.claude_invocation.confinement') <> 'none'
+                    OR (json_type(i.metadata, '$.claude_invocation.add_dirs') IS NOT NULL
+                        AND (json_type(i.metadata, '$.claude_invocation.add_dirs') <> 'array'
+                             OR json_array_length(i.metadata, '$.claude_invocation.add_dirs') > 0)))))
+      AND NOT EXISTS (
+          SELECT 1 FROM artifact_registration_events moved
+          WHERE moved.artifact_id=i.id AND moved.event_type='ownership_rehomed'
+            AND moved.source_path='registry.ownership.rehome_on_thread_end'
+            AND moved.new_owner_thread_id=threads.id)
+"""
+
+
 def migrate_155_to_156(conn: sqlite3.Connection) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
-    if {"id", "spawned_by", "confinement", "confined_read_dirs"} <= columns:
-        conn.execute(
-            "UPDATE threads SET confinement=NULL, confined_read_dirs=NULL "
-            "WHERE (confinement IS NOT NULL OR confined_read_dirs IS NOT NULL) "
-            "AND (spawned_by IS NULL OR id IN "
-            "(SELECT spawned_by FROM threads WHERE spawned_by IS NOT NULL))"
-        )
-    # Earlier migrations also support partial historical databases with no registry.
+    # Earlier migrations also support partial historical databases with no registry;
+    # 154 -> 155 copied no confinement into those.
     if conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
         "('artifact_registrations','artifact_identities','artifact_registration_events')"
     ).fetchone()[0] != 3:
         return
+    # A review thread has no CORSIA tools, so a root or a thread that spawned workers
+    # got its confinement from a moved record, unless it holds a closed one of its own.
+    conn.execute(
+        "UPDATE threads SET confinement=NULL, confined_read_dirs=NULL "
+        "WHERE (confinement IS NOT NULL OR confined_read_dirs IS NOT NULL) "
+        "AND (spawned_by IS NULL OR id IN "
+        "(SELECT spawned_by FROM threads WHERE spawned_by IS NOT NULL)) "
+        f"AND NOT EXISTS ({_OWN_CLOSED_RECORD})"
+    )
     # Provider types are frozen here: migrations are snapshots of their release.
     rows = conn.execute(
         """SELECT DISTINCT r.id, i.id, COALESCE((
