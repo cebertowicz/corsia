@@ -26,18 +26,11 @@
 		opens: true,
 	});
 
-	function open(event: MouseEvent): void {
-		// Capture keeps AttachmentRow's shared chip untouched while this notice owns where a tap goes: the chip's own
-		// open would only add a tab for a document the caller already reaches in its own way.
-		event.stopPropagation();
-		onOpen();
-	}
 </script>
 
 {#if count > 0}
-	<section class="reply-chip-notice" aria-label="Unread agent replies" onclickcapture={open}>
-		<!-- The chip is only tappable with a thread to open into; the capture above takes the tap either way. -->
-		<AttachmentRow {card} threadId={threadId ?? artifactId} variant="chip" chipWidth="content" newMarker />
+	<section class="reply-chip-notice" aria-label="Unread agent replies">
+		<AttachmentRow {card} threadId={threadId ?? artifactId} variant="chip" chipWidth="content" newMarker onActivate={onOpen} />
 	</section>
 {/if}
 
