@@ -434,6 +434,21 @@ describe('a reading kept past an unmeasurable turn', () => {
 });
 
 describe('model change (trace row 10)', () => {
+	it('does not hold the old model preview while the new model read is pending', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.headline()).toContain('30%'));
+		fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+		activeModelId.set('model-b');
+		flushSync();
+		expect(composer.donut()).toBe('42%');
+		expect(composer.headline()).toContain('42%');
+		expect(composer.headline()).not.toContain('30%');
+		expect(previewCalls()[1]).toContain('model=model-b');
+	});
+
 	it('retires the preview and reads it again with the new model', async () => {
 		const composer = mountComposer();
 		setContextUsage('thread-a', measured('thread-a', 420) as never);

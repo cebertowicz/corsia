@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 import type { ContextUsage } from './contextUsageTypes';
-export { previewIdentity, contextReading } from './contextPreviewIdentity';
+import type { Checkpoint } from './checkpoints';
 import { findModelById, type Model } from './models';
 import { fetchNextTurnPreview } from './nextTurnPreview';
 
@@ -22,13 +22,12 @@ export const contextUsageByThread = writable<ReadonlyMap<string, ContextUsage>>(
 
 export interface ContextPreviewEntry {
 	/** Thread, model and measured reading the preview was read against. */
-	owner: string | null;
+	owner: string;
 	/** `owner` plus the latest checkpoint: a change re-reads the preview. */
-	key: string | null;
+	key: string;
 	usage: ContextUsage | null;
 	loading: boolean;
 	error: string;
-	previous: ContextUsage | null;
 }
 
 export const contextPreviewByThread = writable<ReadonlyMap<string, ContextPreviewEntry>>(new Map());
@@ -36,8 +35,13 @@ export const contextPreviewByThread = writable<ReadonlyMap<string, ContextPrevie
 /** Threads whose first message page has been read since entry, reload or auth. */
 export const measuredHydratedThreads = writable<ReadonlySet<string>>(new Set());
 
-// Bumped by every invalidation, so a read that started before it cannot land.
-const previewGenerations = new Map<string, number>();
+// Every read and invalidation advances the thread's sequence.
+const previewSequences = new Map<string, number>();
+function nextPreviewSequence(threadId: string): number {
+	const next = (previewSequences.get(threadId) ?? 0) + 1;
+	previewSequences.set(threadId, next);
+	return next;
+}
 
 type PreviewRequest = {
 	threadId: string;
@@ -46,16 +50,13 @@ type PreviewRequest = {
 	authToken: string;
 	modelId: string | null;
 	retryError?: boolean;
-	carry?: boolean;
 };
 
-type ActivePreviewRead = { generation: number; pending: PreviewRequest | null; promise: Promise<boolean> };
-type PreviewReadResult = { result: boolean; discardedByGeneration: boolean; entry: ContextPreviewEntry };
+type ActivePreviewRead = { sequence: number; pending: PreviewRequest | null; promise: Promise<boolean> };
 
 // One in-flight request owns each thread. New identities replace `pending`, so
 // a burst of measured frames yields exactly one read after the current one.
 const activePreviewReads = new Map<string, ActivePreviewRead>();
-const openContextSheets = new Set<string>();
 
 function setMapEntry<T>(
 	store: { update(fn: (value: ReadonlyMap<string, T>) => ReadonlyMap<string, T>): void },
@@ -175,87 +176,68 @@ export function hasMeasuredNumbers(usage: ContextUsage | null): boolean {
 	return !!usage && usage.token_usage_available !== false && typeof usage.total_used === 'number';
 }
 
-/** Whether `threadId`'s context sheet is open: only an open sheet carries a retired reading. */
-export function setContextSheetOpen(threadId: string, open: boolean): void {
-	if (open) { openContextSheets.add(threadId); return; }
-	openContextSheets.delete(threadId);
-	contextPreviewByThread.update(entries => {
-		const current = entries.get(threadId);
-		if (!current?.previous) return entries;
-		// In place, so a read in flight still owns its entry and can land.
-		current.previous = null;
-		return new Map(entries);
-	});
+/** Who a preview belongs to, and when it must be read again. */
+export function previewIdentity(
+	threadId: string,
+	modelId: string | null,
+	measured: ContextUsage | null,
+	latest: Checkpoint | null,
+): { owner: string; key: string } {
+	const owner = JSON.stringify([
+		threadId, modelId, measured?.snapshot_id ?? null, measured?.token_source ?? null,
+		measured?.token_usage_available ?? null, measured?.total_used ?? null,
+		measured?.model_context_window ?? null,
+	]);
+	const checkpoint = [latest?.id ?? null, latest?.status ?? null, latest?.startedAt ?? null];
+	return { owner, key: JSON.stringify([owner, checkpoint]) };
 }
-/** Retire `threadId`'s preview. A read in flight settles before its replacement starts. */
+
+/** The current preview when owned, otherwise the measured reading. */
+export function contextReading(preview: ContextPreviewEntry | undefined, owner: string, measured: ContextUsage | null): ContextUsage | null {
+	return (preview?.owner === owner ? preview.usage : null) ?? measured;
+}
+
+/** Retire `threadId`'s preview and prevent older reads from landing. */
 export function invalidateContextPreview(threadId: string): void {
-	previewGenerations.set(threadId, (previewGenerations.get(threadId) ?? 0) + 1);
-	const current = get(contextPreviewByThread).get(threadId);
-	if (current) setMapEntry(contextPreviewByThread, threadId, {
-		owner: null, key: null, usage: null, previous: openContextSheets.has(threadId) ? current.usage ?? current.previous : null, loading: false, error: '',
-	});
+	nextPreviewSequence(threadId);
+	setMapEntry(contextPreviewByThread, threadId, null);
 }
 
-function loadingPreview(request: PreviewRequest, current: ContextPreviewEntry | undefined): ContextPreviewEntry {
-	return {
-		owner: request.owner, key: request.key,
-		usage: current?.owner === request.owner ? current.usage : null,
-		previous: request.carry ? current?.usage ?? current?.previous ?? null : null,
-		loading: true, error: '',
-	};
-}
-
-async function readContextPreview(
-	request: PreviewRequest,
-	generation: number,
-): Promise<PreviewReadResult> {
+async function readContextPreview(request: PreviewRequest, sequence: number): Promise<boolean> {
 	const { threadId, owner, key } = request;
 	const current = get(contextPreviewByThread).get(threadId);
-	const entry = loadingPreview(request, current);
-	setMapEntry(contextPreviewByThread, threadId, entry);
-	const isCurrent = () =>
-		(previewGenerations.get(threadId) ?? 0) === generation
-		&& get(contextPreviewByThread).get(threadId) === entry;
-	const discarded = () => ({
-		result: false,
-		discardedByGeneration: (previewGenerations.get(threadId) ?? 0) !== generation,
-		entry,
-	});
+	const shown = current?.owner === owner ? current.usage : null;
+	setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: shown, loading: true, error: '' });
 	try {
 		const usage = await fetchNextTurnPreview(threadId, request.authToken, request.modelId);
-		if (!isCurrent()) return discarded();
+		if (previewSequences.get(threadId) !== sequence) return false;
 		const preview = usage ? { ...usage, thread_id: threadId } : null;
-		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: preview, previous: null, loading: false, error: '' });
-		return { result: preview !== null, discardedByGeneration: false, entry };
+		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: preview, loading: false, error: '' });
+		return preview !== null;
 	} catch (exc) {
-		if (!isCurrent()) return discarded();
+		if (previewSequences.get(threadId) !== sequence) return false;
 		const error = exc instanceof Error ? exc.message : 'Context preview unavailable';
-		setMapEntry(contextPreviewByThread, threadId, {
-			owner, key, usage: entry.usage, previous: null, loading: false, error,
-		});
-		return { result: false, discardedByGeneration: false, entry };
+		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: null, loading: false, error });
+		return false;
 	}
 }
 
 function startContextPreviewRead(request: PreviewRequest): Promise<boolean> {
 	const active: ActivePreviewRead = {
-		generation: previewGenerations.get(request.threadId) ?? 0,
+		sequence: 0,
 		pending: null,
 		promise: Promise.resolve(false),
 	};
 	active.promise = (async () => {
 		let next = request;
 		while (true) {
-			active.generation = previewGenerations.get(request.threadId) ?? 0;
-			const attempt = await readContextPreview(next, active.generation);
+			active.sequence = nextPreviewSequence(request.threadId);
+			const result = await readContextPreview(next, active.sequence);
 			const pending = active.pending;
 			active.pending = null;
 			if (!pending) {
-				if (attempt.discardedByGeneration && get(contextPreviewByThread).get(request.threadId) === attempt.entry) {
-					invalidateContextPreview(request.threadId);
-				}
 				if (activePreviewReads.get(request.threadId) === active) activePreviewReads.delete(request.threadId);
-				return attempt.result;
+				return result;
 			}
 			next = pending;
 		}
@@ -273,13 +255,12 @@ export async function ensureContextPreview(request: PreviewRequest): Promise<boo
 	const current = get(contextPreviewByThread).get(request.threadId);
 	const active = activePreviewReads.get(request.threadId);
 	if (active) {
-		const generationIsCurrent = active.generation === (previewGenerations.get(request.threadId) ?? 0);
-		if (generationIsCurrent && !active.pending && current?.owner === request.owner && current.key === request.key) {
+		const sequenceIsCurrent = active.sequence === previewSequences.get(request.threadId);
+		if (sequenceIsCurrent && !active.pending && current?.owner === request.owner && current.key === request.key) {
 			return active.promise;
 		}
-		if (active.pending?.key === request.key && current?.key === request.key) return active.promise;
+		if (active.pending?.key !== request.key) nextPreviewSequence(request.threadId);
 		active.pending = request;
-		setMapEntry(contextPreviewByThread, request.threadId, loadingPreview(request, current));
 		return active.promise;
 	}
 	if (current?.key === request.key && (current.loading || !current.error || !request.retryError)) {
@@ -291,10 +272,12 @@ export async function ensureContextPreview(request: PreviewRequest): Promise<boo
 /** Forget every thread's reading, as when the connection identity resets. */
 export function clearAllContextUsage(): void {
 	contextUsageByThread.set(new Map());
-	openContextSheets.clear();
 	measuredHydratedThreads.set(new Set());
-	for (const active of activePreviewReads.values()) active.pending = null;
+	for (const [threadId, active] of activePreviewReads) {
+		active.pending = null;
+		nextPreviewSequence(threadId);
+	}
 	activePreviewReads.clear();
-	for (const threadId of get(contextPreviewByThread).keys()) invalidateContextPreview(threadId);
+	for (const threadId of get(contextPreviewByThread).keys()) nextPreviewSequence(threadId);
 	contextPreviewByThread.set(new Map());
 }

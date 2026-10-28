@@ -17,7 +17,6 @@
 		measuredFor,
 		measuredHydratedThreads,
 		previewIdentity,
-		setContextSheetOpen,
 	} from '$lib/stores/contextUsageByThread';
 	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
 	import { loadComposerModels } from '$lib/stores/modelsLoad';
@@ -181,27 +180,34 @@
 			: null,
 	);
 	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, selection.models));
-	// The preview read for this thread, model and measured turn, if any; a
-	// newer measured turn or another model leaves it unowned and unshown.
+	// The current owner's preview, including its loading or error state.
 	const ownedPreview = $derived(
 		previewIds && boundPreview?.owner === previewIds.owner ? boundPreview : undefined,
 	);
-	// One reading for the donut and the sheet headline (#1952): the owned
-	// preview, else the last measured usage, so opening never waits on the
-	// fetch (#1953) and closing the sheet changes nothing.
-	const sheetUsage = $derived(
-		previewIds ? contextReading(boundPreview, previewIds.owner, measuredReading, sheetView === 'context') : null,
-	);
+	let held = $state<{ threadId: string; modelId: string | null; usage: ContextUsage } | null>(null);
+	$effect.pre(() => {
+		if (sheetView !== 'context' || !boundThreadId || ownedPreview?.error) {
+			held = null;
+		} else if (ownedPreview?.usage) {
+			held = { threadId: boundThreadId, modelId: previewModelId, usage: ownedPreview.usage };
+		} else if (held && (held.threadId !== boundThreadId || held.modelId !== previewModelId)) {
+			held = null;
+		}
+	});
+	// Both surfaces choose the same reading; an open sheet keeps its last preview during refresh.
+	const reading = $derived.by(() => {
+		const holding = sheetView === 'context' && !ownedPreview?.usage && !ownedPreview?.error
+			&& held?.threadId === boundThreadId && held.modelId === previewModelId;
+		return {
+			usage: holding ? held!.usage : previewIds ? contextReading(boundPreview, previewIds.owner, measuredReading) : null,
+			updating: !!holding || !!ownedPreview?.loading,
+		};
+	});
+	const sheetUsage = $derived(reading.usage);
 	const contextChipSummary = $derived(chipSummaryFor(sheetUsage));
-	const contextPreviewLoading = $derived(
-		!!(ownedPreview?.loading || (sheetView === 'context' && boundPreview?.owner === null && boundPreview.previous)),
-	);
+	const contextPreviewLoading = $derived(reading.updating);
 	const contextPreviewError = $derived(ownedPreview?.error ?? '');
 	let sheetWasOpen = false;
-	$effect(() => {
-		const threadId = boundThreadId;
-		if (surface === 'sheets' && threadId) return () => setContextSheetOpen(threadId, false);
-	});
 	$effect(() => {
 		const t = $token;
 		const ids = previewIds;
@@ -209,7 +215,6 @@
 		const sheetOpen = surface === 'sheets' && sheetView === 'context';
 		const opening = sheetOpen && !sheetWasOpen;
 		sheetWasOpen = sheetOpen;
-		if (surface === 'sheets' && boundThreadId) setContextSheetOpen(boundThreadId, sheetOpen);
 		// The always-mounted sheets instance is the one reader per composer.
 		if (surface !== 'sheets' || !boundThreadId || !canInspectContext || !t || !ids) return;
 		if (opening) contextSourceDetail = null;
@@ -228,7 +233,6 @@
 			modelId: previewModelId,
 			...ids,
 			retryError: opening,
-			carry: sheetOpen && !opening,
 		});
 	});
 	function openSheet(view: Exclude<SheetView, null>) {
