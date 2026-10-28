@@ -65,15 +65,11 @@ def settle_terminal(
         connection, node_id, new_state, actor_id=actor_id, provenance=provenance,
     )
     if settles_worker:
-        retire_settled_worker(
-            connection, node_id, actor_id=actor_id, provenance=provenance,
-            causal_event_id=event_id,
-        )
+        retire_settled_worker(connection, node_id, actor_id=actor_id)
 
 
 def retire_settled_worker(
-    connection, node_id: str, *, actor_id: str | None, provenance: str,
-    causal_event_id: str | None,
+    connection, node_id: str, *, actor_id: str | None,
 ) -> bool:
     """Retire the worker a settled step spawned, if nothing else still holds it."""
     node = service._node_row(connection, node_id)
