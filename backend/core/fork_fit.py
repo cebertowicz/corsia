@@ -6,7 +6,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from core.fork_types import FORK_OUTPUT_TOKENS, FORK_TOOL_ROUND_TRIP_TOKENS
+from core.fork_pressure import (
+    CHECKPOINT_INSTRUCTION_BUDGET_TOKENS, WARM_FORK_RESERVE_TOKENS,
+    at_checkpoint_launch_point, soft_pressure_remaining,
+)
 from core.token_estimation import _estimate_messages_tokens
 from core.checkpoint_fold_blocks import (
     COLD_FOLD_OLD_TOOL_BUDGET_TOKENS,
@@ -51,6 +54,7 @@ class ProviderPayload:
     checkpoint_status: str | None
     installed_input_tokens: int | None
     checkpoint_admissible: bool
+    recovery_input_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,31 +80,7 @@ class ColdFoldInputTooLarge(RuntimeError):
     """Even the protected minimum cannot fit one fork call."""
 
 
-# R08: a warm fork started at soft-zone entry must fit its output reserve, the
-# checkpoint instruction with its bounded review block, and a tool round trip
-# (#2514). The raise stops at a quarter of the window so a small model cannot
-# fold at low occupancy and loop.
-CHECKPOINT_INSTRUCTION_BUDGET_TOKENS = 8_192
-WARM_FORK_RESERVE_TOKENS = (
-    FORK_OUTPUT_TOKENS + CHECKPOINT_INSTRUCTION_BUDGET_TOKENS + FORK_TOOL_ROUND_TRIP_TOKENS
-)
-
-
-def soft_pressure_remaining(context_window: int) -> int:
-    """Return the one static launch reserve, raised so a warm fork can finish."""
-    if isinstance(context_window, bool) or not isinstance(context_window, int):
-        raise ValueError("context window must be a positive integer")
-    if context_window <= 0:
-        raise ValueError("context window must be a positive integer")
-    base = min(32_768, max(8_192, context_window // 10))
-    return min(max(base, WARM_FORK_RESERVE_TOKENS), max(base, context_window // 4))
-
-
-def at_checkpoint_launch_point(current_tokens: int, context_window: int) -> bool:
-    """Return whether occupancy has reached the pressure checkpoint launch point."""
-    return context_window - current_tokens <= soft_pressure_remaining(context_window)
-
-
+# Pressure thresholds are shared with external recovery measurement.
 def foldable_tail_tokens(
     projection: PortableHistoryProjection,
     boundary: HistoryBoundary | None,
@@ -148,9 +128,10 @@ def evaluate_boundary(payload: ProviderPayload) -> BoundaryDecision:
         payload.installed_input_tokens, "installed input tokens"
     )
     current = correlated if correlated is not None else canonical
+    recovery = _optional_tokens(payload.recovery_input_tokens, "recovery input tokens")
     if current <= payload.context_window:
         active = payload.checkpoint_status in {"running", "captured"}
-        under_pressure = at_checkpoint_launch_point(current, payload.context_window)
+        under_pressure = at_checkpoint_launch_point(max(current, recovery or 0), payload.context_window)
         if under_pressure and payload.checkpoint_admissible and not active:
             return BoundaryDecision.PROCEED_AND_FOLD
         return BoundaryDecision.PROCEED

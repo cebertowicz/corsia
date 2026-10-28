@@ -7,6 +7,10 @@ from functools import partial
 from typing import Any
 
 from subagents.harness_checkpoint_cold_admission import build_external_cold_admission
+from subagents.harness_checkpoint_measure import (
+    current_external_input as _current_external_input,
+    recovery_input_tokens,
+)
 from subagents.harness_checkpoint_context import (
     ExternalCheckpointContext,
     external_measurement,
@@ -114,42 +118,7 @@ async def _prepare_external_checkpoint(
     )
 
 
-async def _current_external_input(
-    context: ExternalCheckpointContext,
-    identity: Any,
-    measurement: tuple[int | None, int | None],
-    complete_input_tokens: int | None = None,
-) -> tuple[int | None, Any | None, int | None]:
-    """Measure the live call or render the exact context that seeded its handle."""
-    from core.context_replay import exact_replay
-
-    measured, measured_window = measurement
-    if complete_input_tokens is not None:
-        # Current input/output plus actual replies already cover this Step.
-        # Do not count it again through the checkpoint-rendered tail.
-        return complete_input_tokens, None, measured_window
-    if measured is not None:
-        return measured + context.tail_tokens, None, measured_window
-    installed = context.installed_checkpoint
-    if (
-        installed is not None
-        and context.registered_checkpoint_id == installed.id
-    ):
-        from core.checkpoint_resume import installed_replay
-        from infra.db_async import run_in_db
-
-        selection = await run_in_db(installed_replay, installed)
-    else:
-        selection = exact_replay(context.history)
-    rendered = await render_external_selection(
-        context,
-        identity,
-        selection,
-        f"tool-boundary:{identity.turn_id}",
-    )
-    return None, rendered, measured_window
-
-
+# Current input measurement lives beside recovery pressure measurement.
 def _minimum_external_input(prepared, context: ExternalCheckpointContext) -> int:
     fixed = _initial_minimum(prepared) if prepared is not None else 0
     return fixed + context.minimum_tail_tokens
@@ -269,8 +238,9 @@ async def maintain_external_tool_boundary(
         )
         return InstalledContinuation(prepared.rendered.input_tokens, prepared)
 
-    window = effective_usage_window(
-        checkpoint_context.target.context_window, measured_window,
+    window = effective_usage_window(checkpoint_context.target.context_window, measured_window)
+    recovery_tokens = await recovery_input_tokens(
+        checkpoint_context, identity, window, render_external_selection,
     )
     continuation = await maintain_before_provider_call(ProviderBoundary(
         thread_id=thread_id,
@@ -288,6 +258,7 @@ async def maintain_external_tool_boundary(
         render_installed=render,
         wait_scope=scope,
         eager_checkpoint_id=checkpoint_context.eager_checkpoint_id,
+        recovery_input_tokens=recovery_tokens,
     ), must_adopt=must_adopt)
     if continuation.payload is None:
         return False
