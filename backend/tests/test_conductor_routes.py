@@ -53,6 +53,7 @@ def conductor_db(tmp_path, monkeypatch):
             lifecycle_state TEXT DEFAULT 'active', dormant_at TEXT,
             archived_at TEXT, archived_reason TEXT, purged_at TEXT,
             created_at TEXT, updated_at TEXT,
+            pending_model TEXT, switch_status TEXT, switch_error TEXT, switch_operation_id TEXT,
             runtime_context_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1
         );
@@ -170,6 +171,10 @@ class TestConductorRoutes:
             "title": "Native conductor",
             "bootloader_files": '["context/CONDUCTOR.md"]',
             "updated_at": row_updated_at,
+            "pending_model": None,
+            "switch_status": None,
+            "switch_error": None,
+            "switch_operation_id": None,
             "model": "vmlx-local-qwen",
             "reasoning_effort": "max",
             "thread_kind": "chat",
@@ -314,6 +319,47 @@ class TestConductorRoutes:
         assert target["addressability_error"] == (
             f"Model '{removed_model}' not found in catalog. Choose another model."
         )
+
+
+    @pytest.mark.asyncio
+    async def test_target_carries_a_pending_and_a_failed_model_switch(
+        self, inline_db, conductor_db, monkeypatch,
+    ):
+        import api.conductor as conductor_routes
+        import infra.queries as queries_mod
+        from llm.resolution import ModelUnavailableError
+
+        conductor_db.execute(
+            "INSERT INTO threads (id, user_id, title, model, lifecycle_state) "
+            "VALUES ('switching-conductor', 'steve', 'Switching', 'omlx@local/a', 'active')"
+        )
+        conductor_db.commit()
+        monkeypatch.setattr(queries_mod, "get_db", lambda: conductor_db)
+
+        def missing_model(model):
+            raise ModelUnavailableError(model, f"Model '{model}' not found in catalog")
+
+        monkeypatch.setattr("infra.runtime_truth.resolve_execution_target", missing_model)
+        await conductor_routes.put_conductor_route(
+            token="tok", body={"thread_id": "switching-conductor"}, scope="proj-a",
+        )
+
+        async def read_switch():
+            got = await conductor_routes.get_conductor_route(token="tok", scope="proj-a")
+            return {k: got["target"][k] for k in (
+                "pending_model", "switch_status", "switch_error", "switch_operation_id")}
+
+        for status, error in (("preparing", None), ("failed", "No room")):
+            conductor_db.execute(
+                "UPDATE threads SET pending_model='omlx@local/b', switch_status=?, "
+                "switch_error=?, switch_operation_id='op-1' WHERE id='switching-conductor'",
+                (status, error),
+            )
+            conductor_db.commit()
+            assert await read_switch() == {
+                "pending_model": "omlx@local/b", "switch_status": status,
+                "switch_error": error, "switch_operation_id": "op-1",
+            }
 
 
 class TestWorkspaceScopeIsTheCorsiaAgent:
