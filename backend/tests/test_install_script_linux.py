@@ -322,6 +322,23 @@ def test_browser_dependencies_match_the_distribution(env, distro, expected):
     assert "fonts-liberation" in result.stdout.splitlines()
 
 
+@pytest.mark.parametrize("restrict, wants_apparmor", [("1\n", True), ("0\n", False), (None, False)])
+def test_browser_needs_apparmor_only_where_user_namespaces_are_restricted(env, tmp_path, restrict, wants_apparmor):
+    # Debian's kernel has no such switch and its AppArmor 3 rejects the userns rule.
+    restrict_file = tmp_path / "apparmor_restrict_unprivileged_userns"
+    if restrict is not None:
+        restrict_file.write_text(restrict)
+    command = ('source "$1"; install_apt_linux() { printf "%s\\n" "$@"; }; linux_browser_deps; '
+               'linux_userns_restricted && echo RESTRICTED || echo OPEN')
+    result = subprocess.run(["/bin/bash", "-c", command, "_", str(_script(env))],
+                            env={**env, "CORSIA_INSTALL_SOURCE_ONLY": "1",
+                                 "CORSIA_INSTALL_USERNS_RESTRICT": str(restrict_file)},
+                            text=True, capture_output=True, check=True)
+    lines = result.stdout.splitlines()
+    assert ("apparmor" in lines) is wants_apparmor
+    assert lines[-1] == ("RESTRICTED" if wants_apparmor else "OPEN")
+
+
 def test_x86_64_downloads_the_x86_64_builds(env):
     # The fixture pins each architecture to its own local archive.
     result = _run(env, STUB_ARCH="x86_64")
