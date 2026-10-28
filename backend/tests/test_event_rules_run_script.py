@@ -14,6 +14,7 @@ from automation.script_sandbox import ScriptRun
 from infra.database import get_db
 from infra.measure_registry import REGISTRY, sync
 from tests.event_routing_helpers import mk_session
+from tests.test_script_github_channel import spawned  # noqa: F401 - real sandbox path, process faked
 from tools.event_rules import EventRulesTool
 
 OWNER, OTHER = "run-owner", "run-other"
@@ -32,6 +33,10 @@ events:
     use: route
   qa.three:
     attributes: {code: id}
+    dedupe: [code]
+    use: route
+  qa.forged:
+    attributes: {code: id, repo: id}
     dedupe: [code]
     use: route
 """
@@ -64,7 +69,8 @@ def world(isolated_db, tmp_path: Path, monkeypatch):
 def runs(world, monkeypatch):
     """The sandboxed process: each script's stdout by file name, and every call's stdin."""
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None,
+                   github_repo=None):
         world["calls"].append((path.name, json.loads(stdin) if stdin is not None else None))
         world["traces"].append(trace)
         return world["outputs"].get(path.name, ScriptRun(0, b"", b"", False))
@@ -364,6 +370,96 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
     for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):
         asyncio.run(script_sandbox.run_script(OWNER, None, script, run_id="r", timeout_seconds=5, **kwargs))
     assert [env.get("CORSIA_EVENT_TRACE") for env in envs] == [None, '["rule_a", "rule_b"]']
+
+
+@pytest.mark.parametrize("stored, repo", [
+    (None, None),  # the agent's own qa event names no repository
+    ({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r", "pr_number": 1}}, "o/r"),
+    # A worker result's repo is its claimed event's; the model's result text never names the scope.
+    ({"type": "worker.result", "origin": "platform",
+      "facts": {"repo": "o/r", "result": json.dumps({"repo": "x/y"})}}, "o/r"),
+    ({"type": "worker.result", "origin": "platform", "facts": {"result": json.dumps({"repo": "x/y"})}}, None),
+    ({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r/../x"}}, None),
+    # A script's or agent's event names whatever it likes; it never names the scope.
+    ({"type": "qa.forged", "origin": "emitter", "facts": {"repo": "o/r"}}, None),
+    ({"type": "qa.forged", "origin": "agent", "facts": {"repo": "o/r"}}, None),
+])
+def test_a_rule_run_reads_github_only_for_the_repository_its_stored_event_names(
+        world, spawned, monkeypatch, stored, repo):
+    from events import rule_runs
+
+    rule = _rule(_script(world, "bound.sh"))
+    _emit()
+    if stored is not None:
+        real = rule_runs.start
+
+        def start(db, decision_id):
+            run_input = real(db, decision_id)
+            run_input["event"].update(stored)
+            return run_input
+
+        monkeypatch.setattr(rule_runs, "start", start)
+    _sweep()
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert spawned["channels"] == ([(rule["id"], repo)] if repo else [])
+    assert len(spawned["commands"]) == 1
+    assert bool(spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")) is (repo is not None)
+
+
+def test_a_script_cannot_open_a_channel_for_a_repository_its_own_event_names(world, monkeypatch):
+    """Script A emits an event naming another repository; rule B runs a script on it. Neither
+    run gets a channel: B's stored event is A's, an emitter's, whatever its facts say."""
+    from contextlib import asynccontextmanager
+
+    from automation import script_sandbox
+    from host_access.processes import ForegroundProcessResult
+
+    channels, commands, envs = [], [], []
+    forged = json.dumps({"event": {"type": "qa.forged", "facts": {"code": "f", "repo": "other/private"}}})
+
+    async def nothing(*_a, **_k):
+        return None
+
+    async def cwd(*_a, **_k):
+        return str(world["tmp"]), None
+
+    async def prepare(command, *_a):
+        commands.append(command)
+        return None, ["true"]
+
+    async def spawn(_argv, **kwargs):
+        envs.append(kwargs["env"])
+        stdout = forged.encode() + b"\n" if "forger.sh" in commands[-1] else b""
+        return ForegroundProcessResult(None, stdout, b"", 0)
+
+    @asynccontextmanager
+    async def github_channel(*args, **kwargs):
+        channels.append((args, kwargs))
+        yield world["tmp"] / "socket"
+
+    monkeypatch.setattr(script_sandbox, "_checked_environment", nothing)
+    monkeypatch.setattr(script_sandbox, "load_shell_repo_policies", lambda *_a: ([], []))
+    monkeypatch.setattr(script_sandbox, "_resolve_execution_cwd", cwd)
+    monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
+    monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
+    monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: world["tmp"])
+    monkeypatch.setattr(script_sandbox, "github_channel", github_channel)
+    monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
+    first = _rule(_script(world, "forger.sh"))
+    second = _rule(_script(world, "reader.sh"), event_type="forged")
+    _emit()
+    _sweep()
+    assert _outcomes(first["id"]) == [("ran", None)] and _outcomes(second["id"]) == [("ran", None)]
+    assert ["reader.sh" in command for command in commands] == [False, True]
+    assert channels == []
+    assert all("CORSIA_SCRIPT_GITHUB_SOCKET" not in env for env in envs)
+
+
+def test_a_scheduled_run_gets_no_repository(world, spawned):
+    _script(world, "scheduled.sh", cadence=300)
+    _sweep(_START + timedelta(minutes=6))
+    assert spawned["channels"] == [] and len(spawned["commands"]) == 1
+    assert "CORSIA_SCRIPT_GITHUB_SOCKET" not in spawned["envs"][0]
 
 
 def test_a_rules_queue_is_capped_and_a_skip_shows_in_explain_and_list(runs, monkeypatch):

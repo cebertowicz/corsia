@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from events import rule_runs
+from events.worker_labels import labelled_event
 from events.rule_outcomes import (
     DROPPED, INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, SKIPPED, START_WORKER, STARTED,
     Outcome, Rule, RuleEvent,
@@ -73,9 +74,9 @@ def queue(
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, request_identity=identity,
                                     run_input=json.dumps({
-                "event": {"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
-                          "rule_id": rule.id, "facts": dict(event.facts),
-                          "artifact": dict(event.artifact_ref) if event.artifact_ref else None},
+                "event": labelled_event({"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
+                          "rule_id": rule.id, "facts": dict(event.facts), "origin": event.origin,
+                          "artifact": dict(event.artifact_ref) if event.artifact_ref else None}),
                 "trace": [*event.trace, rule.id],
             }, ensure_ascii=False, default=str)))
     return outcomes

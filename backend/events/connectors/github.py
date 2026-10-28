@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
+from events.connector_workflows import ShippedResultContract, ShippedWorkflowDecl
 from events.connectors import (
     ConnectorManifest,
     EventTypeDecl,
@@ -198,9 +199,9 @@ def _capture_screen(staging):
 
 
 def _apply_screen(payload, record):
-    from events.connectors.github_screen.result import apply_captured_floor
+    from events.connectors.github_screen.result import validate_captured_result
 
-    return apply_captured_floor(payload, record)
+    return validate_captured_result(payload, record)
 
 
 def _screen_instructions():
@@ -313,8 +314,14 @@ MANIFEST = register(ConnectorManifest(
     shipped_observe_rules=(ShippedObserveRuleDecl(
         id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
     ),),
-    shipped_workflows={"github-pr-screen": _screen_workflow},
-    shipped_result_hooks={"github-pr-screen": (_capture_screen, _apply_screen, _screen_instructions, _screen_version)},
+    shipped_workflows={"github-pr-screen": ShippedWorkflowDecl(
+        load=_screen_workflow,
+        result=ShippedResultContract(
+            source="outside", kind="pull request", item_fields=("repo", "pr_number", "item_version"),
+            version=_screen_version, instructions=_screen_instructions,
+            capture=_capture_screen, validate=_apply_screen,
+        ),
+    )},
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

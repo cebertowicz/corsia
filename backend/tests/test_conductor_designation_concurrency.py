@@ -13,9 +13,7 @@ import threading
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _no_shipped_rule_sync_on_minimal_database(monkeypatch):
-    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
+from tests.github_screen_schema import SCREEN_INSTALL_SCHEMA_SQL
 
 
 class _BarrierCursor:
@@ -105,6 +103,7 @@ class _RecordingConnection:
 def _connection(path) -> sqlite3.Connection:
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
+    connection.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=5000")
     return connection
@@ -129,6 +128,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            path TEXT,
             conductor_thread_id TEXT,
             updated_at TEXT
         );
@@ -242,6 +242,7 @@ def test_caller_deferred_transaction_acquires_write_lock_before_designation_read
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            path TEXT,
             conductor_thread_id TEXT,
             updated_at TEXT
         );

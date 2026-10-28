@@ -9,19 +9,19 @@ from pathlib import Path
 from automation.script_schedules import DEFAULT_TIMEOUT_SECONDS, UNBOUNDED_RUNS, file_sha256
 from automation.worker_inputs import owner_root
 from events.connectors import get_manifest
-from events.connectors.github_notifications_feed import _remotes
+from events.connectors.github_notifications_feed import github_repositories_for_policy
 from infra.database import write_transaction
-from infra.measure_registry import REGISTRY, _attempt
+from infra.measure_registry import REGISTRY, persist_declaration
 from infra.project_repo_policy import list_registered_repo_policies
 from infra.write_effects import after_commit
 
 ORIGIN_PREFIX = "rule_set:github@"
+WORKFLOW = "github-pr-screen"
+PACKAGE = Path(__file__).parent
 
 
 def origin() -> str:
     return ORIGIN_PREFIX + get_manifest("github").version
-WORKFLOW = "github-pr-screen"
-PACKAGE = Path(__file__).parent
 
 
 def _key(project: str) -> str:
@@ -40,7 +40,7 @@ def _write_if_changed(path: Path, data: bytes) -> None:
 
 def _repos(db, project: str) -> list[str]:
     policies = list_registered_repo_policies(project_id=project, db=db)
-    return sorted({repo for policy in policies for repo in _remotes(policy)}, key=str.casefold)
+    return sorted({repo for policy in policies for repo in github_repositories_for_policy(policy)}, key=str.casefold)
 
 
 def _declaration(project: str) -> tuple[str, str]:
@@ -53,7 +53,7 @@ def _declaration(project: str) -> tuple[str, str]:
 
 
 def _retire_declaration(db, project: str, owner: str, path: str) -> None:
-    _attempt(db, owner, path, _namespace(project), [], "")
+    persist_declaration(db, owner, path, _namespace(project), [], "")
 
 
 def _schedule(db, project: str, owner: str, script: Path, now: str) -> str:
@@ -134,7 +134,7 @@ def sync(db, project: str | None = None) -> None:
                       "staged_type": namespace + ".pr_staged"}
             _write_if_changed(folder / "config.json", json.dumps(config, sort_keys=True).encode())
             path = str(folder / "measures.yaml")
-            _attempt(conn, owner, path, namespace, [("event", namespace + ".pr_staged", spec)], "shipped")
+            persist_declaration(conn, owner, path, namespace, [("event", namespace + ".pr_staged", spec)], "shipped")
             after_commit(conn, lambda: REGISTRY.rebuild(db))
             now = datetime.now(timezone.utc).isoformat()
             schedule = _schedule(conn, project_id, owner, folder / "stage.py", now)
@@ -147,4 +147,3 @@ def sync(db, project: str | None = None) -> None:
             _rule(conn, rule_id=key + "_start", project=project_id, owner=owner,
                   connector=namespace, event_type="pr_staged", tests=[tests[0]], action="start_worker",
                   script_id=None, now=now)
-    return None

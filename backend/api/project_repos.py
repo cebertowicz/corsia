@@ -9,7 +9,7 @@ import threading
 from typing import Callable, TypeVar
 
 from fastapi import APIRouter, HTTPException
-from api.project_repo_models import RepoAdd as RepoAdd, RepoUpdate as RepoUpdate, with_policy as _with_policy
+from pydantic import BaseModel, ConfigDict
 
 from core.project_context import resolve_project_paths
 from infra.auth import authenticate
@@ -60,6 +60,23 @@ _PROJECT_REPO_LOCKS_GUARD = threading.Lock()
 _PROJECT_REPO_LOCKS: dict[str, threading.RLock] = {}
 
 
+class RepoAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str  # "link" | "create"
+    path: str | None = None  # link mode: the existing directory to attach
+    name: str | None = None  # optional for link (defaults from basename); required for create
+    pinned_branch: str | None = None
+    protect_base_checkout: bool | None = None
+
+
+class RepoUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pinned_branch: str | None = None
+    protect_base_checkout: bool | None = None
+
+
 def _workspace_dir_for(project_id: str) -> Path:
     """Resolve the project's planning dir or raise 404."""
     db = get_db()
@@ -80,7 +97,9 @@ def _workspace_dir_for(project_id: str) -> Path:
 
 def _sync(project_id: str, ws_dir: Path, db) -> None:
     """Update doc roots inside the caller's compensation transaction."""
+    from events.connectors.github_screen import install
     _write_doc_roots(db, project_id, compute_doc_roots(ws_dir))
+    install.sync(db, project_id)
 
 
 def _under_project_repo_lock(project_id: str, operation: Callable[[], _T]) -> _T:
@@ -89,6 +108,25 @@ def _under_project_repo_lock(project_id: str, operation: Callable[[], _T]) -> _T
         lock = _PROJECT_REPO_LOCKS.setdefault(project_id, threading.RLock())
     with lock:
         return operation()
+
+
+def _with_policy(repo: dict, policies: dict[str, RepoPolicy]) -> dict:
+    """Attach policy state only when the visible binding still matches its row."""
+    row = dict(repo)
+    policy = policies.get(repo["name"])
+    bound = (
+        policy is not None
+        and not repo.get("missing", False)
+        and policy.path
+        == Path(str(repo["path"])).expanduser().resolve(strict=False)
+    )
+    row["registered"] = bound
+    row["pinned_branch"] = policy.pinned_branch if bound else None
+    row["protect_base_checkout"] = policy.protect_base_checkout if bound else False
+    # Current clients still render this derived response field. Mutations use
+    # only the two canonical controls above.
+    row["branch_pinned"] = bool(bound and policy.branch_pinned)
+    return row
 
 
 def _remove_created_source(

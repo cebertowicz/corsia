@@ -25,7 +25,8 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
 def read(args: list[str]) -> int:
     path = os.environ.get(SOCKET_ENV)
     if not path:
-        print("GitHub reads are available only inside a script run", file=sys.stderr)
+        print("GitHub reads are available only to a script run that a rule started from an event "
+              "naming a repository", file=sys.stderr)
         return 1
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -34,12 +35,13 @@ def read(args: list[str]) -> int:
             client.sendall(json.dumps(args).encode() + b"\n")
             size = int.from_bytes(_read_exact(client, 8), "big")
             response = json.loads(_read_exact(client, size))
-    except (OSError, ValueError):
-        print("GitHub read channel is unavailable", file=sys.stderr)
+        stdout, stderr, code = response["stdout"], response["stderr"], int(response["code"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"GitHub read channel is unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    sys.stdout.write(response["stdout"])
-    sys.stderr.write(response["stderr"])
-    return response["code"]
+    sys.stdout.write(stdout)
+    sys.stderr.write(stderr)
+    return code
 
 
 if __name__ == "__main__":

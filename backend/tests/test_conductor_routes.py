@@ -11,6 +11,7 @@ import pytest
 from infra.schema import STRUCTURED_PLAN_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from tests.registry_helpers import ARTIFACT_REGISTRY_DDL
+from tests.github_screen_schema import SCREEN_INSTALL_SCHEMA_SQL
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 if _BACKEND_DIR not in sys.path:
@@ -69,7 +70,7 @@ def conductor_db(tmp_path, monkeypatch):
         );
         """ + ARTIFACT_REGISTRY_DDL
     )
-    conn.executescript(STRUCTURED_PLAN_SCHEMA_SQL + CHECKPOINT_SCHEMA_SQL)
+    conn.executescript(STRUCTURED_PLAN_SCHEMA_SQL + CHECKPOINT_SCHEMA_SQL + SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "INSERT INTO projects (id, name, path, created_at, updated_at) "
         "VALUES ('proj-a', 'Proj A', '/Users/x/proj-a', 't', 't')"

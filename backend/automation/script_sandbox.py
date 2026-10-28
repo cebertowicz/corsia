@@ -5,6 +5,11 @@ through ``PROCESS_OWNER`` under the thread and Turn identity. A script run has
 no Turn, so it uses a synthetic one (``script:<run_id>``) and the unleased
 envelope: it can never inherit a host-access lease. Every builder below is the
 one ``BashTool.execute`` calls, so the two cannot drift apart.
+
+A rule-started run whose stored event names a repository also gets a GitHub
+read channel for that repository (``script_github_channel``) and the
+``corsia github read`` client; every other run gets neither. The person's
+``gh`` homes stay hidden from every run.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import asyncio
 import os
 import shlex
 import tempfile
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -104,16 +110,20 @@ async def run_script(
     stdin: bytes | None = None,
     trace: tuple[str, ...] = (),
     rule_id: str | None = None,
+    github_repo: str | None = None,
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
     ``stdin`` is written to a private file in the thread's own temp root, which
     the envelope grants read-write, and removed once the run ends. ``trace`` is a
     rule-started run's rule chain, handed to ``corsia event emit`` (``events.trace_env``).
+    ``github_repo`` is the repository a rule run's claimed event names; only then
+    does the run get a GitHub read channel, and only for that repository.
     """
     await _checked_environment()
     if stdin is None:
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace, rule_id)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace,
+                          rule_id, github_repo)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -122,26 +132,44 @@ async def run_script(
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace, rule_id)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace,
+                          rule_id, github_repo)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...], rule_id: str | None,
+    stdin: Path | None, trace: tuple[str, ...], rule_id: str | None, github_repo: str | None,
 ) -> ScriptRun:
+    if github_repo is None:
+        return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                       stdin, trace, None, None)
+    async with _github_client(thread_id, run_id, rule_id, github_repo) as (socket_path, client_dir):
+        return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                       stdin, trace, socket_path, client_dir)
+
+
+@asynccontextmanager
+async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
+    """The run's channel socket and a directory holding its ``corsia`` client.
+
+    Only a failure to set these up is reported as the channel's; the run's own
+    failures keep their cause.
+    """
+    stack = AsyncExitStack()
     try:
-        async with github_channel(thread_id, run_id, rule_id) as socket_path:
-            with tempfile.TemporaryDirectory(prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id)) as directory:
-                client_dir = Path(directory)
-                client = client_dir / "corsia"
-                client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
-                client.chmod(0o700)
-                return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
-                                               stdin, trace, socket_path, client_dir)
+        socket_path = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))
+        client_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(
+            prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id))))
+        client = client_dir / "corsia"
+        client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
+        client.chmod(0o700)
     except OSError as exc:
-        raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}") from exc
+        await stack.aclose()
+        raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}: {exc}") from exc
+    async with stack:
+        yield socket_path, client_dir
 
 
 def _script_gh_homes() -> set[Path]:
@@ -160,10 +188,12 @@ def _script_profile(*args, **kwargs) -> str:
 
 async def _run_with_channel(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...], socket_path: Path, client_dir: Path,
+    stdin: Path | None, trace: tuple[str, ...], socket_path: Path | None, client_dir: Path | None,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
-    env[SOCKET_ENV] = str(socket_path)
+    env.pop(SOCKET_ENV, None)
+    if socket_path is not None:
+        env[SOCKET_ENV] = str(socket_path)
     if trace:
         env[TRACE_ENV] = encode_trace(trace)
     try:

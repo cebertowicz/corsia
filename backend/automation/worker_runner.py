@@ -36,6 +36,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -147,8 +148,6 @@ def _free(conn: sqlite3.Connection) -> int:
 def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
     """Claim up to one queued start per free slot, oldest first. With no slot free nothing
     is written: the starts wait, and the newest of them is remembered as having waited."""
-    from events.connectors import shipped_result_hook
-
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
     cleanup: list[tuple[str, int, str | None]] = []
     with write_transaction(db, scope="worker_starts_claim") as conn:
@@ -162,7 +161,7 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
                 break
             skipped = _skip(conn, row)
             if skipped is not None:
-                if shipped_result_hook(row["origin"], row["workflow_id"]):
+                if row["origin"] and row["origin"].startswith("rule_set:"):
                     data = json.loads(row["run_input"] or "{}")
                     facts = (data.get("event") or {}).get("facts") or {}
                     cleanup.append((row["thread_id"], row["id"], facts.get(inputs.STAGING_FACT)))
@@ -176,7 +175,7 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
     return claimed
 
 
-def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, Any]:
+def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None) -> dict[str, Any]:
     """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
@@ -217,10 +216,11 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
         raise inputs.StartRefused(f"refused: your model {name} can't run now. "
                                   "Choose a model that is ready for this chat.")
     # A skill whose declared result fails validation is not included, so one found here is valid.
-    from events.connectors import shipped_workflow
-
-    skill = shipped_workflow(dict(row).get("origin"), row["workflow_id"], project)
-    if skill is None:
+    if shipped is not None:
+        if shipped.error or project is None:
+            raise inputs.StartRefused("refused: " + (shipped.error or "the shipped workflow needs a project"))
+        skill = shipped.declaration.load(project)
+    else:
         skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
     if skill is None or schema is None:
@@ -259,9 +259,18 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
     from tools.delegate_task import _spawn
 
+    from events.connector_workflows import resolve_shipped_workflow
+
     waited = row["id"] <= _state["waited"]
     try:
-        found = await run_in_db(_prepare, row, run_input)
+        origin = dict(row).get("origin")
+        shipped = resolve_shipped_workflow(origin, row["workflow_id"])
+        contract = shipped.declaration.result if shipped and shipped.declaration else None
+        if contract:
+            event_facts = run_input["event"]["facts"]
+            run_input["result_context"] = contract.context(origin, row["workflow_id"], event_facts)
+            run_input["workflow"] = f"{row['workflow_id']}@{contract.version()}"
+        found = await run_in_db(_prepare, row, run_input, shipped)
         if found["harness"] == "codex":
             from subagents.cc_confinement import ConfinementRefused
             from subagents.codex_confinement import verify_version
@@ -270,28 +279,21 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                 await verify_version()
             except ConfinementRefused as exc:
                 raise inputs.StartRefused(str(exc)) from exc
-        from events.connectors import shipped_result_hook
-
-        origin = dict(row).get("origin")
-        hook = shipped_result_hook(origin, row["workflow_id"])
-        if hook:
-            found["result_instructions"] = hook[2]()
-            found["workflow"] = f"{row['workflow_id']}@{hook[3]()}"
-        read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
-        captured = None
-        if hook:
+        if contract:
+            found["result_instructions"] = contract.instructions()
+            found["workflow"] = run_input["workflow"]
             try:
-                captured = await asyncio.to_thread(hook[0], found["staging"])
-            except Exception:  # A missing floor must invalidate, never clear, the result.
+                run_input["result_context"]["record"] = await asyncio.to_thread(
+                    contract.capture, Path(found["staging"]),
+                )
+            except Exception as exc:  # CORSIA input failure, before any worker turn.
                 logger.exception("worker start {} could not capture its result record", row["id"])
+                raise inputs.StartRefused("refused: CORSIA could not capture the workflow result inputs") from exc
+        read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "trace": run_input.get("trace") or [], "waited": waited,
-                            "item_version": found["facts"].get("item_version") or found["facts"].get(inputs.HEAD_SHA_FACT),
-                            "hook_origin": origin if hook else None,
-                            "hook_name": row["workflow_id"] if hook else None,
-                            "hook_record": captured,
-                            "staging_path": found["facts"].get(inputs.STAGING_FACT) if hook else None,
-                            "event_facts": found["facts"] if hook else None})
+                            "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
+                            "result_context": run_input.get("result_context")})
 
         async def record(worker: str) -> None:
             await run_in_db(_made, row["id"], worker, check)

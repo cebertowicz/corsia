@@ -44,6 +44,21 @@ def apply_captured_floor(result: dict, record: dict) -> dict:
     return result
 
 
+def validate_captured_result(result: dict, record: dict) -> dict:
+    """The screen may add caution but cannot rewrite the model's other fields."""
+    original = json.loads(json.dumps(result))
+    checked = apply_captured_floor(result, record)
+    before, after = original["payload"], checked["payload"]
+    if ({key: value for key, value in checked.items() if key != "payload"}
+            != {key: value for key, value in original.items() if key != "payload"}
+            or {key: value for key, value in after.items() if key not in {"verdict", "categories", "floor_hit"}}
+            != {key: value for key, value in before.items() if key not in {"verdict", "categories"}}
+            or not set(before["categories"]).issubset(after["categories"])
+            or after["verdict"] not in ({"safe", "flagged"} if before["verdict"] == "safe" else {before["verdict"]})):
+        raise RuntimeError("the screen validator weakened or changed the model result")
+    return checked
+
+
 def screen_result(text: str, paths: set[str], floor_hits: set[str]) -> dict:
     """Validate the model result, then apply the earlier deterministic floor."""
     return apply_captured_floor(check_result(text, SCREEN_SCHEMA),

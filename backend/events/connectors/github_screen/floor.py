@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 
 ENCODED_BOUND = 256
 ENCODED = re.compile(r"[A-Za-z0-9+/=_-]+")
-HIDDEN = re.compile(r"[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
+HIDDEN = re.compile(r"[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
 LOCKFILES = frozenset({"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
                        "Cargo.lock", "Pipfile.lock", "poetry.lock", "uv.lock", "Gemfile.lock",
                        "composer.lock", "go.sum"})
@@ -25,7 +25,8 @@ def _path_rules(path: str, ci_paths: set[str]) -> set[str]:
             or (name.startswith("requirements") and name.endswith(".txt"))):
         hits.add("floor.ci_file")
     if (name in {"SKILL.md", "AGENTS.md", "CLAUDE.md"}
-            or (name.endswith(".md") and any(part in {"skills", "context"} for part in parts[:-1]))
+            or "skills" in parts[:-1]
+            or (name.endswith(".md") and "context" in parts[:-1])
             or path.startswith("backend/prompts/")):
         hits.add("floor.agent_instructions")
     return hits

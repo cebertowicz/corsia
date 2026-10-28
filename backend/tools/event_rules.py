@@ -83,7 +83,8 @@ def _workflows(thread_id: str, project_id: str | None) -> dict[str, Any]:
 
 async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     """Send one declared event as this chat; the receipt, or the refusal with its fix."""
-    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error
+    from events.intake import admit_event, emitted_event_id
+    from events.intake_errors import failure_code, format_event_error
 
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:

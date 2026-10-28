@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from events.connector_workflows import shipped_item_fields
 from events.connectors import ConnectorManifest, EventTypeDecl, register
 
 NAMESPACE = "worker"
@@ -22,7 +23,7 @@ REQUESTER_FACT = "requester"
 _FACTS = (
     REQUESTER_FACT, "rule_id", "request_event", "request_identity", "workflow", "source",
     "item", "item_version", "artifact_integration", "artifact_type", "valid", "result",
-    "reason", "detail", "repo", "pr_number", "kind", "injection_signs",
+    "reason", "detail", "kind", "injection_signs",
 )
 
 
@@ -31,7 +32,8 @@ def _classify(raw: dict[str, Any]) -> str:
 
 
 def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
-    return {key: raw[key] for key in ("run_id", *_FACTS) if raw.get(key) is not None}
+    return {key: raw[key] for key in ("run_id", *_FACTS, *shipped_item_fields())
+            if key in raw and (raw[key] is not None or key == "injection_signs")}
 
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
@@ -48,8 +50,8 @@ MANIFEST = register(ConnectorManifest(
     namespace=NAMESPACE,
     version="1",
     event_types={
-        RESULT: EventTypeDecl(RESULT, ("run_id",), _FACTS, event_class="actionable"),
-        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), _FACTS, event_class="informational"),
+        RESULT: EventTypeDecl(RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="actionable"),
+        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="informational"),
     },
     classify=_classify,
     extract_facts=_extract_facts,

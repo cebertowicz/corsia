@@ -6,7 +6,8 @@ gone is skipped with the reason, since it never started. None of these wakes
 anyone; ``explain`` and ``list`` show them. A rule run takes its script's own
 in-flight claim, the one a scheduled run takes, so at most one run of a script
 is in flight; a run whose script is busy stays queued for a later sweep. The
-queue itself is ``events.rule_runs``.
+queue itself is ``events.rule_runs``. The repository a run may read GitHub for is
+taken from that stored input's event here, before the script sees any of it.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 from dataclasses import dataclass
 
 from automation import script_schedules as store
+from automation.script_github_channel import bound_repository
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
@@ -26,12 +28,15 @@ KEY_PREFIX = "rule:"
 
 @dataclass(frozen=True)
 class RuleRun:
-    """One claimed rule run: its decision row, the event for stdin, and the rule chain."""
+    """One claimed rule run: its decision row, the event for stdin, the rule chain, and
+    the repository its stored connector or platform event names, the only one its GitHub
+    channel reads."""
 
     decision_id: int
     rule_id: str
     stdin: bytes
     trace: tuple[str, ...]
+    github_repo: str | None = None
 
     @property
     def key(self) -> str:
@@ -77,9 +82,11 @@ def claim(now: str, capacity: int, live_keys: set[str], db) -> list[tuple[Schedu
             # Still queued under this write lock; were it not, the next sweep frees the claim.
             run_input = rule_runs.start(connection, row["id"])
             if run_input is not None:
+                event = run_input.get("event", {})
                 claimed.append((schedule, RuleRun(
                     row["id"], row["rule_id"],
-                    json.dumps(run_input.get("event", {}), ensure_ascii=False).encode(),
+                    json.dumps(event, ensure_ascii=False).encode(),
                     tuple(run_input.get("trace", ())),
+                    bound_repository(event),
                 )))
     return claimed

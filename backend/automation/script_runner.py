@@ -212,7 +212,8 @@ async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str,
     if not report.events:
         return report
     from automation.script_measures import run_stamps
-    from events.intake import admit_event, failure_code, format_event_error
+    from events.intake import admit_event
+    from events.intake_errors import failure_code, format_event_error
 
     stamps = run_stamps(schedule, report)
     producer = f"script:{schedule.id}"
@@ -320,8 +321,8 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"stdin": rule_run.stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id}
-               if rule_run is not None else {}),
+            **({"stdin": rule_run.stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
+                "github_repo": rule_run.github_repo} if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")

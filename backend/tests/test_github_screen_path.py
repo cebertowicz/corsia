@@ -39,7 +39,7 @@ def screen(world, tmp_path, monkeypatch):
     db.commit()
     set_project_conductor(world['project'], OWNER, db=db)
     observe_rules.sync_shipped_rules(db)
-    install.sync(db, world['project'])
+
     key = install._key(world['project'])
     schedule = db.execute('SELECT script_path FROM automation_schedules WHERE id=?', (key + '_script',)).fetchone()
     assert schedule is not None
@@ -88,7 +88,7 @@ def screen(world, tmp_path, monkeypatch):
             args += ['-H', 'Accept: ' + accept]
         return broker(args + [endpoint]).stdout
 
-    async def run(_thread_id, _project_id, script_path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None):
+    async def run(_thread_id, _project_id, script_path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None, github_repo=None):
         config = json.loads((Path(script_path).parent / 'config.json').read_text())
         event = json.loads(stdin)
         facts = stage.stage(event, config['project_id'], Path(config['staging_root']), 'o/r', read)

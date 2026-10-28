@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tools.project_repo_register import ProjectRepoRegisterTool
+from tests.github_screen_schema import SCREEN_INSTALL_SCHEMA_SQL
 
 
 class _NoClose:
@@ -60,15 +61,17 @@ def _git_repo(path: Path) -> None:
 def _policy_db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:", timeout=2, check_same_thread=False)
     db.row_factory = sqlite3.Row
+    db.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     db.executescript(
         """
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
             name TEXT,
             path TEXT,
-            doc_roots TEXT
+            doc_roots TEXT,
+            conductor_thread_id TEXT
         );
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,

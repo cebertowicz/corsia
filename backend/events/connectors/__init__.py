@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from events.connector_workflows import ShippedWorkflowDecl
 from events.connectors.receiver import ReceiverDecl
 from events.identity_formula import RelationshipDecl
 
@@ -87,9 +88,7 @@ class ConnectorManifest:
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
         default_factory=dict)
     shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
-    shipped_workflows: Mapping[str, Callable[[str], Any]] = field(default_factory=dict)
-    shipped_result_hooks: Mapping[str, tuple[Callable[..., Any], Callable[..., Any], Callable[..., str],
-                                             Callable[..., str]]] = field(default_factory=dict)
+    shipped_workflows: Mapping[str, ShippedWorkflowDecl] = field(default_factory=dict)
     app_identities: frozenset[str] = frozenset()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
@@ -156,26 +155,6 @@ def registered_connectors() -> tuple[str, ...]:
     """All registered connector names."""
     return tuple(sorted(_REGISTRY))
 
-
-def _shipped_manifest(origin: str | None):
-    if not origin or not origin.startswith("rule_set:"):
-        return None
-    connector, separator, version = origin.removeprefix("rule_set:").partition("@")
-    manifest = _REGISTRY.get(connector)
-    return manifest if separator and manifest and manifest.version == version else None
-
-
-def shipped_workflow(origin: str | None, name: str, project_id: str | None):
-    """Resolve a bundled workflow only for a rule written by its connector package."""
-    manifest = _shipped_manifest(origin)
-    loader = manifest.shipped_workflows.get(name) if manifest and project_id else None
-    return loader(project_id) if loader else None
-
-
-def shipped_result_hook(origin: str | None, name: str):
-    """Resolve a result hook only for its connector's shipped rule."""
-    manifest = _shipped_manifest(origin)
-    return manifest.shipped_result_hooks.get(name) if manifest else None
 
 
 def artifact_extractor(

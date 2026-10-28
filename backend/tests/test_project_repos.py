@@ -23,6 +23,8 @@ from api.project_scaffolding import (  # noqa: E402
     remove_linked_repo,
 )
 from auth_fixtures import OWNER_TOKEN  # noqa: E402
+from infra.continuation_schema import AUTOMATION_SCHEDULES_SQL  # noqa: E402
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL  # noqa: E402
 
 _TOKEN = OWNER_TOKEN
 
@@ -94,7 +96,8 @@ def _policy_db(path: str | Path = ":memory:") -> sqlite3.Connection:
         """
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
-            doc_roots TEXT
+            doc_roots TEXT,
+            conductor_thread_id TEXT
         );
         CREATE TABLE project_repo_policies (
             project_id TEXT NOT NULL,
@@ -106,6 +109,7 @@ def _policy_db(path: str | Path = ":memory:") -> sqlite3.Connection:
         )
         """
     )
+    db.executescript(EVENT_RULE_SCHEMA_SQL + AUTOMATION_SCHEDULES_SQL)
     return db
 
 
@@ -150,7 +154,7 @@ def _configure_repo_api(monkeypatch, module, workspace: Path, db) -> None:
     monkeypatch.setattr(module, "run_in_db", _run_now)
     monkeypatch.setattr(module, "get_db", lambda: _NoClose(db))
     monkeypatch.setattr(module, "_sync", lambda *_args: None)
-    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
+
 
 
 _HOST_LOAD_DEADLINE_S = 120
@@ -1305,7 +1309,7 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "run_in_db", _run_in_thread)
     monkeypatch.setattr(project_repos, "get_db", _connection)
     monkeypatch.setattr(project_repos, "_sync", lambda *_args: None)
-    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
+
     monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
 
     first = asyncio.create_task(

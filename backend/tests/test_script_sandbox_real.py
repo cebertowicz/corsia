@@ -192,14 +192,21 @@ async def test_script_cli_reads_broker(sandbox, monkeypatch):
     commands = [f'corsia github read "repos/o/r/{endpoint}?page={page}" || exit $?'
                 for endpoint in endpoints for page in (1, 2)]
     path = _script(sandbox, "broker.sh", "\n".join(commands) + "\n")
-    run = await run_script(THREAD_ID, None, path, run_id="broker-real", timeout_seconds=60)
+    run = await run_script(THREAD_ID, None, path, run_id="broker-real", timeout_seconds=60,
+                           github_repo="o/r")
     assert run.returncode == 0, run.stderr
     assert run.stdout == b"from broker" * 8
+    other = _script(sandbox, "other-repo.sh", 'corsia github read "repos/x/y/pulls/1"\n')
+    run = await run_script(THREAD_ID, None, other, run_id="broker-other", timeout_seconds=60,
+                           github_repo="o/r")
+    assert run.returncode == 1 and run.stdout == b"" and b"repository_not_allowed" in run.stderr
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("github_repo", [None, "o/r"])
 @pytest.mark.parametrize("account_present", [False, True])
-async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, account_present):
+async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, account_present,
+                                                               github_repo):
     from connections import github_agent
     from connections.github_agent import AgentAccountView
     from tools import sandbox_config
@@ -222,7 +229,8 @@ async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypa
              'test -z "${!name}" || exit 1; done\n'
              f'if cat {shlex.quote(str(gh / "hosts.yml"))} >/dev/null 2>&1; then exit 2; fi\n')
     path = _script(sandbox, "canaries.sh", probe)
-    run = await run_script(THREAD_ID, None, path, run_id="canaries", timeout_seconds=20)
+    run = await run_script(THREAD_ID, None, path, run_id="canaries", timeout_seconds=20,
+                           github_repo=github_repo)
     assert run.returncode == 0, run.stderr
 
 
@@ -238,7 +246,7 @@ async def test_other_thread_cannot_connect_to_channel(sandbox):
         db.commit()
     finally:
         db.close()
-    async with channel.github_channel(THREAD_ID, "first-run") as socket_path:
+    async with channel.github_channel(THREAD_ID, "first-run", None, repo="o/r") as socket_path:
         probe = ("import socket,sys\n"
                  "s=socket.socket(socket.AF_UNIX)\n"
                  f"try: s.connect({str(socket_path)!r})\n"

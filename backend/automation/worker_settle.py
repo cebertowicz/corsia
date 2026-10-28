@@ -99,40 +99,29 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
     try:
         result = check_result(text, schema)
         signs = None
-        if check and check.get("hook_name"):
-            result = _apply_result_hook(result, check)
+        if check and check.get("result_context"):
+            result = _validate_declared_result(result, check["result_context"])
             signs = result["injection_signs"]
             result = result["payload"]
         payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     except ResultInvalid as exc:
         return INVALID, {"reason": "invalid", "detail": str(exc)[:500]}
+    except Exception:  # noqa: BLE001 - a CORSIA defect must release, not consume, the identity
+        logger.exception("CORSIA could not validate the worker result")
+        return NO_RESULT, {"reason": "CORSIA could not validate the workflow result"}
     if len(payload.encode()) > MAX_RESULT:
         return INVALID, {"reason": "invalid", "detail": f"the result is over {MAX_RESULT} bytes"}
     return RETURNED, {"result": payload, **({"injection_signs": signs} if signs is not None else {})}
 
 
-def _apply_result_hook(payload: dict, check: Mapping[str, Any]) -> dict:
-    """Allow a shipped hook only to add categories, a floor record, or a flag."""
-    from events.connectors import shipped_result_hook
+def _validate_declared_result(payload: dict, context: Mapping[str, Any]) -> dict:
+    """The connector owns validation; identity never comes back from this call."""
+    from events.connector_workflows import resolve_shipped_workflow
 
-    hook = shipped_result_hook(check.get("hook_origin"), check["hook_name"])
-    try:
-        if not hook or check.get("hook_record") is None:
-            raise ValueError("missing result record")
-        original = json.loads(json.dumps(payload))
-        result = hook[1](payload, check["hook_record"])
-        before, after = original["payload"], result["payload"]
-        if ({k: v for k, v in result.items() if k != "payload"}
-                != {k: v for k, v in original.items() if k != "payload"}
-                or {k: v for k, v in after.items() if k not in {"verdict", "categories", "floor_hit"}}
-                != {k: v for k, v in before.items() if k not in {"verdict", "categories"}}
-                or not set(before["categories"]).issubset(after["categories"])
-                or after["verdict"] not in ({"safe", "flagged"} if before["verdict"] == "safe"
-                                             else {before["verdict"]})):
-            raise ValueError("result hook weakened or changed the model result")
-        return result
-    except Exception as exc:
-        raise ResultInvalid("the result hook could not validate the result") from exc
+    resolved = resolve_shipped_workflow(context["origin"], context["name"])
+    if resolved is None or resolved.error or context["record"] is None:
+        raise RuntimeError("the shipped result contract or captured record is unavailable")
+    return resolved.declaration.result.validate(payload, context["record"])
 
 
 def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[Settle]:
@@ -155,12 +144,8 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
                said: Mapping[str, Any]) -> Settle:
     """The event one start settles with: the envelope (source, item and version, workflow,
     run, validity) around the payload or the reason."""
-    from events.connectors import shipped_result_hook
-
     kind = worker_events.RESULT if outcome == RETURNED else worker_events.NO_RESULT
-    hook = shipped_result_hook(check.get("hook_origin") or dict(row).get("origin"),
-                               check.get("hook_name") or row["workflow_id"])
-    event_facts = check.get("event_facts") or ((check.get("event") or {}).get("facts") or {})
+    context = check.get("result_context")
     facts = {
         worker_events.REQUESTER_FACT: row["thread_id"], "rule_id": row["rule_id"],
         "request_event": row["event_id"], "request_identity": row["request_identity"],
@@ -169,16 +154,14 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "item_version": check.get("item_version"), "artifact_integration": row["artifact_integration"],
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
     }
-    if hook:
-        facts.update(source="outside", kind="pull request", repo=event_facts.get("repo"),
-                     pr_number=event_facts.get("pr_number"),
-                     item_version=event_facts.get("item_version"),
+    if context:
+        facts.update(source=context["source"], kind=context["kind"], **context["item"],
                      injection_signs=said.get("injection_signs"))
-    staged = check.get("staging_path") or event_facts.get("staging_path")
-    clean_facts = {k: v for k, v in facts.items() if v is not None or (hook and k == "injection_signs")}
+    clean_facts = {k: v for k, v in facts.items() if v is not None or (context and k == "injection_signs")}
     return Settle(row["id"], row["thread_id"], outcome, f"{worker_events.NAMESPACE}.{kind}",
                   f"worker:{row['id']}:{kind}", clean_facts,
-                  tuple(check.get("trace") or ()), bool(check.get("waited")), staged if hook else None)
+                  tuple(check.get("trace") or ()), bool(check.get("waited")),
+                  context["staging_path"] if context else None)
 
 
 async def settle(item: Settle) -> None:
@@ -212,6 +195,7 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
     """Settle the row and, when nothing usable came back, wake its owner once: the outcome
     and whether it woke, or ``None`` when the row was already settled."""
     from events.delivery import enqueue_event_wake
+    from events.worker_labels import labelled_summary
 
     outcome = NO_RESULT if event_refused and item.outcome != REFUSED else item.outcome
     # A refused start's row says only the cause: its outcome already reads "did not start".
@@ -225,9 +209,8 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
         said = (f"A rule couldn’t start {workflow}: {stored}" if outcome == REFUSED
                 else f"The agent a rule started for {workflow} returned no result: {reason}")
         enqueue_event_wake(
-            item.owner, item.event_type, said,
-            {"run_id": str(item.decision_id), "rule_id": item.facts.get("rule_id"),
-             "request_event": item.facts.get("request_event")},
+            item.owner, item.event_type, labelled_summary(said, item.facts),
+            item.facts,
             message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:{item.event_id}:wake")), db=conn,
         )
         return outcome, True

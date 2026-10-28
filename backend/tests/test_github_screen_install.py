@@ -16,7 +16,7 @@ def _rows(db, table, where, args):
     return [dict(r) for r in db.execute(f"SELECT * FROM {table} WHERE {where} ORDER BY id", args)]
 
 
-def test_observe_sync_does_not_install_screen(isolated_db, tmp_path, monkeypatch):
+def test_designation_installs_screen_and_observe_sync_preserves_it(isolated_db, tmp_path, monkeypatch):
     mk_session("screen-owner", project_id="screen-project")
     db = get_db()
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('screen-project','Screen','t','t')")
@@ -24,9 +24,12 @@ def test_observe_sync_does_not_install_screen(isolated_db, tmp_path, monkeypatch
     monkeypatch.setattr(install, "_repos", lambda conn, project: ["example/repo"])
     monkeypatch.setattr(install, "owner_root", lambda owner, project, conn: tmp_path / owner)
     assert set_project_conductor("screen-project", "screen-owner", db=db)
+    rows = _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
+    schedules = _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
+    assert len(rows) == 3 and len(schedules) == 1
     observe_rules.sync_shipped_rules(db)
-    assert not _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
-    assert not _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
+    assert rows == _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
+    assert schedules == _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
 
 
 def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path, monkeypatch):

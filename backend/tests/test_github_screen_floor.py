@@ -46,9 +46,9 @@ def test_nested_agent_instruction_paths(path):
     assert "floor.agent_instructions" in floor_hits(diff(path))
 
 
-@pytest.mark.parametrize("path", ["src/context/Auth.tsx", "skills/review/config.json"])
-def test_non_markdown_context_and_skills_are_not_agent_instructions(path):
-    assert "floor.agent_instructions" not in floor_hits(diff(path))
+@pytest.mark.parametrize("path,expected", [("src/context/Auth.tsx", False), ("skills/review/config.json", True)])
+def test_context_code_is_not_instructions_but_all_skill_files_are(path, expected):
+    assert ("floor.agent_instructions" in floor_hits(diff(path))) is expected
 
 
 def test_file_header_is_not_encoded_content_even_after_an_earlier_hunk():
