@@ -26,7 +26,7 @@ export function signinMessage(result: SigninResult, nameOf: (id: string | null |
 	if (result.status === 'completed') return 'Signed in';
 	if (result.status === 'cancelled') return 'Sign-in cancelled';
 	if (result.status === 'superseded') return 'Account changed before sign-in finished';
-	if (result.status === 'unavailable') return 'Sign-in is unavailable';
+	if (result.status === 'unavailable') return `Sign-in is unavailable${result.ref ? ` Reference: ${result.ref}` : ''}`;
 	if (result.cause === 'same_account') {
 		const name = nameOf(result.duplicate_of);
 		return name ? `Already signed in as ${name}` : 'This account is already signed in';

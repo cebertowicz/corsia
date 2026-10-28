@@ -59,6 +59,42 @@ async def test_signed_in_account_without_refresh_starts_vendor_login(accounts, m
 
 
 @pytest.mark.asyncio
+async def test_unreadable_signed_in_status_has_logged_reference(accounts, monkeypatch, caplog):
+    from connections import account_controls
+
+    _, _, account, _ = accounts
+    monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
+    monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(None, {}, 'vendor_status_unreadable')))
+    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
+    result = await account_controls.start_signin(account['id'])
+    assert result['status'] == 'unavailable'
+    assert result['cause'] == 'vendor_status_unreadable'
+    assert result['ref']
+    assert caplog.text.count(f"reference={result['ref']} cause=vendor_status_unreadable") == 1
+
+
+@pytest.mark.asyncio
+async def test_signed_in_github_account_refuses_without_logout_or_login(monkeypatch):
+    from connections import account_controls
+    from connections.vendor_accounts import AccountError
+
+    monkeypatch.setattr(account_controls, 'custom_account', AsyncMock(return_value={
+        'id': 'gh', 'provider': 'github', 'state': 'signed_in', 'revision': 1, 'source_home': '/synthetic',
+    }))
+    monkeypatch.setattr(account_controls, 'signin_recheck', AsyncMock(return_value=None))
+    monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
+    logout = AsyncMock(return_value=(0, b''))
+    spawn = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(account_controls, '_run', logout)
+    monkeypatch.setattr(account_controls, '_spawn', spawn)
+    monkeypatch.setattr(account_controls, '_hold', AsyncMock())
+    with pytest.raises(AccountError, match='account is already signed in'):
+        await account_controls.start_signin('gh')
+    logout.assert_not_awaited()
+    spawn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_signed_in_account_found_signed_out_starts_login(accounts, monkeypatch):
     from connections import account_controls
     from connections.vendor_accounts import get_account

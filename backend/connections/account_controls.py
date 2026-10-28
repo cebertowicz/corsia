@@ -196,7 +196,9 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
     """Begin, or return the live, vendor browser sign-in for an added account."""
     account = await custom_account(account_id)
     if account["state"] == "signed_in":
-        result = await signin_recheck(account_id, lambda selected: verify(selected, report_refresh=True))
+        if account["provider"] not in VENDORS:
+            raise AccountError("account is already signed in")
+        result = await signin_recheck(account_id, account["provider"], lambda selected: verify(selected, report_refresh=True))
         if result is not None:
             return result
         account = await custom_account(account_id)
@@ -283,7 +285,7 @@ async def _drop(account_id: str) -> SignIn | None:
 
 
 async def cancel_signin(account_id: str) -> dict[str, Any]:
-    """Stop one held sign-in; the account stays signed out and the vendor's logout is never run.
+    """Stop one held sign-in; the account keeps its state and the vendor's logout is never run.
 
     A sign-in the vendor already finished is not cancelled: its real result is
     returned and its record stays.
@@ -302,7 +304,7 @@ async def cancel_signin(account_id: str) -> dict[str, Any]:
 
 
 async def stop_all_signins() -> None:
-    """Stop every held sign-in when the backend shuts down; each account stays signed out."""
+    """Stop held sign-ins at shutdown; accounts keep their state and vendor logout is never run."""
     operations = list(_SIGNINS.values())
     for operation in operations:
         if operation.status == "waiting":
