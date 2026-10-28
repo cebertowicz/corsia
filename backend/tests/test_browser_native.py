@@ -87,14 +87,23 @@ async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeyp
     url = f'http://127.0.0.1:{port}/'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     try:
-        assert not (await browser_pane.open_url('native-pane-open', url)).startswith('Error:')
+        opened = await browser_pane.open_url('native-pane-open', url)
+        assert not opened.startswith('Error:')
         runtime = native_owner._sessions['native-pane-open']
-        binary = native_owner._native.path
-        result = await native_owner._invoke(
-            (binary, '--session', runtime.record.session, '--json', 'get', 'url'), timeout=30,
-        )
+        binding = runtime.record.binding
+        assert binding is not None
+        # Exercise the agent's actual path before any independent client can
+        # reconfigure Chrome. Both paths use the same session and launch flags.
+        owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing')
+        assert json.loads(owner_url)['url'] == url, f'pane open={opened!r}; agent get url={owner_url!r}'
+        assert (await native_owner._observe(runtime)).binding == binding
+        result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
         assert result.returncode == 0
-        assert json.loads(result.stdout)['data']['url'] == url
+        data = json.loads(result.stdout)['data']
+        assert data['lifecycle']['reused'] is True
+        assert data['lifecycle']['launched'] is False
+        assert (await native_owner._observe(runtime)).binding == binding
+        assert data['url'] == url
     finally:
         server.close()
         await server.wait_closed()
