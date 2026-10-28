@@ -15,6 +15,9 @@ from connections.mail.email_document import reply_addresses
 
 _NO_REPLY = re.compile(r"(^|[.@_-])(no[-_]?reply|do[-_]?not[-_]?reply|donotreply|noreply)([.@_-]|$)", re.I)
 _PREFIX = re.compile(r"^\s*(re|fwd|fw|message replied|aw|sv|antw|wg)\s*:\s*", re.I)
+NOT_SHOWN = "The text isn’t shown here; read it in your mail app."
+FLAGGED = "The text isn’t shown here because it may contain instructions aimed at agents; read it in your mail app."
+UNCHECKED = "The text isn’t shown here because your local model hasn’t checked it yet; read it in your mail app."
 
 
 @dataclass(frozen=True)
@@ -67,8 +70,7 @@ def evidence(message: Message) -> str:
     when = when.astimezone(timezone.utc)
     date = f"{when:%b} {when.day}, {when.year}, {when.hour % 12 or 12}:{when:%M %p} UTC"
     return (f"{message.sender} wrote on {date} ({state}).\n"
-            + (message.visible_evidence or message.withheld
-               or "The text isn’t shown here; read it in your mail app."))
+            + (message.visible_evidence or message.withheld or NOT_SHOWN))
 
 
 def check_reply(

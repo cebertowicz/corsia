@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
-from tools.email_read import screened_message
-from tools.mail_guard import Message, Verdict, check_reply, evidence, normalize_subject, same_sender
+from tools.email_read import UNSCREENED, screened_message
+from tools.mail_guard import (FLAGGED, UNCHECKED, Message, Verdict, check_reply, evidence,
+                              normalize_subject, same_sender)
 
 
 async def _visible(backend: Any, account_id: str, message: Message) -> Message:
@@ -17,8 +18,8 @@ async def _visible(backend: Any, account_id: str, message: Message) -> Message:
                              headers={"from": message.sender, "subject": message.subject,
                                       "date": message.date.isoformat()}, body=message.body)
     rendered = await screened_message(account_id, source)
-    if rendered.startswith("Error: "):  # flagged or unscreened: say which
-        return replace(message, withheld=rendered.removeprefix("Error: "))
+    if rendered.startswith("Error: "):  # the person reads this in the draft: say which, in their words
+        return replace(message, withheld=UNCHECKED if rendered == f"Error: {UNSCREENED}" else FLAGGED)
     try:
         payload = json.loads(rendered)
     except (TypeError, ValueError):

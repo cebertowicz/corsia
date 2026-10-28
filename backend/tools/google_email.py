@@ -3,9 +3,9 @@
 The draft is a workspace document the person reads and answers in chat. ``email_draft``
 writes it, records its revision and binds it to the account it was written from;
 ``email_send`` sends it from that account, re-checking this thread's reach, only when
-``tools.action_gate.check_action`` approves. It builds the reply from the checked draft,
-and re-reads the conversation, quote and sent-mail font at send time. What differs by host is the account's backend
-(``tools.mail_backends``).
+``tools.action_gate.check_action`` approves. It builds the email from the checked draft
+and re-reads the sent-mail font at send time; for a reply it also re-reads the
+conversation and quote. What differs by host is the account's backend (``tools.mail_backends``).
 """
 
 from __future__ import annotations
@@ -93,8 +93,8 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
 
 
 UNGUARDED_REPLY = (
-    "Not sent: this reply was saved before reply checks ran when saving. Save it again with "
-    "email_draft, then wait for the person's reply."
+    "Not sent: this reply draft has no record of when its conversation was last read. Save it "
+    "again with email_draft, then wait for the person's reply."
 )
 
 

@@ -282,10 +282,20 @@ async def test_reply_saved_without_guard_read_is_refused(mail, approve, clean_sc
     assert not mail.sends
 
 
+def _guard_read_second(draft_id):
+    """The send cutoff, with the row's recorded_at moved later so only guard_read_at can match."""
+    row = _row(draft_id)
+    cutoff = datetime.fromisoformat(json.loads(row['target_json'])['guard_read_at'])
+    db = get_db()
+    db.execute('UPDATE action_drafts SET recorded_at=? WHERE id=?',
+               ((cutoff + timedelta(seconds=5)).isoformat(), draft_id))
+    db.commit()
+    return cutoff.replace(microsecond=0)
+
+
 async def test_same_second_arrival_stops_but_target_itself_does_not(mail, approve, clean_screen):
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    recorded = datetime.fromisoformat(_row(saved['draft_id'])['recorded_at'])
-    same_second = _arrival(newer(), recorded.replace(microsecond=0))
+    same_second = _arrival(newer(), _guard_read_second(saved['draft_id']))
     for header in same_second['payload']['headers']:
         if header['name'] == 'From':
             header['value'] = 'Another person <other@mail.example>'
@@ -319,8 +329,7 @@ async def test_thirty_day_sender_count_counts_messages_without_fetching_each(mai
 
 async def test_same_second_target_is_not_a_new_arrival(mail, approve):
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    recorded = datetime.fromisoformat(_row(saved['draft_id'])['recorded_at'])
-    target = _arrival(THREADED, recorded.replace(microsecond=0))
+    target = _arrival(THREADED, _guard_read_second(saved['draft_id']))
     provider_state(mail, [target])
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
