@@ -144,6 +144,8 @@ async def _watch_targets(thread_id: str, connection_token: str, changed: asyncio
     except BrowserSessionError as exc:
         # Agent tab switches still reach the pane through target_changed; only browser-opened tabs go unfollowed.
         log.warning("browser pane %s stopped watching tabs and keeps its current tab: %s", thread_id, exc)
+    except Exception:
+        log.exception("browser pane %s tab watch failed; it keeps its current tab", thread_id)
 
 
 async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames,
@@ -255,7 +257,8 @@ async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
     lands seconds late. So the pane is read while earlier messages are delivered, and a move that
     arrives right behind a queued move replaces it, so a stalled page never holds more than one
     waiting move. Nothing else is dropped or reordered, and the pane's disconnect is raised only
-    after everything it sent first.
+    after everything it sent first. A page that answers no input while the backlog reaches
+    `_MAX_QUEUED_INPUT` is stalled: the pane is closed, as an overflowing output path closes it.
     """
     received: collections.deque[dict | Exception] = collections.deque()
     arrived = asyncio.Event()
@@ -286,12 +289,22 @@ async def _receive_pane_messages(pane: WebSocket, received: collections.deque[di
             if isinstance(data, dict):
                 if _is_move(data) and received and _is_move(received[-1]):
                     received[-1] = data
+                elif len(received) >= _MAX_QUEUED_INPUT:
+                    received.clear()
+                    with contextlib.suppress(Exception):
+                        await pane.close(code=1013)
+                    raise WebSocketDisconnect(code=1013)
                 else:
                     received.append(data)
                 arrived.set()
     except Exception as exc:
         received.append(exc)
         arrived.set()
+
+
+# The pane sends at most one wheel event per animation frame, so this is about 17 s of input
+# against a page that has answered none of it.
+_MAX_QUEUED_INPUT = 1024
 
 
 def _is_move(data: dict | Exception) -> bool:

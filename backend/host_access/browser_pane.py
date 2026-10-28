@@ -48,7 +48,8 @@ async def watch_targets(thread_id: str, notify: Callable[[], None], known: list[
     closed while the watch was down.
     """
     from host_access.browser_session_commands import browser_endpoint
-    endpoint = await browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id)
+    # A pane that leaves cancels this watch mid-read; cancelling a running command resets the shared session.
+    endpoint = await asyncio.shield(browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id))
     async with browser_cdp.CdpClient(endpoint) as cdp:
         discovery = await cdp.send("Target.setDiscoverTargets", discover=True)
         discovering = False

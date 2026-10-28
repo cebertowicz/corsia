@@ -2,6 +2,7 @@ import asyncio
 import json
 
 import pytest
+from fastapi import WebSocketDisconnect
 
 from host_access import browser_cdp, browser_pane, browser_pane_state, browser_session_commands
 from tools import browser, browser_actions
@@ -263,3 +264,60 @@ async def test_queued_pointer_moves_collapse_as_they_arrive():
     # A stalled page holds at most one waiting move: moves behind a move replace it, a click never does.
     assert [await anext(messages) for _ in range(3)] == [move(3), click, move(4)]
     await messages.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_page_closes_the_pane_instead_of_queueing_input_without_end(monkeypatch):
+    monkeypatch.setattr(browser_stream, '_MAX_QUEUED_INPUT', 3)
+    key = {'type': 'input_keyboard', 'key': 'a'}
+    sent = asyncio.Queue()
+    for _ in range(5):
+        sent.put_nowait(json.dumps(key))
+    closed = []
+
+    class Pane:
+        async def receive_text(self):
+            return await sent.get()
+
+        async def close(self, code):
+            closed.append(code)
+
+    messages = browser_stream._pane_messages(Pane())
+    delivered = 0
+    with pytest.raises(WebSocketDisconnect):
+        while True:
+            await anext(messages)
+            delivered += 1
+    assert closed == [1013] and delivered < 5
+    await messages.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_pane_leaving_never_cancels_the_target_watchs_endpoint_lookup(monkeypatch):
+    release, finished = asyncio.Event(), []
+
+    async def endpoint(*_args):
+        await release.wait()
+        finished.append(True)
+        return 'ws://browser.test'
+
+    monkeypatch.setattr(browser_session_commands, 'browser_endpoint', endpoint)
+    task = asyncio.create_task(browser_pane.watch_targets('thread', lambda: None, [None]))
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    # The lookup is the session's own command: cancelling it would reset the shared browser.
+    release.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert finished == [True]
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_target_watch_failure_is_logged(monkeypatch, caplog):
+    async def watch(*_args):
+        raise AttributeError('unexpected CDP message')
+
+    monkeypatch.setattr(browser_pane, 'watch_targets', watch)
+    await browser_stream._watch_targets('thread', 'pane', asyncio.Event(), [None])
+    assert 'tab watch failed' in caplog.text
