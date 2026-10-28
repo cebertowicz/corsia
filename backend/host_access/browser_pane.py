@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_pane_state, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_pane_state, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
 __all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
@@ -141,17 +141,17 @@ async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
 
 async def clipboard_selection(thread_id: str, connection_token: str, request_id: int) -> str:
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be copied")
-    return await browser_cdp.clipboard_selection(endpoint, _clipboard_request(connection_token, request_id))
+    return await browser_clipboard.clipboard_selection(endpoint, _clipboard_request(connection_token, request_id))
 
 
 async def clipboard_paste(thread_id: str, connection_token: str, text: str) -> None:
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't receive pasted text")
-    await browser_cdp.clipboard_paste(endpoint, text)
+    await browser_clipboard.clipboard_paste(endpoint, text)
 
 
 async def clipboard_cut(thread_id: str, connection_token: str, text: str, request_id: int) -> None:
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be cut")
-    await browser_cdp.clipboard_cut(endpoint, text, _clipboard_request(connection_token, request_id))
+    await browser_clipboard.clipboard_cut(endpoint, text, _clipboard_request(connection_token, request_id))
 
 
 def _clipboard_request(connection_token: str, request_id: int) -> str:

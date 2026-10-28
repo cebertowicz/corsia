@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from host_access import browser_cdp, browser_dom_write
+from host_access import browser_cdp, browser_clipboard, browser_dom_write
 from host_access.browser_cli import CommandResult
 
 
@@ -196,9 +196,9 @@ async def test_clipboard_selection_and_paste_use_the_page_target(monkeypatch):
         async def call(self, method, **params):
             calls.append((method, params))
             return {'result': {'value': 'selected'}} if method == 'Runtime.evaluate' else {}
-    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
-    assert await browser_cdp.clipboard_selection('endpoint', 'pane:1') == 'selected'
-    await browser_cdp.clipboard_paste('endpoint', 'paste text')
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    assert await browser_clipboard.clipboard_selection('endpoint', 'pane:1') == 'selected'
+    await browser_clipboard.clipboard_paste('endpoint', 'paste text')
     assert calls[0][0] == 'Runtime.evaluate'
     assert calls[1] == ('Input.insertText', {'text': 'paste text'})
 
@@ -212,9 +212,9 @@ async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
         async def call(self, _method, **params):
             expressions.append(params['expression'])
             return {'result': {'value': 'same' if len(expressions) == 1 else True}}
-    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
-    await browser_cdp.clipboard_selection('endpoint', 'pane:1')
-    await browser_cdp.clipboard_cut('endpoint', 'same', 'pane:1')
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
+    await browser_clipboard.clipboard_cut('endpoint', 'same', 'pane:1')
     script = """
       class Input { constructor() { this.value = 'same same'; this.selectionStart = 0; this.selectionEnd = 4; } }
       global.HTMLInputElement = Input; global.HTMLTextAreaElement = class {};
