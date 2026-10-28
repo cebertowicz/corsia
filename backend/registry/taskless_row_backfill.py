@@ -7,9 +7,9 @@ for each thread, the start of its most recently started accepted task, through
 the shared retirement writer, so every row is audited and comes back on pin or
 the thread's next write.
 
-It runs once per instance, and again on the start after a task settlement that
-could not classify its rows (``startup_backfill.settlement_retirement``); a
-repeat finds only what that settlement left.
+It runs once per instance for each change of that rule
+(``startup_backfill.TASKLESS_MARKER``); a repeat finds only the rows the
+change made retirable.
 """
 
 from __future__ import annotations
