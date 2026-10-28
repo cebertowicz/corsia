@@ -13,11 +13,12 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered, onUnreadViewed }: {
 		replies: CommentReplyData[];
 		newReplyIds?: ReadonlySet<string>;
 		collapseReplyIds?: ReadonlySet<string>;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
+		onUnreadViewed?: (id: string) => Promise<void>;
 	} = $props();
 
 	const me = $derived($userParticipant);
@@ -36,6 +37,35 @@
 		onNewestReplyRendered?.(newest);
 		return () => onNewestReplyRendered?.(undefined);
 	});
+
+	// Chat stamps each visible unread answer, rather than the last reply in the thread.
+	function unreadElement(node: HTMLElement, enabled: boolean) {
+		if (!onUnreadViewed) return;
+		let timer: number | undefined;
+		let stamped = false;
+		const cancel = () => { if (timer !== undefined) window.clearTimeout(timer); timer = undefined; };
+		const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+			const entry = entries.at(-1);
+			if (!enabled || stamped || document.visibilityState !== 'visible' || !entry?.isIntersecting || entry.intersectionRatio !== 1) { cancel(); return; }
+			if (timer !== undefined) return;
+			timer = window.setTimeout(() => {
+				timer = undefined;
+				if (document.visibilityState !== 'visible' || !enabled || !node.dataset.replyId) return;
+				stamped = true;
+				onUnreadViewed?.(node.dataset.replyId).catch((err) => { stamped = false; console.warn('Could not record the viewed reply', err); });
+			}, 1_500);
+		}, { root: null, threshold: 1 });
+		const refresh = () => {
+			cancel(); observer?.disconnect();
+			if (enabled && document.visibilityState === 'visible') observer?.observe(node);
+		};
+		document.addEventListener('visibilitychange', refresh);
+		refresh();
+		return {
+			update(next: boolean) { if (enabled !== next) { enabled = next; refresh(); } },
+			destroy() { cancel(); observer?.disconnect(); document.removeEventListener('visibilitychange', refresh); },
+		};
+	}
 
 	function newestElement(node: HTMLElement, isNewest: boolean) {
 		if (isNewest) newest = node;
@@ -57,7 +87,7 @@
 		{@const index = visibleFrom + offset}
 		{@const author = who(reply.author, reply.authorKind)}
 		{@const isNew = !!reply.id && newReplyIds.has(reply.id)}
-		<div class="ct-reply" class:new={isNew} data-reply-id={reply.id} use:newestElement={index === replies.length - 1}>
+		<div class="ct-reply" class:new={isNew} data-reply-id={reply.id} use:newestElement={index === replies.length - 1} use:unreadElement={!!onUnreadViewed && isNew}>
 			<div class="ct-msg-meta">
 				<!-- The reply rail supplies grouping; an author dot would repeat it. -->
 				<span class="ct-msg-author">{author.name}</span>

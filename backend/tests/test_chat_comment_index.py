@@ -16,9 +16,27 @@ def test_chat_migration_follows_thread_confinement():
     from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 160
+    from infra.migration_160_to_161_chat_comment_roots import migrate_160_to_161
+    assert SCHEMA_VERSION == 161
     assert MIGRATIONS[154] is migrate_154_to_155
     assert MIGRATIONS[155] is migrate_155_to_156
+    assert MIGRATIONS[160] is migrate_160_to_161
+
+
+def test_root_migration_preserves_existing_index_rows():
+    from infra.database_migrations import migrate_to_current
+    from infra.migration_160_to_161_chat_comment_roots import migrate_160_to_161
+
+    with sqlite3.connect(':memory:') as db:
+        migrate_155_to_156(db)
+        db.execute("INSERT INTO chat_comments VALUES ('thread','target','sender','c1.1','t')")
+        db.execute('PRAGMA user_version=160')
+        db.commit()
+        result = migrate_to_current(db, 161)
+        assert (result.from_version, result.to_version) == (160, 161)
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 161
+        migrate_160_to_161(db)
+        assert db.execute('SELECT user_message_id,cid,root_user_message_id,root_cid FROM chat_comments').fetchone() == ('sender', 'c1.1', None, None)
 
 
 def test_migration_accepts_a_partial_database_without_messages():

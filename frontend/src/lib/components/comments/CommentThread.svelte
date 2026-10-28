@@ -41,7 +41,7 @@
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
 		focused?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
@@ -56,6 +56,8 @@
 		keepReplyVisible?: boolean;
 		/** Document comment surfaces present threads on the sheet rather than as nested cards. */
 		flat?: boolean;
+		/** Chat answers have independent seen stamps for each comment. */
+		viewEachUnread?: boolean;
 		/** The drawer's quote already says text changed; a flat popover still needs the state message. */
 		hideOrphan?: boolean;
 		/** Easing out of the list: a resolved card keeps its card form until it is gone, instead of switching to the resolved row first. */
@@ -175,7 +177,7 @@
 	$effect(() => {
 		observeTick;
 		newestReply;
-		replyVisibility.sync(el, !!onViewed, JSON.parse(unreadKey));
+		replyVisibility.sync(el, !!onViewed && !viewEachUnread, JSON.parse(unreadKey));
 	});
 	$effect(() => () => replyVisibility.clear());
 	function onVisibilityChange() {
@@ -300,7 +302,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving}
-			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
+			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} onUnreadViewed={viewEachUnread ? (replyId) => onViewed?.(comment.id, replyId) ?? Promise.resolve() : undefined} />
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}

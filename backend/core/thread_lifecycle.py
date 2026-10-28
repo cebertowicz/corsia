@@ -38,7 +38,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from infra.chat_comment_answers import delete_thread_chat_comment_answers
+from infra.chat_comment_answers import delete_thread_chat_comment_index_rows
 from infra.checkpoint_entry_index import delete_thread_checkpoints
 from infra.continuity_store import delete_thread_continuity
 from infra.presence import delete_thread_presence
@@ -305,7 +305,7 @@ def _apply_purge(db, sid: str, now: datetime) -> None:
     _wake_parent_of_ended_child(db, sid, reason="purged")
     delete_thread_checkpoints(db, sid)
     delete_thread_continuity(db, sid)
-    delete_thread_chat_comment_answers(db, sid)
+    delete_thread_chat_comment_index_rows(db, sid)
     # One rule: held input dies exactly when the transcript dies, never
     # otherwise. Held input rides the reactor's tables, so its one teardown
     # door drops all of them; nothing survives a purge a reversible archive keeps.

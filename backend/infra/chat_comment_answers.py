@@ -72,7 +72,7 @@ def place_answers(
             )
 
 
-def delete_thread_chat_comment_answers(db: sqlite3.Connection, thread_id: str) -> None:
+def delete_thread_chat_comment_index_rows(db: sqlite3.Connection, thread_id: str) -> None:
     """Remove derived rows before the thread's messages are deleted."""
     db.execute(
         "DELETE FROM chat_comment_views WHERE user_message_id IN "

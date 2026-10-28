@@ -10,6 +10,7 @@ so a comment that fails refuses the whole input instead (``RejectedComments``).
 """
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from collections import Counter
@@ -141,7 +142,7 @@ def _first_unread(raw: object, newest: int, dropped: list[dict]) -> dict | None:
     return {"seq": seq, "truncated": raw.get("truncated") is True}
 
 
-def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
+def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
     if not isinstance(raw, list):
         dropped.append(_dropped("comments", "not_list"))
         return []
@@ -163,14 +164,40 @@ def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -
             reason = "invalid_string"
         elif not item["quote"]:
             reason = "empty_quote"
+        root_sender = item.get('root_user_message_id') if isinstance(item, dict) else None
+        root_cid = item.get('root_cid') if isinstance(item, dict) else None
+        if not reason and (root_sender is not None or root_cid is not None):
+            if not isinstance(root_sender, str) or not root_sender or not isinstance(root_cid, str) or not root_cid:
+                reason = 'invalid_root'
+            else:
+                row = db.execute(
+                    "SELECT sender.metadata FROM chat_comments c "
+                    "JOIN messages sender ON sender.id=c.user_message_id AND sender.thread_id=c.thread_id "
+                    "JOIN messages target ON target.id=c.target_message_id AND target.thread_id=c.thread_id "
+                    "WHERE c.thread_id=? AND c.user_message_id=? AND c.cid=? "
+                    "AND c.root_user_message_id IS NULL AND target.seq=? AND target.role='assistant'",
+                    (thread_id, root_sender, root_cid, item['seq']),
+                ).fetchone()
+                try:
+                    original = next((c for c in json.loads(row[0] or '{}').get('reply_context', {}).get('comments', [])
+                                     if c.get('cid') == root_cid), None) if row else None
+                except (ValueError, TypeError, AttributeError):
+                    original = None
+                if not original or any(item[key] != original.get(key) for key in (
+                    'from_off', 'to_off', 'quote', 'anchor_prefix', 'anchor_suffix',
+                )):
+                    reason = 'invalid_root'
         if reason:
             dropped.append(_dropped("comments", reason, index=index))
             continue
         # Admission holds the write transaction until input order is incremented.
         cid = format_cid(input_order, index + 1)
-        comments.append({key: item[key] for key in (
+        comment = {key: item[key] for key in (
             "id", "seq", "from_off", "to_off", "quote", "anchor_prefix", "anchor_suffix", "note",
-        )} | {"cid": cid})
+        )} | {"cid": cid}
+        if root_sender is not None:
+            comment.update(root_user_message_id=root_sender, root_cid=root_cid)
+        comments.append(comment)
     return comments
 
 
@@ -203,7 +230,7 @@ def validate_reply_context(
         builders = (
             ("in_view", lambda value: _in_view(value, newest, dropped)),
             ("first_unread", lambda value: _first_unread(value, newest, dropped)),
-            ("comments", lambda value: _comments(value, newest, int(db.execute(
+            ("comments", lambda value: _comments(db, thread_id, value, newest, int(db.execute(
                 "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
             ).fetchone()[0]), dropped)),
         )

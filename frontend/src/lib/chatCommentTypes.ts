@@ -1,9 +1,13 @@
-export interface ChatCommentAnswer {
-	assistant_message_id: string;
+export type ChatCommentAnswer = {
+	user_message_id: string;
+	cid: string;
 	text: string;
 	created_at: string;
 	unread: boolean;
-}
+} & (
+	| { author_kind: 'user'; assistant_message_id?: never }
+	| { author_kind: 'agent'; assistant_message_id: string }
+);
 
 export interface ChatComment {
 	id: string;

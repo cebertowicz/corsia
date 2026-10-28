@@ -215,10 +215,18 @@
 		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
 	};
 	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
-	const jumpToChatReply = createChatReplyJumper({
+	const replyJumper = createChatReplyJumper({
 		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
 		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
+		generation: () => pagerGeneration,
 	});
+	const jumpToChatReply = replyJumper.jump;
+	$effect(() => {
+		// Retry a queued click only after the existing pager has recovered.
+		$activeThreadId; pager.loading; pager.error;
+		replyJumper.resume();
+	});
+	onDestroy(replyJumper.cancel);
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {
 		const changed = focusSeen !== undefined && focusSeen !== focusOn();
