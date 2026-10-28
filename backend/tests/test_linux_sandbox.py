@@ -7,6 +7,31 @@ from tools.linux_sandbox import HOME_CACHES, HOME_RW, build_protected_argv, prot
 from tests.linux_sandbox_test_support import linux_sandbox_root
 
 
+def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch):
+    from connections import github_agent
+    from infra import config, project_repo_policy
+    from tools import linux_shell
+    home = tmp_path / 'home'
+    gh = home / '.config/gh'
+    gh.mkdir(parents=True)
+    (gh / 'hosts.yml').write_text('dummy-marker')
+    workspace = home / 'work'
+    workspace.mkdir()
+    policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [home, gh, workspace])
+    monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
+    monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
+    monkeypatch.setattr(project_repo_policy, 'list_unsupported_pinned_repos', lambda _: [])
+    monkeypatch.setattr(config, 'WORKSPACE', workspace)
+    monkeypatch.setattr(github_agent, 'default_home', lambda: gh)
+    monkeypatch.setattr(linux_shell.shutil, 'which', lambda _: '/usr/bin/bwrap')
+    account = github_agent.AgentAccountView(state='needs_auth')
+    argv = linux_shell.shell_argv('true', workspace, thread_id='one', policies=[], env={}, agent_account=account)
+    assert any(argv[i:i + 4] == ['--perms', '0000', '--tmpfs', str(gh)] for i in range(len(argv)))
+    assert not any(argv[i:i + 3] == ['--ro-bind', str(gh), str(gh)] for i in range(len(argv)))
+
+
 def test_protected_overlay_pins_every_ancestor_before_overlay(linux_sandbox_root):
     home = linux_sandbox_root / 'home'
     workspace = home / 'work'

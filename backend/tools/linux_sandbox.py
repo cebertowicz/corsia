@@ -227,6 +227,7 @@ def build_protected_argv(
     command: str, cwd: Path, *, path_policy: Any,
     rw_roots: Sequence[Path], ro_roots: Sequence[Path],
     readonly_overlays: Sequence[Path], env: Mapping[str, str],
+    hidden_roots: Sequence[Path] = (),
     thread_id: str, executable: str,
 ) -> list[str]:
     """Render only; the caller owns startup verification and process launch."""
@@ -246,7 +247,7 @@ def build_protected_argv(
     rw = [path for path in rw if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     ro = [path for path in ro if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     tmp, file_mask = _backing(state, thread_id)
-    hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots,
+    hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots, *hidden_roots,
                          *(home / path for path in PERSISTENCE)])
     overlays = _canonical([cache, *readonly_overlays, *path_policy.write_roots])
     omitted = [entry for entry in (home.iterdir() if home.is_dir() else ())

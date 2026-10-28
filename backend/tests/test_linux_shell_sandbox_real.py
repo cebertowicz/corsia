@@ -70,6 +70,39 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
                            policy=policy, run=run, argv_for=argv_for, env=env)
 
 
+def test_personal_gh_home_hidden_with_agent_account(linux_box, monkeypatch):
+    from connections import github_agent
+    from tools import linux_shell
+    box = linux_box
+    gh = box.home / '.config/gh'
+    gh.mkdir(parents=True)
+    marker = 'dummy-personal-oauth-marker'
+    (gh / 'hosts.yml').write_text(marker)
+    cache = box.home / '.cache/corsia'
+    cache.mkdir(parents=True)
+    (cache / 'readable').write_text('runtime-control')
+    monkeypatch.setattr(github_agent, 'default_home', lambda: gh)
+    monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [box.home, box.workspace, gh])
+    monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
+    monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
+    account = github_agent.AgentAccountView(state='needs_auth')
+    def run(command):
+        argv = linux_shell.shell_argv(command, box.workspace, thread_id='one', policies=[],
+                                      env=box.env, agent_account=account)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    for command in (f'cat {shlex.quote(str(gh / "hosts.yml"))}',
+                    f'ls {shlex.quote(str(gh))}', f'touch {shlex.quote(str(gh / "new"))}'):
+        result = run(command)
+        print(f'personal gh denied: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0 and marker not in result.stdout + result.stderr
+    result = run(f'cat {shlex.quote(str(cache / "readable"))}')
+    print(f'runtime read: exit={result.returncode} output={result.stdout.strip()}')
+    assert result.returncode == 0 and result.stdout == 'runtime-control'
+    result = run(f'touch {shlex.quote(str(cache / "new"))}')
+    print(f'runtime write denied: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode != 0 and marker not in result.stdout + result.stderr
+
+
 def test_real_bwrap_setup_failure_triggers_reprobe(monkeypatch):
     from tools import linux_sandbox_probe, shell_sandbox
     result = subprocess.run([shutil.which('bwrap'), '--invalid-corsia-test-option'],
