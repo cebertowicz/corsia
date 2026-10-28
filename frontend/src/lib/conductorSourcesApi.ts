@@ -161,12 +161,14 @@ export async function startSignin(t: string, accountId: string, bindThreadId: st
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-export async function checkSignin(t: string, accountId: string): Promise<Signin> {
+export async function checkSignin(t: string, accountId: string): Promise<Signin | null> {
 	const response = await fetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, {
 		method: 'POST', headers: headers(t),
 	});
+	const body = await response.json().catch(() => null);
+	if (response.status === 409 && body?.detail === 'no sign-in is in progress for this account') return null;
 	if (!response.ok) throw new Error(`signin check ${response.status}`);
-	return signinOf(await response.json().catch(() => null), accountId);
+	return signinOf(body, accountId);
 }
 
 export async function cancelSignin(t: string, accountId: string): Promise<Signin> {
