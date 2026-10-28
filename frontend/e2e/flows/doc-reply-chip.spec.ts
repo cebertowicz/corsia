@@ -8,6 +8,7 @@ import { chatComposer, createSession, loginByUrl, sendButton, sidebarThread, TES
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
 import { headerSend, seedHeldComments } from '../support/heldComments';
+import { hitBox } from '../support/hitBox';
 
 // Evidence frames for the document reply chip (R5): the chat's own "N new replies" chip, floated over the document it counts.
 // Mock-mode only: every state is seeded straight into the disposable database, and the clock is frozen so a frame is repeatable.
@@ -226,6 +227,15 @@ async function backToDocument(page: Page): Promise<void> {
 const chipButton = (page: Page) => page.locator('[data-doc-reply-chip]').getByRole('button');
 const chipBox = (page: Page) => page.locator('[data-doc-reply-chip]');
 
+/** The button's extended hit area is a pseudo-element, not the visible face's bounding box. */
+async function chipHitBox(page: Page) {
+	return chipButton(page).evaluate((button) => {
+		const face = button.getBoundingClientRect();
+		const height = Number.parseFloat(getComputedStyle(button, '::after').height);
+		return { x: face.x, y: face.y + (face.height - height) / 2, width: face.width, height };
+	});
+}
+
 /** The chip, once drawn: its text, and that nothing else on the document's surface sits under it. */
 async function expectChip(page: Page, text: string): Promise<void> {
 	await expect(chipButton(page)).toHaveText(new RegExp(text));
@@ -258,8 +268,10 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opened at the top: both replies are below the fold, the document says so once, in the chat's own chip.
 			await expectChip(page, '2 new replies');
 			await expect(headerSend(page)).toBeVisible();
-			const sendBox = (await headerSend(page).boundingBox())!;
-			const replyBox = (await chipButton(page).boundingBox())!;
+			const sendBox = await hitBox(headerSend(page));
+			const replyBox = await chipHitBox(page);
+			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
+			expect(replyBox.width, 'reply target is at least 44px wide').toBeGreaterThanOrEqual(44);
 			expect(replyBox.x < sendBox.x + sendBox.width && sendBox.x < replyBox.x + replyBox.width && replyBox.y < sendBox.y + sendBox.height && sendBox.y < replyBox.y + replyBox.height, 'held-comment Send stays clear of the reply target').toBe(false);
 			await shot(page, `01d-held-send-with-chip-${theme}-${width}`);
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
@@ -338,8 +350,9 @@ for (const width of [1440, 393]) {
 		await sendButton(reviewer).click();
 		const activity = page.locator('[data-doc-activity-pill]');
 		await expect(activity).toBeVisible();
-		const activityBox = (await activity.boundingBox())!;
-		const replyBox = (await chipButton(page).boundingBox())!;
+		const activityBox = await hitBox(activity.getByRole('button'));
+		const replyBox = await chipHitBox(page);
+		expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 		expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
 		await shot(page, `01e-activity-with-chip-light-${width}`);
 		await reviewer.close();
@@ -471,11 +484,12 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(chipButton(page)).toHaveAttribute('title', '1 new reply');
 				const popover = page.locator('[data-popover]').filter({ hasText: 'Yes, the header is final. I attached the export.' });
 				await expect(popover).toBeVisible();
-				const chip = (await chipBox(page).boundingBox())!;
+				const chip = await chipHitBox(page);
+				expect(chip.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 				const targets = [popover, ...await popover.locator('button, input, textarea, select, a[href], [role="button"]').all()];
 				for (const target of targets) {
 					if (!await target.isVisible()) continue;
-					const box = (await target.boundingBox())!;
+					const box = target === popover ? (await target.boundingBox())! : await hitBox(target);
 					expect(chip.x < box.x + box.width && box.x < chip.x + chip.width && chip.y < box.y + box.height && box.y < chip.y + chip.height, 'reply chip clears the pin popover and its controls').toBe(false);
 				}
 			}

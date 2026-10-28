@@ -6,6 +6,7 @@ import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN, waitFo
 import { seedMockResponses } from '../support/mock';
 import { DOC, seedImageDocument, overlay } from '../support/docImageComments';
 import { isolatedDb } from '../support/heldComments';
+import { hitBox } from '../support/hitBox';
 
 for (const width of [393, 1440]) {
 	for (const theme of ['light', 'dark'] as const) {
@@ -81,6 +82,17 @@ for (const width of [393, 1440]) {
 			} else await page.keyboard.press('Escape');
 			const chip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(chip).toContainText('1 new reply');
+			const target = await chip.evaluate((button) => {
+				const face = button.getBoundingClientRect();
+				const height = Number.parseFloat(getComputedStyle(button, '::after').height);
+				return { x: face.x, y: face.y + (face.height - height) / 2, width: face.width, height };
+			});
+			expect(target.height).toBeGreaterThanOrEqual(44);
+			for (const control of await overlay(page).locator('.bar button').all()) {
+				if (!await control.isVisible()) continue;
+				const box = await hitBox(control);
+				expect(target.x < box.x + box.width && box.x < target.x + target.width && target.y < box.y + box.height && box.y < target.y + target.height, 'reply target clears image controls').toBe(false);
+			}
 			const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
 			if (frameDir) { mkdirSync(frameDir, { recursive: true }); await page.screenshot({ path: path.join(frameDir, `Q1-image-waiting-${theme}-${width}.png`), animations: 'disabled' }); }
 			await reply(roots[0], 'The header is ready.');
