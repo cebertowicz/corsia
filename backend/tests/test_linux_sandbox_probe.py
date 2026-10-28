@@ -11,7 +11,7 @@ MISSING = ('Error: the Linux sandbox (bubblewrap) is not installed on this compu
 
 
 def failure(detail):
-    return (f'Error: the Linux sandbox (bubblewrap) is installed but cannot start: {detail}. '
+    return ("Error: the Linux sandbox (bubblewrap) is installed but couldn't complete its startup check. "
             'Nothing ran. On Ubuntu 24.04 or later, rerun the CORSIA installer to add its '
             'AppArmor rule, then restart CORSIA.')
 
@@ -46,19 +46,25 @@ def test_missing_binary(monkeypatch):
 ])
 def test_bad_version(executable, monkeypatch, output, detail):
     monkeypatch.setattr(probe.subprocess, 'run', lambda *a, **kw: result(stdout=output))
-    assert probe.sandbox_error() == failure(detail)
+    error = probe.sandbox_error()
+    if output == 'bubblewrap 0.7.9':
+        assert 'bubblewrap 0.8.0 or newer is required (found 0.7.9)' in error
+        assert 'Upgrade bubblewrap' in error
+    else:
+        assert error == failure(detail)
 
 
-def test_probe_failure_first_stderr_line_and_retry(executable, monkeypatch):
+def test_probe_failure_logs_detail_and_retries(executable, monkeypatch, caplog):
     calls = []
     def run(args, **kwargs):
         calls.append((args, kwargs))
         return result(stdout='bubblewrap 0.9.0') if args[-1] == '--version' else result(stderr='denied\nextra', returncode=1)
     monkeypatch.setattr(probe.subprocess, 'run', run)
     assert probe.sandbox_error() == failure('denied')
-    assert probe.sandbox_error() == failure('denied')
+    assert 'denied\nextra' in caplog.text
+    assert 'denied' not in probe.sandbox_error()
     assert len(calls) == 4
-    assert calls[1][0] == probe.launcher_argv([str(executable), '--ro-bind', '/', '/', '--unshare-pid', '--proc', '/proc', '--', '/bin/true'])
+    assert calls[1][0] == probe.launcher_argv([str(executable), *probe.NAMESPACES, '--ro-bind', '/', '/', '--proc', '/proc', '--', '/bin/true'])
     assert calls[1][1] == {'capture_output': True, 'text': True, 'timeout': 5}
 
 
@@ -110,8 +116,55 @@ def test_invalidate_reprobes_and_failure_can_recover(executable, monkeypatch):
     assert len(calls) == 6
 
 
+@pytest.mark.parametrize(('code', 'stderr', 'timeout', 'cleared'), [
+    (1, b'bwrap: setup failed\n', False, True),
+    (2, b'ordinary error\n', False, False),
+    (1, b'bwrap: setup failed\n', True, False),
+])
+def test_possible_setup_error_requests_reprobe(monkeypatch, code, stderr, timeout, cleared):
+    from tools import shell_sandbox
+    from types import SimpleNamespace
+    monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
+    calls = []
+    monkeypatch.setattr(probe, 'invalidate_sandbox_probe', lambda: calls.append(True))
+    shell_sandbox.recheck_after_launch_error(code, stderr, timed_out=timeout)
+    assert bool(calls) == cleared
+
+
+def test_child_spoofed_bwrap_message_causes_harmless_reprobe(monkeypatch):
+    from tools import shell_sandbox
+    from types import SimpleNamespace
+    monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
+    calls = []
+    monkeypatch.setattr(probe, 'invalidate_sandbox_probe', lambda: calls.append(True))
+    shell_sandbox.recheck_after_launch_error(1, b'bwrap: x\n')
+    assert calls == [True]
+
+
 @pytest.mark.asyncio
-async def test_background_failure_forces_next_startup_probe(executable, monkeypatch):
+async def test_script_uses_shared_startup_gate(monkeypatch):
+    from automation import script_sandbox
+    calls = []
+
+    async def gate(available, version_error, **kwargs):
+        calls.append((available, version_error, kwargs))
+        return 'refused'
+
+    monkeypatch.setattr(script_sandbox.shell_sandbox, 'startup_error', gate)
+    with pytest.raises(script_sandbox.ScriptSandboxError, match='refused'):
+        await script_sandbox._checked_environment()
+    assert calls == [(script_sandbox.is_safehouse_available,
+                      script_sandbox.safehouse_version_error,
+                      {'prefix': 'sandbox unavailable: '})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('log', 'lease_id', 'probes'), [
+    (b'make: *** [all] Error 1\n', None, 2),
+    (b'bwrap: setup failed\n', None, 4),
+    (b'bwrap: setup failed\n', 'lease-1', 2),
+])
+async def test_background_failure_reprobes_only_on_bwrap_error(executable, monkeypatch, tmp_path, log, lease_id, probes):
     from types import SimpleNamespace
     from automation import managed_process_events
     from infra import db_async
@@ -126,8 +179,11 @@ async def test_background_failure_forces_next_startup_probe(executable, monkeypa
     monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
     monkeypatch.setattr(managed_process_events, 'row_for', lambda record: {})
     monkeypatch.setattr(db_async, 'run_in_db', no_persistence)
+    log_path = tmp_path / 'process.log'
+    log_path.write_bytes(log)
+    record = SimpleNamespace(lease_id=lease_id, exit_code=1, log_path=log_path)
     assert probe.sandbox_error() is None
     assert len(calls) == 2
-    await managed_process_events.on_background_transition(SimpleNamespace(), 'failed')
+    await managed_process_events.on_background_transition(record, 'failed')
     assert probe.sandbox_error() is None
-    assert len(calls) == 4
+    assert len(calls) == probes

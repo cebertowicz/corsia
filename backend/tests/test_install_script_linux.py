@@ -25,6 +25,16 @@ REPO = Path(__file__).resolve().parents[2]
 INSTALL = REPO / "scripts" / "install.sh"
 APP_URL = f"http://localhost:{DEFAULT_BACKEND_PORT}"
 
+
+def test_installer_probe_uses_renderer_namespace_flags():
+    import shlex
+    from tools.linux_sandbox import NAMESPACES
+    script = (REPO / 'scripts/install-linux-sandbox.sh').read_text()
+    command = next(line.strip() for line in script.splitlines() if line.strip().startswith('bwrap --die-with-parent'))
+    args = shlex.split(command)
+    assert args[1:1 + len(NAMESPACES)] == list(NAMESPACES)
+    assert args[1 + len(NAMESPACES):] == ['--ro-bind', '/', '/', '--proc', '/proc', '--', '/bin/true', '>/dev/null', '2>&1']
+
 NODE_VERSION = RUNTIME_PINS["node"]["arm64"].version
 UV_VERSION = RUNTIME_PINS["uv"]["arm64"].version
 NODE_URL = {

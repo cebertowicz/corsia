@@ -126,9 +126,11 @@ def test_accepting_a_task_retires_the_rows_registered_before_it_started(db):
 
     rows = _rows(db, thread_id)
     assert rows[old["id"]] == ("settled", True)
+    # A shared document's row is task-scoped like any other.
+    assert rows[shared["id"]] == ("settled", True)
     # Pin keeps the row in the pane; the stamp records that it would have left.
     assert rows[pinned["id"]] == ("visible", True)
-    for kept in (shared, session, touched_since):
+    for kept in (session, touched_since):
         assert rows[kept["id"]] == ("visible", False)
     assert _rows(db, other_thread)[elsewhere["id"]] == ("visible", False)
     event = db.execute(
@@ -285,78 +287,46 @@ def test_a_task_that_is_not_a_completion_by_its_executor_retires_nothing(
     assert _rows(db, thread_id)[old["id"]] == ("visible", False)
 
 
-def test_a_settlement_that_cannot_classify_its_rows_leaves_them_for_the_next_start(db):
-    from infra.settings import get_setting, set_setting
-    from registry import finished_task_row_backfill, startup_backfill, taskless_row_backfill
-    from registry.retirement_predicate import SharedRootsUnreadable
-
-    markers = (startup_backfill.FINISHED_TASK_MARKER, startup_backfill.TASKLESS_MARKER)
-    thread_id = make_session(db, prefix="rule3-deferred")
-    old = _taskless(db, thread_id, "old.md")
-    node = _started(db, thread_id)
-    made = _taskless(db, thread_id, "made.md", touched=_AFTER)
-    db.execute(
-        "UPDATE artifact_registrations SET origin_plan_node_id=? WHERE artifact_id=?",
-        (node.id, made["id"]),
+def _shared(db, thread_id: str, name: str, **kwargs) -> dict:
+    return _taskless(
+        db, thread_id, name, external_id=f"{_PROJECT}/shared/documents/{name}",
+        path=str(config.WORKSPACE / "projects/alpha/shared/documents" / name), **kwargs,
     )
-    for marker in markers:
-        set_setting(marker, {"completed_at": "t0"}, db=db)
-    # A project row left over from another workspace: the shared roots cannot be read.
-    db.execute(
-        "INSERT INTO projects (id,name,path,created_at,updated_at) "
-        "VALUES ('moved','moved','workspace://ws-other/projects/moved','t0','t0')"
-    )
-    db.commit()
-
-    _accept(db, node, thread_id)
-
-    # The task is accepted, nothing was guessed, and both passes are owed again.
-    assert plans.get_node(node.id, db=db).state == "accepted"
-    assert _rows(db, thread_id) == {
-        old["id"]: ("visible", False), made["id"]: ("visible", False),
-    }
-    assert [get_setting(marker, db=db) for marker in markers] == [None, None]
-
-    # A start that still cannot read the roots fails the pass and records nothing.
-    with pytest.raises(SharedRootsUnreadable):
-        finished_task_row_backfill.run_startup_backfill()
-    assert get_setting(markers[0], db=get_db()) is None
-
-    db.execute("DELETE FROM projects WHERE id='moved'")
-    db.commit()
-    finished_task_row_backfill.run_startup_backfill()
-    taskless_row_backfill.run_startup_backfill()
-
-    assert _rows(get_db(), thread_id) == {
-        old["id"]: ("settled", True), made["id"]: ("settled", True),
-    }
 
 
 def test_the_one_time_pass_applies_the_rule_to_tasks_already_accepted(db, monkeypatch):
-    from infra.settings import get_setting
+    from infra.settings import get_setting, set_setting
     from registry import taskless_row_backfill as backfill
 
+    # The pass already ran once on this instance, under the earlier rule.
+    set_setting("artifact_pane:taskless_rows_retired", {"completed_at": "t0"}, db=db)
     done_thread = make_session(db, prefix="rule3-pass")
     idle_thread = make_session(db, prefix="rule3-idle")
     with monkeypatch.context() as patched:
         # The task was accepted before the rule existed.
         patched.setattr(node_retirement, "retire_taskless_rows", lambda _db, **_kwargs: 0)
         left_behind = _taskless(db, done_thread, "old.md")
+        shared = _shared(db, done_thread, "REFERENCE.md")
         _accept(db, _started(db, done_thread), done_thread)
     newer = _taskless(db, done_thread, "newer.md", touched=_AFTER)
+    shared_newer = _shared(db, done_thread, "NEWER.md", touched=_AFTER)
     never_ran = _taskless(db, idle_thread, "idle.md")
+    idle_shared = _shared(db, idle_thread, "IDLE.md")
     assert _rows(db, done_thread)[left_behind["id"]] == ("visible", False)
 
     backfill.run_startup_backfill()
 
     fresh = get_db()
     assert _rows(fresh, done_thread) == {
-        left_behind["id"]: ("settled", True), newer["id"]: ("visible", False),
+        left_behind["id"]: ("settled", True), shared["id"]: ("settled", True),
+        newer["id"]: ("visible", False), shared_newer["id"]: ("visible", False),
     }
-    assert _rows(fresh, idle_thread)[never_ran["id"]] == ("visible", False)
+    assert _rows(fresh, idle_thread) == {
+        never_ran["id"]: ("visible", False), idle_shared["id"]: ("visible", False),
+    }
     marker = get_setting(backfill._MARKER, db=fresh)
-    assert marker["retired_rows"] == 1
-    assert marker["retired_by_thread"] == {done_thread: 1}
+    assert marker["retired_rows"] == 2
+    assert marker["retired_by_thread"] == {done_thread: 2}
     event = fresh.execute(
         "SELECT metadata FROM artifact_registration_events "
         "WHERE artifact_id=? ORDER BY rowid DESC LIMIT 1",

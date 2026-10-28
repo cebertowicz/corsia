@@ -724,8 +724,9 @@ def test_default_roots_live_in_the_corsia_folder(tmp_path, platform, in_app, exp
     assert root == tmp_path / expected
 
 
-def test_the_cache_root_lives_in_the_corsia_folder(tmp_path):
+def test_the_cache_root_lives_in_the_corsia_folder(tmp_path, monkeypatch):
     managed_runtime = importlib.import_module("tools.managed_runtime")
+    monkeypatch.setattr(managed_runtime.platform, "system", lambda: "Darwin")
 
     assert managed_runtime.application_cache_root(home=tmp_path) == tmp_path / "Library" / "Caches" / "CORSIA"
 
