@@ -92,6 +92,18 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
     return None, None, "Couldn't read your usual font, so this email may go out in your mail's default font."
 
 
+GUARD_GUIDANCE = (
+    "If message text is withheld, use email_read or ask the person to look in their mail app. "
+    "For new mail, save a new draft and wait for the person's reply. "
+)
+
+
+def _size(count: int) -> str:
+    if count < 1024 * 1024:
+        return f"{max(1, round(count / 1024))} KB"
+    return f"{count / (1024 * 1024):.1f} MB"
+
+
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
 
 class EmailDraftTool(Tool):
@@ -186,8 +198,7 @@ class EmailDraftTool(Tool):
         if target.get("prefix_reply_subject"):
             subject = reply_subject(subject)
         face, size, font_note = await _font(backend, account_id)
-        if font_note:
-            notes.append(font_note)
+        notes.extend([font_note] if font_note else [])
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
         try:
@@ -197,8 +208,7 @@ class EmailDraftTool(Tool):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
         target = {**target, "account_id": account_id, "account": address, "attachments": attached}
-        notes.extend(f"Attachment: {item['name']} ({max(1, round(item['size'] / 1024))} KB)" if item['size'] < 1024 * 1024
-                     else f"Attachment: {item['name']} ({item['size'] / (1024 * 1024):.1f} MB)" for item in attached)
+        notes.extend(f"Attachment: {item['name']} ({_size(item['size'])})" for item in attached)
         text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
         if applies_to_message and limit is not None:
             parsed = parse_document(text)
@@ -227,13 +237,8 @@ class EmailDraftTool(Tool):
         }
         if original:
             result["guard_evidence"] = verdict.evidence_ids
-            result["guard_guidance"] = (
-                "If message text is withheld, use email_read or ask the person to look in their mail app. "
-                "For new mail, save a new draft and wait for the person's reply. "
-                f"Reply target: {original.message_id}; thread: {original.thread_id}."
-            )
-        if font_note:
-            result["font_note"] = font_note
+            result["guard_guidance"] = GUARD_GUIDANCE + f"Reply target: {original.message_id}; thread: {original.thread_id}."
+        result.update({"font_note": font_note} if font_note else {})
         if copy_note is not None:
             result["note"] = copy_note
         return json.dumps(result)
