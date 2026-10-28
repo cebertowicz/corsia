@@ -31,7 +31,7 @@ Last reviewed: 2026-10-28
 ### Network Exposure
 
 - **Bind address** — setup selects local (`127.0.0.1`) or server (`0.0.0.0`) access. A mismatch between the recorded choice and bind address fails closed. Existing installations without a recorded choice retain the legacy server bind.
-- **Devices** — an opt-in TLS listener (default port 47901) for pairing other devices. It accepts signed-in person sessions only, refuses peers outside private networks unless an outside address is configured, and can be managed only from the host itself.
+- **Devices** — an opt-in TLS listener (default port 47901) for pairing other devices. It accepts signed-in person sessions only, refuses peers outside private networks unless an outside address is configured, and can be managed only from the main computer itself.
 - **Remote access** — CORSIA includes guidance for setting up a Tailscale Serve mapping to the local service.
 
 ## Gaps / Future Work
