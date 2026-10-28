@@ -113,8 +113,9 @@ def test_email_and_calendar_use_google_connect_with_own_project_as_backup():
     email = app.split("6. **Email and calendar.**", 1)[1].split("7. **Learning", 1)[0]
     assert "call `google_status`, then `google_connect`" in email
     assert "one Allow with no Google Cloud project" in email
-    assert "Use skill `google-setup` only if Google refuses this sign-in" in email
-    assert "the person asks to use their own Google Cloud project" in email
+    assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in email
+    assert "An expired link gets a new link; a Cancel or \"not now\" is a decline, not a refusal." in email
+    assert "when they ask for their own Google Cloud project" in email
     assert "it creates no agent" in app
     hand_off = app.split("## Hand over to your agents", 1)[1]
     assert "Setup offers no agent" in hand_off
@@ -152,7 +153,7 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Read the new client's ID from the Clients list" in steps and "latest creation date" in steps and "never open it" in steps
     assert steps.index("reuse its path and go to step 6") < steps.index("If the error says to reinstall or update CORSIA")
     assert "do not repeat that call as the backup" in steps
-    assert "description: Use only when Google refuses the sign-in from `google_connect`" in skill
+    assert "description: Use only when the person says Google blocked the sign-in from `google_connect`" in skill
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "Do not set `show_window`: the shared browser is already available." in steps
     assert "Do not revisit `projectcreate` or submit Create again" in steps

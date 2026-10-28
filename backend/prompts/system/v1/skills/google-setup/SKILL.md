@@ -1,11 +1,11 @@
 ---
 name: google-setup
-description: Use only when Google refuses the sign-in from `google_connect`, or the person asks to connect using their own Google Cloud project. For ordinary Gmail or Google Calendar connection, call `google_status`, then `google_connect`.
+description: Use only when the person says Google blocked the sign-in from `google_connect` ("Access blocked", "your admin hasn't allowed this app"), the same address comes back refused after they said they clicked Allow, or they ask to connect using their own Google Cloud project. For ordinary Gmail or Google Calendar connection, load pack `email`, call `google_status`, then `google_connect`.
 ---
 
 # Connect Google with your own project
 
-The usual route is `google_connect`: one Allow, no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service. This skill is the backup only when Google refuses that sign-in or the person asks for their own project.
+The usual route is `google_connect`: one Allow, no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service. This skill is the backup only when the person says Google blocked that sign-in (for example "Access blocked" or "your admin hasn't allowed this app"), when the same address comes back refused after they said they clicked Allow, or when they ask for their own project. An expired link gets a new link; a Cancel or "not now" is a decline, not a refusal.
 
 Only the designated CORSIA thread runs this. The person does two things: signs in to Google once in the browser you open, and clicks Allow on each account's sign-in link. You do every other step, every Cloud console page included; never send the person to the console or hand them a list. Never ask for, type, read, print or paste a password, code, client secret or token.
 
