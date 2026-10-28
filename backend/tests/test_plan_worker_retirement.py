@@ -112,6 +112,34 @@ def _lifecycle(db, thread_id: str) -> tuple:
     return (row["lifecycle_state"] or "active", row["archived_reason"])
 
 
+@pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
+def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integration, kind):
+    from registry.cc_session import registered_confinement
+    from subagents.cc_invocation import UNCONFINED
+
+    db = _db(monkeypatch)
+    try:
+        parent_plan, delegated, *_ = _returned(db, "Work")
+        for thread in ("parent", "worker"):
+            metadata = None
+            if integration == "claude-code" and thread == "worker":
+                metadata = {"claude_invocation": {"confinement": "review", "add_dirs": ["/src"],
+                                                   "working_dir": "/worker/confined"}}
+            models.register_artifact(integration=integration, type=kind, external_id=thread,
+                                     parent_thread_id=thread, metadata=metadata, db=db)
+        db.execute("UPDATE artifact_identities SET updated_at='9999' WHERE external_id='worker'")
+        db.commit()
+        submit_review_evidence(delegated.id, db=db, actor_id="parent")
+        _verdict(db, parent_plan.id, "accept", delegated.id)
+        assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
+        assert models.find_for_thread("parent", integration, kind, db=db)["external_id"] == "parent"
+        assert registered_confinement("parent", db) == UNCONFINED
+        if integration == "claude-code":
+            assert registered_confinement("worker", db).mode == "review"
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("parent_ended", [False, True])
 def test_settled_worker_document_passes_to_live_ancestor(monkeypatch, tmp_path, parent_ended):
     db = _db(monkeypatch)

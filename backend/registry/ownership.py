@@ -320,7 +320,8 @@ def _live_conductor_or_user(db, project_id: str | None, ending: set[str]) -> str
 
 def _thread_end_target(db, identity, thread, ending: set[str], *, reason: str) -> str | None:
     from registry.shared_principals import acting_owner
-
+    if (identity["integration"], identity["type"]) in (("claude-code", "session"), ("codex", "thread")):
+        return None  # Provider continuity belongs to the launching thread.
     if _is_shared_document(identity["path"], _shared_root(db, thread)):
         persistent = bool(_thread_value(thread, "agent_enabled")) or reason == "agent_disabled"
         project_id = _thread_value(thread, "project_id")
