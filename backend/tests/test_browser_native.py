@@ -372,7 +372,11 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 await cdp.call('Page.enable')
                 await cdp.call('Page.addScriptToEvaluateOnNewDocument', source=browser_screencast.PRELOAD,
                                worldName=browser_screencast.WORLD, runImmediately=True)
-                probe = "navigator.clipboard.readText().then(() => 'allowed', () => 'denied')"
+                # Headed Chrome holds an unanswered read behind its own permission prompt instead of
+                # rejecting it; either way the page never reads the person's clipboard.
+                probe = ("Promise.race([navigator.clipboard.readText().then(() => 'allowed', () => 'denied'),"
+                         " new Promise(resolve => setTimeout(() => resolve('pending'), 1000))])")
+                not_read = {'denied', 'pending'} if headed else {'denied'}
                 async def read_probe():
                     try:
                         async with asyncio.timeout(5):
@@ -380,13 +384,13 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                     except TimeoutError:
                         pytest.fail('clipboard read-denial probe did not finish')
                     return result['result']['value']
-                assert await read_probe() == 'denied'
+                assert await read_probe() in not_read
                 await cdp.call('Browser.grantPermissions', origin=base, permissions=['clipboardSanitizedWrite'])
                 try:
-                    assert await read_probe() == 'denied'
+                    assert await read_probe() in not_read
                 finally:
                     await cdp.call('Browser.resetPermissions')
-                assert await read_probe() == 'denied'
+                assert await read_probe() in not_read
                 child = base.replace('127.0.0.1', 'localhost') + '/clipboard-child'
                 setup = """new Promise((resolve, reject) => {
                     window.clipboardEvents = [];
