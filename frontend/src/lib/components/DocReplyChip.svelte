@@ -5,16 +5,19 @@
 	import { ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import UnreadReplyChip from './comments/UnreadReplyChip.svelte';
+	import { unreadReplyCount } from '$lib/docReplyChip';
+	import type { DocComment } from '$lib/stores/docComments';
 
 	// Floats over the document where its "N new above / below" pill does (DocCanvasActivity), in the editor's grid cell so it
 	// follows the comments drawer. The chip is the chat's own (UnreadReplyChip); only where it sits and where a tap goes are the document's.
-	let { artifactId, path, threadId, count, onStep }: {
+	let { artifactId, path, threadId, threads, onStep }: {
 		artifactId: string;
 		path: string;
 		threadId: string | null;
-		count: number;
+		threads: DocComment[];
 		onStep: () => void;
 	} = $props();
+	const count = $derived(unreadReplyCount(threads));
 
 	// Arrives where it lands (fade, 4px rise) and leaves by fading at 70%; reduced motion crossfades only (motion.md).
 	function arrive(node: HTMLElement) {
