@@ -262,7 +262,7 @@ describe('SetupScreen', () => {
 		// The answer is kept in setup progress, where the first chat reads which subscriptions they pay for.
 		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false } });
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
-		expect(button('Sign in')).toBeTruthy();
+		expect(button('Sign in')).toBeUndefined();
 	});
 
 	it('installs only the chosen CLI after its delayed detection', async () => {

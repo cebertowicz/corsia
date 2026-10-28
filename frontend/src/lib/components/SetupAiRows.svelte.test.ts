@@ -11,7 +11,7 @@ describe('setup row progress', () => {
 			{ key: 'busy', name: 'Busy', meta: '', busy: true },
 			{ key: 'action', name: 'Action', meta: '', action },
 			{ key: 'install', name: 'Installing', meta: '', busy: true, spinning: true, action },
-			{ key: 'queued', name: 'Queued', meta: '', busy: true, spinning: true },
+			{ key: 'checking', name: 'Checking', meta: '', busy: true, spinning: true },
 			{ key: 'button', name: 'Button', meta: '', action: { ...action, loading: true } },
 			{ key: 'both', name: 'Both', meta: '', busy: true, spinning: true, action: { ...action, loading: true } },
 			{ key: 'ready', name: 'Ready', meta: '', pill: { state: 'success', label: 'Ready' } },

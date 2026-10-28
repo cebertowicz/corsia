@@ -5,10 +5,8 @@ import { formatMoment } from '$lib/time';
 
 type InstallFailureCause = 'connection' | 'site_refused' | 'download_unverified' | 'installer_failed';
 type ConnectPhase = {
-	phase: 'awaiting-source' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin';
+	phase: 'awaiting-source' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; accountId?: string; failed?: 'install' | 'signin';
 	reason?: string | null; cause?: InstallFailureCause; ref?: string | null; shadowedBinary?: string;
-	/** Sign in was pressed while installing: the sign-in starts the moment the install is done. */
-	signInQueued?: boolean;
 	/** A failed sign-in's stable cause, from the service or `unreachable` when no answer came; absent when unknown. */
 	signinCause?: string;
 	checkingModels?: boolean;
@@ -85,41 +83,40 @@ export function createSetupConnect(deps: ConnectDeps) {
 		flow = { ...flow, [vendor]: next };
 		if (next?.phase === 'failed') attempts = { ...attempts, [vendor]: { attempt: next.failed === 'signin' ? 'signin_failed' : 'install_failed', cause: next.failed === 'signin' ? next.signinCause ?? 'signin_failed' : installCause(next.cause), ref: next.ref ?? undefined } };
 	}
-	function signinFailed(vendor: string, result?: Signin | null, installed?: boolean, cause?: string) {
-		setConnect(vendor, { phase: 'failed', failed: 'signin', installed, signinCause: result ? result.cause ?? result.status : cause, ref: result?.ref ?? null });
+	function signinFailed(vendor: string, result?: Signin | null, cause?: string) {
+		setConnect(vendor, { phase: 'failed', failed: 'signin', signinCause: result ? result.cause ?? result.status : cause, ref: result?.ref ?? null });
 	}
-	async function beginSignIn(source: ModelSource, installed = false) {
+	async function beginSignIn(source: ModelSource) {
 		const current = deps.token();
 		if (!current) return;
-		setConnect(source.source, { phase: 'signing-in', installed });
+		setConnect(source.source, { phase: 'signing-in' });
 		// stop() clears the row when the tool is unpicked, even before the sign-in has an account.
 		const stopped = () => flow[source.source]?.phase !== 'signing-in';
 		let result: Signin | null = null;
 		try {
 			const lookup = await fetchCorsiaAgent(current);
 			if (stopped()) return;
-			if (lookup.kind !== 'target') { signinFailed(source.source, null, installed, 'agent_unavailable'); return; }
+			if (lookup.kind !== 'target') { signinFailed(source.source, null, 'agent_unavailable'); return; }
 			const accountId = await accountToSignIn(current, source.source, source.name);
 			if (stopped()) return;
 			result = await startSignin(current, accountId, lookup.target.thread_id);
 			if (stopped()) { await cancelSignin(current, accountId).catch(() => undefined); return; }
-			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result, installed); return; }
-			setConnect(source.source, { phase: 'signing-in', installed, accountId });
+			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result); return; }
+			setConnect(source.source, { phase: 'signing-in', accountId });
 			await tickConnect();
 		} catch (error) {
 			// An unpicked tool stays cleared: its failure is never written back over the row stop() cleared.
 			if (stopped()) return;
 			// Only a request that got no answer is unreachable; a refusal's cause is unknown here.
-			signinFailed(source.source, result, installed, error instanceof TypeError ? 'unreachable' : undefined);
+			signinFailed(source.source, result, error instanceof TypeError ? 'unreachable' : undefined);
 		}
 	}
 	async function openSignInAgain(source: ModelSource) {
 		const current = deps.token(), accountId = flow[source.source]?.accountId;
 		if (current && accountId) await cancelSignin(current, accountId).catch(() => undefined);
-		await beginSignIn(source, flow[source.source]?.installed);
+		await beginSignIn(source);
 	}
 	async function afterInstalled(vendor: string, shadowedBinary: string | null = null) {
-		const signInQueued = flow[vendor]?.signInQueued === true;
 		attempts = { ...attempts, [vendor]: { attempt: 'installed' } };
 		// A fresh check, never the stored list: the stored row can still say not installed.
 		await deps.refreshSources(true);
@@ -127,13 +124,12 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (shadowedBinary) { setConnect(vendor, { phase: 'path-shadow', shadowedBinary }); return; }
 		if (!source || sourceIsReady(source) || source.state === 'unverified') { setConnect(vendor, undefined); return; }
 		if (source.state === 'not_installed') { setConnect(vendor, { phase: 'failed', failed: 'install' }); return; }
-		if (signInQueued) await beginSignIn(source, true);
-		else setConnect(vendor, undefined);
+		setConnect(vendor, undefined);
 	}
-	async function startInstall(source: ModelSource, signInQueued = false) {
+	async function startInstall(source: ModelSource) {
 		const current = deps.token();
 		if (!current) return;
-		setConnect(source.source, { phase: 'installing', signInQueued });
+		setConnect(source.source, { phase: 'installing' });
 		try {
 			const refusal = await startCliInstall(current, source.source);
 			if (refusal === 'invisible_binary') await linkCli(current, source.source);
@@ -162,11 +158,10 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.state !== 'not_installed' || entry?.phase === 'installing' || entry?.phase === 'signing-in') return;
 		await startInstall(source);
 	}
-	/** Sign in: once the install is done when one is running, after installing when the tool is missing. */
+	/** A missing tool is installed first; signing in requires a separate action after installation. */
 	async function signIn(source: ModelSource) {
-		const entry = flow[source.source];
-		if (entry?.phase === 'installing') { setConnect(source.source, { ...entry, signInQueued: true }); return; }
-		if (source.state === 'not_installed') { await startInstall(source, true); return; }
+		if (flow[source.source]?.phase === 'installing') return;
+		if (source.state === 'not_installed') { await startInstall(source); return; }
 		await beginSignIn(source);
 	}
 	async function cancelInstall(source: ModelSource) {
@@ -184,8 +179,6 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const entry = flow[vendor], current = deps.token();
 		if (entry?.phase === 'awaiting-source') setConnect(vendor, undefined);
 		else if (entry?.phase === 'installing') {
-			// A sign-in queued behind this install must not start if the install finishes anyway.
-			setConnect(vendor, { ...entry, signInQueued: false });
 			const source = deps.sources().find((candidate) => candidate.source === vendor);
 			if (source) await cancelInstall(source);
 		} else if (entry?.phase === 'signing-in') {
@@ -213,7 +206,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 					const signin = await checkSignin(current, entry.accountId).catch(() => undefined);
 					if (signin?.status === 'completed' && signin.outcome == null) setConnect(vendor, { ...entry, checkingModels: true });
 					else if (signin === null || signin?.status === 'completed') { await deps.refreshSources(); setConnect(vendor, undefined); }
-					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin, entry.installed);
+					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin);
 				}
 			}
 		} finally { ticking = false; }
@@ -222,7 +215,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const copy = VENDOR_COPY[source.source], entry = flow[source.source];
 		const signInAction = { label: 'Sign in', run: () => void signIn(source) };
 		if (entry?.phase === 'installing') {
-			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: entry.signInQueued ? undefined : signInAction };
+			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true };
 		}
 		if (entry?.phase === 'signing-in' && entry.checkingModels) return { meta: `Checking your ${copy.account} models…`, busy: true, spinning: true };
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
@@ -232,7 +225,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		}
 		if (entry?.phase === 'failed') {
 			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref, copy.maker);
-			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source, true) } : undefined };
+			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source) } : undefined };
 		}
 		if (entry?.phase === 'path-shadow') return { meta: `An older ${copy.cli} at ${entry.shadowedBinary} runs instead of the one CORSIA installed. Remove it, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
 		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.`, error: true };
