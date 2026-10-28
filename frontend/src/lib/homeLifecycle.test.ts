@@ -2,6 +2,86 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { registerHomeLifecycle } from './homeLifecycle';
 
+describe('keyboard inset focus ordering', () => {
+	let teardown: () => void;
+	let input: HTMLTextAreaElement;
+	let button: HTMLButtonElement;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		input = document.createElement('textarea');
+		button = document.createElement('button');
+		document.body.append(input, button);
+		teardown = registerHomeLifecycle({
+			token: () => null, activeThreadId: () => null, activeView: () => 'chat', threads: () => [],
+			loadThreads: vi.fn(), loadModels: vi.fn(), loadSettings: vi.fn(), loadUpdateStatus: vi.fn(),
+			pollSystem: vi.fn(), checkSecurityAlert: vi.fn(), selectThread: vi.fn(async () => {}),
+			setActiveView: vi.fn(), chatPanel: () => undefined, on: () => () => {}, connect: vi.fn(),
+		});
+	});
+
+	afterEach(() => {
+		teardown();
+		input.remove();
+		button.remove();
+		document.documentElement.style.removeProperty('--kb-toolbar-inset');
+		vi.clearAllTimers();
+		vi.useRealTimers();
+	});
+
+	const pointer = (target: HTMLElement, type: string) => {
+		const event = new Event(type, { bubbles: true });
+		Object.defineProperty(event, 'pointerId', { value: 1 });
+		target.dispatchEvent(event);
+	};
+	const inset = () => document.documentElement.style.getPropertyValue('--kb-toolbar-inset');
+
+	it('keeps the inset through pointerup and click before clearing it', () => {
+		input.focus();
+		pointer(button, 'pointerdown');
+		input.blur();
+		expect(inset()).toBe('60px');
+		pointer(button, 'pointerup');
+		button.addEventListener('click', () => expect(inset()).toBe('60px'));
+		button.click();
+		expect(inset()).toBe('60px');
+		vi.runAllTimers();
+		expect(inset()).toBe('0px');
+	});
+
+	it('also keeps the inset if focusout follows pointerup before click', () => {
+		input.focus();
+		pointer(button, 'pointerdown');
+		pointer(button, 'pointerup');
+		input.blur();
+		button.addEventListener('click', () => expect(inset()).toBe('60px'));
+		button.click();
+		vi.runAllTimers();
+		expect(inset()).toBe('0px');
+	});
+
+	it('clears immediately on cancellation or blur without a press', () => {
+		input.focus();
+		pointer(button, 'pointerdown');
+		input.blur();
+		pointer(button, 'pointercancel');
+		expect(inset()).toBe('0px');
+		input.focus();
+		input.blur();
+		expect(inset()).toBe('0px');
+	});
+
+	it('keeps the inset if another editable receives focus before the deferred clear', () => {
+		input.focus();
+		pointer(button, 'pointerdown');
+		input.blur();
+		pointer(button, 'pointerup');
+		input.focus();
+		vi.runAllTimers();
+		expect(inset()).toBe('60px');
+	});
+});
+
 describe('registerHomeLifecycle polling', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();

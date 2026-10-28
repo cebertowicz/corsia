@@ -1,0 +1,72 @@
+import { expect, test } from './support/test';
+import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { injectMessage, seedMockResponses } from './support/mock';
+
+test('reply from the thread and edit the pending highlight before sending', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  if ((page.viewportSize()?.width ?? 0) <= 768) await page.setViewportSize({ width: 393, height: 852 });
+  const capture = async (stage: string) => {
+    const directory = process.env.CORSIA_REPLY_CAPTURE_DIR;
+    if (!directory) return;
+    const width = page.viewportSize()?.width ?? 0;
+    const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await page.screenshot({ path: `${directory}/${stage}-${width}-${theme}.png`, animations: 'disabled' });
+    }
+    await page.evaluate((value) => { if (value) document.documentElement.dataset.theme = value; }, originalTheme);
+  };
+  const title = 'Reply journey';
+  const thread = await createSession(request, title);
+  await injectMessage(request, thread, { role: 'assistant', content: 'Earlier context.\n\n'.repeat(20), metadata: { for_user: true } }, TEST_TOKEN);
+  const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
+  await openAppPastLanding(page);
+  await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
+  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await sidebarThread(page, title).click();
+  await waitForWsConnected(page);
+  const row = page.locator(`[data-message-id="${id}"]`);
+  await expect(row).toBeVisible();
+  await row.evaluate((el) => {
+    const body = el.querySelector('.long-message-body')!;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode() as Text | null;
+    while (node && !node.data.includes('selected phrase')) node = walker.nextNode() as Text | null;
+    if (!node) throw new Error('Selected text was not rendered');
+    const start = node.data.indexOf('selected phrase');
+    const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + 'selected phrase'.length);
+    const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  });
+  await page.locator('.sel-comment').click();
+  await page.getByPlaceholder('Comment…').fill('First comment');
+  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Edit comment/ })).toBeVisible();
+  await seedMockResponses(request, [{ content: 'Received comment' }]);
+  await chatComposer(page).fill('Please address this');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const comment = row.locator('.chat-comment-thread').first();
+  await expect(comment.getByText('First comment')).toBeVisible();
+  await capture('thread');
+  await comment.getByRole('button', { name: /Reply to comment/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Reply' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Reply' }).fill('Draft reply');
+  await capture('compose');
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Edit reply/ })).toBeVisible();
+  await expect(chatComposer(page)).toBeFocused();
+  await row.locator('.cm-comment-pending').first().evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await row.locator('.cm-comment-pending').first().click();
+  await page.getByRole('textbox', { name: 'Reply' }).fill('Edited reply');
+  await capture('edit');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit reply' })).toHaveCount(0);
+  await seedMockResponses(request, [{ content: 'Received reply' }]);
+  await chatComposer(page).fill('Please consider my reply');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(comment.getByText('Edited reply')).toBeVisible();
+  await capture('sent');
+  await page.reload();
+  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await sidebarThread(page, title).click();
+  await expect(row.locator('.chat-comment-thread').getByText('Edited reply')).toBeVisible();
+});

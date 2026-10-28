@@ -5,6 +5,7 @@
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
 	import CommentThread, { type CommentThreadData } from './comments/CommentThread.svelte';
+	import './comments/comment-link.css';
 
 	let { messageId, threadId, comments }: { messageId: string; threadId: string; comments: ChatComment[] } = $props();
 	const agentName = $derived.by(() => {
@@ -46,6 +47,7 @@
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				<CommentQuote quote={comment.quote} />
 				<CommentThread comment={thread(comment)} readOnly flat viewEachUnread onViewed={(_, replyId) => viewed(comment, replyId)} />
+				<button class="ct-link reply-link" data-reply-comment={comment.id} aria-label={`Reply to comment on “${comment.quote}”`} onclick={(event) => document.dispatchEvent(new CustomEvent('chat-comment-reply', { detail: { threadId, messageId, commentId: comment.id, target: event.currentTarget } }))}><span class="reply-label">Reply</span></button>
 			</div>
 		{/each}
 	</div>
@@ -54,5 +56,10 @@
 <style>
 	.chat-comment-threads { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border); }
 	.chat-comment-thread { display: flex; flex-direction: column; gap: var(--space-1); }
+	.reply-link { align-self: flex-start; min-width: var(--touch-target); text-align: left; padding: 0; margin: calc(-1 * var(--space-1)) 0 calc(-1 * var(--space-1)) calc(var(--space-3) - var(--chip-inline-padding)); }
+	.reply-label { display: inline-block; padding: var(--space-1) var(--chip-inline-padding); border-radius: var(--radius-sm); }
+	.reply-link:focus-visible { outline: none; }
+	.reply-link:focus-visible .reply-label { outline: 2px solid var(--accent); outline-offset: -2px; }
+	@media (pointer: coarse) { .reply-link { min-height: var(--touch-target); padding: var(--space-3) 0; margin-top: calc(-1 * var(--space-4)); margin-bottom: calc(-1 * var(--space-4)); } }
 	.chat-comment-thread:global(.chat-reply-landed) { background: color-mix(in srgb, var(--accent) 24%, var(--bg-primary)); border-radius: var(--radius-sm); padding: var(--space-2); }
 </style>

@@ -17,6 +17,8 @@ export interface ChatComment {
 	note: string;
 	from_off: number;
 	to_off: number;
+	anchor_prefix: string;
+	anchor_suffix: string;
 	created_at: string;
 	answers: ChatCommentAnswer[];
 }

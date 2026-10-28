@@ -72,7 +72,7 @@ export function keepingSelection(el: HTMLElement, repaint: () => void) {
 const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
 
 /** Wraps the text nodes a range holds, so a mark follows the text inside formatting. */
-export function wrapRange(range: Range, mark: Mark) {
+export function wrapRange(range: Range, mark: Mark, interactivePending = false) {
 	const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT);
 	const nodes: Text[] = [];
 	for (let node = walker.nextNode(); node; node = walker.nextNode()) if (range.intersectsNode(node)) nodes.push(node as Text);
@@ -86,6 +86,7 @@ export function wrapRange(range: Range, mark: Mark) {
 		const wrap = document.createElement('span');
 		wrap.className = ['cm-comment-wrap', ...markClasses(mark.kind)].join(' ');
 		addCommentId(wrap, mark);
+		if (interactivePending && mark.kind === 'pending') wrap.dataset.commentIds = mark.id;
 		wrap.dataset.commentAria = 'true';
 		wrap.setAttribute('aria-label', `Commented text: ${clean(part.toString())}`);
 		part.surroundContents(wrap);

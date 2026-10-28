@@ -10,7 +10,7 @@ afterEach(() => { if (component) unmount(component); host?.remove(); vi.unstubAl
 
 it('shows a comment and its shared answer in the thread, and leaves an unanswered comment without a New mark', () => {
 	host = document.createElement('div'); document.body.appendChild(host);
-	const base = { from_off: 0, to_off: 1, user_message_id: 'send', created_at: '2026-10-27T00:00:00Z', note: 'Why?', quote: 'selected text' };
+	const base = { from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', user_message_id: 'send', created_at: '2026-10-27T00:00:00Z', note: 'Why?', quote: 'selected text' };
 	component = mount(ChatCommentThreads, { target: host, props: {
 		messageId: 'target', threadId: 'thread', comments: [
 			{ ...base, id: 'one', cid: 'c1.1', answers: [{ author_kind: 'agent', user_message_id: 'send', cid: 'c1.1', assistant_message_id: 'answer', text: 'Shared answer', created_at: '2026-10-27T00:01:00Z', unread: true }] },
@@ -41,7 +41,7 @@ it('stamps only each fully visible unread agent answer, even with a later user r
 	vi.stubGlobal('fetch', fetcher);
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 	host = document.createElement('div'); document.body.appendChild(host);
-	const base = { from_off: 0, to_off: 1, id: 'root', cid: 'root', user_message_id: 'first', quote: 'quote', note: 'note', created_at: '2026-10-27T00:00:00Z' };
+	const base = { from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', id: 'root', cid: 'root', user_message_id: 'first', quote: 'quote', note: 'note', created_at: '2026-10-27T00:00:00Z' };
 	component = mount(ChatCommentThreads, { target: host, props: { messageId: 'target', threadId: 'thread', comments: [{ ...base, answers: [
 		{ author_kind: 'agent', user_message_id: 'first', cid: 'one', assistant_message_id: 'same', text: 'first answer', created_at: '2026-10-27T00:01:00Z', unread: true },
 		{ author_kind: 'agent', user_message_id: 'second', cid: 'two', assistant_message_id: 'same', text: 'second answer', created_at: '2026-10-27T00:02:00Z', unread: true },

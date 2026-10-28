@@ -3,6 +3,8 @@ export interface ChatComment extends ChatCommentAnchor {
 	messageId: string;
 	seq: number;
 	note: string;
+	root_user_message_id?: string;
+	root_cid?: string;
 }
 
 export interface ChatCommentAnchor {

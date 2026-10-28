@@ -92,8 +92,14 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		document.documentElement.style.setProperty('--doc-visual-viewport-offset', `${vv.offsetTop}px`);
 	};
 
+	const pointers = new Set<number>();
+	let pendingBlur = false;
+	let blurTimer: ReturnType<typeof setTimeout> | undefined;
 	const onFocusIn = (e: FocusEvent) => {
 		if (!isEditableTarget(e.target)) return;
+		pendingBlur = false;
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
+		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '60px');
 		document.documentElement.style.setProperty('--floater-bottom-pad', '4px');
 		document.documentElement.style.setProperty('--messages-pad-top', 'calc(var(--safe-top) + 12px)');
@@ -105,8 +111,9 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		}));
 	};
 
-	const onFocusOut = (e: FocusEvent) => {
-		if (!isEditableTarget(e.target)) return;
+	const clearKeyboardInset = () => {
+		pendingBlur = false;
+		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '0px');
 		document.documentElement.style.removeProperty('--floater-bottom-pad');
 		document.documentElement.style.removeProperty('--messages-pad-top');
@@ -116,6 +123,28 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 			options.chatPanel()?.restoreBottomOffset();
 		}));
 	};
+	const onFocusOut = (e: FocusEvent) => {
+		if (!isEditableTarget(e.target)) return;
+		if (pointers.size || blurTimer !== undefined) pendingBlur = true;
+		else clearKeyboardInset();
+	};
+	const onPointerDown = (e: PointerEvent) => {
+		pointers.add(e.pointerId);
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
+		blurTimer = undefined;
+	};
+	const onPointerEnd = (e: PointerEvent) => {
+		pointers.delete(e.pointerId);
+		if (pointers.size) return;
+		if (e.type === 'pointercancel') {
+			if (pendingBlur) clearKeyboardInset();
+		} else {
+			blurTimer = setTimeout(() => {
+				blurTimer = undefined;
+				if (pendingBlur) clearKeyboardInset();
+			}, 0);
+		}
+	};
 
 	updateCanvasShift();
 	window.addEventListener('corsia:navigate', handleNavigateEvent);
@@ -123,6 +152,9 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 	window.visualViewport?.addEventListener('resize', updateCanvasShift);
 	document.addEventListener('focusin', onFocusIn);
 	document.addEventListener('focusout', onFocusOut);
+	document.addEventListener('pointerdown', onPointerDown, true);
+	document.addEventListener('pointerup', onPointerEnd, true);
+	document.addEventListener('pointercancel', onPointerEnd, true);
 	if (options.token()) options.connect();
 
 	return () => {
@@ -131,6 +163,10 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		window.removeEventListener('corsia:navigate', handleNavigateEvent);
 		document.removeEventListener('focusin', onFocusIn);
 		document.removeEventListener('focusout', onFocusOut);
+		document.removeEventListener('pointerdown', onPointerDown, true);
+		document.removeEventListener('pointerup', onPointerEnd, true);
+		document.removeEventListener('pointercancel', onPointerEnd, true);
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
 		window.visualViewport?.removeEventListener('scroll', updateCanvasShift);
 		window.visualViewport?.removeEventListener('resize', updateCanvasShift);
 	};

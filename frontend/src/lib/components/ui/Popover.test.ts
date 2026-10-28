@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Popover from './Popover.svelte';
 
@@ -14,7 +14,12 @@ function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean; wid
 	component = mount(Popover, { target: host, props: { anchor: options.anchor ?? anchor(), open: options.open ?? true, fill: options.fill, width: options.width, onPlace: options.onPlace, onClose, restoreFocus, children } });
 	flushSync(); return { onClose, restoreFocus };
 }
-afterEach(() => { if (component) unmount(component); component = null; host?.remove(); });
+beforeEach(() => {
+	// jsdom has no layout: match the dimensions provided by each geometry fixture.
+	vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function () { return this.getBoundingClientRect().width; });
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function () { return this.getBoundingClientRect().height; });
+});
+afterEach(() => { if (component) unmount(component); component = null; host?.remove(); vi.restoreAllMocks(); });
 describe('Popover', () => {
 	it('gives its content a bounded flex column only when asked to fill', () => {
 		render();
@@ -169,11 +174,15 @@ describe('Popover', () => {
 			await vi.waitFor(() => expect(surface.style.top).toBe('100px'));
 			reading = null;
 			window.dispatchEvent(new Event('scroll'));
-			await vi.waitFor(() => expect(surface.style.visibility).toBe('hidden'));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
+			expect(surface.inert).toBe(true);
+			expect(surface.getAttribute('aria-hidden')).toBe('true');
 			expect(onClose).not.toHaveBeenCalled();
 			reading = new DOMRect(520, 300, 20, 20);
 			window.dispatchEvent(new Event('scroll'));
-			await vi.waitFor(() => expect(surface.style.visibility).toBe(''));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe(''));
+			expect(surface.inert).toBe(false);
+			expect(surface.hasAttribute('aria-hidden')).toBe(false);
 			expect(surface.style.top).toBe('300px');
 		});
 		it('hides a live anchor scrolled out of the canvas instead of closing, while a fixed anchor still closes', async () => {
@@ -183,11 +192,15 @@ describe('Popover', () => {
 			await vi.waitFor(() => expect(surface.style.top).toBe('100px'));
 			reading = new DOMRect(520, 2000, 20, 20);
 			window.dispatchEvent(new Event('scroll'));
-			await vi.waitFor(() => expect(surface.style.visibility).toBe('hidden'));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
+			expect(surface.inert).toBe(true);
+			expect(surface.getAttribute('aria-hidden')).toBe('true');
 			expect(onClose).not.toHaveBeenCalled();
 			reading = new DOMRect(520, 220, 20, 20);
 			window.dispatchEvent(new Event('scroll'));
-			await vi.waitFor(() => expect(surface.style.visibility).toBe(''));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe(''));
+			expect(surface.inert).toBe(false);
+			expect(surface.hasAttribute('aria-hidden')).toBe(false);
 			expect(surface.style.top).toBe('220px');
 			unmount(component!); host.remove();
 			const fixed = vi.fn();

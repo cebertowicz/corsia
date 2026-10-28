@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
+	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -376,8 +377,7 @@
 	.ct-chev.open { transform: rotate(90deg); }
 	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
 	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
-	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; padding: 0; cursor: pointer; }
-	.ct-link:hover { text-decoration: underline; }
+	/* The link treatment is shared in comment-link.css. */
 	.ct-res-hint { font-size: var(--text-caption); color: var(--text-tertiary); }
 
 </style>

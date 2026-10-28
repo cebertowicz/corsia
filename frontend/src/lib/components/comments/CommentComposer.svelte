@@ -4,11 +4,13 @@
 	import Field from '$lib/components/ui/Field.svelte';
 	import CommentQuote from './CommentQuote.svelte';
 
-	let { quote, label = '', body = '', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment…', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
 		body?: string;
+		fieldLabel?: string;
+		placeholder?: string;
 		disabledReason?: string;
 		submitLabel?: string;
 		submittingLabel?: string;
@@ -39,8 +41,8 @@
 
 <div class="composer">
 	<CommentQuote {quote} {label} />
-	<Field variant="nested" hideLabel label="Comment" labelFor={`${explanationId}-body`}>
-		<textarea id={`${explanationId}-body`} data-drawer-autofocus rows="1" placeholder="Comment…" bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+	<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
+		<textarea id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 	</Field>
 	<div class="actions">
 		<button class="cancel" onclick={onCancel}>Cancel</button>
@@ -56,5 +58,6 @@
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
 	.submit:disabled { opacity: .4; cursor: default; }
+	@media (pointer: coarse) { .actions button { min-width: var(--touch-target); min-height: var(--touch-target); } }
 	.selection-reason { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>
