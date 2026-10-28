@@ -24,7 +24,7 @@ def test_blueprint_is_indexed_and_searchable():
     assert search_items(indexed, "software blueprint") == [row]
 
 
-@pytest.mark.parametrize("path", ["../outside", "/absolute", ".hidden", "inner/.hidden"])
+@pytest.mark.parametrize("path", ["../outside", "/absolute", ".hidden", "inner/.hidden", "scripts/run", "nested/scripts/run"])
 def test_blueprint_refuses_unsafe_indexed_paths(path):
     row = pack_row()
     row["files"].append({"path": path, "sha256": "c" * 64})

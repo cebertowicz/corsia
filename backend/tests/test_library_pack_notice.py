@@ -86,7 +86,7 @@ def test_newest_pack_only_and_withdrawal_when_community_off(isolated_db, tmp_pat
     db = get_db()
     try:
         messages = db.execute("SELECT content FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", (owner,)).fetchall()
-        assert len(messages) == 1 and "library.item_withdrawn" in messages[0]["content"]
+        assert len(messages) == 1 and "library.pack_withdrawn" in messages[0]["content"]
     finally:
         db.close()
     monkeypatch.setattr(library_package, "load_index", lambda: SimpleNamespace(items=(), generations={}))

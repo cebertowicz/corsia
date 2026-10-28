@@ -8,12 +8,18 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from events.connectors.library import INSTALLED_PACK_TYPE, LIBRARY_INTEGRATION
+from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
+from library.producer import INSTALLED_ROWS_SQL
+from registry.models import SURFACING_QUIET
+
+_PACK_REGISTRATION_SQL = INSTALLED_ROWS_SQL + """ AND identities.external_id=? AND identities.path=?
+    AND registrations.parent_thread_id=? AND registrations.surfacing=? LIMIT 1"""
+
 
 def can_fetch(thread_id: str, project_id: str | None, db) -> bool:
     """Check the current coordinating agent designation for this scope."""
-    from infra.conductor import get_coordination_scopes
-
-    return any(row["scope"] == (project_id or "workspace") for row in get_coordination_scopes(thread_id, db=db))
+    return get_scope_coordinator(project_id or WORKSPACE_SCOPE, db=db) == thread_id
 
 
 def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, workspace: Path, db) -> dict[str, Any]:
@@ -52,7 +58,7 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
     except (OSError, ValueError, AtomicRenameUnavailableError) as error:
         return {"error": "publication_failed", "message": str(error)}
     try:
-        artifact = register_artifact(integration="library", type="installed-pack", external_id=f"{thread_id}/{item['name']}/{item['version']}", parent_thread_id=thread_id, path=str(dest / "manifest.yaml"), db=db)
+        artifact = register_artifact(integration=LIBRARY_INTEGRATION, type=INSTALLED_PACK_TYPE, external_id=f"{thread_id}/{item['name']}/{item['version']}", parent_thread_id=thread_id, path=str(dest / "manifest.yaml"), db=db)
         update_surfacing(artifact["id"], surfacing=SURFACING_QUIET, parent_thread_id=thread_id, actor_thread_id=thread_id, db=db)
     except (OSError, ValueError, sqlite3.Error) as error:
         return {"error": "registration_failed", "message": f"The verified pack is present at {dest}, but registration failed: {error}. Do not overwrite it; registration needs repair."}
@@ -61,16 +67,11 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
 
 def _registered(owner: str, name: str, version: str, folder: Path, db) -> bool:
     """An active quiet registration completes publication; incomplete state can be repaired."""
-    row = db.execute(
-        """SELECT 1 FROM artifact_identities AS identities
-           JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
-           WHERE identities.integration=? AND identities.type=? AND identities.external_id=?
-             AND identities.state='active' AND identities.path=? AND registrations.parent_thread_id=?
-             AND registrations.relationship_state IN ('owner-active', 'owner-pinned')
-             AND registrations.surfacing='quiet' LIMIT 1""",
-        ("library", "installed-pack", f"{owner}/{name}/{version}", str(folder / "manifest.yaml"), owner),
-    ).fetchone()
-    return row is not None
+    return db.execute(
+        _PACK_REGISTRATION_SQL,
+        (LIBRARY_INTEGRATION, INSTALLED_PACK_TYPE, f"{owner}/{name}/{version}",
+         str(folder / "manifest.yaml"), owner, SURFACING_QUIET),
+    ).fetchone() is not None
 
 
 def _matches_published(folder: Path, expected: dict[str, bytes]) -> bool:

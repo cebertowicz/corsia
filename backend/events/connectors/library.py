@@ -1,7 +1,7 @@
-"""Library installed-skill notice connector manifest (declared data).
+"""Library installed-item notice connector manifest (declared data).
 
-A library producer reports that a thread-owned installed skill changed upstream
-or was withdrawn.  The manifest identifies that installed copy for the generic
+A library producer reports that a thread-owned installed skill or pack changed
+upstream or was withdrawn. The manifest identifies that installed copy for the generic
 platform resolver; it neither stores state nor chooses a route.
 """
 
@@ -16,6 +16,7 @@ LIBRARY_INTEGRATION = "library"
 INSTALLED_SKILL_TYPE = "installed-skill"
 INSTALLED_PACK_TYPE = "installed-pack"
 PACK_CHANGED_EVENT = "library.pack_changed"
+PACK_WITHDRAWN_EVENT = "library.pack_withdrawn"
 ITEM_CHANGED_EVENT = "library.item_changed"
 ITEM_WITHDRAWN_EVENT = "library.item_withdrawn"
 
@@ -62,7 +63,7 @@ def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
         return None
     return {
         "integration": LIBRARY_INTEGRATION,
-        "type": INSTALLED_PACK_TYPE if event_type == PACK_CHANGED_EVENT or raw.get("artifact_type") == INSTALLED_PACK_TYPE else INSTALLED_SKILL_TYPE,
+        "type": INSTALLED_PACK_TYPE if event_type in (PACK_CHANGED_EVENT, PACK_WITHDRAWN_EVENT) else INSTALLED_SKILL_TYPE,
         "external_id": external_id,
     }
 
@@ -91,6 +92,16 @@ MANIFEST = register(ConnectorManifest(
             event_class="informational",
             collapse_fact="item_key",
             digest_line_facts=_CHANGED_LINE_FACTS,
+        ),
+        PACK_WITHDRAWN_EVENT: EventTypeDecl(
+            PACK_WITHDRAWN_EVENT,
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
+            _FILTERABLE,
+            artifact_type=INSTALLED_PACK_TYPE,
+            artifact_integration=LIBRARY_INTEGRATION,
+            event_class="actionable",
+            collapse_fact="item_key",
+            digest_line_facts=_WITHDRAWN_LINE_FACTS,
         ),
         ITEM_WITHDRAWN_EVENT: EventTypeDecl(
             ITEM_WITHDRAWN_EVENT,

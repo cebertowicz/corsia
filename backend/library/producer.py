@@ -11,6 +11,7 @@ from events.connectors.library import (
     INSTALLED_SKILL_TYPE,
     INSTALLED_PACK_TYPE,
     PACK_CHANGED_EVENT,
+    PACK_WITHDRAWN_EVENT,
     ITEM_CHANGED_EVENT,
     ITEM_WITHDRAWN_EVENT,
     LIBRARY_CONNECTOR,
@@ -24,7 +25,7 @@ from library.items import item_manifest, source_ref
 log = logging.getLogger(__name__)
 REFRESH_SECONDS = 24 * 60 * 60
 
-INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id, registrations.created_at
+INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id, registrations.created_at, registrations.surfacing
     FROM artifact_identities AS identities
     JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
     WHERE identities.integration=? AND identities.type=? AND identities.state='active'
@@ -116,8 +117,8 @@ def _pack_notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]], 
                 return None
         except ValueError:
             return None
-    return {"event_type": ITEM_WITHDRAWN_EVENT if item["withdrawn"] else PACK_CHANGED_EVENT,
-            "artifact_type": INSTALLED_PACK_TYPE, "external_id": external_id, "name": name,
+    return {"event_type": PACK_WITHDRAWN_EVENT if item["withdrawn"] else PACK_CHANGED_EVENT,
+            "external_id": external_id, "name": name,
             "installed_version": version, "library_version": item["version"],
             "item_manifest": item["digest"], "library_index_generation": generations.get(name, 0),
             "installed_at": row["created_at"], "edited": False, "changed_files": [],

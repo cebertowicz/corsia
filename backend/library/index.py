@@ -15,6 +15,7 @@ from urllib.request import urlopen
 import semver
 
 from library.items import COMMIT, REPOSITORY, LibraryItemError, validate_relative_path
+from library.pack_validation import validate_blueprint_path
 
 INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
 _CACHE_NAME = "index.json"
@@ -199,7 +200,13 @@ def _validate_item(row: Any) -> dict[str, Any]:
         path, sha256 = file_row.get("path"), file_row.get("sha256")
         if not isinstance(path, str):
             raise LibraryIndexValidationError("library index file path must be a string")
-        _validate_relative_path(path)
+        if kind == "pack":
+            try:
+                validate_blueprint_path(path)
+            except LibraryItemError as error:
+                raise LibraryIndexValidationError(f"library blueprint contains an unsafe path: {path!r}") from error
+        else:
+            _validate_relative_path(path)
         paths.append(path)
         if not isinstance(sha256, str) or not _SHA256.fullmatch(sha256):
             raise LibraryIndexValidationError(
@@ -209,8 +216,6 @@ def _validate_item(row: Any) -> dict[str, Any]:
         raise LibraryIndexValidationError("library index skill files must include SKILL.md")
     if kind == "pack" and not {"manifest.yaml", "CHANGELOG.md"}.issubset(paths):
         raise LibraryIndexValidationError("library blueprint must include manifest.yaml and CHANGELOG.md")
-    if kind == "pack" and any(any(part.startswith(".") for part in path.split("/")) for path in paths):
-        raise LibraryIndexValidationError("library blueprint cannot contain dotfiles")
     if len(paths) != len({path.casefold() for path in paths}):
         raise LibraryIndexValidationError("library index file paths must be unique, ignoring case")
     return dict(row)

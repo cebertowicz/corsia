@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 import yaml
@@ -14,20 +13,19 @@ from library.pack_digest import pack_digest
 _FONT_PREFIXES = (b"\x00\x01\x00\x00", b"OTTO", b"ttcf", b"wOFF", b"wOF2")
 
 
+def validate_blueprint_path(path: str) -> None:
+    """Apply the same path policy to indexed and fetched blueprints."""
+    validate_relative_path(path)
+    parts = path.split("/")
+    if any(part.startswith(".") for part in parts) or "scripts" in parts:
+        raise LibraryIntegrityError(f"pack path is not allowed: {path}")
+
+
 def validate_pack(item: dict[str, Any], files: dict[str, bytes]) -> None:
     """Refuse unsafe contents or an envelope inconsistent with the indexed pack."""
-    expected_paths = {row["path"] for row in item["files"]}
-    if set(files) != expected_paths:
-        raise LibraryIntegrityError("pack files do not match the index")
-    for row in item["files"]:
-        actual = hashlib.sha256(files[row["path"]]).hexdigest()
-        if actual != row["sha256"].removeprefix("sha256:").casefold():
-            raise LibraryIntegrityError(f"integrity check failed for {row['path']}")
     for path, data in files.items():
-        validate_relative_path(path)
+        validate_blueprint_path(path)
         parts = path.split("/")
-        if any(part.startswith(".") for part in parts) or "scripts" in parts:
-            raise LibraryIntegrityError(f"pack path is not allowed: {path}")
         try:
             data.decode("utf-8")
             binary = b"\0" in data

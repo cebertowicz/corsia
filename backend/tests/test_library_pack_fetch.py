@@ -14,11 +14,10 @@ def fixture_pack():
 
 def setup(monkeypatch, tmp_path, files):
     from core import skill_resolution
-    from infra import conductor
     from library import items, pack_fetch
     from registry import models, registration_writer
 
-    monkeypatch.setattr(conductor, "get_coordination_scopes", lambda thread_id, db: [{"scope": "project", "scope_type": "project"}])
+    monkeypatch.setattr(pack_fetch, "get_scope_coordinator", lambda scope, db: "owner" if scope == "project" else None)
     monkeypatch.setattr(skill_resolution, "skill_scope_root", lambda **kwargs: tmp_path / "thread")
     monkeypatch.setattr(items, "_fetch_raw", lambda url: files[url.split("/packs/demo/", 1)[1]])
     registrations = []
@@ -44,8 +43,29 @@ def test_registration_completeness_uses_real_owner_and_surfacing(isolated_db, tm
         assert not _registered(owner, "demo", "1.0.0", folder, db)
         models.update_surfacing(artifact["id"], surfacing="quiet", parent_thread_id=owner, actor_thread_id=owner, db=db)
         assert _registered(owner, "demo", "1.0.0", folder, db)
+        assert not _registered(owner, "demo", "2.0.0", folder, db)
+        assert not _registered(owner, "demo", "1.0.0", tmp_path / "other", db)
+        assert not _registered("other-owner", "demo", "1.0.0", folder, db)
+        from library.pack_fetch import _PACK_REGISTRATION_SQL
+        plan = db.execute("EXPLAIN QUERY PLAN " + _PACK_REGISTRATION_SQL,
+                          ("library", "installed-pack", f"{owner}/demo/1.0.0",
+                           str(folder / "manifest.yaml"), owner, "quiet")).fetchall()
+        assert any("SEARCH identities" in row["detail"] and "external_id=?" in row["detail"] for row in plan)
     finally:
         db.close()
+
+
+def test_can_fetch_uses_designated_scope_coordinator(monkeypatch):
+    from library import pack_fetch
+
+    calls = []
+    monkeypatch.setattr(pack_fetch, "get_scope_coordinator", lambda scope, db: calls.append(scope) or {"workspace": "workspace-owner", "project": "project-owner"}.get(scope))
+    db = object()
+    assert pack_fetch.can_fetch("workspace-owner", None, db)
+    assert pack_fetch.can_fetch("project-owner", "project", db)
+    assert not pack_fetch.can_fetch("workspace-owner", "project", db)
+    assert not pack_fetch.can_fetch("worker", "missing", db)
+    assert calls == ["workspace", "project", "project", "missing"]
 
 
 def test_tool_returns_fetch_owner_authorization(monkeypatch):
