@@ -140,6 +140,7 @@ def _marker_content(
     *,
     is_error: bool,
     metadata: dict,
+    account: dict | None,
 ) -> str:
     suppress = (
         ctx.live.turn_has_assistant_row
@@ -147,9 +148,7 @@ def _marker_content(
         and not ctx.live.dropped_line_this_turn
     )
     if is_error and auth_failure_kind("claude-code", ev.get("result")):
-        from subagents.turn_account_error import claude_login_message, turn_account
-
-        account = turn_account(metadata.get("turn_id"), "claude-code", db=ctx.db)
+        from subagents.turn_account_error import claude_login_message
         if account:
             metadata["account_id"] = account["id"]
         return claude_login_message(account)
@@ -271,16 +270,20 @@ def _schedule_sparse_usage_control_read(ctx: CCEventContext) -> None:
 
 async def _handle_result_error(
     ctx: CCEventContext, ev: dict, metadata: dict, *, is_error: bool,
-) -> None:
+) -> dict | None:
     if not is_error:
-        return
+        return None
+    account = None
     if auth_failure_kind("claude-code", ev.get("result")):
         from subagents.turn_account_error import turn_account
 
-        account = turn_account(metadata.get("turn_id"), "claude-code", db=ctx.db)
+        account = await run_in_db_unless_owned(
+            ctx.db, turn_account, metadata.get("turn_id"), "claude-code", db=ctx.db,
+        )
         reconcile_expired_login(ev.get("result"), log, account)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
+    return account
 
 
 async def on_result(ctx: CCEventContext, ev: dict) -> None:
@@ -312,11 +315,9 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
         identity=identity,
         apply_now_interrupt_owns_result=apply_now,
     )
-    content = _marker_content(
-        ctx, ev, is_error=is_error, metadata=metadata,
-    )
+    account = await _handle_result_error(ctx, ev, metadata, is_error=is_error)
+    content = _marker_content(ctx, ev, is_error=is_error, metadata=metadata, account=account)
     outcome = _result_outcome(is_error, metadata)
-    await _handle_result_error(ctx, ev, metadata, is_error=is_error)
     settlement = await claim_terminal(
         identity, outcome,
         (ev.get("result") or "Claude Code turn failed") if outcome == "error" else None,

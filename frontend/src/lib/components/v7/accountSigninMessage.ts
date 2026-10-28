@@ -19,6 +19,10 @@ export function signinMessage(result: SigninResult, nameOf: (id: string | null |
 	if (result.status === 'cancelled') return 'Sign-in cancelled';
 	if (result.status === 'superseded') return 'Account changed before sign-in finished';
 	if (result.status === 'unavailable') return 'Sign-in is unavailable';
+	if (result.status === 'model_refresh_failed') {
+		const name = nameOf(result.account_id) ?? 'This account';
+		return `${name} is still signed in, but its model list couldn’t be reloaded. Reference: ${result.ref}`;
+	}
 	if (result.cause === 'same_account') {
 		const name = nameOf(result.duplicate_of);
 		return name ? `Already signed in as ${name}` : 'This account is already signed in';

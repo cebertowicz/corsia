@@ -26,23 +26,10 @@ class CodexPreparedContextStale(RuntimeError):
 
 
 class CodexModelCacheChanged(RuntimeError):
-    def __init__(self, account_id: str | None, message: str):
-        super().__init__(message)
-        self.account_id = account_id
+    """The account's model cache changed before provider admission."""
 
-
-def explain_model_cache_change(turn_identity, logger, *, db=None) -> CodexModelCacheChanged:
-    from infra.failure_reference import new_reference
-    from subagents.turn_account_error import turn_account
-
-    account = turn_account(getattr(turn_identity, "turn_id", None), "codex", db=db)
-    name = account["name"] if account else "this account"
-    ref = new_reference("local")
-    logger.warning("Codex launch failed reference=%s cause=account_model_cache_changed", ref)
-    return CodexModelCacheChanged(
-        account["id"] if account else None,
-        f"Couldn’t start Codex on {name}: its model list is out of date. Reference: {ref}",
-    )
+    def __init__(self) -> None:
+        super().__init__("account_model_cache_changed")
 
 
 def cache_error_marker(exc, thread_id, live, bcast, db, insert_message_fn, logger):
@@ -50,10 +37,21 @@ def cache_error_marker(exc, thread_id, live, bcast, db, insert_message_fn, logge
         return None
 
     async def marker():
+        from infra.db_async import run_in_db_unless_owned
+        from infra.failure_reference import new_reference
+        from subagents.turn_account_error import turn_account
+
+        account = await run_in_db_unless_owned(
+            db, turn_account, getattr(live.corsia_turn, "turn_id", None), "codex", db=db,
+        )
+        name = account["name"] if account else "this account"
+        ref = new_reference("local")
+        logger.warning("Codex launch failed reference=%s cause=account_model_cache_changed", ref)
         return surface_exit_error(
-            thread_id, 1, str(exc), bcast, db, live.corsia_turn,
-            terminal_applied=True, emit_terminal=False, insert_message_fn=insert_message_fn,
-            logger=logger, account_id=exc.account_id, formatted=True,
+            thread_id, 1, f"Couldn’t start Codex on {name}: its model list is out of date. Reference: {ref}",
+            bcast, db, live.corsia_turn, terminal_applied=True, emit_terminal=False,
+            insert_message_fn=insert_message_fn, logger=logger,
+            account_id=account["id"] if account else None, formatted=True, ref=ref,
         )
     return marker
 
@@ -72,6 +70,7 @@ def surface_exit_error(
     logger,
     account_id: str | None = None,
     formatted: bool = False,
+    ref: str | None = None,
 ) -> str | None:
     if code == 0 and not terminal_applied:
         return None
@@ -92,6 +91,8 @@ def surface_exit_error(
         }
         if account_id:
             meta["account_id"] = account_id
+        if ref:
+            meta["ref"] = ref
         mid = insert_turn_error(
             insert_message_fn, thread_id, text, meta,
             turn_id=getattr(turn_identity, "turn_id", None),

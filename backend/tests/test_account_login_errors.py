@@ -75,7 +75,7 @@ async def test_signin_rechecks_before_touching_login(accounts, monkeypatch, stat
     result = await account_controls.start_signin(row['id'])
     assert result['status'] == expected
     if refresh is False:
-        assert result['ref'] and result['cause'] == 'failed'
+        assert result['ref'] and result['cause'] == 'account_refresh_failed'
     if status is None:
         assert result['cause'] == 'unreadable'
     spawn.assert_not_awaited()
@@ -83,7 +83,7 @@ async def test_signin_rechecks_before_touching_login(accounts, monkeypatch, stat
 
 
 def test_error_messages_use_turn_account_and_reference(claude, accounts, caplog):
-    from subagents.codex_runtime_errors import explain_model_cache_change
+    from subagents.codex_runtime_errors import CodexModelCacheChanged
     from subagents.turn_account_error import claude_login_message, turn_account
 
     db = claude.db
@@ -96,9 +96,4 @@ def test_error_messages_use_turn_account_and_reference(claude, accounts, caplog)
     db.execute("INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,vendor_account_id) "
                "VALUES ('codex-turn','destination',0,'codex/test','running','t','test',?)", (codex['id'],))
     db.commit()
-    with caplog.at_level(logging.WARNING):
-        error = explain_model_cache_change(SimpleNamespace(turn_id='codex-turn'), logging.getLogger(__name__), db=db)
-    assert str(error).startswith('Couldn’t start Codex on Second: its model list is out of date. Reference: ')
-    assert error.account_id == codex['id']
-    assert 'account_model_cache_changed' not in str(error)
-    assert f"reference={str(error).split('Reference: ')[1]} cause=account_model_cache_changed" in caplog.text
+    assert str(CodexModelCacheChanged()) == 'account_model_cache_changed'

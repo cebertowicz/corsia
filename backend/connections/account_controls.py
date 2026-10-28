@@ -17,7 +17,7 @@ import logging
 from typing import Any
 
 from connections import account_login_wait, account_signin_prompt
-from connections.account_verify_refresh import custom_account as _custom
+from connections.account_verify_refresh import custom_account as _custom, refresh_models, signin_recheck
 from connections.account_identity import codex_identity, refresh_default_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
@@ -195,8 +195,6 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
     """Begin, or return the live, vendor browser sign-in for one signed-out added account."""
     account = await _custom(account_id)
     if account["state"] == "signed_in":
-        from connections.account_verify_refresh import signin_recheck
-
         result = await signin_recheck(account_id, verify)
         if result is not None:
             return result
@@ -339,8 +337,6 @@ async def verify(account_id: str, *, refresh_default: bool = True) -> dict[str, 
         account = await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
     refresh_ok, refresh_cause, refresh_ref = None, None, None
     if account["state"] == "signed_in" and signed_in is True:
-        from connections.account_verify_refresh import refresh_models
-
         refresh_ok, refresh_cause, refresh_ref = await refresh_models(account, receipt, binary, current_c6)
     return {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"],
             "model_refresh_ok": refresh_ok, "model_refresh_cause": refresh_cause, "model_refresh_ref": refresh_ref}

@@ -58,6 +58,7 @@ export interface SigninResult {
 	route: 'browser' | null;
 	status: SigninStatus;
 	cause: string | null;
+	ref?: string | null;
 	duplicate_of?: string | null;
 	held_by?: string | null;
 }

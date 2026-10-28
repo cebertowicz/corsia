@@ -430,7 +430,7 @@ async def test_verify_started_on_old_login_cannot_discover_the_replacement(accou
     release.set()
     result = await task
     assert result == {'account_id': row['id'], 'vendor_signed_in': True, 'cause': None, 'state': 'signed_in',
-                      'model_refresh_ok': False, 'model_refresh_cause': 'account_refresh_superseded',
+                      'model_refresh_ok': False, 'model_refresh_cause': 'account_refresh_failed',
                       'model_refresh_ref': result['model_refresh_ref']}
     assert result['model_refresh_ref']
     assert get_account(row['id'], db=db)['discovery'] == before

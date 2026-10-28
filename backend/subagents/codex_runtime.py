@@ -829,10 +829,6 @@ async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
     except CommittedTerminalFailure:
         raise
     except BaseException as exc:
-        if str(exc) == "account_model_cache_changed":
-            from subagents.codex_runtime_errors import explain_model_cache_change
-
-            exc = explain_model_cache_change(live.corsia_turn, log, db=spec.db)
         if live.checkpoint_wait_scope.stop_requested:
             if spec.settle_delivery_terminal is not None:
                 await spec.settle_delivery_terminal("cancelled", str(exc) or None)
@@ -847,7 +843,7 @@ async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
             terminalize=live.corsia_turn is not None,
             settle_delivery_terminal=spec.settle_delivery_terminal,
         )
-        raise exc
+        raise
     _remember_spawned_app_server_turn(spec, live, session)
     return turn_id
 
