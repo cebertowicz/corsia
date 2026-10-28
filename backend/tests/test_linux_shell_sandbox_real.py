@@ -228,6 +228,8 @@ def test_linux_home_and_run_add_dirs_keep_persistence_and_ipc_hidden(linux_box):
               and not path.is_relative_to(Path('.local/state/corsia/sandbox-masks'))]
     caches = {Path(value) for value in HOME_CACHES}
     expected = {part for cache in caches for part in (cache, *cache.parents) if part != Path('.')}
+    from tools.managed_runtime import application_cache_root
+    expected.add(application_cache_root(box.home).relative_to(box.home))
     created = expected - set(before)
     assert after == sorted(set(before) | created)
     for path in created:
