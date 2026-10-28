@@ -10,7 +10,7 @@
 	 * through the one shared account row. The caller passes rows only for a vendor with two or
 	 * more accounts; one account has no row, so no account chrome. Choosing a row pins the open
 	 * thread to that account; during a running turn it applies at the next turn, as a model choice
-	 * does. A draft chat has no thread, so its rows are read-only.
+	 * does. A draft keeps the choice until its first send.
 	 */
 	// Every permitted account shows, in server order, and the one the next turn runs on carries
 	// the same selected treatment as the header that names it, with or without rollover.
@@ -22,7 +22,7 @@
 
 	async function choose(row: PickerAccount) {
 		const target = sel.threadId;
-		if (!target || row.marked || !row.choosable || busy) return;
+		if (row.marked || !row.choosable || busy) return;
 		busy = true;
 		error = '';
 		const result = await choosePickerAccount(target, sel.modelId, $corsiaAgentId, row);
@@ -40,7 +40,7 @@
 			pending={row.pending}
 			order={row.order}
 			choosable={row.choosable}
-			onselect={sel.threadId ? () => choose(row) : undefined}
+			onselect={() => choose(row)}
 		/>
 	{/each}
 	{#if error}<p class="account-error" role="alert">{error}</p>{/if}

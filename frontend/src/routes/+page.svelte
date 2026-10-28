@@ -2,9 +2,10 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
-	import { threads, activeThreadId, activeThread, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
+	import { threads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
 	import { toasts } from '$lib/stores/toast';
 	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
+	import { models } from '$lib/stores/modelsState';
 	import { loadThreads } from '$lib/stores/threadsLoad';
 	import { loadSettings, loadUpdateStatus } from '$lib/stores/settings';
 	import { connect, on, subscribeThread } from '$lib/ws';
@@ -33,7 +34,9 @@
 	import FirstRunHandoff from '$lib/components/FirstRunHandoff.svelte';
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
-	import { buildNewThreadBody } from '$lib/threadCreate';
+	import { buildNewThreadBody, createdThreadRow, createFailedMessage, draftAccountForModel, reloadOnAccountRefusal } from '$lib/threadCreate';
+	import { pinThreadAccount } from '$lib/stores/threadAccountPin';
+	import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
@@ -295,9 +298,7 @@
 	// triggers a read-only re-check; focus covers changes made while away.
 	$effect(() => startDocumentRealtime());
 	$effect(() => { checkThreadRevisions($activeThreadId); });
-
 	$effect(() => watchSubagentOpenRequests({ selectThread: (id) => selectThread(id, 'link') }));
-
 	async function newThread(projectId?: string | null) {
 		selectionIntent++;
 		const t = $token;
@@ -305,38 +306,34 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const body = buildNewThreadBody({
-			projectId,
-			reasoningEffort: pendingEffort,
-			modelId: inheritModel,
-		});
+		const choice = get(draftAccountId);
+		const accountId = draftAccountForModel(choice, inheritModel, get(models));
+		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		});
+		if (!res.ok) {
+			const detail = await res.json().catch(() => null);
+			const refusal = accountId && await reloadOnAccountRefusal(res.status, detail?.detail, loadModels);
+			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : createFailedMessage(detail?.reference), 'error');
+			throw new Error('Thread creation failed');
+		}
 		const data = await res.json();
-		const thread: Thread = {
-			id: data.thread_id,
-			user_id: $user?.id ?? '',
-			profile: 'personal',
-			title: 'New Chat',
-			model: inheritModel,
-			project_id: projectId ?? undefined,
-			reasoning_effort: pendingEffort ?? null,
-			created_at: new Date().toISOString(),
-			updated_at: new Date().toISOString(),
-		};
+		const thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
 		adoptCreatedThread(thread);
 		activeThreadId.set(data.thread_id);
+		if (choice && !accountId) {
+			const result = await pinThreadAccount(data.thread_id, choice);
+			if (!result.ok) toasts.show(result.message, 'error');
+		}
 		messages.set([]);
 		clearThreadBuffers(data.thread_id);
 		sidebarOpen = false;
-		
 		subscribeThread(data.thread_id);
 		await chatPanelRef?.fetchThreadMessages(data.thread_id);
 	}
-
 	const selectThread = createHomeThreadSelector({
 		advanceIntent: () => selectionIntent++,
 		prepareChatSurface: (firstRun) => { activeView = 'chat'; if (!firstRun) sidebarOpen = false; }, // a late first-run landing keeps the user's drawer

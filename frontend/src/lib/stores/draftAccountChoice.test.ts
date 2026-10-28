@@ -1,0 +1,39 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
+import { token } from './auth';
+import { activeThreadId, draftAccountId } from './threads';
+import { loadModels } from './modelsLoad';
+import { activeModelId, models } from './modelsState';
+
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ models: [] }) }))); });
+afterEach(() => { token.set(null); activeThreadId.set(null); activeModelId.set(null); vi.unstubAllGlobals(); });
+
+describe('draft account selection', () => {
+	it('reads the chosen account through the catalog', async () => {
+		token.set('test');
+		const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => ({ models: [{ id: 'codex/test', runs_on: [{ account_id: url.includes('account_id=chosen') ? 'chosen' : 'default', selected: true }] }] }) }));
+		vi.stubGlobal('fetch', fetcher);
+		activeModelId.set('codex/test');
+		draftAccountId.set('chosen');
+		await loadModels();
+		expect(get(activeModelId)).toBe('codex/test');
+		expect(fetcher.mock.calls.some(([url]) => url.includes('account_id=chosen'))).toBe(true);
+		expect(get(models)[0].runs_on?.[0].account_id).toBe('chosen');
+	});
+	it('preserves the workspace catalog when an unscoped read fails without a choice', async () => {
+		activeThreadId.set(null);
+		const rows = [{ id: 'codex/test', status: 'ready' }] as Parameters<typeof models.set>[0];
+		models.set(rows);
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+		await loadModels();
+		expect(get(models)).toEqual(rows);
+	});
+	it('clears the choice when the chat surface is entered or left', () => {
+		draftAccountId.set('chosen');
+		activeThreadId.set('thread');
+		expect(get(draftAccountId)).toBeNull();
+		draftAccountId.set('chosen');
+		activeThreadId.set(null);
+		expect(get(draftAccountId)).toBeNull();
+	});
+});
