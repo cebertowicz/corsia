@@ -26,9 +26,7 @@ from infra.project_repo_policy import (
 from infra.repo_flock import fast_forward_repo_locked
 from tools.shared_write_detection import collect_shell_shared_write_notices
 from registry.connected_app_observation import observe_with_warning
-from registry.observer import observe_command_result
 from registry.registration_writer import origin_from_tool_context
-from registry.service import notify_changed
 import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward
 from tools.base import Tool
@@ -475,7 +473,6 @@ class BashTool(Tool):
                 "bash", {"command": command},
                 "\n".join(part for part in (stdout_text, stderr_text) if part),
                 is_error=owned.returncode != 0, notify=False,
-                observe=observe_command_result, notify_change=notify_changed,
                 origin=origin_from_tool_context(thread_id, kwargs, "observe_rule"),
             )
 

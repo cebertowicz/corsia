@@ -310,7 +310,7 @@ def test_a_follower_gets_the_pane_refresh_through_the_shell_tool(isolated_db, mo
     rival = make_session(get_db(), prefix="rival", user_id="user-1")
     _run("owner", "gh pr create")
     notified: list[dict] = []
-    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    monkeypatch.setattr("registry.connected_app_observation.notify_changed", notified.append)
     _stub_process(monkeypatch, stdout=_URL + "\n")
     result = asyncio.run(BashTool().execute("gh pr create --title t", **_direct_shell_context(rival)))
     assert "Registered" not in result and _owner() == "owner"
@@ -336,7 +336,7 @@ def test_shell_notifies_each_registration_even_if_a_later_one_fails(isolated_db,
         return original_register(*args, **kwargs)
     monkeypatch.setattr(observer, "register_observed_artifact", register)
     notified = []
-    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    monkeypatch.setattr("registry.connected_app_observation.notify_changed", notified.append)
     _stub_process(monkeypatch, stdout=_URL + "\n")
     result = asyncio.run(BashTool().execute("gh pr create", **_direct_shell_context(thread)))
     assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])

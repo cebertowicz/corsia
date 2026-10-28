@@ -1,12 +1,16 @@
 """Observe an in-memory stamped connected-app result."""
 from __future__ import annotations
 
+import logging
+
 from infra.tool_result_errors import is_error_result
 from registry.observer import CommandArtifactRegistrationError, observe_command_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed
 from tools.mcp_stamp import result_stamp
 from tools.shell_output import registration_warning as build_registration_warning
+
+log = logging.getLogger(__name__)
 
 
 def observe_current_result(result: object, args: dict) -> object:
@@ -30,27 +34,22 @@ def observe_current_result(result: object, args: dict) -> object:
 
 
 def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: str,
-                         *, observe=None, notify_change=None, **kwargs):
+                         **kwargs) -> tuple[list[str], str | None]:
     """Observe once, returning notices and a warning while notifying partial changes."""
-    import logging
-
-    logger = logging.getLogger("tools.shell")
-    observe = observe or observe_command_result
-    notify_change = notify_change or notify_changed
     told: list[str] = []
     changed: list[dict] = []
     warning = None
     try:
-        observe(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
+        observe_command_result(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
     except CommandArtifactRegistrationError as exc:
-        logger.exception("connector command artifact registration failed in %s", thread_id)
+        log.exception("connector command artifact registration failed in %s", thread_id)
         warning = build_registration_warning(exc.artifact, exc.error)
     except Exception as exc:
-        logger.exception("connector command observation failed in %s", thread_id)
+        log.exception("connector command observation failed in %s", thread_id)
         warning = build_registration_warning(None, exc)
     finally:
         for artifact in changed:
-            notify_change(artifact)
+            notify_changed(artifact)
     return told, warning
 
 

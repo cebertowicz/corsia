@@ -13,6 +13,7 @@ from events import observe_rules
 from infra.database import get_db
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.thread_driver import admit_input
+from registry import connected_app_observation as observation_module
 from registry import models
 from registry.command_match import command_matches_rule
 from subagents.child_thread import persist_tool_use
@@ -206,7 +207,7 @@ async def test_direct_success_registers_from_full_output_and_notifies(
     db = get_db()
     thread_id = make_session(db, prefix="bash-pr")
     notifications = []
-    monkeypatch.setattr(shell_module, "notify_changed", notifications.append)
+    monkeypatch.setattr(observation_module, "notify_changed", notifications.append)
     _stub_process(monkeypatch, stdout=stdout, stderr=stderr)
 
     result = await BashTool().execute(
@@ -392,14 +393,9 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(
-        shell_module,
-        "observe_command_result",
-        fail_registration,
-        raising=False,
-    )
+    monkeypatch.setattr(observation_module, "observe_command_result", fail_registration)
 
-    with caplog.at_level(logging.ERROR, logger="tools.shell"):
+    with caplog.at_level(logging.ERROR, logger="registry.connected_app_observation"):
         result = await BashTool().execute(
             "gh pr create --title warning",
             **_direct_shell_context(thread_id),
@@ -435,12 +431,9 @@ async def test_slow_registration_does_not_block_event_loop_timer(
         kwargs["changed"].append(artifact)
         return artifact
 
-    monkeypatch.setattr(shell_module, "observe_command_result", slow_registration)
+    monkeypatch.setattr(observation_module, "observe_command_result", slow_registration)
     monkeypatch.setattr(
-        shell_module,
-        "notify_changed",
-        lambda _artifact: events.append("notified"),
-        raising=False,
+        observation_module, "notify_changed", lambda _artifact: events.append("notified"),
     )
 
     async def timer():
@@ -471,7 +464,7 @@ async def test_bash_registration_warning_budget_preserves_warning(
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(shell_module, "observe_command_result", fail_registration)
+    monkeypatch.setattr(observation_module, "observe_command_result", fail_registration)
 
     result = await BashTool().execute(
         "gh pr create --title capped",
