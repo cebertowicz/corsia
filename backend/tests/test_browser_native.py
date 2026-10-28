@@ -6,15 +6,17 @@ Generic integration suites do not install or launch this optional native depende
 import asyncio
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import shutil
 from threading import Thread
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import psutil
 import pytest
-from host_access import browser_identity as identity, browser_pane
+from host_access import browser_cdp, browser_identity as identity, browser_pane
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_stream
 from ws.browser_frames import PaneFrames
@@ -164,6 +166,116 @@ async def test_native_pane_follows_popup_and_returns_to_opener(native_owner, mon
             assert not (await native_owner.run(thread, ['click', '#finish'])).startswith('Error:')
             await _wait_for_pane_endpoint(thread, token, opener)
             assert 'signed in' in await native_owner.run(thread, ['snapshot'])
+        finally:
+            if pane:
+                pane.cancel()
+                await asyncio.gather(pane, return_exceptions=True)
+            browser_pane.clear_page_endpoint(thread, token)
+
+
+@contextmanager
+def signin_popup_fixture(variant):
+    # Both origins share a tiny test-only completion store, standing in for a server-mediated sign-in.
+    state = {'value': ''}
+    servers = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            route = urlsplit(self.path)
+            if route.path == '/complete':
+                state['value'] = parse_qs(route.query).get('value', [''])[0]
+                body = b'ok'
+            elif route.path == '/result':
+                body = state['value'].encode()
+            elif route.path == '/popup':
+                body = b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
+                <button id="finish" onclick="fetch('/complete?value='+encodeURIComponent(document.querySelector('#account').value))
+                  .then(() => window.close())">Finish</button>'''
+            elif route.path == '/':
+                port = servers[1].server_port if variant in {'cross-origin', 'coop'} else servers[0].server_port
+                url = json.dumps(f'http://127.0.0.1:{port}/popup')
+                opening = (f"const w=window.open('', 'g_auth', 'popup,width=500,height=600'); w.location={url};"
+                           if variant == 'blank-navigation' else
+                           f"window.open({url}, 'g_auth', 'popup,width=500,height=600');")
+                body = f'''<!doctype html><title>Opener</title><button id="open">Sign in</button>
+                <output id="result"></output><script>
+                document.querySelector('#open').onclick = () => {{ {opening} }};
+                setInterval(async () => {{ document.querySelector('#result').textContent =
+                    await (await fetch('/result')).text(); }}, 100);
+                </script>'''.encode()
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            if variant == 'coop' and route.path in {'/', '/popup'}:
+                self.send_header('Cross-Origin-Opener-Policy',
+                                 'same-origin-allow-popups' if route.path == '/' else 'same-origin')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    servers.extend(ThreadingHTTPServer(('127.0.0.1', 0), Handler) for _ in range(2))
+    threads = [Thread(target=server.serve_forever, daemon=True) for server in servers]
+    for worker in threads:
+        worker.start()
+    try:
+        yield f'http://127.0.0.1:{servers[0].server_port}'
+    finally:
+        for server in servers:
+            server.shutdown()
+        for worker in threads:
+            worker.join()
+        for server in servers:
+            server.server_close()
+
+
+async def _pane_click(thread, token, selector):
+    endpoint = await browser_pane._page_endpoint(thread, token, 'pane unavailable')
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        result = await cdp.call('Runtime.evaluate', expression=(
+            f"(() => {{ const r = document.querySelector({json.dumps(selector)}).getBoundingClientRect(); "
+            "return [r.x + r.width / 2, r.y + r.height / 2]; }})()"), returnByValue=True)
+    x, y = result['result']['value']
+    for event_type in ('mousePressed', 'mouseReleased'):
+        await browser_pane.mouse_event(thread, {'eventType': event_type, 'x': x, 'y': y,
+                                                'button': 'left', 'clickCount': 1}, token)
+
+
+@pytest.mark.parametrize('variant', ['features', 'cross-origin', 'coop', 'blank-navigation'])
+async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, variant):
+    thread, token = 'popup-variants', 'variant-pane'
+    monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: native_owner))
+    monkeypatch.setattr(browser_stream, 'emit_product_event', lambda *_args, **_kwargs: None)
+    pane = None
+    with signin_popup_fixture(variant) as origin:
+        try:
+            assert not (await native_owner.run(thread, ['open', origin])).startswith('Error:')
+            opener = await native_owner.page_endpoint(thread)
+            pane = asyncio.create_task(browser_stream._follow_page(thread, token, PaneFrames(), lambda _msg: None))
+            await _wait_for_pane_endpoint(thread, token, opener)
+            await asyncio.sleep(0.2)  # Allow target discovery replay to finish.
+            await _pane_click(thread, token, '#open')
+            assert 'Account' in await native_owner.run(thread, ['snapshot'])
+            popup = await native_owner.page_endpoint(thread)
+            assert popup != opener
+            await _wait_for_pane_endpoint(thread, token, popup)
+            if variant == 'coop':
+                async with browser_cdp.CdpClient(popup) as cdp:
+                    result = await cdp.call('Runtime.evaluate', expression='window.opener === null', returnByValue=True)
+                assert result['result']['value'], 'COOP variant should sever the opener reference'
+            await _pane_click(thread, token, '#account')
+            await browser_pane.key_event(thread, {'eventType': 'keyDown', 'key': 'a', 'code': 'KeyA',
+                                                   'keyCode': 65, 'text': 'signed in'}, token)
+            await _pane_click(thread, token, '#finish')
+            await _wait_for_pane_endpoint(thread, token, opener)
+            async def posted():
+                while 'signed in' not in await native_owner.run(thread, ['snapshot']):
+                    await asyncio.sleep(0.1)
+            await asyncio.wait_for(posted(), 5)
         finally:
             if pane:
                 pane.cancel()
