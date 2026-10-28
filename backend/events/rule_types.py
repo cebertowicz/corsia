@@ -27,7 +27,8 @@ def _artifact_types(
     return [
         {"item_type": name, "extractor": name in manifest.artifact_extractors,
          "shipped_commands": [
-             {"tool": rule.tool, "argv_prefix": list(rule.argv_prefix)}
+             {"tool": rule.tool, **({"argv_prefix": list(rule.argv_prefix)}
+              if rule.tool in observe_rules.SHELL_TOOLS else {})}
              for rule in shipped if rule.connector == manifest.connector and rule.item_type == name]}
         for name in names
     ]

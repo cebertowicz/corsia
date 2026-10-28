@@ -22,7 +22,7 @@ const SCOPE_SECTIONS: Section[] = [
 
 const CHAT_SECTIONS: Section[] = [
 	{ title: 'Plan', kind: 'plan' },
-	{ title: 'Artifacts', kind: 'artifacts' },
+	{ title: 'Files', kind: 'artifacts' },
 ];
 
 /**

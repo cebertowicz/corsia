@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
+- Chat, Files, and project and workspace messages use clearer, consistent names.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Updates show the data upgrade step while your data is being upgraded.
 - Update settings show the changes for the update currently on offer.

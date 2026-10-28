@@ -10,6 +10,7 @@
 	import { token } from '$lib/stores/auth';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { toasts } from '$lib/stores/toast';
+	import { deactivateSidebarAgent } from './sidebarAgentDeactivation';
 	import { uiScope, exitScope } from '$lib/stores/uiScope';
 	import { paletteOpen } from '$lib/stores/palette';
 	import { togglePin } from '$lib/stores/pinnedConversations';
@@ -132,18 +133,13 @@
 		const authToken = $token;
 		closeContextMenu();
 		if (!id || !authToken) return;
-		try {
-			const query = new URLSearchParams({ token: authToken });
-			const response = await fetch(`/api/agents/${id}?${query}`, { method: 'DELETE' });
-			if (!response.ok) {
-				const body = await response.json().catch(() => ({})) as { detail?: string };
-				throw new Error(body.detail ?? `Deactivate failed (${response.status})`);
-			}
-			demoteAgentLocally(id);
-			toasts.show('Agent deactivated', 'success');
-		} catch (error) {
-			toasts.show(error instanceof Error ? error.message : "Couldn't deactivate Agent", 'error');
+		const failure = await deactivateSidebarAgent(id, authToken);
+		if (failure) {
+			toasts.show(failure, 'error');
+			return;
 		}
+		demoteAgentLocally(id);
+		toasts.show('Agent deactivated', 'success');
 	}
 
 	function contextMenuArchive() {
@@ -209,7 +205,7 @@
 			<span>Activity</span>
 		</button>
 		<a class="rail-link press-tint" class:active={activeView === 'measurement'} href={measurementRailHref($uiScope?.id ?? null)} onclick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return; event.preventDefault(); openMeasurementFromRail($uiScope?.id ?? null); onMeasurement?.(); }} title="Measurement" aria-current={activeView === 'measurement' ? 'page' : undefined}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg><span>Measurement</span></a>
-		<button class="rail-link press-tint" onclick={() => paletteOpen.set(true)} title="Jump to a project, conversation, or doc">
+		<button class="rail-link press-tint" onclick={() => paletteOpen.set(true)} title="Jump to a project or chat">
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
 			<span>Jump to…</span>
 			<kbd class="rail-kbd">⌘K</kbd>
