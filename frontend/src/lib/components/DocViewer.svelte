@@ -13,6 +13,7 @@
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createReplyLanding } from '$lib/docReplyLanding.svelte';
+	import { nextUnreadThread, unreadReplyCount } from '$lib/docReplyChip';
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
@@ -27,13 +28,14 @@
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
-	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
+	import type { DocComment } from '$lib/stores/docComments';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
 		withDraftArtifactId, existingDraft,
@@ -46,6 +48,7 @@
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
+	import DocReplyChip from './DocReplyChip.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
@@ -155,16 +158,28 @@
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
+	let lastReplyStep = $state<string | null>(null);
+	// Where a waiting reply is shown: its text scrolled to and focused, with the comments list open at it.
+	function showUnreadThread(first: DocComment | null, landing: CanvasScrollTarget | null) {
+		if (first && landing) { scroll.value = landing; focusedDocComment.set(first.id); }
+		commentUI.state = { kind: 'list' };
+	}
 	createReplyLanding({
 		target: () => target,
 		ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
 		first: () => firstUnreadThread, landing: () => firstUnreadTarget,
-		open: (first, landing) => {
-			if (first && landing) { scroll.value = landing; focusedDocComment.set(first.id); }
-			commentUI.state = { kind: 'list' };
-			onLanded?.();
-		},
+		open: (first, landing) => { showUnreadThread(first, landing); lastReplyStep = first?.id ?? null; onLanded?.(); },
 	});
+	// The chip's tap: the next waiting reply after the last one it went to. A reply on part of an image opens that image with
+	// its thread open; any other lands as arrival does.
+	const replyCount = $derived(unreadReplyCount(unreadThreads));
+	function stepToUnreadReply() {
+		const thread = nextUnreadThread(listedComments, lastReplyStep);
+		if (!thread) return;
+		lastReplyStep = thread.id;
+		const landing = canvasCommentScrollTarget(listedComments, editText, thread.id, false, 'quote-tap');
+		images.openOr([thread.id], { id: thread.id }, () => showUnreadThread(thread, landing));
+	}
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
@@ -246,6 +261,7 @@
 			prevTarget = d;
 
 			draftController.select(null);
+			lastReplyStep = null;
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
 			// These fields describe the mounted target, not its predecessor.
@@ -331,6 +347,10 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
+	<!-- Not while the comments sheet's scrim is up: the sheet already lists every reply marked New, and the chip would show through it, unreachable. -->
+	{#if target && loadedArtifactId && docState === 'ready' && !covered && !commentUI.sheetModalOpen}
+		<DocReplyChip artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} count={replyCount} onStep={stepToUnreadReply} />
+	{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
