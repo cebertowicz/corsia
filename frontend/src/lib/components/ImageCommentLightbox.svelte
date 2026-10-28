@@ -97,6 +97,7 @@
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
 	let focusedId: string | undefined;
+	$effect(() => { void focus?.id; focusedId = undefined; });
 	async function showFocus() {
 		const wanted = focus;
 		if (!wanted || focusedId === wanted.id) return;

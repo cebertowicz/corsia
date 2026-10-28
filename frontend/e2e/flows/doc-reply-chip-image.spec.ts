@@ -78,10 +78,10 @@ for (const width of [393, 1440]) {
 				const dir = process.env.REPLY_CHIP_PLACEMENT_DIR;
 				if (!dir || theme !== 'light') return;
 				mkdirSync(dir, { recursive: true });
+				await page.screenshot({ path: path.join(dir, `${stage}-${width}.png`), scale: 'css', animations: 'disabled' });
 				const button = overlay(page).locator('[data-doc-reply-chip] button');
 				const box = await button.isVisible() ? await button.boundingBox() : null;
 				writeFileSync(path.join(dir, `${stage}-${width}.json`), JSON.stringify(box));
-				await page.screenshot({ path: path.join(dir, `${stage}-${width}.png`), scale: 'css', animations: 'disabled' });
 			}
 			const initialChip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(initialChip).toBeVisible();
@@ -137,7 +137,7 @@ for (const width of [393, 1440]) {
 			await capturePlacement('arrival');
 			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
 				await overlay(page).locator('[data-image-comments-pill]').click();
-				await expect(page.locator('[data-adaptive-drawer]').first()).toBeVisible();
+				await expect(page.locator(width === 393 ? '[data-adaptive-drawer]' : '.canvas-comment-drawer').first()).toBeVisible();
 				await capturePlacement('drawer');
 				if (width === 393) await page.getByRole('button', { name: 'Done', exact: true }).click();
 				else await page.keyboard.press('Escape');
