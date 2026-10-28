@@ -239,7 +239,6 @@ def make_on_event(
     return functools.partial(_dispatch_on_event, ctx)
 
 
-
 def _event_identity(ctx, ev: dict) -> TurnIdentity:
     identity = ev.get("_corsia_turn_identity")
     if not isinstance(identity, TurnIdentity):
@@ -437,7 +436,6 @@ async def _on_tool_result(ctx, ev: dict) -> None:
         provider_tool_call_id=tool_id,
         assistant_step_id=step_id,
         echoed_content=ev.get("content", ""),
-
     )
     await settle_committed_tool_result(
         live=ctx.live,

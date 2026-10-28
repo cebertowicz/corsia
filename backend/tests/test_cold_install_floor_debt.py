@@ -90,7 +90,7 @@ async def test_prior_floor_excludes_unpaid_legacy_debt_from_clean_candidate(debt
 async def test_prior_floor_refuses_unpaid_debt_declared_in_candidate_range(debt_db, monkeypatch):
     previous, candidate_seq = await _previous_floor(debt_db, monkeypatch)
     _bind_provider_turn(debt_db, "later-step")
-    live, on_event = _codex_events(debt_db)
+    live, on_event = _codex_events(debt_db, open_step="later-step")
 
     await on_event(_event("tool_use", "in-range"))
     assert live.tool_step_ids == {"in-range": "later-step"}
