@@ -13,7 +13,7 @@ from events import rules
 from events.connectors import get_manifest
 from events.envelope import EventEnvelope
 from events.platform import (
-    DEAD_LETTERED, WOKE, deliver_rule_adds, emit_route_events, rule_event, settle_rule_delivery,
+    DEAD_LETTERED, WOKE, Filter, deliver_rule_adds, emit_route_events, rule_event, settle_rule_delivery,
 )
 from events.resolve import Target
 from events.rule_match import matches
@@ -22,7 +22,8 @@ from infra.database import get_db, write_transaction
 
 def apply_webhook_rules_sync(
     envelope: EventEnvelope, watch_event: str, targets: list[Target], *, ends_artifact: bool,
-    repository_projects: frozenset[str] | None = frozenset(),
+    repository_projects: frozenset[str] | None = frozenset(), target_filter: Filter | None = None,
+    skipped: tuple[str, ...] = (),
 ) -> rules.RulePlan | None:
     """Rules for one webhook event: deliver what they add, return what rides.
 
@@ -35,7 +36,7 @@ def apply_webhook_rules_sync(
     lookup failed, and no rule fires.
     """
     event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
-    anchor = rules.routed(targets)[2]
+    anchor = rules.routed(targets, skipped)[2]
     if anchor is None:
         if repository_projects is None:
             with write_transaction(None, scope="apply_webhook_rules") as conn:
@@ -53,10 +54,10 @@ def apply_webhook_rules_sync(
         reader.close()
     decl = get_manifest(event.connector).decl(event.event_type)
     with write_transaction(None, scope="apply_webhook_rules") as conn:
-        plan = rules.evaluate(conn, event, targets)
+        plan = rules.evaluate(conn, event, targets, skipped=skipped)
         if plan is None:
             return None
-        added, outcomes = deliver_rule_adds(conn, envelope, decl, plan)
+        added, outcomes = deliver_rule_adds(conn, envelope, decl, plan, target_filter)
         rules.record(conn, event, [*plan.settled, *outcomes])
         emit_route_events(envelope, added)
         return plan

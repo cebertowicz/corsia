@@ -68,7 +68,8 @@ def from_row(row: Mapping[str, Any]) -> ObserveRule:
 def shape(rule: ObserveRule) -> dict[str, Any]:
     return {
         "id": rule.id, "kind": OBSERVE, "enabled": rule.enabled, "scope": rule.scope,
-        "connector": rule.connector, "tool": rule.tool, "argv_prefix": list(rule.argv_prefix),
+        "connector": rule.connector, "tool": rule.tool,
+        **({"argv_prefix": list(rule.argv_prefix)} if rule.tool in SHELL_TOOLS else {}),
         "item_type": rule.item_type, "origin": rule.origin, "written_by": rule.created_by,
     }
 
@@ -90,7 +91,7 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
     declarations = []
     for name in connectors.registered_connectors():
         manifest = connectors.get_manifest(name)
-        origin = f"rule_set:{name}@{manifest.version}"
+        origin = f"{RULE_SET_ORIGIN}{name}@{manifest.version}"
         for rule in manifest.shipped_observe_rules:
             declarations.append((rule, name, origin, f"shipped:{name}@{manifest.version}"))
     ids = [rule.id for rule, _, _, _ in declarations]
@@ -110,8 +111,8 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
                 "OR origin IS NOT excluded.origin OR created_by IS NOT excluded.created_by "
                 "OR authority_ref IS NOT excluded.authority_ref OR tool IS NOT excluded.tool "
                 "OR argv_prefix IS NOT excluded.argv_prefix OR item_type IS NOT excluded.item_type)",
-                (rule.id, now, now, name, origin, origin, authority, rule.tool,
-                 encode_prefix(rule.argv_prefix), rule.item_type),
+                (rule.id, now, now, name, origin, origin, authority,
+                 rule.tool, encode_prefix(rule.argv_prefix) if rule.tool in SHELL_TOOLS else None, rule.item_type),
             )
         # event_route_decisions.rule_id has no foreign key; historical outcomes remain.
         placeholders = ','.join('?' for _ in ids)
@@ -153,17 +154,6 @@ def _connector(item_type: Any, connector: Any) -> str:
     return declared[0]
 
 
-def _tool(tool: Any) -> str:
-    from tools.catalog import normalize_tool_name
-
-    name = normalize_tool_name(tool if isinstance(tool, str) else None)
-    if name not in SHELL_TOOLS:
-        raise RuleRefused(
-            f"Observe rules can't watch a connected app's actions. An observe rule covers shell "
-            f"commands: tool {sorted(SHELL_TOOLS)[0]!r} with an argv_prefix such as ['gh', 'pr', 'create'].")
-    return name
-
-
 def _prefix(raw: Any) -> list[str]:
     if (not isinstance(raw, list) or not 0 < len(raw) <= MAX_PREFIX
             or not all(isinstance(arg, str) and 0 < len(arg) <= MAX_ARGUMENT and "\n" not in arg
@@ -186,11 +176,24 @@ def create(
     if named:
         raise RuleRefused(f"An observe rule takes tool, argv_prefix and item_type and always registers "
                           f"to you; it takes no {', '.join(named)}.")
-    name, words, owner = _tool(tool), _prefix(argv_prefix), _connector(item_type, connector)
+    from tools.catalog import normalize_tool_name
+
+    owner = _connector(item_type, connector)
+    normalized = normalize_tool_name(tool if isinstance(tool, str) else None)
+    if normalized in SHELL_TOOLS:
+        name, words = normalized, _prefix(argv_prefix)
+    else:
+        if not isinstance(tool, str) or not tool or tool.startswith("mcp__"):
+            raise RuleRefused("For a connected app, give the upstream tool name as tool; for a shell use bash with argv_prefix.")
+        if argv_prefix is not None:
+            raise RuleRefused("A connected app observe rule takes an upstream tool name, not argv_prefix.")
+        if not connectors.get_manifest(owner).app_identities:
+            raise RuleRefused(f"Connector {owner} declares no connected apps.")
+        name, words = tool, None
     if db.execute(
         "SELECT 1 FROM event_rules WHERE kind='observe' AND enabled=1 AND created_by=? AND scope=? "
-        "AND tool=? AND argv_prefix=? AND item_type=?",
-        (writer["id"], scope, name, encode_prefix(words), item_type),
+        "AND tool=? AND argv_prefix IS ? AND item_type=?",
+        (writer["id"], scope, name, encode_prefix(words) if words else None, item_type),
     ).fetchone():
         raise RuleRefused("You already have that observe rule; `list` shows it.")
     rule_id = "rule_" + uuid.uuid4().hex[:12]
@@ -198,7 +201,7 @@ def create(
         "INSERT INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector, origin, "
         "created_by, authority_ref, tool, argv_prefix, item_type) VALUES (?,?,?,1,'observe',?,?,?,?,'self',?,?,?)",
         (rule_id, now, now, scope, owner, f"agent:{writer['id']}", writer["id"], name,
-         encode_prefix(words), item_type),
+         encode_prefix(words) if words else None, item_type),
     )
     rules.prune_disabled(db, scope, now)
     return shape(from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
