@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Email drafts describe the conversation in plain sentences, and say when your usual font couldn't be read. A message that arrives while a reply draft is being saved now stops the send.
 - Email replies check for newer messages and support attachments and your usual font.
 - Mail that is flagged or not yet screened shows only the sender's address in search results.
 - The reasoning level you pick for a local model is now the level it runs at.
