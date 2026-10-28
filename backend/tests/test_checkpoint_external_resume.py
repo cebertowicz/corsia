@@ -1090,6 +1090,15 @@ async def test_codex_tool_boundary_prepares_warm_checkpoint_at_previous_group(
     assert resumed == [(live, thread_id, admission, "codex")]
 
 
+@pytest.fixture
+def stub_recovery_measurement(monkeypatch):
+    # The real recovery path is covered in test_codex_canonical_pressure.py.
+    async def no_pressure(*_args):
+        return None
+    monkeypatch.setattr("subagents.harness_checkpoint_resume.recovery_input_tokens", no_pressure)
+
+
+@pytest.mark.usefixtures("stub_recovery_measurement")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ("claude-code", "codex"))
 @pytest.mark.parametrize("fresh_state", ("boundary", "winner", "no_boundary"))
@@ -1195,7 +1204,7 @@ async def test_external_tool_boundary_uses_fresh_checkpoint_state(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ("claude-code", "codex"))
 async def test_external_tool_boundary_adopts_winner_seen_by_fresh_read(
-    monkeypatch,
+    stub_recovery_measurement, monkeypatch,
     harness,
 ) -> None:
     from core.checkpoint_resume import CheckpointWaitScope
@@ -1792,7 +1801,7 @@ async def test_codex_checkpoint_replaces_attempt_beneath_same_turn(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ("claude-code", "codex"))
 async def test_external_tool_boundary_carries_provider_checkpoint_identity(
-    isolated_db,
+    stub_recovery_measurement, isolated_db,
     monkeypatch,
     harness,
 ) -> None:
@@ -1967,7 +1976,7 @@ async def test_external_tool_boundary_renders_exact_when_usage_is_missing(
     ),
 )
 async def test_external_tool_boundary_uses_the_context_that_seeded_its_handle(
-    isolated_db,
+    stub_recovery_measurement, isolated_db,
     monkeypatch,
     harness,
     measurement,
