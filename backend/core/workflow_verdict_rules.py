@@ -46,7 +46,7 @@ class WorkflowHistory:
     owner: str | None
     runs: tuple[Run, ...]
     definitions: tuple[Definition, ...] = ()
-    version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
+    version_attr: str | None = None  # The verdict read side currently passes None.
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
 
     def _in_start_order(self) -> list[Run]:

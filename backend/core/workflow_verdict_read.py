@@ -73,15 +73,15 @@ def _model_groups(db: sqlite3.Connection, run_ids: Sequence[str]) -> dict[str, s
     return groups
 
 
-def _terminal_times(db: sqlite3.Connection, node_ids: Sequence[str]) -> dict[tuple[str, str], str]:
-    """The first time each node entered each terminal state; both accepted states count as one."""
+def _terminal_times(db: sqlite3.Connection, node_ids: Sequence[str], *, normalized: bool = False) -> dict[tuple[str, str], str]:
+    """First terminal times by state; optionally normalize with SQLite's datetime semantics."""
     rows = db.execute("""
         SELECT node_id, CASE WHEN new_state='accepted_with_followup' THEN 'accepted' ELSE new_state END AS state,
-          MIN(created_at) AS at FROM plan_node_events
+          MIN(CASE WHEN :normalized THEN datetime(created_at) ELSE created_at END) AS at FROM plan_node_events
         WHERE node_id IN (SELECT value FROM json_each(:ids))
           AND new_state IN ('accepted','accepted_with_followup','failed','closed')
         GROUP BY node_id, 2
-    """, {"ids": _ids(node_ids)}).fetchall()
+    """, {"ids": _ids(node_ids), "normalized": normalized}).fetchall()
     return {(row["node_id"], row["state"]): row["at"] for row in rows}
 
 

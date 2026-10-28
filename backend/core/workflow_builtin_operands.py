@@ -10,6 +10,15 @@ from core.correction_attribution import measured_attributed_facts, plan_attribut
 from core.cost_identity import IdentityResolver
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 from core.measurement_scope import MeasurementScope, scope_cte
+from core.workflow_verdict_read import _terminal_times
+
+
+def _in_window(db: sqlite3.Connection, times: list[str | None], start: str, end: str) -> set[int]:
+    """Compare all timestamps in one query using SQLite's datetime rules."""
+    return {int(row[0]) for row in db.execute("""
+        SELECT key FROM json_each(?)
+        WHERE datetime(value)>=datetime(?) AND datetime(value)<datetime(?)
+    """, (json.dumps(times), start, end))}
 
 
 @dataclass(frozen=True)
@@ -48,26 +57,22 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
     ids = json.dumps(list(versions))
     totals: defaultdict[str | None, list] = defaultdict(lambda: [0, 0, 0])
     if builtin == 'runs':
-        rows = db.execute("""
-            SELECT node_id,MIN(datetime(created_at)) AS at FROM plan_node_events
-            WHERE node_id IN (SELECT value FROM json_each(?))
-              AND new_state IN ('accepted','accepted_with_followup','failed','closed')
-            GROUP BY node_id HAVING at>=datetime(?) AND at<datetime(?)
-        """, (ids, start, end)).fetchall()
-        for row in rows:
-            total = totals[versions[row['node_id']]]
+        first: dict[str, str] = {}
+        for (node_id, _state), at in _terminal_times(db, list(versions), normalized=True).items():
+            if at is not None and (node_id not in first or at < first[node_id]):
+                first[node_id] = at
+        entries = list(first.items())
+        for index in _in_window(db, [at for _, at in entries], start, end):
+            total = totals[versions[entries[index][0]]]
             total[0] += 1
             total[1] += 1
     elif builtin == 'corrections':
-        for fact in (*measured_attributed_facts(db), *plan_attributed_facts(db)):
-            if fact.node_id not in versions or not fact.is_correction or fact.source_at is None:
-                continue
-            within = db.execute('SELECT datetime(?)>=datetime(?) AND datetime(?)<datetime(?)',
-                                (fact.source_at, start, fact.source_at, end)).fetchone()[0]
-            if within:
-                total = totals[versions[fact.node_id]]
-                total[0] += 1
-                total[1] += 1
+        facts = [fact for fact in (*measured_attributed_facts(db), *plan_attributed_facts(db))
+                 if fact.node_id in versions and fact.is_correction and fact.source_at is not None]
+        for index in _in_window(db, [fact.source_at for fact in facts], start, end):
+            total = totals[versions[facts[index].node_id]]
+            total[0] += 1
+            total[1] += 1
     elif builtin == 'fresh_tokens':
         from api.measurement_token_sql import FRESH_TOKEN_SQL, FRESH_TOKEN_UNKNOWN_SQL
 

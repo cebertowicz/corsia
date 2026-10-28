@@ -65,6 +65,31 @@ def test_only_latest_active_classifier_counts(db):
     assert len(person_corrections(db, '2026-10-01', '2026-10-04')) == result.value
 
 
+def test_window_uses_sqlite_time_comparisons_in_one_query(db):
+    from core.workflow_builtin_operands import _in_window
+
+    queries = []
+    db.set_trace_callback(queries.append)
+    try:
+        matches = _in_window(db, ['2026-10-01T01:00:00+01:00', '2026-10-03T23:59:59Z',
+                                  '2026-10-04T00:00:00Z', 'invalid', None],
+                             '2026-10-01T00:00:00Z', '2026-10-04T00:00:00Z')
+    finally:
+        db.set_trace_callback(None)
+    assert matches == {0, 1}
+    assert len(queries) == 1
+
+
+def test_runs_use_first_terminal_instant_across_states(db):
+    node(db, 'old', version='v1', ended='2026-10-05T00:00:00Z')
+    from tests.plan_writer_authorizer import raw_plan_seed
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                   "VALUES ('earlier','old','test','failed','active','failed','2026-10-04T01:00:00+02:00')")
+    assert read(db, 'runs').versions['v1'].value == 1
+    assert read(db, 'runs', '2026-10-04', '2026-10-06').versions['v1'].value == 0
+
+
 def test_untracked_and_unknown_cost(db):
     assert read(db, 'runs').reason == 'not tracked: this workflow has no tasks'
     node(db, 'old')

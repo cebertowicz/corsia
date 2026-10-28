@@ -34,6 +34,20 @@ def client(isolated_db, monkeypatch, tmp_path):
         yield result, tmp_path
 
 
+def test_http_repository_resolution_without_mocking(isolated_db, monkeypatch):
+    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 1, 20, tzinfo=timezone.utc))
+    db = get_db()
+    db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+    _seed_thread(db, "owner", project_id="p", agent=True)
+    db.commit()
+    db.close()
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: {"id": "steve"}
+    with TestClient(app) as http:
+        assert read(http)["kpis"] == []
+
+
 def definition(db, tmp_path: Path, kind, name, spec):
     db.execute("""INSERT INTO measure_definitions(owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at)
         VALUES ('owner',?,?,1,?,?, 'hash','2026-01-01')""", (kind, name, json.dumps(spec), str(tmp_path / "measures.yaml")))
@@ -140,12 +154,31 @@ def test_synced_version_attribute_and_missing_metadata(client):
     fact(db, "demo.done", 6, {"revision": "rev1"})
     db.commit()
     db.close()
-    assert any(v["label"] == "Unversioned" for v in item(read(http), "items")["versions"])
+    unsynced = item(read(http), "items")
+    assert unsynced["version_status"] == "version rule not synced yet; run measure_sync"
+    assert any(v["label"] == unsynced["version_status"] for v in unsynced["versions"])
     db = get_db()
     db.execute("INSERT INTO measure_files VALUES ('owner',?,'hash','revision','2026-01-01')", (str(path / "measures.yaml"),))
     db.commit()
     db.close()
     assert any(v["version"] == "rev1" and v["label"] == "v1" for v in item(read(http), "items")["versions"])
+    db = get_db()
+    db.execute("UPDATE measure_files SET version_attr=NULL")
+    db.commit()
+    db.close()
+    assert any(v["label"] == "Unversioned" for v in item(read(http), "items")["versions"])
+
+
+def test_external_report_label_does_not_expose_thread_id():
+    from core.agent_kpi_read import _label
+    from core.agent_kpi_formula import _labels
+    from core.agent_kpi_operands import Event
+
+    row = {"provenance": "agent_recorded", "corroborated_by": None, "agent_thread_id": "internal-id"}
+    label = _label(row, "owner", {"owner"})
+    assert label == "Reported by another agent"
+    event = Event('event', datetime(2026, 1, 1, tzinfo=timezone.utc), {}, None, None, label)
+    assert _labels([event]) == (label, {label: 1})
 
 
 def test_first_review_and_push_with_no_suite(client):

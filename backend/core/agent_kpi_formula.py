@@ -8,8 +8,8 @@ from typing import Any, Mapping, Sequence
 
 from core.agent_kpi_operands import Event, attribute, distinct, select
 
-_LABEL_ORDER = {"Reported": 0, "Self-reported": 1, "Imported": 2,
-                "Labeled by another agent": 3, "Corroborated": 4, "Observed": 5}
+_LABEL_ORDER = {"Reported by another agent": 0, "Self-reported": 1, "Imported": 2,
+                "Corroborated": 3, "Observed": 4}
 
 
 def _in_bucket(rows: Sequence[Event], start: datetime, end: datetime, version: str | None) -> list[Event]:
@@ -31,7 +31,7 @@ def _coverage(spec: Mapping[str, Any], numerator: Sequence[Event], facts: Sequen
 
 def _labels(rows: Sequence[Event]) -> tuple[str | None, dict[str, int]]:
     mix = dict(Counter(row.label for row in rows))
-    weakest = min(mix, key=lambda label: _LABEL_ORDER.get("Reported" if label.startswith("Reported by ") else label, 0)) if mix else None
+    weakest = min(mix, key=lambda label: _LABEL_ORDER.get(label, 0)) if mix else None
     return weakest, mix
 
 
