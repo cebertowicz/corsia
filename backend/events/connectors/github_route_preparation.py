@@ -12,6 +12,35 @@ if TYPE_CHECKING:
     from events.router import RouteResult
 
 
+def _chip_line(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
+    """Use a machine-readable line for check suites; otherwise use the summary."""
+    suite = payload.get("check_suite") or {}
+    if suite and not (payload.get("comment") or payload.get("pull_request")):
+        target = external_id or (payload.get("repository") or {}).get("full_name", "")
+        return f"CI {suite.get('conclusion') or 'completed'} on {target}"
+    return summary
+
+
+def summary_facts(payload: dict[str, Any], facts: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Reuse normalized facts or classify authored text for the default wake."""
+    from loguru import logger
+
+    comment = payload.get("comment") or {}
+    pr = payload.get("pull_request") or {}
+    issue = payload.get("issue") or {}
+    has_text = bool(comment.get("body") or pr.get("title") or issue.get("title"))
+    if facts is None and has_text:
+        from events.connectors.github_content_facts import content_facts
+
+        try:
+            facts = content_facts(payload)
+        except Exception as exc:
+            logger.warning("event-routing: author origin unavailable: {}", type(exc).__name__)
+    if has_text and facts and not facts.get("author"):
+        logger.warning("event-routing: author origin unavailable: missing author")
+    return facts
+
+
 @dataclass
 class PreparedRoute:
     """Committed preparation effects recovered even after cancellation or error."""
@@ -99,7 +128,8 @@ def _prepare_route(
                            scope=scope)
         return
     thread_id, wake_reason = selected
-    summary, details = router._summarize(internal_event, payload, external_id)
+    facts = scope.envelope.facts if scope and scope.envelope else None
+    summary, details = router._summarize(internal_event, payload, external_id, facts)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
     chip = router._chip_line(payload, external_id, summary)
