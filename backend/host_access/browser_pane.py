@@ -193,4 +193,6 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):
-        await owner.run(thread_id, args, session="existing", pane=True)
+        result = await owner.run(thread_id, args, session="existing", pane=True)
+        if result.startswith("Error:"):
+            raise browser_cdp.BrowserSessionError(result)

@@ -368,6 +368,38 @@ async def test_match_pane_sets_size_density_and_theme_on_the_open_session(monkey
 
 
 @pytest.mark.asyncio
+async def test_match_pane_reports_a_refused_viewport_command(monkeypatch):
+    calls = []
+    class Owner:
+        async def run(self, thread_id, args, **kwargs):
+            calls.append(args)
+            return 'Error: viewport refused'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: Owner())
+    with pytest.raises(BrowserSessionError, match='viewport refused'):
+        await browser_pane.match_pane('thread-1', browser_pane.PaneAppearance(700, 1400, 2, 'dark'))
+    assert calls == [('set', 'viewport', '700', '1400', '2')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('width', 'height'), [(700, 1400), (1400, 500)])
+async def test_pane_box_is_applied_on_connect_and_again_after_tab_follow(monkeypatch, width, height):
+    calls = []
+    class Owner:
+        async def run(self, thread_id, args, **kwargs):
+            calls.append(args)
+            return 'ok'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: Owner())
+    appearance = {'width': width, 'height': height, 'scale': 2, 'scheme': 'dark'}
+    for _ in range(2):
+        browser_stream._request_match('thread-shape', 'pane', appearance)
+        await browser_stream._runners['thread-shape']
+    assert [args for args in calls if args[:2] == ('set', 'viewport')] == [
+        ('set', 'viewport', str(width), str(height), '2'),
+        ('set', 'viewport', str(width), str(height), '2'),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
     fitted, release = [], asyncio.Event()
 

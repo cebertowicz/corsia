@@ -91,6 +91,17 @@ afterEach(() => {
 });
 
 describe('BrowserLeaf drawing', () => {
+	it.each([[700, 1400], [1400, 500]])('sends the %ix%i pane on connect and after following a tab', (width, height) => {
+		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, height));
+		const { socket } = render();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		expect(appearances()).toEqual([{ type: 'appearance', width, height, scale: 1, scheme: 'dark' }]);
+		socket.receive({ type: 'browser_target_changed' });
+		expect(appearances()).toEqual([
+			{ type: 'appearance', width, height, scale: 1, scheme: 'dark' },
+			{ type: 'appearance', width, height, scale: 1, scheme: 'dark' },
+		]);
+	});
 	it('resends the pane appearance after following another page target', () => {
 		const { socket } = render();
 		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
