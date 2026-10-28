@@ -25,7 +25,8 @@ def _discover(server_id: str, provider_model_id: str) -> None:
         "provider_model_id": provider_model_id,
         "litellm_model": f"omlx@{server_id}/{provider_model_id}",
         "display_name": provider_model_id, "description": None,
-        "context_window": 32768, "supports_vision": 0, "metadata_json": json.dumps({}),
+        "context_window": 32768, "supports_vision": 0, "supports_reasoning": 0,
+        "metadata_json": json.dumps({}),
     }, "now")
     db.commit()
     db.close()

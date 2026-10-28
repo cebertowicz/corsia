@@ -1,5 +1,17 @@
 import { get, type Readable } from 'svelte/store';
 import { on } from '$lib/ws';
+import { loadCheckpoints } from '$lib/stores/checkpoints';
+import { hydrateSubagentThread } from '$lib/stores/subagents';
+
+export async function refreshVisibleThread(threadId: string, bearer: string | null, page: Promise<void>): Promise<void> {
+	try {
+		await Promise.all([
+			page,
+			bearer ? loadCheckpoints(threadId, bearer).catch(() => null) : Promise.resolve(null),
+			bearer ? hydrateSubagentThread(threadId, bearer).catch(() => null) : Promise.resolve(null),
+		]);
+	} catch { /* ignore */ }
+}
 
 export interface ChatPanelEventPort {
 	activeThreadId: Readable<string | null>;

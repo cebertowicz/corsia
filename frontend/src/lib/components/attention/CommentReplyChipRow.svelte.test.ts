@@ -5,6 +5,7 @@ import type { AttentionQueue, CommentReplyItem } from '$lib/api/attentionQueue';
 import { __reset } from '$lib/stores/attentionDock.svelte';
 import { token } from '$lib/stores/auth';
 import { activeThreadId } from '$lib/stores/threads';
+import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -34,6 +35,7 @@ beforeEach(() => {
 	host = document.body;
 	body = { current: null, count: 0, items: [] };
 	__reset();
+	chatReplyAttention.set(null);
 	token.set('test-bearer');
 	activeThreadId.set('thread-1');
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => body })));
@@ -50,6 +52,17 @@ afterEach(() => {
 });
 
 describe('CommentReplyChipRow', () => {
+	it('names a chat reply as chat and opens its thread target', async () => {
+		const item: CommentReplyItem = { detail: { title: '', unread_count: 1, newest_at: 't', destination: { pane: 'chat-replies', id: 'target', user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread-1' } } };
+		chatReplyAttention.set({ threadId: 'thread-1', items: [item] });
+		const open = vi.fn();
+		component = mount(CommentReplyChipRow, { target: host, props: { onOpenDocument: open } });
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
+		expect(chip?.getAttribute('aria-label')).toBe('1 new reply, chat');
+		chip!.click();
+		expect(open).toHaveBeenCalledWith(item.detail.destination, 'thread-1');
+	});
 	it('coalesces only this chat’s unread replies and opens the newest document', async () => {
 		const first = reply('one', 'launch-plan.md', { unreadCount: 2, newestAt: '2026-10-24T15:00:00Z' });
 		const newest = reply('two', 'roadmap.md', { newestAt: '2026-10-24T16:00:00Z' });
