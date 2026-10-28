@@ -107,10 +107,15 @@ def test_person_browser_guidance_keeps_the_other_first_run_steps_in_the_shared_b
         assert instruction in (system / relative_path).read_text(encoding="utf-8")
 
 
-def test_email_and_calendar_route_to_google_setup_and_setup_hands_off_no_agent():
-    """Step 5 loads google-setup without creating an agent, and the hand-off offers none."""
+def test_email_and_calendar_use_google_connect_with_own_project_as_backup():
+    """First-run Google connection uses one Allow; the hand-off still offers no agent."""
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    assert "follow skill `google-setup` from its step 2" in app and "it creates no agent" in app
+    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **Learning", 1)[0]
+    assert "call `google_status`, then `google_connect`" in email
+    assert "one Allow with no Google Cloud project" in email
+    assert "Use skill `google-setup` only if Google refuses this sign-in" in email
+    assert "the person asks to use their own Google Cloud project" in email
+    assert "it creates no agent" in app
     hand_off = app.split("## Hand over to your agents", 1)[1]
     assert "Setup offers no agent" in hand_off
     assert "only when they ask you to take that work off them (skill `time-to-agent`)" in hand_off
@@ -145,7 +150,9 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Never make a second project." in steps
     assert "shows the client secret may still be open, so take no snapshot or screenshot of it" in steps
     assert "Read the new client's ID from the Clients list" in steps and "latest creation date" in steps and "never open it" in steps
-    assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
+    assert steps.index("reuse its path and go to step 6") < steps.index("If the error says to reinstall or update CORSIA")
+    assert "do not repeat that call as the backup" in steps
+    assert "description: Use only when Google refuses the sign-in from `google_connect`" in skill
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "Do not set `show_window`: the shared browser is already available." in steps
     assert "Do not revisit `projectcreate` or submit Create again" in steps

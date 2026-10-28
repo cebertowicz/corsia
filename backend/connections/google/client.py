@@ -47,7 +47,6 @@ SIGN_IN_RECOVERY = (
 PUBLISHED_SIGN_IN_RECOVERY = "Google rejected the saved sign-in. Call google_connect again for this account."
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."
-INVALID_CLIENT = "The saved Google client is invalid. Remove and reconnect this account."
 # Transport errors raised before any request bytes reach Google.
 _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
@@ -87,12 +86,9 @@ class GoogleRequestFailed(GoogleError):
         super().__init__(UNREACHABLE if status is None else f"Google refused the request (HTTP {status}).")
 
 
-def uses_published(source: object) -> bool:
-    """Select the saved Google client; old bundles without a discriminator use their own client."""
-    kind = source.get("client", "own") if isinstance(source, dict) else getattr(source, "client", "own")
-    if kind not in ("published", "own"):
-        raise ValueError("invalid Google client")
-    return kind == "published"
+def uses_published(bundle: dict) -> bool:
+    """Only the published marker selects Google's Workspace extension client."""
+    return bundle.get("client") == "published"
 
 
 def read_client_file(raw_path: object) -> tuple[str, str]:
@@ -119,21 +115,16 @@ def read_client_file(raw_path: object) -> tuple[str, str]:
 
 def client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
     """Use an explicit client file or this row's saved client, never another row's."""
-    from connections.connected_accounts import _stored_bundle, account_client
+    from connections.connected_accounts import account_client
 
-    stored = _stored_bundle(account_id, db=db) if account_id is not None else None
-    try:
-        published = uses_published(stored[1]) if stored is not None else True
-    except ValueError:
-        raise GoogleSignInError(INVALID_CLIENT) from None
     if client_file:
         return read_client_file(client_file)
-    if account_id is not None and not published:
-        material = account_client(account_id, db=db)
-        if material is None:
-            raise GoogleSignInError(NEEDS_CLIENT_FILE)
-        return material["client_id"], material["client_secret"]
-    return None
+    if account_id is None:
+        return None
+    material = account_client(account_id, db=db)
+    if material is None:
+        raise GoogleSignInError(NEEDS_CLIENT_FILE)
+    return None if uses_published(material) else (material["client_id"], material["client_secret"])
 
 
 def id_token_subject(value: object) -> str | None:
@@ -191,27 +182,15 @@ def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # typ
     return resolve_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
 
 
-def _published_account(account_id: str, *, db) -> bool:  # type: ignore[no-untyped-def]
-    from connections.connected_accounts import resolve_credentials
-
-    stored = resolve_credentials(account_id, db=db)
-    if stored is None:
-        raise GoogleNotConnected()
-    return uses_published(stored)
-
-
 def sign_in_recovery(account_id: str, *, db) -> str:  # type: ignore[no-untyped-def]
     """Choose recovery instructions for the account's saved client."""
-    from connections.connected_accounts import _stored_bundle
+    from connections.connected_accounts import account_client
 
-    stored = _stored_bundle(account_id, db=db)
-    try:
-        return PUBLISHED_SIGN_IN_RECOVERY if stored and uses_published(stored[1]) else SIGN_IN_RECOVERY
-    except ValueError:
-        raise GoogleSignInError(INVALID_CLIENT) from None
+    material = account_client(account_id, db=db)
+    return PUBLISHED_SIGN_IN_RECOVERY if material and uses_published(material) else SIGN_IN_RECOVERY
 
 
-async def _access_token(account_id: str) -> tuple[str, bool]:
+async def access_grant(account_id: str) -> tuple[str, bool]:
     """A fresh token and its client selection for this account.
 
     A refused refresh marks only this account ``needs_sign_in``; no other account changes.
@@ -222,9 +201,10 @@ async def _access_token(account_id: str) -> tuple[str, bool]:
     stored = await run_in_db(_on_account, _usable_credentials, account_id)
     if stored is None:
         raise GoogleNotConnected()
+    published = uses_published(stored)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            if uses_published(stored):
+            if published:
                 response = await http.post(PUBLISHED_REFRESH_URL, json={"refresh_token": stored["refresh_token"]})
             else:
                 response = await http.post(TOKEN_URL, data={
@@ -238,7 +218,7 @@ async def _access_token(account_id: str) -> tuple[str, bool]:
     if response.status_code in (400, 401):
         # invalid_grant or an unauthorized client: this account's saved sign-in no longer works.
         await run_in_db(_on_account, mark_needs_sign_in, account_id, stored["refresh_token"])
-        raise GoogleSignInRejected(published=uses_published(stored))
+        raise GoogleSignInRejected(published=published)
     if response.status_code != 200:
         raise GoogleRequestFailed(response.status_code)
     try:
@@ -252,18 +232,18 @@ async def _access_token(account_id: str) -> tuple[str, bool]:
         raise GoogleRequestFailed(response.status_code)
     if provider_subject is not None:
         await run_in_db(_on_account, backfill_subject, account_id, provider_subject)
-    return token, uses_published(stored)
+    return token, published
 
 
 async def access_token(account_id: str) -> str:
     """Return a fresh access token for this account."""
-    token, _ = await _access_token(account_id)
+    token, _ = await access_grant(account_id)
     return token
 
 
 async def request_json(
     method: str, url: str, *, account_id: str | None, params: dict[str, Any] | None = None,
-    body: dict[str, Any] | None = None, token: str | None = None,
+    body: dict[str, Any] | None = None, token: str | None = None, published: bool = False,
 ) -> Any:
     """One authorized JSON call to a Google API as one account, returning the decoded body.
 
@@ -273,7 +253,9 @@ async def request_json(
 
     if token is None and account_id is None:
         raise GoogleNotConnected()
-    bearer, published = (token, None) if token else await _access_token(str(account_id))
+    bearer = token
+    if bearer is None:
+        bearer, published = await access_grant(str(account_id))
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.request(
@@ -283,8 +265,6 @@ async def request_json(
         raise GoogleRequestFailed(never_sent=isinstance(exc, _NEVER_SENT)) from None
     if response.status_code == 401:
         if account_id is not None:
-            if published is None:
-                published = await run_in_db(_on_account, _published_account, account_id)
             await run_in_db(_on_account, mark_needs_sign_in, account_id)
             raise GoogleSignInRejected(published=published)
         raise GoogleSignInRejected()

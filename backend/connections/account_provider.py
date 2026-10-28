@@ -31,8 +31,6 @@ class AccountProvider:
     client_fields: frozenset[str]
     #: Optional stored fields accepted when present but not required for an older usable bundle.
     optional_bundle_fields: frozenset[str] = frozenset()
-    #: Provider-specific required fields for a usable bundle; explicit overrides still take precedence.
-    required_for: Callable[[dict], frozenset[str]] | None = None
     #: Account kinds the provider tells apart; empty when it has none.
     account_kinds: frozenset[str] = frozenset()
     #: Whether every row must carry the provider's stable account identity.
@@ -63,21 +61,11 @@ class AccountProvider:
     def required_fields(self) -> frozenset[str]:
         return self.bundle_fields | ({SCOPES_FIELD} if self.scopes_required else frozenset())
 
-    def fields_for(self, bundle: dict) -> frozenset[str]:
-        """Return the fields required by this provider for the given bundle."""
-        return self.required_for(bundle) if self.required_for is not None else self.required_fields
-
     def valid_bundle(self, bundle: object, required: frozenset[str] | None = None) -> bool:
         """A stored bundle: ``required`` (default: a usable sign-in) present, nothing unknown."""
-        if not isinstance(bundle, dict):
-            return False
-        try:
-            provider_fields = self.fields_for(bundle)
-        except ValueError:
-            return False
-        needed = required if required is not None else provider_fields
+        needed = self.required_fields if required is None else required
         allowed = self.bundle_fields | self.optional_bundle_fields | {SCOPES_FIELD}
-        if not needed <= set(bundle) or set(bundle) - allowed:
+        if not isinstance(bundle, dict) or not needed <= set(bundle) or set(bundle) - allowed:
             return False
         if any(
             not isinstance(bundle[key], str) or not bundle[key]

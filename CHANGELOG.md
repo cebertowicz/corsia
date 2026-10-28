@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Google sign-in can now be done with one Allow, through Google's sign-in service for its Workspace tools; the setup guide moves to it in a later change.
+- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.

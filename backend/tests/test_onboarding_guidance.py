@@ -295,7 +295,8 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert not re.search(r"\bsteps? \d", work_step)
     assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
     assert "post exactly `" + HANDOFF + "`" in app
-    assert "follow skill `google-setup`" in steps
+    assert "then `google_connect`" in steps
+    assert "Use skill `google-setup` only if Google refuses this sign-in" in steps
     assert "Never write the opening or create the setup plan" in app
     assert "mark each done when complete" in app
     assert "agent-import.md" in steps

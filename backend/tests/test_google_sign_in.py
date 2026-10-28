@@ -800,7 +800,7 @@ def _begin_for_test() -> str | None:
 async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
     errors = (
         oauth.GoogleSignInError(oauth.DENIED, browser_message=oauth.BROWSER_DENIED),
-        oauth.GoogleSignInError(oauth.MISSING_SCOPES, browser_message=oauth.BROWSER_MISSING_SCOPES),
+        oauth.GoogleSignInError(oauth.missing_scopes(oauth.OPTIONAL_SCOPES), browser_message=oauth.BROWSER_MISSING_SCOPES),
         oauth.GoogleSignInError(
             oauth.TOO_MANY, browser_message="Too many Google sign-ins are waiting. Go back to CORSIA and try again later.",
         ),
@@ -957,7 +957,8 @@ async def test_callback_unexpected_error_does_not_log_or_render_credentials(monk
     assert response.status_code == 500
     assert REFRESH not in response.text and ACCESS not in response.text
     assert REFRESH not in caplog.text and ACCESS not in caplog.text
-    assert "RuntimeError" in caplog.text and "test_google_sign_in.py" in caplog.text
+    assert "RuntimeError" in caplog.text and "test_google_sign_in.py" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_google_bundle_requires_secret_except_published():

@@ -52,7 +52,8 @@ OPTIONAL_SCOPES = (
 IDENTITY_SCOPES = ("openid",)
 SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES + IDENTITY_SCOPES
 PUBLISHED_REQUIRED_SCOPES = ("https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/calendar")
-PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + ("https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/documents")
+PUBLISHED_OPTIONAL_SCOPES = OPTIONAL_SCOPES[:2]
+PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + PUBLISHED_OPTIONAL_SCOPES
 PUBLISHED_CLIENT_ID = "338689075775-o75k922vn5fdl18qergr96rp8g63e4d7.apps.googleusercontent.com"
 PUBLISHED_URL = client.PUBLISHED_URL
 PENDING_SECONDS = 600
@@ -62,12 +63,14 @@ CALLBACK_PATH = "/api/google/oauth/callback"
 NEEDS_CLIENT_FILE = client.NEEDS_CLIENT_FILE
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
 BROWSER_DENIED = "Google sign-in was refused or expired. Go back to CORSIA and try again."
-_MISSING_SCOPES_TEMPLATE = (
-    "The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
-    "Gmail and Calendar; {optional} are optional."
-)
-MISSING_SCOPES = _MISSING_SCOPES_TEMPLATE.format(optional="Drive, Docs and Sheets")
-PUBLISHED_MISSING_SCOPES = _MISSING_SCOPES_TEMPLATE.format(optional="Drive and Docs")
+def missing_scopes(optional: tuple[str, ...]) -> str:
+    labels = {"drive": "Drive", "documents": "Docs", "spreadsheets": "Sheets"}
+    items = [labels[scope.rsplit("/", 1)[-1]] for scope in optional]
+    listing = ", ".join(items[:-1]) + " and " + items[-1]
+    return (
+        "The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
+        f"Gmail and Calendar; {listing} are optional."
+    )
 BROWSER_MISSING_SCOPES = "Gmail and Calendar access weren't allowed. Go back to CORSIA and try again."
 WRONG_ACCOUNT = (
     "You signed in as {signed_in}, but this sign-in is for {address}. Call google_connect again and "
@@ -93,7 +96,7 @@ class _Pending:
     reach: AppReach | None
     scopes: tuple[str, ...]
     verifier: str | None
-    client: str
+    published: bool
     client_id: str
     client_secret: str | None
     redirect_uri: str
@@ -145,19 +148,19 @@ def _begin(
     finally:
         db.close()
     scopes: tuple[str, ...]
-    if credentials is None:
-        kind, client_id, client_secret, verifier = "published", PUBLISHED_CLIENT_ID, None, None
+    published = credentials is None
+    if published:
+        client_id, client_secret, verifier = PUBLISHED_CLIENT_ID, None, None
         scopes = PUBLISHED_SCOPES
     else:
-        kind = "own"
-        client_id, client_secret = credentials
+        client_id, client_secret = cast(tuple[str, str], credentials)
         verifier = secrets.token_urlsafe(64)
         scopes = SCOPES
     pending = _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()),
         adding=account_id is None, actor=actor, adding_thread_id=adding_thread_id, reach=reach,
         starting_thread_id=starting_thread_id, scopes=scopes,
-        verifier=verifier, client=kind, client_id=client_id,
+        verifier=verifier, published=published, client_id=client_id,
         client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
     with _pending_lock:
@@ -171,7 +174,7 @@ def _begin(
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
         "scope": " ".join(pending.scopes), "state": pending.state, "access_type": "offline", "prompt": "consent",
     }
-    if client.uses_published(pending):
+    if pending.published:
         params["redirect_uri"] = PUBLISHED_URL
         params["state"] = base64.b64encode(json.dumps({
             "uri": pending.redirect_uri, "manual": False, "csrf": pending.state,
@@ -222,11 +225,7 @@ async def stop_all_signins() -> None:
 
 
 def _take_pending(state: object) -> _Pending:
-    """Consume the unexpired sign-in whose nonce is ``state``; none matching is DENIED.
-
-    A wrong state leaves every flow pending: any page can make the browser GET
-    the loopback callback, and that must not cancel the person's sign-in.
-    """
+    """Consume a matching nonce; unrelated callback GETs must leave every flow pending."""
     if not isinstance(state, str) or not state:
         raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     with _pending_lock:
@@ -283,8 +282,8 @@ def _store(
     from connections.connected_accounts import ConnectedAccountError, get_account, store_credentials
     from connections.account_state import mark_signed_in, record_audit
 
-    bundle: dict[str, object] = {"client": pending.client, "client_id": pending.client_id, "refresh_token": refresh_token, "scopes": scopes}
-    if not client.uses_published(pending):
+    bundle: dict[str, object] = {"client": "published" if pending.published else "own", "client_id": pending.client_id, "refresh_token": refresh_token, "scopes": scopes}
+    if not pending.published:
         bundle["client_secret"] = pending.client_secret
     with write_transaction(None, scope="google_sign_in_store") as conn:
         if pending.adding:
@@ -326,7 +325,7 @@ async def complete_sign_in(code: object, state: object, *, access_token: object 
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
     try:
-        published = client.uses_published(pending)
+        published = pending.published
         if not published:
             from connections.google.oauth_exchange import exchange
 
@@ -342,7 +341,7 @@ async def complete_sign_in(code: object, state: object, *, access_token: object 
             scopes = sorted(str(grant.get("scope") or "").split())
             required = PUBLISHED_REQUIRED_SCOPES if published else REQUIRED_SCOPES
             if not set(required) <= set(scopes):
-                message = PUBLISHED_MISSING_SCOPES if published else MISSING_SCOPES
+                message = missing_scopes(PUBLISHED_OPTIONAL_SCOPES if published else OPTIONAL_SCOPES)
                 raise GoogleSignInError(message, browser_message=BROWSER_MISSING_SCOPES)
             provider_subject = await client.token_subject(access) if published else client.id_token_subject(grant.get("id_token"))
             profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
