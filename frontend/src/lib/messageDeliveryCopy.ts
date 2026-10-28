@@ -68,9 +68,8 @@ export const WAITING_FOR_MODEL_CHOICE = {
 	title: 'This thread has no model yet. Your message is saved and will send as soon as you choose one.',
 } as const;
 
-export const CREATE_ACCOUNT_REFUSED = "Couldn't start the chat on the account you picked. Pick another account in the model menu and send again.";
+export const CREATE_ACCOUNT_REFUSED = 'Couldn’t start the chat on that account. The model menu shows why; pick another account or fix it in Settings › Providers.';
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
-export const ACCOUNT_PROJECT_DENIED = 'Your provider settings don’t allow this chat’s account.';
 
 const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
 const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
@@ -100,7 +99,7 @@ export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_
 	// does not say which, so no settings pointer: it could name a place with no toggle.
 	account_project_denied: {
 		label: WAITING_FOR_ACCOUNT,
-		title: `${ACCOUNT_PROJECT_DENIED} ${SWITCH_MODELS}.`,
+		title: `Your provider settings don’t allow this chat’s account. ${SWITCH_MODELS}.`,
 	},
 	project_policy_missing: {
 		label: WAITING_FOR_ACCOUNT,

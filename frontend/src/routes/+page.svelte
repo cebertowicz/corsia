@@ -316,8 +316,8 @@
 		});
 		if (!res.ok) {
 			const detail = await res.json().catch(() => null);
-			const refusal = accountId && await createAccountRefusal(res.status, detail?.detail, () => draftAccountId.set(null), loadModels);
-			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : "Couldn't create the chat. Try again.", 'error');
+			const refusal = accountId && await createAccountRefusal(res.status, detail?.detail, loadModels);
+			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : 'Couldn’t create the chat. Try again.', 'error');
 			throw new Error('Thread creation failed');
 		}
 		const data = await res.json();

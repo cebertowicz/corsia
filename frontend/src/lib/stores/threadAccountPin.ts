@@ -19,11 +19,6 @@ export function reasonOf(detail: unknown): string | null {
 	return typeof detail === 'string' ? detail.trim().match(/^[a-z0-9]+(?:_[a-z0-9]+)+/)?.[0] ?? null : null;
 }
 
-export function accountRefusalMessage(detail: unknown): string {
-	const reason = reasonOf(detail);
-	return (reason && REFUSALS[reason]) || PIN_FAILED;
-}
-
 /**
  * Pin a thread to one account. The choice is explicit, so a thread that changed since the picker
  * drew (a model switch, a checkpoint) is still moved; the backend refuses only an account the
@@ -44,7 +39,8 @@ export async function pinThreadAccount(threadId: string, accountId: string): Pro
 		});
 		body = await response.json().catch(() => null);
 		if (!response.ok) {
-			return { ok: false, message: accountRefusalMessage(body?.detail) };
+			const reason = reasonOf(body?.detail);
+			return { ok: false, message: (reason && REFUSALS[reason]) || PIN_FAILED };
 		}
 	} catch {
 		return { ok: false, message: SERVER_UNREACHABLE };

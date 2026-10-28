@@ -14,18 +14,15 @@ describe('session creation helpers', () => {
 		expect(draftAccountForModel('other', 'codex/model', models)).toBeNull();
 	});
 
-	it('keeps a refused choice and refreshes its status, clearing only a removed account', async () => {
-		const clear = vi.fn();
+	it('refreshes known account refusals without clearing the choice', async () => {
 		const reload = vi.fn(async () => {});
-		expect(await createAccountRefusal(400, 'account_signed_out; retry', clear, reload)).toBe(true);
-		expect(clear).not.toHaveBeenCalled();
-		expect(reload).toHaveBeenCalledTimes(1);
-		expect(await createAccountRefusal(400, 'account_removed; account does not exist for this provider', clear, reload)).toBe(true);
-		expect(clear).toHaveBeenCalledTimes(1);
+		expect(await createAccountRefusal(400, 'account_signed_out; retry', reload)).toBe(true);
+		expect(await createAccountRefusal(400, 'account_removed; choose a permitted account or restore this account\'s eligibility', reload)).toBe(true);
 		expect(reload).toHaveBeenCalledTimes(2);
-		expect(await createAccountRefusal(400, 'account does not exist for this provider', clear, reload)).toBe(false);
-		expect(await createAccountRefusal(500, 'account_removed; retry', clear, reload)).toBe(false);
-		expect(CREATE_ACCOUNT_REFUSED).toBe("Couldn't start the chat on the account you picked. Pick another account in the model menu and send again.");
+		expect(await createAccountRefusal(400, 'account_unknown; retry', reload)).toBe(false);
+		expect(await createAccountRefusal(400, 'account does not exist for this provider', reload)).toBe(false);
+		expect(await createAccountRefusal(500, 'account_removed; retry', reload)).toBe(false);
+		expect(CREATE_ACCOUNT_REFUSED).toBe('Couldn’t start the chat on that account. The model menu shows why; pick another account or fix it in Settings › Providers.');
 	});
 
 	it('builds the create-session payload from selected project and model state', () => {

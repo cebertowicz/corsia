@@ -1,16 +1,16 @@
 import type { Thread } from '$lib/stores/threads';
 import { modelMatchesId, type Model } from '$lib/stores/models';
 import { reasonOf } from '$lib/stores/threadAccountPin';
+import { ACCOUNT_HOLD_COPY } from '$lib/messageDeliveryCopy';
 
 export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[]): string | null {
 	const model = models.find((row) => modelMatchesId(row, modelId));
 	return accountId && model?.runs_on?.some((entry) => entry.selected && entry.account_id === accountId) ? accountId : null;
 }
 
-export async function createAccountRefusal(status: number, detail: unknown, clear: () => void, reload: () => Promise<void>): Promise<boolean> {
+export async function createAccountRefusal(status: number, detail: unknown, reload: () => Promise<void>): Promise<boolean> {
 	const reason = reasonOf(detail);
-	if (status !== 400 || !reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')) return false;
-	if (reason === 'account_removed') clear();
+	if (status !== 400 || !reason || !Object.hasOwn(ACCOUNT_HOLD_COPY, reason)) return false;
 	await reload();
 	return true;
 }
