@@ -173,7 +173,7 @@ class PreviewRoute:
         # A write that would be refused, or would need a host permit, is never previewed.
         try:
             try:
-                resolved = await asyncio.to_thread(filesystem_gate._resolve_path, path, call.workspace, for_write=True)
+                resolved = await asyncio.to_thread(filesystem_gate.resolve_path, path, call.workspace, for_write=True)
             except PermissionError:
                 resolved = None
             entry = find_live(resolved) if resolved is not None else None

@@ -83,7 +83,7 @@ def _reference_unreviewed(tool, pattern, search_dir, requested_path, current_thr
             resolved_match = match.resolve(strict=False)
             if not resolved_match.is_relative_to(search_dir):
                 try:
-                    resolved_match = glob_module._resolve_path(
+                    resolved_match = glob_module.resolve_path(
                         str(match), tool._workspace, tool._allowed_dir
                     )
                 except PermissionError:
@@ -189,7 +189,7 @@ def tree(tmp_path, monkeypatch):
     root = tmp_path / "root"
     outside = tmp_path / "outside"
     build_tree(root, outside)
-    monkeypatch.setattr(glob_module, "_resolve_path", _Sandbox((outside / "tree").resolve()))
+    monkeypatch.setattr(glob_module, "resolve_path", _Sandbox((outside / "tree").resolve()))
     return root.resolve()
 
 
