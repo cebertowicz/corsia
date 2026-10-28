@@ -9,7 +9,7 @@ from tools.filesystem_effects import match_relative_glob, walk_bound_files
 from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
 from tools.glob_result import other_thread_result, render_glob_result
 from tools.glob_walk import Traversal, select_matches
-from tools.search_scope import SearchScope, keep_path, pattern_components, scoped_match
+from tools.search_scope import SearchScope, keep_path, pattern_components, scoped_match, search_identity
 
 
 def _glob_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
@@ -89,6 +89,7 @@ class GlobTool(Tool):
                 project_id=kwargs.get("_thread_project_id"),
             )
             search_dir = authorized.resolved
+            current_thread_id, all_threads = search_identity(search_dir, current_thread_id, all_threads)
             if not keep_path(search_dir, current_thread_id, all_threads):
                 return other_thread_result(pattern, search_dir)
 

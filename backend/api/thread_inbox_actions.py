@@ -12,6 +12,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from infra.queued_input_settlement import cancel_queued_input
+from infra.vendor_login import public_metadata
 
 
 def _owned_input(thread_id: str, message_id: str, user_id: str):
@@ -106,6 +107,7 @@ def _retry_content(message: dict) -> tuple[str, dict]:
         metadata = {}
     if not isinstance(metadata, dict):
         metadata = {}
+    metadata = public_metadata(metadata)
     metadata.pop("turn_id", None)
     metadata.pop("input_id", None)
     metadata = {

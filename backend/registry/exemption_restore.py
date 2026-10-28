@@ -4,9 +4,8 @@ An exemption (``registry.retirement_predicate``) only stops a later
 retirement. A row retired before its artifact became exempt would stay hidden
 from the owner, so the write that creates the exemption calls this to show it
 again, through the rebind a deliberate hand-off uses. The same call shows an
-owner row that an ownership change settled on an artifact that was exempt all
-along (a shared document): ownership alone never shows a row, but the user's
-comment is the owner's reason to see the document.
+owner row that an ownership change settled: ownership alone never shows a
+row, but the user's comment is the owner's reason to see the document.
 """
 
 from __future__ import annotations
@@ -18,10 +17,7 @@ from registry.identity_bridge import (
     _upsert_registration,
 )
 from registry.registration_events import _append_registration_events, _now
-from registry.retirement_predicate import (
-    RETIREMENT_NOT_EXEMPT_CLAUSE,
-    bind_shared_documents,
-)
+from registry.retirement_predicate import RETIREMENT_NOT_EXEMPT_CLAUSE
 
 #: The registration event that records an exemption lifting a retirement.
 EXEMPT_ROW_RESTORED_EVENT = "exempt_row_restored"
@@ -34,7 +30,6 @@ def restore_exempt_owner_row(db, *, artifact_id: str, trigger: str) -> int:
     alone. The owner's pane is nudged once the caller's write commits.
     """
     owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
-    bind_shared_documents(db)
     rows = db.execute(
         f"""SELECT r.id,r.parent_thread_id,r.relationship_state
              FROM artifact_registrations AS r
