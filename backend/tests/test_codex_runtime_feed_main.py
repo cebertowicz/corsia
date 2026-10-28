@@ -142,7 +142,7 @@ def test_codex_switch_scope_accepts_only_the_explicit_source_model() -> None:
     db.row_factory = sqlite3.Row
     db.execute(
         "CREATE TABLE threads "
-        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT)"
+        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT, confined_read_dirs TEXT)"
     )
     db.execute(
         "INSERT INTO threads (id,model,project_id) VALUES (?,?,?)",
@@ -168,7 +168,7 @@ def test_codex_switch_scope_accepts_only_the_explicit_source_model() -> None:
             target_catalog_id="codex/gpt-5-codex",
             expected_selected_model="anthropic/claude-3-5-sonnet",
             db=db,
-        ) == ("project-1", "/workspace")
+        ) == ("project-1", "/workspace", False)
     db.close()
 
 
@@ -179,7 +179,7 @@ def test_codex_switch_scope_accepts_an_explicit_unset_legacy_source() -> None:
     db.row_factory = sqlite3.Row
     db.execute(
         "CREATE TABLE threads "
-        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT)"
+        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT, confined_read_dirs TEXT)"
     )
     db.execute(
         "INSERT INTO threads (id,model,project_id) VALUES (?,?,?)",
@@ -195,7 +195,7 @@ def test_codex_switch_scope_accepts_an_explicit_unset_legacy_source() -> None:
             target_catalog_id="codex/gpt-5-codex",
             expected_selected_model="",
             db=db,
-        ) == ("project-1", "/workspace")
+        ) == ("project-1", "/workspace", False)
     db.close()
 
 
@@ -303,7 +303,7 @@ def test_prepare_codex_destination_payload_exposes_exact_preflight_surface() -> 
         patch.object(
             codex_destination_render,
             "codex_destination_scope",
-            return_value=("project-1", "/workspace"),
+            return_value=("project-1", "/workspace", False),
         ),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
@@ -400,7 +400,7 @@ def test_prepare_codex_destination_payload_freezes_provider_resume_boundary() ->
         patch.object(
             codex_destination_render,
             "codex_destination_scope",
-            return_value=("project-1", "/workspace"),
+            return_value=("project-1", "/workspace", False),
         ),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
@@ -448,7 +448,7 @@ def test_prepare_codex_destination_payload_freezes_persisted_resume_registry() -
         patch.object(
             codex_destination_render,
             "codex_destination_scope",
-            return_value=("project-1", "/workspace"),
+            return_value=("project-1", "/workspace", False),
         ),
         patch(
             "subagents.harness_tool_bridge.build_tool_registry",
@@ -576,7 +576,7 @@ def test_prepare_live_destination_ignores_reported_model_without_target_evidence
         patch.object(
             codex_destination_render,
             "codex_destination_scope",
-            return_value=("project-1", "/workspace"),
+            return_value=("project-1", "/workspace", False),
         ),
     ):
         destination = codex_destination_render.prepare_codex_destination_payload(
@@ -688,7 +688,7 @@ def test_prepare_destination_accepts_equivalent_working_dir_spellings() -> None:
     with patch.object(
         codex_destination_render,
         "codex_destination_scope",
-        return_value=("project-1", "/workspace/./"),
+        return_value=("project-1", "/workspace/./", False),
     ):
         codex_destination_render._require_unchanged_scope(
             thread_id="prepared-session",
@@ -696,6 +696,7 @@ def test_prepare_destination_accepts_equivalent_working_dir_spellings() -> None:
             expected_selected_model=None,
             project_id="project-1",
             working_dir="/workspace",
+            confined=False,
             db=object(),
         )
 

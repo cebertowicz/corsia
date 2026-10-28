@@ -22,7 +22,7 @@ EMAIL_THREAD_TYPE = "email-thread"
 
 _MESSAGE_TO_THREAD = RelationshipDecl("message", "message_to_email_thread", "email-thread")
 
-_FILTERABLE = ("from", "to", "label", "thread_id", "message_id")
+_FILTERABLE = ("from", "to", "label", "thread_id", "message_id", "author_origin")
 
 
 def _classify(raw: dict[str, Any]) -> str:
@@ -33,7 +33,7 @@ def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]
     keys = ("account_id", "from", "to", "label", "thread_id", "message_id", "date", "history_id",
             "subject", "screen_status", "needs_person", "injection", "injection_rule", "kind",
             "screen_model")
-    return {k: raw[k] for k in keys if raw.get(k) is not None}
+    return {**{k: raw[k] for k in keys if raw.get(k) is not None}, "author_origin": "outside"}
 
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:

@@ -132,6 +132,7 @@
 .context-chip.warn { color: var(--amber); }
 .context-chip.crit { color: var(--red); }
 .ctx-ring { flex-shrink: 0; }
+.ctx-ring-fill { transition: stroke-dashoffset var(--dur-drawer) ease; }
 .model-chip-name {
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
