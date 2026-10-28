@@ -401,6 +401,36 @@ for (const width of [1440, 393]) {
 }
 
 for (const width of [1440, 393]) {
+	for (const route of ['Escape', 'scrim'] as const) {
+		test(`${TAG} focus ${width}px ${route}: return to the reply notice`, async ({ page, request }, testInfo) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+			skipMismatchedProject(width, testInfo.project.name);
+			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `focus-${width}-${route}`, 'launch-plan.md', [8, 10]);
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '2 new replies');
+			await holdDwell(page, true);
+			await chipButton(page).focus();
+			await page.keyboard.press('Enter');
+			const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
+			await expect(backdrop).toBeVisible();
+			if (route === 'Escape') await page.keyboard.press('Escape');
+			else {
+				const box = (await backdrop.boundingBox())!;
+				await page.mouse.click(box.x + 5, box.y + 5);
+			}
+			await expect(backdrop).toHaveCount(0);
+			await expect(chipButton(page)).toBeFocused();
+			await holdDwell(page, false);
+		});
+	}
+}
+
+for (const width of [1440, 393]) {
 	test(`${TAG} modal ${width}px: reply notice stays unavailable through sheet outro`, async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');

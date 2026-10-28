@@ -113,7 +113,7 @@
 		draft: () => draft,
 		sheetDrawer: () => sheetDrawer,
 		narrow: () => narrow,
-		onClose: () => onClose(),
+		onClose: () => closeDrawer(),
 		onCancelDraft: () => (onCancelDraft ?? onClose)(),
 	});
 	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
@@ -334,7 +334,7 @@
 		</div>{/key}</div>
 	</div>
 	<div class="drawer-footers" use:drawerFooterHeight>
-		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
+		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]') ?? undefined} />
 	</div>
 {/snippet}
 
