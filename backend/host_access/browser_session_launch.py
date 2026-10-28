@@ -159,6 +159,11 @@ def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> 
 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
     """Keep launch settings stable across the CDP connection's commands."""
+    if sys.platform == "linux":
+        args = ["--args", browser_launch.stealth_args(None, headless=False)]
+        if not record.show_window and ua:
+            args.extend(["--user-agent", ua])
+        return [*args, "--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
     if sys.platform != "darwin":
         return ["--args", browser_launch.stealth_args(ua, headless=not record.show_window),
                 "--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
