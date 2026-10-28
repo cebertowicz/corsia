@@ -71,7 +71,10 @@ def _resolve_path(
     """
     p = _join_relative_to_workspace(path, workspace)
     resolved = p.resolve(strict=False)
+    import tools.confined_reads as confined_reads
     from tools.host_path_policy import ordinary_host_path_denial
+
+    confined_reads.check(p, resolved, for_write=for_write)
 
     for candidate in dict.fromkeys((p.absolute(), resolved)):
         if denial := ordinary_host_path_denial(
@@ -125,9 +128,11 @@ async def _resolve_path_for_action(
     use for the effect. Without a permit, the ordinary protected boundary is
     unchanged.
     """
+    import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
 
-    consumed = await consume_current_action_permit(
+    # A confined worker's reads never take a host permit: its read paths are all it has.
+    consumed = None if confined_reads.confined() else await consume_current_action_permit(
         thread_id=thread_id,
         project_id=project_id,
         tool=tool,
