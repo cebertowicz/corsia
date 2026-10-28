@@ -105,6 +105,7 @@ jobs:
             npm install --prefix "$capture_root/$version" "@openai/codex@$version"
           done
           echo "CORSIA_CODEX_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
+          # The loop ends on the newest version, which the other stock-CLI proofs use.
           npm install --global @anthropic-ai/claude-code@2.1.296 "@openai/codex@$version"
           claude --version
           codex --version
@@ -198,13 +199,7 @@ jobs:
       - name: Install stock agent CLIs
         run: |
           set -e
-          versions=$(python -c 'import ast; p = ast.parse(open("backend/subagents/codex_confinement.py").read()); v = next(n.value.args[0] for n in p.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "CAPTURED_CODEX_VERSIONS" for t in n.targets)); print(" ".join(sorted((s.removeprefix("codex-cli ") for s in ast.literal_eval(v)), key=lambda s: tuple(map(int, s.split("."))))) )')
-          capture_root="$RUNNER_TEMP/codex-capture"
-          for version in $versions; do
-            npm install --prefix "$capture_root/$version" "@openai/codex@$version"
-          done
-          echo "CORSIA_CODEX_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
-          npm install --global @anthropic-ai/claude-code@2.1.296 "@openai/codex@$version"
+          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.165.0
           claude --version
           codex --version
 
