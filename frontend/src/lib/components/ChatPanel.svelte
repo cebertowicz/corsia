@@ -12,7 +12,7 @@
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
-	import { createChatReplyJumper } from './chatReplyJump';
+	import { useChatReplyJumper } from './chatReplyJumper.svelte';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -215,18 +215,11 @@
 		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
 	};
 	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
-	const replyJumper = createChatReplyJumper({
+	const jumpToChatReply = useChatReplyJumper({
 		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
 		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
 		generation: () => pagerGeneration,
 	});
-	const jumpToChatReply = replyJumper.jump;
-	$effect(() => {
-		// Retry a queued click only after the existing pager has recovered.
-		$activeThreadId; pager.loading; pager.error;
-		replyJumper.resume();
-	});
-	onDestroy(replyJumper.cancel);
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {
 		const changed = focusSeen !== undefined && focusSeen !== focusOn();

@@ -6,7 +6,7 @@ import type { AttentionDestination } from '$lib/api/attentionQueue';
 import type { PagerState } from '$lib/messagePager';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
 
-type JumpPort = {
+export type JumpPort = {
 	pager: () => PagerState;
 	runs: () => readonly RunStub[];
 	loads: () => Record<string, RunLoad>;
