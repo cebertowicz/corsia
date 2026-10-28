@@ -22,7 +22,7 @@ Cut vertically: one owner carries a domain end to end, from deciding what to do 
 
 ## One accountable owner per deliverable
 
-Core context says who the owner is by default. Contributors keep authority over their own domains and constraints. For consequential cross-owner work, state in one line who drives, who approves, and who contributes. An unowned aggregate outcome is a gap for the conductor to assign; owning it grants accountability within the commission, not authority to start new work.
+The default owner is set in skill `plans-and-workers`. Contributors keep authority over their own domains and constraints. For consequential cross-owner work, state in one line who drives, who approves, and who contributes. An unowned aggregate outcome is a gap for the conductor to assign; owning it grants accountability within the commission, not authority to start new work.
 
 ## New agents and projects
 
