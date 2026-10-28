@@ -63,7 +63,7 @@ async def test_idle_owner_wake_after_context_change_is_delivered(
     main_db.execute("UPDATE threads SET model=? WHERE id='main-1'", (MODEL,))
     main_db.commit()
     target = resolve_execution_target(MODEL, db=main_db)
-    _, working_dir = codex_destination_scope("main-1", target_catalog_id=MODEL, db=main_db)
+    _, working_dir, _ = codex_destination_scope("main-1", target_catalog_id=MODEL, db=main_db)
     registry = build_tool_registry(working_dir)
     idle = _make_mock_app_session("provider-thread-1")
     idle.working_dir = working_dir

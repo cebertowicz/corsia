@@ -10,13 +10,15 @@ from core.context_replay import checkpoint_prompt
 from core.tool_result_projection import HARNESS_TOOL_RESULT_BUDGET_TOKENS
 from history.types import PORTABLE_HISTORY_FORMAT_VERSION, PortableHistoryProjection
 from infra.database import get_db
-from llm.catalog import get_display_name
+from infra.thread_confinement import ConfinementRecordDamaged, parse
+from subagents.cc_confinement import ConfinementRefused
 from llm.resolution import ExecutionTarget
+from subagents import codex_confinement
+from subagents.codex_confinement import tool_surface as _tool_surface
 from subagents.codex_destination import (
     build_prepared_codex_destination,
     validate_live_compaction,
 )
-from subagents.cc_confinement import ConfinementRefused, unsupported_model_message
 from subagents.codex_runtime_errors import CodexPreparedContextStale
 from subagents.codex_runtime_state import (
     _APP_SESSIONS,
@@ -44,43 +46,32 @@ def codex_destination_scope(
     target_catalog_id: str,
     expected_selected_model: str | None = None,
     db,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, bool]:
     row = db.execute(
-        "SELECT project_id,model,confinement FROM threads WHERE id=?", (thread_id,)
+        "SELECT project_id,model,confinement,confined_read_dirs FROM threads WHERE id=?", (thread_id,)
     ).fetchone()
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
-    if row["confinement"] is not None:
-        raise ConfinementRefused(unsupported_model_message(get_display_name(target_catalog_id)))
     selected_model = target_catalog_id if expected_selected_model is None else expected_selected_model
     if str(row["model"] or "") != selected_model:
         raise CodexPreparedContextStale(
             "Codex destination model changed before context rendering"
         )
     project_id = row["project_id"]
-    working_dir = working_dir_for_reconstruction(project_id, db=db)
+    try:
+        confined = parse(row["confinement"], row["confined_read_dirs"]) is not None
+    except ConfinementRecordDamaged as exc:
+        raise ConfinementRefused(str(exc)) from exc
+    working_dir = (
+        codex_confinement.neutral_working_dir(thread_id)
+        if confined
+        else working_dir_for_reconstruction(project_id, db=db)
+    )
     if not working_dir:
         raise CodexPreparedContextStale(
             "Codex destination working directory is unresolved"
         )
-    return project_id, working_dir
-
-
-def _tool_surface(working_dir: str, session) -> tuple[Any, tuple[dict[str, Any], ...]]:
-    if session is not None:
-        registry = getattr(session, "tool_registry", None)
-        if registry is None:
-            raise CodexPreparedContextStale(
-                "Codex app-server handle has no frozen CORSIA tool registry"
-            )
-        return registry, tuple(getattr(session, "dynamic_tools", ()) or ())
-    from subagents.harness_tool_bridge import (
-        build_tool_registry,
-        dynamic_tool_definitions,
-    )
-
-    registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry)
+    return project_id, working_dir, confined
 
 
 def _validate_live_model(
@@ -113,6 +104,7 @@ def _live_preparation(
     history_epoch: int,
     sealed_boundary,
     working_dir: str,
+    confined: bool = False,
 ) -> _DeliveryPreparation:
     if replay_selection is not None:
         raise ValueError("live Codex destination cannot include replay")
@@ -141,7 +133,7 @@ def _live_preparation(
     live = _LIVE.get(thread_id)
     session = live.session if live is not None else _APP_SESSIONS.get(thread_id)
     validate_live_compaction(session, target)
-    registry, tools = _tool_surface(working_dir, session)
+    registry, tools = _tool_surface(working_dir, session, confined)
     return _DeliveryPreparation(
         fingerprint,
         projection,
@@ -160,6 +152,7 @@ def _cold_preparation(
     history_epoch: int,
     sealed_boundary,
     working_dir: str,
+    confined: bool = False,
 ) -> _DeliveryPreparation:
     if replay_selection is None:
         raise ValueError("cold Codex destination requires replay")
@@ -172,7 +165,7 @@ def _cold_preparation(
         or tail.sealed_boundary != sealed_boundary
     ):
         raise ValueError("Codex replay does not match the admitted history boundary")
-    registry, tools = _tool_surface(working_dir, None)
+    registry, tools = _tool_surface(working_dir, None, confined)
     return _DeliveryPreparation(
         None,
         tail,
@@ -197,6 +190,7 @@ def _delivery_preparation(
     history_epoch: int,
     sealed_boundary,
     working_dir: str,
+    confined: bool = False,
 ) -> _DeliveryPreparation:
     kwargs = {
         "thread_id": thread_id,
@@ -204,6 +198,7 @@ def _delivery_preparation(
         "history_epoch": history_epoch,
         "sealed_boundary": sealed_boundary,
         "working_dir": working_dir,
+        "confined": confined,
     }
     if provider_resume:
         return _live_preparation(target=target, **kwargs)
@@ -255,6 +250,7 @@ def _require_unchanged_scope(
     expected_selected_model: str | None,
     project_id: str | None,
     working_dir: str,
+    confined: bool,
     db,
 ) -> None:
     try:
@@ -268,9 +264,10 @@ def _require_unchanged_scope(
         raise CodexPreparedContextStale(
             "Codex destination thread scope changed during context rendering"
         ) from exc
-    final_project_id, final_working_dir = final_scope
+    final_project_id, final_working_dir, final_confined = final_scope
     if (
-        final_project_id != project_id
+        final_confined != confined
+        or final_project_id != project_id
         or os.path.abspath(final_working_dir) != os.path.abspath(working_dir)
     ):
         raise CodexPreparedContextStale(
@@ -297,7 +294,7 @@ def prepare_codex_destination_payload(
         raise ValueError("Codex destination render received a non-Codex target")
     connection = db or get_db()
     try:
-        project_id, working_dir = codex_destination_scope(
+        project_id, working_dir, confined = codex_destination_scope(
             thread_id,
             target_catalog_id=target.catalog_id,
             expected_selected_model=expected_selected_model,
@@ -311,6 +308,7 @@ def prepare_codex_destination_payload(
             history_epoch=history_epoch,
             sealed_boundary=sealed_boundary,
             working_dir=working_dir,
+            confined=confined,
         )
         handle = prepared.fingerprint
         if handle is not None and handle.session_identity is not None:
@@ -338,6 +336,7 @@ def prepare_codex_destination_payload(
             expected_selected_model=expected_selected_model,
             project_id=project_id,
             working_dir=working_dir,
+            confined=confined,
             db=connection,
         )
         return build_prepared_codex_destination(
