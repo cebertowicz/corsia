@@ -39,6 +39,26 @@ async def test_new_visible_session_is_headed_and_shared(synthetic_browser):
     await fake.owner.shutdown()
 
 
+@pytest.mark.parametrize('existing', [False, True])
+async def test_pane_open_shares_headless_without_host_window(synthetic_browser, monkeypatch, existing):
+    from types import SimpleNamespace
+    from host_access import browser_control, browser_pane, browser_session_commands
+    fake = synthetic_browser
+    notices, events = [], []
+    monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: fake.owner))
+    monkeypatch.setattr(browser_control, 'announce_browser_opened', notices.append)
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append(args))
+    if existing:
+        await fake.owner.run('thread', ['open', 'about:blank'])
+    await browser_pane.open_url('thread', 'https://example.test', 'token' if existing else None)
+    record = fake.owner._sessions['thread'].record
+    assert not record.show_window and record.shared
+    assert '--headless=new' in fake.chrome_calls[0]
+    assert all('--headed' not in call for call in fake.calls)
+    assert notices == [] and events == []
+    await fake.owner.shutdown()
+
+
 async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_browser, monkeypatch):
     fake = synthetic_browser
 

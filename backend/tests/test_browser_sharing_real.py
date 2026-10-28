@@ -1,11 +1,12 @@
 """Host-only proof that sharing preserves a live browser."""
 import os
 from uuid import uuid4
+from types import SimpleNamespace
 
 import psutil
 import pytest
 
-from host_access import browser_cdp, browser_control
+from host_access import browser_cdp, browser_control, browser_pane
 from host_access.browser_sessions import BrowserSessionOwner
 from tests.test_browser_shared_e2e import fixture_server
 
@@ -49,9 +50,11 @@ async def test_first_shared_open_is_headless(monkeypatch):
     thread = f'shared-first-{uuid4().hex}'
     owner = BrowserSessionOwner(namespace='corsia-share-real', instance_key=uuid4().hex)
     monkeypatch.setattr(browser_control, 'announce_browser_opened', lambda _thread: None)
+    monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: owner))
     try:
         with fixture_server() as origin:
-            await owner.run(thread, ('open', f'{origin}/plain.html'), session='new', show_window=True)
+            await browser_pane.open_url(thread, f'{origin}/plain.html')
+            assert owner._sessions[thread].record.shared and not owner._sessions[thread].record.show_window
             pid = owner._sessions[thread].chrome.process.pid
             assert any(flag.startswith('--headless') for flag in psutil.Process(pid).cmdline())
     finally:

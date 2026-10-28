@@ -160,10 +160,11 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         owner._queued_actions -= 1
     try:
         rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
-        if show_window and not runtime.record.shared and not rendered.startswith("Error:"):
+        if (show_window or pane) and not runtime.record.shared and not rendered.startswith("Error:"):
             runtime.record = replace(runtime.record, shared=True)
-            browser_control.announce_browser_opened(thread_id)
-            await asyncio.to_thread(emit_product_event, "browser_pane", "shared_on_demand", thread_id=thread_id)
+            if not pane:
+                browser_control.announce_browser_opened(thread_id)
+                await asyncio.to_thread(emit_product_event, "browser_pane", "shared_on_demand", thread_id=thread_id)
         if notice and not pane and runtime.record.profile_notice and not runtime.profile_notice_sent:
             runtime.profile_notice_sent = True
             rendered += "\n" + runtime.record.profile_notice

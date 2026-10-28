@@ -141,7 +141,6 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
     """Open a pane URL: a connected pane navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(
         thread_id, ("open", url), session="new" if connection_token is None else "existing", pane=True,
-        show_window=True,
     )
 
 
