@@ -40,7 +40,7 @@
 		tabText = '',
 		onReopen,
 		onRead,
-		covered = false,
+		imageOpen = false,
 		activityRoot = null,
 	}: {
 		title?: string;
@@ -71,8 +71,8 @@
 		tabText?: string;
 		onReopen?: () => void;
 		onRead?: () => void;
-		/** The document is covered, so recovery waits until it is visible again. */
-		covered?: boolean;
+		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
+		imageOpen?: boolean;
 		activityRoot?: HTMLElement | null;
 	} = $props();
 
@@ -147,7 +147,7 @@
 	let recoveredFor: string | null = null;
 	$effect(() => {
 		const held = feedbackStatus?.controller();
-		if (!held || covered || !held.artifactId || held.imageHeld === 0) return;
+		if (!held || imageOpen || !held.artifactId || held.imageHeld === 0) return;
 		if (recoveredFor === held.artifactId) return;
 		recoveredFor = held.artifactId;
 		void held.sendImage();

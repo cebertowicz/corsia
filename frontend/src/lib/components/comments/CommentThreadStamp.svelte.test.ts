@@ -149,6 +149,33 @@ describe('CommentThread stamping', () => {
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
 	});
 
+	it('stamps a resolved thread\'s unread reply only once the thread is expanded and the reply dwells', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, resolved: true, replies: [reply('r1')], newReplyIds: ['r1'] };
+		FakeObserver.visibleOnObserve = true;
+		render(onViewed);
+		expect(FakeObserver.live()).toHaveLength(0);
+		host.querySelector<HTMLButtonElement>('.ct-res-head')!.click(); flushSync();
+		expect(newMarks()).toBe(1);
+		await dwell();
+		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+	});
+
+	it('cancels a resolved thread\'s dwell when it is collapsed before the reply has dwelled', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, resolved: true, replies: [reply('r1')], newReplyIds: ['r1'] };
+		FakeObserver.visibleOnObserve = true;
+		render(onViewed);
+		const head = host.querySelector<HTMLButtonElement>('.ct-res-head')!;
+		head.click(); flushSync();
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		head.click(); flushSync();
+		await settle();
+		expect(FakeObserver.live()).toHaveLength(0);
+		await dwell();
+		expect(onViewed).not.toHaveBeenCalled();
+	});
+
 	it('cancels dwell while the comment surface is covered and restarts on return', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };

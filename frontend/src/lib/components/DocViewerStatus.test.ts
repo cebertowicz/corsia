@@ -116,7 +116,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const sends = () => fetchMock.mock.calls.filter(([url]) => url === '/api/doc-feedback/send');
 		vi.stubGlobal('fetch', fetchMock);
 		try {
-			render(value(), undefined, { commentCount: 5, covered: true });
+			render(value(), undefined, { commentCount: 5, imageOpen: true });
 			component!.sync('artifact-1', { open_count: 5, document_held_count: 2, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 			flushSync();
 			const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!;
@@ -344,7 +344,7 @@ describe('DocViewerStatus held comments', () => {
 	});
 
 	it('sends image comments left held when no image viewer is open, once', async () => {
-		render(value(), undefined, { covered: false });
+		render(value(), undefined, { imageOpen: false });
 		component!.sync('artifact-1', held(0, 2));
 		flushSync();
 		await vi.waitFor(() => expect(sends()).toHaveLength(1));
@@ -356,7 +356,7 @@ describe('DocViewerStatus held comments', () => {
 	});
 
 	it('leaves the image lane to its viewer while an image is open', async () => {
-		render(value(), undefined, { covered: true });
+		render(value(), undefined, { imageOpen: true });
 		component!.sync('artifact-1', held(0, 2));
 		flushSync();
 		await Promise.resolve();
