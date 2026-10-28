@@ -6,6 +6,10 @@ import { setFocusMode } from './support/focusMode';
 
 test.use({ seedPerTest: true });
 
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
+});
+
 for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat answers land on comments and the reply chip opens them (${mode})`, async ({ page, request }) => {
   const focus = mode !== 'normal';
   test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name === 'chromium-mobile');
