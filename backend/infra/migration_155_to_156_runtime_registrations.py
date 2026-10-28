@@ -43,7 +43,21 @@ def migrate_155_to_156(conn: sqlite3.Connection) -> None:
              AND e.source_path='registry.ownership.rehome_on_thread_end'
              AND e.reason IN ('thread_ended:archived', 'thread_ended:purged',
                               'thread_ended:deleted', 'thread_ended:agent_disabled')
-             AND e.new_owner_thread_id=r.parent_thread_id"""
+             AND e.new_owner_thread_id=r.parent_thread_id
+             AND NOT EXISTS (
+                 SELECT 1 FROM artifact_registration_events later
+                 JOIN artifact_registration_events prior ON prior.artifact_id=later.artifact_id
+                 WHERE later.artifact_id=i.id
+                   AND prior.event_type='ownership_rehomed'
+                   AND prior.source_path='registry.ownership.rehome_on_thread_end'
+                   AND prior.reason IN ('thread_ended:archived', 'thread_ended:purged',
+                                        'thread_ended:deleted', 'thread_ended:agent_disabled')
+                   AND (later.created_at > prior.created_at OR
+                        (later.created_at = prior.created_at AND later.rowid > prior.rowid))
+                   AND COALESCE(later.source_path, '') != 'registry.ownership.rehome_on_thread_end'
+                   AND later.event_type IN ('ownership_rehomed', 'ownership_released', 'registered')
+                   AND later.old_owner_thread_id IS NOT later.new_owner_thread_id
+             )"""
     ).fetchall()
     repaired = {}
     for registration_id, artifact_id, launcher, registrant in rows:
@@ -53,19 +67,28 @@ def migrate_155_to_156(conn: sqlite3.Connection) -> None:
         repaired[artifact_id] = launcher
     now = datetime.now(timezone.utc).isoformat()
     for artifact_id, launcher in repaired.items():
-        conn.execute(
-            "UPDATE artifact_registrations SET relationship_state='subscriber-recent', updated_at=? "
+        owners = conn.execute(
+            "SELECT id,parent_thread_id,relationship_state FROM artifact_registrations "
             "WHERE artifact_id=? AND relationship_state IN ('owner-pinned','owner-active','unassigned-triage')",
-            (now, artifact_id),
-        )
-        conn.execute(
-            """INSERT INTO artifact_registration_events
-               (id, artifact_id, event_type, actor_thread_id, authority, reason, source_path,
-                causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
-                old_relationship_state, new_relationship_state, metadata, created_at)
-               VALUES (?,?,'ownership_released',NULL,'migration',
-                       'release rehomed provider session', 'infra.migration_155_to_156',
-                       NULL,?,?,NULL,'owner-active','subscriber-recent',NULL,?)""",
-            (str(uuid.uuid4())[:12], artifact_id, launcher, launcher, now),
-        )
+            (artifact_id,),
+        ).fetchall()
+        for registration_id, owner, state in owners:
+            conn.execute(
+                "UPDATE artifact_registrations SET relationship_state='subscriber-recent', updated_at=? WHERE id=?",
+                (now, registration_id),
+            )
+        # If the rehomed row was the only owner, the forward release belongs to
+        # the launcher. Otherwise record the actual demoted owner rows.
+        released = [(owner, state) for _, owner, state in owners] or [(launcher, 'owner-active')]
+        for owner, state in released:
+            conn.execute(
+                """INSERT INTO artifact_registration_events
+                   (id, artifact_id, event_type, actor_thread_id, authority, reason, source_path,
+                    causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
+                    old_relationship_state, new_relationship_state, metadata, created_at)
+                   VALUES (?,?,'ownership_released',NULL,'migration',
+                           'release rehomed provider session', 'infra.migration_155_to_156',
+                           NULL,?,?,NULL,?,'subscriber-recent',NULL,?)""",
+                (str(uuid.uuid4())[:12], artifact_id, owner, owner, state, now),
+            )
     # Re-running finds no rehomed registration rows, so it appends no new events.

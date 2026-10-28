@@ -55,6 +55,57 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
 
 
 @pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
+def test_later_deliberate_transfer_is_untouched(integration, kind):
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread, parent in (("parent", None), ("worker", "parent"), ("other", None)):
+        db.execute("INSERT INTO threads (id,user_id,spawned_by,lifecycle_state,created_at,updated_at) "
+                   "VALUES (?,'u',?,?, 't','t')", (thread, parent, "archived" if thread == "worker" else "active"))
+    db.commit()
+    artifact = dict(integration=integration, type=kind, external_id="session")
+    models.register_artifact(**artifact, parent_thread_id="worker", db=db)
+    rehome_artifact(**artifact, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    rehome_artifact(**artifact, new_owner_thread_id="other", actor_thread_id="parent",
+                    authority="test", reason="manual", source_path="test", db=db)
+    # Equal timestamps must still preserve event order via rowid.
+    db.execute("UPDATE artifact_registration_events SET created_at='same'")
+    before = [tuple(r) for r in db.execute("SELECT parent_thread_id,relationship_state FROM artifact_registrations ORDER BY 1")]
+    events = db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0]
+    migrate_155_to_156(db)
+    assert [tuple(r) for r in db.execute("SELECT parent_thread_id,relationship_state FROM artifact_registrations ORDER BY 1")] == before
+    assert ("other", "owner-active") in before
+    assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == events
+    migrate_155_to_156(db)
+    assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == events
+    db.close()
+
+
+def test_release_event_names_the_owner_row_demoted():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread in ("worker", "parent", "other"):
+        db.execute("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES (?,'u','t','t')", (thread,))
+    db.commit()
+    artifact = dict(integration="claude-code", type="session", external_id="session")
+    models.register_artifact(**artifact, parent_thread_id="worker", db=db)
+    rehome_artifact(**artifact, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    models.register_artifact(**artifact, parent_thread_id="other", db=db)
+    db.execute("UPDATE artifact_registrations SET relationship_state='owner-pinned' WHERE parent_thread_id='other'")
+    migrate_155_to_156(db)
+    row = db.execute("SELECT affected_thread_id,old_owner_thread_id,old_relationship_state "
+                     "FROM artifact_registration_events WHERE source_path='infra.migration_155_to_156'").fetchone()
+    assert tuple(row) == ("other", "other", "owner-pinned")
+    assert db.execute("SELECT relationship_state FROM artifact_registrations WHERE parent_thread_id='other'").fetchone()[0] == "subscriber-recent"
+    db.close()
+
+
+@pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
 def test_repaired_session_matches_forward_release(integration, kind):
     from core.thread_lifecycle import archive_settled_worker
     from infra.database import write_transaction
