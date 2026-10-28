@@ -192,8 +192,8 @@ async def test_an_owner_on_a_harness_without_a_confined_launch_is_refused(world)
     await request()
     await settle_all()
     outcome, reason = starts(rule)[0][:2]
-    assert outcome == "refused" and reason.startswith("Couldn't start this worker on")
-    assert _workers() == [] and "Couldn't start this worker on" in owner_wakes()[0]
+    assert outcome == "refused" and reason.startswith("Couldn't start this read-only agent on")
+    assert _workers() == [] and "Couldn't start this read-only agent on" in owner_wakes()[0]
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

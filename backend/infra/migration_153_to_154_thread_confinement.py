@@ -26,10 +26,6 @@ def migrate_153_to_154(conn: sqlite3.Connection) -> None:
     if "confined_read_dirs" not in columns:
         conn.execute("ALTER TABLE threads ADD COLUMN confined_read_dirs TEXT")
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "event_route_decisions" in tables:
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_event_route_decisions_unheld_starts "
-                     "ON event_route_decisions(outcome, id) "
-                     "WHERE request_identity IS NOT NULL AND reason IS NULL")
     if not {"artifact_identities", "artifact_registrations"} <= tables:
         return
     # A damaged session could have been the review record. Preserve the old

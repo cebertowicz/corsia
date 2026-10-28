@@ -129,9 +129,6 @@ EVENT_RULE_SCHEMA_SQL = f"""
     -- SQLite uses a partial index only when the query repeats its WHERE term, and these bind the outcome.
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_runs
         ON event_route_decisions(outcome, id);
-    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_unheld_starts
-        ON event_route_decisions(outcome, id)
-        WHERE request_identity IS NOT NULL AND reason IS NULL;
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_request
         ON event_route_decisions(rule_id, request_identity);
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_worker

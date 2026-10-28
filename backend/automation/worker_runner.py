@@ -6,16 +6,17 @@ spawn it makes runs inside, so no start is claimed twice:
 
 1. a started start a restart cut short (no worker, or a worker with no turn, no queued
    input and no process) settles ``no_result`` and releases its identity;
-2. with ``n`` slots free under the Claude Code limit, the ``n`` oldest queued starts are
-   claimed, each checked when it would start: its rule turned off or gone, or its owner
+2. with ``n`` slots free under the Claude Code limit, up to ``n`` runnable queued starts
+   are claimed in order, each checked when it would start: its rule turned off or gone, or its owner
    gone or paused, skips it (no replay; the identity is released) and takes no slot. At
    no free slot nothing is claimed or written, and the starts wait in the queue. A
    claimed start's inputs and brief are made (``automation.worker_inputs``) and it starts
    through ``delegate_task``'s own capped spawn with the ``review`` confinement on the
    owner's model. A Local only owner's start (the chat's own, or its project's cloud
-   off) binds a ready local model instead, the owner's own when that is one; with none
-   ready it is not claimed and waits ``queued``, held, keeping its place, and a catalog
-   change runs a pass (:func:`poke_on_catalog_change`). Spawn records the worker on the
+   off) waits queued until the owner's own model is a ready local model. Each pass scans
+   queued starts in order until its free slots are claimed, skipping disabled or unavailable
+   owners among the rows scanned. With no free slot it returns without scanning.
+   Spawn records the worker on the
    start (``rule_start``) before its first turn can run. If another spawn took the slot first, the start goes back to the queue
    at its place, never refused for it. Any other refusal ends it ``refused`` and tells
    the owner through ``worker.no_result``;
@@ -48,20 +49,15 @@ from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
 from infra.database import write_transaction
 from infra.db_async import run_in_db
 
-#: Starts claimed per pass at most; the rest wait for the next.
+#: Queue rows read per keyset page.
 BATCH = 8
 _RESTARTED = "a restart cut the start short"
-HELD_LOCAL = "held: local only, no local model ready"
+WAITING_LOCAL = "waiting: local only, model not ready"
 _SPAWN_FAILED = "refused: the start failed (delegation error)"
 _FAILED = "refused: the start failed"
 # "waited": the newest decision id queued while no slot was free. Process memory: it only
 # feeds the settle's product event, and a restart forgets it.
-_state: dict[str, Any] = {"lock": None, "task": None, "again": False, "open": False, "waited": 0,
-                          "checked_holds": False}
-
-
-class _HeldLocal(Exception):
-    """A Local only owner's claimed start found no ready local model: it goes back, held."""
+_state: dict[str, Any] = {"lock": None, "task": None, "again": False, "open": False, "waited": 0}
 
 
 def _lock() -> asyncio.Lock:
@@ -76,9 +72,6 @@ def poke(*, if_open: bool = False) -> None:
     """Run a pass soon (with ``if_open``, only while the last pass left a start open); one
     already running runs once more instead of a second starting. Best-effort: it never
     raises and never waits for the pass."""
-    from infra.state.ws import on_models_changed
-
-    on_models_changed(poke_on_catalog_change)
     if if_open and not _state["open"]:
         return
     try:
@@ -93,34 +86,6 @@ def poke(*, if_open: bool = False) -> None:
         _state["task"] = loop.create_task(_passes())
     except Exception:  # noqa: BLE001 - a turn end must never fail on the runner
         logger.exception("worker runner poke failed")
-
-
-def poke_on_catalog_change() -> None:
-    """A catalog change may have made a local model ready for a held start: run a pass
-    while one is open, from the loop or a DB worker alike."""
-    import infra.app_loop as app_loop
-
-    async def _on_loop() -> None:
-        await _release_holds_if_local_ready()
-        poke(if_open=True)
-
-    try:
-        app_loop.submit(_on_loop())
-    except app_loop.AppLoopUnavailable:
-        pass  # no loop, no runner: the continuation sweep runs a pass after a start
-
-
-async def _release_holds_if_local_ready() -> None:
-    from infra.local_only import ready_local_selectors
-
-    if await run_in_db(ready_local_selectors):
-        await run_in_db(_release_local_holds)
-
-
-def _release_local_holds() -> None:
-    with write_transaction(None, scope="worker_starts_release_local") as conn:
-        conn.execute("UPDATE event_route_decisions SET reason=NULL "
-                     "WHERE outcome='queued' AND request_identity IS NOT NULL AND reason=?", (HELD_LOCAL,))
 
 
 async def _passes() -> None:
@@ -139,25 +104,27 @@ async def drive() -> int:
     from subagents.cc_runtime_state import _LIVE
 
     async with _lock():
-        if not _state["checked_holds"]:
-            # Holds outlive a restart, but the catalog change that frees them may not.
-            _state["checked_holds"] = True
-            await _release_holds_if_local_ready()
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
         notices: list[Mapping[str, Any]] = []
         claimed = await run_in_db(_claim, None, notices)
-        if notices:
-            from automation import script_runner
-            for row in notices:
-                await run_in_db(worker_notices.notice_hold, row)
-            for owner in dict.fromkeys(row["thread_id"] for row in notices):
-                await script_runner._drive_owner(owner)
         claimed_ids = {row["id"] for row, _run_input in claimed}
         made = 0
         for row, run_input in claimed:
             made += await _start(row, run_input)
+        if notices:
+            from automation import script_runner
+            for row in notices:
+                try:
+                    await run_in_db(worker_notices.notice_wait, row)
+                except Exception:  # noqa: BLE001 - notices must not interrupt the pass
+                    logger.exception("worker wait notice failed for {}", row["id"])
+            for owner in dict.fromkeys(row["thread_id"] for row in notices):
+                try:
+                    await script_runner._drive_owner(owner)
+                except Exception:  # noqa: BLE001 - a notice drive must not interrupt the pass
+                    logger.exception("worker wait notice drive failed for {}", owner)
         for item in await run_in_db(_read, worker_settle.ready):
             if item.decision_id not in claimed_ids:
                 await _settle(item)
@@ -194,10 +161,17 @@ def _free(conn: sqlite3.Connection) -> int:
 
 
 def _claim(db: sqlite3.Connection | None = None, notices: list[Mapping[str, Any]] | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
-    """Claim up to one queued start per free slot, oldest first. With no slot free nothing
-    is written: the starts wait, and the newest of them is remembered as having waited.
-    Held starts are excluded until a catalog change makes a local model ready."""
+    """Scan oldest first until free slots are claimed or the queue is exhausted.
+
+    Every scanned disabled rule or unavailable owner is skipped; waits use no slot. With
+    no free slot the queue is not scanned, as for an ordinary capacity wait. Queued
+    rows are bounded by QUEUE_CAP times rules with queued starts, including disabled
+    or deleted rules, whose rows end skipped when scanned.
+    """
     from infra.queries import get_thread
+    from infra.local_only import inherited_local_only, ready_local_selectors
+    from llm.locality import locality_cause, project_cloud_models_off
+    from llm.resolution import catalog_row
 
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
     with write_transaction(db, scope="worker_starts_claim") as conn:
@@ -206,49 +180,45 @@ def _claim(db: sqlite3.Connection | None = None, notices: list[Mapping[str, Any]
             newest = conn.execute("SELECT MAX(id) FROM event_route_decisions").fetchone()[0]
             _state["waited"] = max(_state["waited"], newest or 0)
             return claimed
-        ready: list[tuple[str, ...]] = []
-        locality: dict[str, str | bool | None] = {}
+        ready = set(ready_local_selectors())
+        locality: dict[str, tuple[str | None, bool]] = {}
         owners: dict[str, Any] = {}
-        for row in worker_starts.queued(conn, min(free, BATCH)):
-            owner_id = row["thread_id"]
-            if owner_id not in owners:
-                owners[owner_id] = get_thread(owner_id, db=conn)
-            skipped = _skip(conn, row, owners[owner_id])
-            if skipped is not None:
-                worker_starts.end(conn, row["id"], SKIPPED, skipped)
-            else:
+        after = 0
+        while len(claimed) < free:
+            page = worker_starts.queued(conn, BATCH, after)
+            if not page:
+                break
+            for row in page:
+                after = row["id"]
+                owner_id = row["thread_id"]
+                if owner_id not in owners:
+                    owners[owner_id] = get_thread(owner_id, db=conn)
+                owner = owners[owner_id]
+                skipped = _skip(conn, row, owner)
+                if skipped is not None:
+                    worker_starts.end(conn, row["id"], SKIPPED, skipped)
+                    continue
                 if owner_id not in locality:
-                    locality[owner_id] = _local_model(conn, owners[owner_id], ready)
-                if locality[owner_id] is False:
-                    if worker_starts.hold(conn, row["id"], HELD_LOCAL) and notices is not None:
-                        notices.append(dict(row))
+                    cause = locality_cause(
+                        thread_local_only=inherited_local_only((owner_id,), db=conn),
+                        cloud_off=project_cloud_models_off(owner["project_id"], db=conn))
+                    model = owner["model"]
+                    resolved = catalog_row(model, db=conn) if cause and model else None
+                    selector = resolved.get("litellm_model") if resolved else model
+                    locality[owner_id] = (cause, selector in ready)
+                cause, model_ready = locality[owner_id]
+                if cause and not model_ready:
+                    if worker_starts.wait(conn, row["id"], WAITING_LOCAL) and notices is not None:
+                        notices.append({**dict(row), "cause": cause, "model": owner["model"]})
                 elif (run_input := worker_starts.claim(conn, row["id"])) is not None:
                     claimed.append((row, run_input))
+                    if len(claimed) >= free:
+                        break
     return claimed
 
 
-def _local_model(conn: sqlite3.Connection, owner: Mapping[str, Any],
-                 ready: list[tuple[str, ...]]) -> str | bool | None:
-    """The ready local model a Local only owner's start binds (its own model when that is
-    one), ``False`` when none is ready, ``None`` when the owner is not Local only. ``ready``
-    caches the catalog's ready local models for one pass."""
-    from infra.local_only import inherited_local_only, ready_local_selectors
-    from llm.locality import locality_cause, project_cloud_models_off
-
-    if locality_cause(thread_local_only=inherited_local_only((owner["id"],), db=conn),
-                      cloud_off=project_cloud_models_off(owner["project_id"], db=conn)) is None:
-        return None
-    if not ready:
-        ready.append(ready_local_selectors())
-    models = ready[0]
-    if owner["model"] and owner["model"] in models:
-        return owner["model"]
-    return models[0] if models else False
-
-
 def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, Any]:
-    """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`,
-    or :class:`_HeldLocal` when its Local only owner's last ready local model went away."""
+    """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
     from infra.queries import get_thread
@@ -258,9 +228,6 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     db = get_db()
     owner = dict(get_thread(row["thread_id"], db=db))
     project = owner.get("project_id")
-    local = _local_model(db, owner, [])
-    if local is False:
-        raise _HeldLocal
     # A skill whose declared result fails validation is not included, so one found here is valid.
     skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
@@ -269,7 +236,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
                                   "read that declares a valid result")
     facts = (run_input.get("event") or {}).get("facts") or {}
     root = inputs.owner_root(owner["id"], project, db)
-    return {"owner": owner, "model": local or owner.get("model"),
+    return {"owner": owner, "model": owner.get("model"),
             "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
@@ -316,13 +283,6 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         _state["waited"] = max(_state["waited"], row["id"])
         await run_in_db(_requeue, row["thread_id"], row["id"])
         return 0
-    except _HeldLocal:
-        held = await run_in_db(_requeue, row["thread_id"], row["id"], HELD_LOCAL)
-        if held:
-            await run_in_db(worker_notices.notice_hold, row)
-            from automation import script_runner
-            await script_runner._drive_owner(row["thread_id"])
-        return 0
     except Exception:  # noqa: BLE001 - a start that fails is told to its owner, not lost
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
         return await _refuse(row, run_input, _FAILED, waited)
@@ -332,10 +292,6 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             logger.warning("worker start {} was refused: {}", row["id"], started)
             cause = _SPAWN_FAILED
         return await _refuse(row, run_input, cause, waited)
-    if found["model"] != found["owner"].get("model"):
-        await run_in_db(worker_notices.notice_model, row, found["model"])
-        from automation import script_runner
-        await script_runner._drive_owner(row["thread_id"])
     return 1
 
 
@@ -345,13 +301,10 @@ def _made(decision_id: int, worker: str, check: str) -> None:
 
 
 # The queue's write transaction never reads workflow files; notices run afterward.
-def _requeue(owner: str, decision_id: int, held: str | None = None) -> bool:
-    entered = False
+def _requeue(owner: str, decision_id: int) -> None:
     with write_transaction(None, scope="worker_starts_requeue") as conn:
-        if worker_starts.requeue(conn, decision_id) and held:
-            entered = worker_starts.hold(conn, decision_id, held)
+        worker_starts.requeue(conn, decision_id)
     _remove_inputs(owner, decision_id)
-    return entered
 
 
 async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,

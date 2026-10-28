@@ -6,8 +6,8 @@ request identity (R24) and, once started, its worker's record. Evaluation record
 ``queued`` with the start's input and the identity, or ``skipped`` (a duplicate
 request, a loop, a missing identity, or ``queue full`` once its rule already has
 ``rule_runs.QUEUE_CAP`` starts waiting, as a ``run_script`` rule's runs). It stays ``queued`` while the Claude Code limit
-is full (R23), or, held with its reason, while its Local only owner has no local model
-ready: no worker exists until the runner claims it with a free slot and makes
+is full (R23), or while its Local only owner's model is not a ready local model:
+no worker exists until the runner claims it with a free slot and makes
 it ``started``, or ends it ``skipped`` or ``refused``. The worker's result settles it
 once as ``returned``, ``invalid`` or ``no_result``.
 
@@ -92,8 +92,8 @@ def any_open(db: sqlite3.Connection | None = None) -> bool:
     ).fetchone() is not None
 
 
-def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
-    """Up to ``limit`` unheld queued starts, oldest first, with their rule's
+def queued(db: sqlite3.Connection, limit: int, after: int = 0) -> list[Mapping[str, Any]]:
+    """Up to ``limit`` queued starts after ``after``, oldest first, with their rule's
     workflow and whether it is still on. No start's input is read here."""
     if limit <= 0:
         return []
@@ -102,8 +102,8 @@ def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
         "d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
         "r.workflow_id, r.enabled "
         "FROM event_route_decisions d LEFT JOIN event_rules r ON r.id=d.rule_id "
-        "WHERE d.outcome=? AND d.request_identity IS NOT NULL AND d.reason IS NULL ORDER BY d.id LIMIT ?",
-        (QUEUED, limit),
+        "WHERE d.outcome=? AND d.request_identity IS NOT NULL AND d.id>? ORDER BY d.id LIMIT ?",
+        (QUEUED, after, limit),
     ).fetchall()
 
 
@@ -129,10 +129,10 @@ def requeue(db: sqlite3.Connection, decision_id: int) -> bool:
     ).rowcount == 1
 
 
-def hold(db: sqlite3.Connection, decision_id: int, reason: str) -> bool:
-    """Say why a queued start waits; return whether it entered this hold."""
+def wait(db: sqlite3.Connection, decision_id: int, reason: str) -> bool:
+    """Note a queued start's wait once; return whether the note was set."""
     return db.execute("UPDATE event_route_decisions SET reason=? WHERE id=? AND outcome=? "
-                      "AND reason IS NOT ?", (reason, decision_id, QUEUED, reason)).rowcount == 1
+                      "AND reason IS NULL", (reason, decision_id, QUEUED)).rowcount == 1
 
 
 def made(db: sqlite3.Connection, decision_id: int, worker: str, check: str) -> None:

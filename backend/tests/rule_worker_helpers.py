@@ -129,8 +129,7 @@ def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
 
     monkeypatch.setattr(script_runner, "_drive_owner", drive_owner)
     monkeypatch.setattr(worker_runner, "_state",
-                        {"lock": None, "task": None, "again": False, "open": False, "waited": 0,
-                         "checked_holds": False})
+                        {"lock": None, "task": None, "again": False, "open": False, "waited": 0})
     yield {"root": root, "folder": folder, "project": project, "reply": reply, "driven": driven,
            "staging": folder / "staging" / "req"}
     shutil.rmtree(root, ignore_errors=True)
