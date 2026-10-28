@@ -8,6 +8,8 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Agents are offered mail, calendar and file actions only in chats a connected account is shared with.
+- After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
+- Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.
 - Provider and model settings use clearer wording for connection, account and usage states.
 - Clearer wording for sign-in, saved keys, host access and project errors.
@@ -72,9 +74,11 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Connections from paired devices work again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
+- Right-clicking CORSIA or Conductor in the left rail now opens a menu with Agent settings, plus Mark read or Mark unread when it applies, instead of an empty one.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
 - CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
+- Status banners such as Reconnecting no longer cover the tabs in the right pane.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 

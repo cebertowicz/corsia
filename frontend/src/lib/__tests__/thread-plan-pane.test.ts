@@ -431,15 +431,21 @@ describe("ThreadPlanPane", () => {
     expect(pause.disabled).toBe(true);
   });
 
-  it("unauthorized explains the inaccessible thread without exposing IDs", async () => {
-    mockFetch(403, {});
+  it.each([
+    [401, {}, "Sign in to see this plan."],
+    [403, {}, "You don’t have access to this chat. Choose another."],
+    [404, {}, "This chat isn’t available. Choose another."],
+    [500, { detail: "internal" }, "This plan couldn’t load"],
+  ])("shows the store's own message for a %i plan read", async (status, body, message) => {
+    mockFetch(status, body);
     component = mount(ThreadPlanPane, {
       target: host,
       props: { threadId: "t1" },
     });
     flushSync();
     await settle();
-    expect(host.textContent).toContain("isn’t available");
+    expect(host.querySelector(".plan-state")?.textContent?.trim().startsWith(message)).toBe(true);
+    expect(host.textContent).not.toContain("internal");
     expect(host.textContent).not.toContain("t1");
   });
 
@@ -537,7 +543,7 @@ describe("ThreadPlanPane", () => {
     row!.click();
     await settle();
 
-    expect(host.textContent).toContain("That item no longer needs you");
+    expect(host.textContent).toContain("That decision is closed");
     expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     __reset();
   });
@@ -614,7 +620,7 @@ describe("ThreadPlanPane", () => {
     indicator.click();
     await settle();
 
-    expect(host.textContent).toContain("That item no longer needs you");
+    expect(host.textContent).toContain("That decision is closed");
     expect(
       network.calls.filter((url) => url.includes("/api/attention/queue")),
     ).toHaveLength(1);
@@ -665,7 +671,7 @@ describe("ThreadPlanPane", () => {
     expect(counts).toHaveLength(1);
     expect(counts[0].textContent?.trim()).toBe("12 left");
     expect(counts[0].classList.contains("oversize")).toBe(true);
-    expect(counts[0].getAttribute("title")).toContain("40");
+    expect(counts[0].getAttribute("title")).toBe("This plan has more than 40 open tasks. Use Mark done or Won’t do on any that don’t need doing.");
     unmount(component);
     unmount(head!);
     component = null;

@@ -189,7 +189,12 @@
 {/if}
 
 <style>
-	.split { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+	/* A status banner pushes the split down in flow. The split reaches back up under it, its padding keeping the
+	   columns where they are, so the expanded leaf can hold its tab strip in the header band above the banner. */
+	.split {
+		flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden;
+		margin-top: calc(-1 * var(--status-banners-height, 0px)); padding-top: var(--status-banners-height, 0px);
+	}
 	.chat-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 	/* Hidden, not unmounted — see the comment on the element. */
 	.chat-col.offscreen { display: none; }

@@ -90,6 +90,7 @@ async def test_tool_refuses_without_awaiting_setup_lane_item(ownership_scope, tm
     assert result.server_saved and live.path.read_text() == "new"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_maximum_backlog_three_store_waits_policy_under_app_writer(ownership_scope, tmp_path):
     from tests.test_document_live_performance import maximum_message
@@ -119,6 +120,7 @@ async def test_maximum_backlog_three_store_waits_policy_under_app_writer(ownersh
     print(f"maximum-shared-backlog-three-waits-app-writer={elapsed:.3f}s")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_maximum_shared_flush_p99_real_policy_with_simulated_registration_drain(ownership_scope, tmp_path, monkeypatch):
     """Focused lane/policy cost under the app writer; registration and owed deletion
