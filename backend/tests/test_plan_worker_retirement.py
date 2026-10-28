@@ -114,12 +114,13 @@ def _lifecycle(db, thread_id: str) -> tuple:
 
 @pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
 def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integration, kind):
-    from registry.cc_session import registered_confinement
-    from subagents.cc_invocation import UNCONFINED
+    from infra import thread_confinement
 
     db = _db(monkeypatch)
     try:
         parent_plan, delegated, *_ = _returned(db, "Work")
+        thread_confinement.record(db, "worker", "review", ("/src",))
+        db.commit()
         for thread in ("parent", "worker"):
             metadata = None
             if integration == "claude-code" and thread == "worker":
@@ -133,9 +134,8 @@ def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integ
         _verdict(db, parent_plan.id, "accept", delegated.id)
         assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
         assert models.find_for_thread("parent", integration, kind, db=db)["external_id"] == "parent"
-        assert registered_confinement("parent", db) == UNCONFINED
-        if integration == "claude-code":
-            assert registered_confinement("worker", db).mode == "review"
+        assert thread_confinement.read_dirs("parent", db) is None
+        assert thread_confinement.read_dirs("worker", db) == ("/src",)
     finally:
         db.close()
 

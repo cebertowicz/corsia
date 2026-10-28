@@ -5,7 +5,15 @@ import uuid
 from datetime import datetime, timezone
 
 
-def migrate_154_to_155(conn: sqlite3.Connection) -> None:
+def migrate_155_to_156(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
+    if {"id", "spawned_by", "confinement", "confined_read_dirs"} <= columns:
+        conn.execute(
+            "UPDATE threads SET confinement=NULL, confined_read_dirs=NULL "
+            "WHERE (confinement IS NOT NULL OR confined_read_dirs IS NOT NULL) "
+            "AND (spawned_by IS NULL OR id IN "
+            "(SELECT spawned_by FROM threads WHERE spawned_by IS NOT NULL))"
+        )
     # Earlier migrations also support partial historical databases with no registry.
     if conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
@@ -56,7 +64,8 @@ def migrate_154_to_155(conn: sqlite3.Connection) -> None:
                 causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
                 old_relationship_state, new_relationship_state, metadata, created_at)
                VALUES (?,?,'ownership_released',NULL,'migration',
-                       'release rehomed provider session', 'infra.migration_154_to_155',
+                       'release rehomed provider session', 'infra.migration_155_to_156',
                        NULL,?,?,NULL,'owner-active','subscriber-recent',NULL,?)""",
             (str(uuid.uuid4())[:12], artifact_id, launcher, launcher, now),
         )
+    # Re-running finds no rehomed registration rows, so it appends no new events.

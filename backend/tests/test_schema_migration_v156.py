@@ -5,12 +5,12 @@ import sqlite3
 import pytest
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_154_to_155_runtime_registrations import migrate_154_to_155
+from infra.migration_155_to_156_runtime_registrations import migrate_155_to_156
+from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
+from infra import thread_confinement
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 from registry import models
-from registry.cc_session import registered_confinement
 from registry.ownership import rehome_artifact
-from subagents.cc_invocation import UNCONFINED
 
 
 @pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
@@ -20,6 +20,7 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
     db.executescript(SCHEMA_SQL)
     for thread in ("parent", "worker", "other"):
         db.execute("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES (?,'u','t','t')", (thread,))
+    db.execute("UPDATE threads SET spawned_by='parent' WHERE id='worker'")
     db.commit()
     metadata = {"claude_invocation": {"confinement": "review", "add_dirs": ["/src"],
                                        "working_dir": "/worker/confined"}}
@@ -34,18 +35,19 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
     models.register_artifact(**other, parent_thread_id="worker", db=db)
     rehome_artifact(**other, new_owner_thread_id="other", actor_thread_id=None,
                     authority="test", reason="manual", source_path="test", db=db)
-    if integration == "claude-code":
-        assert registered_confinement("parent", db).mode == "review"
     migrate_154_to_155(db)
+    if integration == "claude-code":
+        assert thread_confinement.read_dirs("parent", db) == ("/src",)
+    migrate_155_to_156(db)
     rows = db.execute("SELECT i.external_id,r.parent_thread_id FROM artifact_registrations r "
                       "JOIN artifact_identities i ON i.id=r.artifact_id ORDER BY 1,2").fetchall()
     assert [tuple(r) for r in rows] == [("child-session", "worker"),
                                         ("other-session", "other"), ("other-session", "worker")]
     if integration == "claude-code":
-        assert registered_confinement("parent", db) == UNCONFINED
-        assert registered_confinement("worker", db).mode == "review"
+        assert thread_confinement.read_dirs("parent", db) is None
+        assert thread_confinement.read_dirs("worker", db) == ("/src",)
     event_count = db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0]
-    migrate_154_to_155(db)
+    migrate_155_to_156(db)
     assert [tuple(r) for r in db.execute("SELECT i.external_id,r.parent_thread_id FROM artifact_registrations r "
                                         "JOIN artifact_identities i ON i.id=r.artifact_id ORDER BY 1,2")] == [tuple(r) for r in rows]
     assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == event_count
@@ -79,12 +81,14 @@ def test_repaired_session_matches_forward_release(integration, kind):
                         authority="thread_lifecycle", reason="thread_ended:archived",
                         source_path="registry.ownership.rehome_on_thread_end", db=repaired)
         migrate_154_to_155(repaired)
+        migrate_154_to_155(forward)
+        migrate_155_to_156(repaired)
         with write_transaction(forward, scope="test_archive") as conn:
             assert archive_settled_worker(conn, "worker")
         for db in (repaired, forward):
-            assert registered_confinement("parent", db) == UNCONFINED
+            assert thread_confinement.read_dirs("parent", db) is None
             if integration == "claude-code":
-                assert registered_confinement("worker", db).mode == "review"
+                assert thread_confinement.read_dirs("worker", db) == ("/src",)
             assert resolve(**artifact, db=db) is None
             artifact_id = db.execute("SELECT id FROM artifact_identities WHERE external_id='session'").fetchone()[0]
             latest = db.execute("SELECT event_type,old_owner_thread_id,new_owner_thread_id,"
@@ -101,14 +105,70 @@ def test_repaired_session_matches_forward_release(integration, kind):
         forward.close()
 
 
+@pytest.mark.parametrize("own_review", [False, True])
+def test_backfilled_spawned_parent_is_repaired_even_with_own_record(own_review):
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread, parent in (("root", None), ("parent", "root"), ("worker", "parent")):
+        db.execute("INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) "
+                   "VALUES (?,'u',?,'t','t')", (thread, parent))
+    db.commit()
+    metadata = {"claude_invocation": {"confinement": "review", "add_dirs": ["/src"],
+                                      "working_dir": "/worker/confined"}}
+    child = dict(integration="claude-code", type="session", external_id="child")
+    models.register_artifact(**child, parent_thread_id="worker", metadata=metadata, db=db)
+    if own_review:
+        models.register_artifact(integration="claude-code", type="session", external_id="own",
+                                 parent_thread_id="parent", metadata=metadata, db=db)
+    rehome_artifact(**child, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    migrate_154_to_155(db)
+    assert thread_confinement.read_dirs("parent", db) == ("/src",)
+    migrate_155_to_156(db)
+    assert thread_confinement.read_dirs("parent", db) is None
+    assert thread_confinement.read_dirs("worker", db) == ("/src",)
+    db.close()
+
+
+def test_v155_damaged_parent_backfill_is_cleared_and_leaf_kept():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread, parent in (("root", None), ("parent", "root"), ("worker", "parent")):
+        db.execute("INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) "
+                   "VALUES (?,'u',?,'t','t')", (thread, parent))
+    db.commit()
+    artifact = dict(integration="claude-code", type="session", external_id="child")
+    models.register_artifact(**artifact, parent_thread_id="worker", db=db, metadata={
+        "claude_invocation": {"confinement": "review", "add_dirs": ["/src"]}})
+    rehome_artifact(**artifact, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    models.register_artifact(integration="claude-code", type="session", external_id="bad",
+                             parent_thread_id="parent", db=db)
+    db.execute("UPDATE artifact_identities SET metadata='bad json' WHERE external_id='bad'")
+    migrate_154_to_155(db)
+    with pytest.raises(thread_confinement.ConfinementRecordDamaged):
+        thread_confinement.read_dirs("parent", db)
+    migrate_155_to_156(db)
+    assert thread_confinement.read_dirs("parent", db) is None
+    assert thread_confinement.read_dirs("worker", db) == ("/src",)
+    before = db.total_changes
+    migrate_155_to_156(db)
+    assert db.total_changes == before
+    db.close()
+
+
 def test_absent_or_partial_registry_is_a_noop():
     with sqlite3.connect(":memory:") as db:
-        migrate_154_to_155(db)
+        migrate_155_to_156(db)
         db.execute("CREATE TABLE artifact_identities (id TEXT)")
-        migrate_154_to_155(db)
+        migrate_155_to_156(db)
         assert db.execute("SELECT COUNT(*) FROM artifact_identities").fetchone()[0] == 0
 
 
 def test_migration_registered():
-    assert SCHEMA_VERSION == 155
-    assert MIGRATIONS[154] is migrate_154_to_155
+    assert SCHEMA_VERSION == 156
+    assert MIGRATIONS[155] is migrate_155_to_156

@@ -89,7 +89,7 @@ def _registration(db, artifact_id: str, thread_id: str):
     ).fetchone()
 
 
-def test_written_shared_document_survives_settlement_and_scratch_does_not(
+def test_written_shared_document_and_scratch_both_leave_with_their_task(
     write_path_scope,
 ):
     workspace, thread_id, db = write_path_scope
@@ -101,7 +101,7 @@ def test_written_shared_document_survives_settlement_and_scratch_does_not(
     scratch = workspace / ".threads" / "t1" / "working" / "scratch.md"
     scratch.write_text("task-scoped notes\n")
 
-    kept = registry_service.register_write_strict(
+    shared = registry_service.register_write_strict(
         thread_id, str(tracker), origin=origin, db=db,
     )
     retired = registry_service.register_write_strict(
@@ -109,15 +109,14 @@ def test_written_shared_document_survives_settlement_and_scratch_does_not(
     )
 
     # The path — not the caller — decides both exemption inputs.
-    assert kept["retention"] == "durable"
+    assert shared["retention"] == "durable"
     assert retired["retention"] == "ephemeral"
 
     _accept(db, node.id)
 
-    kept_row = _registration(db, kept["id"], thread_id)
-    assert kept_row["surfacing"] == "visible"
-    assert kept_row["retired_at"] is None
-
-    retired_row = _registration(db, retired["id"], thread_id)
-    assert retired_row["surfacing"] == "settled"
-    assert retired_row["retired_at"] is not None
+    for artifact in (shared, retired):
+        row = _registration(db, artifact["id"], thread_id)
+        assert row["surfacing"] == "settled"
+        assert row["retired_at"] is not None
+    # Only the row leaves: the shared document stays durable.
+    assert tracker.read_text() == "long-lived tracking document\n"
