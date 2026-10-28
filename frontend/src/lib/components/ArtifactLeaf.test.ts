@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
 		prepareCommentArrival: vi.fn(),
 		revealCommentArrival: vi.fn(),
 		addReply: vi.fn(),
+		markThreadViewed: vi.fn(),
 		resolveComment: vi.fn(),
 		ackComment: vi.fn(),
 		rangeFor: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('$lib/stores/docComments', async () => ({
 	remapComments: () => {},
 	loadComments: mocks.loadComments,
 	addReply: mocks.addReply,
+	markThreadViewed: mocks.markThreadViewed,
 	resolveComment: mocks.resolveComment,
 	ackComment: mocks.ackComment,
 	flushPositions: vi.fn(),
@@ -86,7 +88,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
+import { openTabDocumentImage, recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
 let host: HTMLElement;
@@ -180,6 +182,7 @@ beforeEach(() => {
 	mocks.prepareCommentArrival.mockReset();
 	mocks.revealCommentArrival.mockReset();
 	mocks.addReply.mockReset();
+	mocks.markThreadViewed.mockReset().mockResolvedValue(undefined);
 	mocks.resolveComment.mockReset();
 	mocks.ackComment.mockReset();
 	mocks.rangeFor.mockReset().mockReturnValue(null);
@@ -207,6 +210,7 @@ afterEach(() => {
 	host.remove();
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	resetDocPresenceForTests();
 });
 
@@ -478,6 +482,59 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		expect([...host.querySelectorAll<HTMLElement>('.participant-trigger')].map((row) => row.dataset.participantId)).toEqual(['agent-a', 'agent-b']);
 		expect([...host.querySelectorAll<HTMLElement>('.cm-presence-cursor')].map((row) => row.dataset.threadId)).toEqual(['agent-a', 'agent-b']);
 		expect(host.querySelector('.presence-row')?.textContent?.toLowerCase()).not.toContain('now');
+	});
+});
+
+describe('reply stamping through the document canvas', () => {
+	function setupObserver() {
+		const observers: Array<{ disconnected: boolean; target: Element | null }> = [];
+		vi.stubGlobal('IntersectionObserver', class {
+			disconnected = false;
+			target: Element | null = null;
+			constructor(private callback: IntersectionObserverCallback) { observers.push(this); }
+			observe(target: Element) { this.target = target; if (target.hasAttribute('data-reply-id')) this.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+			disconnect() { this.disconnected = true; }
+		});
+		return () => observers.filter((observer) => observer.target?.hasAttribute('data-reply-id'));
+	}
+	function seedReply() {
+		mocks.fetchContent.mockResolvedValue({ text: 'Document', revision: 'r-1', writable: true, artifact: { id: 'art-visible' } });
+		mocks.setComments({ 'art-visible': [{ id: 'comment', from: 0, to: 1, anchor: 'D', author: 'you', text: 'note', at: 'now', resolved: false, replies: [{ id: 'reply', author: 'agent', authorKind: 'agent', text: 'answer', at: 'now' }], newReplyIds: ['reply'] }] });
+		openArtifactTab(THREAD, { path: '/visible.md', title: 'visible.md' });
+		return get(threadWorkspaces)[THREAD].activeTabId!;
+	}
+	async function openComments() {
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
+		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+		flushSync();
+		await vi.waitFor(() => expect(document.querySelector('[data-reply-id="reply"]')).not.toBeNull());
+	}
+	it('stops a document reply dwell when its image opens', async () => {
+		const observers = setupObserver();
+		const tab = seedReply();
+		render();
+		await openComments();
+		await vi.waitFor(() => expect(observers().some((observer) => !observer.disconnected)).toBe(true));
+		openTabDocumentImage(THREAD, tab, { src: '/image.png', alt: 'image', from: 0, to: 1, top: 0, scrollTop: 0 });
+		flushSync();
+		expect(observers().every((observer) => observer.disconnected)).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 1600));
+		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
+	});
+	it('does not observe document replies while restoring their document place', async () => {
+		const observers = setupObserver();
+		const restore = deferred<void>();
+		mocks.restoreDocumentPlace.mockImplementation((_root, _place, options) => restore.promise.then(() => options.onPlaced()));
+		const tab = seedReply();
+		recordTabDocumentPlace(THREAD, tab, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		await vi.waitFor(() => expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(true));
+		await openComments();
+		expect(observers().filter((observer) => !observer.disconnected)).toHaveLength(0);
+		await new Promise((resolve) => setTimeout(resolve, 1600));
+		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
+		restore.resolve();
+		await vi.waitFor(() => expect(observers().some((observer) => !observer.disconnected)).toBe(true));
 	});
 });
 

@@ -184,7 +184,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
-    "browser_run_steps": _Entry("browser", summary="Run named server-owned browser setup steps", activity="Running setup"),
+    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),

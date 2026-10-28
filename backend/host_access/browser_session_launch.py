@@ -29,6 +29,7 @@ _COOKIE_TIMEOUT = 5.0
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
                   "priority", "sourceScheme", "sourcePort", "partitionKey")
 _SIGNIN_MISSED = "Saved sign-in wasn't used this time. This browser starts signed out."
+STREAM_MISMATCH = "managed browser stream did not use its reserved listener"
 
 
 class CopyRestoreError(RuntimeError):
@@ -83,6 +84,11 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
     from host_access.browser_download import is_private_download
     if not await asyncio.to_thread(is_private_download, owner._chrome):
         await asyncio.to_thread(browser_executables.verify_google, owner._chrome)
+    if runtime.record.profile:
+        from host_access.browser_orphan import close_orphans
+        owned = frozenset(item.chrome.process.pid for item in owner._sessions.values()
+                          if item.chrome is not None and not item.chrome.closed)
+        await asyncio.to_thread(close_orphans, runtime.record.profile, owned)
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
         headless=not runtime.record.show_window, ua=owner._user_agent)
@@ -113,7 +119,7 @@ async def verify_stream(owner: Any, runtime: Any, result: Any = None) -> None:
     except (ValueError, AttributeError):
         actual = None
     if result.returncode or result.timed_out or result.completion != "exited" or actual != runtime.chrome.stream_port:
-        raise RuntimeError("managed browser stream did not use its reserved listener")
+        raise RuntimeError(STREAM_MISMATCH)
     await asyncio.to_thread(require_listener, runtime.record.binding.pid, actual)
 
 
