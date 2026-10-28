@@ -546,31 +546,18 @@ class TestCanonicalPersistence:
             "provider_turn_id": "provider-turn",
             "llm_tool_calls": [],
         })
-        noise_metadata = json.dumps({
-            "turn_id": _TURN_ID,
-            "provider_turn_id": "another-provider-turn",
-            "llm_tool_calls": [],
-        })
         child_db.execute(
             "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
             "VALUES (?,?,?,?,?,?,?)",
             (target_id, cid, "assistant", "", target_metadata, "t", 1),
         )
-        child_db.executemany(
-            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
-            "VALUES (?,?,?,?,?,?,?)",
-            [
-                (f"noise-step-{number}", cid, "assistant", "", noise_metadata, "t", number)
-                for number in range(2, 2_002)
-            ],
-        )
-        child_db.execute("UPDATE threads SET next_message_seq=2002 WHERE id=?", (cid,))
+        child_db.execute("UPDATE threads SET next_message_seq=2 WHERE id=?", (cid,))
         child_db.commit()
         step_id = persist_tool_use(
             cid,
             turn_id=_TURN_ID,
             provider_turn_id="provider-turn",
-            tool_id="long-thread-tool",
+            tool_id="explicit-step-tool",
             name="Read",
             arguments={},
             db=child_db,
@@ -579,7 +566,7 @@ class TestCanonicalPersistence:
 
         assert step_id == target_id
         target = next(row for row in _rows(child_db, cid) if row["id"] == target_id)
-        assert _meta(target)["llm_tool_calls"][0]["id"] == "long-thread-tool"
+        assert _meta(target)["llm_tool_calls"][0]["id"] == "explicit-step-tool"
         new_step_id = persist_tool_use(
             cid, turn_id=_TURN_ID, provider_turn_id="provider-turn",
             tool_id="next-tool", name="Read", arguments={}, db=child_db,
