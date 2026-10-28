@@ -31,6 +31,7 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     _mid,
     _mutate,
     _operation,
+    _remove_inherited_dependency,
     _resolved,
     _revision,
     db,
@@ -826,6 +827,7 @@ _CASES = {
      '"a watch on an artifact needs the expected_event that ends it"'):
         _watch_on_own_artifact,
     # --- plans/dependencies.py ---
+    ("dependencies.py", 'f"Dependency is inherited from ancestor {inherited[\'via\']}; remove it there"'): _remove_inherited_dependency,
     ("dependencies.py", "_DEPENDENCY_REFUSED"): _operation(
         "add_dependency",
         {"node_id": NODE, "depends_on_node_id": NODE, "expected_revision": REV},

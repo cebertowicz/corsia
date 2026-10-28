@@ -109,6 +109,15 @@ def _operation(
     return build
 
 
+def _remove_inherited_dependency(db, scene):
+    phase = service.add_node(scene.plan_id, kind="phase", title="Phase", acceptance_criteria="Done", db=db)
+    child = service.add_node(scene.plan_id, kind="task", title="Child", acceptance_criteria="Done", parent_id=phase.id, db=db)
+    service.add_dependency(phase.id, scene.pending, db=db)
+    return partial(_mutate, db, scene.plan_id, "remove_dependency", {
+        "node_id": child.id, "depends_on_node_id": scene.pending, "expected_revision": child.revision,
+    }, _mid())
+
+
 def _artifact(db, *, external_id: str, owner: str | None) -> str:
     """Register one artifact identity, owned by a thread or by nobody.
 

@@ -24,7 +24,7 @@ def encoded_ids(node_ids) -> str:
 
 
 def unmet_prerequisites(
-    connection: sqlite3.Connection, node_ids, *, compact: bool = False,
+    connection: sqlite3.Connection, node_ids, *, compact: bool = False, include_met: bool = False,
 ) -> dict[str, list]:
     """Each node's prerequisites that are not accepted yet, in plan order.
 
@@ -36,21 +36,35 @@ def unmet_prerequisites(
     ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
     found: dict[str, list] = defaultdict(list)
     if ids:
-        columns = "d.node_id,p.id,p.state,p.plan_id,p.archived_at" if compact else """d.node_id,p.id,p.title,p.state,
-                       CASE WHEN p.plan_id<>n.plan_id THEN pl.owner_id END AS foreign_owner,
-                       CASE WHEN p.plan_id<>n.plan_id
-                            THEN COALESCE(NULLIF(t.title,''),'Untitled thread') END AS foreign_label"""
+        columns = "node_id,id,state,plan_id,archived_at,via" if compact else (
+            "node_id,id,title,state,foreign_owner,foreign_label,via"
+        )
+        unmet = "" if include_met else "AND p.state NOT IN ('accepted','accepted_with_followup')"
         for row in fetch_all(
             connection,
-            f"""SELECT {columns}
-                FROM plan_node_dependencies d
+            f"""WITH RECURSIVE ancestors(root,id,parent_id,depth,path) AS (
+                SELECT id,id,parent_id,0,','||id||',' FROM plan_nodes
+                WHERE id IN (SELECT value FROM json_each(?))
+                UNION ALL
+                SELECT a.root,n.id,n.parent_id,a.depth+1,a.path||n.id||','
+                FROM ancestors a JOIN plan_nodes n ON n.id=a.parent_id
+                WHERE instr(a.path,','||n.id||',')=0
+            ), candidates AS (
+                SELECT a.root AS node_id,p.id,p.title,p.state,p.plan_id,p.archived_at,
+                       CASE WHEN a.depth=0 THEN NULL ELSE a.id END AS via,
+                       CASE WHEN p.plan_id<>root.plan_id THEN pl.owner_id END AS foreign_owner,
+                       CASE WHEN p.plan_id<>root.plan_id
+                            THEN COALESCE(NULLIF(t.title,''),'Untitled thread') END AS foreign_label,
+                       p.order_key,ROW_NUMBER() OVER (PARTITION BY a.root,p.id ORDER BY a.depth) AS rank
+                FROM ancestors a JOIN plan_nodes carrier ON carrier.id=a.id
+                JOIN plan_nodes root ON root.id=a.root
+                JOIN plan_node_dependencies d ON d.node_id=a.id
                 JOIN plan_nodes p ON p.id=d.depends_on_node_id
-                JOIN plan_nodes n ON n.id=d.node_id
                 JOIN plans pl ON pl.id=p.plan_id
                 LEFT JOIN threads t ON t.id=pl.owner_id
-                WHERE d.node_id IN (SELECT value FROM json_each(?))
-                  AND p.state NOT IN ('accepted','accepted_with_followup')
-                ORDER BY d.node_id,p.order_key,p.id""",
+                WHERE (a.depth=0 OR (carrier.state IN ('pending','active','review_requested') AND carrier.archived_at IS NULL))
+                  {unmet}
+            ) SELECT {columns} FROM candidates WHERE rank=1 ORDER BY node_id,order_key,id""",
             (encoded_ids(ids),),
         ):
             found[str(row["node_id"])].append(row)

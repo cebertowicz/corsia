@@ -3,6 +3,8 @@
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from core.skill_validation import validate_skill_bundle
 from core.workflow_verdict_read import _subtrees, run_roots
 from tests.skill_sidecar_helpers import POINTER
@@ -73,6 +75,35 @@ def test_phase_dependencies_both_directions(db):
     from plans import admission
     assert admission.project(inner["id"], db=db)["condition"] == "blocked"
     assert admission.project(after["id"], db=db)["condition"] == "blocked"
+
+
+def test_nested_phase_dependency_blocks_inner_task_until_accepted(db):
+    from plans import admission, node_waits
+    from tests.plan_review_helpers import submit_review_evidence
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    outer = _phase(db, plan, "Outer", "outer")
+    before = _mutate(db, plan.id, "add", {"title": "Before", "acceptance_criteria": "Done", "size": "S", "parent_id": outer["id"]})["node"]
+    inner = _phase(db, plan, "Inner", "inner", outer["id"], "design")
+    child = _mutate(db, plan.id, "add", {"title": "Inner step", "acceptance_criteria": "Done", "size": "S", "parent_id": inner["id"]})["node"]
+    service.add_dependency(inner["id"], before["id"], db=db)
+    rows = node_waits.unmet_prerequisites(db, [child["id"]])[child["id"]]
+    assert [(r["id"], r["via"]) for r in rows] == [(before["id"], inner["id"])]
+    assert admission.project(child["id"], db=db)["condition"] == "blocked"
+    start = _mutate(db, plan.id, "start", {"node_id": child["id"], "expected_revision": child["revision"]})
+    assert start["admission"]["condition"] == "blocked"
+    assert start["admission"]["selection"] is None
+    with pytest.raises(service.PlanInputError, match=inner["id"]):
+        service.remove_dependency(child["id"], before["id"], db=db)
+    service.transition_node(before["id"], "active", actor_id="owner", provenance="test", db=db)
+    submit_review_evidence(before["id"], db=db, actor_id="owner")
+    service.transition_node(before["id"], "accepted", actor_id="owner", provenance="test", verification_result="passed", verified_by="reviewer", db=db)
+    assert admission.project(child["id"], db=db)["condition"] == "ready"
+    with pytest.raises(service.PlanInputError, match=inner["id"]):
+        service.remove_dependency(child["id"], before["id"], db=db)
+    current = service.get_node(child["id"], db=db)
+    started = _mutate(db, plan.id, "start", {"node_id": child["id"], "expected_revision": current.revision})
+    assert started["admission"]["condition"] == "running"
 
 
 def test_nested_versions_use_each_reference(db, monkeypatch, tmp_path):
