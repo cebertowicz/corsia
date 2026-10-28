@@ -12,8 +12,7 @@
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
-	import { chatReplyJump } from '$lib/stores/chatReplyJump';
-	import type { AttentionDestination } from '$lib/api/attentionQueue';
+	import { createChatReplyJumper } from './chatReplyJump';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -143,10 +142,7 @@
 			? hydrateSubagentThread(id, authToken).catch(() => null)
 			: Promise.resolve(null);
 		try {
-			await Promise.all([
-				loadFirstPage(id, myGen),
-				subagentRefresh,
-			]);
+			await Promise.all([loadFirstPage(id, myGen), subagentRefresh]);
 		} catch (e) {
 			console.error('selectThread fetch failed:', e);
 		}
@@ -214,50 +210,10 @@
 		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
 	};
 	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
-	async function jumpToChatReply(destination: AttentionDestination) {
-		const threadId = get(activeThreadId);
-		if (!threadId || !destination.cid || typeof destination.seq !== 'number') return;
-		const target = { threadId, messageId: destination.id, seq: destination.seq, cid: destination.cid };
-		const loaded = () => get(messages).some(row => row.thread_id === threadId && row.id === target.messageId);
-		let stub = () => focusRuns.find(run => run.firstSeq <= target.seq && target.seq <= run.lastSeq);
-		while (!loaded() && !stub() && pager.hasMore && !pager.error && !pager.loading && get(activeThreadId) === threadId) {
-			const before = pager.oldestId;
-			await loadOlderMessages();
-			if (pager.oldestId === before) break;
-		}
-		const run = stub();
-		while (!loaded() && run && get(activeThreadId) === threadId) {
-			const state = runLoads[run.lastId];
-			if (state?.loading || state?.error || state?.hasMore === false) break;
-			await loadRunRange(run, runLoader);
-		}
-		if (!loaded() || get(activeThreadId) !== threadId) return;
-		chatReplyJump.set(target);
-		await tick();
-		await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-		const row = messagesEl?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"]`);
-		const card = row?.querySelector<HTMLElement>(`[data-chat-comment="${CSS.escape(target.cid)}"]`);
-		chatReplyJump.set(null);
-		if (!card) return;
-		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])]
-			.find(element => element.dataset.commentIds?.split(',').includes(card.dataset.commentUuid ?? ''));
-		const focus = mark ?? card;
-		const priorTabIndex = focus.getAttribute('tabindex');
-		focus.tabIndex = -1;
-		focus.scrollIntoView({ block: 'center' });
-		focus.focus({ preventScroll: true });
-		card.classList.add('chat-reply-landed');
-		mark?.classList.add('chat-reply-mark-landed');
-		const clear = () => {
-			card.classList.remove('chat-reply-landed');
-			mark?.classList.remove('chat-reply-mark-landed');
-			if (priorTabIndex === null) focus.removeAttribute('tabindex'); else focus.setAttribute('tabindex', priorTabIndex);
-		};
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-			messagesEl?.addEventListener('scroll', clear, { once: true });
-			card.addEventListener('pointerdown', clear, { once: true });
-		} else window.setTimeout(clear, 2000);
-	}
+	const jumpToChatReply = createChatReplyJumper({
+		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
+		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
+	});
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {
 		const changed = focusSeen !== undefined && focusSeen !== focusOn();
@@ -343,12 +299,8 @@
 			try {
 				await Promise.all([
 					loadFirstPage(sid, myGen),
-					authToken
-						? loadCheckpoints(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
-					authToken
-						? hydrateSubagentThread(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
+					authToken ? loadCheckpoints(sid, authToken).catch(() => null) : Promise.resolve(null),
+					authToken ? hydrateSubagentThread(sid, authToken).catch(() => null) : Promise.resolve(null),
 				]);
 			} catch { /* ignore */ }
 		};

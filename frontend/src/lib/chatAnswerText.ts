@@ -1,3 +1,15 @@
+import type { Message } from '$lib/stores/threads';
+
+/** Remove answer-only transcript rows while retaining other message content. */
+export function visibleChatAnswerRows(rows: Message[]): Message[] {
+	return rows.flatMap((row) => {
+		if (row.role !== 'assistant' || !(row as any).chat_answer_cids?.length) return [row];
+		const content = visibleChatAnswerText(row.content, (row as any).chat_answer_cids);
+		if (!content && !row.reasoning && !row.toolHints?.length && !row.metadata?.tool_calls?.length && !(row as any).chat_comments?.length && !row.cards?.length) return [];
+		return [{ ...row, content }];
+	});
+}
+
 /** Remove only sections the server placed in chat comment threads. */
 export function visibleChatAnswerText(text: string, cids: readonly string[]): string {
 	if (!cids.length) return text;

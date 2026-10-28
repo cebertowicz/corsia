@@ -242,6 +242,13 @@ def _validate_input_shape(metadata, intent, role) -> None:
         raise ValueError(f"invalid model-bound input role: {role}")
 
 
+def _require_current_continuation(thread_id, continuation, connection):
+    if continuation is not None:
+        from automation.continuation.validity import require_current
+
+        require_current(thread_id, continuation, db=connection)
+
+
 def accept_thread_input(
     thread_id: str,
     *,
@@ -274,10 +281,7 @@ def accept_thread_input(
         )
         if duplicate is not None:
             return duplicate
-        if continuation is not None:
-            from automation.continuation.validity import require_current
-
-            require_current(thread_id, continuation, db=connection)
+        _require_current_continuation(thread_id, continuation, connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
         hold = _admission_hold(connection, model, thread_id=thread_id)

@@ -27,6 +27,13 @@ from api.thread_paging import (
 
 router = APIRouter(prefix="/api", tags=["threads"])
 
+
+def _attach_page_extras(db, thread_id, user_id, result):
+    attach_result_cards(db, thread_id, user_id, result)
+    if result is not None:
+        page = result['messages'] if isinstance(result, dict) else result[0]
+        attach_comments(db, thread_id, user_id, page)
+
 @router.post("/threads/{thread_id}/messages/{message_id}/cancel")
 async def cancel_inbox_message(thread_id: str, message_id: str, token: str = ""):
     """Cancel an unclaimed queued message without deleting the user's thought."""
@@ -114,10 +121,7 @@ async def get_messages(
                 result = read_authorized_page_with_summaries(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
-            attach_result_cards(db, thread_id, user["id"], result)
-            if result is not None:
-                page = result['messages'] if isinstance(result, dict) else result[0]
-                attach_comments(db, thread_id, user['id'], page)
+            _attach_page_extras(db, thread_id, user["id"], result)
             return result
         finally:
             db.close()
