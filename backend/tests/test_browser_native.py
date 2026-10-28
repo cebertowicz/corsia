@@ -295,9 +295,11 @@ def popup_fixture():
         '/': b'''<!doctype html><title>Opener</title><button id="open" onclick="window.open('/popup')">Sign in</button>
                   <output id="result"></output><script>window.addEventListener('message', e => {
                   document.querySelector('#result').textContent = e.data; });</script>''',
+        # Close after the click returns: a synchronous close can tear the target down before
+        # the click's own mouse-release is acknowledged, which the stock client reports as a timeout.
         '/popup': b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
                        <button id="finish" onclick="window.opener.postMessage(document.querySelector('#account').value, '*');
-                       window.close()">Finish</button>''',
+                       setTimeout(() => window.close())">Finish</button>''',
     }
 
     class Handler(BaseHTTPRequestHandler):
