@@ -243,16 +243,17 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
                                 'error': "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."}]
         # Cut deletes only the copied selection, in a text field and in an editable region.
         for request, setup, read in (
-                (3, "document.body.innerHTML = '<input id=field value=\"Cut me here\">';"
-                    "const field = document.querySelector('#field'); field.focus(); field.setSelectionRange(0, 7);",
+                # Each setup is a block: top-level const persists across evaluates and would redeclare.
+                (3, "{ document.body.innerHTML = '<input id=field value=\"Cut me here\">';"
+                    "const field = document.querySelector('#field'); field.focus(); field.setSelectionRange(0, 7); }",
                  "document.querySelector('#field').value"),
-                (4, "document.body.innerHTML = '<div id=editor contenteditable>Cut me here</div>';"
+                (4, "{ document.body.innerHTML = '<div id=editor contenteditable>Cut me here</div>';"
                     "const editor = document.querySelector('#editor'); editor.focus();"
                     "const range = document.createRange(); range.setStart(editor.firstChild, 0); range.setEnd(editor.firstChild, 7);"
-                    "getSelection().removeAllRanges(); getSelection().addRange(range);",
+                    "getSelection().removeAllRanges(); getSelection().addRange(range); }",
                  "document.querySelector('#editor').textContent")):
             async with browser_cdp.CdpClient(endpoint) as cdp:
-                await cdp.call('Runtime.evaluate', expression=setup)
+                assert 'exceptionDetails' not in await cdp.call('Runtime.evaluate', expression=setup)
             replies.clear()
             await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': request}, replies.append)
             await browser_clipboard.handle(thread, connection, {'type': 'clipboard_cut', 'id': request, 'text': 'Cut me '}, replies.append)
