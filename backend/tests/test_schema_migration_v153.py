@@ -71,7 +71,7 @@ def test_storage_ties_each_kind_to_its_own_fields_and_global_scope_to_a_shipped_
 
 
 def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_starts():
-    assert SCHEMA_VERSION == 160 and MIGRATIONS[152] is migrate_152_to_153
+    assert SCHEMA_VERSION == 161 and MIGRATIONS[152] is migrate_152_to_153
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):
@@ -79,13 +79,13 @@ def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
     db.execute("PRAGMA user_version=148")
     db.commit()
-    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 160
+    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 161
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     sync_shipped_rules(db)
     sync_shipped_rules(fresh)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
-    assert db.execute("SELECT id FROM event_rules WHERE kind='observe'").fetchall() == [
-        ("ruleset_github_pr_create",)]
+    assert db.execute("SELECT id FROM event_rules WHERE kind='observe' ORDER BY id").fetchall() == [
+        ("ruleset_github_mcp_pr_create",), ("ruleset_github_pr_create",)]
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated

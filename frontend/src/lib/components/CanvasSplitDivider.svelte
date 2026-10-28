@@ -43,7 +43,7 @@
 	class:dragging
 	role="separator"
 	aria-orientation="vertical"
-	aria-label="Resize artifact panel"
+	aria-label="Resize Files panel"
 	aria-valuemin={ARTIFACT_MIN}
 	aria-valuemax={Math.max(ARTIFACT_MIN, canvasWidth - CHAT_MIN - DIVIDER_WIDTH)}
 	aria-valuenow={Math.round(artifactWidth)}

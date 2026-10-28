@@ -17,7 +17,6 @@ from events.connectors import (
     ConnectorManifest,
     EventTypeDecl,
     ObservedArtifactDecl,
-    ShippedObserveRuleDecl,
     register,
 )
 if TYPE_CHECKING:
@@ -31,6 +30,7 @@ from events.identity import (
 )
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
@@ -339,9 +339,7 @@ MANIFEST = register(ConnectorManifest(
     build_artifact_ref=_artifact_ref,
     artifact_extractors={PR_TYPE: _pr_artifact_in_result},
     app_identities=frozenset({"https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"}),
-    shipped_observe_rules=(ShippedObserveRuleDecl(
-        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
-    ),),
+    shipped_observe_rules=GITHUB_OBSERVE_RULES,
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

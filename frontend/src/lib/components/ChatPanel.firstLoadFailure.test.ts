@@ -118,7 +118,7 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		expect(get(messages)).toEqual([]);
-		expect(host.textContent).toContain("Couldn't load this thread");
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
 		expect(host.querySelector('.empty-chat')).toBeNull();
 	});
 
@@ -240,7 +240,7 @@ describe('ChatPanel first-page failure', () => {
 		expect(signals.get('thread-a')?.aborted).toBe(true);
 		expect(signals.get('thread-b')?.aborted).toBe(false);
 		expect(host.textContent).toContain('hello b');
-		expect(host.textContent).not.toContain("Couldn't load this thread");
+		expect(host.textContent).not.toContain("Couldn’t load this chat. Try again.");
 		expect(vi.mocked(console.error).mock.calls.some(([text]) => String(text).includes('thread-a'))).toBe(false);
 	});
 
@@ -276,7 +276,7 @@ describe('ChatPanel first-page failure', () => {
 
 		expect(signals[0]?.aborted).toBe(false);
 		await vi.waitFor(() => expect(host.textContent).toContain('hello a'));
-		expect(host.textContent).not.toContain("Couldn't load this thread");
+		expect(host.textContent).not.toContain("Couldn’t load this chat. Try again.");
 	});
 
 	it('keeps this thread rows when a refresh of the SAME thread fails', async () => {
@@ -295,6 +295,6 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		expect(get(messages).map((m) => m.id)).toEqual(['b1']);
-		expect(host.textContent).toContain("Couldn't load this thread");
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
 	});
 });
