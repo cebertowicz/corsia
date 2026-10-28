@@ -19,6 +19,7 @@ import plans.admission as admission
 import plans.errors as errors
 import plans.material_events as material_events
 import plans.node_states as node_states
+import plans.node_waits as node_waits
 from plans.service import (
     _TERMINAL_STATES,
     PlanError,
@@ -145,8 +146,6 @@ def remove_dependency(node_id: str, depends_on_node_id: str, *,
         )
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
-        from plans import node_waits
-
         direct = connection.execute(
             "SELECT 1 FROM plan_node_dependencies WHERE node_id=? AND depends_on_node_id=?",
             (node_id, depends_on_node_id),
