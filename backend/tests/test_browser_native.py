@@ -197,7 +197,7 @@ def signin_popup_fixture(variant):
                 opening = (f"const w=window.open('', 'g_auth', 'popup,width=500,height=600'); w.location={url};"
                            if variant == 'blank-navigation' else
                            f"window.open({url}, 'g_auth', 'popup,width=500,height=600');")
-                body = f'''<!doctype html><title>Opener</title><button id="open">Sign in</button>
+                body = f'''<!doctype html><title>Opener</title><input id="control"><button id="open">Sign in</button>
                 <output id="result"></output><script>
                 document.querySelector('#open').onclick = () => {{ {opening} }};
                 setInterval(async () => {{ document.querySelector('#result').textContent =
@@ -261,6 +261,13 @@ async def _pane_click(thread, token, selector):
                                                 'button': 'left', 'clickCount': 1}, token)
 
 
+async def _pane_type_a(thread, token):
+    # Match BrowserLeaf's keydown/keyup messages and keyText for a printable key.
+    for event_type, text in (('keyDown', 'a'), ('keyUp', '')):
+        await browser_pane.key_event(thread, {'eventType': event_type, 'key': 'a', 'code': 'KeyA',
+                                               'keyCode': 65, 'text': text, 'modifiers': 0}, token)
+
+
 @pytest.mark.parametrize('variant', ['features', 'cross-origin', 'coop', 'blank-navigation'])
 async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, variant):
     thread, token = 'popup-variants', 'variant-pane'
@@ -274,6 +281,12 @@ async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, vari
             pane = asyncio.create_task(browser_stream._follow_page(thread, token, PaneFrames(), lambda _msg: None))
             await _wait_for_pane_endpoint(thread, token, opener)
             await asyncio.sleep(0.2)  # Allow target discovery replay to finish.
+            await _pane_click(thread, token, '#control')
+            await _pane_type_a(thread, token)
+            async with browser_cdp.CdpClient(opener) as cdp:
+                control = await cdp.call('Runtime.evaluate', expression="document.querySelector('#control').value",
+                                         returnByValue=True)
+            assert control.get('result', {}).get('value') == 'a', f'opener keyboard control failed: {control}'
             await _pane_click(thread, token, '#open')
             assert 'Account' in await native_owner.run(thread, ['snapshot'])
             popup = await native_owner.page_endpoint(thread)
@@ -284,14 +297,19 @@ async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, vari
                     result = await cdp.call('Runtime.evaluate', expression='window.opener === null', returnByValue=True)
                 assert result['result']['value'], 'COOP variant should sever the opener reference'
             await _pane_click(thread, token, '#account')
-            await browser_pane.key_event(thread, {'eventType': 'keyDown', 'key': 'a', 'code': 'KeyA',
-                                                   'keyCode': 65, 'text': 'signed in'}, token)
+            await _pane_type_a(thread, token)
             await _pane_click(thread, token, '#finish')
             await _wait_for_pane_endpoint(thread, token, opener)
             async def posted():
-                while 'signed in' not in await native_owner.run(thread, ['snapshot']):
+                while True:
+                    async with browser_cdp.CdpClient(opener) as cdp:
+                        result = await cdp.call('Runtime.evaluate', expression="document.querySelector('#result').textContent",
+                                                returnByValue=True)
+                    if result.get('result', {}).get('value') == 'a':
+                        return
                     await asyncio.sleep(0.1)
             await asyncio.wait_for(posted(), 5)
+            assert await native_owner.page_endpoint(thread) == opener
         finally:
             if pane:
                 pane.cancel()
