@@ -34,7 +34,7 @@ export function decodeAveragePeriods(value: unknown): number | undefined {
 
 function shortDate(iso: string): string {
 	const [, month, day] = iso.split('-').map(Number);
-	return `${MONTHS[month - 1]} ${day}`;
+	return `${MONTHS[month - 1]}\u00a0${day}`;
 }
 
 /** A window named by its dates: "Sep 28 to Oct 4", or "Oct 8" for one day. */

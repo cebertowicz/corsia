@@ -123,7 +123,7 @@ export function chartGeometry(spec: ChartSpec, W: number, ML: number, MR: number
 			const txt = spec.valueFormat(p.value);
 			const ln = txt.length * 0.62 * labFs;
 			const may = p.ma !== null ? y(p.ma) : null;
-			if (rot) {
+			if (rot && txt.length > 1) {
 				let yb = top - 4;
 				if (may !== null && yb - ln - 2 <= may && may <= yb + 3 && may - 5 - ln >= 4) yb = may - 5;
 				labels.push({ kind: 'text', cls: 'vl', x: Number(f1(cx + 4)), y: Number(f1(yb)), anchor: 'start', text: txt, rotate: { x: Number(f1(cx + 4)), y: Number(f1(yb)) } });

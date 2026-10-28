@@ -86,6 +86,40 @@ function sizeHeadline(): string {
 }
 
 describe('MeasurementKpiRow', () => {
+	it('explains the empty tiles without comparing empty periods', async () => {
+		const empty = { latest: { value: null, n: 0 }, previous: { value: null, n: 0 } };
+		body = windowsBody({ estimated_human_hours_per_active_hour: empty, first_try_acceptance: empty, active_hours_per_outcome: empty });
+		measurementCost.update((s) => ({ ...s, data: { ...costData(null), latest: costPeriod(null, 0) } }));
+		const zeros = { total: figure(0), input: figure(0), cache_write: figure(0), cache_read: figure(0), output: figure(0) };
+		await render(state({ current: period({ tokens: zeros }), previous: period({ tokens: zeros }) }));
+		expect(tile('work')).toContain('Shows when work and your attention are recorded.');
+		expect(tile('first-try')).toContain('Shows when agents grade accepted outcomes.');
+		expect(tile('minutes')).toContain('Shows when your attention and accepted outcomes are recorded.');
+		expect(tile('cost')).toContain('Shows when work and its cost are recorded.');
+		expect(tile('tokens')).toContain('Tokens – Shows when agents use tokens.');
+		expect(host.querySelector('[data-kpi="tokens"] dl')).toBeNull();
+		for (const node of host.querySelectorAll('[data-kpi] small')) expect(node.textContent).not.toMatch(/\bn\b|n\/a|\bvs\b|\bnew\b/i);
+	});
+
+	it('keeps comparison text when the latest window is empty but the previous has data', async () => {
+		const emptyLatest = { latest: { value: null, n: 0 }, previous: { value: 0.5, n: 40 } };
+		body = windowsBody({ estimated_human_hours_per_active_hour: emptyLatest, first_try_acceptance: emptyLatest, active_hours_per_outcome: emptyLatest });
+		measurementCost.update((s) => ({ ...s, data: { ...costData(costPeriod(1.55, 40)), latest: costPeriod(null, 0) } }));
+		const zeros = { total: figure(0), input: figure(0), cache_write: figure(0), cache_read: figure(0), output: figure(0) };
+		await render(state({ current: period({ tokens: zeros }), previous: before }));
+		for (const id of ['work', 'first-try', 'minutes', 'cost']) expect(tile(id)).toContain('n 0, n/a vs Sep 21 to Sep 27 (n 40)');
+		expect(tile('tokens')).not.toContain('Shows when agents use tokens.');
+	});
+
+	it('reads 0+ with its parts when calls recorded no token count, never the no-tokens sentence', async () => {
+		const uncounted = { total: figure(0, 3), input: figure(0, 3), cache_write: figure(0, 3), cache_read: figure(0, 3), output: figure(0, 3) };
+		const zeros = { total: figure(0), input: figure(0), cache_write: figure(0), cache_read: figure(0), output: figure(0) };
+		await render(state({ current: period({ tokens: uncounted }), previous: period({ tokens: zeros }) }));
+		expect(tile('tokens')).toContain('Tokens 0+');
+		expect(tile('tokens')).not.toContain('Shows when agents use tokens.');
+		expect(host.querySelector('[data-kpi="tokens"] dl')).not.toBeNull();
+	});
+
 	it('shows the five tiles in order, each a number and unit with its window, n and change', async () => {
 		await render(state({ current: period(), previous: before }));
 		expect([...host.querySelectorAll('[data-kpi]')].map((node) => (node as HTMLElement).dataset.kpi)).toEqual(['work', 'first-try', 'cost', 'minutes', 'tokens']);
@@ -97,22 +131,37 @@ describe('MeasurementKpiRow', () => {
 		expect(host.querySelector('h2')).toBeNull();
 	});
 
-	it('reads new when a previous window has no value or too few outcomes, and withholds a value under the minimum n', async () => {
+	it('keeps dates and sample counts together', async () => {
+		await render(state({ current: period(), previous: before }));
+		expect(host.querySelector('[data-kpi="work"] small')!.textContent).toContain('Sep\u00a028 to Oct\u00a04, n\u00a01,349, +206% vs Sep\u00a021 to Sep\u00a027 (n\u00a0451)');
+	});
+
+	it('preserves low-n warnings on populated tiles', async () => {
+		const low = { latest: { value: 0.1, n: 12 }, previous: { value: 0.2, n: 40 } };
+		body = windowsBody({ estimated_human_hours_per_active_hour: low, first_try_acceptance: low, active_hours_per_outcome: low });
+		measurementCost.update((s) => ({ ...s, data: { ...costData(costPeriod(1.55, 40)), latest: costPeriod(1.49, 12) } }));
+		await render(state({ current: period(), previous: before }));
+		for (const id of ['work', 'first-try', 'minutes', 'cost']) expect(tile(id)).toContain('n 12, low n vs Sep 21 to Sep 27 (n 40)');
+	});
+
+	it('shows the new comparison when a previous window has no value, and withholds a value under the minimum n', async () => {
 		body = windowsBody({
 			estimated_human_hours_per_active_hour: { latest: { value: 53.2, n: 2317 }, previous: { value: null, n: 450 } },
 			first_try_acceptance: { latest: { value: null, n: 12 }, previous: { value: 0.8, n: 451 } },
 		});
 		measurementCost.update((s) => ({ ...s, data: costData(null) }));
 		await render(state({ current: period(), previous: period({ from: '2026-09-21', to: '2026-09-27', tokens: { total: figure(0), input: figure(0), cache_write: figure(0), cache_read: figure(0), output: figure(0) } }) }));
-		expect(tile('work')).toContain('53 h Sep 28 to Oct 4, n 2,317, new');
+		expect(tile('work')).toContain('53 h Sep 28 to Oct 4, n 2,317, new vs Sep 21 to Sep 27 (n 450)');
 		expect(tile('first-try')).toContain('– Sep 28 to Oct 4, n 12, n/a vs Sep 21 to Sep 27 (n 451)');
-		expect(tile('cost')).toContain('$1.49 Sep 28 to Oct 4, n 1,187, new');
-		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new');
+		expect(tile('cost')).toContain('$1.49 Sep 28 to Oct 4, n 1,187');
+		expect(tile('tokens')).toContain('Sep 28 to Oct 4');
+		expect(tile('tokens')).not.toContain(' vs ');
 	});
 
-	it('reads new on the tokens tile when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
+	it('gives the tokens tile no comparison when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
 		await render(state({ current: period(), previous: { ...before, tokens_recorded: false } }));
-		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new vs Sep 21 to Sep 27');
+		expect(tile('tokens')).toContain('Sep 28 to Oct 4');
+		expect(tile('tokens')).not.toContain(' vs ');
 		expect(tile('tokens')).not.toContain('%');
 	});
 
@@ -126,7 +175,8 @@ describe('MeasurementKpiRow', () => {
 		seedPanels(body, { size: panel });
 		component = mount(MeasurementKpiRow, { target: host, props: { state: state({ current: period(), previous: before }), onRetry: vi.fn() } });
 		flushSync(); await tick();
-		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
+		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349');
+		expect(tile('work')).toContain('new vs Sep 21 to Sep 27 (n 451)');
 		expect(sizeHeadline()).toBe('92 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toContain('+5% vs Sep 21 to Sep 27 (n 451)');
 	});
@@ -142,9 +192,9 @@ describe('MeasurementKpiRow', () => {
 		component = mount(MeasurementKpiRow, { target: host, props: { state: state({ current: period(), previous: before }), onRetry: vi.fn() } });
 		flushSync(); await tick();
 		// The tile, the section headline and the served window agree: one figure, never a second pool of the drawn days.
-		expect(tile('work')).toContain('40 h Sep 28 to Oct 4, n 1,349, new');
+		expect(tile('work')).toContain('40 h Sep 28 to Oct 4, n 1,349');
 		expect(sizeHeadline()).toBe('40 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
-		expect(tile('cost')).toContain('– Sep 28 to Oct 4, n 12, ');
+		expect(tile('cost')).toContain('– Sep 28 to Oct 4, n 12');
 	});
 
 	it('reads every token figure on the tile to the same three significant digits', async () => {
