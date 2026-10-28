@@ -47,7 +47,6 @@ function live() {
 	};
 }
 
-const settled = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 const rows = () => get(docComments).artifact ?? [];
 const row = (id: string) => rows().find((comment) => comment.id === id);
 
@@ -58,8 +57,8 @@ async function opened() {
 	mocks.fetchComments.mockResolvedValue({ comments: ROWS, feedback: {} });
 	await loadComments('artifact');
 	doc.answer(doc.asks().at(-1)!, ['c0', 'c1']);
-	await settled();
-	expect(rows().map((comment) => comment.placement)).toEqual(['placed', 'placed']);
+	// Placement awaits a SHA-256 digest of the text, which no fixed number of timer ticks bounds.
+	await vi.waitFor(() => expect(rows().map((comment) => comment.placement)).toEqual(['placed', 'placed']));
 	return doc;
 }
 
