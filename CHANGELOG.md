@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- The reasoning level you pick for a local model is now the level it runs at.
 - Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
 - When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
 - Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
