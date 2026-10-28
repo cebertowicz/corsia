@@ -182,6 +182,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     started = []
     cleared = []
     events = []
+    notices = []
     change_ready = asyncio.Event()
 
     async def stream(*_args):
@@ -198,7 +199,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     monkeypatch.setattr(browser_stream, '_metadata_events', stream)
     monkeypatch.setattr(browser_pane, 'watch_targets', watch)
     monkeypatch.setattr(browser_pane, 'clear_page_endpoint', lambda *args: cleared.append(args))
-    task = asyncio.create_task(browser_stream._follow_page('thread', 'pane', object(), lambda _m: None))
+    task = asyncio.create_task(browser_stream._follow_page('thread', 'pane', object(), notices.append))
     for _ in range(20):
         if len(started) == 2:
             break
@@ -208,6 +209,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     assert cleared == [('thread', 'pane')]
+    assert notices == [{'type': 'browser_target_changed'}]
     assert events == [(('browser_pane', 'target_changed'), {'thread_id': 'thread'})]
     assert 'thread' not in browser_pane_state._target_changes
 

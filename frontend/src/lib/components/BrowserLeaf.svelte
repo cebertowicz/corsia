@@ -6,6 +6,7 @@
 	import { clampPoint, drawShifted, FrameScrollShift } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
@@ -48,6 +49,8 @@
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
 	let decodeWarned = false;
+	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
+	const clipboardKeys = new Set<string>();
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const paneInput = new BrowserPaneInput(message => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -56,14 +59,16 @@
 		redraw();
 	});
 
-	function resetPointer() {
+	function resetInput() {
+		clipboard?.dispose();
+		clipboardKeys.clear();
 		paneInput.reset();
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
 	}
 
 	function connect() {
-		resetPointer();
+		resetInput();
 		socket?.close();
 		ended = false;
 		if (status.startsWith('Browser stream')) status = '';
@@ -90,7 +95,7 @@
 				ended = true;
 			}
 			streaming = false;
-			resetPointer();
+			resetInput();
 		};
 	}
 
@@ -115,6 +120,12 @@
 		try {
 			message = JSON.parse(raw) as Record<string, unknown>;
 		} catch {
+			return;
+		}
+		if (clipboardReply(message, clipboard, error => { status = error; })) return;
+		if (message.type === 'browser_target_changed') {
+			lastAppearance = '';
+			sendAppearance();
 			return;
 		}
 		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
@@ -271,6 +282,10 @@
 		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
 		paneInput.flush();
+		if (clipboardKey(event, clipboardKeys, () => clipboard ??= new BrowserPaneClipboard(
+			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
+			navigator.clipboard, data => new ClipboardItem(data)
+		), () => { status = 'Could not access the clipboard'; })) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)

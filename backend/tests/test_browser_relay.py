@@ -59,6 +59,39 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
 
 
 @pytest.mark.asyncio
+async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
+    actions = []
+    delivered = asyncio.Event()
+    async def selection(thread, connection):
+        actions.append(('selection', thread, connection))
+        return 'chosen'
+    async def paste(thread, connection, text):
+        actions.append(('paste', thread, connection, text))
+    async def cut(thread, connection, text):
+        actions.append(('cut', thread, connection, text))
+        delivered.set()
+    monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_selection', selection)
+    monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_paste', paste)
+    monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_cut', cut)
+    class Pane(FakePane):
+        async def receive_text(self):
+            if self.messages:
+                return self.messages.pop(0)
+            await delivered.wait()
+            raise WebSocketDisconnect()
+    pane = Pane([json.dumps(message) for message in [
+        {'type': 'clipboard_selection', 'id': 1},
+        {'type': 'clipboard_paste', 'text': 'host'},
+        {'type': 'clipboard_cut', 'text': 'chosen'},
+    ]])
+    with pytest.raises(WebSocketDisconnect):
+        await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
+    assert [action[0] for action in actions] == ['selection', 'paste', 'cut']
+    assert len({action[2] for action in actions}) == 1
+    assert actions[1][3] == 'host' and actions[2][3] == 'chosen'
+
+
+@pytest.mark.asyncio
 async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance(monkeypatch):
     first_started, third_started = asyncio.Event(), asyncio.Event()
     release_first, release_third, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()

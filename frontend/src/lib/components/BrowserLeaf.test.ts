@@ -91,6 +91,14 @@ afterEach(() => {
 });
 
 describe('BrowserLeaf drawing', () => {
+	it('resends the pane appearance after following another page target', () => {
+		const { socket } = render();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		expect(appearances()).toHaveLength(1);
+		socket.receive({ type: 'browser_target_changed' });
+		expect(appearances()).toHaveLength(2);
+		expect(appearances()[1]).toEqual(appearances()[0]);
+	});
 	it('clears the old letterbox when the page size changes inside an unchanged pane', async () => {
 		const { socket } = render();
 		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
@@ -101,6 +109,30 @@ describe('BrowserLeaf drawing', () => {
 		socket.receive({ type: 'frame', metadata: { deviceWidth: 50, deviceHeight: 50 }, data: '' });
 		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,0,100,100']));
 	});
+});
+
+describe('BrowserLeaf clipboard shortcuts', () => {
+ it('copies the selected page text to the host clipboard', async () => {
+  let written: Promise<Blob> | undefined;
+  const write = vi.fn(async (items: { data: Record<string, Promise<Blob>> }[]) => { written = items[0].data['text/plain']; await written; });
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, readText: vi.fn() } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', metaKey: true, bubbles: true, cancelable: true }));
+  expect(socket.sent).toContainEqual({ type: 'clipboard_selection', id: 1 });
+  socket.receive({ type: 'clipboard_selection', id: 1, text: 'page selection' });
+  await vi.waitFor(() => expect(written).toBeDefined());
+  expect(await (await written!).text()).toBe('page selection');
+ });
+ it('uses the host clipboard for paste and forwards select-all to the page', async () => {
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(), readText: vi.fn().mockResolvedValue('host text') } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: 'clipboard_paste', text: 'host text' }));
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a', modifiers: 2 }));
+ });
 });
 
 describe('BrowserLeaf navigation metadata', () => {

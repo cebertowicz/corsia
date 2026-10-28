@@ -138,6 +138,21 @@ async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
     await browser_cdp.dispatch_key_event(endpoint, event)
 
 
+async def clipboard_selection(thread_id: str, connection_token: str) -> str:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be copied")
+    return await browser_cdp.clipboard_selection(endpoint)
+
+
+async def clipboard_paste(thread_id: str, connection_token: str, text: str) -> None:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't receive pasted text")
+    await browser_cdp.clipboard_paste(endpoint, text)
+
+
+async def clipboard_cut(thread_id: str, connection_token: str, text: str) -> None:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be cut")
+    await browser_cdp.clipboard_cut(endpoint, text)
+
+
 async def open_url(thread_id: str, url: str, connection_token: str | None = None) -> str:
     """Open a pane URL: a connected pane navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(

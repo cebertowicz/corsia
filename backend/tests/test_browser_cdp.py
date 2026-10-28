@@ -144,6 +144,43 @@ async def test_dispatch_mouse_event_sets_the_pressed_button_mask(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(('button', 'mask'), [('right', 2), ('middle', 4)])
+async def test_dispatch_mouse_event_uses_the_pressed_button_mask(monkeypatch, button, mask):
+    calls = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            calls.append(params)
+            return {}
+    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
+    await browser_cdp.dispatch_mouse_event('endpoint', {
+        'eventType': 'mousePressed', 'x': 10, 'y': 20, 'button': button, 'clickCount': 1,
+    })
+    assert calls[0]['buttons'] == mask
+    await browser_cdp.dispatch_mouse_event('endpoint', {
+        'eventType': 'mouseMoved', 'x': 15, 'y': 20, 'button': button, 'clickCount': 0,
+    })
+    assert calls[1]['buttons'] == mask
+
+
+@pytest.mark.asyncio
+async def test_clipboard_selection_and_paste_use_the_page_target(monkeypatch):
+    calls = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            calls.append((method, params))
+            return {'result': {'value': 'selected'}} if method == 'Runtime.evaluate' else {}
+    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
+    assert await browser_cdp.clipboard_selection('endpoint') == 'selected'
+    await browser_cdp.clipboard_paste('endpoint', 'paste text')
+    assert calls[0][0] == 'Runtime.evaluate'
+    assert calls[1] == ('Input.insertText', {'text': 'paste text'})
+
+
+@pytest.mark.asyncio
 async def test_dispatch_key_event_preserves_meta_modifier_and_text(monkeypatch):
     calls = []
 

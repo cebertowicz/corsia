@@ -166,7 +166,8 @@ async def dispatch_mouse_event(endpoint: str, event: dict) -> None:
             params["button"] = button
         # CDP does not infer the held-button mask from `button`; a pointer press
         # must carry it or a background shared page can ignore the click sequence.
-        params["buttons"] = 1 if event_type == "mousePressed" else 0
+        params["buttons"] = ({"left": 1, "right": 2, "middle": 4, "back": 8, "forward": 16}.get(button, 0)
+                             if event_type != "mouseReleased" else 0)
         if click_count is not None:
             if not isinstance(click_count, int) or isinstance(click_count, bool) or click_count < 0:
                 raise BrowserSessionError("This page couldn't receive pointer input")
@@ -204,6 +205,52 @@ async def dispatch_key_event(endpoint: str, event: dict) -> None:
         params["commands"] = ["selectAll"]
     async with CdpClient(endpoint) as cdp:
         await cdp.call("Input.dispatchKeyEvent", **params)
+
+
+# Read only the person's selected text. Password controls deliberately retain Chrome's no-copy behavior.
+_SELECTION = """(() => {
+ let node = document.activeElement;
+ while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+ if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+  if (node.type === 'password' || node.selectionStart === null || node.selectionEnd === null) return '';
+  return node.value.slice(node.selectionStart, node.selectionEnd);
+ }
+ return window.getSelection()?.toString() || '';
+})()"""
+
+
+async def clipboard_selection(endpoint: str) -> str:
+    """Read the page selection for a person's explicit copy or cut."""
+    async with CdpClient(endpoint) as cdp:
+        result = await cdp.call("Runtime.evaluate", expression=_SELECTION, returnByValue=True)
+    value = result.get("result", {}).get("value")
+    if result.get("exceptionDetails") or not isinstance(value, str):
+        raise BrowserSessionError("This page's selection couldn't be copied")
+    return value
+
+
+async def clipboard_paste(endpoint: str, text: str) -> None:
+    """Insert the person's clipboard into the focused page field."""
+    async with CdpClient(endpoint) as cdp:
+        await cdp.call("Input.insertText", text=text)
+
+
+async def clipboard_cut(endpoint: str, text: str) -> None:
+    """Delete only if the same selection remains in an editable field after the copy succeeded."""
+    expected = json.dumps(text)
+    expression = f"""(() => {{
+ const selected = {_SELECTION};
+ let node = document.activeElement;
+ while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+ if (selected !== {expected} || !selected || !node) return false;
+ const editable = (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)
+  ? !node.readOnly && !node.disabled && node.type !== 'password' : node.isContentEditable;
+ return editable && document.execCommand('delete');
+}})()"""
+    async with CdpClient(endpoint) as cdp:
+        result = await cdp.call("Runtime.evaluate", expression=expression, returnByValue=True)
+    if result.get("exceptionDetails") or result.get("result", {}).get("value") is not True:
+        raise BrowserSessionError("This page's selection couldn't be cut")
 
 
 async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitable[None]], url: object = None) -> None:

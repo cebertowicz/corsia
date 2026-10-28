@@ -21,6 +21,7 @@ from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
+from ws import browser_clipboard
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
@@ -180,6 +181,7 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
                     task.cancel()
             await asyncio.gather(*streams, return_exceptions=True)
             browser_pane.clear_page_endpoint(thread_id, connection_token)
+            report({"type": "browser_target_changed"})  # Device metrics belong to each page target.
     finally:
         browser_pane_state.unwatch_target_changes(thread_id, connection_token)
         watcher.cancel()
@@ -221,6 +223,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                 elif kind == "input_keyboard":
                     await browser_pane.key_event(thread_id, data, connection_token)
                     browser_control.person_input(thread_id)
+                elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_cut"}:
+                    await browser_clipboard.handle(thread_id, connection_token, data, report)
 
     tasks: set[asyncio.Task] = set()
     try:
