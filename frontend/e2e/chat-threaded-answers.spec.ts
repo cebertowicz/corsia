@@ -20,7 +20,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await waitForWsConnected(page);
   const row = page.locator(`[data-message-id="${target}"]`);
   if (mode === 'normal') {
-    await page.locator('.messages').evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')); });
+    await page.getByRole('button', { name: 'Load older messages' }).click();
     await expect(row).toBeAttached();
   }
   if (mode === 'focus-collapsed') await page.getByRole('button', { name: /Expand (Worked|Background work)/ }).first().click();
