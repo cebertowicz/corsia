@@ -56,7 +56,7 @@ def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
 
 
 def unmet_prerequisites(
-    connection: sqlite3.Connection, node_ids, *, compact: bool = False,
+    connection: sqlite3.Connection, node_ids, *, compact: bool = False, inherit: bool = True,
 ) -> dict[str, list]:
     """Each node's prerequisites that are not accepted yet, in plan order.
 
@@ -64,8 +64,9 @@ def unmet_prerequisites(
     unmet and never will be met; the caller names that as its own cause.
     An open ancestor's edges hold its descendants too (``via`` names that
     ancestor). This read is the one place that inheritance lives: writers
-    change and record only the edges a node owns, so a step's inherited
-    wait is derived here, never stored or evented on the step.
+    pass ``inherit=False`` to change and record only the edges a node owns,
+    so a step's inherited wait is derived here, never stored or evented on
+    the step.
     For a prerequisite in another plan (#1552), ``foreign_owner`` is the
     thread owning it and ``foreign_label`` that thread's title; else None.
     """
@@ -79,6 +80,15 @@ def unmet_prerequisites(
     # Nearest first, so a prerequisite reached at several levels keeps the
     # nearest one.
     touched = set()
+    inherited = f"""UNION ALL
+            SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
+            FROM up JOIN plan_node_dependencies d ON d.node_id=up.id
+            JOIN plan_nodes n ON n.id=up.id
+            {"" if compact else "JOIN plan_nodes r ON r.id=up.root"}
+            JOIN plan_nodes p ON p.id=d.depends_on_node_id
+            JOIN plans pl ON pl.id=p.plan_id
+            LEFT JOIN threads t ON t.id=pl.owner_id
+            WHERE {node_states.open_sql('n')} AND {inherited_sql('p.id', 'up.id')} {unmet}"""
     for row in fetch_all(
         connection,
         f"""WITH RECURSIVE up(root,id,depth) AS (
@@ -95,15 +105,7 @@ def unmet_prerequisites(
             JOIN plans pl ON pl.id=p.plan_id
             LEFT JOIN threads t ON t.id=pl.owner_id
             WHERE d.node_id IN (SELECT value FROM json_each(?1)) {unmet}
-            UNION ALL
-            SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
-            FROM up JOIN plan_node_dependencies d ON d.node_id=up.id
-            JOIN plan_nodes n ON n.id=up.id
-            {"" if compact else "JOIN plan_nodes r ON r.id=up.root"}
-            JOIN plan_nodes p ON p.id=d.depends_on_node_id
-            JOIN plans pl ON pl.id=p.plan_id
-            LEFT JOIN threads t ON t.id=pl.owner_id
-            WHERE {node_states.open_sql('n')} AND {inherited_sql('p.id', 'up.id')} {unmet}
+            {inherited if inherit else ""}
             ORDER BY 1,depth,order_key,2""",
         (encoded_ids(ids),),
     ):
@@ -257,5 +259,5 @@ def project(connection: sqlite3.Connection, rows) -> dict[str, tuple[list[str], 
 
 
 def waits_on_dependency(connection: sqlite3.Connection, node_id: str, state: str) -> bool:
-    """Whether an open node has an unmet dependency: the writer-side delta test."""
-    return state in WAITABLE_STATES and bool(unmet_prerequisites(connection, [node_id]))
+    """Whether an open node has an unmet edge of its own: the writer-side delta test."""
+    return state in WAITABLE_STATES and bool(unmet_prerequisites(connection, [node_id], inherit=False))

@@ -46,6 +46,28 @@ def test_retiring_a_phase_prerequisite_releases_its_open_steps(db, retire):
     assert service.get_node(step.id, db=db).unmet_dependencies == []
 
 
+def test_step_blocked_events_follow_its_own_edges_while_its_phase_waits(db):
+    def events(node_id):
+        return [r[0] for r in db.execute(
+            "SELECT event FROM plan_node_events WHERE node_id=? AND event LIKE 'blocked_%' ORDER BY rowid", (node_id,),
+        )]
+
+    plan = owner_plan(db)
+    own = _node(db, plan, "Own")
+    outer = _node(db, plan, "Outer")
+    phase = _node(db, plan, "Phase", "phase")
+    step = _node(db, plan, "Step", parent=phase.id)
+    service.add_dependency(step.id, own.id, db=db)
+    service.add_dependency(phase.id, outer.id, db=db)
+    _mark_done(db, plan.id, own.id)
+
+    assert events(step.id) == ["blocked_raised", "blocked_cleared"]
+    assert service.get_node(step.id, db=db).unmet_dependencies == [outer.id]
+    _mark_done(db, plan.id, outer.id)
+    assert events(step.id) == ["blocked_raised", "blocked_cleared"]
+    assert service.get_node(step.id, db=db).unmet_dependencies == []
+
+
 def test_inherited_rows_deduplicate_prefer_nearest_and_allow_direct_removal(db):
     plan = owner_plan(db)
     before = _node(db, plan, "Before")
