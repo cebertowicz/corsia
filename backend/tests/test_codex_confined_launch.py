@@ -24,11 +24,24 @@ from test_codex_confined_capture import definitions
     {"type": "function", "name": "clock"},
 ])
 def test_full_surface_refuses_any_extra_native_or_hosted_tool(extra):
-    with pytest.raises(ConfinementRefused, match="Choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         confinement.assert_tools([*definitions(), extra])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
 
 
-@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.163.0", ""])
+def test_missing_tool_refusal_has_same_message():
+    with pytest.raises(ConfinementRefused) as error:
+        confinement.assert_tools(definitions()[:-1])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
+
+
+@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.166.0", ""])
 @pytest.mark.asyncio
 async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, monkeypatch, version):
     binary = tmp_path / "fake-codex"
@@ -40,9 +53,24 @@ async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, mo
     session = CodexAppServerSession(binary=str(binary), task="review", corsia_thread_id="worker",
                                     dynamic_tools=definitions())
     monkeypatch.setattr(session, "build_env", lambda: pytest.fail("auth must not be projected"))
-    with pytest.raises(ConfinementRefused, match="choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         await session.start()
+    display_version = version.removeprefix("codex-cli ") or "(version unknown)"
+    assert str(error.value) == (
+        f"Couldn’t start this read-only agent on Codex {display_version}: "
+        "read-only agents work only on Codex 0.162.1, 0.163.0, 0.164.0 and 0.165.0. "
+        "Switch Codex to one of those, or choose another model."
+    )
     assert session._proc is None
+
+
+@pytest.mark.parametrize("version", sorted(confinement.CAPTURED_CODEX_VERSIONS))
+@pytest.mark.asyncio
+async def test_captured_versions_are_admitted(tmp_path, version):
+    binary = tmp_path / "fake-codex"
+    binary.write_text(f"#!{sys.executable}\nprint({version!r})\n")
+    binary.chmod(0o700)
+    await confinement.verify_version(str(binary))
 
 
 @pytest.mark.asyncio
