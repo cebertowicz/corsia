@@ -453,11 +453,12 @@ def test_migration_preserves_reopened_rows_and_admits_rejected_rows(isolated_db)
         db.execute("CREATE INDEX idx_doc_feedback_batch_items_comment ON doc_feedback_batch_items(comment_id)")
         rewind_to_v88_policy(db)
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=82")
         db.commit()
 
         assert migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute(
             "SELECT event FROM doc_feedback_batch_items WHERE comment_id=?", (comment["id"],)

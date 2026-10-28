@@ -107,6 +107,7 @@ def _legacy_db(path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=59")
         db.commit()
     return ids, watched
@@ -130,7 +131,7 @@ def _parent_heard(db) -> tuple[int, int]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_open_event_waits_get_a_deadline_and_keep_their_event(tmp_path):

@@ -21,7 +21,7 @@ def test_fresh_schema_is_v73_with_edit_items_and_delivery_outcome():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
 
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert "delivery_outcome" in _columns(db, "doc_feedback_batches")
         assert {
             "batch_id",
@@ -40,6 +40,7 @@ def test_fresh_schema_is_v73_with_edit_items_and_delivery_outcome():
 def test_v72_startup_migration_adds_edit_feedback_schema_idempotently():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
@@ -63,6 +64,7 @@ def test_dev_v70_database_upgrades_through_every_document_migration():
     """A database at dev's v70 has none of the train's document schema."""
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')

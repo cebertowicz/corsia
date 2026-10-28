@@ -499,6 +499,7 @@ def test_migration_adds_the_tables_and_columns_once(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=46")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

@@ -169,6 +169,7 @@ def test_startup_migration_backfills_and_runs_only_once(db):
     from infra.schema import SCHEMA_VERSION
 
     _, event = _seed_event(db)
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=150")
     db.commit()
     assert migrate_to_current(db, SCHEMA_VERSION).migrated

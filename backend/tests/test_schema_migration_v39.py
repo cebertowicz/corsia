@@ -27,7 +27,7 @@ def _watch(db, watch_id: str):
 
 
 def test_an_unbound_plan_wait_expires_and_wakes_its_owner():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     db = _db()
     try:
         plan, node, _other = _plan(db)
@@ -45,6 +45,7 @@ def test_an_unbound_plan_wait_expires_and_wakes_its_owner():
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=38")
         db.commit()
 

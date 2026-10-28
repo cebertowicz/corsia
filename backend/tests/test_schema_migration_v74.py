@@ -19,7 +19,7 @@ def _columns(db) -> set[str]:
 def test_fresh_schema_has_the_checkpoint_through_at_column():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert "through_at" in _columns(db)
 
 
@@ -27,6 +27,7 @@ def test_startup_migration_adds_through_at(tmp_path):
     path = tmp_path / "legacy-checkpoint-through-at-v73.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         # Wind the table back to its v73 shape: the column did not exist.
         db.execute("ALTER TABLE checkpoints DROP COLUMN through_at")
         rewind_to_v88_policy(db)

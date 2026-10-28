@@ -38,12 +38,13 @@ def _v103_database(path):
         # A file with both a legacy code row and an image row: only one may hold the key.
         _identity(db, "twin-code", type_="code", external_id="/ws/g.png", path="/ws/g.png")
         _identity(db, "twin-image", type_="image", external_id="/ws/g.png", path="/ws/g.png")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=103")
         db.commit()
 
 
 def test_migration_is_registered():
-    assert SCHEMA_VERSION == 162 and MIGRATIONS[103] is migrate_103_to_104
+    assert SCHEMA_VERSION == 163 and MIGRATIONS[103] is migrate_103_to_104
 
 
 def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):
@@ -53,7 +54,7 @@ def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):
         before = _rows(db)
         migrate_to_current(db, SCHEMA_VERSION)
         after = _rows(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 162
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 163
 
     retyped = {"png", "upper", "logical", "svg"}
     for identity_id in retyped:

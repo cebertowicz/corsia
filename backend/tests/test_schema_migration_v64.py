@@ -40,12 +40,13 @@ def _legacy_63(path) -> None:
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=63")
         db.commit()
 
 
 def test_fresh_schema_is_the_current_version_with_the_seen_columns():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[63] is migrate_63_to_64
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)

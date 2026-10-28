@@ -192,6 +192,24 @@ def _check_since(name: str, spec: dict[str, Any], events: dict[str, dict[str, An
         raise fail(lines, path + ("as",), f"event {name} since.as must name a num or count attribute of the end event.")
 
 
+def _check_where(name: str, operand: dict[str, Any], path: tuple[Any, ...], context: _Context) -> None:
+    where = operand.get("where")
+    if where is None:
+        return
+    if not isinstance(where, dict) or len(where) > 2:
+        raise fail(context.lines, path + ("where",), f"kpi {name} where needs at most two conditions.")
+    for event in _event_names(operand):
+        attrs = _attributes(event, context.events) or {}
+        for key, value in where.items():
+            kind = attrs.get(key, "id" if event in context.events and key in ("run_id", "workflow_ref") else None)
+            kind = getattr(kind, "kind", kind)
+            is_enum = kind == "enum" or isinstance(kind, dict) and "enum" in kind
+            if kind != "id" and not is_enum:
+                raise fail(context.lines, path + ("where", key), f"kpi {name} where needs an id or enum attribute on every event.")
+            if is_enum and value in ("present", "absent"):
+                raise fail(context.lines, path + ("where", key), f"kpi {name} where present and absent are allowed only on id attributes.")
+
+
 def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> None:
     coverage = spec.get("coverage")
     operands: list[tuple[tuple[str, ...], Any]] = [((key,), spec.get(key)) for key in ("num", "den")]
@@ -200,6 +218,11 @@ def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> N
     for position, operand in operands:
         if not isinstance(operand, dict):
             continue
+        path = ("kpis", name) + position
+        _check_where(name, operand, path, context)
+        for index, clause in enumerate(operand.get("match", [])):
+            if isinstance(clause, dict):
+                _check_where(name, clause, path + ("match", index), context)
         for field in ("latest", "first"):
             if field not in operand:
                 continue
@@ -216,6 +239,8 @@ def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> N
                 attrs = _attributes(event, context.events)
                 for key in keys:
                     kind = attrs.get(key) if attrs is not None and isinstance(key, str) else None
+                    if event in context.events and key in ("run_id", "workflow_ref"):
+                        kind = "id"
                     kind = getattr(kind, "kind", kind)
                     if kind != "id" and kind != "enum" and not (isinstance(kind, dict) and "enum" in kind):
                         raise fail(context.lines, path, f"kpi {name} {field} needs id or enum attributes declared on every event.")

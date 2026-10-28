@@ -19,7 +19,7 @@ def _columns(db) -> set[str]:
 def test_fresh_schema_has_checkpoint_snapshot_columns():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert {"artifact_snapshot_json", "plan_status_snapshot_json"} <= _columns(db)
 
 
@@ -27,6 +27,7 @@ def test_startup_migration_adds_checkpoint_snapshot_columns(tmp_path):
     path = tmp_path / "legacy-checkpoint-snapshots-v42.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         # Wind the table back to its v42 shape: the snapshot columns did not
         # exist, and a legacy installed row carries nothing to migrate.
         db.execute("ALTER TABLE checkpoints DROP COLUMN artifact_snapshot_json")

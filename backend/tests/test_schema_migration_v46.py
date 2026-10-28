@@ -43,7 +43,7 @@ def _mark(db, entry_id: int) -> tuple:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_answerless_selections_become_unmarked_and_answered_ones_stay():
@@ -103,6 +103,7 @@ def test_startup_migration_runs_from_45(tmp_path):
     path = tmp_path / "placement-answers.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES ('t', 'u', 'x', 'x')"
         )

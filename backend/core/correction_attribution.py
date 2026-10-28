@@ -129,6 +129,65 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
+def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Keep the latest classification for each source, preserving first on ties."""
+    latest: dict[tuple[str, str], tuple[str, sqlite3.Row]] = {}
+    for row in rows:
+        attributes = json.loads(row['attributes'])
+        key = (str(row['source_kind']), str(row['source_id']))
+        seen = str(attributes.get('classified_at') or '')
+        if key not in latest or seen > latest[key][0]:
+            latest[key] = (seen, row)
+    return [row for _, row in latest.values()]
+
+
+def measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+    """Latest facts of Measurement's activated classifier, retaining task attribution."""
+    rows = db.execute(_ATTRIBUTED_SQL + f" WHERE {_ACTIVE_VERSION_ONLY}").fetchall()
+    facts = []
+    for row in _latest_classifications(rows):
+        attributes = json.loads(row['attributes'])
+        facts.append(AttributedFact(
+            str(row['source_kind']), str(row['source_id']), row['source_at'],
+            str(attributes.get('asset_version')), attributes.get('label') == LABEL_CORRECTION,
+            row['node_id']))
+    return facts
+
+
+def plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+    """Plan-sourced correction facts, attributed to the work they corrected.
+
+    Missing source events and missing corrected nodes stay unattributed.
+    """
+    rows = db.execute("""
+        SELECT f.subject_key,e.created_at AS source_at,f.attributes,n.id AS source_node
+        FROM outcome_events f
+        LEFT JOIN plan_node_events e ON e.id = CASE
+          WHEN f.subject_key LIKE 'plan-review-rejected:%'
+            THEN substr(f.subject_key, length('plan-review-rejected:') + 1)
+          WHEN f.subject_key LIKE 'plan-correction-created:%'
+            THEN substr(f.subject_key, length('plan-correction-created:') + 1)
+          END AND ((f.subject_key LIKE 'plan-review-rejected:%' AND e.event='review_rejected')
+                OR (f.subject_key LIKE 'plan-correction-created:%' AND e.event='correction_created'))
+        LEFT JOIN plan_nodes n ON n.id = CASE
+          WHEN e.event='review_rejected' THEN e.node_id
+          WHEN e.event='correction_created' AND json_valid(e.payload_json)
+            THEN json_extract(e.payload_json,'$.source_node_id') END
+        WHERE f.event_name=? AND f.retracted_at IS NULL
+          AND (f.subject_key LIKE 'plan-review-rejected:%'
+            OR f.subject_key LIKE 'plan-correction-created:%')
+    """, (CORRECTION_EVENT,)).fetchall()
+    facts = []
+    for row in rows:
+        attributes = json.loads(row['attributes'])
+        kind = str(attributes.get('source_kind') or '')
+        facts.append(AttributedFact(kind, str(attributes.get('source_id') or ''), row['source_at'],
+                                    str(attributes.get('asset_version') or ''),
+                                    attributes.get('label') == LABEL_CORRECTION,
+                                    row['source_node']))
+    return facts
+
+
 def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:
     """The person's corrections arriving in [start, end) as (arrival time, target thread), one per source.
 
@@ -142,17 +201,12 @@ def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tup
     A source whose arrival cannot be resolved has no time and is left out.
     """
     rows = db.execute(_TIMED_SQL, {"start": start, "end": end}).fetchall()
-    latest: dict[tuple[str, str], tuple[str, bool, str, str | None]] = {}
-    for row in rows:
-        if row["source_at"] is None:
-            continue
-        attributes = json.loads(row["attributes"])
-        key = (str(row["source_kind"]), str(row["source_id"]))
-        seen = str(attributes.get("classified_at") or "")
-        if key not in latest or seen > latest[key][0]:
-            latest[key] = (seen, attributes.get("label") == LABEL_CORRECTION, str(row["source_at"]),
-                           None if row["target_thread"] is None else str(row["target_thread"]))
-    return [(at, thread) for _, is_correction, at, thread in latest.values() if is_correction]
+    timed = (row for row in rows if row["source_at"] is not None)
+    return [
+        (str(row["source_at"]), None if row["target_thread"] is None else str(row["target_thread"]))
+        for row in _latest_classifications(timed)
+        if json.loads(row["attributes"]).get("label") == LABEL_CORRECTION
+    ]
 
 
 def workflow_run_of(node_id: str | None, parents: Mapping[str, str | None], runs: Iterable[str]) -> str:

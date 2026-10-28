@@ -18,7 +18,7 @@ def _indexes(db) -> set[str]:
 def test_fresh_schema_has_checkpoint_listing_index():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert "checkpoints_listing" in _indexes(db)
 
 
@@ -26,6 +26,7 @@ def test_startup_migration_adds_checkpoint_listing_index(tmp_path):
     path = tmp_path / "legacy-checkpoint-listing-v33.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("DROP INDEX checkpoints_listing")
         rewind_below_v42(db)
         rewind_to_v88_policy(db)

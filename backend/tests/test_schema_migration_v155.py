@@ -17,6 +17,7 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     db.execute("ALTER TABLE threads DROP COLUMN confinement")
     db.execute("ALTER TABLE threads DROP COLUMN confined_read_dirs")
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=154")
     db.execute("INSERT INTO users (id,password_hash,created_at,password_changed_at) VALUES ('u','x','t','t')")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('old','u','t','t','t')")
@@ -29,7 +30,7 @@ def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def test_v155_is_registered() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[154] is migrate_154_to_155
 
 
@@ -38,7 +39,7 @@ def test_v155_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> 
     db = _legacy_db()
     try:
         initialize_schema(fresh)
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 162
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 163
         assert sorted(_columns(db)) == sorted(_columns(fresh))
         assert thread_confinement.read_dirs("old", db) is None
         assert {r[1] for r in db.execute("PRAGMA index_list(event_route_decisions)")} == {

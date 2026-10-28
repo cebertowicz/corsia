@@ -22,7 +22,7 @@ def _has_check_suite_id(db) -> bool:
 def test_fresh_schema_has_check_suite_id():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert _has_check_suite_id(db)
 
 
@@ -30,6 +30,7 @@ def test_startup_migration_adds_check_suite_id_and_drops_ingress_receipts(tmp_pa
     path = tmp_path / "legacy-webhook-deliveries-v44.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("DROP INDEX idx_webhook_deliveries_check_suite")
         db.execute("ALTER TABLE webhook_deliveries DROP COLUMN check_suite_id")
         db.execute(

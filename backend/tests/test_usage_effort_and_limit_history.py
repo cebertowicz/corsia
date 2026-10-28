@@ -202,7 +202,7 @@ def test_the_history_index_serves_an_account_window_between_two_times(isolated_d
 
 
 def test_the_step_is_registered_at_97() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[97] is migrate_97_to_98
 
 
@@ -213,6 +213,7 @@ def test_the_migration_upgrades_an_existing_database_and_keeps_its_rows() -> Non
         db.execute("DROP TABLE limit_observations")
         db.execute(
             "INSERT INTO llm_usage (id,thread_id,model,created_at) VALUES ('old','t','m','2026-10-01')")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=97")
         db.commit()
 

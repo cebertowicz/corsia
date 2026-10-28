@@ -72,6 +72,7 @@ def _legacy() -> tuple[sqlite3.Connection, dict[str, str]]:
     rewind_plan_aggregates(db)
     db.execute("DROP TRIGGER bump_plan_revision_node_update")
     db.execute(_OLD_TRIGGER)
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=105")
     db.commit()
     return db, ids
@@ -98,7 +99,7 @@ def _objects(db, table: str) -> dict[str, str]:
 
 
 def test_the_step_is_registered_and_106_is_current() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[105] is step.migrate_105_to_106
 
 

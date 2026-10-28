@@ -64,6 +64,7 @@ def test_fresh_and_upgraded_schema():
     assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.execute("DROP TABLE chat_comment_answers")
     db.execute("DROP TABLE chat_comment_views")
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=148")
     db.commit()
     migrate_to_current(db, SCHEMA_VERSION)

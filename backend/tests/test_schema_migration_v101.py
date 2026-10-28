@@ -62,7 +62,7 @@ def _v100(*, rows: bool) -> sqlite3.Connection:
 
 
 def test_step_is_registered_at_100() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[100] is migrate_100_to_101
 
 
@@ -209,12 +209,13 @@ def test_the_whole_chain_from_97_ends_current_with_the_bill_facts_intact(start: 
         db.execute(
             "INSERT INTO vendor_account_billing_facts(id,account_id,kind,amount_cents,start_date,end_date,"
             "account_revision,created_at) VALUES ('c1','chain-acct','subscription_rate',2000,'2026-02-17','9999-12-31',1,'t')")
+        db.execute("DROP TABLE measure_files")
         db.execute(f"PRAGMA user_version={start}")
         db.commit()
 
         migrate_to_current(db, SCHEMA_VERSION)
 
-        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 162
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 163
         assert db.execute("SELECT kind,amount_cents,charge_day FROM vendor_account_billing_facts WHERE id='c1'").fetchone() == (
             "subscription_rate", 2000, 17)
         assert db.execute("SELECT COUNT(*) FROM plan_status_dirty").fetchone() == (0,)

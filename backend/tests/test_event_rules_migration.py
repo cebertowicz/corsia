@@ -30,6 +30,7 @@ def _dev_135() -> sqlite3.Connection:
     db = _fresh()
     for table in _TABLES:
         db.execute(f"DROP TABLE {table}")
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=135")
     db.commit()
     return db
@@ -39,7 +40,7 @@ def test_upgrade_from_135_matches_a_fresh_install_and_seeds_only_shipped_rules(t
     fresh = _fresh()
     upgraded = _dev_135()
     result = migrate_to_current(upgraded, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 162)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 163)
     sync_shipped_rules(upgraded)
     sync_shipped_rules(fresh)
     assert [tuple(r) for r in upgraded.execute(_OBJECTS)] == [tuple(r) for r in fresh.execute(_OBJECTS)]

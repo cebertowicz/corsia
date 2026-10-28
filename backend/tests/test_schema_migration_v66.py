@@ -84,7 +84,7 @@ def test_migration_deletes_deleted_threads_rows_keeps_live_ones(
         with caplog.at_level(logging.INFO, logger="infra.migration_65_to_66_delete_orphaned_thread_state"):
             result = migrate_to_current(db, 66)
 
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert (result.migrated, result.from_version, result.to_version) == (True, 65, 66)
         assert _counts(db) == dict.fromkeys(_TABLES, 1)
         for table in _TABLES:
@@ -106,6 +106,7 @@ def test_migration_deletes_deleted_threads_rows_keeps_live_ones(
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=65")
         db.commit()
         again = migrate_to_current(db, SCHEMA_VERSION)
@@ -134,7 +135,7 @@ def test_startup_migration_adds_comment_context_columns_idempotently() -> None:
         result = migrate_to_current(db, SCHEMA_VERSION)
 
         columns = {row[1] for row in db.execute("PRAGMA table_info(doc_comments)")}
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert (result.migrated, result.from_version, result.to_version) == (True, 66, SCHEMA_VERSION)
         assert {"anchor_prefix", "anchor_suffix"} <= columns
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

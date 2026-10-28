@@ -30,7 +30,7 @@ def _insert(db, delivery_id: str, object_key: str | None) -> None:
 def test_fresh_schema_has_unique_object_key():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 163
         assert _has_object_key(db)
         _insert(db, "a", None)
         _insert(db, "b", None)
@@ -43,6 +43,7 @@ def test_startup_migration_adds_object_key_and_keeps_rows(tmp_path):
     path = tmp_path / "legacy-webhook-deliveries-v34.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("DROP INDEX idx_webhook_deliveries_object_key")
         db.execute("ALTER TABLE webhook_deliveries DROP COLUMN object_key")
         db.execute(

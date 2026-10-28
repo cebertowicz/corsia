@@ -30,12 +30,13 @@ def test_v109_upgrade_marks_a_legacy_token_plan_endpoint_interactive_only(isolat
         "VALUES ('legacy','external','external','legacy','Alibaba Token Plan',443,'online','t','t','t',?)",
         (json.dumps({"base_url": "https://token-plan.example.com/v1"}),),
     )
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=108")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 162)
+    assert (result.from_version, result.to_version) == (108, 163)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
 
 
@@ -54,13 +55,14 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
         "VALUES ('allowed-v109','external','external','allowed-v109','Alibaba Token Plan',443,'online','t','t','t',?)",
         (json.dumps({"agent_use_restriction": "allowed"}),),
     )
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=109")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert SCHEMA_VERSION == 162
-    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 162)
+    assert SCHEMA_VERSION == 163
+    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 163)
     assert endpoint_agent_use("external@legacy-v109/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@allowed-v109/glm-5.3") == "allowed"
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
@@ -77,12 +79,13 @@ def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
             "VALUES (?,'external','external',?,'Alibaba Token Plan',443,'online','t','t','t',?)",
             (sid, sid, raw),
         )
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=109")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.to_version) == (True, 162)
+    assert (result.migrated, result.to_version) == (True, 163)
     rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
     assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"'}
 
@@ -97,12 +100,13 @@ def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
         "VALUES ('existing','external','external','existing','Existing endpoint',443,'online','t','t','t',?)",
         (json.dumps({"base_url": "https://existing.example/v1"}),),
     )
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=108")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 162)
+    assert (result.from_version, result.to_version) == (108, 163)
     assert endpoint_agent_use("external@existing/model") == "allowed"
 
 

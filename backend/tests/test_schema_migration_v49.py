@@ -31,7 +31,7 @@ def _columns(db) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_fresh_schema_has_one_mark_and_the_step_leaves_it_alone():
@@ -45,6 +45,7 @@ def test_startup_migration_drops_the_folded_mark_and_keeps_every_view(tmp_path):
     path = tmp_path / "pane-view-one-mark.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("DROP TABLE plan_pane_views")
         db.execute(_V48_TABLE)
         db.execute(

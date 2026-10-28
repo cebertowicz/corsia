@@ -202,6 +202,22 @@ def _check_workflow_file(path: str, workflow: str, agent: str, workflows: Mappin
         raise ValueError(_NOT_BESIDE.format(workflow=workflow, folder=folder, path=path))
 
 
+def workflow_for_file(path: str, agent: str, workflows: Mapping[str, WorkflowOwner]) -> str | None:
+    """Resolve a synced file through the same live ownership and path checks as sync."""
+    try:
+        _check_agent_file(path, agent)
+        return None
+    except ValueError:
+        pass
+    for workflow in workflows:
+        try:
+            _check_workflow_file(path, workflow, agent, workflows)
+            return workflow
+        except ValueError:
+            continue
+    return None
+
+
 def namespace_refusal(namespace: str, holder: str, held: list[str]) -> str:
     """The §5 text for a namespace that another agent holds; ``held`` is the caller's own namespaces."""
     mine = f"you can emit {', '.join(f'{ns}.*' for ns in held)} only. Use your own namespace, or pick a new one in measures.yaml." if held else "you own no namespace yet. Pick a new one in measures.yaml and run measure_sync."
@@ -272,7 +288,7 @@ def _claim_namespace(connection: sqlite3.Connection, namespace: str, owner: str,
     return retire, taken
 
 
-def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str) -> dict[str, Any]:
+def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str, version_attr: str | None = None, *, record_file: bool = False) -> dict[str, Any]:
     """Plan from one read outside the transaction, then write the finished rows in one short transaction."""
     now = datetime.now(timezone.utc).isoformat()
     latest = _latest(db.execute(_OWNER_ROWS, (owner,)))
@@ -281,6 +297,14 @@ def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace
     with write_transaction(db, scope="measure_sync") as connection:
         retire, taken = _claim_namespace(connection, namespace, owner, held, now)
         connection.executemany(_INSERT, inserts + retire)
+        if record_file:
+            connection.execute(
+                "INSERT INTO measure_files(owner_thread_id,file_path,file_sha256,version_attr,synced_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(owner_thread_id,file_path) DO UPDATE SET "
+                "file_sha256=excluded.file_sha256,version_attr=excluded.version_attr,synced_at=excluded.synced_at "
+                "WHERE measure_files.file_sha256<>excluded.file_sha256 OR measure_files.version_attr IS NOT excluded.version_attr",
+                (owner, path, sha, version_attr, now),
+            )
     result: dict[str, Any] = {"namespace": namespace, "items": changes}
     if taken:
         result["namespace_takeover"] = taken
@@ -314,7 +338,7 @@ def sync(
     normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
     for attempt in (1, 2):
         try:
-            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha)
+            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha, data.get("version_attr"), record_file=True)
             break
         except sqlite3.IntegrityError:
             if attempt == 2:

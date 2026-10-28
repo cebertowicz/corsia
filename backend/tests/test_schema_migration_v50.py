@@ -50,6 +50,7 @@ def _legacy_db(path):
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO threads (id,user_id,title,created_at,updated_at)"
             " VALUES ('owner','user','Owner','t','t')"
@@ -113,7 +114,7 @@ def _plan_revision(db, plan_id: str) -> int:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_only_withdrawal_failures_close(tmp_path):
@@ -176,6 +177,7 @@ def test_a_migrated_close_holds_what_a_runtime_withdrawal_holds(tmp_path):
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO threads (id,user_id,title,created_at,updated_at)"
             " VALUES ('owner','user','Owner','t','t')"

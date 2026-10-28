@@ -27,6 +27,7 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     for name in _INDEXES:
         db.execute(f"DROP INDEX {name}")
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=147")
     db.commit()
     return db
@@ -41,7 +42,7 @@ def _fact(db, event_name: str, subject: str, key: str) -> None:
 
 
 def test_v148_fresh_schema_has_both_indexes() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[147] is migrate_147_to_148
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
@@ -76,7 +77,7 @@ def test_v148_upgrade_matches_a_fresh_install_and_enforces_one_fact_per_subject(
         _fact(db, "learning_loop.correction_outcome", "message:one", "b")
         _fact(db, "measurement.correction", "message:one", "c")
         db.commit()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 162
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 163
         assert _indexes(db) == sorted(_INDEXES)
         with pytest.raises(sqlite3.IntegrityError):
             _fact(db, "learning_loop.correction_triage", "message:one", "d")

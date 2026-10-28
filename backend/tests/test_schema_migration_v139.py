@@ -131,6 +131,7 @@ def _v137() -> sqlite3.Connection:
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V138)
     db.executescript(AUTOMATION_SCHEDULES_SQL.replace(_NULLABLE_NEXT_RUN, "next_run_at TEXT NOT NULL"))
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=137")
     db.commit()
     return db
@@ -142,11 +143,11 @@ def test_a_v137_install_takes_both_steps_and_ends_where_a_fresh_install_starts()
     from infra.migration_137_to_138_plan_intent import migrate_137_to_138
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert (MIGRATIONS[137], MIGRATIONS[138]) == (migrate_137_to_138, migrate_138_to_139)
     db = _v137()
     result = migrate_to_current(db, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 137, 162)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 137, 163)
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     # Step 138 adds its columns and table with ALTER/CREATE text laid out unlike the fresh DDL, so its two

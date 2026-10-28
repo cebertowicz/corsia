@@ -60,6 +60,7 @@ def _seed(path, monkeypatch) -> None:
         })
         _put(db, "tools", {"web": {"search": {"apiKey": "settings-search-0004", "count": 3}}})
         _put(db, "webhook", {"github_webhook_secret": "settings-hook-0005", "other": 1})
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-anthropic-0006")
@@ -146,6 +147,7 @@ def test_environment_fills_only_what_settings_and_store_lack(state, tmp_path, mo
     path = tmp_path / "env.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-anthropic-0006")
@@ -194,6 +196,7 @@ def test_a_second_start_is_a_no_op(state, tmp_path, monkeypatch):
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         settings_before = [tuple(r) for r in db.execute("SELECT key, value FROM settings ORDER BY key")]
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
         _clear_backups(tmp_path)
@@ -247,6 +250,7 @@ def test_a_value_that_cannot_be_stored_stays_where_it_was(state, tmp_path):
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         _put(db, "providers", {"openai": {"apiKey": "has a space"}, "anthropic": {"apiKey": "ok-value-0013"}})
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
     with closing(sqlite3.connect(path)) as db:
@@ -271,6 +275,7 @@ def test_a_value_the_store_cannot_take_stays_put_and_one_warning_counts_it(state
         _put(db, "providers", dict(anthropic={field: unstorable}, openai={field: "x" * 5000}))
         _put(db, "tools", dict(web=dict(search={field: unstorable})))
         _put(db, "webhook", {hook: unstorable})
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
     monkeypatch.setenv(env_name, unstorable)
@@ -300,6 +305,7 @@ def test_stripped_settings_keys_are_overwritten_in_the_database_file(state, tmp_
         _put(db, "providers", dict(anthropic={field: planted, "enabled": True}))
         _put(db, "tools", dict(web=dict(search={field: planted + "b", "count": 3})))
         _put(db, "webhook", {hook: planted + "c", "other": 1})
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
 
@@ -316,6 +322,7 @@ def test_a_flat_format_store_moves_under_references_and_the_flat_names_go(state,
     path = tmp_path / "flat.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=106")
         db.commit()
     _seed_flat(path, {"provider-openai": "flat-openai-0014", "web-search": "flat-search-0015"})

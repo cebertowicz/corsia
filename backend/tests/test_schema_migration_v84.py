@@ -62,6 +62,7 @@ def _build_existing_v83_database(path) -> None:
         )
         for name in _EXPECTED_INDEXES:
             db.execute(f"DROP INDEX {name}")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=83")
         db.commit()
         # Without this the upgrade below would prove nothing.
@@ -103,7 +104,7 @@ def _searches(db: sqlite3.Connection, statements: list[str], alias: str) -> list
 
 
 def test_the_step_is_registered_at_83_and_84_is_current() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[83] is migrate_83_to_84
 
 

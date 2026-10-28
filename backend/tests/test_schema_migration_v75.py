@@ -44,6 +44,7 @@ def test_startup_migration_backfills_installed_rows_only(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=74")
         db.commit()
 

@@ -195,5 +195,6 @@ def build_store(path: Path, plant=None) -> None:
         )
         if plant is not None:
             plant(db)
+        db.execute("DROP TABLE measure_files")
         db.execute(f"PRAGMA user_version={FROM_VERSION}")
         db.commit()

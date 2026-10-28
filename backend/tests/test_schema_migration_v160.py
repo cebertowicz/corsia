@@ -14,6 +14,7 @@ def test_upgrade_renames_modes_and_preserves_other_values():
     fresh = sqlite3.connect(":memory:")
     try:
         initialize_schema(db)
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=159")
         for name, mode in (("old", "review"), ("other", "none"), ("null", None)):
             db.execute(

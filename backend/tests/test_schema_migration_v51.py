@@ -25,7 +25,7 @@ from tools.agent_roster_update import AgentRosterEntryTool, AgentRosterUpdateToo
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_roster_revision_migration_backfills_existing_threads(tmp_path):
@@ -88,6 +88,7 @@ async def test_migrated_database_gives_new_threads_a_usable_roster_revision(isol
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=50")
         db.commit()
         migrate_to_current(db, SCHEMA_VERSION)

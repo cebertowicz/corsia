@@ -115,6 +115,7 @@ def _legacy_db(path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=58")
         db.commit()
     return ids, held
@@ -154,7 +155,7 @@ def _plan_state(db, plan_id: str) -> str:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_only_the_agents_own_open_pauses_become_scheduled_tasks(tmp_path):
@@ -296,6 +297,7 @@ def test_a_pause_on_an_archived_plan_stays_where_it_is(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=58")
         db.commit()
 

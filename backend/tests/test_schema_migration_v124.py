@@ -35,7 +35,7 @@ def _wound_back_to_v123() -> sqlite3.Connection:
 
 
 def test_the_step_is_registered_at_123() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[123] is migrate_123_to_124
 
 
@@ -58,6 +58,7 @@ def test_the_step_is_safe_to_run_again() -> None:
 
 def test_the_runner_takes_a_123_database_to_current_and_stays_there() -> None:
     with closing(_fresh()) as fresh, closing(_wound_back_to_v123()) as db:
+        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
 
         assert (result.migrated, result.from_version, result.to_version) == (True, 123, SCHEMA_VERSION)

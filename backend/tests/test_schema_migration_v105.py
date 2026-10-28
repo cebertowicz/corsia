@@ -15,17 +15,18 @@ def _columns(db) -> list[str]:
 
 
 def test_migration_registered_and_adds_the_review_time_column(tmp_path):
-    assert SCHEMA_VERSION == 162 and MIGRATIONS[104] is migrate_104_to_105
+    assert SCHEMA_VERSION == 163 and MIGRATIONS[104] is migrate_104_to_105
     path = tmp_path / "v104.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         db.execute("ALTER TABLE continuity_entries DROP COLUMN reviewed_at")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=104")
         db.commit()
         assert "reviewed_at" not in _columns(db)
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 162
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 163
         assert "reviewed_at" in _columns(db)
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 

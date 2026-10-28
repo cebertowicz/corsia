@@ -28,7 +28,7 @@ def _insert(db, sid: str, name: str, metadata) -> None:
 
 
 def test_the_step_is_registered_and_current():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[110] is migrate_110_to_111
 
 
@@ -42,12 +42,13 @@ def test_v110_upgrade_unmarks_every_ordinary_host(isolated_db):
     # Marked while named "Token Plan", then re-added under a new name: the mark survives the rename.
     _insert(db, "renamed", "Workspace", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
     _insert(db, "named-allowed", "Token Plan", {"base_url": _ORDINARY, "agent_use_restriction": "allowed"})
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=110")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 162)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 163)
     rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
     assert rows["named-only"] == rows["renamed"] == {"base_url": _ORDINARY}
     assert endpoint_agent_use("external@named-only/glm-5.3") == "allowed"

@@ -498,6 +498,7 @@ def test_the_migration_adds_the_marker_table_to_an_existing_database():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
         db.execute("DROP TABLE plan_status_dirty")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=98")
         db.commit()
 

@@ -11,11 +11,12 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_migration_registered_and_adds_the_reviewer_index(tmp_path):
-    assert SCHEMA_VERSION == 162 and MIGRATIONS[101] is migrate_101_to_102
+    assert SCHEMA_VERSION == 163 and MIGRATIONS[101] is migrate_101_to_102
     path = tmp_path / "v101.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         db.execute("DROP INDEX idx_doc_review_requests_reviewer")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=101")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

@@ -39,6 +39,7 @@ _ROWS: dict[str, tuple[str, object, str | None]] = {
 def _legacy_db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
+    db.execute("DROP TABLE measure_files")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('t','u','T','x','x')")
     for row_id, (content, metadata, _) in _ROWS.items():
         db.execute(
@@ -51,7 +52,7 @@ def _legacy_db() -> sqlite3.Connection:
 
 
 def test_v158_is_registered() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[157] is migrate_157_to_158
 
 
@@ -60,7 +61,7 @@ def test_v158_stamps_each_older_provider_failure_row_once_through_the_writers_ma
     try:
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.migrated, result.from_version, result.to_version) == (True, 157, 162)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 157, 163)
         stored = {row_id: json.loads(metadata) for row_id, metadata in db.execute("SELECT id, metadata FROM messages")}
         for row_id, (_, metadata, kind) in _ROWS.items():
             if kind is None:

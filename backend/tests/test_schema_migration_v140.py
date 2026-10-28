@@ -19,13 +19,14 @@ def _dev_139() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     db.execute("ALTER TABLE doc_review_requests DROP COLUMN requesting_node_id")
+    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=139")
     db.commit()
     return db
 
 
 def test_v140_registers_the_requesting_node_step() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[139] is migrate_139_to_140
 
 
@@ -39,6 +40,6 @@ def test_an_upgraded_database_has_the_column() -> None:
     with closing(_dev_139()) as db:
         assert "requesting_node_id" not in _columns(db)
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.from_version, result.to_version) == (139, 162)
+        assert (result.from_version, result.to_version) == (139, 163)
         assert "requesting_node_id" in _columns(db)
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False

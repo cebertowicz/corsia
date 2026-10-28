@@ -84,6 +84,7 @@ def _legacy_db(path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
     return plan.id, ids
@@ -108,7 +109,7 @@ def _plan_revision(db, plan_id: str) -> int:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
 
 
 def test_only_rejection_failures_close_as_sent_back(tmp_path):
@@ -159,6 +160,7 @@ def test_a_send_back_over_open_work_stays_failed(tmp_path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
         before = _rows(db)
@@ -181,6 +183,7 @@ def test_a_migrated_send_back_releases_what_it_held(tmp_path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
 

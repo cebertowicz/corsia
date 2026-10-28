@@ -140,7 +140,7 @@ def _selected(db: sqlite3.Connection) -> list[tuple]:
 
 
 def test_the_step_is_registered_at_95_and_96_is_current() -> None:
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[95] is migrate_95_to_96
 
 
@@ -217,6 +217,7 @@ def test_v95_upgrade_lands_the_same_index_a_fresh_install_has(tmp_path) -> None:
         initialize_schema(db)
         _seed(db)
         db.execute(f"DROP INDEX {_INDEX}")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=95")
         db.commit()
         assert _index_rows(db) == {}
@@ -245,6 +246,7 @@ def test_the_step_repeats_cleanly_and_never_claims_the_version(tmp_path) -> None
         initialize_schema(db)
         _seed(db)
         db.execute(f"DROP INDEX {_INDEX}")
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=95")
         db.commit()
 

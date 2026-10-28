@@ -34,7 +34,7 @@ def _strand(db, node_id: str, on: str) -> None:
 
 
 def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch):
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 163
     db = _db(monkeypatch)
     try:
         plan, step = _plain_step(db)
@@ -70,6 +70,7 @@ def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
+        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=36")
         db.commit()
         assert [c["reason_key"] for c in admission.project(waiting.id, db=db)["causes"]] == [
