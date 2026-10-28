@@ -10,7 +10,7 @@ probe() {
     IFS=. read -r major minor _ <<< "$version"
     [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
     (( major > 0 || minor >= 8 )) || return 1
-    bwrap --ro-bind / / --unshare-pid --proc /proc -- /bin/true >/dev/null 2>&1
+    bwrap --die-with-parent --new-session --unshare-user --disable-userns --unshare-pid --unshare-ipc --unshare-uts --ro-bind / / --proc /proc -- /bin/true >/dev/null 2>&1
 }
 
 if probe; then

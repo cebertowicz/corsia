@@ -7,6 +7,11 @@ button, input { position: fixed; left: 0; width: 100%; height: 50%; border: 0; b
 <input id="probe-input" aria-label="Probe" style="top:50%" oninput="if (this.value === 'hi') this.style.background = 'rgb(0,0,200)'">
 <script>
 const params = new URLSearchParams(location.search);
+if (params.has('popup-opener')) {
+ document.getElementById('probe-button').onclick = () => window.open('browser-pane-probe.html?popup', '_blank');
+ if (params.has('timed')) setTimeout(() => { const popup = window.open('browser-pane-probe.html?popup', '_blank'); setTimeout(() => popup?.close(), 5000); }, 5000);
+}
+if (params.has('popup')) document.body.innerHTML = '<button style="height:100vh;background:rgb(200,0,0)" onclick="window.close()">Close popup</button>';
 if (params.has('navigated')) document.getElementById('probe-button').style.background = 'rgb(120,0,160)';
 const submitted = '<output style="display:block;height:100vh;background:rgb(0,160,80)">Password submitted</output>';
 if (params.has('submitted')) document.body.innerHTML = submitted;

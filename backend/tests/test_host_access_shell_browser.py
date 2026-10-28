@@ -1248,6 +1248,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
     from host_access import browser_cdp, browser_step_lifecycle as lifecycle
     from host_access.browser_cdp import PasswordProbe
     from host_access.browser_sessions import BrowserSessionOwner
+    from host_access.browser_session_state import BrowserSessionRecord
     from tools import browser_actions, browser_runtime
 
     owner = BrowserSessionOwner(namespace="corsia-person-step", instance_key="test")
@@ -1259,7 +1260,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
 
     async def admit(thread_id, **_kwargs):
         admitted.append(thread_id)
-        return SimpleNamespace(record=SimpleNamespace(session="session-one"))
+        return SimpleNamespace(record=BrowserSessionRecord(thread_id, "session-one"))
 
     async def page_endpoint(_command):
         return "ws://page.test"

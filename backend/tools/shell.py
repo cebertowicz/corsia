@@ -6,6 +6,7 @@ from functools import partial
 import logging
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -119,8 +120,7 @@ async def _run_controlled_git(
             raise RuntimeError(
                 f"{operation} process owner returned an invalid result"
             )
-        if owned.returncode != 0 or owned.timed_out:
-            await asyncio.to_thread(shell_sandbox.launch_failed)
+        await shell_sandbox.recheck_after(owned, leased=lease_id is not None)
         if owned.timed_out:
             raise subprocess.TimeoutExpired(
                 argv,
@@ -134,9 +134,6 @@ async def _run_controlled_git(
             owned.stdout.decode("utf-8", errors="replace"),
             owned.stderr.decode("utf-8", errors="replace"),
         )
-    except BaseException:
-        await asyncio.to_thread(shell_sandbox.launch_failed)
-        raise
     finally:
         if profile_path is not None:
             profile_path.unlink(missing_ok=True)
@@ -445,8 +442,7 @@ class BashTool(Tool):
                 return long_call.started_message(owned.handle)
             if not isinstance(owned, ForegroundProcessResult):
                 raise RuntimeError("process owner returned an invalid result")
-            if owned.returncode != 0 or owned.timed_out:
-                await asyncio.to_thread(shell_sandbox.launch_failed)
+            await shell_sandbox.recheck_after(owned, leased=leased)
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
@@ -456,27 +452,22 @@ class BashTool(Tool):
                 combined_output,
                 lambda: shell_sandbox.available_for_denial(is_safehouse_available),
             ):
-                # A repo-policy denial (pinned/protected base) has a concrete
-                # better non-host path — the exact `.worktrees/` recovery — so
-                # that guidance leads. A chained direct-Git form on a base
-                # checkout also gets the one-command teaching, because worktrees
-                # now grant Git by location and unchaining is the real fix there.
-                # The generic state-aware host-scope template applies only when
-                # no policy-specific better way exists; never steer to host scope
-                # to route around repo policy.
+                # Prefer the repo-policy recovery path over host-scope guidance.
+                linux = sys.platform == 'linux'
                 repo_guidance = check_repo_write_path(canonical_cwd)
-                chained_guidance = chained_base_git_denial_guidance(
-                    command,
-                    str(canonical_cwd),
-                )
+                chained_guidance = chained_base_git_denial_guidance(command, str(canonical_cwd))
+                if linux and (repo_guidance or chained_guidance):
+                    output_parts.append('\nIf the sandbox restricted the path, this guidance may help:')
                 append_denial_guidance(output_parts, thread_id, repo_guidance, chained_guidance)
                 if not repo_guidance and not chained_guidance:
                     output_parts.append(
                         "\n"
                         + denial_guidance_prefix(combined_output)
                         + protected_scope_denial(
-                            "this command was blocked by the protected-mode sandbox",
+                            ("the sandbox may restrict access to the path" if linux else
+                             "this command was blocked by the protected-mode sandbox"),
                             lease_active=await _thread_has_live_lease(thread_id),
+                            conditional=linux,
                         )
                     )
 
@@ -515,7 +506,6 @@ class BashTool(Tool):
             return result
 
         except Exception as e:
-            await asyncio.to_thread(shell_sandbox.launch_failed)
             return f"Error executing command: {str(e)}"
         finally:
             if cwd_fd is not None:
