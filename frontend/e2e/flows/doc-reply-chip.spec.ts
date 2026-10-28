@@ -689,6 +689,21 @@ test.describe('reply chip motion evidence', () => {
 				await page.getByRole('button', { name: 'Close comments' }).click();
 				await expect(chipBox(page)).toHaveCount(0);
 				await page.waitForTimeout(700);
+				// Stimulate a second arrival and a viewed event while the document is visible, so the recording includes the chip's own exit.
+				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
+				await reloadComments(page, doc.artifactId);
+				await expectChip(page, '1 new reply');
+				await page.waitForTimeout(700);
+				await page.evaluate(async ({ artifactId, rootId }) => {
+					const { docComments, markThreadViewed } = await import('/src/lib/stores/docComments.ts');
+					let replyId: string | undefined;
+					const unsubscribe = docComments.subscribe((all) => { replyId = all[artifactId]?.find((thread) => thread.id === rootId)?.newReplyIds?.at(-1); });
+					unsubscribe();
+					if (!replyId) throw new Error('No unread reply to mark viewed');
+					await markThreadViewed(artifactId, rootId, replyId);
+				}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
+				await expect(chipBox(page)).toHaveCount(0);
+				await page.waitForTimeout(700);
 			});
 		}
 	}
