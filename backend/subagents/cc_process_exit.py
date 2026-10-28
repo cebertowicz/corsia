@@ -115,16 +115,9 @@ def _surface_process_exit(
 
 
 async def _settle_process_exit(
-    child_thread_id: str,
-    live: _Live,
-    identity: TurnIdentity,
-    pending: PendingProcessExit,
-    detail: str,
-    broadcast: Broadcast,
-    db,
-    *,
-    replaying: bool,
-    defer_drive: bool = False,
+    child_thread_id: str, live: _Live, identity: TurnIdentity,
+    pending: PendingProcessExit, detail: str, broadcast: Broadcast, db,
+    *, replaying: bool, defer_drive: bool = False,
 ) -> tuple[TerminalClaim, bool, bool]:
     async with live.event_lock:
         if live.corsia_turn != identity:
@@ -256,42 +249,31 @@ async def _retire_idle_exit(
 
 
 async def _settle_active_exit(
-    child_thread_id: str,
-    live: _Live,
-    identity: TurnIdentity | None,
-    code: int | None,
-    stderr: str,
-    broadcast: Broadcast,
-    db,
-    finish_callback,
-) -> bool:
-    result = await finish_callback(
-        child_thread_id, live, code, stderr, broadcast, db
+    child_thread_id: str, live: _Live, identity: TurnIdentity | None,
+    code: int | None, stderr: str, broadcast: Broadcast, db, finish_callback,
+) -> tuple[bool, TerminalSettlement | None]:
+    terminal = await finish_callback(
+        child_thread_id, live, code, stderr, broadcast, db, defer_drive=db is None,
     )
+    result = terminal.result if isinstance(terminal, TerminalSettlement) else terminal
     if identity is not None and live.pending_process_exit is not None:
         raise RuntimeError(f"Claude Code process exit was not durably settled: {child_thread_id}")
     if identity is not None and result not in {
         TurnTerminalResult.APPLIED,
         TurnTerminalResult.ALREADY_SAME_OUTCOME,
     }:
-        return False
+        return False, terminal if isinstance(terminal, TerminalSettlement) else None
     current = _LIVE.get(child_thread_id)
-    return (current is live and live.corsia_turn == identity) or (
+    retired = (current is live and live.corsia_turn == identity) or (
         current is None and live.process_exit_resolved
     )
+    return retired, terminal if isinstance(terminal, TerminalSettlement) else None
 
 
 async def handle_process_exit(
-    child_thread_id: str,
-    live: _Live,
-    code: int | None,
-    stderr: str,
-    broadcast: Broadcast,
-    db=None,
-    *,
-    finalize_callback,
-    finish_callback=finish_process_exit,
-    emit_closed: bool = True,
+    child_thread_id: str, live: _Live, code: int | None, stderr: str,
+    broadcast: Broadcast, db=None, *, finalize_callback,
+    finish_callback=finish_process_exit, emit_closed: bool = True,
 ) -> bool:
     """Quiesce, durably finish, and retire one natural process exit."""
     identity = live.corsia_turn
@@ -332,8 +314,16 @@ async def handle_process_exit(
                 child_thread_id, live, broadcast, db,
                 finalize_callback, emit_closed,
             )
+    settlement = None
+    publication_error = None
     try:
-        return await _settle_active_exit(child_thread_id, live, identity, code, stderr, broadcast, db, finish_callback)
+        retired, settlement = await _settle_active_exit(
+            child_thread_id, live, identity, code, stderr, broadcast, db, finish_callback,
+        )
+    except _CommittedTerminalFailure as failure:
+        settlement = failure.settlement
+        publication_error = failure.publication_error
+        retired = False
     except Exception:  # nothing awaits the exit observer: this is the only trace
         log.exception("cc_runtime: %s natural exit of turn %s failed to settle", child_thread_id, identity.turn_id)
         raise
@@ -341,10 +331,21 @@ async def handle_process_exit(
         if live.pending_process_exit is None:
             current = _LIVE.get(child_thread_id)
             if current is live and live.corsia_turn == identity:
-                finalize_callback(
-                    child_thread_id, broadcast, db,
-                    expected_live=live, emit_closed=emit_closed,
-                )
+                try:
+                    finalize_callback(
+                        child_thread_id, broadcast, db,
+                        expected_live=live, emit_closed=emit_closed,
+                    )
+                except BaseException as error:
+                    if settlement is None:
+                        raise
+                    if publication_error is None:
+                        publication_error = error
+    if settlement is not None:
+        await drive_turn_settlement(settlement)
+    if publication_error is not None:
+        raise publication_error
+    return retired
 
 
 async def interrupt_open_turn(
