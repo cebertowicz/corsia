@@ -30,7 +30,10 @@ CHROME_FLAGS = (
 
 def chrome_argv(executable: str, port: int, profile: Path, *, headless: bool, ua: str | None) -> list[str]:
     """The single launch argument source for saved and temporary profiles."""
-    flags = [*CHROME_FLAGS, f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1",
+    # Chrome deletes session cookies at startup unless it is restoring the last session, so without it
+    # a sign-in that set only session cookies is gone after any close of the saved profile.
+    flags = [*CHROME_FLAGS, "--restore-last-session", f"--remote-debugging-port={port}",
+             "--remote-debugging-address=127.0.0.1",
              f"--user-data-dir={profile}", *browser_launch.stealth_args(ua, headless=headless).splitlines()]
     if headless:
         flags.append("--headless=new")
