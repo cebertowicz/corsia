@@ -44,6 +44,8 @@ interface Scenario {
 	signin?: (account: Fixture, accounts: Fixture[]) => Record<string, unknown>;
 	/** What POST …/signin/check answers; absent means no sign-in is in progress. */
 	check?: (account: Fixture, accounts: Fixture[]) => Record<string, unknown> | null;
+	/** Serve a rollover-on provider policy listing every account of this vendor, so each row carries its policy controls. */
+	rollover?: 'claude-code' | 'codex';
 }
 
 async function mockBackend(page: Page, scenario: Scenario) {
@@ -53,7 +55,15 @@ async function mockBackend(page: Page, scenario: Scenario) {
 	await page.route('**/api/settings/models**', (route) => route.fulfill({ json: { models: harnessRows } }));
 	await page.route('**/api/settings/providers**', (route) => route.fulfill({ json: { providers: [] } }));
 	await page.route('**/api/settings/network-servers**', (route) => route.fulfill({ json: { servers: [] } }));
-	await page.route('**/api/provider-policy**', (route) => route.fulfill({ json: { providers: [] } }));
+	await page.route('**/api/provider-policy**', (route) => {
+		const vendor = scenario.rollover;
+		if (!vendor || route.request().method() !== 'GET' || new URL(route.request().url()).pathname !== '/api/provider-policy') return route.fulfill({ json: { providers: [] } });
+		const units = accounts.filter((a) => a.provider === vendor).map((a) => ({ id: a.id, label: a.name, enabled: true }));
+		return route.fulfill({ json: { scope: 'workspace', overriding_projects: [], providers: [{
+			provider_key: vendor, capabilities: { units: 'accounts', rollover: true }, rollover: true,
+			order: units.map((u) => u.id), disabled: [], revision: 1, units,
+		}] } });
+	});
 	await page.route('**/api/vendor-accounts**', async (route) => {
 		const { pathname } = new URL(route.request().url());
 		const match = /^\/api\/vendor-accounts\/([^/]+)\/signin(\/check)?$/.exec(pathname);
@@ -282,6 +292,31 @@ test.describe('Sign in again review frames', () => {
 				if (mobile) await page.setViewportSize({ width: 393, height: 827 });
 				await page.getByRole('button', { name: 'Add account' }).evaluate((footer) => footer.scrollIntoView({ block: 'end' }));
 				await shot(page, 'f2-five-accounts-scrolled', tag);
+			});
+
+			test('g: signed-out rows when rollover is on, so each row also has policy controls', async ({ page }) => {
+				const accounts = claudeAccounts({ 'cc-2': 'signed_out', 'cc-4': 'signed_out' });
+				accounts.find((a) => a.id === 'cc-4')!.name = 'Montclair Rail Trail operations and maintenance';
+				await start(page, { accounts, rollover: 'claude-code' });
+				await openProviderDialog(page, 'claude-code');
+				for (const id of ['cc-2', 'cc-4']) {
+					const signedOut = page.locator(`#vendor-account-${id}`);
+					await expect(signedOut.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+					await expect(signedOut.getByRole('button', { name: /^Use / })).toBeVisible();
+					const geometry = await signedOut.evaluate((el) => {
+						const box = (node: Element | null) => node ? node.getBoundingClientRect() : null;
+						const sign = box([...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Sign in') ?? null)!;
+						const toggle = box(el.querySelector('.provider-account-policy-controls'))!;
+						const name = box(el.querySelector('strong'))!;
+						return { signHeight: sign.height, signWidth: sign.width, signLeft: sign.left, signRight: sign.right, toggleLeft: toggle.left, toggleRight: toggle.right, nameRight: name.right, nameTop: name.top, signTop: sign.top, signBottom: sign.bottom, toggleTop: toggle.top, toggleBottom: toggle.bottom };
+					});
+					console.log(`G ${id} ${JSON.stringify(geometry)}`);
+					expect(geometry.signRight).toBeLessThanOrEqual(geometry.toggleLeft + 0.5);
+					expect(geometry.nameRight).toBeLessThanOrEqual(geometry.signLeft + 0.5);
+				}
+				await shot(page, 'g-signed-out-with-rollover', tag, 'cc-2');
+				// The long name on the same kind of row.
+				await shot(page, 'g2-signed-out-with-rollover-long-name', tag, 'cc-4');
 			});
 		});
 	}
