@@ -7,8 +7,9 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- A paused task, review or decision you owe stays orange in the plan, and so does the task above it; pausing only clears its flag and count in the left menu.
+- A paused task, review, decision or document ask you owe still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
 - An agent can finish or close a task it handed to another agent that was stopped, and a finished agent's documents pass to the agent that started it.
+- Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.

@@ -234,7 +234,9 @@ def _branch_summary(
         needs_user[node["id"]] = node["requires_user_action"] or any(
             needs_user[child_id] for child_id in child_ids
         )
-        asks_user[node["id"]] = node["display"]["label_key"] == "needs_you" or any(asks_user[c] for c in child_ids)
+        asks_user[node["id"]] = node["display"]["label_key"] == "needs_you" or any(
+            asks_user[child_id] for child_id in child_ids
+        )
         working[node["id"]] = (
             not child_ids and node["display"]["label_key"] == "working"
         ) or any(working[child_id] for child_id in child_ids)
