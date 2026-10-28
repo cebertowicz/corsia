@@ -77,6 +77,7 @@ function hasNoUsableModel(source: ModelSource): boolean {
 /** Install once a tool is picked, sign in on request; retain setup-only attempts for the handoff. */
 export function createSetupConnect(deps: ConnectDeps) {
 	let flow = $state<Record<string, ConnectPhase | undefined>>({});
+	const starting = new Set<string>();
 	let attempts = $state<Record<string, SetupAttempt>>({ 'claude-code': { attempt: 'none' }, codex: { attempt: 'none' } });
 	const active = $derived(Object.values(flow).some((entry) => entry?.phase === 'awaiting-source' || entry?.phase === 'installing' || entry?.phase === 'signing-in'));
 	function setConnect(vendor: string, next: ConnectPhase | undefined) {
@@ -129,13 +130,15 @@ export function createSetupConnect(deps: ConnectDeps) {
 	async function startInstall(source: ModelSource) {
 		const current = deps.token();
 		if (!current) return;
+		starting.add(source.source);
 		setConnect(source.source, { phase: 'installing' });
 		try {
 			const refusal = await startCliInstall(current, source.source);
 			if (refusal === 'invisible_binary') await linkCli(current, source.source);
 			if (refusal) { await afterInstalled(source.source); return; }
-			await tickConnect();
-		} catch { setConnect(source.source, { phase: 'failed', failed: 'install' }); }
+		} catch { setConnect(source.source, { phase: 'failed', failed: 'install' }); return; }
+		finally { starting.delete(source.source); }
+		await tickConnect();
 	}
 	/** Resolve a subscription choice once source detection can say whether an install is needed. */
 	function sourcesChanged() {
@@ -194,7 +197,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		try {
 			if (Object.values(flow).some((entry) => entry?.phase === 'awaiting-source')) await deps.refreshSources(true);
 			for (const [vendor, entry] of Object.entries(flow)) {
-				if (entry?.phase === 'installing') {
+				if (entry?.phase === 'installing' && !starting.has(vendor)) {
 					const install = await getCliInstall(current, vendor).catch(() => null);
 					if (install?.state === 'done' || install?.state === 'idle') await afterInstalled(vendor, install.path_shadowed_by);
 					else if (install?.state === 'cancelled') setConnect(vendor, undefined);
@@ -235,6 +238,9 @@ export function createSetupConnect(deps: ConnectDeps) {
 		}
 		if (hasNoUsableModel(source)) {
 			return { meta: `This ${copy.account} account has no models for ${copy.cli}. Sign in with another account, or turn ${copy.cli} off.`, error: true, action: signInAction, canTurnOff: true };
+		}
+		if (source.accounts?.some((account) => account.state === 'unchecked')) {
+			return { meta: `Couldn’t check your ${copy.account} models. Sign in again.`, error: true, action: signInAction, canTurnOff: true };
 		}
 		if (source.state === 'unverified' && source.cli_package_manager) {
 			const command = source.cli_package_manager === 'homebrew' ? `brew reinstall ${source.source === 'claude-code' ? 'claude-code' : 'codex'}` : `npm install -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
