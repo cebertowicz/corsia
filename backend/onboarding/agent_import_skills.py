@@ -1,13 +1,4 @@
-"""The person's own skills in their other tools: offers and installs.
-
-Only the person's own skill folders are scanned (plugin, bundled and ``.system``
-skills never are). Each skill is bounded by lstat before anything is hashed, and
-any link, binary file or unreadable part keeps it from being offered. The agent
-receives name, description, tools, script count and offer state, never a body.
-An install re-reads the folder, writes only an offer still ``new`` with the same
-content hash, and writes CORSIA's skill data form: the whitelisted frontmatter,
-a ``corsia.yaml`` holding only a home-relative ``origin``, and no overwrite.
-"""
+"""Offer personal skill metadata; install only checked, unchanged bundles without overwriting."""
 
 from __future__ import annotations
 
@@ -141,7 +132,7 @@ def _synced_skills(root: Path) -> list[Path]:
                 continue
             name, source = entry.get("name"), entry.get("source") or "custom"
             if (not isinstance(name, str) or not name or name.startswith(".") or Path(name).name != name
-                    or not isinstance(source, str) or source.startswith("anthropic")):
+                    or not isinstance(source, str) or source in ("anthropic", "anthropic-example")):
                 continue
             path = bucket / name
             if not os.path.lexists(path):
@@ -156,6 +147,11 @@ def _synced_skills(root: Path) -> list[Path]:
             if name not in latest or updated > latest[name][0]:
                 latest[name] = (updated, path)
     return [latest[name][1] for name in sorted(latest)]
+
+
+def synced_personal_count(root: Path) -> int:
+    """Return only the count from local synced manifests for pre-consent detection."""
+    return len(_synced_skills(root))
 
 
 def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:

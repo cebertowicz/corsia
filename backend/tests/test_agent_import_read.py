@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import datetime
+import json
 import os
 from pathlib import Path
 
@@ -107,6 +108,36 @@ def test_a_fresh_claude_code_sign_in_is_not_found_until_the_person_has_made_some
     assert reader.found_tools(Roots.for_user()) == []
     (skills / "mine").mkdir()
     assert reader.found_tools(Roots.for_user()) == ["claude-code"]
+
+
+def test_synced_manifest_detects_personal_skills_without_exposing_them(tmp_path, monkeypatch):
+    from onboarding import agent_import_skills
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    roots = Roots.for_user()
+    bucket = roots.claude / "skills" / "synced" / "org_account"
+    _write(bucket / "pdf" / "SKILL.md", "---\nname: pdf\ndescription: built in\n---\n")
+    _write(bucket / "mine" / "SKILL.md", "---\nname: mine\ndescription: personal skill\n---\n")
+    manifest = bucket / "manifest.json"
+    manifest.write_text(json.dumps({"skills": [{"name": "pdf", "source": "anthropic"}]}))
+    assert reader.found_tools(roots) == []
+    manifest.write_text("invalid")
+    assert reader.found_tools(roots) == []
+    manifest.write_text(json.dumps({"skills": [
+        {"name": "pdf", "source": "anthropic"},
+        {"name": "mine", "source": "custom", "updatedAt": "2026-10-20T12:00:00Z"},
+    ]}))
+    original_read_text = Path.read_text
+    with monkeypatch.context() as patch:
+        def manifest_only(path, *args, **kwargs):
+            assert path == manifest
+            return original_read_text(path, *args, **kwargs)
+        patch.setattr(Path, "read_text", manifest_only)
+        assert reader.found_tools(roots) == ["claude-code"]
+        assert agent_import_skills.synced_personal_count(roots.claude) == 1
+    offers = agent_import_skills.skill_offers(roots, ["claude-code"], tmp_path / "workspace")
+    assert [(row["name"], row["state"]) for row in offers] == [("mine", "new")]
 
 
 def test_no_tool_folders_means_nothing_found(tmp_path, monkeypatch):

@@ -2,8 +2,8 @@
 
 The roots are the person's own Claude Code, Codex, OpenClaw and Hermes folders
 (``project_discovery.Roots``), each realpath-checked before use (``checked_root``).
-Before consent ``found_tools`` only stats fixed locations under them. After
-consent ``read_memory`` opens only the files in the build design's order table,
+Before consent ``found_tools`` checks fixed locations and Claude Code's synced
+manifests, retaining only a count. After consent ``read_memory`` opens only the files in the build design's order table,
 each lstat-checked first, at most ``FILE_BYTES`` from its start, until about
 ``TOTAL_BYTES`` are kept, with at most ``FRONTMATTER_READS`` Claude Code auto
 memory files opened. Every excerpt passes the model-visible credential filter.
@@ -36,12 +36,10 @@ DAILY_NOTE_DAYS = 30
 AUTO_MEMORY_TYPES = frozenset({"user", "feedback"})
 OPENCLAW_WORKSPACES = ("workspace", "workspace-main", "workspace.default")
 
-#: Folders a tool fills in itself under ``skills`` do not establish a found tool before consent.
-#: Claude Code's ``synced`` can also contain personal skills, read only after consent.
+#: Tool-filled folders are excluded from ordinary detection; synced manifests are checked separately.
 TOOL_MADE_SKILL_FOLDERS = {CLAUDE_CODE: frozenset({"synced"})}
 
-#: What a stat may find, per tool, before consent: nothing is opened, and a folder that a tool fills in
-#: itself is named, never read.
+#: Fixed markers checked before consent; synced manifests are checked separately.
 FOUND_MARKERS = {
     CLAUDE_CODE: ("CLAUDE.md", "projects", "skills", "commands"),
     CODEX: ("memories", "AGENTS.md", "skills"),
@@ -112,14 +110,19 @@ def _holds_more_than_tool_made(marker: Path, tool_made: frozenset[str]) -> bool:
 
 
 def found_tools(roots: Roots) -> list[str]:
-    """The tools with any fixed location present; nothing is opened, but Claude Code's ``skills`` folder is listed."""
+    """Find tools using fixed markers and local synced-manifest counts."""
+    from onboarding.agent_import_skills import synced_personal_count
+
     found = []
     for tool, root in tool_roots(roots).items():
+        if (real := checked_root(root)) is None:
+            continue
         tool_made = TOOL_MADE_SKILL_FOLDERS.get(tool, frozenset())
         markers = [(root / name, tool_made if name == "skills" else frozenset()) for name in FOUND_MARKERS[tool]]
         if tool == CODEX:
             markers.append((roots.agents / "skills", frozenset()))
-        if any(_holds_more_than_tool_made(marker, made) for marker, made in markers) and checked_root(root) is not None:
+        if (any(_holds_more_than_tool_made(marker, made) for marker, made in markers)
+                or (tool == CLAUDE_CODE and synced_personal_count(real) > 0)):
             found.append(tool)
     return found
 

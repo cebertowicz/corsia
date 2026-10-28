@@ -412,8 +412,8 @@ def test_another_tools_metadata_blocks_are_dropped_on_install(home):
     assert meta["metadata"] == {"tags": ["team"], "corsia-data": "corsia.yaml", "corsia-format": "1"}
 
 
-def test_claude_codes_account_synced_skills_are_never_offered(tmp_path, monkeypatch):
-    """A fresh Claude Code sign-in fills ``skills/synced`` with its own bundles; none is the person's work."""
+def test_synced_bucket_without_manifest_is_not_offered(tmp_path, monkeypatch):
+    """A bucket without a readable manifest cannot identify personal skills."""
     base = tmp_path / "home"
     monkeypatch.setenv("HOME", str(base))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
@@ -485,3 +485,22 @@ def test_synced_newest_account_wins_and_unreadable_manifest_is_skipped(home):
     matching = [row for row in offers if row["name"] == "my-recipe"]
     assert len(matching) == 1 and matching[0]["description"] == "new"
     assert "hidden" not in {row["name"] for row in offers}
+
+
+def test_synced_default_source_installs_and_invalid_paths_are_not_offered(home, tmp_path):
+    roots, workspace = home
+    bucket = _synced_bucket(roots.claude, "org_account", [{"name": "my-recipe"}])
+    outside = _skill(tmp_path / "outside", "outside", "linked outside")
+    (bucket / "linked").symlink_to(outside)
+    (bucket / "manifest.json").write_text(json.dumps({"skills": [
+        {"name": "my-recipe"}, {"name": "linked", "source": "custom"},
+        {"name": "../outside", "source": "custom"}, {"name": ".hidden", "source": "custom"},
+    ]}))
+    offers = skills.skill_offers(roots, ["claude-code"], workspace)
+    rows = {row["name"]: row for row in offers}
+    assert rows["my-recipe"]["state"] == "new"
+    assert rows["linked"]["state"] == "unreadable"
+    assert "../outside" not in rows and ".hidden" not in rows
+    result = skills.install_skills(roots, ["claude-code"], workspace, [rows["my-recipe"]["item_id"]])
+    assert result[0]["outcome"] == "installed"
+    assert (workspace / "skills" / "my-recipe" / "SKILL.md").is_file()
