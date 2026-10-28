@@ -15,8 +15,8 @@ import re
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import timedelta
-from email.utils import getaddresses, parseaddr
+from datetime import datetime, timedelta
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any, Awaitable, Callable
 
 from llm.locality import endpoint_on_this_mac
@@ -128,6 +128,20 @@ def addresses_for_screen(value: str, screen: Screen | None) -> str:
     from connections.mail.email_document import is_plain_address
 
     return ", ".join(address for _, address in getaddresses([value]) if is_plain_address(address))
+
+
+def date_for_screen(value: str, screen: Screen | None) -> str:
+    """A date header as written only after a clean screen; otherwise its parsed ISO time, or nothing."""
+    if screen is not None and screen.clean:
+        return value
+    try:
+        return parsedate_to_datetime(value).isoformat()
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(value).isoformat()
+    except (TypeError, ValueError):
+        return ""
 
 
 def search_screen(screen: Screen | None) -> dict[str, Any]:

@@ -48,7 +48,7 @@ def marked_message(message_id: str, thread_id: str | None, headers: dict[str, st
         "from": email_screen.sender_for_screen(headers.get("from", ""), screen),
         "to": email_screen.addresses_for_screen(headers.get("to", ""), screen),
         "cc": email_screen.addresses_for_screen(headers.get("cc", ""), screen),
-        "date": headers.get("date", ""),
+        "date": email_screen.date_for_screen(headers.get("date", ""), screen),
     }
     if screen.clean:
         result["subject"] = subject
@@ -131,7 +131,7 @@ class EmailSearchTool(Tool):
             entry: dict[str, Any] = {
                 "message_id": message.message_id, "thread_id": thread_key(account, message.thread_id),
                 "from": email_screen.sender_for_screen(message.headers.get("from", ""), screen),
-                "date": message.headers.get("date", ""),
+                "date": email_screen.date_for_screen(message.headers.get("date", ""), screen),
             }
             if screen is not None and screen.clean:
                 entry["subject"] = message.headers.get("subject", "")
