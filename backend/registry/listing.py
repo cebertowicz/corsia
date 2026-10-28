@@ -172,26 +172,3 @@ def find_for_thread(
     finally:
         if not db:
             conn.close()
-
-
-def metadata_ever_for_thread(
-    parent_thread_id: str, integration: str, type: str, json_path: str, db=None
-) -> list[str]:
-    """The metadata of every record of one kind the thread ever registered, in any
-    identity or relationship state, that sets ``json_path`` or is not valid JSON,
-    newest first. For a fact that must outlive the record that first carried it."""
-    conn = db or get_db()
-    try:
-        rows = conn.execute(
-            f"""SELECT i.metadata
-                {_THREAD_RECORDS}
-                  AND CASE WHEN json_valid(i.metadata)
-                           THEN json_extract(i.metadata, ?) IS NOT NULL
-                           ELSE COALESCE(i.metadata, '') <> '' END
-                ORDER BY i.updated_at DESC, i.id ASC""",
-            (parent_thread_id, integration, type, json_path),
-        ).fetchall()
-        return [row["metadata"] for row in rows]
-    finally:
-        if not db:
-            conn.close()
