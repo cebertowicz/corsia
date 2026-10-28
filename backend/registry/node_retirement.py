@@ -16,10 +16,7 @@ from typing import Iterable
 
 from registry.identity_bridge import PANE_REGISTRATION_STATES
 from registry.presentation import NON_PANE_TYPES
-from registry.retirement_predicate import (
-    RETIREMENT_NOT_EXEMPT_CLAUSE,
-    bind_shared_documents,
-)
+from registry.retirement_predicate import RETIREMENT_NOT_EXEMPT_CLAUSE
 from registry.change_notifications import build_artifact_change_messages
 from registry.registration_events import (
     _append_registration_events,
@@ -45,7 +42,7 @@ _RETIREMENT_EVENT_PLACEHOLDERS = ",".join("?" for _ in _RETIREMENT_EVENTS)
 _UNRETIRED_WHERE = f"r.retired_at IS NULL AND {RETIREMENT_NOT_EXEMPT_CLAUSE}"
 # Ownership is a fact about accountability, not about the pane, so a row that
 # exists only because ownership moved retires even when its artifact is exempt
-# from task settlement: shared documents are exactly what an assignment owns.
+# from task settlement.
 _UNRETIRED_ANY_WHERE = "r.retired_at IS NULL"
 # A registration made while its thread had no task selected, last touched
 # before a given moment, of a type the pane can show. Compared through
@@ -257,13 +254,9 @@ def _retire(
 ) -> int:
     """Stamp, settle unpinned visible rows, and audit one retirement cause.
 
-    ``spare_exempt`` chooses the exemption clause and prepares the connection
-    for it together: only the exemption needs rows classified, and an
-    ownership retirement, which ignores it, must not fail on roots it never
-    reads.
+    ``spare_exempt`` chooses whether exempt rows are left alone: an ownership
+    retirement ignores the exemption.
     """
-    if spare_exempt:
-        bind_shared_documents(db)
     where = f"{scope} AND {_UNRETIRED_WHERE if spare_exempt else _UNRETIRED_ANY_WHERE}"
     scope_params = (scope_value,) if isinstance(scope_value, str) else scope_value
     rows = db.execute(
