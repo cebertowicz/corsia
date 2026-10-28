@@ -1,5 +1,5 @@
 import { threads } from '../stores/threads';
-import { patchUnlistedThreadRow } from '../stores/threadRow';
+import { patchDesignatedSwitchRow } from '../stores/threadRow';
 import { acceptThreadModelTruth, seedThreadModelTruth } from '../stores/models';
 import { patchSubagentThread, registerSubagent } from '../stores/subagents';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
@@ -29,7 +29,7 @@ export function handleSessionUpdated(data: any) {
 		)) return;
 	}
 	patchSubagentThread(data.thread_id, threadSwitchFields(data));
-	patchUnlistedThreadRow(data.thread_id, threadSwitchFields(data));
+	patchDesignatedSwitchRow(data.thread_id, threadSwitchFields(data));
 	threads.update(ss => {
 		const updated = ss.map(s => {
 			if (s.id !== data.thread_id) return s;

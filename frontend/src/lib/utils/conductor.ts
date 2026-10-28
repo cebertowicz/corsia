@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { acceptThreadModelTruth } from '$lib/stores/models';
-import { applyUnlistedThreadRead, beginUnlistedThreadRead } from '$lib/stores/threadRow';
+import { applyDesignatedSwitchRead, beginDesignatedSwitchRead } from '$lib/stores/threadRow';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 
@@ -84,13 +84,16 @@ export function conductorScopeParam(scope: UiScope | null): string {
 
 async function fetchTarget(token: string | null, url: string): Promise<CoordinationLookup> {
 	if (!token) return { kind: 'unknown' };
-	const startedAt = beginUnlistedThreadRead();
+	const startedAt = beginDesignatedSwitchRead();
 	try {
 		const res = await fetch(url);
 		if (!res.ok) return { kind: 'unknown' };
 		const data = await res.json();
 		const threadId = data?.target?.thread_id ?? data?.thread_id ?? null;
-		if (!threadId) return { kind: 'absent' };
+		if (!threadId) {
+			applyDesignatedSwitchRead(startedAt, null);
+			return { kind: 'absent' };
+		}
 		const target: CoordinationTarget = { ...(data?.target ?? {}), thread_id: threadId };
 		// The thread list omits this target, so this read is its only row: it
 		// enters the same server-time ordering every listed thread's model does.
@@ -99,12 +102,15 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 		}
 		// Its switch state is server truth like a listed row's, so each read replaces it: a switch
 		// that ended while the page was away clears, and one still pending or failed shows. A read
-		// that began before a later 202 or frame yields to it.
-		applyUnlistedThreadRead(threadId, startedAt, {
-			pending_model: target.pending_model ?? null,
-			switch_status: target.switch_status ?? null,
-			switch_error: target.switch_error ?? null,
-			switch_operation_id: target.switch_operation_id ?? null,
+		// that began before a later 202, frame or read yields to it.
+		applyDesignatedSwitchRead(startedAt, {
+			threadId,
+			fields: {
+				pending_model: target.pending_model ?? null,
+				switch_status: target.switch_status ?? null,
+				switch_error: target.switch_error ?? null,
+				switch_operation_id: target.switch_operation_id ?? null,
+			},
 		});
 		return { kind: 'target', target, firstRunPending: data?.first_run_pending === true };
 	} catch {

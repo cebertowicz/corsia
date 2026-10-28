@@ -18,7 +18,7 @@ import {
 } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
 import { composerSelectionFor } from '$lib/stores/composerSelection';
-import { _resetUnlistedThreadRowsForTests } from '$lib/stores/threadRow';
+import { _resetDesignatedSwitchRowForTests } from '$lib/stores/threadRow';
 import { applyPendingThreadModelSwitch } from '$lib/stores/threadModelSwitch';
 import { handleSessionUpdated } from '$lib/ws/handlersSession';
 
@@ -30,7 +30,7 @@ afterEach(() => {
 	activeThreadId.set(null);
 	activeModelId.set(null);
 	corsiaAgentId.set(null);
-	_resetUnlistedThreadRowsForTests();
+	_resetDesignatedSwitchRowForTests();
 	_resetThreadModelTruthForTests();
 });
 
@@ -188,7 +188,15 @@ describe('fetchConductor', () => {
 			return { done: fetchCorsiaAgent('tok'), release };
 		}
 
+		// The page has read the target once, so the designated thread's row exists for a 202 or frame to change.
+		async function seed() {
+			const first = heldRead({ pending_model: null, switch_status: null });
+			first.release();
+			await first.done;
+		}
+
 		it('does not clear a pending switch that a 202 began after the read started', async () => {
+			await seed();
 			const stale = heldRead({ pending_model: null, switch_status: null });
 			applyPendingThreadModelSwitch('cond-1', {
 				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
@@ -199,6 +207,7 @@ describe('fetchConductor', () => {
 		});
 
 		it('does not bring back a switch that a commit frame finished after the read started', async () => {
+			await seed();
 			applyPendingThreadModelSwitch('cond-1', {
 				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
 			});

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { composerSelectionFor } from './composerSelection';
 import { applyPendingThreadModelSwitch } from './threadModelSwitch';
-import { unlistedThreadRows } from './threadRow';
+import { _resetDesignatedSwitchRowForTests, applyDesignatedSwitchRead, beginDesignatedSwitchRead, designatedSwitchRow } from './threadRow';
 import { activeThreadId, threads } from './threads';
 import { handleSessionUpdated } from '../ws/handlersSession';
 
@@ -15,16 +15,18 @@ const pendingBody = { operation_id: 'op-1', status: 'preparing', pending_model: 
 beforeEach(() => {
 	activeThreadId.set('conductor');
 	threads.set([{ id: 'chat', model: 'model/open' } as never]);
-	unlistedThreadRows.set(new Map());
+	_resetDesignatedSwitchRowForTests();
+	// The page has read the scope's target, so the designated thread's row exists.
+	applyDesignatedSwitchRead(beginDesignatedSwitchRead(), { threadId: 'conductor', fields: {} });
 });
 
 afterEach(() => {
 	activeThreadId.set(null);
 	threads.set([]);
-	unlistedThreadRows.set(new Map());
+	_resetDesignatedSwitchRowForTests();
 });
 
-describe('a pending switch on a thread the list omits', () => {
+describe('a pending switch on the designated thread, which the list omits', () => {
 	it('reaches the composer from the 202 response', () => {
 		applyPendingThreadModelSwitch('conductor', pendingBody);
 
@@ -48,11 +50,13 @@ describe('a pending switch on a thread the list omits', () => {
 		expect(get(composerSelectionFor)('conductor').switching?.pending_model).toBe('model/target');
 	});
 
-	it('leaves a listed chat on its list row and keeps the unlisted store empty', () => {
+	it('leaves a listed chat on its list row and any other thread out of the designated row', () => {
 		applyPendingThreadModelSwitch('chat', pendingBody);
+		handleSessionUpdated({ thread_id: 'elsewhere', pending_model: 'model/target', switch_status: 'preparing' });
 
 		expect(get(threads)[0]).toMatchObject({ pending_model: 'model/target' });
 		expect(get(composerSelectionFor)('chat').switching).toMatchObject({ pending_model: 'model/target' });
-		expect(get(unlistedThreadRows).size).toBe(0);
+		expect(get(designatedSwitchRow)).toEqual({ threadId: 'conductor', fields: {} });
+		expect(get(composerSelectionFor)('elsewhere').switching).toBeUndefined();
 	});
 });
