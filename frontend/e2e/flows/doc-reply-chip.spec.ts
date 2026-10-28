@@ -761,6 +761,22 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(delivered).toHaveCount(0, { timeout: 15_000 });
 			await shot(page, `03-image-document-chip-${theme}-${width}`);
 			await holdDwell(page, true);
+			if (width === 1440) await page.evaluate(() => {
+				const samples: boolean[] = [];
+				(window as unknown as { __documentChipHit: boolean[] }).__documentChipHit = samples;
+				const sample = () => {
+					if (document.querySelector('.image-overlay')) {
+						const chips = [...document.querySelectorAll<HTMLElement>('[data-doc-reply-chip]:not(.image-overlay [data-doc-reply-chip])')];
+						samples.push(chips.some(node => {
+							const box = node.getBoundingClientRect();
+							const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+							return !!hit && node.contains(hit);
+						}));
+					}
+					if (samples.length < 120) requestAnimationFrame(sample);
+				};
+				requestAnimationFrame(sample);
+			});
 			await chipButton(page).click();
 			// The open pin is excluded from the count: desktop shows the other reply clear of the popover; the phone's modal hides the chip.
 			await expect(overlay(page)).toBeVisible();
@@ -770,6 +786,9 @@ for (const theme of ['light', 'dark'] as const) {
 			} else {
 				// The document's covered chip may still be completing its outro as the image opens.
 				await expect(page.locator('[data-doc-reply-chip][inert]')).toHaveCount(0);
+				const documentChipHits = await page.evaluate(() => (window as unknown as { __documentChipHit: boolean[] }).__documentChipHit);
+				expect(documentChipHits.length).toBeGreaterThan(0);
+				expect(documentChipHits.some(Boolean)).toBe(false);
 				await expectChip(page, '1 new reply');
 				await expect(chipButton(page)).toHaveAttribute('title', '1 new reply');
 				const popover = page.locator('[data-popover]').filter({ hasText: 'Yes, the header is final. I attached the export.' });

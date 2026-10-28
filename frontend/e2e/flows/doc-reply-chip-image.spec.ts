@@ -142,7 +142,12 @@ for (const width of [393, 1440]) {
 				(window as unknown as { __chipSamples: unknown[] }).__chipSamples = samples;
 				const sample = () => {
 					const chips = [...document.querySelectorAll<HTMLElement>('.image-overlay [data-doc-reply-chip]')];
-					samples.push({ same: chips[0] === initial, chips: chips.map(node => ({ text: node.innerText, animations: node.getAnimations().length })) });
+					const uncovered = [...document.querySelectorAll<HTMLElement>('[data-doc-reply-chip]')].filter(node => {
+						const box = node.getBoundingClientRect();
+						const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+						return !!hit && node.contains(hit);
+					}).length;
+					samples.push({ same: chips[0] === initial, uncovered, chips: chips.map(node => ({ text: node.innerText, animations: node.getAnimations().length })) });
 					if (samples.length < 120) requestAnimationFrame(sample);
 				};
 				requestAnimationFrame(sample);
@@ -152,10 +157,10 @@ for (const width of [393, 1440]) {
 			await expect(overlay(page)).toBeVisible();
 			if (width === 1440) {
 				await page.waitForTimeout(300);
-				const samples = await page.evaluate(() => (window as unknown as { __chipSamples: Array<{ same: boolean; chips: Array<{ text: string; animations: number }> }> }).__chipSamples);
+				const samples = await page.evaluate(() => (window as unknown as { __chipSamples: Array<{ same: boolean; uncovered: number; chips: Array<{ text: string; animations: number }> }> }).__chipSamples);
 				if (process.env.REPLY_CHIP_PLACEMENT_BASELINE !== '1') {
 					expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
-					expect(samples.every(sample => sample.same && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
+					expect(samples.every(sample => sample.same && sample.uncovered === 1 && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
 				}
 				// The visible pin is excluded even when its popover closes on pointerdown.
 				await expect(chip).toHaveAttribute('title', '1 new reply');
