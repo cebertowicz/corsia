@@ -262,7 +262,7 @@
 		margin-bottom: var(--space-1);
 	}
 	ul.ctx-bar { display: flex; list-style: none; padding: 0; }
-	.ctx-segment { height: 100%; flex: 0 0 auto; }
+	.ctx-segment { height: 100%; flex: 0 0 auto; transition: width var(--dur-drawer) ease; }
 	.ctx-bar-note { font-size: var(--text-footnote); color: var(--text-secondary); margin-bottom: var(--space-1); }
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
