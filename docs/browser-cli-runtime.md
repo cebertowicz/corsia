@@ -255,18 +255,17 @@ agent-browser process or the Chrome window it opened, then restart CORSIA, which
 clears the backend-lifetime block; one later `browser_close` also clears it when
 the producer can still acknowledge. A restart clears ownership but, like deleting
 sidecars, killing a parent PID or finding no environment markers, cannot certify
-descendant absence. No automatic foreign-process signal, directory sweep or `close --all`
-is a recovery path. FileNotFoundError and PermissionError at the asynchronous
+descendant absence. Apart from the saved-profile orphan recovery below, no automatic
+foreign-process signal, directory sweep or `close --all` is a recovery path. FileNotFoundError and PermissionError at the asynchronous
 spawn boundary can follow actual execution; neither is no-effects proof.
 
 The producer acknowledgement is the stock local-CDP cleanup contract. It is not
 an independently enforced kernel containment boundary for every conceivable
 helper process. macOS Chrome starts a new process session and can survive a backend
-crash. Restart clears copied state files but does not recover that process group,
-release its saved-profile lock, remove stale temporary profiles, or reclaim its
-occupied ports. The allocator skips occupied ports until the inventory is exhausted.
-Recovery requires closing the leftover browser before reusing the saved profile;
-no durable crash-recovery ownership mechanism is introduced here.
+crash. Before a saved-profile launch, CORSIA reclaims an orphaned Chrome group whose
+command line matches that exact profile. A live or otherwise unverified holder is
+left alone and reported as a saved sign-in in use. Restart does not remove stale
+temporary profiles. The allocator skips occupied ports until the inventory is exhausted.
 
 ## Verification and rollout
 

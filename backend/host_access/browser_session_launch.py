@@ -83,6 +83,11 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
     from host_access.browser_download import is_private_download
     if not await asyncio.to_thread(is_private_download, owner._chrome):
         await asyncio.to_thread(browser_executables.verify_google, owner._chrome)
+    if runtime.record.profile:
+        from host_access.browser_orphan import close_orphans
+        owned = frozenset(item.chrome.process.pid for item in owner._sessions.values()
+                          if item.chrome is not None and not item.chrome.closed)
+        await asyncio.to_thread(close_orphans, runtime.record.profile, owned)
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
         headless=not runtime.record.show_window, ua=owner._user_agent)
