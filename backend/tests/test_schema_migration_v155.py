@@ -50,12 +50,12 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
     db.close()
 
 
-def test_absent_registry_is_a_noop_but_partial_registry_fails():
+def test_absent_or_partial_registry_is_a_noop():
     with sqlite3.connect(":memory:") as db:
         migrate_154_to_155(db)
         db.execute("CREATE TABLE artifact_identities (id TEXT)")
-        with pytest.raises(sqlite3.OperationalError):
-            migrate_154_to_155(db)
+        migrate_154_to_155(db)
+        assert db.execute("SELECT COUNT(*) FROM artifact_identities").fetchone()[0] == 0
 
 
 def test_migration_registered():

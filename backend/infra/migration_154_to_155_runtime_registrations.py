@@ -5,10 +5,10 @@ import sqlite3
 
 def migrate_154_to_155(conn: sqlite3.Connection) -> None:
     # Earlier migrations also support partial historical databases with no registry.
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name IN "
+    if conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
         "('artifact_registrations','artifact_identities','artifact_registration_events')"
-    ).fetchone():
+    ).fetchone()[0] != 3:
         return
     conn.execute(
         """DELETE FROM artifact_registrations AS r
