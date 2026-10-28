@@ -24,6 +24,11 @@ REPLY_VIA_POST_UPDATE_KEY = "reply_via_post_update"
 #: this rule and the envelope renders by it, so the two cannot drift.
 NON_HUMAN_MARKERS = ("sender_kind", "completion", "routed_event")
 
+
+def is_human_input(role: str, metadata: dict | None) -> bool:
+    """Whether a durable input was written by the person."""
+    return role == "user" and not any((metadata or {}).get(key) for key in NON_HUMAN_MARKERS)
+
 #: The human-message footer: the reply affordance, then the no-reply line.
 HUMAN_REPLY_FOOTER = (
     '[To reply, call post_update(text="<your reply>")]\n'
@@ -62,9 +67,7 @@ def render_agent_envelope(
         from prompts.plan_wakes import paused_line
 
         lead = paused_line(str(paused_since))
-    if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and not any(
-        (metadata or {}).get(key) for key in NON_HUMAN_MARKERS
-    ):
+    if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and is_human_input("user", metadata):
         lead += viewing_context_line((metadata or {}).get(VIEWING_DOCUMENT_KEY))
         context = (metadata or {}).get(REPLY_CONTEXT_KEY)
         lead += reply_context_lines(context)

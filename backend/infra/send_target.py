@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Literal
 
 from loguru import logger
 
 from infra import db_async
 from infra.send_types import DeliveryFailureSide
+from infra.thread_input_types import Admission
 from llm import resolution as model_resolution
 from llm.locality import LOCALITY_REFUSALS
 from llm.resolution import ExecutionTarget, ModelUnavailableError
 
 
 SELECTED_MODEL_UNAVAILABLE = "selected_model_unavailable"
+MODEL_LOAD_FAILED = "model_load_failed"
+MODEL_LOAD_UNREACHABLE = "model_load_unreachable"
 # The same FIFO-head hold, for a thread that has no model yet. Only the user
 # choosing one lifts it (``thread.model_row.select_first_model``), so no catalog wake looks for it.
 NO_MODEL_SELECTED = "no_model_selected"
+
+
+def model_load_error(cause: str) -> str:
+    """Map local load causes to the durable delivery error."""
+    return MODEL_LOAD_UNREACHABLE if cause == "unreachable" else MODEL_LOAD_FAILED
 
 
 class TargetUnavailable(RuntimeError):
@@ -79,7 +86,7 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target, marked unavailable when its thread's policy forbids the model."""
-    return _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
+    return ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
 
 
 async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
@@ -89,108 +96,76 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     def _scope() -> ExecutionTarget:
         db = get_db()
         try:
-            return _ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
+            return ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
         finally:
             db.close()
 
     return await db_async.run_in_db(_scope)
 
 
-def omlx_seat_and_model(target: ExecutionTarget) -> tuple[str, str] | None:
-    """Identify the oMLX seat and model for a native network target."""
-    from llm.locality import row_server_id
-
-    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"
-            and target.transport_model.startswith("omlx@")):
-        return None
-    server_id = row_server_id({"litellm_model": target.transport_model})
-    model_id = target.transport_model.partition("/")[2]
-    return (server_id, model_id) if server_id and model_id else None
-
-
-def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
-    """Use the catalog's cached oMLX readiness, without probing or loading a model."""
-    if not (target.available and target.harness == "native"
-            and target.provider == "omlx" and target.backend == "network"):
+def ready_target(target: ExecutionTarget, *, db=None, loaded: set[str] | None = None) -> ExecutionTarget:
+    """Project cached readiness or a supplied live loaded-model list."""
+    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"):
         return target
-    from llm.model_status import _network_status
-    from llm.network_discovery import get_loaded_model_ids
+    if not target.available and not (loaded is not None and target.availability_reason == "model_not_loaded"):
+        return target
     from infra.database import get_db
+    from llm.local_model_load import cached_status, fit_readiness, omlx_seat_and_model, readiness
 
     seat = omlx_seat_and_model(target)
     if seat is None:
         return target
-    server_id, _ = seat
     connection = db if db is not None else get_db()
     try:
-        server = connection.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()
+        if loaded is not None:
+            if seat[1] in loaded:
+                return replace(target, available=True, availability_reason=None)
+            state = fit_readiness(connection, seat[0], seat[1], loaded)
+        else:
+            if cached_status(target, db=connection, server_id=seat[0]) == "ready":
+                return target
+            state = readiness(target, db=connection)
     finally:
         if db is None:
             connection.close()
-    status = _network_status(
-        {"litellm_model": target.transport_model, "available": target.available},
-        {server_id: server["status"]} if server else {}, get_loaded_model_ids,
-    )
-    if status == "ready":
+    if state is not None and state.state == "loaded":
         return target
-    return replace(target, available=False, availability_reason=(
-        "model_not_loaded" if status == "available" else "model_unavailable"
-    ))
+    reason = "model_not_loaded" if state is not None and state.state == "fits_now" else state.state if state else "model_unavailable"
+    return replace(target, available=False, availability_reason=reason)
 
 
-TargetAdmission = Literal["run", "wait", "fail"]
+def load_authors(inputs) -> tuple[str, ...]:
+    """The ids among ``(id, role, metadata)`` inputs whose person may load a local model."""
+    from core.message_history import is_human_input
+
+    return tuple(input_id for input_id, role, metadata in inputs if is_human_input(role, metadata))
 
 
-def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
+def classify_target_admission(target: ExecutionTarget, *, load_for: tuple[str, ...] = ()) -> Admission:
     """Classify a target at the one admission seam.
 
     Catalog/model unavailability can clear through ``notify_models_changed`` and
     waits at the FIFO head. Harness connection state has no live catalog wake,
     so it fails visibly rather than promising recovery that cannot occur.
     """
+    from llm.local_model_load import LOAD_REFUSALS
+
     if target.available:
-        return "run"
-    if target.availability_reason == "connection_unavailable":
-        return "fail"
-    return "wait"
+        return Admission("run", load_for=load_for)
+    reason = target.availability_reason
+    if load_for and reason == "model_not_loaded":
+        return Admission("load", reason, load_for)
+    if load_for and reason in LOAD_REFUSALS:
+        return Admission("fail", reason, load_for)
+    if reason == "connection_unavailable":
+        return Admission("fail", load_for=load_for)
+    return Admission("wait", reason, load_for)
 
 
-def model_admission(model: str, *, db=None, thread_id: str | None = None) -> TargetAdmission:
-    """Classify the current catalog target from a claim transaction.
-
-    Permanent resolution errors release an existing hold for the normal driver
-    to fail visibly; only the classifier's ``wait`` outcome preserves it. With a
-    ``thread_id`` the target is the one send resolves, so the thread's project
-    policy keeps its hold exactly as it created it.
-    """
-    try:
-        return classify_target_admission(
-            _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db), db=db),
-        )
-    except (ModelUnavailableError, ValueError):
-        return "fail"
-
-
-def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> frozenset[str]:
-    """Ids among ``rows`` that the idle claim should release and take.
-
-    Hold and release use ``classify_target_admission`` through the same model
-    resolver, so only an explicitly recoverable model state remains held.
-    """
-    held = frozenset(
-        str(row["id"]) for row in rows
-        if row["write_outcome"] == "proved_no_write"
-        and row["delivery_error"] in (SELECTED_MODEL_UNAVAILABLE, *LOCALITY_REFUSALS)
-    )
-    from connections.account_holds import ACCOUNT_HOLD_REASONS
-
-    # Idle callers have already admitted the current durable account choice.
-    account_held = frozenset(str(row['id']) for row in rows
-                            if row['write_outcome'] == 'proved_no_write'
-                            and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
-    return account_held | (
-        held if held and model_admission(model, db=db, thread_id=thread_id) != 'wait' else frozenset()
-    )
+def lifted_hold_ids(held: frozenset[str], account_held: frozenset[str],
+                    admission: Admission) -> frozenset[str]:
+    """Release model holds unless admission says to wait, and admitted account holds."""
+    return account_held | (held if admission.kind != "wait" else frozenset())
 
 
 def boundary_account_lifted_ids(db, thread_id: str, turn, rows) -> frozenset[str]:

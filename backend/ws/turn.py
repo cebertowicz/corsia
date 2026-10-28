@@ -36,6 +36,7 @@ from llm.resolution import (
 )
 from ws.native_inbox_batch import native_safe_boundary_input as _native_safe_boundary_input
 from ws.post_turn import run_post_turn_tasks
+from ws.local_send_load import load_for_person as _load_for_person, ready_for_turn
 from ws.turn_cancellation import handle_cancelled_turn
 from ws.turn_unavailable import report_model_unavailable
 from ws.turn_types import _PreparedTurn, TurnBroadcast, TurnIngress
@@ -66,12 +67,14 @@ async def _setup_turn(
     broadcast: TurnBroadcast | None = None,
     step_metadata: dict | None = None,
     preadmitted_turn: TurnIdentity | None = None,
+    request: NativeTurnRequest | None = None,
 ) -> _PreparedTurn:
     """Validate, prepare, and durably bind one admitted Native turn."""
     from core.agent import get_agent
 
     agent = await get_agent()
-    await validate_native_target(target, event=ingress == "event")
+    target, admission = await ready_for_turn(target, load_for=request.load_for if request else ())
+    await validate_native_target(target, event=ingress == "event", admission=admission)
     active_model = target.transport_model
     provider = native_provider_params(target, make_provider_params(active_model))
     if ingress == "event" and broadcast is None:
@@ -121,6 +124,7 @@ async def _setup_turn(
         media_projection,
         unbind,
         effective_effort,
+        admission.kind == "load",
     )
 
 
@@ -267,9 +271,16 @@ async def _execute_turn(request: NativeTurnRequest) -> bool:
                 broadcast=request.broadcast,
                 step_metadata=request.step_metadata,
                 preadmitted_turn=request.preadmitted_turn,
+                request=request,
             )
         )
         ws_send = await _admit_prepared_turn(request, prepared)
+        if prepared.loads:
+            try:
+                await _load_for_person(request, prepared)
+            except BaseException as error:
+                await _finish_failed_admission(prepared, request, error)
+                raise
         cancelled = bool(await _run_prepared_turn(request, prepared))
         resolve_future(request.provider_acceptance, not cancelled)
         emit_terminal_product_event(
@@ -352,32 +363,16 @@ async def execute_turn(
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     ) = None,
     media_projection=None,
+    load_for: tuple[str, ...] = (),
 ) -> bool:
     """Execute one native turn for browser, delegation, or event ingress."""
     request = NativeTurnRequest(
-        ws,
-        user,
-        user_id,
-        thread_id,
-        thread_row,
-        content,
-        attachments,
-        is_retry,
-        target,
-        turn_id,
-        ingress,
-        reasoning_effort,
-        start_ack,
-        broadcast,
-        step_metadata,
-        persist_input_once,
-        settle_delivery,
-        after_persist_before_dispatch,
-        prepared_context,
-        preadmitted_turn,
-        provider_acceptance,
-        settle_delivery_terminal,
-        media_projection,
+        ws, user, user_id, thread_id, thread_row,
+        content, attachments, is_retry, target, turn_id, ingress,
+        reasoning_effort, start_ack, broadcast, step_metadata,
+        persist_input_once, settle_delivery, after_persist_before_dispatch,
+        prepared_context, preadmitted_turn, provider_acceptance,
+        settle_delivery_terminal, media_projection, load_for,
     )
     try:
         return await _execute_turn(request)

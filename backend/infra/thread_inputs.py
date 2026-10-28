@@ -18,6 +18,7 @@ from infra.send_types import SendRejected
 from infra.thread_input_rows import starts_turn
 from infra.vendor_turn_binding import admitted_model_state, turn_account_id
 from infra.thread_input_types import (
+    Admission,
     ClaimedBatch,
     ClaimedInput,
     FailedInputBatch,
@@ -43,7 +44,7 @@ def _batch(
     epoch: int,
     model: str,
     rows: list[sqlite3.Row],
-    stamps: dict | None = None, receipt: ReceiptFence | None = None, recovered: tuple[str, ...] = (),
+    stamps: dict | None = None, receipt: ReceiptFence | None = None, recovered: tuple[str, ...] = (), load_for: tuple[str, ...] = (),
 ) -> ClaimedBatch:
     return ClaimedBatch(
         thread_id=thread_id,
@@ -53,7 +54,7 @@ def _batch(
         target_model=model,
         items=tuple(_claimed_item(row, stamps or {}) for row in rows),
         vendor_receipt=receipt,
-        recovered_message_ids=recovered,
+        recovered_message_ids=recovered, load_for=load_for,
     )
 
 
@@ -184,7 +185,6 @@ def preview_input_batch(
     )
 
 
-
 def invalidate_idle_checkpoint_markers(
     db: sqlite3.Connection, thread_id: str, *, reason: IdleCheckpointReason,
 ) -> None:
@@ -209,26 +209,29 @@ def invalidate_markers_for_archive(db: sqlite3.Connection, thread_id: str) -> No
 
 def _claimable_prefix(
     connection: sqlite3.Connection, thread_id: str, *, movable: bool = False,
-) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool] | None:
+) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool, tuple[str, ...]] | None:
     """The FIFO prefix an idle claim would take: epoch, model, rows, lifted holds, movable-held."""
     state = thread_admission_state(connection, thread_id, allow_unavailable=True)
-    # A model-less thread, or one whose account policy holds its saved model,
-    # keeps every input queued; ``thread.model_row.select_first_model`` or the
-    # policy/lifecycle change that lifts the hold makes the same prefix claimable.
+    # A model or account hold keeps inputs queued until the relevant choice changes.
     selection = admitted_model_state(thread_id, state, db=connection, movable=movable)
     if selection is None:
         return None
     epoch, model, held = selection
-    rows = _queued_epoch_prefix(
-        connection, thread_id, expected_epoch=epoch, expected_model=model)
-    from infra.send_target import lifted_hold_ids
+    rows = _queued_epoch_prefix(connection, thread_id, expected_epoch=epoch, expected_model=model)
+    from infra.send_target import lifted_hold_ids, load_authors
+    from infra.unavailable_model_recovery import liftable_hold_sets, model_admission
 
     rows = still_claimable(connection, thread_id, rows)
-    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id)
+    model_held, account_held = liftable_hold_sets(rows)
+    candidate = _deliverable_prefix(rows, model_held | account_held)
+    load_for = load_authors((row['id'], str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
+    admission = model_admission(model, load_for=load_for, db=connection, thread_id=thread_id)[1] if model_held else Admission("run")
+    lifted = lifted_hold_ids(model_held, account_held, admission)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None
-    return epoch, model, rows, lifted, held
+    claimed = {row['id'] for row in rows}  # only the people this Turn claims authorize its load
+    return epoch, model, rows, lifted, held, tuple(i for i in load_for if i in claimed)
 
 
 def fail_claimable_prefix(
@@ -281,7 +284,7 @@ def start_idle_turn(
         prefix = _claimable_prefix(connection, thread_id, movable=True)
         if prefix is None:
             return None
-        epoch, model, rows, lifted, movable_held = prefix
+        epoch, model, rows, lifted, movable_held, load_for = prefix
         from connections.account_holds import model_account_hold
         from connections.account_rollover import commit_rollover, plan_rollover
         from plans.public import schedule_thread_after_commit, set_aside_while_paused
@@ -340,7 +343,7 @@ def start_idle_turn(
                 stamps, receipt, recovered = _assign_turn(connection, thread_id, turn_id, rows, initial=True)
         except _RolloverHeld:
             return connection_limit_gate(thread_id, model, probe=connection_limit_probe, hold_expired_at_startup=hold_expired_limit_at_startup, db=connection)[1]
-    return _batch(thread_id, turn_id, turn_order, epoch, model, rows, stamps, receipt, recovered)
+    return _batch(thread_id, turn_id, turn_order, epoch, model, rows, stamps, receipt, recovered, load_for)
 
 
 def claim_safe_boundary(

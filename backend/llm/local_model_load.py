@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 
 ReadinessState = Literal["loaded", "fits_now", "no_room", "no_memory", "unreachable"]
 LoadFailure = Literal["load_failed", "unreachable", "no_room", "no_memory"]
+# Readiness states that refuse a person's send before any load starts.
+LOAD_REFUSALS = frozenset({"no_room", "no_memory", "unreachable"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +56,7 @@ class ModelLoadFailed(Exception):
         self.cause: LoadFailure = cause
 
 
-def _fit(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
+def fit_readiness(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
     """Read the seat and reported sizes together, then use the shared fit verdict."""
     from llm.locality import server_on_this_mac
 
@@ -89,35 +91,42 @@ def _fit(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
     return Readiness(verdict, len(others))
 
 
+def omlx_seat_and_model(target: ExecutionTarget) -> tuple[str, str] | None:
+    """Identify the oMLX seat and model for a native network target."""
+    from llm.locality import row_server_id
+
+    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"
+            and target.transport_model.startswith("omlx@")):
+        return None
+    server_id = row_server_id({"litellm_model": target.transport_model})
+    model_id = target.transport_model.partition("/")[2]
+    return (server_id, model_id) if server_id and model_id else None
+
+
+def cached_status(target: ExecutionTarget, *, db, server_id: str) -> str:
+    """Return the network catalog's cached status for this seat."""
+    from llm.model_status import _network_status
+    from llm.network_discovery import get_loaded_model_ids
+
+    server = db.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()
+    return _network_status({"litellm_model": target.transport_model, "available": True},
+                           {server_id: server["status"]} if server else {}, get_loaded_model_ids)
+
+
 def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     """Project send admission's cached readiness and the shared fit verdict."""
-    from infra.send_target import _ready_target, omlx_seat_and_model
     from llm.network_discovery import get_loaded_model_ids
 
     seat = omlx_seat_and_model(target)
     if seat is None:
         return None
     server_id, model_id = seat
-    scoped = _ready_target(target, db=db)
+    status = cached_status(target, db=db, server_id=server_id)
     loaded = get_loaded_model_ids(server_id)
-    if scoped.available:
+    if status == "ready":
         return Readiness("loaded", len(loaded - {model_id}))
-    if scoped.availability_reason not in {"model_not_loaded", "model_unavailable"}:
-        return None
-    fit = _fit(db, server_id, model_id, loaded)
-    if fit.state == "unreachable" or scoped.availability_reason == "model_not_loaded":
-        return fit
-    return None
-
-
-def _readiness_now(target: ExecutionTarget) -> Readiness | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return readiness(target, db=db)
-    finally:
-        db.close()
+    fit = fit_readiness(db, server_id, model_id, loaded)
+    return fit if fit.state == "unreachable" or status == "available" else None
 
 
 def _fit_now(server_id: str, model_id: str, loaded: set[str]) -> Readiness:
@@ -125,7 +134,7 @@ def _fit_now(server_id: str, model_id: str, loaded: set[str]) -> Readiness:
 
     db = get_db()
     try:
-        return _fit(db, server_id, model_id, loaded)
+        return fit_readiness(db, server_id, model_id, loaded)
     finally:
         db.close()
 
@@ -207,22 +216,8 @@ async def ensure_loaded(target: ExecutionTarget) -> None:
     up loaded. Never unloads, and never relies on oMLX's implicit load on a chat request.
     A target that isn't a local oMLX model returns at once.
     """
-    from infra.db_async import run_in_db
-    from infra.send_target import omlx_seat_and_model
-    from llm.providers.omlx_lifecycle import read_loaded
-
     seat = omlx_seat_and_model(target)
     if seat is None:
-        return
-    state = await run_in_db(_readiness_now, target)
-    if state is None:
-        return
-    live = await read_loaded({"server_id": seat[0]})
-    if live is None:
-        log.info("Cannot read loaded status for %s on %s", seat[1], seat[0])
-        _emit_load(seat[0], seat[1], "load.failed", "unreachable")
-        raise ModelLoadFailed("unreachable")
-    if any(row["identifier"] == seat[1] for row in live):
         return
     task = _LOADS.get(seat)
     if task is None:

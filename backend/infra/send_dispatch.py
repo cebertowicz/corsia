@@ -11,7 +11,7 @@ from infra.send_project_paths import validate_project_working_dir as _validate_p
 from infra.send_types import DeliveryFailureSide, SendRejected
 from infra.stale_context import stale_rejection
 from infra.turn_start_ack import await_native_start
-from llm.reasoning_config import effective_reasoning_effort as resolve_reasoning_effort
+from llm.reasoning_config import resolve_thread_effort
 from llm.resolution import ExecutionTarget
 from subagents.codex_dispatch import dispatch_codex
 
@@ -24,12 +24,6 @@ TerminalSettlement = Callable[[str, str | BaseException | None], Awaitable[None]
 
 def _media_projection_kwargs(media_projection) -> dict:
     return {} if media_projection is None else {"media_projection": media_projection}
-
-
-def _resolve_thread_effort(requested, thread_row: Any, target: ExecutionTarget) -> str | None:
-    if requested is None and "reasoning_effort" in thread_row.keys():
-        requested = thread_row["reasoning_effort"]
-    return resolve_reasoning_effort(requested, target.catalog_id)
 
 
 async def dispatch_cc_sub(
@@ -203,6 +197,7 @@ async def dispatch_native_event(
     transfer_delivery_to_turn: Callable[[], None] | None = None,
     settle_delivery_terminal: TerminalSettlement | None = None,
     media_projection=None,
+    load_for: tuple[str, ...] = (),
 ) -> tuple[str, asyncio.Task, TurnIdentity]:
     from infra import state
     from ws.turn import execute_turn
@@ -223,25 +218,22 @@ async def dispatch_native_event(
             ws=_HeadlessWS(owner_id),
             user={"id": owner_id},
             user_id=owner_id,
-            thread_id=thread_id,
-            thread_row=thread_row,
-            content=content,
+            thread_id=thread_id, thread_row=thread_row, content=content,
             attachments=[],
             is_retry=False,
             target=target,
             ingress="event",
             turn_id=turn_id,
-            reasoning_effort=_resolve_thread_effort(None, thread_row, target),
+            reasoning_effort=resolve_thread_effort(None, thread_row, target),
             broadcast=_broadcast,
             step_metadata=metadata,
             persist_input_once=persist_input_once,
             settle_delivery=settle_delivery,
             prepared_context=prepared_context,
             start_ack=start_ack,
-            preadmitted_turn=preadmitted_turn,
-            provider_acceptance=provider_acceptance,
-            settle_delivery_terminal=settle_delivery_terminal,
-            media_projection=media_projection,
+            preadmitted_turn=preadmitted_turn, provider_acceptance=provider_acceptance,
+            settle_delivery_terminal=settle_delivery_terminal, media_projection=media_projection,
+            load_for=load_for,
         )
     )
     if transfer_delivery_to_turn is not None:
@@ -272,6 +264,7 @@ async def dispatch_native_delegation(
     transfer_delivery_to_turn: Callable[[], None] | None = None,
     settle_delivery_terminal: TerminalSettlement | None = None,
     media_projection=None,
+    load_for: tuple[str, ...] = (),
 ) -> tuple[str, asyncio.Task, TurnIdentity]:
     from infra import state
     from ws.turn import execute_turn
@@ -283,23 +276,20 @@ async def dispatch_native_delegation(
             ws=ws,
             user=user,
             user_id=user["id"],
-            thread_id=thread_id,
-            thread_row=thread_row,
-            content=content,
+            thread_id=thread_id, thread_row=thread_row, content=content,
             attachments=attachments or [],
             is_retry=False,
             target=target,
             turn_id=turn_id,
             ingress="delegation",
-            reasoning_effort=_resolve_thread_effort(reasoning_effort, thread_row, target),
+            reasoning_effort=resolve_thread_effort(reasoning_effort, thread_row, target),
             persist_input_once=persist_input_once,
             settle_delivery=settle_delivery,
             prepared_context=prepared_context,
             start_ack=start_ack,
-            preadmitted_turn=preadmitted_turn,
-            provider_acceptance=provider_acceptance,
-            settle_delivery_terminal=settle_delivery_terminal,
-            media_projection=media_projection,
+            preadmitted_turn=preadmitted_turn, provider_acceptance=provider_acceptance,
+            settle_delivery_terminal=settle_delivery_terminal, media_projection=media_projection,
+            load_for=load_for,
         )
     )
     if transfer_delivery_to_turn is not None:
@@ -335,11 +325,12 @@ async def dispatch_native_ws(
     transfer_delivery_to_turn: Callable[[], None] | None = None,
     settle_delivery_terminal: TerminalSettlement | None = None,
     media_projection=None,
+    load_for: tuple[str, ...] = (),
 ) -> tuple[str, TurnIdentity]:
     from infra import state
     from ws.turn import execute_turn
 
-    effective_reasoning_effort = _resolve_thread_effort(
+    effective_reasoning_effort = resolve_thread_effort(
         reasoning_effort, thread_row, target,
     )
     start_ack = asyncio.get_running_loop().create_future()
@@ -348,9 +339,7 @@ async def dispatch_native_ws(
             ws=ws,
             user=user,
             user_id=user["id"],
-            thread_id=thread_id,
-            thread_row=thread_row,
-            content=content,
+            thread_id=thread_id, thread_row=thread_row, content=content,
             attachments=attachments,
             is_retry=is_retry,
             target=target,
@@ -362,10 +351,9 @@ async def dispatch_native_ws(
             after_persist_before_dispatch=after_persist_before_dispatch,
             prepared_context=prepared_context,
             start_ack=start_ack,
-            preadmitted_turn=preadmitted_turn,
-            provider_acceptance=provider_acceptance,
-            settle_delivery_terminal=settle_delivery_terminal,
-            media_projection=media_projection,
+            preadmitted_turn=preadmitted_turn, provider_acceptance=provider_acceptance,
+            settle_delivery_terminal=settle_delivery_terminal, media_projection=media_projection,
+            load_for=load_for,
         )
     )
     if transfer_delivery_to_turn is not None:
@@ -412,6 +400,7 @@ class DispatchContext:
     target: ExecutionTarget
     turn_id: str
     input_message_id: str | None = None
+    load_for: tuple[str, ...] = ()
     metadata: dict | None = None
     native_mode: str = "event"
     allow_fresh: bool = False
@@ -574,6 +563,7 @@ async def _accept_native(
             transfer_delivery_to_turn=ctx.transfer_delivery_to_turn,
             settle_delivery_terminal=ctx.settle_delivery_terminal,
             media_projection=ctx.media_projection,
+            load_for=ctx.load_for,
         )
         return driver, turn_task, identity
     if ctx.native_mode == "ws":
@@ -601,6 +591,7 @@ async def _accept_native(
             transfer_delivery_to_turn=ctx.transfer_delivery_to_turn,
             settle_delivery_terminal=ctx.settle_delivery_terminal,
             media_projection=ctx.media_projection,
+            load_for=ctx.load_for,
         )
         return driver, None, identity
     if ctx.user is None:
@@ -622,6 +613,7 @@ async def _accept_native(
         transfer_delivery_to_turn=ctx.transfer_delivery_to_turn,
         settle_delivery_terminal=ctx.settle_delivery_terminal,
         media_projection=ctx.media_projection,
+        load_for=ctx.load_for,
     )
 
 

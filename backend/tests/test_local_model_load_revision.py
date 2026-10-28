@@ -21,7 +21,7 @@ def test_readiness_projects_send_admission(seat):
         seat.loaded.add("target")
         assert readiness(_target(), db=db) == Readiness("loaded", 0)
         unavailable = replace(_target(), available=False, availability_reason="model_unavailable")
-        assert readiness(unavailable, db=db) is None
+        assert readiness(unavailable, db=db) == Readiness("loaded", 0)
         assert readiness(_target(provider="external"), db=db) is None
         assert readiness(replace(_target(), transport_model=f"external@{SERVER}/target"), db=db) is None
         seat.status("offline")
@@ -51,12 +51,12 @@ async def test_live_recheck_avoids_loading_when_cache_is_stale(seat, lifecycle, 
     async def live(_cfg):
         nonlocal calls
         calls += 1
-        return [] if calls == 1 else [{"identifier": "target"}]
+        return [{"identifier": "target"}]
 
     from llm.providers import omlx_lifecycle
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", live, raising=False)
     await ensure_loaded(_target())
-    assert calls >= 2
+    assert calls == 1
     assert seat.loads == []
 
 

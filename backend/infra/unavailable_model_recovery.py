@@ -113,6 +113,33 @@ async def hold_unavailable_model_input(
     return receipt
 
 
+def model_admission(model, *, load_for: tuple[str, ...] = (), db=None, thread_id: str | None = None, loaded=None):
+    """Resolve and classify the cached or live target for one admission."""
+    from infra.send_target import Admission, ready_target
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
+
+    try:
+        target = resolve_thread_target(model, thread_id=thread_id, db=db) if isinstance(model, str) else model
+        target = ready_target(target, db=db, loaded=loaded)
+        return target, classify_target_admission(target, load_for=load_for)
+    except (ModelUnavailableError, ValueError):
+        return None, Admission("fail")
+
+
+def liftable_hold_sets(rows) -> tuple[frozenset[str], frozenset[str]]:
+    """Collect model and account holds the idle claim may lift."""
+    from connections.account_holds import ACCOUNT_HOLD_REASONS
+
+    held = (row for row in rows if row['write_outcome'] == 'proved_no_write')
+    model, account = set(), set()
+    for row in held:
+        if row['delivery_error'] in (SELECTED_MODEL_UNAVAILABLE, *LOCALITY_REFUSALS):
+            model.add(str(row['id']))
+        if row['delivery_error'] in ACCOUNT_HOLD_REASONS:
+            account.add(str(row['id']))
+    return frozenset(model), frozenset(account)
+
+
 async def hold_unless_runnable(
     target: ExecutionTarget, batch: ClaimedBatch,
 ) -> ExecutionTarget | InboxQueuedInput:
@@ -123,12 +150,16 @@ async def hold_unless_runnable(
     Only the classifier's model-recoverable state is a wait; nothing outside
     admission asks.
     """
-    admission = classify_target_admission(target)
-    if admission == "run":
+    from llm.local_model_load import ModelLoadFailed
+
+    admission = classify_target_admission(target, load_for=batch.load_for)
+    if admission.kind in ("run", "load"):
         return target
-    if admission == "wait":
+    if admission.kind == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
+    if isinstance(error := admission.error(target.catalog_id), ModelLoadFailed):
+        raise error
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",
         side=DeliveryFailureSide.PROVIDER,

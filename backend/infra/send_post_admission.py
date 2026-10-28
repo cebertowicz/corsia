@@ -66,15 +66,22 @@ async def fail_unrun_claim(admission: InputAdmission, error: BaseException) -> N
     """
     from core.turn_core import settle_turn_terminal, terminal_error_detail
     from infra.input_admission import input_delivery
+    from infra.input_sequencing import settle_load_failure
 
     message_id = admission.accepted.message_id
     cancelled = isinstance(error, asyncio.CancelledError)
     try:
-        await settle_turn_terminal(
-            admission.batch.turn_id,  # type: ignore[union-attr]
-            "cancelled" if cancelled else "error",
-            terminal_error_detail(error) or None,
-        )
+        try:
+            await settle_load_failure(admission.batch, error)
+        except BaseException:
+            log.exception("Failed to settle model load")
+            raise
+        finally:
+            await settle_turn_terminal(
+                admission.batch.turn_id,  # type: ignore[union-attr]
+                "cancelled" if cancelled else "error",
+                terminal_error_detail(error) or None,
+            )
     except Exception as settle_error:
         raise settle_error from error
     if not isinstance(error, Exception):

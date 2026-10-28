@@ -1266,7 +1266,7 @@ async def test_cold_provider_dispatch_freezes_map_before_provider_io(
     prepared = PreparedBatch(
         thread_row={"id": "thread-1", "user_id": "user-1", "project_id": None},
         target=SimpleNamespace(
-            catalog_id="claude-code/sonnet", harness=provider,
+            catalog_id="claude-code/sonnet", harness=provider, provider="anthropic", backend="cloud",
         ),
         provider=provider,
         is_subagent=False,
@@ -1466,8 +1466,9 @@ async def test_unavailable_target_holds_claimed_input_and_ends_turn(
     import infra.thread_execution as execution
     from tests.unavailable_model_support import admit_held_candidate, seed_model
 
-    seed_model("omlx@srv/m", available=0)
-    batch = admit_held_candidate("unavailable-thread", "omlx@srv/m", "unavailable-input")
+    # A cloud model: a person's send to an unreachable local one is refused before it is written.
+    seed_model("anthropic/x", backend="api", provider="anthropic", available=0)
+    batch = admit_held_candidate("unavailable-thread", "anthropic/x", "unavailable-input")
     monkeypatch.setattr(execution, "drive_idle_thread", AsyncMock())
 
     result = await execution.drive_claimed_batch(batch)

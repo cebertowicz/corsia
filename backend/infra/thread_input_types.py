@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import Literal
 
 from connections.account_receipts import ReceiptFence
 
@@ -36,6 +37,24 @@ class TurnIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class Admission:
+    """One verdict on a target. ``load_for`` names the person inputs that authorize a load."""
+
+    kind: Literal["run", "load", "wait", "fail"]
+    cause: str | None = None
+    load_for: tuple[str, ...] = ()
+
+    def error(self, catalog_id: str) -> Exception:
+        """The one refusal error. Only ``classify_target_admission`` gives a ``fail`` a cause: a person's refused load."""
+        from llm.local_model_load import ModelLoadFailed
+        from llm.resolution import ModelUnavailableError
+
+        if self.kind == "fail" and self.cause:
+            return ModelLoadFailed(self.cause)  # type: ignore[arg-type]
+        return ModelUnavailableError(catalog_id, self.cause or "model_unavailable")
+
+
+@dataclass(frozen=True, slots=True)
 class ClaimedBatch:
     """One contiguous FIFO prefix claimed by a Turn."""
 
@@ -48,6 +67,8 @@ class ClaimedBatch:
     vendor_receipt: ReceiptFence | None = field(default=None, repr=False)
     #: Error rows this claim stamped `recovered`; published with the batch.
     recovered_message_ids: tuple[str, ...] = ()
+    #: The claimed person inputs that authorize a load; the drive decides admission.
+    load_for: tuple[str, ...] = ()
 
     @property
     def identity(self) -> TurnIdentity:
@@ -60,6 +81,11 @@ class ClaimedBatch:
         resume anchor a warm boundary names. Providers record it as the input's
         own id (Claude Code frame ``uuid``, Codex ``clientUserMessageId``)."""
         return self.items[-1].message_id
+
+
+async def bind_exact_turn(batch: ClaimedBatch, turn_id: str, _previous) -> None:
+    if turn_id != batch.turn_id:
+        raise RuntimeError("provider tried to replace the admitted Turn identity")
 
 
 @dataclass(frozen=True, slots=True)

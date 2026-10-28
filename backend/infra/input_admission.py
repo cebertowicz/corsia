@@ -6,12 +6,13 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from core.message_history import REPLY_VIA_POST_UPDATE_KEY, is_human_input
 from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
 from infra.reply_context import require_every_comment, validate_reply_context
+from infra.send_target import load_authors
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
 from infra.vendor_login import LOGIN_KEY, public_metadata
@@ -48,7 +49,7 @@ def stamped_human_metadata(
         if metadata is not None and any(key in metadata for key in server_keys)
         else metadata
     )
-    if role != "user" or any((clean or {}).get(key) for key in NON_HUMAN_MARKERS):
+    if not is_human_input(role, clean):
         return clean
     stored = connection.execute(
         "SELECT metadata FROM messages WHERE id=?", (message_id,),
@@ -279,7 +280,7 @@ def accept_thread_input(
             require_current(thread_id, continuation, db=connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
-        hold = _admission_hold(connection, model, thread_id=thread_id)
+        hold = _admission_hold(connection, model, thread_id=thread_id, load_for=load_authors(((message_id, role, metadata),)))
         from plans.public import schedule_for_accepted_input
 
         schedule_for_accepted_input(thread_id, db=connection)
@@ -323,7 +324,31 @@ def accept_thread_input(
     )
 
 
-def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str) -> str | None:
+def _person_model_admission(db, model: str, thread_id: str, load_for: tuple[str, ...]) -> None:
+    """Refuse an unready local model before accepting a new human input."""
+    from infra.send_types import SendRejected
+    from infra.unavailable_model_recovery import model_admission
+    from llm.local_model_load import ModelLoadFailed, omlx_seat_and_model
+    from llm.network_discovery import get_loaded_model_ids
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
+
+    if not model or not load_for:
+        return
+    try:
+        target = resolve_thread_target(model, thread_id=thread_id, db=db)
+    except (ModelUnavailableError, ValueError):
+        return
+    seat = omlx_seat_and_model(target)
+    if seat is None:
+        return
+    target, admission = model_admission(target, db=db, load_for=load_for)
+    if target and admission.kind == "fail" and isinstance(error := admission.error(target.catalog_id), ModelLoadFailed):
+        raise SendRejected(409, "Couldn't load the selected local model.", metadata={
+            "cause": error.cause, "other_loaded": len(get_loaded_model_ids(seat[0]) - {seat[1]}),
+        })
+
+
+def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str, load_for: tuple[str, ...]) -> str | None:
     """Check ``model`` can take the input, or name the hold for having none.
 
     A thread with no model to run on takes the FIFO-head hold
@@ -331,6 +356,7 @@ def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str) -> st
     kept, never failed or sent to a model nobody chose, and only the user
     choosing a model lifts it (``thread.model_row.select_first_model``).
     """
+    _person_model_admission(db, model, thread_id, load_for)
     if model:
         from connections.account_holds import model_account_hold
 

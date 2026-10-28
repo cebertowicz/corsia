@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 
-from core.message_history import NON_HUMAN_MARKERS
+from core.message_history import is_human_input
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra import product_events
 from infra.database import TransactionOwnershipError, get_db
@@ -24,7 +24,7 @@ _pending_reports: set[asyncio.Future] = set()
 
 def _viewing_target(role, metadata):
     """Pure check: only a human send that names a document has a target."""
-    if role != "user" or any((metadata or {}).get(key) for key in NON_HUMAN_MARKERS):
+    if not is_human_input(role, metadata):
         return None
     return viewing_document_target((metadata or {}).get(VIEWING_DOCUMENT_KEY))
 

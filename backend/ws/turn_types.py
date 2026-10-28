@@ -26,3 +26,4 @@ class _PreparedTurn(NamedTuple):
     media_projection: Any
     unbind: Callable[[TurnIdentity], None]
     reasoning_effort: str | None
+    loads: bool = False

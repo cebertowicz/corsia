@@ -110,8 +110,15 @@ def wire(monkeypatch):
     async def _healthy(_model):
         return True, ""
 
+    async def _live_loaded(cfg):
+        # The live loaded list agrees with the fixture's cached loaded fact.
+        from llm import network_discovery
+
+        return [{"identifier": m} for m in network_discovery._LOADED_BY_SERVER.get(cfg["server_id"], ())]
+
     monkeypatch.setattr(base, "_completion_with_retries", _completion)
     monkeypatch.setattr(base, "_omlx_loaded_only_preflight", AsyncMock(return_value=None))
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", _live_loaded)
     monkeypatch.setattr(resolution, "_check_local_model_health", _healthy)
     monkeypatch.setattr(state, "broadcast_to_thread", MagicMock())
     monkeypatch.setattr(

@@ -63,14 +63,14 @@ def spawned(deleg_db, monkeypatch):
         children.append(child)
         return {"id": child, "user_id": kwargs["user_id"]}
 
-    async def _send(thread_id, _row, task, **_kwargs):
+    async def _send(thread_id, _row, task, *, metadata=None, **_kwargs):
         # The real send queues the task before the hand-over runs; use the
         # canonical input writer so the fixture advances the FIFO cursor too.
         from infra.input_admission import accept_thread_input
 
         accept_thread_input(
             thread_id, role="user", content=task, intent="apply_now",
-            message_id=f"delegate-task-input:{thread_id}", db=deleg_db,
+            message_id=f"delegate-task-input:{thread_id}", metadata=metadata, db=deleg_db,
         )
         return type("Sent", (), {"driver": "turn_engine", "duplicate": False})()
 

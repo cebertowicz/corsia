@@ -57,10 +57,16 @@ async def test_event_turn_setup_preserves_supported_reasoning_effort(
     async def validate(*_args, **_kwargs):
         return None
 
+    async def ready(target, **_kwargs):
+        from infra.send_target import Admission
+
+        return target, Admission("run")
+
     async def bind(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(agent_module, "get_agent", get_agent)
+    monkeypatch.setattr(ws_turn, "ready_for_turn", ready)
     monkeypatch.setattr(ws_turn, "validate_native_target", validate)
     monkeypatch.setattr(ws_turn, "make_provider_params", lambda _model: {})
     monkeypatch.setattr(ws_turn, "native_provider_params", lambda _target, _params: {})
@@ -1011,6 +1017,7 @@ async def test_external_anthropic_response_persists_and_replays_transport_identi
         _image_paths,
         _unbind_turn,
         _effort,
+        _loads,
     ) = await ws_turn._setup_turn(
         thread_id,
         "Begin.",
