@@ -248,7 +248,7 @@ def model_provider(model: str) -> str | None:
 
 
 def import_card(model: str, ready_sources: set[str]) -> ImportCard | None:
-    """The import card's inputs from stats alone, or None with no tool or no known model."""
+    """Local import discovery, or None with no tool or no known model."""
     from onboarding import agent_import as reader
     from onboarding.project_discovery import Roots
 
