@@ -39,7 +39,12 @@ _RECORDED_ORIGINS = frozenset({"connector", "platform"})
 
 def bound_repository(event: Any) -> str | None:
     """The ``owner/name`` a stored event's ``repo`` fact names, or None when it names none
-    or a script or agent wrote the event."""
+    or a script or agent wrote the event.
+
+    A platform event can carry a repo a script chose earlier: ``worker.result`` copies its
+    ``repo`` from the declared event that started the worker, which a script emits. The
+    start rule's ``repo in <registered repositories>`` test keeps that inside the owning
+    project's registered repositories."""
     if not isinstance(event, Mapping) or event.get("origin") not in _RECORDED_ORIGINS:
         return None
     facts = event.get("facts")
