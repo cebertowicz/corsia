@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
 """Read GitHub through a script run's broker channel."""
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import sys
 
@@ -38,3 +40,14 @@ def read(args: list[str]) -> int:
     sys.stdout.write(response["stdout"])
     sys.stderr.write(response["stderr"])
     return response["code"]
+
+
+if __name__ == "__main__":
+    if sys.argv[1:3] == ["github", "read"]:
+        sys.exit(read(sys.argv[3:]))
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        command = shutil.which("corsia", path=directory)
+        if command and os.path.realpath(command) != os.path.realpath(__file__):
+            os.execv(command, [command, *sys.argv[1:]])
+    print("Usage: corsia github read <api-path>", file=sys.stderr)
+    sys.exit(2)

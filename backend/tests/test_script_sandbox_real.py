@@ -17,7 +17,6 @@ import asyncio
 import os
 import shlex
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -186,17 +185,11 @@ async def test_real_script_startup_cost_by_concurrency(
 async def test_script_cli_reads_broker(sandbox, monkeypatch):
     from automation import script_github_channel as channel
     from connections.github_broker import GithubReadBroker
-    from tools import shell_guard
 
     monkeypatch.setattr(channel, "default_broker", lambda: GithubReadBroker(
         lambda args, *, timeout: subprocess.CompletedProcess(args, 0, "from broker", "")))
-    backend = Path(__file__).resolve().parents[1]
-    original = shell_guard.agent_tool_ro_dirs
-    monkeypatch.setattr(shell_guard, "agent_tool_ro_dirs", lambda: [*original(), backend])
-    cli = shlex.quote(str(backend / "cli.py"))
-    python = shlex.quote(sys.executable)
     endpoints = ("pulls/1", "issues/1/comments", "pulls/1/reviews", "pulls/1/comments")
-    commands = [f'{python} {cli} github read "repos/o/r/{endpoint}?page={page}" || exit $?'
+    commands = [f'corsia github read "repos/o/r/{endpoint}?page={page}" || exit $?'
                 for endpoint in endpoints for page in (1, 2)]
     path = _script(sandbox, "broker.sh", "\n".join(commands) + "\n")
     run = await run_script(THREAD_ID, None, path, run_id="broker-real", timeout_seconds=60)

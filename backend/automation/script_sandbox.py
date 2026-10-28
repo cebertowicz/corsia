@@ -68,7 +68,7 @@ class ScriptRun:
         return len(self.stdout) > STDOUT_CAP_BYTES
 
 
-def script_command(path: Path, stdin: Path | None = None) -> str:
+def script_command(path: Path, stdin: Path | None = None, *, client_dir: Path | None = None) -> str:
     """The one bash command line for a script: ``stdin`` or none, capped stdout and stderr.
 
     ``head`` ends a runaway script with SIGPIPE instead of letting the process
@@ -79,8 +79,9 @@ def script_command(path: Path, stdin: Path | None = None) -> str:
     interpreter = _INTERPRETERS.get(path.suffix)
     run = f"{interpreter} {quoted}" if interpreter else quoted
     source = shlex.quote(str(stdin)) if stdin is not None else "/dev/null"
+    client_path = f'export PATH={shlex.quote(str(client_dir))}:"$PATH"; ' if client_dir else ""
     return (
-        f"set -o pipefail; {run} <{source} "
+        f"{client_path}set -o pipefail; {run} <{source} "
         f"2> >(head -c {STDERR_CAP_BYTES} >&2) | head -c {STDOUT_CAP_BYTES + 1}"
     )
 
@@ -132,8 +133,13 @@ async def _run(
 ) -> ScriptRun:
     try:
         async with github_channel(thread_id, run_id, rule_id) as socket_path:
-            return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
-                                           stdin, trace, socket_path)
+            with tempfile.TemporaryDirectory(prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id)) as directory:
+                client_dir = Path(directory)
+                client = client_dir / "corsia"
+                client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
+                client.chmod(0o700)
+                return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                               stdin, trace, socket_path, client_dir)
     except OSError as exc:
         raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}") from exc
 
@@ -154,7 +160,7 @@ def _script_profile(*args, **kwargs) -> str:
 
 async def _run_with_channel(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...], socket_path: Path,
+    stdin: Path | None, trace: tuple[str, ...], socket_path: Path, client_dir: Path,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     env[SOCKET_ENV] = str(socket_path)
@@ -184,7 +190,7 @@ async def _run_with_channel(
         envelope = replace(envelope, argv_options={**envelope.argv_options,
                                                   "extra_hidden_roots": _script_gh_homes()})
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script, stdin), cwd, envelope,
+        script_command(script, stdin, client_dir=client_dir), cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(

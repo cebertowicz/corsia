@@ -59,3 +59,43 @@ async def _check_channel(calls, thread_id):
     assert not path.exists()
     with pytest.raises(OSError):
         await asyncio.open_unix_connection(str(path))
+
+
+@pytest.mark.asyncio
+async def test_run_stages_the_documented_command_and_removes_it(monkeypatch, tmp_path):
+    from automation import script_sandbox
+
+    monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _: tmp_path)
+    monkeypatch.setattr(channel, "default_broker", lambda: GithubReadBroker(
+        lambda args, *, timeout: subprocess.CompletedProcess(args, 0, "body", "")))
+    script = tmp_path / "run.sh"
+    script.write_text('corsia github read "repos/o/r/pulls/7?page=2"\n')
+    staged = []
+
+    async def execute(_thread, _project, script, _run, _timeout, stdin, _trace, socket_path, client_dir):
+        staged.append(client_dir)
+        process = await asyncio.create_subprocess_exec(
+            "bash", "-c", script_sandbox.script_command(script, stdin, client_dir=client_dir),
+            env={**os.environ, channel.SOCKET_ENV: str(socket_path)},
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        assert (process.returncode, stdout, stderr) == (0, b"body", b"")
+        fallback_dir = tmp_path / "other-bin"
+        fallback_dir.mkdir()
+        fallback = fallback_dir / "corsia"
+        fallback.write_text('#!/bin/sh\nprintf "%s" "$*"\n')
+        fallback.chmod(0o700)
+        script.write_text("corsia event emit example\n")
+        env = {**os.environ, "PATH": f'{fallback_dir}:{os.environ["PATH"]}'}
+        process = await asyncio.create_subprocess_exec(
+            "bash", "-c", script_sandbox.script_command(script, client_dir=client_dir),
+            env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        assert (process.returncode, stdout, stderr) == (0, b"event emit example", b"")
+
+    monkeypatch.setattr(script_sandbox, "_run_with_channel", execute)
+    await script_sandbox._run(os.environ.get("CORSIA_THREAD_ID", "test-thread"), None,
+                              script, "run", 10, None, (), None)
+    assert not staged[0].exists()
