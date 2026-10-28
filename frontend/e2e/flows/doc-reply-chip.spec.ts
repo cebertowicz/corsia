@@ -387,3 +387,59 @@ for (const theme of ['light', 'dark'] as const) {
 		});
 	}
 }
+
+// Before frames (light): the same two documents on the base commit, where no chip exists. Run only on the base checkout
+// (`--grep baseline`); the assertion that no chip is drawn is what proves the checkout is the base.
+for (const width of [1440, 393]) {
+	const size = { width, height: width === 393 ? 852 : 900 };
+
+	test(`${TAG} baseline light ${width}px: J1 text document with replies below the fold, no chip`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize(size);
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `b1-${width}`, 'launch-plan.md', [8, 10]);
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
+		await expect(chipBox(page)).toHaveCount(0);
+		await shot(page, `B1-text-document-before-light-${width}`);
+	});
+
+	test(`${TAG} baseline light ${width}px: J2 image document with replies on two pins, no chip`, async ({ page, request }, testInfo) => {
+		test.setTimeout(120_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize(size);
+		await page.emulateMedia({ colorScheme: 'light' });
+		seconds = 0;
+		await freezeClock(page);
+		const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
+		await onlyThread(request, seeded.sessionId);
+		const image = '![Mock screen](shots/screen.png)';
+		const from = DOC.indexOf(image);
+		const ids: string[] = [];
+		for (const [index, region] of [{ x: 0.1, y: 0.15, w: 0.25, h: 0.2 }, { x: 0.55, y: 0.5, w: 0.25, h: 0.2 }].entries()) {
+			const root = await request.post(`/api/artifacts/${seeded.artifactId}/comments`, {
+				params: { token: TEST_TOKEN },
+				data: { body: index === 0 ? 'Is this the final header?' : 'Does the save button move here?', anchor_text: image, from_off: from, to_off: from + image.length, region, delivery_policy: 'immediate' },
+			});
+			expect(root.ok(), await root.text()).toBeTruthy();
+			ids.push((await root.json()).comment.id as string);
+		}
+		tidy(seeded.artifactId);
+		addAgentReply(seeded.artifactId, ids[0], seeded.sessionId, 'Yes, the header is final. I attached the export.');
+		addAgentReply(seeded.artifactId, ids[1], seeded.sessionId, 'It stays where it is; only its label changed.');
+		for (const message of CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
+		await loginByUrl(page);
+		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.getByText(seeded.sessionTitle).first().click();
+		await expect(page.locator('.cm-md-image img').first()).toBeVisible();
+		await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0, { timeout: 15_000 });
+		await expect(chipBox(page)).toHaveCount(0);
+		await shot(page, `B2-image-document-before-light-${width}`);
+	});
+}
