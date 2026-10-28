@@ -95,8 +95,9 @@ class GmailBackend:
         if target.get("thread_id"):
             body["threadId"] = target["thread_id"]
         return await deliver_claimed(
-            draft_id, acquire=lambda: google_client.access_token(account_id), provider_errors=(GoogleError,),
-            send=lambda bearer: google_client.request_json("POST", SEND_URL, account_id=account_id, body=body, token=bearer),
+            draft_id, acquire=lambda: google_client.access_grant(account_id), provider_errors=(GoogleError,),
+            send=lambda grant: google_client.request_json("POST", SEND_URL, account_id=account_id,
+                body=body, token=grant[0], published=grant[1]),
             result_id=_sent_id,
             success=lambda sent, message_id: _email_sent(sent, message_id, account_id, target),
             sign_in_error=_sign_in_error,
@@ -112,9 +113,9 @@ class GmailBackend:
         body = {"summary": invite.title, "start": {"dateTime": invite.start}, "end": {"dateTime": invite.end},
                 "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
         return await deliver_claimed(
-            draft_id, acquire=lambda: google_client.access_token(account_id), provider_errors=(GoogleError,),
-            send=lambda bearer: google_client.request_json("POST", event_url("primary"), account_id=account_id,
-                body=body, params={"sendUpdates": "all"}, token=bearer),
+            draft_id, acquire=lambda: google_client.access_grant(account_id), provider_errors=(GoogleError,),
+            send=lambda grant: google_client.request_json("POST", event_url("primary"), account_id=account_id,
+                body=body, params={"sendUpdates": "all"}, token=grant[0], published=grant[1]),
             result_id=_sent_id,
             success=lambda sent, event_id: json.dumps({"event_id": event_id,
                 "html_link": sent.get("htmlLink") if isinstance(sent, dict) else None}),
