@@ -74,9 +74,9 @@ class CdpClient:
             if "error" in response:
                 error = response["error"]
                 if isinstance(error, dict):
-                    log.warning("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
+                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
                 else:
-                    log.warning("CDP %s failed with an invalid error response", method)
+                    log.debug("CDP %s failed with an invalid error response", method)
                 raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
             if not isinstance(result, dict):

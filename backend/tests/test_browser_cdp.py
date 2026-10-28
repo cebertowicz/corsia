@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 
 import pytest
 
@@ -16,6 +17,7 @@ async def test_cdp_error_logs_diagnostics_and_keeps_person_facing_error(caplog):
         async def recv(self):
             return json.dumps({'id': 1, 'error': {'code': -32602, 'message': 'invalid parameters'}})
 
+    caplog.set_level(logging.DEBUG, logger=browser_cdp.__name__)
     client = browser_cdp.CdpClient('ws://page')
     client.socket = Socket()
     with pytest.raises(browser_cdp.BrowserSessionError, match="This page couldn't be checked"):
