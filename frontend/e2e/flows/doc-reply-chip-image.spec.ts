@@ -162,7 +162,10 @@ for (const width of [393, 1440]) {
 				await capturePlacement('other-pin');
 				await chip.click();
 				await expect(page.getByText('The save button stays in place.', { exact: true })).toBeVisible();
-			} else await capturePlacement('other-pin');
+			} else {
+				await capturePlacement('other-pin');
+				if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) await page.getByRole('button', { name: 'Done', exact: true }).click();
+			}
 			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
 				await reply(width === 393 ? roots[1] : roots[0], 'A further reply is waiting.');
 				await expect(chip).toBeVisible();
