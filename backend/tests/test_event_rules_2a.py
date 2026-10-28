@@ -1189,3 +1189,63 @@ def test_a_drop_with_nothing_routed_records_nothing(isolated_db):
     assert _decisions(rule_id=drop["id"]) == []
     [listed] = asyncio.run(_tool("watcher", operation="list"))["rules"]
     assert listed["last_fired"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,source", [("issue.opened", "webhook"), ("issue.opened", "poller"),
+                                      ("issue_comment.created", "webhook"), ("pr_comment.created", "webhook")])
+async def test_authored_rule_matches_github_content_facts(isolated_db, sent, monkeypatch, kind, source):
+    from events.github_mapper import map_github_event
+    from events.connectors.github_rules import _envelope
+
+    _project(P)
+    _agent("watcher")
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: False)
+    rule = await _tool("watcher", operation="create", connector="github", event_type=kind,
+                       match=[{"field": "repo", "op": "eq", "value": REPO},
+                              {"field": "author_origin", "op": "eq", "value": "outside"}],
+                       note="Handle the item")
+    issue = {"number": 9, "created_at": "2026-10-25T00:00:00Z",
+             "user": {"login": "outside"}, "html_url": "https://example.test/9"}
+    raw = {"action": "opened" if kind == "issue.opened" else "created",
+           "repository": {"full_name": REPO}, "issue": issue,
+           "sender": {"login": "outside"}}
+    if kind != "issue.opened":
+        raw["comment"] = {"id": 42, "body": "outside text", "user": {"login": "outside"}}
+        if kind == "pr_comment.created":
+            issue["pull_request"] = {"url": "https://example.test/pr"}
+    if source == "poller":
+        from types import SimpleNamespace
+        from events.connectors.github_issue_activity import new_issues
+
+        async def get(*args):
+            return SimpleNamespace(status=200, body=[issue])
+
+        deliveries = []
+
+        async def admit(*args):
+            deliveries.append(args)
+
+        await new_issues(get, admit, REPO, {"issues_opened_at": "2026-10-24T00:00:00Z"}, None)
+        _, raw, _ = deliveries[0]
+    event = map_github_event("issues" if kind == "issue.opened" else "issue_comment", raw)
+    assert event is not None
+    envelope = _envelope(event, raw, None)
+    assert envelope.facts["item_version"] == (9 if kind == "issue.opened" else 42)
+    assert envelope.facts["author_origin"] == "outside"
+    from events.connectors.github_webhook import dispatch_github_webhook_for_replay
+
+    await dispatch_github_webhook_for_replay(
+        "issues" if kind == "issue.opened" else "issue_comment", raw, delivery_id=f"{kind}-{source}")
+    assert _decisions(rule_id=rule["id"])[0]["outcome"] == "woke"
+
+
+@pytest.mark.asyncio
+async def test_opened_issue_without_a_rule_is_not_dead_lettered(isolated_db, sent):
+    from events.connectors.github_webhook import dispatch_github_webhook_for_replay
+
+    _project(P)
+    raw = {"action": "opened", "repository": {"full_name": REPO}, "sender": {"login": "outside"},
+           "issue": {"number": 9, "user": {"login": "outside"}, "title": "outside text"}}
+    await dispatch_github_webhook_for_replay("issues", raw, delivery_id="issue-no-rule")
+    assert _rows("SELECT id FROM dead_letter_events") == []

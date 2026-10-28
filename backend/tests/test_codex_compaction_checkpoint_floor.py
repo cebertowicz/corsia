@@ -175,10 +175,10 @@ async def test_compaction_keeps_the_visible_failure_when_registered_tail_does_no
     context = read_external_checkpoint_context(THREAD, MODEL, "codex")
     assert context is not None and context.boundary is None
 
-    rendered: list[object] = []
+    rendered: list[str] = []
 
-    async def render_overflow(*_args, **_kwargs):
-        rendered.append(object())
+    async def render_overflow(*args, **_kwargs):
+        rendered.append(args[3])
         return SimpleNamespace(
             rendered=SimpleNamespace(input_tokens=200_001),
             fit_ledger=SimpleNamespace(section_tokens=()),
@@ -202,4 +202,8 @@ async def test_compaction_keeps_the_visible_failure_when_registered_tail_does_no
         await maintain_external_tool_boundary(live, THREAD, "codex", must_adopt=True)
     # One render determines current input; a second proves the registered
     # installed continuation was considered and found too large.
-    assert len(rendered) == 2
+    assert sum(label.startswith("tool-boundary:") for label in rendered) == 1
+    assert sum(label.startswith("checkpoint:") for label in rendered) == 1
+    # Recovery pressure measures the installed replay independently.
+    assert sum(label.startswith("recovery:") for label in rendered) == 1
+    assert len(rendered) == 3

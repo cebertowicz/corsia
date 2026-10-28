@@ -168,7 +168,7 @@
 		width: 48px; height: 48px; border-radius: var(--radius-circle);
 		display: flex; align-items: center; justify-content: center;
 		background: var(--accent-fill); color: var(--accent-on-fill); border: none; cursor: pointer;
-		/* The one elevation its rail peers (`MobileScrollFab`, `PlanDrawerControl`)
+		/* The one elevation its rail peers (`ChatScrollControl`, `PlanDrawerControl`)
 		   already carry. Feedback stays in the transforms below, so elevation never
 		   forks into a per-component ladder. */
 		box-shadow: var(--glass-elevation-1), var(--glass-rim);
