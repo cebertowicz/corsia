@@ -134,7 +134,7 @@ async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeyp
         {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'popup'}}},
         {'method': 'Target.targetDestroyed', 'params': {'targetId': 'popup'}},
         {'method': 'Target.targetDestroyed', 'params': {'targetId': 'first'}},
-    ], set()) == 3
+    ], [None]) == 3
 
 
 @pytest.mark.asyncio
@@ -146,13 +146,22 @@ async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeyp
     (['first'], 1),
 ])
 async def test_reconnected_target_watch_notifies_once_for_a_missed_tab_change(monkeypatch, replayed, notices):
-    pages = set()
+    pages = [None]
     assert await _watch(monkeypatch, [_page('Target.targetCreated', 'first'), _page('Target.targetCreated', 'second'),
                                       {'id': 1, 'result': {}}], pages) == 0
-    assert pages == {'first', 'second'}
+    assert pages[0] == {'first', 'second'}
     replay = [_page('Target.targetCreated', target) for target in replayed] + [{'id': 1, 'result': {}}]
     assert await _watch(monkeypatch, replay, pages) == notices
-    assert pages == set(replayed)
+    assert pages[0] == set(replayed)
+
+
+@pytest.mark.asyncio
+async def test_reconnected_target_watch_notifies_when_empty_set_gains_a_tab(monkeypatch):
+    pages = [None]
+    assert await _watch(monkeypatch, [{'id': 1, 'result': {}}], pages) == 0
+    assert pages[0] == set()
+    assert await _watch(monkeypatch, [_page('Target.targetCreated', 'first'), {'id': 1, 'result': {}}], pages) == 1
+    assert pages[0] == {'first'}
 
 
 @pytest.mark.asyncio

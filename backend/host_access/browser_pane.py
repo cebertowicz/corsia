@@ -38,12 +38,12 @@ class PaneAppearance:
         return cls(int(width), int(height), round(scale, 2), data["scheme"])
 
 
-async def watch_targets(thread_id: str, notify: Callable[[], None], pages: set[str]) -> None:
+async def watch_targets(thread_id: str, notify: Callable[[], None], known: list[set[str] | None]) -> None:
     """Observe tab lifecycle while a pane is connected.
 
     Only page targets count: frames and workers (a captcha's, say) come and go constantly, and
     each notice restarts the pane's streams. Chrome replays existing targets before it answers
-    discovery; those seed the known pages without a notice. `pages` outlives one connection, so
+    discovery; those seed the known pages without a notice. `known` outlives one connection, so
     a reconnect whose replay differs from the pages last seen notifies once: a tab opened or
     closed while the watch was down.
     """
@@ -52,14 +52,15 @@ async def watch_targets(thread_id: str, notify: Callable[[], None], pages: set[s
     async with browser_cdp.CdpClient(endpoint) as cdp:
         discovery = await cdp.send("Target.setDiscoverTargets", discover=True)
         discovering = False
-        seen = set(pages)
-        pages.clear()
+        seen = known[0]
+        pages: set[str] = set()
         while True:
             event = json.loads(await cdp.socket.recv())
             if event.get("id") == discovery:
                 discovering = True
-                if seen and pages != seen:
+                if seen is not None and pages != seen:
                     notify()
+                known[0] = pages
                 continue
             method = event.get("method")
             params = event.get("params") if isinstance(event.get("params"), dict) else {}
