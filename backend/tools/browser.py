@@ -30,7 +30,8 @@ class BrowserOpenTool(Tool):
     name = "browser_open"
     description = (
         "Navigate to a URL in the browser. Opens a new browser session if none is active. "
-        "Headless is the default for ordinary inspection; set show_window to open a visible window.\n\n"
+        "Use show_window=true only when the person must watch or act; this shares the browser in their CORSIA pane. "
+        "browser_person_step shares it automatically when you need their help.\n\n"
         "USE THIS to:\n"
         "- Open a web page for inspection or testing\n"
         f"- Navigate to CORSIA UI (http://localhost:{DEFAULT_BACKEND_PORT}) for UX review\n\n"
@@ -49,7 +50,7 @@ class BrowserOpenTool(Tool):
             },
             "show_window": {
                 "type": "boolean",
-                "description": "Open a visible window the user can watch; headless by default.",
+                "description": "Share in the person's CORSIA pane when they must watch or act; default false.",
             },
         },
         "required": ["url"],
@@ -70,14 +71,21 @@ class BrowserOpenTool(Tool):
         # before this wrapper gets a chance to honor wait_for_load=False.
         # Launch a neutral page first, then schedule navigation through eval so
         # callers control whether to wait for the destination.
+        from host_access.processes import PROCESS_OWNER
+        from host_access import browser_cli
+        sessions = PROCESS_OWNER.browser_sessions()
+        existing = await sessions.has_session(thread_id)
+        share_existing = existing and show_window and not await sessions.is_shared(thread_id)
         result = await _run(
-            ["open", "about:blank"],
+            ["get", "url"] if existing else ["open", "about:blank"],
             thread_id=thread_id,
             show_window=show_window,
             notice=False,  # Deliver a one-time session notice with the navigation result returned below.
         )
         if result.startswith("Error"):
             return result
+        if share_existing and browser_cli.json_object(result).get("url") == effective_url:
+            return f"Shared the current page in the person's CORSIA pane: {effective_url}"
 
         navigation_result = await _run(
             [

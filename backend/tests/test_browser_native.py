@@ -57,12 +57,13 @@ async def test_native_open_outcome_remains_cleanable(native_owner):
     await native_owner.shutdown()
 
 
-async def test_native_visible_session_uses_the_headed_launch_option(native_owner):
+async def test_native_shared_session_stays_in_the_pane_without_a_host_window(native_owner):
     assert not (await native_owner.run(
         "native-visible", ["open", "about:blank"], show_window=True,
     )).startswith("Error:")
     runtime = native_owner._sessions["native-visible"]
-    assert "--headed" in native_owner._session_argv(runtime, ["snapshot"])
+    assert await native_owner.is_shared("native-visible")
+    assert "--headed" not in native_owner._session_argv(runtime, ["snapshot"])
     await native_owner.close_thread("native-visible")
 
 

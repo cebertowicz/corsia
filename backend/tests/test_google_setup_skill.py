@@ -88,19 +88,19 @@ def test_person_browser_guidance_keeps_the_other_first_run_steps_in_the_shared_b
     system = ROOT / "backend/prompts/system/v1"
     expected_guidance = {
         "skills/conductor-bootstrap/references/browser-person-steps.md": (
-            "Use this whenever you open a page in the shared browser (`browser_open` without `show_window`)"
+            "Use this whenever you open a page in the shared browser (`browser_open` with `show_window: true`)"
         ),
         "skills/conductor-bootstrap/references/web-search.md": (
-            "the person watches in the shared browser, so do not set `show_window`"
+            "`browser_open` and `show_window: true`; the person watches in the shared browser"
         ),
         "skills/conductor-bootstrap/references/first-run.md": (
             "the person signs up in their own browser from the link you post"
         ),
         "skills/google-setup/SKILL.md": (
-            "Do not set `show_window`: the shared browser is already available."
+            "`browser_open` and `show_window: true`, so the person watches it in the shared browser."
         ),
         "skills/microsoft-setup/SKILL.md": (
-            "the person watches in the shared browser, so do not set `show_window`"
+            "`browser_open` and `show_window: true`; the person watches in the shared browser"
         ),
     }
     for relative_path, instruction in expected_guidance.items():
@@ -147,7 +147,7 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Read the new client's ID from the Clients list" in steps and "latest creation date" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
-    assert "Do not set `show_window`: the shared browser is already available." in steps
+    assert "`browser_open` and `show_window: true`, so the person watches it in the shared browser." in steps
     assert "Do not revisit `projectcreate` or submit Create again" in steps
     assert "wait for the project selector to show `CORSIA` as the current project" in steps
     assert "first check whether the selector lists `CORSIA`: select it if it does" in steps

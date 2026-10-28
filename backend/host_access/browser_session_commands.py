@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import replace
 from functools import partial
 from typing import Any, Sequence
 from urllib.parse import urlsplit
@@ -121,7 +122,8 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
             command == "click" and len(args) == 2 and not args[1].startswith("-") or
             command == "fill" and len(args) == 3 and not args[1].startswith("-") or
             command == "wait" and len(args) == 2 and not args[1].startswith("-") or
-            command == "screenshot" and len(args) == 2 and not args[1].startswith("-"))
+            command == "screenshot" and len(args) == 2 and not args[1].startswith("-") or
+            command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}))
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
@@ -158,6 +160,9 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         owner._queued_actions -= 1
     try:
         rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        if show_window and not runtime.record.show_window and not rendered.startswith("Error:"):
+            runtime.record = replace(runtime.record, show_window=True)
+            browser_control.announce_browser_opened(thread_id)
         if notice and not pane and runtime.record.profile_notice and not runtime.profile_notice_sent:
             runtime.profile_notice_sent = True
             rendered += "\n" + runtime.record.profile_notice
@@ -200,9 +205,11 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return browser_cli.WAIT_TIMED_OUT
     rendered = owner._model_result(result, runtime.record)
+    if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
+        browser_pane_state.target_changed(thread_id)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until
     # the next session instead of coming back on every later open.
-    if opening_unlaunched_session and not unfinished and not rendered.startswith("Error:"):
+    if opening_unlaunched_session and runtime.record.show_window and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return rendered
 
@@ -214,12 +221,26 @@ async def page_endpoint(owner: Any, thread_id: str) -> str:
     return await browser_cdp.page_endpoint(partial(_command, owner, runtime, None))
 
 
+async def browser_endpoint(owner: Any, thread_id: str) -> str:
+    """Resolve the browser-level CDP endpoint for target-change notifications."""
+    await owner._pin_native()
+    runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
+    result = await _command(owner, runtime, None, ("get", "cdp-url"), 10)
+    endpoint = browser_cdp._data_field(result, "cdpUrl")
+    if endpoint is None or not endpoint.startswith("ws"):
+        raise BrowserSessionError("This browser couldn't be checked")
+    return endpoint
+
+
 async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> None:
     """Give the current shared-browser page to the person and arrange its observed completion."""
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
     command = partial(_command, owner, runtime, None)
     endpoint = await browser_cdp.page_endpoint(command)
+    if not runtime.record.show_window:
+        runtime.record = replace(runtime.record, show_window=True)
+        browser_control.announce_browser_opened(thread_id)
     await browser_control.declare_person_step(
         thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
     )
