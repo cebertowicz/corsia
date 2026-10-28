@@ -232,7 +232,7 @@ def test_the_backfill_keeps_an_error_a_reply_for_the_user_follows(db):
 
 
 def test_the_migration_is_registered_and_runs_the_backfill(db):
-    assert SCHEMA_VERSION == 157 and MIGRATIONS[102] is migrate_102_to_103
+    assert SCHEMA_VERSION == 158 and MIGRATIONS[102] is migrate_102_to_103
     ids = _backfill_history(db)
 
     migrate_102_to_103(db)
