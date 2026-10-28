@@ -10,6 +10,7 @@ import shutil
 
 import psutil
 import pytest
+from host_access import browser_cdp
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 
@@ -43,6 +44,34 @@ async def native_owner(monkeypatch, tmp_path):
         assert owner.live_count() == 0
         if owner.socket_dir.exists():
             shutil.rmtree(owner.socket_dir)
+
+
+async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_owner):
+    thread_id = 'native-display-secret'
+    assert not (await native_owner.run(thread_id, ['open', 'about:blank'])).startswith('Error:')
+    endpoint = await native_owner.page_endpoint(thread_id)
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" value="fixture" readonly></div>
+          <div><div><input type="password" value="fixture"></div><div><button>Show</button><button>Regenerate</button></div></div>`""")
+    assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <form><input type="email"><div><input type="password" value="fixture" readonly>
+          <button type="button" aria-label="Show password">Show</button></div><button>Sign in</button></form>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" value="fixture"><button>Show</button></div>`""")
+    assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password"><button>Show password</button><div role="button">Next</div></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):
