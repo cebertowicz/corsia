@@ -8,7 +8,6 @@
 	import ImageRegionLayer from './ImageRegionLayer.svelte';
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
-	import DocBottomBand from './DocBottomBand.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
@@ -24,7 +23,7 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry, onReplyStep }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry, onReplyBandState }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -54,7 +53,7 @@
 		onLoaded?: () => void;
 		onFailed?: () => void;
 		onRetry?: () => void;
-		onReplyStep?: (excludeId?: string) => void;
+		onReplyBandState?: (state: { loaded: boolean; sheetModalOpen: boolean; selectedId?: string }) => void;
 	} = $props();
 
 	let root = $state<HTMLElement>();
@@ -112,6 +111,7 @@
 		onLoaded?.();
 	}
 	$effect(() => { if (loaded && comments.length) void showFocus(); });
+	$effect(() => { onReplyBandState?.({ loaded, sheetModalOpen: image.ui.sheetModalOpen, selectedId: image.ui.state?.kind === 'thread' ? image.ui.state.id : undefined }); });
 
 	$effect(() => { draftOpen = image.hasDraftText; });
 	$effect(() => {
@@ -226,7 +226,6 @@
 				{/if}
 			{/snippet}
 		</ImageLightbox>
-		{#if onReplyStep}<DocBottomBand {artifactId} path="" threadId={null} threads={all.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0 && !(image.ui.state?.kind === 'thread' && image.ui.state.id === comment.id))} ready={loaded} covered={false} sheetModalOpen={image.ui.sheetModalOpen} onStep={() => onReplyStep?.(image.ui.state?.kind === 'thread' ? image.ui.state.id : undefined)} />{/if}
 	</div>
 	{#if artifactId}
 		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->

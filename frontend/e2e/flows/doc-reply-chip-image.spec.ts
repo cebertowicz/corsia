@@ -125,10 +125,25 @@ for (const width of [393, 1440]) {
 			await reply(roots[0], 'The header is ready.');
 			await expect(chip).toContainText('2 new replies');
 			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
+			await page.evaluate(() => {
+				const samples: unknown[] = [];
+				const initial = document.querySelector('.image-overlay [data-doc-reply-chip]');
+				(window as unknown as { __chipSamples: unknown[] }).__chipSamples = samples;
+				const sample = () => {
+					const chips = [...document.querySelectorAll<HTMLElement>('.image-overlay [data-doc-reply-chip]')];
+					samples.push({ same: chips[0] === initial, chips: chips.map(node => ({ text: node.innerText, animations: node.getAnimations().length })) });
+					if (samples.length < 120) requestAnimationFrame(sample);
+				};
+				requestAnimationFrame(sample);
+			});
 			await chip.click();
 			await expect(page.getByText('The header is ready.', { exact: true })).toBeVisible();
 			await expect(overlay(page)).toBeVisible();
 			if (width === 1440) {
+				await page.waitForTimeout(300);
+				const samples = await page.evaluate(() => (window as unknown as { __chipSamples: Array<{ same: boolean; chips: Array<{ text: string; animations: number }> }> }).__chipSamples);
+				expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
+				expect(samples.every(sample => sample.same && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
 				// The visible pin is excluded even when its popover closes on pointerdown.
 				await expect(chip).toHaveAttribute('title', '1 new reply');
 				await chip.click();
