@@ -39,6 +39,7 @@
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
+	import { createReplyVisibility } from './replyVisibility';
 
 	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
@@ -106,7 +107,7 @@
 	let el = $state<HTMLElement>();
 	let replyField = $state<ReplyField>();
 	let newestReply = $state<HTMLElement>();
-	// Bumped to observe the newest reply again, which hands the observer fresh geometry.
+	// Bumped to observe rendered replies again with fresh geometry.
 	let observeTick = $state(0);
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
@@ -120,20 +121,23 @@
 	// A reply becomes read only after a short uninterrupted visible dwell. Until then the server projection remains
 	// the sole source for its New marker, comment pill, and attention-dock item.
 	const VIEWED_DWELL_MS = 1_500;
-	let dwellTimer: number | null = null;
-	let dwellingReplyId: string | null = null;
+	const dwellTimers = new Map<string, number>();
+	const dwelled = new Set<string>();
+	let stampTimer: number | null = null;
+	const unreadKey = $derived(JSON.stringify(comment.newReplyIds ?? []));
+	const replyVisibility = createReplyVisibility(dwellThenStamp, (id) => cancelDwell(id), () => cancelDwell());
 	function cancelDwell(replyId?: string) {
-		if (replyId && dwellingReplyId !== replyId) return;
-		if (dwellTimer !== null) window.clearTimeout(dwellTimer);
-		dwellTimer = null;
-		dwellingReplyId = null;
+		for (const [id, timer] of dwellTimers) {
+			if (!replyId || id === replyId) { window.clearTimeout(timer); dwellTimers.delete(id); }
+		}
+		if (!replyId && stampTimer !== null) { window.clearTimeout(stampTimer); stampTimer = null; }
 	}
 
 	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
-		if (document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
+		if (!onViewed || document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
 		const position = comment.replies.findIndex((r) => r.id === replyId);
 		if (position < 0 || position <= comment.replies.findIndex((r) => r.id === lastStamped)) return;
 		const previous = lastStamped;
@@ -144,33 +148,38 @@
 			if (lastStamped === replyId) lastStamped = previous;
 		});
 	}
+	function advanceStamp() {
+		stampTimer = null;
+		const unread = new Set(comment.newReplyIds ?? []);
+		let through: string | undefined;
+		for (const reply of comment.replies) {
+			if (!reply.id || !unread.has(reply.id)) continue;
+			if (!dwelled.has(reply.id)) break;
+			through = reply.id;
+		}
+		if (through) stamp(through);
+	}
 	function dwellThenStamp(replyId: string) {
-		if (dwellingReplyId === replyId || lastStamped === replyId) return;
-		cancelDwell();
-		dwellingReplyId = replyId;
-		dwellTimer = window.setTimeout(() => {
-			dwellTimer = null;
-			dwellingReplyId = null;
-			stamp(replyId);
-		}, VIEWED_DWELL_MS);
+		if (document.visibilityState !== 'visible' || dwellTimers.has(replyId)) return;
+		if (dwelled.has(replyId)) {
+			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
+			return;
+		}
+		dwellTimers.set(replyId, window.setTimeout(() => {
+			dwellTimers.delete(replyId);
+			dwelled.add(replyId);
+			// Coalesce replies that finish their dwell together into one watermark update.
+			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
+		}, VIEWED_DWELL_MS));
 	}
 	$effect(() => {
 		observeTick;
-		const element = newestReply;
-		if (!element || typeof IntersectionObserver === 'undefined') return;
-		const replyId = element.dataset.replyId;
-		// The viewport root clips against every scroll ancestor, including one that is itself offscreen.
-		const observer = new IntersectionObserver((entries) => {
-			const entry = entries.at(-1);
-			if (!replyId) return;
-			if (entry?.isIntersecting && entry.intersectionRatio === 1) dwellThenStamp(replyId);
-			else cancelDwell(replyId);
-		}, { root: null, threshold: 1 });
-		observer.observe(element);
-		return () => { observer.disconnect(); cancelDwell(replyId); };
+		newestReply;
+		replyVisibility.sync(el, !!onViewed, JSON.parse(unreadKey));
 	});
+	$effect(() => () => replyVisibility.clear());
 	function onVisibilityChange() {
-		if (document.visibilityState === 'visible') observeTick++;
+		if (document.visibilityState === 'visible') { replyVisibility.clear(); observeTick++; }
 		else cancelDwell();
 	}
 
@@ -218,7 +227,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 				{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} />{/if}
+				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
 	</div>
@@ -233,7 +242,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} />
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} />{/if}
+				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
