@@ -6,12 +6,12 @@
 	import { activeModelId } from '$lib/stores/models';
 	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
-	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
-	import { subscribeChatPanelEvents } from './chatPanelEvents';
+	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
+	import { mergeChatReplyAttention, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { createChatReplyJumper } from './chatReplyJump';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
@@ -142,7 +142,10 @@
 			? hydrateSubagentThread(id, authToken).catch(() => null)
 			: Promise.resolve(null);
 		try {
-			await Promise.all([loadFirstPage(id, myGen), subagentRefresh]);
+			await Promise.all([
+				loadFirstPage(id, myGen),
+				subagentRefresh,
+			]);
 		} catch (e) {
 			console.error('selectThread fetch failed:', e);
 		}
@@ -198,6 +201,7 @@
 			async fetchPage(cursor) {
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
+					mergeChatReplyAttention(get(activeThreadId) ?? '', page.chat_reply_items ?? []);
 					mergeTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
@@ -255,6 +259,7 @@
 			const data = await res.json() as MessagePage;
 			if (!isCurrentFirstPageRequest(threadId, gen)) return;
 			firstLoadFailed = false;
+			setChatReplyAttention(threadId, data.chat_reply_items ?? []);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
 			mergeTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);
@@ -295,14 +300,7 @@
 			pagerGeneration++;
 			pager = createPager();
 			const myGen = pagerGeneration;
-			const authToken = get(token);
-			try {
-				await Promise.all([
-					loadFirstPage(sid, myGen),
-					authToken ? loadCheckpoints(sid, authToken).catch(() => null) : Promise.resolve(null),
-					authToken ? hydrateSubagentThread(sid, authToken).catch(() => null) : Promise.resolve(null),
-				]);
-			} catch { /* ignore */ }
+			await refreshVisibleThread(sid, get(token), loadFirstPage(sid, myGen));
 		};
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {

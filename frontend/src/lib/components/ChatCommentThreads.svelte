@@ -1,13 +1,11 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { isNavAgent, messages, threads } from '$lib/stores/threads';
-	import { reload } from '$lib/stores/attentionDock.svelte';
+	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
+	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
 	import CommentThread, { type CommentThreadData } from './comments/CommentThread.svelte';
 
-	type Answer = { assistant_message_id: string; text: string; created_at: string; unread: boolean };
-	type ChatComment = { id: string; cid: string; user_message_id: string; quote: string; note: string; created_at: string; answers: Answer[] };
 	let { messageId, threadId, comments }: { messageId: string; threadId: string; comments: ChatComment[] } = $props();
 	const agentName = $derived.by(() => {
 		const current = $threads.find(item => item.id === threadId);
@@ -31,10 +29,10 @@
 		});
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
 		messages.update(current => current.map(row => row.id !== messageId ? row : {
-			...row, chat_comments: (row as any).chat_comments.map((item: ChatComment) => item.cid !== comment.cid || item.user_message_id !== comment.user_message_id
+			...row, chat_comments: (row.chat_comments ?? []).map(item => item.cid !== comment.cid || item.user_message_id !== comment.user_message_id
 				? item : { ...item, answers: item.answers.map(answer => seenAt && answer.created_at <= seenAt ? { ...answer, unread: false } : answer) }),
 		}));
-		await reload();
+		await refreshChatReplyAttention(threadId);
 	}
 </script>
 

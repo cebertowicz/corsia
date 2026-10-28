@@ -46,6 +46,9 @@ export function isNavAgent(s: Thread): boolean {
 	return enabled && active && hasResponsibility && s.spawned_by == null && !s.archived;
 }
 
+export type { ChatComment } from '../chatCommentTypes';
+import type { ChatComment } from '../chatCommentTypes';
+
 export interface Message {
 	id: string;
 	thread_id: string;
@@ -73,6 +76,8 @@ export interface Message {
 	cards_more?: number;
 	/** Server-computed transcript content after placed chat answers are removed. */
 	chat_visible_content?: string;
+	chat_comments?: ChatComment[];
+	chat_answer_cids?: string[];
 }
 
 function validDeliveryRevision(value: unknown): number | null {

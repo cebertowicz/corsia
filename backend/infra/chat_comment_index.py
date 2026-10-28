@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from infra.chat_comment_answers import parse_answers, visible_answer_content
+from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, visible_answer_content
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
@@ -28,17 +28,18 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         return
     rows = db.execute(
         "SELECT c.target_message_id,c.user_message_id,c.cid,c.created_at,"
-        "a.assistant_message_id,a.answered_at,m.content,v.seen_at "
+        "answer.assistant_message_id,answer.answered_at,m.content,"
+        f"EXISTS (SELECT 1 {UNREAD_FROM} WHERE {UNREAD_WHERE} "
+        "AND a.cid=answer.cid AND a.assistant_message_id=answer.assistant_message_id) "
         "FROM chat_comments c "
-        "LEFT JOIN chat_comment_answers a ON a.user_message_id=c.user_message_id AND a.cid=c.cid "
-        "LEFT JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=c.thread_id "
-        "LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=c.user_message_id AND v.cid=c.cid "
+        "LEFT JOIN chat_comment_answers answer ON answer.thread_id=c.thread_id AND answer.user_message_id=c.user_message_id AND answer.cid=c.cid "
+        "LEFT JOIN messages m ON m.id=answer.assistant_message_id AND m.thread_id=c.thread_id "
         "WHERE c.thread_id=? AND c.target_message_id IN (SELECT value FROM json_each(?)) "
-        "ORDER BY c.created_at,c.user_message_id,c.cid,a.answered_at",
-        (user_id, thread_id, json.dumps(list(by_id))),
+        "ORDER BY c.created_at,c.user_message_id,c.cid,answer.answered_at",
+        (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
     answer_rows = db.execute(
-        "SELECT a.assistant_message_id,a.cid,answer.content FROM chat_comment_answers a "
+        "SELECT a.assistant_message_id,a.cid,answer.content FROM chat_comment_answers a INDEXED BY sqlite_autoindex_chat_comment_answers_1 "
         "JOIN messages answer ON answer.id=a.assistant_message_id AND answer.thread_id=a.thread_id "
         "JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id "
         "JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id "
@@ -65,7 +66,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
             comments[(sender_id, comment['cid'])] = comment
     threads = {}
-    for target, sender, cid, created, answer_id, answered_at, text, seen in rows:
+    for target, sender, cid, created, answer_id, answered_at, text, unread in rows:
         comment = comments.get((sender, cid))
         if comment is None:
             continue
@@ -79,7 +80,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
                 threads[key]['answers'].append({
                     'assistant_message_id': answer_id,
                     'text': '\n\n'.join(section['text'] for section in sections),
-                    'created_at': answered_at, 'unread': seen is None or seen < answered_at,
+                    'created_at': answered_at, 'unread': bool(unread),
                 })
     for message in by_id.values():
         if 'chat_comments' in message:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from doceditor.reply_attention import chat_reply_items
 from infra.auth import authenticate
 from infra.chat_comment_index import attach_comments
 from infra.database import get_db
@@ -66,6 +67,19 @@ async def retry_inbox_message(
     return await retry_thread_delivery_now(thread_id, message_id, user["id"])
 
 
+def _validate_page_request(limit, before, view, from_id, to_id):
+    if before is not None and (limit is None or limit < 1):
+        raise HTTPException(400, detail="`before` cursor requires `limit` ≥ 1 (spec §1.8)")
+    if view not in (None, "focus"):
+        raise HTTPException(400, detail="`view` must be `focus` when given")
+    if (from_id is None) != (to_id is None):
+        raise HTTPException(400, detail="`from_id` and `to_id` are given together")
+    if (view or from_id) and (limit is None or limit < 1):
+        raise HTTPException(400, detail="`view` and `from_id` require `limit` ≥ 1")
+    if view and from_id:
+        raise HTTPException(400, detail="`view` and `from_id` are separate reads")
+
+
 @router.get("/threads/{thread_id}/messages")
 async def get_messages(
     thread_id: str,
@@ -92,17 +106,7 @@ async def get_messages(
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-    if before is not None and (limit is None or limit < 1):
-        raise HTTPException(400, detail="`before` cursor requires `limit` ≥ 1 (spec §1.8)")
-
-    if view not in (None, "focus"):
-        raise HTTPException(400, detail="`view` must be `focus` when given")
-    if (from_id is None) != (to_id is None):
-        raise HTTPException(400, detail="`from_id` and `to_id` are given together")
-    if (view or from_id) and (limit is None or limit < 1):
-        raise HTTPException(400, detail="`view` and `from_id` require `limit` ≥ 1")
-    if view and from_id:
-        raise HTTPException(400, detail="`view` and `from_id` are separate reads")
+    _validate_page_request(limit, before, view, from_id, to_id)
 
     def _query():
         db = get_db()
@@ -122,7 +126,7 @@ async def get_messages(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
             _attach_page_extras(db, thread_id, user["id"], result)
-            return result
+            return (result, chat_reply_items(db, user["id"], thread_id)) if result is not None else None
         finally:
             db.close()
 
@@ -136,8 +140,9 @@ async def get_messages(
         return {"messages": [], "has_more": False, "oldest_id": None, "turn_summaries": {}}
     if result is None:
         raise HTTPException(404)
+    result, chat_replies = result
     if isinstance(result, dict):
-        return result
+        return {**result, **({'chat_reply_items': chat_replies} if chat_replies else {})}
 
     display_msgs, has_more, oldest_id, turn_summaries = result
     return {
@@ -145,6 +150,7 @@ async def get_messages(
         "has_more": has_more,
         "oldest_id": oldest_id,
         "turn_summaries": turn_summaries,
+        **({'chat_reply_items': chat_replies} if chat_replies else {}),
     }
 
 

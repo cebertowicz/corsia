@@ -82,13 +82,19 @@ def delete_thread_chat_comment_answers(db: sqlite3.Connection, thread_id: str) -
     db.execute("DELETE FROM chat_comments WHERE thread_id=?", (thread_id,))
 
 
-UNREAD_SQL = """SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id, a.answered_at
-FROM chat_comment_answers a
+# All projections compose this source and predicate so that missing comments,
+# messages, and viewed answers have the same meaning everywhere.
+UNREAD_FROM = """FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
+JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid
+JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id
 JOIN messages u ON u.id=a.user_message_id AND u.thread_id=a.thread_id
 JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=a.thread_id
-LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid
-WHERE a.thread_id=? AND (v.user_id IS NULL OR v.seen_at < a.answered_at)
+LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid"""
+UNREAD_WHERE = "(v.user_id IS NULL OR v.seen_at < a.answered_at)"
+UNREAD_SQL = f"""SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id, a.answered_at
+{UNREAD_FROM}
+WHERE a.thread_id=? AND {UNREAD_WHERE}
 ORDER BY a.answered_at
 LIMIT ?"""
 

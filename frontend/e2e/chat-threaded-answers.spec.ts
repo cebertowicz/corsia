@@ -17,7 +17,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await setFocusMode(request, focus);
   const thread = await createSession(request, 'Threaded answers proof');
   const target = await injectMessage(request, thread, { role: 'assistant', content: 'The selected phrase explains the result.', metadata: mode === 'focus-collapsed' ? {} : { for_user: true } }, TEST_TOKEN);
-  for (let i = 0; i < (mode === 'normal' ? 55 : 12); i++) await injectMessage(request, thread, { role: 'assistant', content: `Later update ${i}`, metadata: { for_user: true } }, TEST_TOKEN);
+  for (let i = 0; i < (mode === 'normal' ? 55 : 40); i++) await injectMessage(request, thread, { role: 'assistant', content: `Later update ${i}`, metadata: { for_user: true } }, TEST_TOKEN);
   await openAppPastLanding(page);
   await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
   await sidebarThread(page, 'Threaded answers proof').click();
@@ -27,7 +27,11 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await page.getByRole('button', { name: 'Load older messages' }).dispatchEvent('click');
     await expect(row).toBeAttached();
   }
-  if (mode === 'focus-collapsed') await page.getByRole('button', { name: /Expand (Worked|Background work)/ }).first().click();
+  if (mode === 'focus-collapsed') {
+    const work = page.locator('[data-work-block]').filter({ has: page.getByRole('button', { name: /Expand (Worked|Background work)/ }) });
+    await expect(work).toHaveCount(1);
+    await work.getByRole('button', { name: /Expand (Worked|Background work)/ }).click();
+  }
   await row.scrollIntoViewIfNeeded();
   await page.evaluate((id) => {
     const body = document.querySelector<HTMLElement>(`[data-message-id="${id}"] .long-message-body`)!;
@@ -46,7 +50,19 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await page.locator('.sel-comment').click();
   await page.getByPlaceholder('Comment…').fill('Why?');
   await page.getByPlaceholder('Comment…').press('Control+Enter');
-  if (mode === 'focus-collapsed') await page.getByRole('button', { name: /Collapse (Worked|Background work)/ }).first().click();
+  if (mode === 'focus-collapsed') {
+    const work = row.locator('xpath=ancestor::section[@data-work-block]');
+    await expect(work).toHaveCount(1);
+    await work.getByRole('button', { name: /Collapse (Worked|Background work)/ }).click();
+  } else {
+    const scroller = page.locator('.messages');
+    await expect(scroller).toHaveCount(1);
+    await page.getByText(`Later update ${mode === 'normal' ? 54 : 39}`, { exact: true }).scrollIntoViewIfNeeded();
+    await expect.poll(async () => {
+      const [targetBox, scrollBox] = await Promise.all([row.boundingBox(), scroller.boundingBox()]);
+      return !!targetBox && !!scrollBox && targetBox.y + targetBox.height <= scrollBox.y;
+    }).toBe(true);
+  }
   await seedMockResponses(request, [{ content: '[c2.1] This is the answer.' }]);
   await chatComposer(page).fill('Please answer the comment');
   await chatComposer(page).press('Enter');
@@ -57,22 +73,23 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     const sent = body.messages.find((message: any) => message.role === 'user' && message.metadata?.reply_context?.comments?.length);
     const answer = body.messages.find((message: any) => message.role === 'assistant' && message.content.includes('This is the answer.'));
     answerId = answer?.id ?? '';
-    return { cid: sent?.metadata.reply_context.comments[0].cid, answer: answer?.content };
-  }, { timeout: 30_000 }).toEqual({ cid: 'c2.1', answer: '[c2.1] This is the answer.' });
+    return { cid: sent?.metadata.reply_context.comments[0].cid, answer: answer?.content, visible: answer?.chat_visible_content };
+  }, { timeout: 30_000 }).toEqual({ cid: 'c2.1', answer: '[c2.1] This is the answer.', visible: '' });
   await expect(page.locator(`[data-message-id="${answerId}"]`)).not.toBeVisible();
   if (mode === 'normal') {
     await page.reload();
     await sidebarThread(page, 'Threaded answers proof').click();
     await expect(row).toHaveCount(0);
   }
-  const chip = page.getByText('1 new reply', { exact: false });
+  const chip = page.locator('.reply-chip-notice button').filter({ hasText: '1 new reply' });
+  await expect(chip).toHaveCount(1);
   await expect(chip).toBeVisible({ timeout: 30_000 });
   if (mode === 'focus') {
     await page.locator('.messages').evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect.poll(async () => {
-      const box = await row.boundingBox();
-      return box ? box.y + box.height : 0;
-    }).toBeLessThan(0);
+      const [box, scroller] = await Promise.all([row.boundingBox(), page.locator('.messages').boundingBox()]);
+      return !!box && !!scroller && box.y + box.height <= scroller.y;
+    }).toBe(true);
     await page.waitForTimeout(2_000);
     await expect(chip).toBeVisible();
     const spacing = await page.evaluate((answer) => {

@@ -4,6 +4,7 @@
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 	import { activeThreadId } from '$lib/stores/threads';
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { replyItemsForThread } from './replyItems';
 
 	let {
@@ -14,7 +15,10 @@
 
 	// Reply notices belong to the agent who answered. They are not Needs-you work, so
 	// the dock keeps its single-job queue and this stable chip carries only unread replies.
-	const replies = $derived(replyItemsForThread($visibleQueue, $activeThreadId));
+	const replies = $derived([
+		...replyItemsForThread($visibleQueue, $activeThreadId),
+		...($chatReplyAttention?.threadId === $activeThreadId ? $chatReplyAttention.items : []),
+	]);
 	const unreadCount = $derived(replies.reduce((total, item) => total + item.detail.unread_count, 0));
 	const documents = $derived.by(() => {
 		const unique = new Map<string, CommentReplyItem>();
@@ -36,7 +40,7 @@
 			kind: 'artifact',
 			artifact_id: target.detail.destination.id,
 			title: chipLabel,
-			type: 'document',
+			type: target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document',
 			icon: target.detail.destination.pane === 'chat-replies' ? 'message-square' : 'file-text',
 			name: chipLabel,
 			path: target.detail.destination.path ?? null,
@@ -45,10 +49,7 @@
 		};
 	});
 
-	function openReplyDocument(event: MouseEvent): void {
-		// Capture keeps AttachmentRow's shared chip untouched while this source owns
-		// the reply-specific landing intent opens the first unread reply.
-		event.stopPropagation();
+	function openReplyDocument(): void {
 		const target = singleDocument ?? newest;
 		if (target) onOpenDocument(target.detail.destination, target.detail.source.thread_id);
 	}
@@ -56,7 +57,7 @@
 </script>
 
 {#if card && unreadCount}
-	<section class="reply-chip-notice" aria-label="Unread agent replies" onclickcapture={openReplyDocument}>
-		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker onActivate={card.icon === 'message-square' ? () => {} : undefined} />
+	<section class="reply-chip-notice" aria-label="Unread agent replies">
+		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker onActivate={openReplyDocument} />
 	</section>
 {/if}

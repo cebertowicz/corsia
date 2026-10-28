@@ -20,8 +20,10 @@ def _seed(db):
     seed_thread(db, "thread")
     db.execute("UPDATE threads SET user_id=?, next_message_seq=2 WHERE id='thread'", (OWNER_USER,))
     metadata = json.dumps({"reply_context": {"comments": [{"cid": "c1.1"}, {"cid": "c1.2"}]}})
+    db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','2026-01-01',0)")
     db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq,input_order) "
                "VALUES ('question','thread','user','text',?,'2026-01-01',1,1)", (metadata,))
+    db.executemany("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) VALUES ('thread','target','question',?,'2026-01-01')", [('c1.1',), ('c1.2',)])
     db.commit()
 
 
@@ -156,10 +158,8 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
                    "VALUES ('other-question','other','user','x','t',1)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('other','other-question','c1.1','other-answer','t')")
-        db.executemany("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES (?,?,?,?,?)", [
-            ('thread', 'answer', 'question', 'c1.1', 't'),
-            ('other', 'other-answer', 'other-question', 'c1.1', 't'),
-        ])
+        db.execute("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES (?,?,?,?,?)",
+                   ('other', 'other-answer', 'other-question', 'c1.1', 't'))
         db.executemany("INSERT INTO chat_comment_views VALUES (?,?,?,?)", [
             (OWNER_USER, "question", "c1.1", "t"),
             (OWNER_USER, "other-question", "c1.1", "t"),

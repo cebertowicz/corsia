@@ -8,10 +8,11 @@ def migrate_154_to_155(conn: sqlite3.Connection) -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_comments (
         thread_id TEXT NOT NULL, target_message_id TEXT NOT NULL,
         user_message_id TEXT NOT NULL, cid TEXT NOT NULL, created_at TEXT NOT NULL,
-        root_user_message_id TEXT, root_cid TEXT,
         PRIMARY KEY (user_message_id, cid)
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_comments_target ON chat_comments(thread_id, target_message_id)")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_comment_answers'").fetchone():
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_comment_answers_comment ON chat_comment_answers(thread_id, user_message_id, cid)")
     # A partial older database may have no messages to backfill.
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'").fetchone():
         return

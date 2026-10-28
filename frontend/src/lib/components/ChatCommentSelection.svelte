@@ -97,7 +97,7 @@
 			if (!body) continue;
 			if (body.querySelector('.cm-comment-wrap')) keepingSelection(body, () => unpaint(body));
 			const target = byId.get(row.dataset.messageId ?? '');
-			const indexed = (target as any)?.chat_comments ?? [];
+			const indexed = target?.chat_comments ?? [];
 			const sent = [...new Map([...indexed, ...(sentBySeq.get(target?.seq) ?? [])].map(comment => [comment.id, comment])).values()];
 			const pending = comments.filter(comment => comment.messageId === row.dataset.messageId);
 			const marks = [...sent.map(comment => ({ ...comment, kind: 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];

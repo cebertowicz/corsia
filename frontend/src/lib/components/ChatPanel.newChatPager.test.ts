@@ -81,6 +81,24 @@ afterEach(() => {
 });
 
 describe('ChatPanel new chat', () => {
+	it('shows the reply chip after loading an older page with an answered comment', async () => {
+		const reply = { detail: { title: '', unread_count: 1, newest_at: 't', destination: { pane: 'chat-replies', id: 'old', user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread-b' } } };
+		globalThis.fetch = withEmptyAttentionQueue(vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/messages?')) return { ok: true, status: 200, json: async () => url.includes('before=')
+				? { messages: [{ id: 'old', thread_id: 'thread-b', role: 'assistant', content: 'old', created_at: 't', chat_comments: [{ id: 'comment', cid: 'c1.1', user_message_id: 'sender', quote: 'old', note: '', from_off: 0, to_off: 3, created_at: 't', answers: [{ assistant_message_id: 'answer', text: 'answer', created_at: 't', unread: true }] }] }], has_more: false, oldest_id: 'old', chat_reply_items: [reply] }
+				: { messages: [{ id: 'b1', thread_id: 'thread-b', role: 'assistant', content: 'newest', created_at: 't', metadata: { for_user: true } }], has_more: true, oldest_id: 'b1' } } as Response;
+			return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) } as Response;
+		}) as typeof fetch);
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		flushSync();
+		expect(get(messages).map(row => row.id)).toContain('b1');
+		host.querySelector('.messages')?.dispatchEvent(new Event('scroll'));
+		await vi.waitFor(() => expect(host.textContent).toContain('1 new reply'));
+		expect(get(messages).find(row => row.id === 'old')?.chat_comments?.[0].answers[0].text).toBe('answer');
+	});
 	it('does not commit a first-run opener after the websocket import yields to thread-to-null intent', async () => {
 		firstPageWithMoreHistory();
 		threads.set([

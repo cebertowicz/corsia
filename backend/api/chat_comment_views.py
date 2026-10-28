@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from doceditor.reply_attention import chat_reply_items
 from infra.auth import owns_thread, require_user_header_only
 from infra.chat_comment_answers import has_comment_cid
 from infra.chat_comment_index import attach_comments
@@ -16,14 +17,15 @@ class ThreadsRequest(BaseModel):
     message_ids: list[str]
 
 
-def _threads(user_id: str, thread_id: str, message_ids: list[str]) -> list[dict] | None:
+def _threads(user_id: str, thread_id: str, message_ids: list[str]) -> dict | None:
     db = get_db()
     try:
         if not owns_thread(thread_id, user_id, db=db):
             return None
         targets = [{'id': message_id, 'role': 'assistant'} for message_id in message_ids]
         attach_comments(db, thread_id, user_id, targets)
-        return targets
+        replies = chat_reply_items(db, user_id, thread_id)
+        return {'messages': targets, **({'chat_reply_items': replies} if replies else {})}
     finally:
         db.close()
 
@@ -33,7 +35,7 @@ async def chat_comment_threads(thread_id: str, body: ThreadsRequest, user: dict 
     result = await run_read(lambda: _threads(user['id'], thread_id, body.message_ids))
     if result is None:
         raise HTTPException(404)
-    return {'messages': result}
+    return result
 
 
 class ViewRequest(BaseModel):

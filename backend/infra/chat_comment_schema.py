@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS chat_comments (
     user_message_id TEXT NOT NULL,
     cid TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    root_user_message_id TEXT,
-    root_cid TEXT,
     PRIMARY KEY (user_message_id, cid)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_comments_target
@@ -30,4 +28,6 @@ CREATE TABLE IF NOT EXISTS chat_comment_answers (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_comment_answers_thread_time
     ON chat_comment_answers(thread_id, answered_at);
+CREATE INDEX IF NOT EXISTS idx_chat_comment_answers_comment
+    ON chat_comment_answers(thread_id, user_message_id, cid);
 """
