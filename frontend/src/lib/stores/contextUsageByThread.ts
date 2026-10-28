@@ -77,8 +77,8 @@ export function setContextUsage(threadId: string, usage: ContextUsage | null): v
 }
 
 /**
- * Record a turn's measured usage. Any turn invalidates the preview, which it
- * has made older; a turn that could not measure (no usage, or usage marked
+ * Record a turn's measured usage. Any turn retires the preview, which it has
+ * made older; a turn that could not measure (no usage, or usage marked
  * unavailable) keeps the reading already shown rather than blanking it, but
  * marks it stale so it stops standing in for a receipt and the next preview
  * read replaces it.
@@ -175,17 +175,17 @@ export function hasMeasuredNumbers(usage: ContextUsage | null): boolean {
 	return !!usage && usage.token_usage_available !== false && typeof usage.total_used === 'number';
 }
 
+/** Whether `threadId`'s context sheet is open: only an open sheet carries a retired reading. */
 export function setContextSheetOpen(threadId: string, open: boolean): void {
-	if (open) openContextSheets.add(threadId);
-	else {
-		openContextSheets.delete(threadId);
-		contextPreviewByThread.update(entries => {
-			const current = entries.get(threadId);
-			if (!current?.previous) return entries;
-			current.previous = null;
-			return new Map(entries);
-		});
-	}
+	if (open) { openContextSheets.add(threadId); return; }
+	openContextSheets.delete(threadId);
+	contextPreviewByThread.update(entries => {
+		const current = entries.get(threadId);
+		if (!current?.previous) return entries;
+		// In place, so a read in flight still owns its entry and can land.
+		current.previous = null;
+		return new Map(entries);
+	});
 }
 /** Retire `threadId`'s preview. A read in flight settles before its replacement starts. */
 export function invalidateContextPreview(threadId: string): void {
