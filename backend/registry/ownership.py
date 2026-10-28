@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.database import get_db, write_transaction
-from registry import node_retirement
+from registry import node_retirement, provider_continuity
 from registry.identity_bridge import (
     OWNER_REGISTRATION_STATES,
     PARENT_CHAIN_REGISTRATION_STATE,
@@ -320,7 +320,7 @@ def _live_conductor_or_user(db, project_id: str | None, ending: set[str]) -> str
 
 def _thread_end_target(db, identity, thread, ending: set[str], *, reason: str) -> str | None:
     from registry.shared_principals import acting_owner
-    if (identity["integration"], identity["type"]) in (("claude-code", "session"), ("codex", "thread")):
+    if (identity["integration"], identity["type"]) in provider_continuity.HARNESS_CONTINUITY_TYPES.values():
         return None  # Provider continuity belongs to the launching thread.
     if _is_shared_document(identity["path"], _shared_root(db, thread)):
         persistent = bool(_thread_value(thread, "agent_enabled")) or reason == "agent_disabled"
