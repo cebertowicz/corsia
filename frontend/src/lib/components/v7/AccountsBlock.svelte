@@ -11,7 +11,7 @@
 	import AccountBillingRow from './AccountBillingRow.svelte';
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import PolicySaveStatus from './PolicySaveStatus.svelte';
-	import { isStillSignedIn, signinMessage } from './accountSigninMessage';
+	import { signinMessage } from './accountSigninMessage';
 	import { VENDORS } from '$lib/conductorSources';
 	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -368,7 +368,7 @@
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>
 					{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
-						<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="ghost" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
+						<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
 					{/if}
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
@@ -377,7 +377,7 @@
 				{#if account.state !== 'removed' && account.details_stale && editingId !== account.id}
 					<div class="signin-state"><span>Account details need to be reloaded.</span><Button size="sm" disabled={!!pending[account.id]} onclick={() => reloadAccount(account.id)}>Reload</Button></div>
 				{/if}
-				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in' && !isStillSignedIn(signIn))}
+				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
 						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli ?? null)}</span>
 						{#if signIn.status === 'waiting'}

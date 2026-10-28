@@ -99,7 +99,7 @@ describe('Sign in again on an account row', () => {
 	});
 
 	it('says so on the status line when the vendor still has the account signed in', async () => {
-		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'completed', cause: 'already_signed_in' });
+		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'already_signed_in', cause: null });
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		await openMenu('fomrrt1');
@@ -110,7 +110,7 @@ describe('Sign in again on an account row', () => {
 	});
 
 	it('reports a failed model reload on the status line with its reference and no control of its own', async () => {
-		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'completed', cause: 'models_reload_failed', ref: 'R-7K2M' });
+		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'model_refresh_failed', cause: 'account_refresh_failed', ref: 'R-7K2M' });
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		await openMenu('fomrrt1');
@@ -141,6 +141,8 @@ describe('a settings link to one account', () => {
 		await vi.waitFor(() => expect(document.querySelector('[data-chat-link-focus]')).not.toBeNull());
 		const target = document.querySelector<HTMLButtonElement>('#vendor-account-fomrrt2 [data-chat-link-focus] .btn')!;
 		expect(target.textContent?.trim()).toBe('Sign in');
+		// Drawn like Sign in again, so the link lands on a control with a box of its own.
+		expect(target.classList.contains('secondary')).toBe(true);
 		expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
 		expect(document.activeElement).toBe(target);
 		expect(document.querySelectorAll('[data-chat-link-focus]')).toHaveLength(1);

@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 import SystemMessageRow from './SystemMessageRow.svelte';
+import { vendorAccounts, type VendorAccount } from '$lib/stores/vendorAccounts';
+
+const account = (id: string, extra: Partial<VendorAccount> = {}): VendorAccount => ({
+	id, provider: 'claude-code', name: id, is_default: false, state: 'signed_out', revision: 1, identity: {},
+	label: { name: id, email: null, text: id, custom: id }, ...extra,
+});
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -12,6 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vendorAccounts.set([]);
 	if (component) unmount(component);
 	component = null;
 	host.remove();
@@ -38,6 +45,7 @@ describe('SystemMessageRow', () => {
 
 	it('shows a lost-login error as written and links Settings › Providers to the account named', () => {
 		const text = 'FOMRRT1 is signed out of Claude Code. Sign it in again under Settings › Providers.';
+		vendorAccounts.set([account('fomrrt1')]);
 		render({ id: 'lost-login', role: 'system', content: text, metadata: { type: 'result', cause: 'sign_in_expired', cc: true, account_id: 'fomrrt1' } });
 
 		expect(host.textContent?.trim()).toBe(text);
@@ -50,10 +58,21 @@ describe('SystemMessageRow', () => {
 
 	it('links the same way in any error that names an account', () => {
 		const text = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers. Reference: R-7K2M';
+		vendorAccounts.set([account('fomrrt1', { state: 'signed_in' })]);
 		render({ id: 'stale-models', role: 'system', content: text, metadata: { type: 'harness_error', account_id: 'fomrrt1' } });
 
 		expect(host.textContent?.trim()).toBe(text);
 		expect(host.querySelector('a')?.getAttribute('href')).toBe('/settings/providers#account-fomrrt1');
+	});
+
+	it('keeps the text for the Default and legacy accounts, which have no row to press', () => {
+		vendorAccounts.set([account('personal', { is_default: true, state: 'signed_in' }), account('older', { state: 'legacy' }), account('gone', { state: 'removed' })]);
+		for (const id of ['personal', 'older', 'gone']) {
+			render({ id: `plain-${id}`, role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error', account_id: id } });
+		}
+
+		expect(host.querySelector('a')).toBeNull();
+		expect(host.textContent).toContain('Sign it in again under Settings › Providers.');
 	});
 
 	it('writes no link without a usable account id to land on', () => {

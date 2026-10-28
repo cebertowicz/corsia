@@ -12,19 +12,14 @@ function readableCause(cause: string | null, cli: string | null): string {
 	return cause.replaceAll('_', ' ');
 }
 
-/** Sign in again on an account the vendor still reports signed in starts no login: these two results end with the account as it was. */
-export function isStillSignedIn(result: SigninResult): boolean {
-	return result.status === 'completed' && (result.cause === 'already_signed_in' || result.cause === 'models_reload_failed');
-}
-
 /** The one line an account row shows for a sign-in attempt; `nameOf` names another account by id, `cli` is the tool the account signs in to. */
 export function signinMessage(result: SigninResult, nameOf: (id: string | null | undefined) => string | null, signin: Record<string, SigninResult>, cli: string | null = null): string {
 	if (result.status === 'waiting') return 'Waiting for sign-in in your browser';
-	if (result.status === 'completed' && result.cause === 'already_signed_in') {
+	if (result.status === 'already_signed_in') {
 		const name = nameOf(result.account_id);
 		return `${name ?? 'This account'} is still signed in. Its model list is up to date.`;
 	}
-	if (result.status === 'completed' && result.cause === 'models_reload_failed') {
+	if (result.status === 'model_refresh_failed') {
 		const name = nameOf(result.account_id);
 		return `${name ?? 'This account'} is still signed in, but its model list couldn’t be reloaded. Use Sign in again to retry.${result.ref ? ` Reference: ${result.ref}` : ''}`;
 	}

@@ -151,7 +151,7 @@
 	}
 	.menu-item:focus-visible { background: var(--bg-hover); }
 	/* A link that lands on one verb marks it: focus moved by script after a click does not match :focus-visible. */
-	.menu-item.landed { background: var(--bg-hover); box-shadow: inset 0 0 0 2px var(--accent); }
+	.menu-item.landed { background: var(--bg-hover); outline: 2px solid var(--accent); outline-offset: -2px; }
 	.menu-item:disabled { opacity: 0.6; cursor: default; }
 	.menu-item.danger { color: var(--red-text); }
 	.note { margin: 0; padding: 2px 10px 4px; color: var(--text-secondary); font-size: var(--text-caption); }
