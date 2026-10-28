@@ -640,7 +640,7 @@ async def test_failed_cc_start_cleans_early_live_and_config(
     monkeypatch.setattr(
         harness_tool_bridge,
         "dynamic_tool_definitions",
-        lambda _registry: (),
+        lambda _registry, _capabilities: (),
     )
     monkeypatch.setattr(harness_tool_bridge, "write_cc_mcp_config", write_config)
     monkeypatch.setattr(cc_startup_process, "CCStreamSession", FailingSession)

@@ -778,6 +778,8 @@ async def test_external_preview_freezes_tools_without_native_singleton(monkeypat
         original = getattr(function, "__wrapped__", function)
         if original is thread_runtime._load_next_turn_context_snapshot_provider:
             return "cc", {"model": "claude-code/sonnet"}, SimpleNamespace()
+        if original is thread_runtime.account_capabilities_for_thread:
+            return frozenset()
         assert original is thread_runtime._load_next_turn_context_snapshot_preview
         assert args[-3] == "cc"
         assert json.dumps(args[-4], sort_keys=True) == json.dumps(
@@ -799,7 +801,8 @@ async def test_external_preview_freezes_tools_without_native_singleton(monkeypat
         lambda: SimpleNamespace(),
     )
     monkeypatch.setattr(
-        "tools.catalog.advertised_tool_definitions", lambda _registry: definitions
+        "tools.catalog.advertised_tool_definitions",
+        lambda _registry, _capabilities: definitions,
     )
 
     result = await thread_runtime.next_turn_context_snapshot(
@@ -809,6 +812,7 @@ async def test_external_preview_freezes_tools_without_native_singleton(monkeypat
     assert result == {"preview": {"snapshot_id": "ctx-external"}}
     assert [getattr(call[0], "__wrapped__", call[0]) for call in calls] == [
         thread_runtime._load_next_turn_context_snapshot_provider,
+        thread_runtime.account_capabilities_for_thread,
         thread_runtime._load_next_turn_context_snapshot_preview,
     ]
     get_agent.assert_not_awaited()
@@ -845,6 +849,8 @@ async def test_native_preview_freezes_tools_for_same_provider(monkeypatch):
         original = getattr(function, "__wrapped__", function)
         if original is thread_runtime._load_next_turn_context_snapshot_provider:
             return "native", {"model": "native/model"}, SimpleNamespace()
+        if original is thread_runtime.account_capabilities_for_thread:
+            return frozenset()
         return {"snapshot_id": "ctx-native"}
 
     monkeypatch.setattr(
@@ -860,7 +866,7 @@ async def test_native_preview_freezes_tools_for_same_provider(monkeypatch):
         "preview-thread", token="valid"
     )
 
-    preview_args = calls[1][1]
+    preview_args = calls[2][1]
     assert result == {"preview": {"snapshot_id": "ctx-native"}}
     assert preview_args[-3] == "native"
     assert json.dumps(preview_args[-4], sort_keys=True) == json.dumps(

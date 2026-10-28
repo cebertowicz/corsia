@@ -288,7 +288,7 @@ def test_cc_eviction_prepares_the_same_provider_resume(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry: (),
+        lambda _registry, _capabilities: (),
     )
 
     first = prepare_cc_destination_payload(
@@ -518,7 +518,7 @@ async def test_codex_restart_restores_before_preparing_current_turn(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry: (),
+        lambda _registry, _capabilities: (),
     )
 
     destination = prepare_codex_destination_payload(
