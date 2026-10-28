@@ -22,7 +22,7 @@ from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
 from core.placement_decide import Decision, Destination, ThreadPlace
 from core.lesson_trial_targeting import (
-    TrialRefused, active_target_trials, additive_only, same_case, target_trials,
+    TrialRefused, additive_only, same_case, target, target_from_lesson, target_trials,
 )
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
@@ -43,8 +43,8 @@ FIXES = {
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
     "over-budget": "shorten the trial guidance so it fits at task start",
-    "target-full": ("wait for a conflicting trial on this file to finish, then call place again; "
-                    "name target_section to run beside other trials on this file"),
+    "target-full": ("wait for a trial on this file to finish and call place again, or name a different "
+                    "target_section when the only other trial changes a different named section"),
 }
 
 
@@ -165,9 +165,15 @@ def _target_full(
     metadata = lesson_case.revised(previous.lesson.case_metadata if previous is not None else {}, pending)
     if not (metadata.get("target_file") or metadata.get("new_target_path")):
         return False
-    active = active_target_trials(db, place, replace(decision, case_metadata=metadata))
+    from core.placement_receipt import offered_skills
+    from infra.config import WORKSPACE
+
+    normalized = target(replace(decision, case_metadata=metadata))
     existing_path = merge[0] if merge else destination.path if revising else None
-    others = [item for path, item in active if path != existing_path]
+    existing = existing_path.resolve() if existing_path is not None else None
+    split = offered_skills(db, place.thread_id, Path(WORKSPACE))
+    others = [row.trial for row in split.per_task if row.trial is not None
+              and row.path.resolve() != existing and target_from_lesson(row.trial) == normalized]
     section = metadata.get("target_section")
     return len(others) >= 2 or any(
         not section or not item.lesson.case_metadata.get("target_section")

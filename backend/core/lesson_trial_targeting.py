@@ -85,50 +85,6 @@ def target_trials(
     return open_trials, retired
 
 
-def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> list[tuple[Path, Any]]:
-    """Find offered trials on this file across the user's live owner trays."""
-    from datetime import datetime, timezone
-    from core.lesson_trials import offer_refusal
-    from core.project_context import resolve_project_row_paths
-    from core.skill_scanning import skill_files
-    from core.workspace_layout import ThreadRootResolver
-    from infra.config import WORKSPACE
-
-    owner = db.execute("SELECT user_id FROM threads WHERE id=?", (place.thread_id,)).fetchone()
-    if owner is None:
-        raise TrialRefused("invalid-output", "The trial owner is unavailable.")
-    rows = db.execute(
-        """SELECT t.id, t.project_id, p.name, p.path FROM threads t
-           LEFT JOIN projects p ON p.id=t.project_id
-           WHERE t.user_id=? AND t.archived_at IS NULL
-             AND COALESCE(t.lifecycle_state, 'active') NOT IN ('archived', 'purged')""",
-        (owner["user_id"],),
-    )
-    workspace = Path(WORKSPACE)
-    resolver = ThreadRootResolver()
-    projects: dict[str, Path | None] = {}
-    normalized, now = target(decision), datetime.now(timezone.utc)
-    matches = []
-    for row in rows:
-        project_id = row["project_id"]
-        if project_id and project_id not in projects:
-            projects[project_id] = resolve_project_row_paths(
-                workspace, project_name=row["name"], raw_path=row["path"],
-            )[1]
-        scope = projects[project_id] if project_id else workspace
-        if scope is None:
-            continue
-        for path in skill_files(resolver.root(scope, row["id"])):
-            try:
-                current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
-            except OSError:
-                continue
-            if (current is not None and current.lesson.owner == row["id"]
-                    and offer_refusal(current.lesson, now) is None and target_from_lesson(current) == normalized):
-                matches.append((path, current))
-    return matches
-
-
 def same_case(current: Any, decision: Decision) -> bool:
     """Whether an existing trial has the same section and correction cause."""
     current_meta, requested = current.lesson.case_metadata, decision.case_metadata

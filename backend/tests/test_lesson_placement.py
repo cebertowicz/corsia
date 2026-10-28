@@ -1047,21 +1047,35 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
     assert _artifacts(env, capture) == 1
 
 
+def _activate_cap_trial(env: Env, number: int, section: str | None, *, owner: str = THREAD) -> Path:
+    from core.lesson_trials import Trial
+    from plans import lesson_reviews
+
+    name = f"existing-{number}"
+    path = env.workspace / ".threads" / owner / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = lesson_files.render_trial(
+        lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner=owner, name=name,
+        description="Use for checks.", text="Check it.",
+        trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
+        source_refs=TURN, case_metadata={"new_target_path": "context/shared.md", "target_section": section, "cause": "rule_gap"},
+    )
+    trial = lesson_files.read_trial(text)
+    env.db.execute("INSERT OR IGNORE INTO artifact_identities (id,integration,type,external_id,title,state,created_at,updated_at) VALUES ('cap-artifact','workspace','skill','workspace://cap','cap','active','t','t')")
+    node, _ = lesson_reviews.ensure_lesson_review(
+        env.db, owner, lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
+        artifact_id="cap-artifact", title=f"Review {name}", acceptance="Review the trial.",
+        review_after=trial.lesson.review_after,
+    )
+    env.db.commit()
+    path.write_text(lesson_files.with_review_ref(text, node))
+    return path
+
+
 @pytest.mark.parametrize(("target", "held"), [("context/shared.md", True), ("context/other.md", False)])
 async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> None:
-    from core.lesson_trials import Trial
-
-    _seed_thread(env.db, "other-owner")
-    env.db.commit()
-    for number, owner in ((1, THREAD), (2, "other-owner")):
-        path = env.workspace / ".threads" / owner / "skills" / f"existing-{number}" / "SKILL.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(lesson_files.with_review_ref(lesson_files.render_trial(
-            lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner=owner,
-            name=f"existing-{number}", description="Use for existing checks.", text="Check it.",
-            trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
-            source_refs=TURN, case_metadata={"new_target_path": "context/shared.md", "target_section": f"Part {number}"},
-        ), "review"))
+    for number in (1, 2):
+        _activate_cap_trial(env, number, f"Part {number}")
     reply = _place(env, _entry(env), _answer(new_target_path=target, target_section="Part 3"))
     await _drain(env.worker)
     if held:
@@ -1079,115 +1093,42 @@ async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> Non
     ("Part A", None, "context/shared.md", True),
     (None, None, "context/other.md", False),
 ])
-async def test_trial_section_conflicts_across_owners(env: Env, existing_section, requested_section, target, held) -> None:
-    from core.lesson_trials import Trial
-
-    _seed_thread(env.db, "other-owner")
-    env.db.commit()
-    path = env.workspace / ".threads" / "other-owner" / "skills" / "existing" / "SKILL.md"
-    path.parent.mkdir(parents=True)
-    metadata = {"new_target_path": "context/shared.md"}
-    if existing_section is not None:
-        metadata["target_section"] = existing_section
-    path.write_text(lesson_files.with_review_ref(lesson_files.render_trial(
-        lesson_id="00000000-0000-0000-0000-000000000001", owner="other-owner",
-        name="existing", description="Use for existing checks.", text="Check it.",
-        trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
-        source_refs=TURN, case_metadata=metadata,
-    ), "review"))
+async def test_trial_section_conflicts(env: Env, existing_section, requested_section, target, held) -> None:
+    _activate_cap_trial(env, 1, existing_section)
     answer = _answer(new_target_path=target, target_section=requested_section)
     reply = _place(env, _entry(env), answer)
     await _drain(env.worker)
     if held:
-        assert "name target_section to run beside other trials on this file" in reply
+        assert "wait for a trial on this file to finish and call place again" in reply
+        assert "when the only other trial changes a different named section" in reply
         assert not _skill(env).exists()
         assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
     else:
         assert _skill(env).exists()
 
 
-def _other_trial(root: Path, owner: str, name: str, *, due: str = "2030-01-01T00:00:00+00:00", review: bool = True) -> Path:
-    from core.lesson_trials import Trial
-
-    path = root / ".threads" / owner / "skills" / name / "SKILL.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = lesson_files.render_trial(
-        lesson_id=f"00000000-0000-0000-0000-{int(name[-1]):012d}", owner=owner, name=name,
-        description="Use for checks.", text="Check it.",
-        trial=Trial(kind="hypothesis", review_after=due), source_refs=TURN,
-        case_metadata={"new_target_path": "context/shared.md", "target_section": name},
-    )
-    path.write_text(lesson_files.with_review_ref(text, "review") if review else text)
-    return path
-
-
-@pytest.mark.parametrize("inactive", ["archived", "purged", "past-due", "unscheduled"])
-def test_inactive_trials_do_not_block_admission(env: Env, inactive: str) -> None:
+def test_unrelated_owner_trials_do_not_hold_this_owner(env: Env) -> None:
     _seed_thread(env.db, "other-owner")
-    if inactive in ("archived", "purged"):
-        env.db.execute("UPDATE threads SET lifecycle_state=? WHERE id='other-owner'", (inactive,))
-    env.db.commit()
-    _other_trial(env.workspace, "other-owner", "existing-1",
-                 due="2020-01-01T00:00:00+00:00" if inactive == "past-due" else "2030-01-01T00:00:00+00:00",
-                 review=inactive != "unscheduled")
-    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="existing-1"))
-    assert "captured hypothesis" not in reply
-    assert "queued" in reply
-
-
-def test_workspace_owner_counts_trials_from_other_projects(env: Env) -> None:
-    from tests.project_ref_helpers import project_ref, write_project_context
-
-    project = write_project_context(env.workspace, "p")
-    env.db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES('p','P',?,'t','t')", (project_ref("p"),))
     for number in (1, 2):
-        owner = f"project-owner-{number}"
-        _seed_thread(env.db, owner)
-        env.db.execute("UPDATE threads SET project_id='p' WHERE id=?", (owner,))
-        _other_trial(project, owner, f"existing-{number}")
-    env.db.commit()
-    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="third"))
-    assert "two trials" in reply
-
-
-def test_missing_project_root_does_not_block_admission(env: Env) -> None:
-    _seed_thread(env.db, "other-owner")
-    env.db.execute(
-        "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES('missing','Missing',?,'t','t')",
-        (str(env.workspace / "projects" / "missing"),),
-    )
-    env.db.execute("UPDATE threads SET project_id='missing' WHERE id='other-owner'")
-    env.db.commit()
-    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Fresh"))
+        _activate_cap_trial(env, number, f"Part {number}", owner="other-owner")
+    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part 1"))
     assert "queued" in reply
 
 
-@pytest.mark.parametrize("owner", [THREAD, "other-owner"])
-def test_unreadable_skill_does_not_fail_admission(env: Env, monkeypatch, owner: str) -> None:
-    if owner != THREAD:
-        _seed_thread(env.db, owner)
-        env.db.commit()
-    bad = _other_trial(env.workspace, owner, "existing-1")
-    read_text = Path.read_text
-
-    def read_or_fail(path, *args, **kwargs):
-        if path == bad:
-            raise OSError("file disappeared")
-        return read_text(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", read_or_fail)
-    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="existing-1"))
+def test_trial_with_stale_review_does_not_count(env: Env) -> None:
+    path = _activate_cap_trial(env, 1, "Part A")
+    path.write_text(path.read_text().replace("Check it.", "Changed behavior."))
+    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
     assert "queued" in reply
 
 
-def test_non_utf8_skill_does_not_fail_admission(env: Env) -> None:
-    _seed_thread(env.db, "other-owner")
+def test_inherited_offered_trial_counts(env: Env) -> None:
+    _seed_thread(env.db, "ancestor")
+    env.db.execute("UPDATE threads SET spawned_by='ancestor' WHERE id=?", (THREAD,))
     env.db.commit()
-    path = env.workspace / ".threads" / "other-owner" / "skills" / "bad" / "SKILL.md"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"\xff invalid skill")
-    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Fresh"))
-    assert "queued" in reply
+    _activate_cap_trial(env, 1, "Part A", owner="ancestor")
+    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
+    assert "captured hypothesis" in reply
 
 
 async def test_revising_a_trial_does_not_conflict_with_itself(env: Env) -> None:
@@ -1205,15 +1146,16 @@ async def test_revising_a_trial_does_not_conflict_with_itself(env: Env) -> None:
 async def test_watch_promotion_counts_its_retained_target(env: Env) -> None:
     from core.lesson_trials import Trial
 
-    for number, state, name in ((1, "trial", "first"), (2, "trial", "second"), (3, "watch", "cite-the-head")):
-        path = env.tray / "skills" / name / "SKILL.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(lesson_files.with_review_ref(lesson_files.render_trial(
-            lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner=THREAD, name=name,
-            description="Use for checks.", text="Check it.",
-            trial=Trial(kind="hypothesis", state=state, review_after="2030-01-01T00:00:00+00:00"),
-            source_refs=TURN, case_metadata={"new_target_path": "context/shared.md"},
-        ), "review"))
+    for number in (1, 2):
+        _activate_cap_trial(env, number, f"Part {number}")
+    path = _skill(env)
+    path.parent.mkdir(parents=True)
+    path.write_text(lesson_files.render_trial(
+        lesson_id="00000000-0000-0000-0000-000000000003", owner=THREAD, name="cite-the-head",
+        description="Use for checks.", text="Check it.",
+        trial=Trial(kind="hypothesis", state="watch", review_after="2030-01-01T00:00:00+00:00"),
+        source_refs=TURN, case_metadata={"new_target_path": "context/shared.md"},
+    ))
     reply = _place(env, _entry(env))
     await _drain(env.worker)
     assert "two trials" in reply
