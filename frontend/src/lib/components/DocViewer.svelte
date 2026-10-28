@@ -328,7 +328,7 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
-	{#if target}<DocBottomBand artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetModalOpen} onStep={replyNavigation.step} />{/if}
+	{#if target}<DocBottomBand artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetModalOpen} onStep={() => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.step(); }} />{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}

@@ -346,6 +346,45 @@ for (const width of [1440, 393]) {
 	});
 }
 
+for (const width of [1440, 393]) {
+	for (const key of ['Enter', 'Space'] as const) {
+		test(`${TAG} keyboard ${width}px ${key}: tab to the notice and return from comments`, async ({ page, request }, testInfo) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+			skipMismatchedProject(width, testInfo.project.name);
+			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `keyboard-${width}-${key}`, 'launch-plan.md', [8, 10]);
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '2 new replies');
+			await page.locator('body').focus();
+			let reached = false;
+			for (let i = 0; i < 100; i += 1) {
+				await page.keyboard.press('Tab');
+				if (await chipButton(page).evaluate((button) => button === document.activeElement)) { reached = true; break; }
+			}
+			expect(reached, 'notice is reachable in the tab order').toBe(true);
+			await page.keyboard.press('Shift+Tab');
+			await expect(chipButton(page)).not.toBeFocused();
+			await page.keyboard.press('Tab');
+			await expect(chipButton(page)).toBeFocused();
+			await shot(page, `keyboard-chip-focus-${key}-light-${width}`);
+			await holdDwell(page, true);
+			await page.keyboard.press(key);
+			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
+			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+			await expect.poll(() => page.locator('[data-doc-comments-drawer]').evaluate((drawer) => drawer.contains(document.activeElement) || !!drawer.closest('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
+			await shot(page, `keyboard-destination-${key}-light-${width}`);
+			await page.getByRole('button', { name: 'Close comments' }).click();
+			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+			await expect(chipButton(page)).toBeFocused();
+			await holdDwell(page, false);
+		});
+	}
+}
+
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		const size = { width, height: width === 393 ? 852 : 900 };
