@@ -22,7 +22,7 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
             report({"type": kind, "id": data["id"], "text": text})
         except PageHandledError:
             outcome = "page_handled"
-            report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy from this page. Try copying again."})
+            report({"type": kind, "id": data["id"], "error": "This page handles copying itself, so CORSIA couldn’t copy the text."})
         except (BrowserSessionError, OSError, WebSocketException, TimeoutError):
             report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy from this page. Try copying again."})
         await asyncio.to_thread(emit_product_event, "browser_pane", "clipboard", thread_id=thread_id,

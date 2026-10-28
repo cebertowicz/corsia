@@ -187,7 +187,7 @@ async def test_page_handled_clipboard_reports_failure_without_text(monkeypatch):
     messages = []
     await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1, 'cut': True}, messages.append)
     assert messages == [{'type': 'clipboard_selection', 'id': 1,
-                         'error': 'CORSIA couldn’t copy from this page. Try copying again.'}]
+                         'error': 'This page handles copying itself, so CORSIA couldn’t copy the text.'}]
     assert events == [(('browser_pane', 'clipboard'), {'thread_id': 'thread', 'properties': {'action': 'cut', 'outcome': 'page_handled'}})]
 
 
