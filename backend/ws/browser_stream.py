@@ -377,8 +377,7 @@ async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
     """Open a URL, or go back, forward or reload from an authenticated pane connection."""
     action, url = data.get("action"), data.get("url")
     if action is None:
-        url = browser_control.normalize_browser_url(url)
-        if url is None:
+        if (url := browser_control.normalize_browser_url(url)) is None:
             return {"type": "navigate_result", "error": "Browser URL must be http or https"}
     if action is not None and action not in browser_pane.HISTORY_ACTIONS:
         return {"type": "navigate_result", "error": "Unknown browser action"}
