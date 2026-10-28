@@ -63,7 +63,6 @@
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let userIsNearBottom = $state(true);
-	let attentionDockShowing = $state(false);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
 	let inputBarRef: InputBar;
@@ -320,7 +319,7 @@
 			bind:messagesEl
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
-			hideScrollFab={attentionDockShowing}
+			hideScrollFab
 			onOpenLightbox={(url) => onOpenLightbox(url)}
 			{hasMoreMessages}
 			{loadingOlderMessages}
@@ -354,21 +353,14 @@
 				/>
 			{/if}
 			<AttentionDock
-				bind:showing={attentionDockShowing}
 				suppressed={attentionSuppressed}
 				onOpenDestination={(destination, threadId) => {
 					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
 					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
-			>
-				{#snippet scrollControl()}
-					<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} docked onScrollToBottom={scrollToBottomFromUser} />
-				{/snippet}
-			</AttentionDock>
-			{#if !attentionDockShowing}
-				<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
-			{/if}
+			/>
+			<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}

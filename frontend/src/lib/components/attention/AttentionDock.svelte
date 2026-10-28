@@ -13,7 +13,7 @@
 	 * `suppressed` defers to a higher-precedence control in the same physical
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
-	import { onMount, type Snippet } from 'svelte';
+	import { onMount } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
 	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -50,15 +50,11 @@
 		writesDisabled = false,
 		suppressed = false,
 		onOpenDestination = () => {},
-		showing = $bindable(false),
-		scrollControl,
 	}: {
 		writesDisabled?: boolean;
 		/** A higher-precedence control holds this slot right now. */
 		suppressed?: boolean;
 		onOpenDestination?: (destination: AttentionDestination, threadId?: string | null) => void;
-		showing?: boolean;
-		scrollControl?: Snippet;
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
@@ -75,7 +71,6 @@
 	const current = $derived(shownItem(dockQueue, $activeId));
 	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
 		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
-	$effect(() => { showing = !!current || hasReplies; });
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
@@ -314,7 +309,6 @@
 		{/if}
 		</section>
 		{/if}
-		{@render scrollControl?.()}
 	</div>
 {/if}
 
@@ -329,11 +323,8 @@
 		/* No side inset of its own: the chat column places it, so its content edges are the transcript's. */
 		padding: var(--space-4) var(--dock-gutter) var(--dock-gutter);
 		margin: 0 calc(-1 * var(--dock-gutter)) calc(-1 * var(--dock-gutter));
-		/* Transcript scrolling beneath fades out across that top inset, so the row's edge
-		   reads without a border or a tint. Invisible when nothing is under it. It covers
-		   the band only, never the gutter. */
-		background: linear-gradient(to bottom, transparent, var(--bg-primary) var(--space-4))
-			center top / calc(100% - 2 * var(--dock-gutter)) calc(100% - var(--dock-gutter)) no-repeat;
+		/* Only the controls receive pointer input; empty space stays part of the transcript. */
+		pointer-events: none;
 		/* The chat slot publishes this height budget so an opened row scrolls
 		   inside it instead of growing off the top of the viewport (measured at
 		   320px: heading and close button at y = -91). The bottom gutter is outside it. */
@@ -342,6 +333,8 @@
 		overscroll-behavior: contain;
 	}
 	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
+	.attention-dock :global(.reply-chip-notice button),
+	.attention-dock [data-attention-dock] { pointer-events: auto; }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {
 		display: flex; align-items: center; gap: var(--space-3); width: 100%;

@@ -1,31 +1,25 @@
 <script lang="ts">
 	/**
-	 * One peer of the mobile action rail. Height, material, elevation and radius
-	 * are the rail contract (see `ChatAttentionStack`): this live-edge control is
-	 * distinguished by being present only while the user is scrolled up, never by
-	 * being smaller or flatter than its neighbours.
+	 * The chat attention stack's live-edge control. On mobile it shares the
+	 * action rail's height, material, elevation and radius; on desktop it keeps
+	 * the compact size used below the attention dock.
 	 */
-	import { isMobile } from '$lib/stores/viewport';
-
 	let {
 		threadId,
 		userIsNearBottom,
 		onScrollToBottom,
-		docked = false,
 	}: {
 		threadId: string | null;
 		userIsNearBottom: boolean;
 		onScrollToBottom: () => void;
-		docked?: boolean;
 	} = $props();
 
-	const visible = $derived(($isMobile || docked) && !userIsNearBottom && !!threadId);
+	const visible = $derived(!userIsNearBottom && !!threadId);
 </script>
 
 {#if visible}
 	<button
 		class="rail-control mobile-scroll-fab press-tint"
-		class:docked
 		type="button"
 		onclick={onScrollToBottom}
 		aria-label="Scroll to bottom"
@@ -48,9 +42,8 @@
 		color: var(--text-secondary);
 		cursor: pointer;
 	}
-	.mobile-scroll-fab.docked { display: flex; margin: var(--space-2) auto 0; }
 	@media (min-width: 769px) {
-		.mobile-scroll-fab.docked { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
+		.mobile-scroll-fab { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
 	}
 	.mobile-scroll-fab svg {
 		width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
