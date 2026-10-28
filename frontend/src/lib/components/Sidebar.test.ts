@@ -65,9 +65,9 @@ describe('Sidebar deactivation', () => {
 
 	it.each([
 		[500, { detail: 'private detail', reference: 'abc123' }, 'Couldn’t deactivate this agent. Try again. Reference: abc123'],
-		[401, { detail: 'private detail' }, 'Your sign-in isn’t valid. In Settings → System, log out and sign in again.'],
+		[401, { detail: 'private detail' }, 'CORSIA couldn’t verify your sign-in. In Settings → System, select Log out, then sign in again.'],
 		[403, { detail: 'private detail' }, 'You don’t have access to deactivate this agent. You can continue in another chat.'],
-		[404, { detail: 'private detail', reference: 'ref404' }, 'This agent’s chat is no longer available. Refresh the page to update the sidebar. Reference: ref404'],
+		[404, { detail: 'private detail', reference: 'ref404' }, 'This agent’s chat isn’t available. Refresh the page to update the sidebar. Reference: ref404'],
 		[400, { detail: 'private detail' }, 'Couldn’t deactivate this agent. You can continue in another chat.'],
 		[500, { detail: 'private detail', reference: 42 }, 'Couldn’t deactivate this agent. Try again.'],
 		[500, { detail: 'private detail', reference: '' }, 'Couldn’t deactivate this agent. Try again.'],
