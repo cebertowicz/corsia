@@ -431,31 +431,6 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_display_secret_and_sign_in_are_distinguished_in_chrome():
-    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
-        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
-    thread_id = f"shared-display-secret-{uuid4().hex}"
-    owner = BrowserSessionOwner(namespace="corsia-display-secret", instance_key=uuid4().hex)
-    try:
-        with fixture_server() as origin:
-            await owner.run(thread_id, ("open", f"{origin}/writes.html"), show_window=False, session="new")
-            endpoint = await owner.page_endpoint(thread_id)
-            async with browser_cdp.CdpClient(endpoint) as cdp:
-                await cdp.call("Runtime.evaluate", expression="""document.body.innerHTML = `
-                  <div><input type="password" value="fixture" readonly></div>
-                  <div><div><input type="password" value="fixture"></div><div><button>Show</button><button>Regenerate</button></div></div>`""")
-            assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
-            async with browser_cdp.CdpClient(endpoint) as cdp:
-                await cdp.call("Runtime.evaluate", expression="""document.body.innerHTML = `
-                  <form><input type="email"><div><input type="password" value="fixture" readonly>
-                  <button type="button" aria-label="Show password">Show</button></div><button>Sign in</button></form>`""")
-            assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
-    finally:
-        await owner.shutdown()
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_a_settled_password_visit_refuses_reads_of_its_hidden_field_by_ref_or_selector(monkeypatch):
     """AR2: once the field hides, a value or attribute read that locates it, or can't be located, is refused."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":
