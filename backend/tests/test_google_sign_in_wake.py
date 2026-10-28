@@ -118,7 +118,7 @@ async def test_missing_scopes_wake_the_thread_with_the_cause_and_what_to_ask_for
 
     assert status == 400
     [wake] = wakes()
-    assert (wake["outcome"], wake["cause"], wake["message"]) == ("failed", "consent_cancelled", oauth.MISSING_SCOPES)
+    assert (wake["outcome"], wake["cause"], wake["message"]) == ("failed", "consent_cancelled", oauth.missing_scopes(oauth.OPTIONAL_SCOPES))
     assert _accounts() == []
 
 
