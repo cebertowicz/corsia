@@ -272,6 +272,23 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(editorBox.y + editorBox.height + 0.5);
 			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(chipBounds.y);
 			await shot(page, `01b-visible-anchor-with-chip-${theme}-${width}`);
+			// Move the editing caret to the end: the last line must remain visible above the notice.
+			await page.locator('.doc .cm-content').click();
+			await page.keyboard.press('ControlOrMeta+End');
+			await page.keyboard.press('ArrowLeft');
+			const caretBox = await page.locator('.doc .cm-content').evaluate((editor) => {
+				const selection = window.getSelection();
+				if (!selection?.isCollapsed || !selection.anchorNode || !editor.contains(selection.anchorNode)) throw new Error('Editor caret is not focused');
+				const rect = selection.getRangeAt(0).getBoundingClientRect();
+				return { y: rect.y, height: rect.height };
+			});
+			expect(caretBox.height, 'caret has visible geometry').toBeGreaterThan(0);
+			const editorAfter = (await page.locator('.doc-main').boundingBox())!;
+			const chipAfter = (await chipBox(page).boundingBox())!;
+			expect(caretBox.y + caretBox.height, 'caret stays inside the editor').toBeLessThanOrEqual(editorAfter.y + editorAfter.height + 0.5);
+			expect(caretBox.y + caretBox.height, 'caret stays above the reply chip').toBeLessThanOrEqual(chipAfter.y);
+			await shot(page, `01c-visible-caret-with-chip-${theme}-${width}`);
+			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
 			await holdDwell(page, true);
 			await chipButton(page).click();
