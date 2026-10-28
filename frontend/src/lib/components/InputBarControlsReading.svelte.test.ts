@@ -251,6 +251,87 @@ describe('context-chip readings', () => {
 });
 
 describe('turns after a preview (trace rows 5, 7)', () => {
+	it('shows the receipt immediately on first open while the preview loads', () => {
+		fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		expect(composer.donut()).toBe('42%');
+		expect(composer.headline()).toContain('42%');
+	});
+
+	it('does not carry a preview across a model switch while refreshing', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+		let finish!: (response: unknown) => void;
+		fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
+		flushSync();
+		expect(composer.donut()).toBe('~30%');
+		activeModelId.set('model-b');
+		flushSync();
+		expect(composer.donut()).not.toBe('~30%');
+		finish({ ok: true, json: async () => ({ preview: measured('thread-a', 700) }) });
+		await vi.waitFor(() => expect(previewCalls()).toHaveLength(3));
+	});
+
+	it('shows the receipt in the donut when the sheet closes during refresh', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+		fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
+		flushSync();
+		expect(composer.donut()).toBe('~30%');
+		composer.props.sheetView = null;
+		flushSync();
+		expect(composer.donut()).toBe('51%');
+	});
+
+	it('returns to the receipt and shows the error when refresh fails', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+		let fail!: (error: Error) => void;
+		fetchMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
+		flushSync();
+		expect(composer.donut()).toBe('~30%');
+		fail(new Error('Preview failed'));
+		await vi.waitFor(() => expect(composer.donut()).toBe('51%'));
+		expect(host.textContent).toContain('Could not refresh');
+	});
+
+	it('keeps the preview in the open sheet and donut until the next preview lands', async () => {
+		const composer = mountComposer();
+		setContextUsage('thread-a', measured('thread-a', 420) as never);
+		composer.props.sheetView = 'context';
+		flushSync();
+		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+
+		let finish!: (response: unknown) => void;
+		fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
+		flushSync();
+		expect(composer.donut()).toBe('~30%');
+		expect(composer.headline()).toContain('30%');
+		expect(host.textContent).toContain('Updating');
+
+		finish({ ok: true, json: async () => ({ preview: {
+			...measured('thread-a', 640), token_source: 'estimated', token_usage_available: false, preview: true,
+		} }) });
+		await vi.waitFor(() => expect(composer.donut()).toBe('~64%'));
+		expect(composer.headline()).toContain('64%');
+	});
+
 	it('shows the measured reading once a turn completes after a preview', async () => {
 		const composer = mountComposer();
 		setContextUsage('thread-a', measured('thread-a', 420) as never);
