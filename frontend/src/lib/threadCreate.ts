@@ -5,7 +5,7 @@ import { ACCOUNT_HOLD_COPY } from '$lib/messageDeliveryCopy';
 
 export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[]): string | null {
 	const model = models.find((row) => modelMatchesId(row, modelId));
-	return accountId && model?.runs_on?.some((entry) => entry.selected && entry.account_id === accountId) ? accountId : null;
+	return accountId && model?.runs_on?.some((entry) => entry.account_id === accountId) ? accountId : null;
 }
 
 export async function createAccountRefusal(status: number, detail: unknown, reload: () => Promise<void>): Promise<boolean> {

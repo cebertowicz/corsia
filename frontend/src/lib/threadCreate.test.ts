@@ -8,10 +8,11 @@ describe('session creation helpers', () => {
 		expect(buildNewThreadBody({ modelId: 'codex/model', accountId: 'chosen' })).toEqual({ title: 'New Chat', model: 'codex/model', account_id: 'chosen' });
 		expect(buildNewThreadBody({ modelId: 'codex/model' })).toEqual({ title: 'New Chat', model: 'codex/model' });
 	});
-	it('sends the choice matching the current model vendor after a model change', () => {
+	it('sends any choice of the current model vendor, so creation admits or refuses it before the first send', () => {
 		const models = [{ id: 'codex/model', runs_on: [{ account_id: 'chosen', selected: true }, { account_id: 'other', selected: false }] }] as Model[];
 		expect(draftAccountForModel('chosen', 'codex/model', models)).toBe('chosen');
-		expect(draftAccountForModel('other', 'codex/model', models)).toBeNull();
+		expect(draftAccountForModel('other', 'codex/model', models)).toBe('other');
+		expect(draftAccountForModel('claude-account', 'codex/model', models)).toBeNull();
 	});
 
 	it('refreshes known account refusals without clearing the choice', async () => {
