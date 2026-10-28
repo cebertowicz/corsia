@@ -1,7 +1,7 @@
 """Paused asks retain their pane display without raising attention."""
 import pytest
 
-from plans import artifact_links, operator_projection, service
+from plans import artifact_links, operator_projection, service, user_steering
 from registry import attention as registry_attention, models
 from tests.test_plan_decisions import _task
 from tests.test_plan_pause_defers_person_ask import (
@@ -48,11 +48,16 @@ def test_paused_ask_stays_orange(db, kind, pause, monkeypatch):
     assert projected[parent_id]["display"] == orange
     assert not projected[node_id]["requires_user_action"]
     assert not projected[parent_id]["requires_user_action"]
+    # One state, one mark: the row and its parent name the pause, item or whole plan.
+    assert projected[node_id]["status_reason"] == user_steering.USER_PAUSE_REASON
+    assert projected[parent_id]["status_reason"] == user_steering.USER_PAUSE_REASON
     if pause == "item":
         _node_lifecycle(db, plan.id, node_id, "resume_node")
     else:
         _lifecycle(db, plan.id, "resume")
-    assert rows()[node_id]["requires_user_action"]
+    resumed = rows()
+    assert resumed[node_id]["requires_user_action"]
+    assert resumed[node_id]["status_reason"] != user_steering.USER_PAUSE_REASON
 
 
 def test_paused_user_task_with_dependency_stays_waiting(db):
