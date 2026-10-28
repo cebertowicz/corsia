@@ -73,22 +73,10 @@ async def test_snapshot_lists_and_switches_only_existing_tab_refs(monkeypatch):
     assert not browser_session_commands._saved_command(('tab', 'close'), pane=False)
 
 
-@pytest.mark.asyncio
-async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeypatch):
+async def _watch(monkeypatch, replay, pages):
+    """Run one target-watch connection over `replay` and return how many notices it sent."""
     events = asyncio.Queue()
-    for event in [
-        # Discovery replays the tab already open before it answers; that replay is no change.
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'first'}}},
-        {'id': 1, 'result': {}},
-        # A captcha's frames and workers come and go without touching the tabs.
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'iframe', 'targetId': 'frame'}}},
-        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'frame'}},
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'worker', 'targetId': 'worker'}}},
-        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'worker'}},
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'popup'}}},
-        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'popup'}},
-        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'first'}},
-    ]:
+    for event in replay:
         events.put_nowait(json.dumps(event))
     notified = []
 
@@ -115,7 +103,7 @@ async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeyp
 
     monkeypatch.setattr(browser_session_commands, 'browser_endpoint', endpoint)
     monkeypatch.setattr(browser_cdp, 'CdpClient', Client)
-    task = asyncio.create_task(browser_pane.watch_targets('thread', lambda: notified.append(True)))
+    task = asyncio.create_task(browser_pane.watch_targets('thread', lambda: notified.append(True), pages))
     for _ in range(20):
         if events.empty():
             break
@@ -123,7 +111,48 @@ async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeyp
     await asyncio.sleep(0)
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    assert len(notified) == 3
+    return len(notified)
+
+
+def _page(method, target):
+    if method == 'Target.targetDestroyed':
+        return {'method': method, 'params': {'targetId': target}}
+    return {'method': method, 'params': {'targetInfo': {'type': 'page', 'targetId': target}}}
+
+
+@pytest.mark.asyncio
+async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeypatch):
+    assert await _watch(monkeypatch, [
+        # Discovery replays the tab already open before it answers; that replay is no change.
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'first'}}},
+        {'id': 1, 'result': {}},
+        # A captcha's frames and workers come and go without touching the tabs.
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'iframe', 'targetId': 'frame'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'frame'}},
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'worker', 'targetId': 'worker'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'worker'}},
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'popup'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'popup'}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'first'}},
+    ], set()) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('replayed', 'notices'), [
+    # The same tabs come back: nothing changed while the watch was down.
+    (['first', 'second'], 0),
+    # A tab opened or closed during the gap: one notice when discovery answers.
+    (['first', 'second', 'third'], 1),
+    (['first'], 1),
+])
+async def test_reconnected_target_watch_notifies_once_for_a_missed_tab_change(monkeypatch, replayed, notices):
+    pages = set()
+    assert await _watch(monkeypatch, [_page('Target.targetCreated', 'first'), _page('Target.targetCreated', 'second'),
+                                      {'id': 1, 'result': {}}], pages) == 0
+    assert pages == {'first', 'second'}
+    replay = [_page('Target.targetCreated', target) for target in replayed] + [{'id': 1, 'result': {}}]
+    assert await _watch(monkeypatch, replay, pages) == notices
+    assert pages == set(replayed)
 
 
 @pytest.mark.asyncio
@@ -138,7 +167,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
             change_ready.set()
         await asyncio.Future()
 
-    async def watch(_thread, _notify):
+    async def watch(_thread, _notify, _pages):
         await asyncio.Future()
 
     monkeypatch.setattr(browser_stream, '_screencast_events', stream)

@@ -136,9 +136,10 @@ async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames
     """Restart both page streams on a target change without reconnecting the pane."""
     changed = asyncio.Event()
     browser_pane_state.watch_target_changes(thread_id, connection_token, changed.set)
+    pages: set[str] = set()
     watcher = asyncio.create_task(_retry_pane_connection(
         thread_id, connection_token, "target watch", "The pane stopped following browser tabs",
-        lambda: browser_pane.watch_targets(thread_id, changed.set),
+        lambda: browser_pane.watch_targets(thread_id, changed.set, pages),
     ))
     streams: set[asyncio.Task] = set()
     try:
