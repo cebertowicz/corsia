@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
@@ -16,6 +17,7 @@ from host_access.browser_session_state import BrowserSessionError
 
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
+log = logging.getLogger(__name__)
 # The CDP plain-text search matches tag names, attribute names and values, and text, in every
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
@@ -70,6 +72,11 @@ class CdpClient:
                                 self.parents[node_id] = parent
                 continue
             if "error" in response:
+                error = response["error"]
+                if isinstance(error, dict):
+                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
+                else:
+                    log.debug("CDP %s failed with an invalid error response", method)
                 raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
             if not isinstance(result, dict):

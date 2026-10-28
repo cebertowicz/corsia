@@ -14,6 +14,8 @@ def auth_failure_kind(provider: str, detail: str | BaseException | None) -> str 
     if provider != "claude-code" or detail is None:
         return None
     text = str(detail).casefold()
+    if "not logged in · please run /login" in text:
+        return SIGN_IN_EXPIRED
     required = (
         "failed to authenticate",
         "oauth session expired",

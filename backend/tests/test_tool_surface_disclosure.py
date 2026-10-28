@@ -120,7 +120,7 @@ def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
     assert list(members) == list(TOOL_PACKS)
     for name in packed:
         assert TOOL_CATALOG[name].summary
-        assert index.count(f"- {name}: ") == 1
+        assert index.count(f"- {name}: ") == (0 if TOOL_CATALOG[name].account_bound else 1)
     assert registry.get("tools_load").parameters["properties"]["pack"]["enum"] == list(
         TOOL_PACKS
     )

@@ -267,7 +267,10 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    reconcile_expired_login(ev.get("result"), log)
+    from subagents.turn_account_error import claude_turn_signed_out
+
+    if not await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db):
+        reconcile_expired_login(ev.get("result"), log)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 
