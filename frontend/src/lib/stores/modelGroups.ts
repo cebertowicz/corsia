@@ -6,7 +6,6 @@ import type { VendorAccount } from './vendorAccounts';
 export type GroupState = 'ready' | 'limited' | 'signed_out' | 'unavailable';
 export const ACCOUNT_SIGNED_OUT = 'signed out';
 export const ACCOUNT_LIMITED = 'limited';
-
 /** One account in the picker: the rows of a connection and the state its rows report. */
 export interface ModelGroup {
 	key: string;
@@ -25,7 +24,6 @@ export interface ModelGroup {
 export function canonicalName(model: Model): string {
 	return model.display_name ?? model.name;
 }
-
 export function groupKey(model: Model): string {
 	const connection = model.connection ?? model.provider ?? model.backend;
 	return model.backend === 'network' && model.server_name ? `${connection}:${model.server_name}` : connection;
