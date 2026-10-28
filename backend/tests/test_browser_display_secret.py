@@ -13,11 +13,12 @@ class Cdp:
             7: {"nodeName": "FORM" if form else "BODY", "nodeId": 7, "parentId": 8, "attributes": []},
             8: {"nodeName": "#document", "nodeId": 8},
         }
+        self.parents = {5: 6, 6: 7, 7: 8}
         self.reveal, self.form, self.credentials = reveal, form, credentials
 
     async def call(self, method, **params):
         if method == "DOM.describeNode":
-            return {"node": self.nodes[params["nodeId"]]}
+            return {"node": {k: v for k, v in self.nodes[params["nodeId"]].items() if k != "parentId"}}
         if method == "Accessibility.queryAXTree":
             return {"nodes": [{"role": {"value": "button"}, "name": {"value": "Show secret"}}] if self.reveal else []}
         if method == "DOM.querySelectorAll":
@@ -52,7 +53,8 @@ async def test_slack_box_reveal_text_in_wrapper_is_not_a_prompt():
     class SlackBox(Cdp):
         def __init__(self):
             super().__init__()
-            self.nodes[6]["parentId"] = 9
+            self.parents[6] = 9
+            self.parents[9] = 7
             self.nodes[9] = {"nodeName": "DIV", "nodeId": 9, "parentId": 7, "attributes": []}
             self.nodes[5]["attributes"] += ["value", "fixture"]
 
@@ -69,3 +71,10 @@ async def test_slack_box_reveal_text_in_wrapper_is_not_a_prompt():
 @pytest.mark.asyncio
 async def test_readonly_password_in_sign_in_form_remains_guarded():
     assert await browser_cdp._password_inputs(Cdp(readonly=True, form=True)) == {77}
+
+
+@pytest.mark.asyncio
+async def test_missing_pushed_ancestry_keeps_field_guarded():
+    cdp = Cdp(readonly=True)
+    cdp.parents.clear()
+    assert await browser_cdp._password_inputs(cdp) == {77}

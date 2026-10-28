@@ -43,6 +43,7 @@ class CdpClient:
         self.endpoint = endpoint
         self._max_size = max_size
         self._next_id = 0
+        self.parents: dict[int, int] = {}
 
     def next_request(self) -> int:
         """The id of the next send, for a reader that must know its answer before send returns."""
@@ -59,6 +60,14 @@ class CdpClient:
         while True:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
+                if response.get("method") == "DOM.setChildNodes":
+                    params = response.get("params", {})
+                    parent = params.get("parentId")
+                    if isinstance(parent, int):
+                        for child in params.get("nodes", []):
+                            node_id = child.get("nodeId")
+                            if isinstance(node_id, int):
+                                self.parents[node_id] = parent
                 continue
             if "error" in response:
                 raise BrowserSessionError("This page couldn't be checked")
@@ -118,7 +127,7 @@ async def _display_secret(cdp: CdpClient, node: dict) -> bool:
     flat = node.get("attributes") or []
     names = {str(name).lower() for name in flat[::2]}
     display_signal = bool(names & {"readonly", "disabled"})
-    parent = node.get("parentId")
+    parent = getattr(cdp, "parents", {}).get(node.get("nodeId"))
     if not isinstance(parent, int):
         return False
     try:
@@ -149,7 +158,7 @@ async def _display_secret(cdp: CdpClient, node: dict) -> bool:
                                         selector="button:not([type]), button[type=submit i], input[type=submit i], input[type=image i]")
                 if submit.get("nodeIds"):
                     return False
-            parent = ancestor.get("parentId")
+            parent = cdp.parents.get(parent)
     except BrowserSessionError:
         return False
     return False
