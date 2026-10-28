@@ -95,6 +95,23 @@ function renderRail(
 	flushSync();
 }
 
+describe('RailScopedSection main chat tooltip', () => {
+	it.each([
+		[false, 'conductor-1', false, 'CORSIA — main chat for this workspace'],
+		[true, 'conductor-1', false, 'Conductor — main chat for this project'],
+		[false, null, true, 'No main chat for this workspace'],
+		[true, null, true, 'No main chat for this project'],
+		[false, null, false, 'Open main chat'],
+		[true, null, false, 'Open main chat'],
+	])('describes main chat in the current scope', (project, id, absent, title) => {
+		if (project) uiScope.set({ id: 'project-1', name: 'Project', color: '#fff' });
+		renderRail(undefined, undefined, { conductorThreadId: id, conductorKnownAbsent: absent });
+		const row = host.querySelector<HTMLElement>('.scoped-item.conductor')!;
+		expect(row.title).toBe(title);
+		expect(row.querySelector('button')?.disabled).toBe(absent);
+	});
+});
+
 describe('RailScopedSection agent zone', () => {
 	it('renders the conductor and persistent agents; not Documents or Automations', () => {
 		renderRail();
@@ -192,7 +209,7 @@ describe('RailScopedSection agent zone', () => {
 		const conductor = host.querySelector<HTMLElement>('.scoped-item.conductor');
 		expect(conductor).not.toBeNull();
 		expect(conductor?.querySelector<HTMLButtonElement>('.scoped-item-trigger')?.disabled).toBe(true);
-		expect(conductor?.getAttribute('title')).toBe('No CORSIA agent for this workspace');
+		expect(conductor?.getAttribute('title')).toBe('No main chat for this workspace');
 		conductor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onConductor).not.toHaveBeenCalled();
 	});
@@ -208,7 +225,7 @@ describe('RailScopedSection agent zone', () => {
 		const conductor = host.querySelector<HTMLElement>('.scoped-item.conductor');
 		expect(conductor).not.toBeNull();
 		expect(conductor?.querySelector<HTMLButtonElement>('.scoped-item-trigger')?.disabled).toBe(false);
-		expect(conductor?.getAttribute('title')).toBe('Open CORSIA chat');
+		expect(conductor?.getAttribute('title')).toBe('Open main chat');
 		conductor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onConductor).toHaveBeenCalledOnce();
 	});

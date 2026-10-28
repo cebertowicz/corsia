@@ -175,10 +175,10 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? `${entryLabel} — main chat for this ${entryLabel === 'CORSIA' ? 'workspace' : 'project'}`
+			? `${entryLabel} — main chat for this ${$uiScope ? 'project' : 'workspace'}`
 			: conductorKnownAbsent
-				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this ${entryLabel === 'CORSIA' ? 'workspace' : 'project'}`
-				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
+				? `No main chat for this ${$uiScope ? 'project' : 'workspace'}`
+				: 'Open main chat'}
 	>
 		<button
 			type="button"
