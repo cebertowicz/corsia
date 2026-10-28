@@ -25,6 +25,7 @@ def warm_command(
     invocation = replace(
         source.invocation,
         binary=request.binary or source.invocation.binary,
+        mcp_config=request.mcp_config if request.mcp_config is not None else source.invocation.mcp_config,
         resume_session_id=snapshot_id,
     )
     return build_claude_cmd(

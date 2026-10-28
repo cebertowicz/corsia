@@ -116,7 +116,8 @@ class EmailSearchTool(Tool):
             screen = screens.get(message.message_id)
             entry: dict[str, Any] = {
                 "message_id": message.message_id, "thread_id": thread_key(account, message.thread_id),
-                "from": message.headers.get("from", ""), "date": message.headers.get("date", ""),
+                "from": email_screen.sender_for_screen(message.headers.get("from", ""), screen),
+                "date": message.headers.get("date", ""),
             }
             if screen is not None and screen.clean:
                 entry["subject"] = message.headers.get("subject", "")
