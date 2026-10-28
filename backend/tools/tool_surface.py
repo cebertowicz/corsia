@@ -29,6 +29,7 @@ from tools.connected_app_visibility import (
     mcp_app_id,
     mcp_tool_reaches_thread,
     mcp_tool_visible_here,
+    tools_for_connected_accounts,
 )
 from tools.catalog import (
     TOOL_CATALOG,
@@ -41,10 +42,8 @@ from tools.catalog import (
 
 if TYPE_CHECKING:
     from tools.registry import ToolRegistry
-
 TOOLS_LOAD = "tools_load"
 TOOL_CALL = "tool_call"
-
 _LOAD_HEADER = (
     "Load the full schemas of CORSIA tools that are not in your tool list, "
     "then call them with tool_call. Pass pack to load a whole pack, or names "
@@ -167,7 +166,9 @@ def _server_label(name: str) -> str:
 def pack_index(registry: ToolRegistry) -> str:
     """Render the always-on index: core packs plus one line per MCP server."""
     lines = []
+    visible = set(tools_for_connected_accounts([name for names in pack_members().values() for name in names], TOOL_CATALOG))
     for pack, names in pack_members().items():
+        names = [name for name in names if name in visible]
         if names:
             lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
             lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in names)
@@ -191,7 +192,6 @@ def _user_configured_in_order(registry: ToolRegistry) -> list[Tool]:
 def _user_configured(registry: ToolRegistry) -> list[Tool]:
     tools = (registry.get(name) for name in sorted(registry.tool_names))
     return [tool for tool in tools if tool is not None and tool.user_configured]
-
 
 
 def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:

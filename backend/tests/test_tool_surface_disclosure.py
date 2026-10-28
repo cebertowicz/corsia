@@ -106,9 +106,11 @@ def test_no_reader_outside_the_selector_sends_the_raw_registry():
     assert offenders == []
 
 
-def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
+def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path, monkeypatch):
     from tools.catalog import TOOL_CATALOG, TOOL_PACKS, pack_members
 
+    providers = {provider for entry in TOOL_CATALOG.values() for provider in entry.account_providers}
+    monkeypatch.setattr("tools.connected_app_visibility.connected_account_providers", lambda: providers)
     registry = _registry(tmp_path)
     members = pack_members()
     packed = [name for names in members.values() for name in names]
