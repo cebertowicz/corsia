@@ -11,6 +11,7 @@ import platform
 import re
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 PROFILE_ROOT_NAME = "browser-profile"
@@ -91,6 +92,10 @@ def inherited_args() -> list[str]:
     # Match Chrome argv's splitlines() boundaries before checking each switch.
     inherited = [part.strip() for line in os.environ.get("AGENT_BROWSER_ARGS", "").splitlines()
                  for part in line.split(",") if part.strip()]
+    if sys.platform == "linux":
+        inherited = [cleaned for arg in inherited if (cleaned := re.sub(
+            r"(?<!\S)--(?:no-sandbox|disable-setuid-sandbox)(?:=[^\s]*)?(?=\s|$)", "", arg
+        ).strip())]
     for arg in inherited:
         switch = re.split(r"[=\s]", arg.lstrip("-"), maxsplit=1)[0].lower()
         if switch in {"explicitly-allowed-ports", "remote-allow-origins", "remote-debugging-port",
