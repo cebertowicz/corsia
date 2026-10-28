@@ -190,10 +190,10 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 25941,
+      "bytes": 26472,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "5bc15b989a20d52dc0ff54c17f5701c094c69b4970ede4cdd7ce0b127de4cd7d"
+      "sha256": "ad6161924d0e0d8ad80aa0a4bc58d1f77a9be7fc309bfa39695bda04dc9a151d"
     },
     {
       "bytes": 1259,
@@ -256,10 +256,10 @@
       "sha256": "e38d08303a38eb082ecaaa5258eb637782eb2edd5d90406b4a377c7923cb0a7e"
     },
     {
-      "bytes": 7842,
+      "bytes": 8017,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "624691aa6272d3ad88ead8af4ec1fb71537e249d22678e08feb61fa9470b959e"
+      "sha256": "b259ad7167c26fe9d5a9af71a0c4068cf3dc8d6fa2883c667b4231f0bad149c5"
     },
     {
       "bytes": 6035,
@@ -328,10 +328,10 @@
       "sha256": "0b379ab5de70691e11fc5dcf013b0bdc13ef1f12e73e835bc485ef520c02e781"
     },
     {
-      "bytes": 8731,
+      "bytes": 9038,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "74c0684b35ff2e8a8ff9c9ae9c0d2c70633799a5cb9569e8a2f2fe8cf858eecd"
+      "sha256": "0d1a8707286cc60eea46c33bd2148a42e20f6915be60afb26a96284d61c04604"
     },
     {
       "bytes": 695,
@@ -352,10 +352,10 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 3147,
+      "bytes": 3370,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
-      "sha256": "49c2b17770750497674dba469d545769a96d42fd12f9727d12eb2033835b18ee"
+      "sha256": "1303864c2e1ef171ed64a39bc3f9fde9b85a5fdf339a3739d8a9f3950c606115"
     },
     {
       "bytes": 8898,
