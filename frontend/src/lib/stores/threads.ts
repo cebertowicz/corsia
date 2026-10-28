@@ -124,9 +124,7 @@ export const activeThreadId = {
 		activeThreadIdStore.set(id);
 		draftAccountId.set(null);
 	},
-	update(fn: (id: string | null) => string | null) {
-		this.set(fn(get(activeThreadIdStore)));
-	},
+	update(fn: (id: string | null) => string | null) { this.set(fn(get(activeThreadIdStore))); },
 };
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
