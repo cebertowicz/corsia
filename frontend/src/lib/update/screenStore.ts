@@ -107,6 +107,17 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, l.usualSeconds));
 		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
 	}
+	// A still-running old service can report serving as HTTP goes away. Its PID is valid, but it says nothing about
+	// the replacement. Only accept its late startup phases after an earlier phase from that same PID was observed.
+	const latePhase = file?.phase === 'recovering' || file?.phase === 'serving';
+	if (file && latePhase && file.pid !== l.lastPid) {
+		if (l.lastPid === null && file.seq !== l.lastSeq) {
+			l.lastSeq = file.seq;
+			l.seqChangedAt = now;
+		}
+		const frozen = now - (l.seqChangedAt ?? now);
+		return { input: { step: 'restarting', count: null, alive: frozen < CREEP_STALE_MS }, longer: frozen >= TAKING_LONGER_MS, estimated: false };
+	}
 	if (file && file.phase !== 'failed') {
 		if (file.seq !== l.lastSeq || file.pid !== l.lastPid) {
 			l.lastSeq = file.seq;
