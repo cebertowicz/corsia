@@ -60,7 +60,7 @@ def workflow_texts(repo: str, revision: str, read) -> list[str]:
     return texts
 
 
-def stage(event: dict, project: str, root: Path, tracked_repo: str, read=github_read) -> dict:
+def stage(event: dict, project: str, root: Path, tracked_repo: str | None, read=github_read) -> dict:
     """Copy the exact PR head to a unique directory and return its event facts."""
     facts = event["facts"]
     repo, number, version = facts["repo"], facts["pr_number"], facts["item_version"]

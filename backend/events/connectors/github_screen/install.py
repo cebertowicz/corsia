@@ -138,7 +138,7 @@ def sync(db, project: str | None = None) -> None:
             after_commit(conn, lambda: REGISTRY.rebuild(db))
             now = datetime.now(timezone.utc).isoformat()
             schedule = _schedule(conn, project_id, owner, folder / "stage.py", now)
-            tests = [{"field": "repo", "op": "in", "value": repos},
+            tests: list[dict] = [{"field": "repo", "op": "in", "value": repos},
                      {"field": "author_origin", "op": "eq", "value": "outside"}]
             for suffix in ("opened", "synchronize"):
                 _rule(conn, rule_id=key + "_" + suffix, project=project_id, owner=owner,

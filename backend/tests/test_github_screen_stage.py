@@ -13,6 +13,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "events/connectors/github_screen
 sys.path.insert(0, str(PACKAGE))
 try:
     spec = importlib.util.spec_from_file_location("screen_stage", PACKAGE / "stage.py")
+    assert spec is not None and spec.loader is not None
     stage_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(stage_module)
 finally:

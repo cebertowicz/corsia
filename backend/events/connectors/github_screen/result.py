@@ -23,7 +23,7 @@ def apply_floor(payload: dict, paths: set[str], floor_hits: set[str]) -> dict:
     return payload
 
 
-def capture_floor(staging: str | None) -> dict:
+def capture_floor(staging: str) -> dict:
     """Snapshot the fixed floor before the worker can access staging."""
     record = json.loads((Path(staging) / "floor.json").read_text())
     if not isinstance(record, dict) or not all(
