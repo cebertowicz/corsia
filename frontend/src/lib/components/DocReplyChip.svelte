@@ -29,7 +29,7 @@
 </script>
 
 {#if count > 0}
-	<div class="doc-reply-chip" data-doc-reply-chip in:arrive out:leave>
+	<div class="doc-reply-chip" data-doc-reply-chip in:arrive|global out:leave|global>
 		<UnreadReplyChip {artifactId} {path} {threadId} {count} onOpen={onStep} />
 	</div>
 {/if}

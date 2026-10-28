@@ -149,7 +149,7 @@ async function startMotionProbe(page: Page): Promise<void> {
 	});
 }
 
-async function saveMotionProbe(page: Page, name: string): Promise<void> {
+async function saveMotionProbe(page: Page, name: string): Promise<Array<{ target: string; animations: Array<{ timing: { duration: number }; keyframes: Array<{ transform?: string; opacity?: string }> }> }>> {
 	await page.waitForTimeout(600);
 	const events = await page.evaluate(() => {
 		const probe = (window as unknown as { __replyMotion: { events: unknown[]; cleanup: () => void } }).__replyMotion;
@@ -160,6 +160,7 @@ async function saveMotionProbe(page: Page, name: string): Promise<void> {
 		mkdirSync(screenshotDir, { recursive: true });
 		writeFileSync(path.join(screenshotDir, `${name}-events.json`), JSON.stringify(events));
 	}
+	return events as Array<{ target: string; animations: Array<{ timing: { duration: number }; keyframes: Array<{ transform?: string; opacity?: string }> }> }>;
 }
 
 function sqlite(statements: Array<[string, Array<string | number | null>]>): void {
@@ -373,8 +374,19 @@ for (const theme of ['light', 'dark'] as const) {
 					writeFileSync(path.join(screenshotDir, `01c-caret-b-${theme}-${width}.png`), second);
 				}
 				await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
+				if (width === 1440) {
+					await page.getByRole('button', { name: 'Toggle panel' }).click();
+					await page.evaluate(async () => { const { splitWidth } = await import('/src/lib/stores/artifactWorkspace.ts'); splitWidth.set(650); });
+					await expect.poll(() => page.locator('.document-canvas').evaluate(node => node.getBoundingClientRect().width)).toBeGreaterThanOrEqual(649);
+				}
 				const send = headerSend(page);
 				await send.scrollIntoViewIfNeeded();
+				if (width === 1440) {
+					const sendRect = (await send.boundingBox())!, canvasRect = (await page.locator('.document-canvas').boundingBox())!;
+					expect(sendRect.x).toBeGreaterThanOrEqual(canvasRect.x);
+					expect(sendRect.x + sendRect.width).toBeLessThanOrEqual(canvasRect.x + canvasRect.width);
+					writeFileSync(path.join(screenshotDir, `01d-wide-canvas-${theme}.json`), JSON.stringify({ canvasWidth: canvasRect.width, sendRect }));
+				}
 				const box = (await send.boundingBox())!;
 				await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 				const before = await page.screenshot({ scale: 'css', animations: 'disabled' });
@@ -397,6 +409,19 @@ for (const theme of ['light', 'dark'] as const) {
 				if (active && changed.length) {
 					expect(pressed.equals(before), 'pressed frame differs from unpressed neighbour').toBe(false);
 					writeFileSync(path.join(screenshotDir, `01d-held-send-with-chip-${theme}-${width}.png`), pressed);
+				}
+				if (width === 393) {
+					const cdp = await page.context().newCDPSession(page);
+					await cdp.send('DOM.enable');
+					await cdp.send('CSS.enable');
+					const { root } = await cdp.send('DOM.getDocument');
+					const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button' });
+					expect(nodeId).toBeGreaterThan(0);
+					await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] });
+					expect(await send.evaluate(node => node.matches(':active'))).toBe(true);
+					await page.screenshot({ path: path.join(screenshotDir, `01d-forced-active-${theme}-393.png`), scale: 'css', animations: 'disabled' });
+					await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
+					await cdp.detach();
 				}
 			}
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
@@ -457,6 +482,46 @@ for (const width of [1440, 393]) {
 }
 
 for (const width of [1440, 393]) {
+	test(`${TAG} viewed failure and partial response ${width}px`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `viewed-partial-${width}`, 'launch-plan.md', [8, 10]);
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '2 new replies');
+		const viewedRoute = `**/api/artifacts/${doc.artifactId}/comments/${doc.roots[8]}/viewed`;
+		await page.route(viewedRoute, route => route.fulfill({ status: 500, body: 'Unavailable' }));
+		const failed = await page.evaluate(async ({ artifactId, rootId }) => {
+			const { docComments, markThreadViewed } = await import('/src/lib/stores/docComments.ts');
+			let replyId: string | undefined;
+			const off = docComments.subscribe(all => { replyId = all[artifactId]?.find(row => row.id === rootId)?.newReplyIds?.at(-1); });
+			off();
+			if (!replyId) throw new Error('No unread reply');
+			try { await markThreadViewed(artifactId, rootId, replyId); return false; } catch { return true; }
+		}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
+		expect(failed).toBe(true);
+		await expectChip(page, '2 new replies');
+		await shot(page, `viewed-500-retained-light-${width}`);
+		await page.unroute(viewedRoute);
+		const commentsRoute = `**/api/artifacts/${doc.artifactId}/comments?*`;
+		await page.route(commentsRoute, async route => {
+			const response = await route.fetch();
+			const body = await response.json();
+			body.comments = body.comments.filter((row: { id: string }) => row.id === doc.roots[8]);
+			expect(body.comments).toHaveLength(1);
+			await route.fulfill({ response, json: body });
+		});
+		await reloadComments(page, doc.artifactId);
+		await expectChip(page, '1 new reply');
+		await shot(page, `partial-response-light-${width}`);
+		await page.unroute(commentsRoute);
+	});
+
 	test(`${TAG} fetch failure ${width}px: retain the last reply count`, async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
@@ -868,12 +933,22 @@ test.describe('reply chip motion evidence', () => {
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 				await openThread(page, THREAD_TITLE);
 				await expect(chipBox(page)).toHaveCount(0);
+				const durations = await page.evaluate(async () => {
+					const { ms } = await import('/src/lib/popoverMotion.ts');
+					return { standard: ms('--dur-standard'), tight: ms('--dur-tight') };
+				});
+				if (screenshotDir) writeFileSync(path.join(screenshotDir, `chip-duration-${width}-${reduced ? 'reduced' : 'standard'}.json`), JSON.stringify(durations));
+				expect(durations.standard).toBeGreaterThan(0);
+				expect(durations.tight).toBeGreaterThan(0);
 				await page.waitForTimeout(600);
 				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The owner is confirmed.');
 				await startMotionProbe(page);
 				await reloadComments(page, doc.artifactId);
 				await expectChip(page, '1 new reply');
-				await saveMotionProbe(page, `chip-entry-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const entryEvents = await saveMotionProbe(page, `chip-entry-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const entry = entryEvents.filter(event => String(event.target).includes('doc-reply-chip')).flatMap(event => event.animations).find(animation => animation.timing.duration > 0);
+				expect(entry?.timing.duration).toBe(reduced ? durations.tight : durations.standard);
+				if (reduced) expect(new Set(entry!.keyframes.map(frame => frame.transform)).size).toBe(1);
 				await startMotionProbe(page);
 				await chipButton(page).click();
 				await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
@@ -898,7 +973,10 @@ test.describe('reply chip motion evidence', () => {
 					await markThreadViewed(artifactId, rootId, replyId);
 				}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
 				await expect(chipBox(page)).toHaveCount(0);
-				await saveMotionProbe(page, `chip-exit-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const exitEvents = await saveMotionProbe(page, `chip-exit-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const exit = exitEvents.filter(event => String(event.target).includes('doc-reply-chip')).flatMap(event => event.animations).find(animation => animation.timing.duration > 0);
+				expect(exit?.timing.duration).toBeCloseTo(durations.standard * 0.7);
+				expect(exit?.keyframes.every(frame => frame.transform === undefined)).toBe(true);
 			});
 		}
 	}
