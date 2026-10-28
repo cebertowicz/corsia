@@ -1,4 +1,4 @@
-"""The pane classifies only rows it will render for retirement flags."""
+"""The pane flags only the rows it renders, by the one retirement exemption."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 from infra import config
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
-from registry import models, retirement_predicate, view
+from registry import models, view
 from tests.registry_helpers import make_session
 
 
@@ -65,7 +65,7 @@ def _pull_request(db, thread_id: str, name: str, state: str) -> dict:
     )
 
 
-def test_pane_only_classifies_visible_rows_for_retirement_flags(db, monkeypatch):
+def test_pane_flags_visible_rows_by_the_retirement_exemption(db, monkeypatch):
     thread_id = make_session(db, prefix="pane-flag-query")
     shared = _document(db, thread_id, "shared", shared=True)
     ordinary = _document(db, thread_id, "ordinary")
@@ -93,14 +93,6 @@ def test_pane_only_classifies_visible_rows_for_retirement_flags(db, monkeypatch)
     )
     db.commit()
 
-    calls: list[object] = []
-    original = retirement_predicate._is_shared_document
-
-    def counted(location):
-        calls.append(location)
-        return original(location)
-
-    db.create_function(retirement_predicate._SHARED_DOCUMENT_FUNCTION, 1, counted)
     monkeypatch.setattr(view, "get_db", lambda: _NoCloseConnection(db))
 
     pane = view.pane_for_thread(thread_id)
@@ -110,14 +102,13 @@ def test_pane_only_classifies_visible_rows_for_retirement_flags(db, monkeypatch)
         if node["kind"] == "artifact"
     }
 
+    # A shared document leaves with its task like any other file.
     assert visible == {
-        shared["id"]: True,
+        shared["id"]: False,
         ordinary["id"]: False,
         pinned_retired["id"]: False,
         open_pr["id"]: True,
     }
     assert ended_pr["id"] not in visible
     assert non_pane["id"] not in visible
-    classified_locations = [location for location in calls if location is not None]
-    assert len(classified_locations) == 3
-    assert all("hidden-" not in str(location) for location in classified_locations)
+    assert not any(artifact["id"] in visible for artifact in hidden)
