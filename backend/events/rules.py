@@ -337,4 +337,3 @@ def record(db: sqlite3.Connection, event: RuleEvent, outcomes: Iterable[Outcome]
     )
     cutoff = _iso(now - RETENTION)
     db.execute("DELETE FROM event_route_decisions WHERE at<?", (cutoff,))
-    db.execute("DELETE FROM self_caused_events WHERE at<?", (cutoff,))

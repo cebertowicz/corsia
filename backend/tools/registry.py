@@ -5,7 +5,7 @@ from dataclasses import replace
 import logging
 from typing import Any
 
-from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
+from tools.result_sanitizer import sanitize_result
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
 from tools.mcp_stamp import ConnectedAppResult, restamp, with_connected_app_stamp
@@ -84,7 +84,7 @@ class ToolRegistry:
     ) -> str:
         """Execute a tool with optional backend-owned review scope."""
         try:
-            result = self._sanitize_result(await self._execute_unredacted(
+            result = sanitize_result(await self._execute_unredacted(
                 name, params, review_request_id=review_request_id,
             ))
             if isinstance(result, ConnectedAppResult):
@@ -101,29 +101,12 @@ class ToolRegistry:
                 replace(
                     call,
                     name=name if dispatched else call.name,
-                    result=self._sanitize_result(call.result),
+                    result=sanitize_result(call.result),
                 )
                 for call in failure.completed
             )
             raise
         return result
-
-    @staticmethod
-    def _sanitize_result(result: Any) -> Any:
-        """Apply the text/media boundary; read_file's CredentialSafeText is pre-redacted."""
-        if isinstance(result, CredentialSafeText):
-            return str(result)
-        if not isinstance(result, str):
-            return result
-        redacted = restamp(result, sanitize_credential_text(result))
-        media = getattr(result, "media", None)
-        if media is None:
-            return redacted
-        # Redaction rewrites text; it must not strip the media reference the
-        # provider boundary needs to resolve bytes.
-        from core.media_reads import MediaToolResult
-
-        return MediaToolResult(redacted, media)
 
     async def _authorized_execute(
         self,
@@ -329,7 +312,10 @@ class ToolRegistry:
                 "Error: Tool execution requires an exact current session identity.",
             )
         turn_identity = state._current_turn_identity.get(None)
-        if turn_identity is not None and not isinstance(turn_identity, TurnIdentity):
+        if turn_identity is not None and not isinstance(
+            turn_identity,
+            TurnIdentity,
+        ):
             return (
                 None,
                 "Error: Tool execution turn identity is invalid.",
@@ -352,7 +338,11 @@ class ToolRegistry:
                     "SELECT 1 FROM active_turns "
                     "WHERE id=? AND thread_id=? AND turn_order=? "
                     "AND status='running'",
-                    (turn_identity.turn_id, thread_id, turn_identity.turn_order),
+                    (
+                        turn_identity.turn_id,
+                        thread_id,
+                        turn_identity.turn_order,
+                    ),
                 ).fetchone()
                 return context, active is not None
             finally:

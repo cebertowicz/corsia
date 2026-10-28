@@ -24,8 +24,13 @@ def record_result(thread_id: str | None, result: object) -> None:
             if artifact:
                 keys.extend((name, key, thread_id) for key in artifact.created_event_ids)
     if keys:
-        at = datetime.now(timezone.utc).isoformat()
+        from events.rules import RETENTION
+
+        now = datetime.now(timezone.utc)
+        at = now.isoformat()
+        cutoff = (now - RETENTION).isoformat()
         with write_transaction(None, scope="observe_self_caused") as db:
+            db.execute("DELETE FROM self_caused_events WHERE at<?", (cutoff,))
             db.executemany(
                 "INSERT OR REPLACE INTO self_caused_events (connector,event_key,thread_id,at) VALUES (?,?,?,?)",
                 [(connector, key, thread, at) for connector, key, thread in keys],

@@ -42,7 +42,7 @@ def observe_current_result(result: object, args: dict, thread_id: str | None, tu
 
 def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: str,
                          **kwargs) -> tuple[list[str], str | None]:
-    """Observe once, returning notices and a warning while notifying partial changes."""
+    """Observe shell or connected-app results; return notices and warn, notifying partial changes."""
     told: list[str] = []
     changed: list[dict] = []
     warning = None
