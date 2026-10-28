@@ -181,7 +181,7 @@ def _redact_token_prefix(_match: re.Match[str]) -> str:
 
 
 _TOKEN_PREFIX_RE = re.compile(
-    r"\b(?:sk-(?:ant-)?|gh[pousr]_|github_pat_|glpat-|xox[abpr]-|AIza|ya29\.|dop_v1_)"
+    r"\b(?:sk-(?:ant-)?|gh[pousr]_|github_pat_|glpat-|xox[a-z]-|xoxe\.xox[a-z]-|xapp-|AIza|ya29\.|dop_v1_)"
     r"[A-Za-z0-9_-]{16,}|\b(?:AKIA|ASIA)[0-9A-Z]{12,}\b"
 )
 
