@@ -29,7 +29,9 @@ from infra.fresh_threads import create_fresh_thread
 from infra.queries import thread_is_openable
 
 WORKSPACE_SCOPE = "workspace"
-CONDUCTOR_THREAD_TITLE = "Conductor"
+def conductor_title(project_name: str) -> str:
+    """Canonical title for a newly created project conductor."""
+    return f"{project_name} Conductor"
 
 
 class CoordinationScope(TypedDict):
@@ -170,7 +172,7 @@ def ensure_project_conductor(
                 return existing
 
             row = conn.execute(
-                "SELECT id FROM projects WHERE id = ?",
+                "SELECT id, name FROM projects WHERE id = ?",
                 (project_id,),
             ).fetchone()
             if row is None:
@@ -178,7 +180,7 @@ def ensure_project_conductor(
 
             session = create_fresh_thread(
                 user_id=user_id,
-                title=CONDUCTOR_THREAD_TITLE,
+                title=conductor_title(row["name"]),
                 model=model,
                 project_id=row["id"],
                 db=conn,

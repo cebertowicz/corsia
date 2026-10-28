@@ -294,7 +294,7 @@ def test_project_create_tool_designates_project_conductor_for_calling_thread(
         assert conductor_id == payload["conductor_thread_id"]
         assert dict(row) == {
             "user_id": "owner",
-            "title": "Conductor",
+            "title": "Tool Project Conductor",
             "project_id": payload["project_id"],
             "model": "claude-code/sonnet",
         }

@@ -67,16 +67,32 @@ async def list_threads(token: str, archived: int = 0):
             item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
             projected.append(item)
         try:
-            add_local_only_payload_fields(projected, db=db)
-            return projected
+            coordination = []
+            if conductor_ids:
+                coordination_sql = f"""SELECT s.*,
+                    (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+                    CASE WHEN s.id = (SELECT json_extract(value, '$.session_id') FROM settings WHERE key = 'corsia_agent_thread_id')
+                        THEN 'corsia' ELSE 'conductor' END AS coordination
+                    FROM threads s WHERE s.user_id = ?
+                    AND {thread_available_sql('s', include_user_archived=bool(archived))}
+                    AND s.spawned_by IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived')
+                    AND s.id IN ({','.join('?' * len(conductor_ids))})
+                    ORDER BY s.updated_at DESC"""
+                for row in fetch_all(db, coordination_sql, [user['id'], *conductor_ids]):
+                    item = dict(row)
+                    item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
+                    coordination.append(item)
+            add_local_only_payload_fields([*projected, *coordination], db=db)
+            return projected, coordination
         finally:
             db.close()
 
-    threads = await run_read(_query)
+    threads, coordination = await run_read(_query)
     from connections.harness_refresh import schedule_refresh_for_selections
 
     schedule_refresh_for_selections(thread.get("model") for thread in threads)
-    return {"threads": threads}
+    return {"threads": threads, "coordination": coordination}
 
 
 @router.post("/threads")

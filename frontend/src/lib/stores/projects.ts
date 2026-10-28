@@ -216,6 +216,10 @@ export async function updateProject(
 				: p,
 		),
 	);
+	if (patch.name !== undefined) {
+		const { loadThreads } = await import('./threadsLoad');
+		await loadThreads(currentToken);
+	}
 }
 
 export async function archiveProject(id: string): Promise<void> {

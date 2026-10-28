@@ -31,7 +31,7 @@ def test_160_rules_survive_and_schema_matches_fresh():
     db.execute(insert, ("shell", "bash", '["gh"]'))
     db.commit()
     result = migrate_to_current(db, SCHEMA_VERSION)
-    assert (result.from_version, result.to_version) == (160, 161)
+    assert (result.from_version, result.to_version) == (160, 162)
     db.execute(insert, ("app", "create_pull_request", None))
     assert db.execute("SELECT id,tool,argv_prefix FROM event_rules ORDER BY id").fetchall() == [
         ("app", "create_pull_request", None), ("shell", "bash", '["gh"]')]
