@@ -53,7 +53,6 @@
 	let decodeGeneration = 0;
 	let decodeWarned = false;
 	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
-	let clipboardUndo = $state(false);
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const paneInput = new BrowserPaneInput(message => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -64,7 +63,7 @@
 
 	function resetInput() {
 		clipboard?.dispose();
-		clipboardUndo = false;
+		paneErrors.resetUndo();
 		paneInput.reset();
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
@@ -125,7 +124,7 @@
 		} catch {
 			return;
 		}
-		if (paneErrors.handle(message)) { if (message.source === 'clipboard') clipboardUndo = false; return; }
+		if (paneErrors.handle(message)) return;
 		if (clipboardReply(message, clipboard)) return;
 		if (message.type === 'browser_target_changed') {
 			lastAppearance = '';
@@ -282,7 +281,7 @@
 		if (clipboardKey(event, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
-		), (error, cut) => { clipboardUndo = cut; paneErrors.set('clipboard', error); }, () => { clipboardUndo = false; paneErrors.set('clipboard', null); })) return;
+		), (error, cut) => paneErrors.set('clipboard', error, cut), () => paneErrors.set('clipboard', null))) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
@@ -375,7 +374,7 @@
 		{/if}
 		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={clipboardUndo && paneErrors.currentSource === 'clipboard' ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); clipboardUndo = false; } : undefined} />
+		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>

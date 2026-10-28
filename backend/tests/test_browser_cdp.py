@@ -243,7 +243,8 @@ async def test_clipboard_commands_use_native_platform_modifier(monkeypatch, plat
 
 
 @pytest.mark.asyncio
-async def test_page_handled_cut_does_not_return_plain_selection(monkeypatch):
+@pytest.mark.parametrize('custom', ['', 'page text'])
+async def test_page_handled_cut_uses_custom_data_or_fails(monkeypatch, custom):
     class Client:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): pass
@@ -251,12 +252,15 @@ async def test_page_handled_cut_does_not_return_plain_selection(monkeypatch):
             if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
             if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
             if method == 'Runtime.evaluate':
-                value = 0 if '|| 0' in params['expression'] else {'kind': 'cut', 'prevented': True, 'data': '', 'selection': 'wrong'}
+                value = 0 if '|| 0' in params['expression'] else {'kind': 'cut', 'prevented': True, 'data': custom, 'selection': 'wrong'}
                 return {'result': {'value': value}}
             return {}
     monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
-    with pytest.raises(browser_clipboard.PageHandledError):
-        await browser_clipboard.clipboard_selection('endpoint', True)
+    if custom:
+        assert await browser_clipboard.clipboard_selection('endpoint', True) == custom
+    else:
+        with pytest.raises(browser_clipboard.PageHandledError):
+            await browser_clipboard.clipboard_selection('endpoint', True)
 
 
 @pytest.mark.asyncio

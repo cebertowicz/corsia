@@ -33,6 +33,7 @@ PRELOAD = """(() => {
     owner.__corsiaClipboardSequence = (owner.__corsiaClipboardSequence || 0) + 1;
    }, 0);
   }, true);
+  // Capture sees stopped events; bubble reads page data before Chrome clears it.
   window.addEventListener(kind, event => {
    const record = pending.get(event);
    if (record) record.data = event.clipboardData?.getData('text/plain') || '';

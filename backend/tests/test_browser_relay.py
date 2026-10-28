@@ -164,6 +164,18 @@ async def test_clipboard_failure_suggests_a_next_step(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_clipboard_event_reports_capture_not_host_write_success(monkeypatch):
+    from ws import browser_clipboard
+    async def selection(*_args): return 'private text'
+    events, messages = [], []
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', selection)
+    monkeypatch.setattr(browser_clipboard, 'emit_product_event', lambda *args, **kwargs: events.append((args, kwargs)))
+    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
+    assert messages == [{'type': 'clipboard_selection', 'id': 1, 'text': 'private text'}]
+    assert events == [(('browser_pane', 'clipboard'), {'thread_id': 'thread', 'properties': {'action': 'copy', 'outcome': 'captured'}})]
+
+
+@pytest.mark.asyncio
 async def test_page_handled_clipboard_reports_failure_without_text(monkeypatch):
     from host_access.browser_clipboard import PageHandledError
     from ws import browser_clipboard

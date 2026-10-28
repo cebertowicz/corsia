@@ -254,12 +254,7 @@ async def _exercise_clipboard(thread, connection, endpoint):
         assert result['result']['value'] == ['copy', 'paste']
         # A successful paste reports no error: it clears any the pane is showing.
         assert replies[1:] == [{'type': 'pane_error', 'source': 'clipboard', 'error': None}]
-        # A page that handles the event and stops propagation must not return the plain selection.
-        async with browser_cdp.CdpClient(endpoint) as cdp:
-            await cdp.call('Runtime.evaluate', expression="document.addEventListener('copy', e => { e.clipboardData.setData('text/plain', 'custom'); e.preventDefault(); e.stopPropagation(); }, {once: true}); const r = document.createRange(); r.selectNodeContents(document.querySelector('#source')); getSelection().removeAllRanges(); getSelection().addRange(r);")
-        handled = []
-        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 10}, handled.append)
-        assert handled[0].get('error')
+        await _check_page_handled_clipboard(thread, connection, endpoint)
         # Same-origin frame selection and cut operate in that frame's own document.
         async with browser_cdp.CdpClient(endpoint) as cdp:
             await cdp.call('Runtime.evaluate', expression=(
@@ -304,6 +299,22 @@ async def _exercise_clipboard(thread, connection, endpoint):
         assert result['result']['value'] == 2
     finally:
         browser_pane.clear_page_endpoint(thread, connection)
+
+
+async def _check_page_handled_clipboard(thread, connection, endpoint):
+    for stop in (False, True):
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            expression = """{ document.activeElement.blur(); const r = document.createRange(); r.selectNodeContents(document.querySelector('#source'));
+              getSelection().removeAllRanges(); getSelection().addRange(r);
+              document.addEventListener('copy', e => { e.clipboardData.setData('text/plain', 'custom page text');
+              e.preventDefault(); %s }, {once: true}); }""" % ('e.stopPropagation();' if stop else '')
+            await cdp.call('Runtime.evaluate', expression=expression)
+        handled = []
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 10}, handled.append)
+        if stop:
+            assert handled[0].get('error')
+        else:
+            assert handled == [{'type': 'clipboard_selection', 'id': 10, 'text': 'custom page text'}]
 
 
 @contextmanager

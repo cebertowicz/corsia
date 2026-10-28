@@ -18,7 +18,7 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
         outcome = "failed"
         try:
             text = await browser_pane.clipboard_selection(thread_id, connection, cut)
-            outcome = "ok" if text else "empty"
+            outcome = "captured" if text else "empty"
             report({"type": kind, "id": data["id"], "text": text})
         except PageHandledError:
             outcome = "page_handled"
