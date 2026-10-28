@@ -8,6 +8,7 @@ from host_access.browser_cdp import CdpClient
 from host_access.browser_session_state import BrowserSessionError
 
 WORLD = "corsia-clipboard"
+CDP_TIMEOUT = 5
 # The listener and its record live in an isolated world, never in page script state.
 PRELOAD = """(() => {
  if (window.__corsiaClipboardListener) return;
@@ -46,22 +47,30 @@ class PageHandledError(BrowserSessionError):
     """A page handled the event but its custom clipboard data was inaccessible."""
 
 
+async def _call(cdp: CdpClient, method: str, step: str, **params: object) -> dict:
+    try:
+        async with asyncio.timeout(CDP_TIMEOUT):
+            return await cdp.call(method, **params)
+    except TimeoutError as exc:
+        raise BrowserSessionError(f"Clipboard {step} didn't finish") from exc
+
+
 async def _world(cdp: CdpClient) -> tuple[int, str]:
-    tree = await cdp.call("Page.getFrameTree")
+    tree = await _call(cdp, "Page.getFrameTree", "frame lookup")
     frame = tree.get("frameTree", {}).get("frame", {})
     frame_id, url = frame.get("id"), frame.get("url")
     if not isinstance(frame_id, str) or not isinstance(url, str):
         raise BrowserSessionError("This page couldn't receive clipboard input")
-    result = await cdp.call("Page.createIsolatedWorld", frameId=frame_id, worldName=WORLD)
+    result = await _call(cdp, "Page.createIsolatedWorld", "world creation", frameId=frame_id, worldName=WORLD)
     context = result.get("executionContextId")
     if not isinstance(context, int):
         raise BrowserSessionError("This page couldn't receive clipboard input")
     return context, url
 
 
-async def _evaluate(cdp: CdpClient, context: int, expression: str) -> object:
-    result = await cdp.call("Runtime.evaluate", expression=expression, contextId=context,
-                            returnByValue=True, awaitPromise=True)
+async def _evaluate(cdp: CdpClient, context: int, expression: str, step: str = "capture") -> object:
+    result = await _call(cdp, "Runtime.evaluate", step, expression=expression, contextId=context,
+                         returnByValue=True, awaitPromise=True)
     if result.get("exceptionDetails"):
         raise BrowserSessionError("This page couldn't receive clipboard input")
     return result.get("result", {}).get("value")
@@ -70,13 +79,14 @@ async def _evaluate(cdp: CdpClient, context: int, expression: str) -> object:
 async def _command(cdp: CdpClient, command: str) -> None:
     key = {"copy": "c", "cut": "x", "paste": "v", "undo": "z"}[command]
     args = {"key": key, "code": f"Key{key.upper()}", "windowsVirtualKeyCode": ord(key.upper()), "modifiers": 4 if sys.platform == "darwin" else 2}
-    await cdp.call("Input.dispatchKeyEvent", type="keyDown", commands=[command], **args)
-    await cdp.call("Input.dispatchKeyEvent", type="keyUp", **args)
+    await _call(cdp, "Input.dispatchKeyEvent", f"{command} key down", type="keyDown", commands=[command], **args)
+    await _call(cdp, "Input.dispatchKeyEvent", f"{command} key up", type="keyUp", **args)
 
 
 async def clipboard_selection(endpoint: str, cut: bool) -> str:
     """Dispatch native copy or cut and retrieve the isolated event record."""
     async with CdpClient(endpoint, max_size=30_004_096) as cdp:
+        await _call(cdp, "Emulation.setFocusEmulationEnabled", "focus emulation", enabled=True)
         context, _ = await _world(cdp)
         sequence = await _evaluate(cdp, context, "window.__corsiaClipboardSequence || 0")
         if not isinstance(sequence, int):
@@ -102,16 +112,17 @@ async def clipboard_selection(endpoint: str, cut: bool) -> str:
 async def clipboard_paste(endpoint: str, text: str) -> None:
     """Write the person's text with a temporary write-only grant and paste natively."""
     async with CdpClient(endpoint) as cdp:
+        await _call(cdp, "Emulation.setFocusEmulationEnabled", "focus emulation", enabled=True)
         context, url = await _world(cdp)
         parsed = urlsplit(url)
         if not parsed.scheme or not parsed.netloc:
             raise BrowserSessionError("This page couldn't receive pasted text")
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        await cdp.call("Browser.grantPermissions", origin=origin, permissions=["clipboardSanitizedWrite"])
         try:
-            await _evaluate(cdp, context, f"navigator.clipboard.writeText({json.dumps(text)})")
+            await _call(cdp, "Browser.grantPermissions", "write permission grant", origin=origin, permissions=["clipboardSanitizedWrite"])
+            await _evaluate(cdp, context, f"navigator.clipboard.writeText({json.dumps(text)})", "write")
         finally:
-            await cdp.call("Browser.resetPermissions")
+            await _call(cdp, "Browser.resetPermissions", "permission reset")
         await _command(cdp, "paste")
 
 

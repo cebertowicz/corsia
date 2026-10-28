@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -227,6 +228,33 @@ async def test_clipboard_selection_and_paste_use_native_commands(monkeypatch):
     grants = [params['permissions'] for method, params in calls if method == 'Browser.grantPermissions']
     assert grants == [['clipboardSanitizedWrite']]
     assert any(method == 'Browser.resetPermissions' for method, _ in calls)
+    assert sum(method == 'Emulation.setFocusEmulationEnabled' and params == {'enabled': True} for method, params in calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('method', 'step'), [
+    ('Page.getFrameTree', 'frame lookup'),
+    ('Page.createIsolatedWorld', 'world creation'),
+    ('Emulation.setFocusEmulationEnabled', 'focus emulation'),
+    ('Browser.grantPermissions', 'write permission grant'),
+    ('Runtime.evaluate', 'write'),
+    ('Browser.resetPermissions', 'permission reset'),
+    ('Input.dispatchKeyEvent', 'paste key down'),
+])
+async def test_clipboard_paste_names_timed_out_step(monkeypatch, method, step):
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, called, **_params):
+            if called == method:
+                await asyncio.Event().wait()
+            if called == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if called == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            return {}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    monkeypatch.setattr(browser_clipboard, 'CDP_TIMEOUT', 0.01)
+    with pytest.raises(browser_clipboard.BrowserSessionError, match=f"Clipboard {step} didn't finish"):
+        await browser_clipboard.clipboard_paste('endpoint', 'text')
 
 
 @pytest.mark.asyncio

@@ -246,6 +246,7 @@ async def _exercise_clipboard(thread, connection, endpoint):
         async with browser_cdp.CdpClient(endpoint) as cdp:
             await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').focus()")
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_paste', 'text': 'Pasted text'}, replies.append)
+        assert replies[1:] == [{'type': 'pane_error', 'source': 'clipboard', 'error': None}], f'paste replies: {replies!r}'
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').value", returnByValue=True)
         assert result['result']['value'] == 'Pasted text'
@@ -267,10 +268,11 @@ async def _exercise_clipboard(thread, connection, endpoint):
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2, 'cut': True}, replies.append)
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression="document.querySelector('iframe').contentDocument.querySelector('input').value", returnByValue=True)
-        assert result['result']['value'] == 'here'
+        assert result['result']['value'] == 'here', f'frame cut result: {result!r}; replies: {replies!r}'
         assert replies[2:] == [{'type': 'clipboard_selection', 'id': 11, 'text': 'Cut me '},
-                               {'type': 'clipboard_selection', 'id': 2, 'text': 'Cut me '}]
+                               {'type': 'clipboard_selection', 'id': 2, 'text': 'Cut me '}], f'frame replies: {replies!r}'
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_paste', 'text': 'frame paste'}, replies.append)
+        assert replies[-1] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}, f'frame paste replies: {replies!r}'
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression='clipboardEvents.filter(x => x.startsWith("frame-"))', returnByValue=True)
         assert result['result']['value'] == ['frame-copy', 'frame-cut', 'frame-paste']
@@ -372,7 +374,11 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                                worldName=browser_screencast.WORLD, runImmediately=True)
                 probe = "navigator.clipboard.readText().then(() => 'allowed', () => 'denied')"
                 async def read_probe():
-                    result = await cdp.call('Runtime.evaluate', expression=probe, awaitPromise=True, returnByValue=True)
+                    try:
+                        async with asyncio.timeout(5):
+                            result = await cdp.call('Runtime.evaluate', expression=probe, awaitPromise=True, returnByValue=True)
+                    except TimeoutError:
+                        pytest.fail('clipboard read-denial probe did not finish')
                     return result['result']['value']
                 assert await read_probe() == 'denied'
                 await cdp.call('Browser.grantPermissions', origin=base, permissions=['clipboardSanitizedWrite'])
@@ -393,14 +399,15 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 assert result['result']['value'] is True
                 replies = []
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
-                assert replies[0].get('error')
+                assert replies[0].get('error'), f'cross-origin copy replies: {replies!r}'
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2, 'cut': True}, replies.append)
-                assert replies[1].get('error')
+                assert replies[1].get('error'), f'cross-origin cut replies: {replies!r}'
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_undo'}, replies.append)
                 assert replies[2] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_paste', 'text': 'cross paste'}, replies.append)
+                assert replies[-1] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}, f'cross-origin paste replies: {replies!r}'
                 result = await cdp.call('Runtime.evaluate', expression="new Promise(resolve => { const poll = () => clipboardEvents.includes('paste:cross paste') ? resolve(true) : setTimeout(poll, 20); poll(); setTimeout(() => resolve(false), 5000); })", awaitPromise=True, returnByValue=True)
-                assert result['result']['value'] is True
+                assert result['result']['value'] is True, f'cross-origin paste result: {result!r}; replies: {replies!r}'
         finally:
             browser_pane.clear_page_endpoint(thread, connection)
 
