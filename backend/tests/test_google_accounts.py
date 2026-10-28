@@ -3,8 +3,9 @@ refresh failure, Sign out, Remove, and who may widen where an account works."""
 
 from __future__ import annotations
 
+import base64
 import json
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -19,8 +20,9 @@ from connections.google import client as google_client
 from connections.google import oauth
 from google_account_helpers import ONLY_CORSIA_REACH, only_corsia_account
 from infra.database import get_db
+from tools.google_account import GoogleConnectTool
 from tests.test_google_sign_in import (  # noqa: F401 -- conductor and client_file are fixtures
-    _REAL_CLIENT, FakeGoogle, _accounts, _http, _id_token, _start, client_file, conductor,
+    ACCESS, REFRESH, _REAL_CLIENT, FakeGoogle, _accounts, _http, _id_token, _start, client_file, conductor,
 )
 
 PERSON = ("person", "steve")
@@ -47,10 +49,10 @@ class AccountsGoogle(FakeGoogle):
             return httpx.Response(self.revoke_status, text="google says no, token " + form["token"])
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": self.email})
-        if url == oauth.TOKEN_URL and form.get("grant_type") == "refresh_token" and form["refresh_token"] in self.refused:
+        if url == google_client.TOKEN_URL and form.get("grant_type") == "refresh_token" and form["refresh_token"] in self.refused:
             return httpx.Response(400, json={"error": "invalid_grant"})
         response = super().handler(request)
-        if url == oauth.TOKEN_URL and form.get("grant_type") == "authorization_code" and response.status_code == 200:
+        if url == google_client.TOKEN_URL and form.get("grant_type") == "authorization_code" and response.status_code == 200:
             self.issued += 1
             grant = response.json()
             grant["refresh_token"] = f"sign-in-{self.issued}"
@@ -144,24 +146,32 @@ async def test_two_sign_ins_in_flight_each_add_their_own_account(google, conduct
         assert _audits(account_id) == [("agent", conductor, "connect", None)]
 
 
-async def test_the_same_google_identity_under_another_address_is_not_added_twice(google, conductor, client_file):
+async def test_the_same_google_identity_under_another_address_is_not_added_twice(google, conductor):
+    async def published_finish(email):
+        out = await GoogleConnectTool().execute(_thread_id=conductor)
+        state = json.loads(base64.b64decode(parse_qs(urlparse(json.loads(out)["url"]).query)["state"][0]))["csrf"]
+        google.email = email
+        async with _http() as http:
+            return await http.get("/api/google/oauth/callback", params={
+                "state": state, "access_token": ACCESS, "refresh_token": REFRESH,
+                "scope": " ".join(oauth.PUBLISHED_REQUIRED_SCOPES),
+            })
     google.id_token = _id_token("subject-one")
-    first = await _add(google, conductor, client_file, "person@example.com")
-    _, state = await _start(google, conductor, None)
-    again = await _finish(google, state, google.challenge, "alias@example.com")
+    assert (await published_finish("person@example.com")).status_code == 200
+    first = str(_accounts()[0]["id"])
+    again = await published_finish("alias@example.com")
     assert again.status_code == 400 and "person@example.com is already connected." in again.text
     assert [str(account["id"]) for account in _accounts()] == [first]
 
     google.id_token = _id_token("subject-two")
-    _, state = await _start(google, conductor, None)
     # A different Google identity is a new account, even one reusing nothing else.
-    assert (await _finish(google, state, google.challenge, "other@example.com")).status_code == 200
+    assert (await published_finish("other@example.com")).status_code == 200
     assert len(_accounts()) == 2
 
 
 async def test_a_refused_refresh_signs_out_only_that_account(google, conductor, client_file):
     first = await _add(google, conductor, client_file, "person@example.com")
-    second = await _add(google, conductor, None, "work@example.com")
+    second = await _add(google, conductor, client_file, "work@example.com")
     google.refused.add(_bundle(first)["refresh_token"])
 
     with pytest.raises(google_client.GoogleSignInRejected):
@@ -224,7 +234,7 @@ async def test_a_remove_whose_revoke_fails_still_removes_with_a_fixed_cause(
     google, conductor, client_file, status, cause,
 ):
     account_id = await _add(google, conductor, client_file, "person@example.com")
-    kept = await _add(google, conductor, None, "work@example.com")
+    kept = await _add(google, conductor, client_file, "work@example.com")
     google.revoke_status = status
 
     result = await account_actions.remove_account(account_id, actor=PERSON)

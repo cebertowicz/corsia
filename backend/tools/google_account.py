@@ -101,12 +101,13 @@ class GoogleConnectTool(Tool):
             "account: post its reply verbatim with post_update followed by [Open it in Connected apps](<link>); "
             "its Connected apps row provides the next action. Omit account_id to add another account, which agents "
             "can use where this conversation works. "
-            "Google asks them to allow Gmail, Calendar, Drive, Docs and Sheets in one go. Gmail "
+            "By default, sign-in and token renewal go through Google's Workspace extension sign-in service, "
+            "with one Allow and no Google Cloud project. Google asks for Gmail, Calendar, Drive and Docs; "
+            "using their own Google Cloud project also asks for Sheets. Gmail "
             "and Calendar are required; the others are optional, and google_status lists what "
-            "they allowed. The Google tools here use email and calendar. Pass client_file, the "
-            "path of the Desktop app OAuth client JSON they downloaded from Google Cloud, unless "
-            "a client was saved by an earlier sign-in. To set Google up from the start, follow "
-            "skill `google-setup`."
+            "they allowed. The Google tools here use email and calendar. To use their own "
+            "Desktop OAuth client instead, pass its downloaded JSON as client_file; "
+            "skill `google-setup` covers that backup path."
         )
 
     @property
