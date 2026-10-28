@@ -28,6 +28,7 @@ class Message:
     reply_to: str = ""
     unread: bool = False
     visible_evidence: str = ""
+    withheld: str = ""
 
 
 @dataclass
@@ -66,7 +67,8 @@ def evidence(message: Message) -> str:
     when = when.astimezone(timezone.utc)
     date = f"{when:%b} {when.day}, {when.year}, {when.hour % 12 or 12}:{when:%M %p} UTC"
     return (f"{message.sender} wrote on {date} ({state}).\n"
-            + (message.visible_evidence or "The text wasn't screened as safe to show; read it in your mail app."))
+            + (message.visible_evidence or message.withheld
+               or "The text isn’t shown here; read it in your mail app."))
 
 
 def check_reply(

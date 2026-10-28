@@ -89,7 +89,13 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
     except (ValueError, UnicodeError, OSError):
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
-    return None, None, "Couldn't read your usual font, so this email may go out in your mail's default font."
+    return None, None, "Couldn’t read your usual font, so this email may go out in your mail’s default font."
+
+
+UNGUARDED_REPLY = (
+    "Not sent: this reply was saved before reply checks ran when saving. Save it again with "
+    "email_draft, then wait for the person's reply."
+)
 
 
 GUARD_GUIDANCE = (
@@ -99,8 +105,9 @@ GUARD_GUIDANCE = (
 
 
 def _size(count: int) -> str:
-    if count < 1024 * 1024:
-        return f"{max(1, round(count / 1024))} KB"
+    kb = round(count / 1024)
+    if kb < 1024:
+        return f"{max(1, kb) if count else 0} KB"
     return f"{count / (1024 * 1024):.1f} MB"
 
 
@@ -287,7 +294,7 @@ class EmailSendTool(Tool):
         backend, account, message, target, saved_at = prepared
         try:
             original = None
-            if target.get("reply_to"):
+            if saved_at is not None:
                 original, newer = await new_arrival(backend, str(account["id"]), str(target["reply_to"]), saved_at)
                 if newer:
                     return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft and wait for the person's reply."
@@ -305,7 +312,7 @@ class EmailSendTool(Tool):
 
     async def _prepare(
         self, thread_id: Any, draft_id: str, revision: str,
-    ) -> tuple[MailBackend, dict, EmailMessage, dict, datetime] | str:
+    ) -> tuple[MailBackend, dict, EmailMessage, dict, datetime | None] | str:
         """The account's backend, the account, the message and the draft's target for an approved draft, or the error."""
         row = await run_in_db(open_draft, str(thread_id), draft_id, "email")
         if row is not None and row["state"] == "sending":
@@ -331,7 +338,11 @@ class EmailSendTool(Tool):
             message = build_message(parsed, target)
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
-        saved_at = datetime.fromisoformat(target.get("guard_read_at") or verdict.draft["recorded_at"])
+        if not target.get("reply_to"):
+            return backend, account, message, target, None
+        if not target.get("guard_read_at"):
+            return f"Error: {UNGUARDED_REPLY}"
+        saved_at = datetime.fromisoformat(target["guard_read_at"])
         if saved_at.tzinfo is None:
             saved_at = saved_at.replace(tzinfo=timezone.utc)
         return backend, account, message, target, saved_at

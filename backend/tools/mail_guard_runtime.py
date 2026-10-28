@@ -17,6 +17,8 @@ async def _visible(backend: Any, account_id: str, message: Message) -> Message:
                              headers={"from": message.sender, "subject": message.subject,
                                       "date": message.date.isoformat()}, body=message.body)
     rendered = await screened_message(account_id, source)
+    if rendered.startswith("Error: "):  # flagged or unscreened: say which
+        return replace(message, withheld=rendered.removeprefix("Error: "))
     try:
         payload = json.loads(rendered)
     except (TypeError, ValueError):

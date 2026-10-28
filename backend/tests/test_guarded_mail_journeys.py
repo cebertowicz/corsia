@@ -222,7 +222,7 @@ async def test_font_read_failure_still_saves_and_sends_with_default(mail, approv
         return inner(request)
     mail.fake.handler = handler
     saved = await _draft(mail, to=['pat@mail.example'])
-    note = "Couldn't read your usual font, so this email may go out in your mail's default font."
+    note = "Couldn’t read your usual font, so this email may go out in your mail’s default font."
     assert note in (mail.workspace / saved['path']).read_text()
     assert saved['font_note'] == note
     result = await send(mail, saved)
@@ -270,18 +270,15 @@ async def test_arrival_during_draft_save_stops_send(mail, approve, clean_screen,
     assert not mail.sends
 
 
-async def test_older_draft_uses_saved_time_for_arrival_check(mail, approve, clean_screen):
+async def test_reply_saved_without_guard_read_is_refused(mail, approve, clean_screen):
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
     target = json.loads(_row(saved['draft_id'])['target_json'])
     target.pop('guard_read_at')
     db = get_db()
-    db.execute('UPDATE action_drafts SET recorded_at=?, target_json=? WHERE id=?',
-               (cutoff.isoformat(), json.dumps(target), saved['draft_id']))
+    db.execute('UPDATE action_drafts SET target_json=? WHERE id=?', (json.dumps(target), saved['draft_id']))
     db.commit()
-    provider_state(mail, [THREADED, _arrival(newer(), cutoff + timedelta(seconds=5))])
     result = await send(mail, saved)
-    assert 'Not sent' in result and 'New details from Pat' in result
+    assert result == f'Error: {google_email.UNGUARDED_REPLY}'
     assert not mail.sends
 
 
@@ -328,3 +325,8 @@ async def test_same_second_target_is_not_a_new_arrival(mail, approve):
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     assert len(mail.sends) == 1
+
+
+@pytest.mark.parametrize('count, shown', [(0, '0 KB'), (100, '1 KB'), (1_048_064, '1.0 MB'), (5 * 1024 * 1024, '5.0 MB')])
+def test_attachment_size_label(count, shown):
+    assert google_email._size(count) == shown
