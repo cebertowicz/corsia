@@ -35,6 +35,7 @@ from tools.catalog import (
     TOOL_PACKS,
     is_reachable,
     normalize_tool_name,
+    pack_index_lines,
     pack_members,
     tool_pack,
 )
@@ -168,9 +169,7 @@ def pack_index(registry: ToolRegistry) -> str:
     """Render the always-on index: core packs plus one line per MCP server."""
     lines = []
     for pack, names in pack_members().items():
-        if names:
-            lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
-            lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in names)
+        lines.extend(pack_index_lines(pack, names))
     servers = _server_tools(registry)
     if servers:
         lines.append('[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.')
