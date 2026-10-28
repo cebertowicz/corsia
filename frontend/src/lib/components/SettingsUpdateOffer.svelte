@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui';
 	import { drainStatus } from '$lib/stores/connection';
 	import { toasts } from '$lib/stores/toast';
-	import { changeList, costLine, formatScheduleTime, releaseNotesFor } from '$lib/update/model';
+	import { changeList, costLine, currentOperation, formatScheduleTime, releaseNotesFor } from '$lib/update/model';
 	import { saveUpdateSchedule, startUpdate, updateOperation, updateStarting, updateStatus } from '$lib/update/store';
 	import SettingsUpdateChanges from './SettingsUpdateChanges.svelte';
 
@@ -14,7 +14,7 @@
 
 	const { saving, saveSchedule }: Props = $props();
 
-	const notes = $derived(releaseNotesFor($updateOperation, $updateStatus));
+	const notes = $derived(releaseNotesFor(currentOperation($updateOperation, $updateStatus), $updateStatus));
 	const list = $derived(changeList(notes?.changes));
 	const total = $derived((notes?.changes?.items.length ?? 0) + (notes?.changes?.more ?? 0));
 	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
