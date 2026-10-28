@@ -21,7 +21,9 @@ def shape_messages(
     metadata = json.loads(row.get("metadata_json") or "{}")
     if metadata.get("config_model_type") not in ("gemma4", "gemma4_unified"):
         return messages
-    # Upstream issue: <link pending>. Delete once oMLX ships the fix (version).
+    # oMLX 0.7.1rc1 merges tool responses into the preceding assistant message;
+    # the Gemma 4 template closes the turn when that message has content.
+    # Remove this workaround once oMLX handles it.
     return [
         {**msg, "content": None}
         if msg.get("role") == "assistant" and msg.get("tool_calls") and isinstance(msg.get("content"), str)
