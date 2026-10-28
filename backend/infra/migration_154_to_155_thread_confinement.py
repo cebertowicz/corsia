@@ -8,7 +8,7 @@ import sqlite3
 # records only; its newest review record is copied onto its row, so no other harness
 # can launch it unconfined. Empty read dirs copy as ``[]``, which reads as damaged.
 _REVIEW_RECORD = """
-    FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id
+    FROM artifact_registrations r INDEXED BY {index_name} CROSS JOIN artifact_identities i ON r.artifact_id=i.id
     WHERE r.parent_thread_id=threads.id AND i.integration='claude-code'
       AND i.type='session' AND json_valid(i.metadata)
       AND json_extract(i.metadata, '$.claude_invocation.confinement')='review'
@@ -41,18 +41,31 @@ def migrate_154_to_155(conn: sqlite3.Connection) -> None:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"artifact_identities", "artifact_registrations"} <= tables:
         return
+    # Start lookups at the thread's registrations; the index is migration-only.
+    index_name = "migration_155_registrations_thread"
+    while conn.execute("SELECT 1 FROM sqlite_master WHERE name=? COLLATE NOCASE", (index_name,)).fetchone():
+        index_name += "_"
+    conn.execute(f"CREATE INDEX {index_name} ON artifact_registrations(parent_thread_id, artifact_id)")
+    try:
+        _copy_confinement(conn, index_name)
+    finally:
+        conn.execute(f"DROP INDEX {index_name}")
+
+
+def _copy_confinement(conn: sqlite3.Connection, index_name: str) -> None:
     # A damaged session could have been the review record. Preserve the old
     # fail-closed behavior even when another valid record exists for the thread.
     conn.execute(
         "UPDATE threads SET confinement='review', confined_read_dirs='[]' "
         "WHERE confinement IS NULL AND spawned_by IS NOT NULL AND EXISTS ("
-        "SELECT 1 FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id "
+        f"SELECT 1 FROM artifact_registrations r INDEXED BY {index_name} CROSS JOIN artifact_identities i ON r.artifact_id=i.id "
         "WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' "
         f"AND i.type='session' AND ({_DAMAGED_RECORD}))"
     )
+    review_record = _REVIEW_RECORD.format(index_name=index_name)
     conn.execute(
         "UPDATE threads SET confinement='review', confined_read_dirs=("
         "SELECT COALESCE(json_extract(i.metadata, '$.claude_invocation.add_dirs'), '[]') "
-        f"{_REVIEW_RECORD} ORDER BY i.updated_at DESC, i.id ASC LIMIT 1) "
-        f"WHERE confinement IS NULL AND EXISTS (SELECT 1 {_REVIEW_RECORD})"
+        f"{review_record} ORDER BY i.updated_at DESC, i.id ASC LIMIT 1) "
+        f"WHERE confinement IS NULL AND EXISTS (SELECT 1 {review_record})"
     )
