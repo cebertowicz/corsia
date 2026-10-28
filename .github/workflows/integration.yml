@@ -99,7 +99,7 @@ jobs:
       - name: Install stock agent CLIs
         run: |
           set -e
-          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.162.1
+          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.165.0
           claude --version
           codex --version
 
@@ -192,7 +192,7 @@ jobs:
       - name: Install stock agent CLIs
         run: |
           set -e
-          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.162.1
+          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.165.0
           claude --version
           codex --version
 

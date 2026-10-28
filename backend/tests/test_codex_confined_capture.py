@@ -2,13 +2,14 @@
 
 No subscription, API key, external service, or production state is used. CI may
 lack the optional Codex binary; a release claiming this version must run this
-capture on its supported binary. See codex_confinement.CAPTURED_CODEX_VERSION.
+capture on its supported binary. See codex_confinement.CAPTURED_CODEX_VERSIONS.
 """
 from __future__ import annotations
 
 import base64
 import json
 import shutil
+import subprocess
 from datetime import datetime, timezone
 
 import pytest
@@ -151,5 +152,6 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
     print("built-in openai, ChatGPT auth; unexpected/auth/proxy requests: []")
     print("loopback workspace checks:", endpoint.account_checks,
           "; optional local services:", sorted(set(endpoint.local_services)))
-    print("codex-cli 0.162.1 cold and process-resume full tools: " +
+    version = subprocess.check_output([binary, "--version"], text=True).strip()
+    print(f"{version} cold and process-resume full tools: " +
           json.dumps(endpoint.requests[0]["tools"], sort_keys=True))
