@@ -41,6 +41,7 @@ class ToolRequests:
         self.session = session
         self.tasks: set[asyncio.Task] = set()
         self.seen: set[int | str] = set()
+        self.dispatched_call_ids: set[str] = set()
         self.turn_id: str | None = None
         self.lock = asyncio.Lock()
         self.cursor: RolloutReceiptCursor | None = None
@@ -59,6 +60,7 @@ class ToolRequests:
             )
             self.fresh_rollout = False
             self.seen.clear()
+            self.dispatched_call_ids.clear()
             self.turn_id = None
 
     def dispatch(self, frame: dict) -> bool:
@@ -70,6 +72,7 @@ class ToolRequests:
             return False
         if params.get("turnId") != self.turn_id:
             self.seen.clear()
+            self.dispatched_call_ids.clear()
             self.turn_id = params["turnId"]
         if frame["id"] in self.seen:
             return True

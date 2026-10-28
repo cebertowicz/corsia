@@ -345,6 +345,7 @@ async def _on_assistant_text(ctx, ev: dict) -> None:
     }))
     ctx.live.last_text = text
     ctx.live.last_assistant_message_id = mid
+    ctx.live.codex_step_has_calls = False
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
     ctx.live.turn_has_assistant_row = True
@@ -382,6 +383,14 @@ async def _on_tool_use(ctx, ev: dict) -> None:
     args = ev.get("input") or {}
     hint = name[:80]
     model_id = _provider_reported_model_id(ctx.live)
+    if ctx.live.tool_step_ids:
+        append_step_id = next(iter(ctx.live.tool_step_ids.values()))
+    elif not ctx.live.codex_step_has_calls:
+        append_step_id = ctx.live.last_assistant_message_id
+    else:
+        append_step_id = None
+    # A fresh live owner has no evidence that an existing Step settled.
+    # Preserve the writer's provider-turn lookup until this owner observes a Step.
     step_id = await run_in_db(
         ctx.persist_tool_use,
         ctx.thread_id, tool_id=tool_id, name=name,
@@ -393,9 +402,14 @@ async def _on_tool_use(ctx, ev: dict) -> None:
         provider="codex",
         model=model_id,
         expected_model=getattr(ctx.live, "expected_reported_model", None),
+        explicit_step_target=(ctx.live.last_assistant_message_id is not None
+                              or ctx.live.codex_step_has_calls
+                              or bool(ctx.live.tool_step_ids)),
+        assistant_step_id=append_step_id,
     )
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
+    ctx.live.codex_step_has_calls = True
     ctx.live.tool_names[tool_id] = name
     ctx.live.tool_step_ids[tool_id] = step_id
     ctx.live.tools_settled.clear()
@@ -429,12 +443,15 @@ async def _on_tool_result(ctx, ev: dict) -> None:
             echoed_content=ev.get("content", ""),
         )
         return
+    requests = getattr(ctx.live.session, "_tool_requests", None)
+    dispatched = tool_id in requests.dispatched_call_ids if requests is not None else None
     canonical = await run_in_db(
         ctx.bind_tool_result_echo,
         thread_id=ctx.thread_id,
         provider_tool_call_id=tool_id,
         assistant_step_id=step_id,
         echoed_content=ev.get("content", ""),
+        codex_dispatched=dispatched,
     )
     await settle_committed_tool_result(
         live=ctx.live,

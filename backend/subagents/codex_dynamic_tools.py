@@ -78,6 +78,9 @@ async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict
 
     if isinstance(boundary, ForkToolBoundary):
         fork_kwargs["fork_policy"] = boundary
+    requests = getattr(session, "_tool_requests", None)
+    if session.fork_id is None and requests is not None:
+        requests.dispatched_call_ids.add(provider_call_id)
     content = await execute_tool(
         session.tool_registry, thread_id=session.corsia_thread_id,
         turn_identity=session.corsia_turn_identity,
