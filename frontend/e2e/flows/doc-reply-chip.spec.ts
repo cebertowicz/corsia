@@ -7,6 +7,7 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
+import { headerSend, seedHeldComments } from '../support/heldComments';
 
 // Evidence frames for the document reply chip (R5): the chat's own "N new replies" chip, floated over the document it counts.
 // Mock-mode only: every state is seeded straight into the disposable database, and the clock is frozen so a frame is repeatable.
@@ -248,11 +249,19 @@ for (const theme of ['light', 'dark'] as const) {
 			const threadId = await createSession(request, THREAD_TITLE);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j1-${theme}-${width}`, 'launch-plan.md', [8, 10]);
+			const heldFrom = TEXT.indexOf(SECTIONS[0].anchor);
+			await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from: heldFrom, to: heldFrom + SECTIONS[0].anchor.length });
+			tidy(doc.artifactId);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, THREAD_TITLE);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			// Opened at the top: both replies are below the fold, the document says so once, in the chat's own chip.
 			await expectChip(page, '2 new replies');
+			await expect(headerSend(page)).toBeVisible();
+			const sendBox = (await headerSend(page).boundingBox())!;
+			const replyBox = (await chipButton(page).boundingBox())!;
+			expect(replyBox.x < sendBox.x + sendBox.width && sendBox.x < replyBox.x + replyBox.width && replyBox.y < sendBox.y + sendBox.height && sendBox.y < replyBox.y + replyBox.height, 'held-comment Send stays clear of the reply target').toBe(false);
+			await shot(page, `01d-held-send-with-chip-${theme}-${width}`);
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
 			// Probe the actual hit target at both vertical edges, outside the visual chip face.
 			const edgeHits = await chipButton(page).evaluate((button) => {
