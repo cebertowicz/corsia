@@ -4,10 +4,8 @@
 	import DocReplyChip from './DocReplyChip.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 
-	let { artifactId, path, threadId, threads, ready, covered, sheetModalOpen, onStep }: {
+	let { artifactId, threads, ready, covered, sheetModalOpen, onStep }: {
 		artifactId: string | null;
-		path: string;
-		threadId: string | null;
 		threads: DocComment[];
 		ready: boolean;
 		covered: boolean;
@@ -21,7 +19,7 @@
 {#if hasChip || hasToast}
 	<div class="doc-bottom-band" data-doc-bottom-band>
 		{#if hasToast}<DeliveryConfirmation {artifactId} inBand />{/if}
-		{#if hasChip && artifactId}<DocReplyChip {artifactId} {path} {threadId} {threads} {onStep} />{/if}
+		{#if hasChip && artifactId}<DocReplyChip {artifactId} {threads} {onStep} />{/if}
 	</div>
 {/if}
 

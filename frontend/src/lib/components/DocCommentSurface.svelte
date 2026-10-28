@@ -113,11 +113,14 @@
 		draft: () => draft,
 		sheetDrawer: () => sheetDrawer,
 		narrow: () => narrow,
-		onClose: () => closeDrawer(),
+		onClose: () => onClose(),
 		onCancelDraft: () => (onCancelDraft ?? onClose)(),
 	});
 	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
-	$effect(() => onSheetModalChange?.(sheet.modalOpen));
+	$effect(() => {
+		onSheetModalChange?.(sheet.modalOpen);
+	});
+	$effect(() => () => onSheetModalChange?.(false));
 	// The editor keeps its text above whichever of these sheets is up: it reads where it rests from `trackOverlaySheet`.
 	let listSheet = $state<HTMLElement | null>(null);
 	let draftSheet = $state<HTMLElement | null>(null);
@@ -195,6 +198,10 @@
 		return { duration: leaving ? token('--dur-drawer') * pace : 0 };
 	}
 	function closeDrawer() { onClose(); restoreFocus(); }
+	function finishSheetClose() {
+		sheet.finishClose();
+		if (!sheet.open) void tick().then(() => restoreFocus());
+	}
 	/** The card or thumbnail last clicked in the drawer: what an image covering the document was opened from. */
 	let opener: Element | null = null;
 	// Covered by the image a card opened, the drawer keeps its scroll; uncovered, that card has focus again.
@@ -340,10 +347,10 @@
 
 {#if surfaceState || sheet.closing}
 	{#if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 

@@ -8,7 +8,6 @@
 	import ImageRegionLayer from './ImageRegionLayer.svelte';
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
-	import DocBottomBand from './DocBottomBand.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
@@ -18,13 +17,13 @@
 	import { regionColor, revealCentre } from '$lib/imageRegions';
 	import { FIT_MARGIN } from '$lib/imageZoom';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
-	import { commentLoads, docComments, hasNewReplies, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
+	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry, onReplyStep }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -49,12 +48,14 @@
 		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
 		draftOpen?: boolean;
+		hasDraft?: boolean;
+		sheetUp?: boolean;
+		selectedThread?: string | null;
 		place?: ImageViewportPlace | null;
 		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
 		onFailed?: () => void;
 		onRetry?: () => void;
-		onReplyStep?: (excludeId?: string) => void;
 	} = $props();
 
 	let root = $state<HTMLElement>();
@@ -74,53 +75,47 @@
 	export function refresh() {
 		if (artifactId) return reload(artifactId);
 	}
-	const image = $derived.by(() => {
-		void focus?.id;
-		return createImageComments({
-			artifactId: () => artifactId,
-			readOnly: () => !canComment,
-			restoreFocus: () => root?.querySelector<HTMLElement>('.viewport')?.focus({ preventScroll: true }),
-			reveal: (id, region) => {
-				const frame = root?.querySelector('[data-image-regions]')?.getBoundingClientRect();
-				if (!frame?.width || !frame.height) return;
-				const tag = root?.querySelector(`[data-region-tag][data-comment-id="${id}"]:not([inert])`)?.getBoundingClientRect() ?? null;
-				const centre = revealCentre(region, tag, frame);
-				lightbox?.revealFraction(centre.x, centre.y);
-			},
-			post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
-			onCreated: () => {
-				feedback?.commentCreated();
-				if (artifactId) reload(artifactId);
-			},
-		});
+	const image = createImageComments({
+		artifactId: () => artifactId,
+		readOnly: () => !canComment,
+		restoreFocus: () => root?.querySelector<HTMLElement>('.viewport')?.focus({ preventScroll: true }),
+		reveal: (id, region) => {
+			const frame = root?.querySelector('[data-image-regions]')?.getBoundingClientRect();
+			if (!frame?.width || !frame.height) return;
+			const tag = root?.querySelector(`[data-region-tag][data-comment-id="${id}"]:not([inert])`)?.getBoundingClientRect() ?? null;
+			const centre = revealCentre(region, tag, frame);
+			lightbox?.revealFraction(centre.x, centre.y);
+		},
+		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
+		onCreated: () => {
+			feedback?.commentCreated();
+			if (artifactId) reload(artifactId);
+		},
 	});
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
-	let focusedId: string | undefined;
-	$effect(() => { void focus?.id; focusedId = undefined; });
+	let focused = false;
 	async function showFocus() {
 		const wanted = focus;
-		if (!wanted || focusedId === wanted.id) return;
+		if (focused || !wanted) return;
 		await tick();
 		const comment = comments.find((item) => item.id === wanted.id);
 		if (!comment) return;
-		if (focus?.id !== wanted.id) return;
-		if (wanted.move) { focusedId = wanted.id; image.movePin(wanted.id); return; }
+		if (wanted.move) { focused = true; image.movePin(wanted.id); return; }
 		const tag = root?.querySelector<HTMLElement>(`[data-region-tag][data-comment-id="${wanted.id}"]`);
 		if (!tag) return;
-		focusedId = wanted.id;
+		focused = true;
 		image.select(wanted.id, tag, comment.region);
 	}
 	let loaded = $state(false);
-	let loadedFocus = $state<string | null | undefined>(undefined);
 	function imageLoaded() {
 		loaded = true;
-		loadedFocus = focus?.id ?? null;
 		onLoaded?.();
 	}
-	$effect(() => { if (loaded && loadedFocus === (focus?.id ?? null) && comments.length) void showFocus(); });
+	$effect(() => { if (loaded && comments.length) void showFocus(); });
 
-	$effect(() => { draftOpen = image.hasDraftText; });
+	$effect(() => { draftOpen = image.hasDraftText; hasDraft = !!image.draftRegion; });
+	$effect(() => { selectedThread = image.ui.state?.kind === 'thread' ? image.ui.state.id : null; });
 	$effect(() => {
 		const currentRoot = root;
 		const id = artifactId;
@@ -188,7 +183,6 @@
 <div class="image-comments">
 <div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
-		{#key focus?.id}
 		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} {place} {onPlace} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
 				{#if artifactId}
@@ -234,10 +228,7 @@
 				{/if}
 			{/snippet}
 		</ImageLightbox>
-		{/key}
-		{#if onReplyStep}<DocBottomBand {artifactId} path="" threadId={null} threads={all.filter((comment) => hasNewReplies(comment) && !(image.ui.state?.kind === 'thread' && image.ui.state.id === comment.id))} ready={loaded} covered={false} sheetModalOpen={image.ui.sheetModalOpen} onStep={() => onReplyStep?.(image.ui.state?.kind === 'thread' ? image.ui.state.id : undefined)} />{/if}
 	</div>
-	{#key focus?.id}
 	{#if artifactId}
 		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->
 		<DocCommentSurface
@@ -264,11 +255,10 @@
 			{artifactId}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
-			onSheetModalChange={(open) => image.ui.sheetModalOpen = open}
+			onSheetModalChange={(up) => sheetUp = up}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
-	{/key}
 </div>
 </div>
 

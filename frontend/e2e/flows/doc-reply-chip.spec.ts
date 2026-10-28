@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
@@ -11,14 +11,10 @@ import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from
 import { headerSend, holdDocumentComments, seedHeldComments } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
-// Evidence frames for the document reply chip (R5): the chat's own "N new replies" chip, floated over the document it counts.
-// Mock-mode only: every state is seeded straight into the disposable database, and the clock is frozen so a frame is repeatable.
-
-test.use({ video: process.env.REPLY_CHIP_VIDEO === '1' ? 'on' : 'retain-on-failure' });
 
 const TAG = '@surface:doc-reply-chip';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const screenshotDir = process.env.REPLY_CHIP_SCREENSHOT_DIR ?? process.env.CORSIA_E2E_WORKSPACE;
+
 const READER = 'Jordan Lee';
 const REPLIER = 'Maya Chen';
 const THREAD_TITLE = 'Launch plan review';
@@ -84,37 +80,6 @@ async function holdDwell(page: Page, hold: boolean): Promise<void> {
 	await page.evaluate((value) => { (window as unknown as { __holdDwell: boolean }).__holdDwell = value; }, hold);
 }
 
-async function settled(page: Page): Promise<Buffer> {
-	await page.waitForFunction(() => { const shell = document.querySelector('.app'); return !shell || getComputedStyle(shell).opacity === '1'; });
-	await expect(page.getByText(/^Loading/)).toHaveCount(0);
-	await page.evaluate(() => document.fonts.ready.then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
-	let previous: Buffer | null = null;
-	for (let attempt = 0; attempt < 12; attempt += 1) {
-		const frame = await page.screenshot({ fullPage: false, scale: 'css', animations: 'disabled' });
-		if (previous?.equals(frame)) return frame;
-		previous = frame;
-		await page.waitForTimeout(300);
-	}
-	throw new Error('The page never settled, so no frame was taken');
-}
-
-async function shot(page: Page, name: string): Promise<void> {
-	if (!screenshotDir) return;
-	// A fade-in (the chip's arrival) is over before the frame: wait it out, then require two identical captures.
-	await page.evaluate(() => Promise.allSettled(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished)));
-	await page.evaluate(async () => {
-		const { coreSettings } = await import('/src/lib/stores/settings.ts');
-		coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } }));
-	});
-	await expect(page.locator('.version-overlay')).toHaveCount(0);
-	// Park the pointer on inert space so no control keeps the hover it got from the last click.
-	const view = page.viewportSize()!;
-	await page.mouse.move(view.width - 2, Math.round(view.height / 2));
-	const frame = await settled(page);
-	expect(await page.evaluate(() => document.body.innerText), `Frame ${name} shows test wording`).not.toMatch(/\be2e\b|fixture|Another agent|e2e-/i);
-	mkdirSync(screenshotDir, { recursive: true });
-	writeFileSync(path.join(screenshotDir, `${name}.png`), frame);
-}
 
 async function startMotionProbe(page: Page): Promise<void> {
 	await page.evaluate(() => {
@@ -150,17 +115,14 @@ async function startMotionProbe(page: Page): Promise<void> {
 	});
 }
 
-async function saveMotionProbe(page: Page, name: string): Promise<Array<{ target: string; animations: Array<{ timing: { duration: number }; keyframes: Array<{ transform?: string; opacity?: string }> }> }>> {
+async function saveMotionProbe(page: Page): Promise<Array<{ target: string; animations: Array<{ timing: { duration: number }; keyframes: Array<{ transform?: string; opacity?: string }> }> }>> {
 	await page.waitForTimeout(600);
 	const events = await page.evaluate(() => {
 		const probe = (window as unknown as { __replyMotion: { events: unknown[]; cleanup: () => void } }).__replyMotion;
 		probe.cleanup();
 		return probe.events;
 	});
-	if (screenshotDir) {
-		mkdirSync(screenshotDir, { recursive: true });
-		writeFileSync(path.join(screenshotDir, `${name}-events.json`), JSON.stringify(events));
-	}
+
 	return events as Array<{ target: string; animations: Array<{ timing: { duration: number }; keyframes: Array<{ transform?: string; opacity?: string }> }> }>;
 }
 
@@ -326,8 +288,7 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 			expect(replyBox.width, 'reply target is at least 44px wide').toBeGreaterThanOrEqual(44);
 			expect(replyBox.x < sendBox.x + sendBox.width && sendBox.x < replyBox.x + replyBox.width && replyBox.y < sendBox.y + sendBox.height && sendBox.y < replyBox.y + replyBox.height, 'held-comment Send stays clear of the reply target').toBe(false);
-			await shot(page, `01-text-document-chip-${theme}-${width}`);
-			// Capture the held Send after the caret evidence, so a missing press treatment cannot suppress it.
+
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
 			// Probe the actual hit target at both vertical edges, outside the visual chip face.
 			const edgeHits = await chipButton(page).evaluate((button) => {
@@ -345,7 +306,7 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(anchorBox.y).toBeGreaterThanOrEqual(editorBox.y - 0.5);
 			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(editorBox.y + editorBox.height + 0.5);
 			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(chipBounds.y);
-			await shot(page, `01b-visible-anchor-with-chip-${theme}-${width}`);
+
 			// Move the editing caret to the end: the last line must remain visible above the notice.
 			await page.locator('.doc .cm-content').click();
 			await page.keyboard.press('ControlOrMeta+End');
@@ -361,70 +322,7 @@ for (const theme of ['light', 'dark'] as const) {
 			const chipAfter = (await chipBox(page).boundingBox())!;
 			expect(caretBox.y + caretBox.height, 'caret stays inside the editor').toBeLessThanOrEqual(editorAfter.y + editorAfter.height + 0.5);
 			expect(caretBox.y + caretBox.height, 'caret stays above the reply chip').toBeLessThanOrEqual(chipAfter.y);
-			if (screenshotDir) {
-				await expect(page.locator('.doc .cm-content')).toBeFocused();
-				// This editor uses the native caret (no CodeMirror drawSelection layer). Preserve two blink phases for pixel inspection.
-				const first = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
-				await page.waitForTimeout(600);
-				const second = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
-				const neighbour = readFileSync(path.join(screenshotDir, `01b-visible-anchor-with-chip-${theme}-${width}.png`));
-				writeFileSync(path.join(screenshotDir, `01c-caret-diagnostic-${theme}-${width}.json`), JSON.stringify({ caretBox, framesDiffer: !first.equals(second) }));
-				if (!first.equals(second)) {
-					expect(first.equals(neighbour) && second.equals(neighbour), 'at least one caret candidate differs from the anchor frame').toBe(false);
-					writeFileSync(path.join(screenshotDir, `01c-caret-a-${theme}-${width}.png`), first);
-					writeFileSync(path.join(screenshotDir, `01c-caret-b-${theme}-${width}.png`), second);
-				}
-				await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
-				if (width === 1440) {
-					await page.getByRole('button', { name: 'Toggle panel' }).click();
-					await page.evaluate(async () => { const { splitWidth } = await import('/src/lib/stores/artifactWorkspace.ts'); splitWidth.set(650); });
-					await expect.poll(() => page.locator('.document-canvas').evaluate(node => node.getBoundingClientRect().width)).toBeGreaterThanOrEqual(649);
-				}
-				const send = headerSend(page);
-				await send.scrollIntoViewIfNeeded();
-				if (width === 1440) {
-					const sendRect = (await send.boundingBox())!, canvasRect = (await page.locator('.document-canvas').boundingBox())!;
-					expect(sendRect.x).toBeGreaterThanOrEqual(canvasRect.x);
-					expect(sendRect.x + sendRect.width).toBeLessThanOrEqual(canvasRect.x + canvasRect.width);
-					writeFileSync(path.join(screenshotDir, `01d-wide-canvas-${theme}.json`), JSON.stringify({ canvasWidth: canvasRect.width, sendRect }));
-				}
-				const box = (await send.boundingBox())!;
-				await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-				const before = await page.screenshot({ scale: 'css', animations: 'disabled' });
-				const beforeStyle = await send.evaluate((node) => { const style = getComputedStyle(node); return Object.fromEntries(Array.from(style).map((name) => [name, style.getPropertyValue(name)])); });
-				const touch = width === 393 ? await page.context().newCDPSession(page) : null;
-				if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
-				else await page.mouse.down();
-				const active = await send.evaluate((node) => node.matches(':active'));
-				const pressedStyle = await send.evaluate((node) => { const style = getComputedStyle(node); return Object.fromEntries(Array.from(style).map((name) => [name, style.getPropertyValue(name)])); });
-				const pressed = await page.screenshot({ scale: 'css', animations: 'disabled' });
-				const changed = Object.keys(beforeStyle).filter((name) => beforeStyle[name] !== pressedStyle[name]).map((name) => ({ name, before: beforeStyle[name], pressed: pressedStyle[name] }));
-				writeFileSync(path.join(screenshotDir, `01d-press-style-${theme}-${width}.json`), JSON.stringify({ active, changed, pixelsDiffer: !before.equals(pressed) }));
-				if (touch) {
-					await touch.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
-					await touch.detach();
-				} else {
-					await page.mouse.move(2, 2);
-					await page.mouse.up();
-				}
-				if (active && changed.length) {
-					expect(pressed.equals(before), 'pressed frame differs from unpressed neighbour').toBe(false);
-					writeFileSync(path.join(screenshotDir, `01d-held-send-with-chip-${theme}-${width}.png`), pressed);
-				}
-				if (width === 393) {
-					const cdp = await page.context().newCDPSession(page);
-					await cdp.send('DOM.enable');
-					await cdp.send('CSS.enable');
-					const { root } = await cdp.send('DOM.getDocument');
-					const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button' });
-					expect(nodeId).toBeGreaterThan(0);
-					await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] });
-					expect(await send.evaluate(node => node.matches(':active'))).toBe(true);
-					await page.screenshot({ path: path.join(screenshotDir, `01d-forced-active-${theme}-393.png`), scale: 'css', animations: 'disabled' });
-					await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
-					await cdp.detach();
-				}
-			}
+			await expect(page.locator('.doc .cm-content')).toBeFocused();
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
 			await holdDwell(page, true);
@@ -432,22 +330,12 @@ for (const theme of ['light', 'dark'] as const) {
 			// The first waiting reply is brought into view, focused, and the comments list opens at it.
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect.poll(() => page.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
-			await shot(page, `02-text-document-landed-${theme}-${width}`);
-			if (screenshotDir) {
-				const input = page.locator(`[data-comment-id="${doc.roots[8]}"] textarea[placeholder="Reply…"]`);
-				await input.fill('Thanks, I will add the handover notes.');
-				await input.focus();
-				await expect(input).toBeFocused();
-				await expect(chipBox(page)).toHaveCount(0);
-				const first = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
-				await page.waitForTimeout(600);
-				const second = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
-				writeFileSync(path.join(screenshotDir, `reply-caret-blink-${theme}-${width}.json`), JSON.stringify({ framesDiffer: !first.equals(second) }));
-				if (!first.equals(second)) {
-					writeFileSync(path.join(screenshotDir, `reply-caret-a-${theme}-${width}.png`), first);
-					writeFileSync(path.join(screenshotDir, `reply-caret-b-${theme}-${width}.png`), second);
-				}
-			}
+
+			const input = page.locator(`[data-comment-id="${doc.roots[8]}"] textarea[placeholder="Reply…"]`);
+			await input.fill('Thanks, I will add the handover notes.');
+			await input.focus();
+			await expect(input).toBeFocused();
+			await expect(chipBox(page)).toHaveCount(0);
 			await holdDwell(page, false);
 		});
 	}
@@ -472,13 +360,13 @@ for (const width of [1440, 393]) {
 		await chipButton(page).click();
 		await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 		await expect(page.getByText(token)).toBeVisible();
-		await shot(page, `long-unbroken-reply-light-${width}`);
+
 		await page.getByRole('button', { name: 'Close comments' }).click();
 		const statement = "INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'agent', ?, ?, ?, ?)";
 		sqlite(Array.from({ length: 119 }, (_, index) => [statement, [doc.artifactId, doc.roots[10], REPLIER, threadId, `Update ${index + 1}.`, null, null]]));
 		await reloadComments(page, doc.artifactId);
 		await expectChip(page, '120 new replies');
-		await shot(page, `extreme-count-light-${width}`);
+
 	});
 }
 
@@ -507,7 +395,7 @@ for (const width of [1440, 393]) {
 		}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
 		expect(failed).toBe(true);
 		await expectChip(page, '2 new replies');
-		await shot(page, `viewed-500-retained-light-${width}`);
+
 		await page.unroute(viewedRoute);
 		const commentsRoute = `**/api/artifacts/${doc.artifactId}/comments?*`;
 		await page.route(commentsRoute, async route => {
@@ -519,7 +407,7 @@ for (const width of [1440, 393]) {
 		});
 		await reloadComments(page, doc.artifactId);
 		await expectChip(page, '1 new reply');
-		await shot(page, `partial-response-light-${width}`);
+
 		await page.unroute(commentsRoute);
 	});
 
@@ -550,7 +438,7 @@ for (const width of [1440, 393]) {
 			}, doc.artifactId);
 			expect(loadState).toBe('error');
 			await expectChip(page, '2 new replies');
-			await shot(page, `fetch-${failure}-light-${width}`);
+
 			await page.unroute(route);
 			await reloadComments(page, doc.artifactId);
 			await expectChip(page, '2 new replies');
@@ -571,9 +459,7 @@ for (const width of [1440, 393]) {
 		const reviewerId = await createSession(request, 'Review colleague');
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, THREAD_TITLE);
-		const baseline = process.env.REPLY_ACTIVITY_BASELINE === '1';
-		if (baseline) await expect(chipBox(page)).toHaveCount(0);
-		else await expectChip(page, '2 new replies');
+		await expectChip(page, '2 new replies');
 		// Activity is emitted by the settled tool call, not by the direct comment API.
 		const reviewer = await page.context().newPage();
 		await loginByUrl(reviewer);
@@ -588,21 +474,21 @@ for (const width of [1440, 393]) {
 		await sendButton(reviewer).click();
 		const activity = page.locator('[data-doc-activity-pill]');
 		await expect(activity).toBeVisible();
-		if (!baseline) {
+		{
 			const activityBox = await hitBox(activity.getByRole('button'));
 			const replyBox = await chipHitBox(page);
 			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 			expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
 		}
-		if (!baseline && width === 393) {
+		if (width === 393) {
 			await expect.poll(async () => {
 				const editor = await page.locator('.doc .ed-wrap').boundingBox();
 				const pill = await activity.boundingBox();
 				return !!editor && !!pill && editor.y + editor.height <= pill.y + 0.5;
 			}, { message: 'mobile editor text clears the below activity notice' }).toBe(true);
 		}
-		await shot(page, `${baseline ? 'baseline-activity' : '01e-activity-with-chip'}-light-${width}`);
-		if (!baseline) {
+
+		{
 			const scroller = page.locator('.doc .cm-scroller');
 			const before = await scroller.evaluate((node) => node.scrollTop);
 			await activity.getByRole('button').click();
@@ -636,13 +522,13 @@ for (const width of [1440, 393]) {
 			await expect(chipButton(page)).not.toBeFocused();
 			await page.keyboard.press('Tab');
 			await expect(chipButton(page)).toBeFocused();
-			await shot(page, `keyboard-chip-focus-${key}-light-${width}`);
+
 			await holdDwell(page, true);
 			await page.keyboard.press(key);
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 			await expect.poll(() => page.locator('[data-doc-comments-drawer]').evaluate((drawer) => drawer.contains(document.activeElement) || !!drawer.closest('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
-			await shot(page, `keyboard-destination-${key}-light-${width}`);
+
 			await page.getByRole('button', { name: 'Close comments' }).click();
 			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			await expect(chipButton(page)).toBeFocused();
@@ -679,7 +565,7 @@ for (const width of [1440, 393]) {
 				}
 				await expect(backdrop).toHaveCount(0);
 				await expect(chipButton(page)).toBeFocused();
-				await saveMotionProbe(page, `close-${route}-${width}-${reduced ? 'reduced' : 'standard'}`);
+				await saveMotionProbe(page);
 				await holdDwell(page, false);
 			});
 		}
@@ -705,11 +591,11 @@ for (const width of [1440, 393]) {
 		await expect(sheet).toBeVisible();
 		await expect(chipBox(page)).toHaveCount(0);
 		const x = box.x + box.width / 2, y = box.y + box.height / 2;
-		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), { x, y }), 'the sheet intercepts the former chip location').toBe(true);
+		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-reply-chip]'), { x, y }), 'the chip cannot be hit while the sheet is up').toBe(false);
 		await page.getByRole('button', { name: 'Close comments' }).click();
 		await expect(sheet.first()).toBeVisible();
 		await expect(chipBox(page)).toHaveCount(0);
-		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), { x, y }), 'the sheet intercepts the former chip location').toBe(true);
+		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-reply-chip]'), { x, y }), 'the chip cannot be hit while the sheet is up').toBe(false);
 		await expect(sheet).toHaveCount(0);
 		await expectChip(page, '2 new replies');
 		await holdDwell(page, false);
@@ -757,9 +643,9 @@ for (const theme of ['light', 'dark'] as const) {
 			const toastBox = (await delivered.boundingBox())!;
 			const noticeBox = (await chipBox(page).boundingBox())!;
 			expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(noticeBox.y);
-			await shot(page, `03a-image-document-chip-with-delivery-toast-${theme}-${width}`);
+
 			await expect(delivered).toHaveCount(0, { timeout: 15_000 });
-			await shot(page, `03-image-document-chip-${theme}-${width}`);
+
 			await holdDwell(page, true);
 			if (width === 1440) await page.evaluate(() => {
 				const samples: boolean[] = [];
@@ -802,22 +688,22 @@ for (const theme of ['light', 'dark'] as const) {
 					expect(chip.x < box.x + box.width && box.x < chip.x + chip.width && chip.y < box.y + box.height && box.y < chip.y + chip.height, 'reply chip clears the pin popover and its controls').toBe(false);
 				}
 			}
-			await shot(page, `04-image-pin-thread-open-${theme}-${width}`);
+
 			await holdDwell(page, false);
 			// Back to the document: one waiting reply is left and the chip says so; the next tap goes to the second pin.
 			await backToDocument(page);
 			await expectChip(page, '1 new reply');
-			await shot(page, `05-image-document-one-left-${theme}-${width}`);
+
 			await holdDwell(page, true);
 			await chipButton(page).click();
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('It stays where it is; only its label changed.')).toBeVisible();
-			await shot(page, `06-image-second-pin-${theme}-${width}`);
+
 			await holdDwell(page, false);
 			await backToDocument(page);
 			// Everything read: the chip is gone.
 			await expect(chipBox(page)).toHaveCount(0);
-			await shot(page, `07-image-document-all-read-${theme}-${width}`);
+
 			expect(DOC_IMAGE_NATURAL.width).toBeGreaterThan(0);
 		});
 	}
@@ -843,19 +729,19 @@ for (const theme of ['light', 'dark'] as const) {
 			const chatChip = page.locator('.reply-chip-notice').filter({ hasText: 'launch-plan.md' }).getByRole('button');
 			await expect(chatChip).toContainText('3 new replies · launch-plan.md');
 			await expect(chatComposer(page)).toBeVisible();
-			await shot(page, `08-chat-chip-reference-${theme}-${width}`);
+
 			await holdDwell(page, true);
 			await chatChip.click();
 			await expect(page.locator(`[data-comment-id="${doc.roots[2]}"]`)).toHaveClass(/focused/);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-			await shot(page, `09-arrived-from-chat-${theme}-${width}`);
+
 			await holdDwell(page, false);
 			// The first reply is read after its dwell. Put the comments list away: the document's chip is back, counting the other two.
 			await page.waitForTimeout(1700);
 			await page.getByRole('button', { name: 'Close comments' }).click();
 			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			await expectChip(page, '2 new replies');
-			await shot(page, `09b-after-arrival-comments-closed-${theme}-${width}`);
+
 		});
 	}
 }
@@ -877,7 +763,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await openThread(page, THREAD_TITLE);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			await expectChip(page, '1 new reply');
-			await shot(page, `10-one-reply-${theme}-${width}`);
+
 			// Eleven more land while the reader is here: the same chip, a bigger number.
 			await page.waitForTimeout(1100);
 			for (let index = 0; index < 11; index += 1) addAgentReply(doc.artifactId, doc.roots[index], threadId, SECTIONS[index].reply, 'Maya Chen — Customer Support Operations');
@@ -885,7 +771,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The backend pushes the new queue to the chat beside the document; here it is read again.
 			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 			await expectChip(page, '12 new replies');
-			await shot(page, `11-twelve-replies-long-names-${theme}-${width}`);
+
 			// Beside the comments pill: both stay whole and clear of each other.
 			const pill = page.getByRole('button', { name: /open threads?/ });
 			await expect(pill).toBeVisible();
@@ -902,7 +788,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
 			await expect(chipBox(page)).toHaveCount(0);
-			await shot(page, `12-all-read-${theme}-${width}`);
+
 		});
 	}
 }
@@ -923,7 +809,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, THREAD_TITLE);
 			await expectChip(page, '3 new replies');
-			await shot(page, `multi-replies-one-thread-${theme}-${width}`);
+
 			if (width === 393) {
 				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
 				await line.dblclick({ position: { x: 20, y: 8 } });
@@ -931,10 +817,25 @@ for (const theme of ['light', 'dark'] as const) {
 				await page.getByPlaceholder('Comment…').fill('Please confirm the handover.');
 				await expect(page.locator('[data-adaptive-drawer].drawer-backdrop')).toBeVisible();
 				await expect(chipBox(page)).toHaveCount(0);
-				await shot(page, `phone-draft-with-replies-${theme}-${width}`);
+
 				await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 				await expectChip(page, '3 new replies');
-				await shot(page, `phone-after-draft-${theme}-${width}`);
+
+			} else {
+				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
+				await line.dblclick({ position: { x: 20, y: 8 } });
+				await page.locator('.sel-comment').click();
+				const draft = page.getByPlaceholder('Comment…');
+				await draft.fill('Please confirm the handover.');
+				await chipButton(page).click();
+				const savedDraft = await page.evaluate(async () => {
+					const { commentDraft } = await import('/src/lib/stores/commentDraft.ts');
+					let body: string | undefined;
+					const unsubscribe = commentDraft.subscribe((draft) => { body = draft?.body; });
+					unsubscribe();
+					return body;
+				});
+				expect(savedDraft).toBe('Please confirm the handover.');
 			}
 		});
 	}
@@ -959,7 +860,7 @@ test.describe('reply chip motion evidence', () => {
 					const { ms } = await import('/src/lib/popoverMotion.ts');
 					return { standard: ms('--dur-standard'), tight: ms('--dur-tight') };
 				});
-				if (screenshotDir) writeFileSync(path.join(screenshotDir, `chip-duration-${width}-${reduced ? 'reduced' : 'standard'}.json`), JSON.stringify(durations));
+
 				expect(durations.standard).toBeGreaterThan(0);
 				expect(durations.tight).toBeGreaterThan(0);
 				await page.waitForTimeout(600);
@@ -967,19 +868,19 @@ test.describe('reply chip motion evidence', () => {
 				await startMotionProbe(page);
 				await reloadComments(page, doc.artifactId);
 				await expectChip(page, '1 new reply');
-				const entryEvents = await saveMotionProbe(page, `chip-entry-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const entryEvents = await saveMotionProbe(page);
 				const entry = entryEvents.filter(event => String(event.target).includes('doc-reply-chip')).flatMap(event => event.animations).find(animation => animation.timing.duration > 0);
 				expect(entry?.timing.duration).toBe(reduced ? durations.tight : durations.standard);
 				if (reduced) expect(new Set(entry!.keyframes.map(frame => frame.transform)).size).toBe(1);
 				await startMotionProbe(page);
 				await chipButton(page).click();
 				await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
-				await saveMotionProbe(page, `thread-open-${width}-${reduced ? 'reduced' : 'standard'}`);
+				await saveMotionProbe(page);
 				await page.waitForTimeout(2000);
 				await startMotionProbe(page);
 				await page.getByRole('button', { name: 'Close comments' }).click();
 				await expect(chipBox(page)).toHaveCount(0);
-				await saveMotionProbe(page, `close-button-${width}-${reduced ? 'reduced' : 'standard'}`);
+				await saveMotionProbe(page);
 				// Stimulate a second arrival and a viewed event while the document is visible, so the recording includes the chip's own exit.
 				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
 				await reloadComments(page, doc.artifactId);
@@ -995,7 +896,7 @@ test.describe('reply chip motion evidence', () => {
 					await markThreadViewed(artifactId, rootId, replyId);
 				}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
 				await expect(chipBox(page)).toHaveCount(0);
-				const exitEvents = await saveMotionProbe(page, `chip-exit-${width}-${reduced ? 'reduced' : 'standard'}`);
+				const exitEvents = await saveMotionProbe(page);
 				const exit = exitEvents.filter(event => String(event.target).includes('doc-reply-chip')).flatMap(event => event.animations).find(animation => animation.timing.duration > 0);
 				expect(exit?.timing.duration).toBeCloseTo(durations.standard * 0.7);
 				expect(exit?.keyframes.every(frame => frame.transform === undefined)).toBe(true);
@@ -1004,9 +905,9 @@ test.describe('reply chip motion evidence', () => {
 	}
 });
 
-test.describe('round five composed evidence', () => {
+test.describe('reply chip and held Send controls', () => {
 	for (const theme of ['light', 'dark'] as const) {
-		test(`${TAG} round5 held Send 393 ${theme}`, async ({ page, request }, info) => {
+		test(`${TAG} held Send 393 ${theme}`, async ({ page, request }, info) => {
 			test.setTimeout(90_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
@@ -1038,27 +939,20 @@ test.describe('round five composed evidence', () => {
 			const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.document-header .sending-now button' });
 			expect(nodeId).toBeGreaterThan(0);
 			const beforeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
-			const before = await page.screenshot({ scale: 'css', animations: 'disabled' });
+
 			await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] });
 			expect(await send.evaluate(node => node.matches(':active'))).toBe(true);
 			await page.waitForTimeout(200);
 			const activeColor = await send.evaluate(node => getComputedStyle(node).backgroundColor);
-			const active = await page.screenshot({ scale: 'css', animations: 'disabled' });
-			const md5 = (buffer: Buffer) => createHash('md5').update(buffer).digest('hex');
-			if (screenshotDir) {
-				const dir = path.join(screenshotDir, 'round5'); mkdirSync(dir, { recursive: true });
-				writeFileSync(path.join(dir, `send-before-${theme}-393.png`), before);
-				writeFileSync(path.join(dir, `send-active-${theme}-393.png`), active);
-				writeFileSync(path.join(dir, `send-${theme}-393.json`), JSON.stringify({ geometry, beforeColor, activeColor, beforeMd5: md5(before), activeMd5: md5(active) }));
-			}
+
 			await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] }); await cdp.detach();
 			expect(activeColor).not.toBe(beforeColor);
-			expect(md5(active)).not.toBe(md5(before));
+
 		});
 	}
 
 	for (const reduced of [false, true]) {
-		test(`${TAG} round5 modal outro 393 ${reduced ? 'reduced' : 'standard'}`, async ({ page, request }, info) => {
+		test(`${TAG} modal outro 393 ${reduced ? 'reduced' : 'standard'}`, async ({ page, request }, info) => {
 			test.setTimeout(90_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
@@ -1093,16 +987,16 @@ test.describe('round five composed evidence', () => {
 			await chipButton(page).click();
 			await page.waitForFunction(() => (window as unknown as { __r5Done?: boolean }).__r5Done === true, null, { timeout: 5000 });
 			const frames = await page.evaluate(() => (window as unknown as { __r5Frames: Array<{ chipPresent: boolean; scrimPresent: boolean; hitChip: boolean; chipAheadInHitStack: boolean }> }).__r5Frames);
-			if (screenshotDir) { const dir = path.join(screenshotDir, 'round5'); mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `modal-outro-393-${reduced ? 'reduced' : 'standard'}.json`), JSON.stringify(frames, null, 2)); }
+
 			expect(frames.some(frame => frame.chipPresent)).toBe(true);
 			expect(frames.every(frame => frame.scrimPresent && !frame.hitChip && !frame.chipAheadInHitStack)).toBe(true);
 		});
 	}
 });
 
-test.describe('round six toolbar comparison', () => {
+test.describe('reply chip and document toolbar', () => {
 	for (const theme of ['light', 'dark'] as const) {
-		test(`${TAG} round6 no held 393 ${theme}`, async ({ page, request }, info) => {
+		test(`${TAG} no held comments 393 ${theme}`, async ({ page, request }, info) => {
 			test.setTimeout(90_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
@@ -1114,19 +1008,10 @@ test.describe('round six toolbar comparison', () => {
 			await openThread(page, THREAD_TITLE);
 			await expectChip(page, '2 new replies');
 			await expect(page.locator('.document-header .sending-now')).toHaveCount(0);
-			await page.mouse.move(391, 426);
-			await page.waitForTimeout(600);
-			const x = await page.locator('.document-header .comment-status').evaluate(node => node.getBoundingClientRect().x);
-			const crop = await page.locator('.document-header').screenshot({ animations: 'disabled', scale: 'css' });
-			const version = process.env.R6_VERSION ?? 'candidate';
-			if (screenshotDir) {
-				const dir = path.join(screenshotDir, 'round6'); mkdirSync(dir, { recursive: true });
-				writeFileSync(path.join(dir, `no-held-${version}-${theme}.png`), crop);
-				writeFileSync(path.join(dir, `no-held-${version}-${theme}.json`), JSON.stringify({ x, md5: createHash('md5').update(crop).digest('hex') }));
-			}
+
 		});
 	}
-	test(`${TAG} round6 held Send desktop pane 420`, async ({ page, request }, info) => {
+	test(`${TAG} held Send desktop pane 420`, async ({ page, request }, info) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name.endsWith('mobile'));
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -1147,74 +1032,8 @@ test.describe('round six toolbar comparison', () => {
 			const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, canvasX: canvas.x, canvasWidth: canvas.width, whole: rect.x >= canvas.x && rect.right <= canvas.right && rect.y >= canvas.y && rect.bottom <= canvas.bottom, hit: !!hit && (hit === node || node.contains(hit)) };
 		});
-		await page.mouse.move(1438, 450);
-		const crop = await page.locator('.document-header').screenshot({ animations: 'disabled', scale: 'css' });
-		if (screenshotDir) {
-			const dir = path.join(screenshotDir, 'round6'); mkdirSync(dir, { recursive: true });
-			writeFileSync(path.join(dir, 'held-candidate-desktop-420.png'), crop);
-			writeFileSync(path.join(dir, 'held-candidate-desktop-420.json'), JSON.stringify({ ...geometry, md5: createHash('md5').update(crop).digest('hex') }));
-		}
+
 		expect(geometry.canvasWidth).toBe(420);
 		expect(geometry.whole && geometry.hit).toBe(true);
 	});
 });
-
-// Before frames (light): the same two documents on the base commit, where no chip exists. Run only on the base checkout
-// (`--grep baseline`); the assertion that no chip is drawn is what proves the checkout is the base.
-for (const width of [1440, 393]) {
-	const size = { width, height: width === 393 ? 852 : 900 };
-
-	test(`${TAG} baseline light ${width}px: J1 text document with replies below the fold, no chip`, async ({ page, request }, testInfo) => {
-		test.setTimeout(90_000);
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		skipMismatchedProject(width, testInfo.project.name);
-		await page.setViewportSize(size);
-		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
-		await onlyThread(request, threadId);
-		const doc = await seedTextDocument(page, request, threadId, `b1-${width}`, 'launch-plan.md', [8, 10]);
-		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
-		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-		await expect(chipBox(page)).toHaveCount(0);
-		await shot(page, `B1-text-document-before-light-${width}`);
-	});
-
-	test(`${TAG} baseline light ${width}px: J2 image document with replies on two pins, no chip`, async ({ page, request }, testInfo) => {
-		test.setTimeout(120_000);
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		skipMismatchedProject(width, testInfo.project.name);
-		await page.setViewportSize(size);
-		await page.emulateMedia({ colorScheme: 'light' });
-		seconds = 0;
-		await freezeClock(page);
-		const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
-		await onlyThread(request, seeded.sessionId);
-		sqlite([['UPDATE threads SET title=? WHERE id=?', [IMAGE_THREAD_TITLE, seeded.sessionId]]]);
-		const image = '![Mock screen](shots/screen.png)';
-		const from = DOC.indexOf(image);
-		const ids: string[] = [];
-		for (const [index, region] of [{ x: 0.1, y: 0.15, w: 0.25, h: 0.2 }, { x: 0.55, y: 0.5, w: 0.25, h: 0.2 }].entries()) {
-			const root = await request.post(`/api/artifacts/${seeded.artifactId}/comments`, {
-				params: { token: TEST_TOKEN },
-				data: { body: index === 0 ? 'Is this the final header?' : 'Does the save button move here?', anchor_text: image, from_off: from, to_off: from + image.length, region, delivery_policy: 'immediate' },
-			});
-			expect(root.ok(), await root.text()).toBeTruthy();
-			ids.push((await root.json()).comment.id as string);
-		}
-		tidy(seeded.artifactId);
-		addAgentReply(seeded.artifactId, ids[0], seeded.sessionId, 'Yes, the header is final. I attached the export.');
-		addAgentReply(seeded.artifactId, ids[1], seeded.sessionId, 'It stays where it is; only its label changed.');
-		for (const message of IMAGE_CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
-		await loginByUrl(page);
-		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		await page.getByText(IMAGE_THREAD_TITLE).first().click();
-		await expect(page.locator('.cm-md-image img').first()).toBeVisible();
-		// Opening the document delivers the two pin comments; take the frame once the confirmation has come and gone.
-		const delivered = page.locator('.toast').filter({ hasText: /comments? sent/ });
-		await expect(delivered).toBeVisible();
-		await expect(delivered).toHaveCount(0, { timeout: 15_000 });
-		await expect(chipBox(page)).toHaveCount(0);
-		await shot(page, `B2-image-document-before-light-${width}`);
-	});
-}

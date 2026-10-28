@@ -41,5 +41,5 @@
 </script>
 
 {#if target && unreadCount}
-	<UnreadReplyChip artifactId={target.detail.destination.id} path={target.detail.destination.path ?? null} threadId={$activeThreadId} count={unreadCount} {where} type={target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document'} onOpen={openReplyDocument} />
+	<UnreadReplyChip artifactId={target.detail.destination.id} count={unreadCount} {where} type={target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document'} onOpen={openReplyDocument} />
 {/if}

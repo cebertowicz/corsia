@@ -6,9 +6,9 @@ import { token } from '$lib/stores/auth';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
-function render(props: Partial<{ count: number; where: string | null; path: string | null; threadId: string | null; onOpen: () => void }> = {}) {
+function render(props: Partial<{ count: number; where: string | null; onOpen: () => void }> = {}) {
 	const onOpen = props.onOpen ?? vi.fn();
-	component = mount(UnreadReplyChip, { target: host, props: { artifactId: 'doc-1', path: '/tmp/launch-plan.md', threadId: 'thread-1', count: 2, onOpen, ...props } });
+	component = mount(UnreadReplyChip, { target: host, props: { artifactId: 'doc-1', count: 2, onOpen, ...props } });
 	flushSync();
 	return onOpen;
 }
@@ -56,19 +56,4 @@ describe('UnreadReplyChip', () => {
 		expect(tabs).not.toHaveBeenCalled();
 	});
 
-	it('uses the supplied destination even when the document has no path', () => {
-		const onOpen = render({ path: null });
-		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
-		expect(chip).not.toBeNull();
-		chip!.click();
-		expect(onOpen).toHaveBeenCalledOnce();
-	});
-
-	it('stays a tappable button when the document has no thread of its own', () => {
-		const onOpen = render({ threadId: null });
-		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
-		expect(chip).not.toBeNull();
-		chip!.click();
-		expect(onOpen).toHaveBeenCalledOnce();
-	});
 });

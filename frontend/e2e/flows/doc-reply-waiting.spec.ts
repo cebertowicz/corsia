@@ -653,7 +653,7 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(projected.reply_items.filter((item: { detail: { source: { thread_id: string } } }) => item.detail.source.thread_id === threadId)).toHaveLength(1);
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
-			const chip = page.locator('.reply-chip-notice');
+			const chip = page.locator('.attention-dock .reply-chip-notice');
 			const dock = page.locator('[data-attention-dock]');
 			const composer = chatComposer(page);
 			await expect(chip).toBeVisible();
@@ -716,7 +716,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// Use the real queue projection for cross-document aggregation.
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
-			const notice = page.locator('.reply-chip-notice');
+			const notice = page.locator('.attention-dock .reply-chip-notice');
 			const chip = notice.getByRole('button');
 			await expect(chip).toContainText('2 new replies · 2 documents');
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
@@ -746,12 +746,12 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(sidebarThread(page, THREAD_TITLE)).toBeAttached();
 			await openThread(page, THREAD_TITLE);
 			await expect(page.getByText(CHAT[0].content, { exact: true })).toBeVisible();
-			await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
+			await expect(page.locator('.attention-dock .reply-chip-notice')).toHaveCount(0);
 			await shot(page, `00-current-chat-${theme}-${width}`);
 			addAgentReply(scenario.artifactId, scenario.roots[2], threadId, PASSAGES[2].reply);
 			// The reply is now waiting; refresh the real queue after the fixture writes it.
 			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-			await expect(page.locator('.reply-chip-notice').getByRole('button')).toContainText('1 new reply · launch-plan.md');
+			await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('1 new reply · launch-plan.md');
 			const releaseViewedStamps = await holdViewedStamps(page);
 			try {
 				await page.evaluate(async ({ id, path, title }) => {
@@ -765,7 +765,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.getByRole('button', { name: '3 open threads, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				// The reply is on screen but not yet read (the stamp is held), so Chat still counts it beside the document.
-				if (width === 1440) await expect(page.locator('.reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
+				if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
 				await shotRailClosed(page, `01-document-arrival-${theme}-${width}-rail-closed`, width);
@@ -806,7 +806,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The pill counts the three unread threads; the chip counts their replies: each seeded reply, closed before
 			// its dwell stamped it, plus the later one.
 			if (width === 1440) {
-				await expect(page.locator('.reply-chip-notice').getByRole('button')).toContainText('6 new replies · launch-plan.md');
+				await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('6 new replies · launch-plan.md');
 				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 			}
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
@@ -821,7 +821,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The pill counts the three unread threads; the chip counts their replies: each seeded reply, closed before
 			// its dwell stamped it, plus the later one.
 			if (width === 1440) {
-				await expect(page.locator('.reply-chip-notice').getByRole('button')).toContainText('6 new replies · launch-plan.md');
+				await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('6 new replies · launch-plan.md');
 				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 			}
 			await shot(page, `03-three-replies-${theme}-${width}`);
@@ -847,7 +847,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// destination action opens the seeded document.
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
-			const replyChip = page.locator('.reply-chip-notice');
+			const replyChip = page.locator('.attention-dock .reply-chip-notice');
 			await expect(replyChip).toBeVisible();
 			await expect(replyChip.getByRole('button')).toContainText('3 new replies · launch-plan.md');
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
@@ -869,7 +869,7 @@ for (const theme of ['light', 'dark'] as const) {
 			})).toBe(true);
 			// The document keeps the unread reply until its own visible dwell stamps it.
 			await expect(page.getByText(PASSAGES[0].reply, { exact: true }).last()).toBeVisible();
-			if (width === 1440) await expect(page.locator('.reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
+			if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
 			await shot(page, `05-open-in-document-${theme}-${width}`);
 			await shotRailClosed(page, `05-open-in-document-${theme}-${width}-rail-closed`, width);
 			// What the dock reads next, on Chat (beside the document the 1440 frame above already shows it).
@@ -886,7 +886,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 				await resetDockPosition(page);
 				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-				await expect(page.locator('.reply-chip-notice')).toContainText('2 new replies · launch-plan.md');
+				await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('2 new replies · launch-plan.md');
 				await shot(page, `05b-reply-chip-next-reply-${theme}-${width}`);
 			}
 
@@ -905,10 +905,10 @@ for (const theme of ['light', 'dark'] as const) {
 					const { setActiveSurface } = await import('/src/lib/stores/artifactWorkspace.ts');
 					setActiveSurface(id, 'chat');
 				}, threadId);
-				await expect(page.locator('.reply-chip-notice')).toBeVisible({ timeout: 1_000 });
+				await expect(page.locator('.attention-dock .reply-chip-notice')).toBeVisible({ timeout: 1_000 });
 			}).toPass({ timeout: 15_000 });
 			// The persistent chip aggregates this chat's replies and lands on the first unread root.
-			const chip = page.locator('.reply-chip-notice').getByRole('button');
+			const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
 			await expect(chip).toHaveCount(1);
 			// One initially unread reply remains at desktop; the phone path adds one more
 			// reply before leaving the document. The final chip must aggregate those with
@@ -960,7 +960,7 @@ for (const width of [1440, 393]) {
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			// The collapsed notice is the one reply chip; the long document name stays inside the viewport above the composer.
-			const notice = page.locator('.reply-chip-notice');
+			const notice = page.locator('.attention-dock .reply-chip-notice');
 			const chip = notice.getByRole('button');
 			await expect(chip).toContainText(`3 new replies · ${LONG_DOCUMENT_NAME}`);
 			// The tooltip and the accessible name carry the whole name, whatever the visible text shows.
@@ -990,7 +990,7 @@ for (const width of [1440, 393]) {
 		await serveReplyQueue(page, request, scenario, threadId);
 		await loadPastFirstRunLanding(page, () => page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`), { lands: true });
 		await openThread(page, THREAD_TITLE);
-		const chip = page.locator('.reply-chip-notice').getByRole('button');
+		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
 		await expect(chip).toContainText('3 new replies');
 		await expect(chip).toContainText(LONG_DOCUMENT_NAME);
 		await shot(page, `10-long-chip-light-${width}`);
@@ -1009,8 +1009,8 @@ for (const width of [1440, 393]) {
 		await openThread(page, THREAD_TITLE);
 		// Replies never become a dock stop: the keyboard reaches the chip, then goes straight on to the composer.
 		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-		const chip = page.locator('.reply-chip-notice').getByRole('button');
-		await tabTo(page, '.reply-chip-notice button');
+		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
+		await tabTo(page, '.attention-dock .reply-chip-notice button');
 		await expect(chip).toBeFocused();
 		await expect(chip).toContainText('3 new replies · launch-plan.md');
 		await expect(chip).toHaveCSS('outline-style', 'solid');
@@ -1044,7 +1044,7 @@ for (const width of [1440, 393]) {
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await page.locator('.reply-chip-notice').getByRole('button').click();
+			await page.locator('.attention-dock .reply-chip-notice').getByRole('button').click();
 			const failurePanel = page.locator('.load-error');
 			await expect(failurePanel).toBeVisible();
 			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
@@ -1076,7 +1076,7 @@ test(`${TAG} light 393px: same reply count keeps the responsive document UI unch
 	await loginByUrl(page);
 	await openThread(page, THREAD_TITLE);
 	await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-	await page.locator('.reply-chip-notice').getByRole('button').click();
+	await page.locator('.attention-dock .reply-chip-notice').getByRole('button').click();
 	await documentReady(page);
 	await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
 	await shot(page, '05c-same-count-light-393');
@@ -1096,7 +1096,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await serveReplyQueue(page, request, scenario, threadId, () => documentAvailable);
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
-			const chip = page.locator('.reply-chip-notice').getByRole('button');
+			const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
 			await expect(chip).toContainText('3 new replies · launch-plan.md');
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 			// The terminal state is an actual removal. Deleting the disposable file and
@@ -1104,7 +1104,12 @@ for (const theme of ['light', 'dark'] as const) {
 			rmSync(scenario.docPath);
 			const reconciled = await request.post(`/api/threads/${threadId}/artifacts/reconcile?token=${encodeURIComponent(TEST_TOKEN)}`);
 			expect(reconciled.ok(), await reconciled.text()).toBeTruthy();
-			expect((await reconciled.json()).counts.applied).toBe(1);
+			// The pane's background reconciliation may have applied the removal first.
+			await expect.poll(async () => {
+				const pane = await request.get(`/api/threads/${threadId}/artifacts`, { params: { token: TEST_TOKEN } });
+				expect(pane.ok()).toBeTruthy();
+				return JSON.stringify(await pane.json());
+			}).not.toContain(scenario.artifactId);
 			// The real reconciler emits this frame after it commits. This request-context
 			// fixture has no browser WebSocket transport, so deliver the exact event to
 			// the mounted pane and prove its normal refetch removes the stale rail row.
@@ -1122,7 +1127,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await removed.getByRole('button', { name: 'Close tab' }).click();
 			await expect(page.getByText(CHAT[0].content, { exact: true })).toBeVisible();
 			// The removed document's reply hand-off is gone from Chat, and nothing moved into Needs you.
-			await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
+			await expect(page.locator('.attention-dock .reply-chip-notice')).toHaveCount(0);
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		});
 	}
@@ -1144,7 +1149,7 @@ for (const theme of ['light', 'dark'] as const) {
 		expect((await response.json()).reply_items[0].detail.source.thread_id).toBe(threadId);
 		await loginByUrl(page);
 		await openThread(page, THREAD_TITLE);
-		const notice = page.locator('.reply-chip-notice');
+		const notice = page.locator('.attention-dock .reply-chip-notice');
 		await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
 		await shot(page, `visible-root-chip-${theme}`);
 		await notice.getByRole('button').click();
@@ -1167,7 +1172,7 @@ test(`${TAG} real queue: open the chip and read its reply`, async ({ page, reque
 	expect((await queue.json()).reply_items[0].detail.unread_count).toBe(1);
 	await loginByUrl(page);
 	await openThread(page, THREAD_TITLE);
-	const notice = page.locator('.reply-chip-notice');
+	const notice = page.locator('.attention-dock .reply-chip-notice');
 	await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
 	await expect(notice.locator('.ct-new-dot')).toBeVisible();
 	await notice.getByRole('button').click();
@@ -1195,7 +1200,7 @@ for (const theme of ['light', 'dark'] as const) {
 			const scenario = await seedScenario(page, request, threadId, `read-${theme}-${width}`, [0, 1, 2], { readerFollowups: partialReadFollowups(width) });
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
-			const notice = page.locator('.reply-chip-notice');
+			const notice = page.locator('.attention-dock .reply-chip-notice');
 			await expect(notice.getByRole('button')).toContainText('3 new replies · launch-plan.md');
 			await notice.getByRole('button').click();
 			await documentReady(page);
@@ -1319,7 +1324,7 @@ for (const theme of ['light', 'dark'] as const) {
 				const bubble = messages.locator('.user-bubble-wrapper', { hasText: longBubble });
 				const overlap = await bubble.evaluate((element) => {
 					const bubbleBox = element.getBoundingClientRect();
-					const chipBox = document.querySelector('.reply-chip-notice')!.getBoundingClientRect();
+					const chipBox = document.querySelector('.attention-dock .reply-chip-notice')!.getBoundingClientRect();
 					return bubbleBox.left < chipBox.right && bubbleBox.right > chipBox.left && bubbleBox.top < chipBox.bottom && bubbleBox.bottom > chipBox.top;
 				});
 				expect(overlap, 'The long user bubble is directly behind the reply chip').toBe(true);

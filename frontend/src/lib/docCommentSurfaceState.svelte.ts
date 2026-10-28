@@ -31,14 +31,12 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let anchor = $state<CommentAnchor | null>(null);
 	let restoreFocus = $state<() => void>(restoreEditor);
 	// Derived solely from createCommentSheet's modal lifecycle; the viewer uses it to hide its sibling selection control.
-	let sheetModalOpen = $state(false);
-	let restoreAfterSheet = false;
+	let sheetUp = $state(false);
 	function restoreReplyFocus(root: () => HTMLElement | undefined) {
-		const focus = () => void tick().then(() => {
+		restoreFocus = () => void tick().then(() => {
 			const button = root()?.querySelector<HTMLElement>('[data-doc-reply-chip] button');
 			if (button) button.focus({ preventScroll: true }); else restoreEditor();
 		});
-		restoreFocus = () => { if (sheetModalOpen) restoreAfterSheet = true; else focus(); };
 	}
 	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
 	let hovered = $state<string | null>(null);
@@ -80,7 +78,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
 		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
 		get restoreFocus() { return restoreFocus; },
-		get sheetModalOpen() { return sheetModalOpen; }, set sheetModalOpen(value: boolean) { sheetModalOpen = value; if (!value && restoreAfterSheet) { restoreAfterSheet = false; restoreFocus(); } },
+		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
 		close, openDraft, focusComment, focusMarker, openList, restoreReplyFocus,
 	};

@@ -9,10 +9,8 @@
 	import type { DocComment } from '$lib/stores/docComments';
 
 	// The document's notice uses the chat's attachment chip and New marker; its caller supplies the destination.
-	let { artifactId, path, threadId, threads, onStep }: {
+	let { artifactId, threads, onStep }: {
 		artifactId: string;
-		path: string;
-		threadId: string | null;
 		threads: DocComment[];
 		onStep: () => void;
 	} = $props();
@@ -30,7 +28,7 @@
 
 {#if count > 0}
 	<div class="doc-reply-chip" data-doc-reply-chip in:arrive|global out:leave|global>
-		<UnreadReplyChip {artifactId} {path} {threadId} {count} onOpen={onStep} />
+		<UnreadReplyChip {artifactId} {count} onOpen={onStep} />
 	</div>
 {/if}
 

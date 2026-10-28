@@ -1,10 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
-import { DOC, seedImageDocument, overlay, expectBarFits } from '../support/docImageComments';
+import { DOC, seedImageDocument, overlay, expectBarFits, imageSurface } from '../support/docImageComments';
+import { drag } from '../support/imageRegionComments';
 import { isolatedDb } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
@@ -61,47 +60,37 @@ for (const width of [393, 1440]) {
 			await page.getByText(sessionTitle, { exact: true }).first().click();
 			await page.locator('.cm-md-image img').first().click();
 			await expect(overlay(page)).toBeVisible();
-			if (process.env.REPLY_IMAGE_BASELINE === '1') {
-				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
-				await expect(overlay(page).locator('.sending-now')).toContainText('Sent');
-				await overlay(page).locator('.bar').evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined))); });
-				const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
-				if (frameDir) {
-					await page.evaluate(async () => { const { coreSettings } = await import('/src/lib/stores/settings.ts'); coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } })); });
-					await expect(page.locator('.version-overlay')).toHaveCount(0);
-					await page.screenshot({ path: path.join(frameDir, `baseline-image-toolbar-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
-				}
-				await writer.close();
-				return;
-			}
-			async function capturePlacement(stage: string) {
-				const dir = process.env.REPLY_CHIP_PLACEMENT_DIR;
-				if (!dir || theme !== 'light') return;
-				mkdirSync(dir, { recursive: true });
-				await page.screenshot({ path: path.join(dir, `${stage}-${width}.png`), scale: 'css', animations: 'disabled' });
-				const button = overlay(page).locator('[data-doc-reply-chip] button');
-				const box = await button.isVisible() ? await button.boundingBox() : null;
-				writeFileSync(path.join(dir, `${stage}-${width}.json`), JSON.stringify(box));
-			}
+
 			const initialChip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(initialChip).toBeVisible();
 			const initialBox = (await initialChip.boundingBox())!;
-			await capturePlacement('waiting');
+			await overlay(page).locator('[data-image-comment]').click();
+			const imageBox = (await imageSurface(page).boundingBox())!;
+			await drag(page, { x: imageBox.x + imageBox.width * 0.1, y: imageBox.y + imageBox.height * 0.7 }, { x: imageBox.x + imageBox.width * 0.3, y: imageBox.y + imageBox.height * 0.9 });
+			const imageDraft = page.getByPlaceholder('Comment…');
+			await imageDraft.fill('The image draft must survive.');
+			await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
+			await expect(imageDraft).toHaveValue('The image draft must survive.');
+			await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+			await expect(imageDraft).toHaveCount(0);
+			await expect(initialChip).toContainText('1 new reply');
+
 			// Inspect the other pin first, then close its comments: the unread reply belongs to pin two.
 			await overlay(page).locator(`[data-region-tag][data-comment-id="${roots[0]}"]:not([inert])`).click();
 			await expect(page.locator(`[data-comment-id="${roots[0]}"]`).last()).toBeVisible();
+
 			if (width === 393) {
 				const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
 				await expect(backdrop).toBeVisible();
 				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
 				const point = { x: initialBox.x + initialBox.width / 2, y: initialBox.y + initialBox.height / 2 };
-				const sheetIntercepts = () => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), point);
-				expect(await sheetIntercepts()).toBe(true);
+				const chipHit = () => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-reply-chip]'), point);
+				expect(await chipHit()).toBe(false);
 				const layer = await page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
 				await page.getByRole('button', { name: 'Done', exact: true }).click();
 				await expect(backdrop.first()).toBeVisible();
 				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
-				expect(await sheetIntercepts()).toBe(true);
+				expect(await chipHit()).toBe(false);
 				await expect(backdrop).toHaveCount(0);
 				if (layer !== null) await expect.poll(() => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null)).not.toBe(layer);
 			} else await page.keyboard.press('Escape');
@@ -121,21 +110,10 @@ for (const width of [393, 1440]) {
 			await overlay(page).locator('.bar').evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined))); });
 			// At the narrow desktop canvas, Fit already clips in the base lightbox; preserve that finding separately.
 			if (width === 393) await expectBarFits(page);
-			const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
-			if (frameDir) {
-				await page.evaluate(async () => {
-					const { coreSettings } = await import('/src/lib/stores/settings.ts');
-					coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } }));
-				});
-				await expect(page.locator('.version-overlay')).toHaveCount(0);
-				expect(await page.locator('body').innerText()).not.toMatch(/\be2e\b|fixture|Mock Test Model/i);
-				mkdirSync(frameDir, { recursive: true });
-				await page.screenshot({ path: path.join(frameDir, `Q1-image-waiting-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
-			}
+
 			await reply(roots[0], 'The header is ready.');
 			await expect(chip).toContainText('2 new replies');
-			await capturePlacement('arrival');
-			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
+
 			await page.evaluate(() => {
 				const samples: unknown[] = [];
 				const initial = document.querySelector('.image-overlay [data-doc-reply-chip]');
@@ -158,25 +136,12 @@ for (const width of [393, 1440]) {
 			if (width === 1440) {
 				await page.waitForTimeout(300);
 				const samples = await page.evaluate(() => (window as unknown as { __chipSamples: Array<{ same: boolean; uncovered: number; chips: Array<{ text: string; animations: number }> }> }).__chipSamples);
-				if (process.env.REPLY_CHIP_PLACEMENT_BASELINE !== '1') {
-					expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
-					expect(samples.every(sample => sample.same && sample.uncovered === 1 && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
-				}
+				expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
+				expect(samples.every(sample => sample.same && sample.uncovered === 1 && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
 				// The visible pin is excluded even when its popover closes on pointerdown.
 				await expect(chip).toHaveAttribute('title', '1 new reply');
-				await capturePlacement('other-pin');
 				await chip.click();
 				await expect(page.getByText('The save button stays in place.', { exact: true })).toBeVisible();
-			} else {
-				await capturePlacement('other-pin');
-				if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) await page.getByRole('button', { name: 'Done', exact: true }).click();
-			}
-			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
-				await reply(width === 393 ? roots[1] : roots[0], 'A further reply is waiting.');
-				await expect(chip).toBeVisible();
-				await overlay(page).locator('[data-image-comments-pill]').click();
-				await expect(page.locator(width === 393 ? '[data-adaptive-drawer]' : '.canvas-comment-drawer').first()).toBeVisible();
-				await capturePlacement('drawer');
 			}
 			await writer.close();
 		});

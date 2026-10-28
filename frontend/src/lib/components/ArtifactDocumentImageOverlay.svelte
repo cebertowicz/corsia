@@ -2,6 +2,8 @@
 	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
+	import DocBottomBand from './DocBottomBand.svelte';
+	import { docComments, hasNewReplies } from '$lib/stores/docComments';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import type { DocumentImageComments } from '$lib/docViewerImages';
@@ -18,6 +20,14 @@
 		onReplyStep: (excludeId?: string) => void;
 	} = $props();
 
+	let hasDraft = $state(false);
+	let sheetUp = $state(false);
+	let selectedThread = $state<string | null>(null);
+	let loaded = $state(false);
+	const unread = $derived(comments?.artifactId
+		? ($docComments[comments.artifactId] ?? []).filter((comment) => hasNewReplies(comment) && comment.id !== selectedThread)
+		: []);
+
 	// Back, Escape, another tab, a collapsed canvas or another thread all end this overlay: each is this one send of
 	// the image comments the viewer still holds.
 	leaveImageOnExit(() => ({ feedback: comments?.feedback, artifactId: comments?.artifactId, key: target.instanceId }));
@@ -26,7 +36,7 @@
 <div class="image-overlay">
 	<!-- Keyed on the tab and the image, so opening another one starts its comments afresh, and another tab's (even
 	     of the same image) starts at that tab's own camera. -->
-	{#key `${target.instanceId}\u0000${image.src}`}
+	{#key `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
 		{#if comments}
 			<ImageCommentLightbox
 				src={image.src}
@@ -36,7 +46,10 @@
 				readOnly={comments.readOnly}
 				docName={target.name}
 				{onBack}
-				{onReplyStep}
+				bind:hasDraft
+				bind:sheetUp
+				bind:selectedThread
+				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
 					post: (region, text) => comments.post(image.from, image.to, region, text),
@@ -51,6 +64,9 @@
 			<ImageLightbox src={image.src} alt={image.alt} docName={target.name} {onBack} {place} {onPlace} />
 		{/if}
 	{/key}
+	{#if comments}
+		<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+	{/if}
 </div>
 
 <style>

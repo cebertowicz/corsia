@@ -328,7 +328,7 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
-	{#if target}<DocBottomBand artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetModalOpen} onStep={() => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.step(); }} />{/if}
+	{#if target}<DocBottomBand artifactId={loadedArtifactId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetUp} onStep={() => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.step(); }} />{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
@@ -354,7 +354,7 @@
 		{onDocumentPlace}
 		saveError={save.error}
 		pendingSel={draftController.pending}
-		commentSheetOpen={commentUI.sheetModalOpen}
+		commentSheetOpen={commentUI.sheetUp}
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface
@@ -386,7 +386,7 @@
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
-		onSheetModalChange={(open) => commentUI.sheetModalOpen = open}
+		onSheetModalChange={(open) => commentUI.sheetUp = open}
 		onRevealDraft={revealDraft}
 		images={images.groups}
 		{covered}
