@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.rule_worker_helpers import OWNER, atool, fenced, run_scripts, settle_all, starts, world, worker_events  # noqa: F401
+from tests.rule_worker_helpers import OWNER, atool, fenced, owner_wakes, run_scripts, settle_all, starts, world, worker_events  # noqa: F401
+from tests.test_rule_workers_local_only import local_model  # noqa: F401
 
 
 @pytest.fixture
@@ -282,6 +283,36 @@ async def test_script_cannot_forge_platform_origin(screen, monkeypatch, forged):
         [event] = seen
         assert event['origin'] == 'emitter'
         await settle_all()
+
+
+@pytest.mark.asyncio
+async def test_local_only_screen_refuses_unloaded_model_and_cleans_staging(screen, local_model, monkeypatch):
+    from unittest.mock import AsyncMock
+    from automation import worker_runner
+    from infra.database import get_db, write_transaction
+    from infra.db_async import run_in_db
+    from tools import delegate_task
+
+    def restrict_owner():
+        with write_transaction(None, scope='screen_local_only') as db:
+            db.execute('UPDATE threads SET local_only=1 WHERE id=?', (OWNER,))
+
+    await run_in_db(restrict_owner)
+    local_model['status'] = 'available'
+    spawn = AsyncMock()
+    monkeypatch.setattr(delegate_task, '_spawn', spawn)
+    await _route(screen['state']['sha'])
+    await run_scripts()
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _, worker)] = starts(screen['key'] + '_start')
+    assert outcome == 'refused' and worker is None
+    assert reason == 'your model Local Qwen is not loaded. Load it, or choose a local model that is loaded.'
+    assert any(reason in wake for wake in owner_wakes())
+    assert not get_db().execute('SELECT 1 FROM threads WHERE spawned_by=?', (OWNER,)).fetchone()
+    spawn.assert_not_awaited()
+    assert not list((screen['folder'] / 'staging').glob('screen-*'))
+    result = next(a['facts'] for a in screen['state']['admitted'] if a['event_type'] == 'worker.no_result')
+    assert result['valid'] is False and result['item_version'] == screen['state']['sha']
 
 
 @pytest.mark.asyncio

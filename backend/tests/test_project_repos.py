@@ -1305,6 +1305,7 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "run_in_db", _run_in_thread)
     monkeypatch.setattr(project_repos, "get_db", _connection)
     monkeypatch.setattr(project_repos, "_sync", lambda *_args: None)
+    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
     monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
 
     first = asyncio.create_task(

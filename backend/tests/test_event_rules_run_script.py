@@ -139,7 +139,7 @@ def test_a_matching_rule_runs_the_script_once_with_the_event_and_explain_and_lis
     _sweep()  # nothing is left to run
 
     assert runs["calls"] == [("once.sh", {"type": "qa.route", "id": event_id, "rule_id": rule["id"],
-                                           "facts": {"code": "ok"}})]
+                                           "facts": {"code": "ok"}, "origin": "agent"})]
     assert _outcomes(rule["id"]) == [("ran", None)]
     explained = json.loads(_tool(OWNER, operation="explain", event_id=event_id))["decisions"]
     assert [(d["outcome"], d["explanation"]) for d in explained] == [
