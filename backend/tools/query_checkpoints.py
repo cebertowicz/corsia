@@ -148,13 +148,15 @@ class GetCheckpointsTool(Tool):
         # Authorization identity is the backend-injected calling thread, never
         # the caller-supplied thread_id: that argument is a filter, and letting
         # it stand in for identity would let a model name whose data it reads.
-        caller = kwargs.get("_thread_id")
-        if not isinstance(caller, str) or not caller:
+        from infra.thread_confinement import Reader
+
+        reader = Reader.from_tool(kwargs)
+        if not reader.thread_id:
             return (
                 "Error: get_checkpoints could not resolve the calling thread, "
                 "so it cannot authorize a read."
             )
-        target = thread_id or caller
+        target = thread_id or reader.thread_id
         if not checkpoint_id and not isinstance(target, str):
             return "Error: get_checkpoints requires a thread or a checkpoint_id"
 
@@ -165,12 +167,12 @@ class GetCheckpointsTool(Tool):
                     return get_checkpoint(
                         db,
                         checkpoint_id,
-                        caller_thread_id=caller,
+                        reader=reader,
                         offset_bytes=offset_bytes,
                         limit_bytes=limit_bytes,
                     )
                 return recent_checkpoints(
-                    db, str(target), caller_thread_id=caller, limit=limit
+                    db, str(target), reader=reader, limit=limit
                 )
             finally:
                 db.close()

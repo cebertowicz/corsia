@@ -11,6 +11,7 @@ import sqlite3
 from loguru import logger as log
 
 from infra.checkpoint_entry_index import NO_REVISION
+from infra.thread_confinement import Reader, hidden_clause
 from memory.checkpoint_search_entries import build_entry_hit, continuity_entries
 
 
@@ -30,13 +31,13 @@ def entry_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
-    caller_thread_id: str | None = "",
+    reader: Reader = Reader.agent(),
 ) -> list[dict]:
     """Return entry rows for an already-built FTS5 ``match`` expression."""
     return hydrate_entry_rows(
         db,
         entry_rank_rows_matching(
-            db, match, user_id, thread_id, candidate_limit, per_thread, caller_thread_id
+            db, match, user_id, thread_id, candidate_limit, per_thread, reader
         ),
     )
 
@@ -48,7 +49,7 @@ def entry_rank_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
-    caller_thread_id: str | None = "",
+    reader: Reader = Reader.agent(),
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
@@ -58,7 +59,8 @@ def entry_rank_rows_matching(
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
-    params.extend((user_id, caller_thread_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
+    visible, identity = hidden_clause(reader, "thread")
+    params.extend((user_id, *identity, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
     # winners. Carrying them through the sorts cost more than the FTS match.
@@ -73,7 +75,7 @@ def entry_rank_rows_matching(
         "  JOIN threads AS thread ON thread.id = entry.thread_id "
         "  WHERE checkpoint_entry_search_fts MATCH ? "
         f"    {scope}"
-        "    AND thread.user_id = ? AND (? IS NULL OR thread.confinement IS NULL OR thread.id = ?)"
+        f"    AND thread.user_id = ? AND {visible}"
         "), revisions AS ("
         "  SELECT *, ROW_NUMBER() OVER ("
         "      PARTITION BY thread_id, history_epoch, entry_id "

@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from infra.thread_confinement import Reader
+
 from delegation_fixtures import deleg_db  # noqa: F401
 from checkpoint_retrieval_fixtures import _install_checkpoint, fresh_db  # noqa: F401
 from tests.child_parent_notice_helpers import db as notice_db, delegated, wakes  # noqa: F401
@@ -82,9 +84,9 @@ def test_search_filters_before_limit_and_self_can_read(deleg_db, with_fts):
         deleg_db.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content)")
         deleg_db.execute("INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages")
     deleg_db.commit()
-    rows = search_messages_fts(deleg_db, CANARY, limit=1, caller_thread_id="sender-self")
+    rows = search_messages_fts(deleg_db, CANARY, limit=1, reader=Reader.agent("sender-self"))
     assert [row["id"] for row in rows] == ["ok"]
-    rows = search_messages_fts(deleg_db, CANARY, limit=10, caller_thread_id="isolated")
+    rows = search_messages_fts(deleg_db, CANARY, limit=10, reader=Reader.agent("isolated"))
     assert {row["id"] for row in rows} == {"ok", "tool-row"}
 
 
@@ -93,11 +95,11 @@ def test_finished_result_rejects_intermediate_and_running(deleg_db):
 
     seed(deleg_db)
     add_final(deleg_db)
-    assert agent_result(deleg_db, "isolated", confined=True) is None
+    assert agent_result(deleg_db, "isolated") is None
     deleg_db.execute("UPDATE active_turns SET status='completed' WHERE id='isolated-turn'")
-    assert agent_result(deleg_db, "isolated", confined=True)["content"] == CANARY
+    assert agent_result(deleg_db, "isolated")["content"] == CANARY
     deleg_db.execute("UPDATE messages SET metadata=? WHERE id='final-row'", (json.dumps({"turn_id": "isolated-turn", "llm_tool_calls": [{"id": "x"}]}),))
-    assert agent_result(deleg_db, "isolated", confined=True) is None
+    assert agent_result(deleg_db, "isolated") is None
 
 
 @pytest.mark.asyncio
@@ -144,13 +146,13 @@ def test_checkpoint_search_and_reads_exclude_confined_child(fresh_db):
     fresh_db.execute("UPDATE threads SET confinement='untrusted' WHERE id='t1'")
     fresh_db.execute("INSERT INTO threads (id,user_id,title) SELECT 'parent',user_id,'Parent' FROM threads WHERE id='t1'")
     checkpoint = _install_checkpoint(fresh_db, thread_id="t1", narrative=CANARY)
-    assert search_checkpoints(fresh_db, CANARY, caller_thread_id="parent") == []
+    assert search_checkpoints(fresh_db, CANARY, reader=Reader.agent("parent")) == []
     _install_checkpoint(fresh_db, thread_id="parent", narrative=CANARY)
-    matches = search_checkpoints(fresh_db, CANARY, caller_thread_id="parent", limit=1)
+    matches = search_checkpoints(fresh_db, CANARY, reader=Reader.agent("parent"), limit=1)
     assert len(matches) == 1 and matches[0]["thread_id"] == "parent"
-    assert recent_checkpoints(fresh_db, "t1", caller_thread_id="parent") == []
-    assert CANARY not in json.dumps(get_checkpoint(fresh_db, checkpoint, caller_thread_id="parent"))
-    assert CANARY in json.dumps(get_checkpoint(fresh_db, checkpoint, caller_thread_id="t1"))
+    assert recent_checkpoints(fresh_db, "t1", reader=Reader.agent("parent")) == []
+    assert CANARY not in json.dumps(get_checkpoint(fresh_db, checkpoint, reader=Reader.agent("parent")))
+    assert CANARY in json.dumps(get_checkpoint(fresh_db, checkpoint, reader=Reader.agent("t1")))
 
 
 def test_parent_completion_and_plan_return_label_finished_result(deleg_db):
@@ -176,7 +178,7 @@ def test_error_notice_does_not_expose_worker_error(notice_db):
     notice_db.execute("UPDATE threads SET confinement='untrusted' WHERE id='worker'")
     notify_turn_error(notice_db, "worker", error=CANARY)
     assert CANARY not in json.dumps([dict(row) for row in wakes(notice_db)])
-    assert "untrusted agent's turn failed" in str(wakes(notice_db)[0]["content"])
+    assert "Couldn't finish this untrusted agent's turn." in str(wakes(notice_db)[0]["content"])
 
 
 @pytest.mark.asyncio
@@ -194,9 +196,12 @@ async def test_untrusted_thread_title_is_never_generated(deleg_db, monkeypatch):
 
 
 def test_unconfined_agent_read_is_unchanged():
-    from infra.thread_confinement import restrict_agent_read
+    from infra.thread_confinement import may_read_transcript
 
-    assert not restrict_agent_read(None, "child", "parent")
-    assert not restrict_agent_read("untrusted", "child", None)
-    assert not restrict_agent_read("untrusted", "child", "child")
-    assert restrict_agent_read("untrusted", "child", "parent")
+    thread = {"id": "child", "confinement": "untrusted"}
+    assert may_read_transcript(Reader.agent("parent"), {**thread, "confinement": None})
+    assert may_read_transcript(Reader.person(), thread)
+    assert may_read_transcript(Reader.agent("child"), thread)
+    assert not may_read_transcript(Reader.agent("parent"), thread)
+    assert not may_read_transcript(Reader.from_tool({}), thread)
+    assert not may_read_transcript(Reader.from_user({"token_kind": "internal"}), thread)

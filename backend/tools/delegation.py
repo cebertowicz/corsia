@@ -15,7 +15,7 @@ from infra.thread_input_types import held_admission_line
 from llm.delegation_model import dispatch_scope, eligible_delegation_model
 from tools.base import Tool
 from tools.delegation_completion import resolve_child_turn_for_parent
-from tools.delegation_status_read import read_delegate_status
+from infra.delegation_status import read_delegate_status
 
 
 def _clean(value: Any) -> str | None:
@@ -345,11 +345,11 @@ class DelegateStatusTool(Tool):
         if isinstance(context, str):
             return context
         _current_id, current = context
-        from infra.runtime_truth import read_runtime_truth
-
+        from infra.thread_confinement import Reader, read_runtime_for
+        reader = Reader.from_tool(kwargs)
         n = max(0, min(int(messages or 0), 50))
         result = await run_in_db(
-            read_delegate_status, thread_id, current["user_id"], n, _current_id
+            read_delegate_status, thread_id, current["user_id"], n, reader
         )
         if result is None:
             return f"Error: Thread not found: {thread_id}"
@@ -358,9 +358,8 @@ class DelegateStatusTool(Tool):
         model_switch = model_switch_status(thread_row)
         requested_checkpoint_id = _clean(checkpoint_id)
         requested_operation_id = _clean(operation_id)
-        truth = await read_runtime_truth(
-            thread_id,
-            thread_row,
+        truth = await read_runtime_for(
+            reader, thread_id, thread_row,
             active_turn=active,
             conductor_scopes=conductor_scopes,
         )

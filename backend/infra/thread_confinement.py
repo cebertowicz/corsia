@@ -11,74 +11,220 @@ it could be the one that said ``untrusted``.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
 
 ISOLATED_RESULT_LABEL = "from an untrusted agent; contains outside content"
+UNTRUSTED_TURN_ERROR = "Couldn't finish this untrusted agent's turn."
 
 
-def restricted_read_notice() -> str:
-    """Explain where another agent can find the shared result."""
-    return "This is an untrusted agent's thread. Only its final result is shared, through delegate_status."
+@dataclass(frozen=True)
+class Reader:
+    """Authenticated read identity; an unresolved agent never becomes a person."""
+
+    is_person: bool = False
+    thread_id: str | None = None
+
+    @classmethod
+    def person(cls) -> Reader:
+        return cls(is_person=True)
+
+    @classmethod
+    def agent(cls, thread_id: str | None = None) -> Reader:
+        return cls(thread_id=thread_id if isinstance(thread_id, str) and thread_id else None)
+
+    @classmethod
+    def from_tool(cls, context: dict) -> Reader:
+        return cls.agent(context.get("_thread_id"))
+
+    @classmethod
+    def from_user(cls, user: dict) -> Reader:
+        return cls.agent(user.get("thread_id")) if user.get("token_kind") == "internal" else cls.person()
 
 
-def agent_caller(user: dict) -> str | None:
-    """Identify an in-process agent; None denotes the person's API view."""
-    return (user.get("thread_id") or "") if user.get("token_kind") == "internal" else None
+@dataclass(frozen=True)
+class RestrictedRead:
+    """The same denied transcript result at the tool and API boundaries."""
+
+    reason: str = (
+        "This is an untrusted agent's thread. Only its final result is shared, through delegate_status."
+    )
+
+    def payload(self) -> dict:
+        return {"restricted": True, "restriction_reason": self.reason}
 
 
-def restrict_agent_read(mode: object, thread_id: str, caller_thread_id: str | None) -> bool:
-    """Whether an agent must not read this thread's intermediate content.
+RESTRICTED_READ = RestrictedRead()
 
-    A None caller denotes the person's own API view; tool callers must pass their
-    backend-injected thread id (or an empty string if it cannot be resolved).
-    Any non-null confinement is treated as restricted if its record is damaged.
-    """
-    return caller_thread_id is not None and caller_thread_id != thread_id and mode is not None
+
+def may_read_transcript(reader: Reader, thread_row) -> bool:
+    """A damaged confinement is restricted too; only the person and self bypass it."""
+    return reader.is_person or thread_row["confinement"] is None or reader.thread_id == thread_row["id"]
+
+
+def hidden_clause(reader: Reader, alias: str = "") -> tuple[str, tuple]:
+    """The SQL equivalent of may_read_transcript, applied before ranking/limits."""
+    if alias and not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", alias):
+        raise ValueError("invalid thread alias")
+    prefix = f"{alias}." if alias else ""
+    return f"(? OR {prefix}confinement IS NULL OR {prefix}id = ?)", (reader.is_person, reader.thread_id)
+
+
+def transcript_restriction(reader: Reader, thread_row) -> RestrictedRead | None:
+    return None if may_read_transcript(reader, thread_row) else RESTRICTED_READ
+
+
+def read_restriction(db: sqlite3.Connection, reader: Reader, thread_id: str) -> RestrictedRead | None:
+    """Resolve the same rule for an id-addressed read with its own ownership check."""
+    row = db.execute("SELECT id,confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+    return transcript_restriction(reader, row) if row is not None else None
+
+
+def project_thread(reader: Reader, thread_row) -> dict:
+    """Keep status facts while withholding transcript-derived thread fields."""
+    item = dict(thread_row)
+    if not may_read_transcript(reader, item):
+        item["title"] = None
+        for key in ("switch_error", "last_message"):
+            if key in item:
+                item[key] = None
+    return item
+
+
+def checkpoint_for_reader(reader: Reader, thread_row, checkpoint) -> dict | None:
+    """Keep checkpoint progress facts while withholding its private narrative/error."""
+    if checkpoint is None:
+        return None
+    status = {"id": checkpoint.id, "status": checkpoint.status, "started_at": checkpoint.started_at}
+    if may_read_transcript(reader, thread_row):
+        status.update(trigger=checkpoint.trigger, mode=checkpoint.mode,
+                      writer_model=checkpoint.writer_model, error=checkpoint.error)
+    return status
+
+
+def _shared_error(error: str | None) -> str | None:
+    from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
+
+    if not error or is_provider_usage_or_quota_limit(error):
+        return error
+    return UNTRUSTED_TURN_ERROR
 
 
 def worker_error_for_agent(db: sqlite3.Connection, thread_id: str, error: str) -> str:
-    """Redact an unclassified error when the agent is untrusted."""
-    row = db.execute("SELECT confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
-    if row and restrict_agent_read(row[0], thread_id, ""):
-        return "untrusted agent's turn failed"
-    return error
+    """Only unclassified worker text is private; provider refusals keep their meaning."""
+    row = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+    return _shared_error(error) if row and not may_read_transcript(Reader.agent(), row) else error
 
 
-def agent_result(
-    db: sqlite3.Connection, thread_id: str, *, turn_id: str | None = None, confined: bool = False,
-) -> dict | None:
-    """Select an agent's reply, applying the completed-answer boundary when confined."""
-    if confined:
-        turn = db.execute(
-            "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
-            (thread_id,),
-        ).fetchone()
-        if turn is None or turn[1] != "completed" or (turn_id is not None and turn[0] != turn_id):
-            return None
-        turn_id = turn[0]
-    where = "thread_id=?"
+def project_runtime(reader: Reader, thread_row, truth: dict) -> dict:
+    """Project liveness in the same place for all agent status readers."""
+    if may_read_transcript(reader, thread_row):
+        return truth
+    result = dict(truth)
+    if result.get("last_turn") is not None:
+        result["last_turn"] = {**result["last_turn"], "error": _shared_error(result["last_turn"].get("error"))}
+    return result
+
+
+async def read_runtime_for(reader: Reader, thread_id: str, thread_row, **kwargs) -> dict:
+    from infra.runtime_truth import read_runtime_truth
+
+    return project_runtime(reader, thread_row, await read_runtime_truth(thread_id, thread_row, **kwargs))
+
+
+def label_result(text: str, *, tail_chars: int | None = None) -> str:
+    """Cap the answer before adding provenance, so every return retains the label."""
+    text = text.strip()
+    if tail_chars is not None and len(text) > tail_chars:
+        text = "…" + text[-tail_chars:]
+    return f"{ISOLATED_RESULT_LABEL}\n\n{text}"
+
+
+def agent_result(db: sqlite3.Connection, thread_id: str, *, turn_id: str | None = None) -> dict | None:
+    """The shared answer: a delivered assistant reply from the newest completed turn.
+
+    Unconfined legacy transcripts may lack turn metadata; their existing start-time
+    bound is applied here too, rather than independently by each delivery path.
+    """
+    thread = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+    confined = thread is not None and not may_read_transcript(Reader.agent(), thread)
+    turn = db.execute(
+        "SELECT id, status, started_at FROM active_turns WHERE thread_id=? "
+        + ("AND status='completed' " if confined else "")
+        + "ORDER BY turn_order DESC LIMIT 1", (thread_id,),
+    ).fetchone()
+    if confined and (turn is None or (turn_id is not None and turn["id"] != turn_id)):
+        return None
+    where = "thread_id=? AND role='assistant' AND length(trim(content))>0 AND delivery_state='delivered'"
     params: list = [thread_id]
-    if confined or turn_id is None:
+    if confined:
+        turn_id = turn["id"]
+        where += (
+            " AND seq IS NOT NULL AND json_valid(metadata)"
+            " AND COALESCE(json_extract(metadata, '$.llm_tool_calls'),'[]') IN ('[]','{}',0,'')"
+            " AND COALESCE(json_extract(metadata, '$.tool_calls'),'[]') IN ('[]','{}',0,'')"
+            " AND COALESCE(json_extract(metadata, '$.step_type'),'')<>'tool_calls'"
+        )
+    elif turn_id is None:
         where += " AND seq IS NOT NULL"
     if turn_id is not None:
         where += " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?"
         params.append(turn_id)
-    if not confined:
-        where += " AND role='assistant' AND length(trim(content))>0"
     row = db.execute(
-        "SELECT id, role, content, metadata, created_at FROM messages WHERE " + where
+        "SELECT id, role, content, created_at FROM messages WHERE " + where
         + " ORDER BY seq DESC, rowid DESC LIMIT 1", params,
     ).fetchone()
-    if row is None or row[1] != "assistant" or not str(row[2] or "").strip():
+    if row is None:
         return None
-    if confined:
-        metadata = json.loads(row[3])
-        if metadata.get("llm_tool_calls") or metadata.get("tool_calls") or metadata.get("step_type") == "tool_calls":
+    if not confined and turn_id is None and turn is not None:
+        def instant(value):
+            parsed = datetime.fromisoformat(str(value))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        if instant(row["created_at"]) < instant(turn["started_at"]):
             return None
-    return {"id": row[0], "role": "assistant", "content": str(row[2]), "created_at": row[4]}
+    return dict(row)
+
+
+def internal_route_restriction(reader: Reader, user_id: str, route, scope: dict) -> RestrictedRead | None:
+    """Guard resolved internal API reads, including future buffer/context endpoints.
+
+    Status is the one projected read; it returns the labelled completed result.
+    Other explicit thread/message/checkpoint reads share the transcript decision.
+    """
+    if scope["method"] != "GET" or route.path == "/api/delegation/threads/{thread_id}/status":
+        return None
+    from urllib.parse import parse_qs
+    from infra.database import get_db
+
+    _, matched = route.matches(scope)
+    targets = {**parse_qs(scope.get("query_string", b"").decode()), **matched.get("path_params", {})}
+    db = get_db()
+    try:
+        for key, value in targets.items():
+            values = value if isinstance(value, list) else [value]
+            for target_id in values:
+                if "thread" in key:
+                    row = db.execute(
+                        "SELECT id,confinement FROM threads WHERE id=? AND user_id=?", (target_id, user_id),
+                    ).fetchone()
+                elif "checkpoint" in key or "message" in key:
+                    table = "checkpoints" if "checkpoint" in key else "messages"
+                    row = db.execute(
+                        f"SELECT t.id,t.confinement FROM {table} item JOIN threads t ON t.id=item.thread_id "
+                        "WHERE item.id=? AND t.user_id=?", (target_id, user_id),
+                    ).fetchone()
+                else:
+                    continue
+                if row is not None and not may_read_transcript(reader, row):
+                    return RESTRICTED_READ
+        return None
+    finally:
+        db.close()
 
 
 class ConfinementRecordDamaged(ValueError):

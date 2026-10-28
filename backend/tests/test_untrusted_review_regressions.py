@@ -7,6 +7,7 @@ from delegation_fixtures import deleg_db  # noqa: F401
 from checkpoint_retrieval_fixtures import _install_checkpoint, fresh_db  # noqa: F401
 from tests.child_parent_notice_helpers import db as notice_db, delegated, wakes  # noqa: F401
 from tests.test_untrusted_transcript_disclosure import add_final, seed
+from infra.thread_confinement import Reader
 
 
 @pytest.mark.asyncio
@@ -47,7 +48,7 @@ def test_distinct_untrusted_errors_remain_distinct_wakes(notice_db):
     notify_turn_error(notice_db, "worker", error="second private error")
     results = wakes(notice_db)
     assert len(results) == 2
-    assert all("untrusted agent's turn failed" in row["content"] for row in results)
+    assert all("Couldn't finish this untrusted agent's turn." in row["content"] for row in results)
     assert "private error" not in json.dumps([dict(row) for row in results])
 
 
@@ -58,7 +59,7 @@ def test_checkpoint_entry_defaults_fail_closed(fresh_db):
     _install_checkpoint(fresh_db, thread_id='t1', narrative='note', continuity=[{'statement': 'needle'}])
     for search in (entry_rank_rows_matching, entry_rows_matching):
         assert search(fresh_db, 'needle', 'u', None, 20, 3) == []
-        assert search(fresh_db, 'needle', 'u', None, 20, 3, 't1')
+        assert search(fresh_db, 'needle', 'u', None, 20, 3, Reader.agent('t1'))
 
 
 def test_untrusted_plan_reply_keeps_tail_cap(deleg_db):

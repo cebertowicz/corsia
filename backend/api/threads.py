@@ -48,18 +48,18 @@ async def list_threads(token: str, archived: int = 0):
         # sets it, because every child it creates is a hidden subagent.
         # AP2 forbids re-introducing a semantic classification column that
         # could resurrect the old divergence.
-        from infra.thread_confinement import agent_caller
+        from infra.thread_confinement import Reader, hidden_clause, project_thread
 
-        caller = agent_caller(user)
+        reader = Reader.from_user(user)
+        visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
-               (? IS NOT NULL AND s.confinement IS NOT NULL AND s.id <> ?) AS read_restricted,
-               CASE WHEN ? IS NULL OR s.confinement IS NULL OR s.id = ? THEN
+               CASE WHEN {visible} THEN
                  (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
                END as last_message
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params: list = [caller, caller, caller, caller, user["id"]]
+        params: list = [*identity, user["id"]]
         if conductor_ids:
             sql += f" AND s.id NOT IN ({','.join('?' * len(conductor_ids))})"
             params.extend(conductor_ids)
@@ -69,9 +69,7 @@ async def list_threads(token: str, archived: int = 0):
         rows = fetch_all(db, sql, params)
         projected = []
         for row in rows:
-            item = dict(row)
-            if item.pop("read_restricted"):
-                item["title"] = None
+            item = project_thread(reader, row)
             item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
             projected.append(item)
         try:

@@ -121,15 +121,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    from infra.thread_confinement import ISOLATED_RESULT_LABEL, agent_result, restrict_agent_read
+    from infra.thread_confinement import Reader, agent_result, label_result, may_read_transcript
 
-    mode = db.execute("SELECT confinement FROM threads WHERE id=?", (child_id,)).fetchone()[0]
-    confined = restrict_agent_read(mode, child_id, str(parent))
-    answer = agent_result(db, child_id, turn_id=turn_id, confined=confined)
+    thread = db.execute("SELECT id, confinement FROM threads WHERE id=?", (child_id,)).fetchone()
+    confined = not may_read_transcript(Reader.agent(str(parent)), thread)
+    answer = agent_result(db, child_id, turn_id=turn_id)
     if answer is None:
         return None
-    label = f"{ISOLATED_RESULT_LABEL}\n\n" if confined else ""
-    content = f"{PARENT_COMPLETION_HEADING}\n\n{label}{str(answer['content']).strip()}"
+    text = label_result(answer["content"]) if confined else str(answer["content"]).strip()
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{text}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))

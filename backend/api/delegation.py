@@ -344,15 +344,17 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
 
     n = max(0, min(messages, 50))
 
-    from api.thread_status_read import read_status
+    from infra.delegation_status import read_delegate_status
+    from infra.thread_confinement import Reader, read_runtime_for
 
-    result = await run_in_db(read_status, thread_id, user, n)
+    reader = Reader.from_user(user)
+    result = await run_in_db(read_delegate_status, thread_id, user["id"], n, reader, person_messages=True)
     if result is None:
         raise HTTPException(404, "Thread not found")
-    thread_row, active, conductor_scopes, recent = result
+    thread_row, active, conductor_scopes, recent, _checkpoint = result
 
-    truth = await read_runtime_truth(
-        thread_id, thread_row,
+    truth = await read_runtime_for(
+        reader, thread_id, thread_row,
         active_turn=active,
         conductor_scopes=conductor_scopes,
     )

@@ -297,28 +297,18 @@ FINAL_REPLY_CHARS = 2000
 
 
 def turn_reply(connection, worker: str):
-    """What the worker said as its last words this Turn: ``{id, text}``, or None.
+    """The shared final answer, with the return's existing tail budget."""
+    from infra.thread_confinement import Reader, agent_result, label_result, may_read_transcript
 
-    The latest non-empty assistant message, only if the worker's latest Turn
-    began before it: an older reply may be a question already answered. Not
-    every harness passes its Turn id here, so the bound is that Turn's start.
-    The question or result usually ends the reply, so the tail is what travels.
-    """
-    from infra.thread_confinement import ISOLATED_RESULT_LABEL, agent_result, restrict_agent_read
-
-    thread = connection.execute("SELECT confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    confined = bool(thread and restrict_agent_read(thread[0], worker, ""))
-    last = agent_result(connection, worker, confined=confined)
-    turn = latest_turn(connection, worker)
-    if last is None or (
-        not confined and turn is not None and instant(last["created_at"]) < instant(turn["started_at"])
-    ):
+    last = agent_result(connection, worker)
+    if last is None:
         return None
+    thread = connection.execute("SELECT id, confinement FROM threads WHERE id=?", (worker,)).fetchone()
     text = str(last["content"]).strip()
-    if len(text) > FINAL_REPLY_CHARS:
+    if thread is not None and not may_read_transcript(Reader.agent(), thread):
+        text = label_result(text, tail_chars=FINAL_REPLY_CHARS)
+    elif len(text) > FINAL_REPLY_CHARS:
         text = "…" + text[-FINAL_REPLY_CHARS:]
-    if confined:
-        text = f"{ISOLATED_RESULT_LABEL}\n\n{text}"
     return {"id": str(last["id"]), "text": text}
 
 
