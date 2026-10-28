@@ -108,9 +108,51 @@ async def _password_inputs(cdp: CdpClient) -> set[int]:
     inputs = set()
     for node_id in found.get("nodeIds", []):
         node = (await cdp.call("DOM.describeNode", nodeId=protocol_int(node_id), depth=0)).get("node", {})
-        if _is_password_input(node):
+        if _is_password_input(node) and not await _display_secret(cdp, node):
             inputs.add(protocol_int(node.get("backendNodeId")))
     return inputs
+
+
+async def _display_secret(cdp: CdpClient, node: dict) -> bool:
+    """Recognize display-only fields from attributes and nearby controls, never field values.
+
+    Incomplete ancestry or a CDP failure leaves the field guarded. The reveal signal is a
+    sibling control with a show/reveal label; an autofilled sign-in form remains guarded.
+    """
+    flat = node.get("attributes") or []
+    names = {str(name).lower() for name in flat[::2]}
+    if names & {"readonly", "disabled"}:
+        return True
+    parent = node.get("parentId")
+    if not isinstance(parent, int):
+        return False
+    try:
+        reveal = await cdp.call(
+            "DOM.querySelectorAll", nodeId=parent,
+            selector=":scope > :is(button, input, [role=button]):is([aria-label*=show i], [aria-label*=reveal i], [title*=show i], [title*=reveal i])",
+        )
+        if not reveal.get("nodeIds"):
+            return False
+        while isinstance(parent, int):
+            ancestor = (await cdp.call("DOM.describeNode", nodeId=parent, depth=0)).get("node", {})
+            name = str(ancestor.get("nodeName", "")).upper()
+            if name == "#DOCUMENT":
+                return True
+            nearby = await cdp.call(
+                "DOM.querySelectorAll", nodeId=parent,
+                selector="input:is([type=email i], [autocomplete~=username i], [autocomplete~=email i], [autocomplete~=one-time-code i], [name*=username i], [name*=email i])",
+            )
+            if nearby.get("nodeIds"):
+                return False
+            if name == "FORM":
+                submit = await cdp.call("DOM.querySelectorAll", nodeId=parent,
+                                        selector="button:not([type]), button[type=submit i], input[type=submit i], input[type=image i]")
+                if submit.get("nodeIds"):
+                    return False
+            parent = ancestor.get("parentId")
+    except BrowserSessionError:
+        return False
+    return False
 
 
 def _is_password_input(node: dict) -> bool:
