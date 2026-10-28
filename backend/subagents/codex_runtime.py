@@ -241,6 +241,7 @@ async def _start_live_turn(
 
     def _bind_turn(identity: TurnIdentity) -> None:
         live.last_assistant_message_id = None
+        live.open_tool_step_id = None
         live.thinking_buf = ""
         live.thinking_provenance = None
         live.last_text = ""

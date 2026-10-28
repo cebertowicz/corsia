@@ -359,9 +359,6 @@ def _append_tool_use_to_step(
         )
 
 
-# Tool declaration updates are performed by assistant_step_tool_append.
-
-
 def persist_tool_use(
     child_thread_id: str,
     *,
@@ -379,7 +376,6 @@ def persist_tool_use(
     provider: str = "cc",
     model: str | None = None,
     expected_model: str | None = None,
-    explicit_step_target: bool = False,
     assistant_step_id: str | None = None,
 ) -> str:
     """Persist a tool call as a canonical intermediate assistant row.
@@ -389,7 +385,7 @@ def persist_tool_use(
     its own durable Assistant Step and owns its result lineage.
     """
     with write_transaction(db, scope="persist_provider_tool_use") as connection:
-        if explicit_step_target and assistant_step_id is not None:
+        if assistant_step_id is not None:
             if provider_turn_id is None:
                 raise ValueError("an explicit Assistant Step requires a provider turn ID")
             return _append_tool_use_to_step(
@@ -397,28 +393,6 @@ def persist_tool_use(
                 name=name, arguments=arguments, hint=hint,
                 provider_turn_id=provider_turn_id, db=connection,
             )
-        if not explicit_step_target and provider_turn_id is not None:
-            rows = connection.execute(
-                "SELECT id FROM messages INDEXED BY idx_messages_turn_calls "
-                "WHERE thread_id=? AND role='assistant' "
-                "AND json_valid(metadata) "
-                "AND json_extract(metadata,'$.turn_id')=? "
-                "AND json_extract(metadata,'$.provider_turn_id')=? "
-                "ORDER BY seq DESC LIMIT 1",
-                (child_thread_id, turn_id, provider_turn_id),
-            ).fetchall()
-            if rows:
-                return _append_tool_use_to_step(
-                    child_thread_id,
-                    str(rows[0]["id"]),
-                    turn_id=turn_id,
-                    tool_id=tool_id,
-                    name=name,
-                    arguments=arguments,
-                    hint=hint,
-                    provider_turn_id=provider_turn_id,
-                    db=connection,
-                )
         return persist_assistant_step(
             child_thread_id,
             turn_id=turn_id,

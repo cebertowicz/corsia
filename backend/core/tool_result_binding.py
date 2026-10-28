@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import core._tool_result_delivery_support as delivery_support
-from core.tool_result_echo_matching import has_unbound_match
+
 from core.tool_result_echo_matching import ranked_echo_matches as _ranked_echo_matches
 from core.tool_result_invocation import invocation_reference_from_echo
 from infra.delivery_states import (
@@ -16,8 +16,6 @@ from infra.delivery_states import (
 
 _BindingError = delivery_support.ToolResultBindingError
 
-
-# Matching lives alongside the shared echo identity rules.
 
 
 def _cas_bind_echo(
@@ -55,9 +53,7 @@ def _bind_undispatched_echo(
     db, *, thread_id: str, assistant_step_id: str,
     provider_tool_call_id: str, echoed_content: str,
 ) -> delivery_support.ToolExecutionResult | None:
-    """Zero rows for a declared call: on the live (non-checkpoint) Turn path
-    ``execute_tool`` persists bytes before returning, so this echo can only
-    mean the call never ran there."""
+    """Persist a synthetic result for a declared call with no result rows."""
     step = db.execute(
         "SELECT metadata FROM messages WHERE id=? AND thread_id=? AND role='assistant'",
         (assistant_step_id, thread_id),
@@ -103,7 +99,7 @@ def _bind_undispatched_echo(
 
 
 def _bind_echo(*, db, thread_id: str, provider_tool_call_id: str, assistant_step_id: str,
-               echoed_content: str, codex_dispatched: bool | None = None) -> delivery_support.ToolExecutionResult:
+               echoed_content: str) -> delivery_support.ToolExecutionResult:
     rows = db.execute(
         "SELECT id,content,metadata FROM messages "
         "WHERE thread_id=? AND role='tool' AND json_valid(metadata) "
@@ -121,14 +117,9 @@ def _bind_echo(*, db, thread_id: str, provider_tool_call_id: str, assistant_step
         provider_tool_call_id=provider_tool_call_id,
     )
     if len(matches) != 1:
-        unbound_match = codex_dispatched is False and has_unbound_match(
-            rows, db=db, thread_id=thread_id, assistant_step_id=assistant_step_id,
-            provider_tool_call_id=provider_tool_call_id,
-        )
         if (
             not marker_present
-            and (not rows if codex_dispatched is None else
-                 not codex_dispatched and not matches and not unbound_match)
+            and not rows
             and (bound := _bind_undispatched_echo(
                 db, thread_id=thread_id, assistant_step_id=assistant_step_id,
                 provider_tool_call_id=provider_tool_call_id,
@@ -256,8 +247,7 @@ def quarantine_unbound_tool_result(
 
 
 def bind_tool_result_echo(*, thread_id: str, provider_tool_call_id: str, assistant_step_id: str,
-                          echoed_content: str, db=None,
-                          codex_dispatched: bool | None = None) -> delivery_support.ToolExecutionResult:
+                          echoed_content: str, db=None) -> delivery_support.ToolExecutionResult:
     """Bind a provider echo, authoring a proven-undispatched result if needed."""
     thread_id = delivery_support.required_text(thread_id, "thread identity")
     provider_tool_call_id = delivery_support.required_text(provider_tool_call_id, "provider tool call identity")
@@ -271,7 +261,7 @@ def bind_tool_result_echo(*, thread_id: str, provider_tool_call_id: str, assista
             provider_tool_call_id=provider_tool_call_id,
             assistant_step_id=assistant_step_id,
             echoed_content=echoed_content,
-            codex_dispatched=codex_dispatched,
+
         )
 
 
