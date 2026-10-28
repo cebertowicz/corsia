@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import core._tool_result_delivery_support as delivery_support
-
 from core.tool_result_echo_matching import ranked_echo_matches as _ranked_echo_matches
 from core.tool_result_invocation import invocation_reference_from_echo
 from infra.delivery_states import (
@@ -15,7 +14,6 @@ from infra.delivery_states import (
 )
 
 _BindingError = delivery_support.ToolResultBindingError
-
 
 
 def _cas_bind_echo(
@@ -261,7 +259,6 @@ def bind_tool_result_echo(*, thread_id: str, provider_tool_call_id: str, assista
             provider_tool_call_id=provider_tool_call_id,
             assistant_step_id=assistant_step_id,
             echoed_content=echoed_content,
-
         )
 
 

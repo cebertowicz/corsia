@@ -49,7 +49,6 @@ _PROVIDER_MISSING_TOOL_RESULT = (
 )
 
 
-
 async def _observe_tool_result(
     thread_id: str, content: str, metadata: dict, *, origin: RegistrationOrigin | None = None,
 ) -> None:
