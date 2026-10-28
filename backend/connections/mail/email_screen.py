@@ -16,6 +16,7 @@ import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import timedelta
+from email.utils import parseaddr
 from typing import Any, Awaitable, Callable
 
 from llm.locality import endpoint_on_this_mac
@@ -102,6 +103,16 @@ class Screen:
     @property
     def flagged(self) -> bool:
         return self.status == STATUS_SCREENED and self.injection
+
+
+def sender_for_screen(sender: str, screen: Screen | None) -> str:
+    """Expose a display name only after a clean screen."""
+    if screen is not None and screen.clean:
+        return sender
+    from connections.mail.email_document import is_plain_address
+
+    address = parseaddr(sender)[1]
+    return address if is_plain_address(address) else ""
 
 
 def search_screen(screen: Screen | None) -> dict[str, Any]:
