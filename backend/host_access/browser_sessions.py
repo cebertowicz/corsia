@@ -6,6 +6,7 @@ import logging
 from dataclasses import replace
 import socket
 import secrets
+import sys
 import time
 from typing import Literal, Sequence, TypeAlias
 
@@ -390,5 +391,9 @@ class BrowserSessionOwner:
         session = argv[argv.index("--session") + 1] if "--session" in argv else None
         runtime = next((item for item in self._sessions.values() if item.record.session == session), None)
         options = {"stream_port": runtime.chrome.stream_port} if runtime and runtime.chrome else {}
+        if sys.platform == "linux":
+            return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
+                                            config_path=self.socket_dir / "config.json",
+                                            linux_chrome=self._chrome, **options)
         return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
                                         config_path=self.socket_dir / "config.json", **options)
