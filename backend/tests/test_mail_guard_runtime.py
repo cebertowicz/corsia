@@ -23,9 +23,11 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
         return newer.body
 
     monkeypatch.setattr(mail_guard_runtime, "screened_message", screened)
-    verdict, _ = await mail_guard_runtime.guarded_reply(SimpleNamespace(guard_data=data, fetch_body=fetch_body),
-                                                        {"id": "account", "address": "me@example.test"},
-                                                        "old", "reply", [])
+    verdict, screened_target = await mail_guard_runtime.guarded_reply(SimpleNamespace(guard_data=data, fetch_body=fetch_body),
+                                                                      {"id": "account", "address": "me@example.test"},
+                                                                      "old", "reply", [])
+    target_evidence = mail_guard_runtime.evidence(screened_target)
+    assert "withheld" in target_evidence and "malicious instructions" not in target_evidence
     assert verdict.stale
     assert "withheld" in verdict.stale[0]
     assert "malicious instructions" not in verdict.stale[0]
