@@ -201,9 +201,16 @@ async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str 
     message = url.removeprefix("Error: ") if url.startswith("Error:") else ""
     if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
-    safe_title = "" if title.startswith("Error:") else title.strip()
-    safe_url = "" if url.startswith("Error:") else url.strip()
+    safe_title, safe_url = _field(title, "title"), _field(url, "url")
     return {"title": safe_title, "url_path": urlparse(safe_url).path, "missing": expected}, safe_url, None
+
+
+def _field(rendered: str, key: str) -> str:
+    """One value from the session's rendered result: agent-browser's `data` object, unwrapped."""
+    if rendered.startswith("Error:"):
+        return ""
+    value = browser_cli.json_object(rendered).get(key)
+    return (value if isinstance(value, str) else rendered).strip()
 
 
 async def _miss(thread_id: str, identifier: str, says: str, expected: str) -> str:

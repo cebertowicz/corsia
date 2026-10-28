@@ -174,13 +174,14 @@ async def test_scripted_steps_guard_a_mock_password_page(tmp_path, monkeypatch):
                 "id": "password-page", "says": "Open the mock password page.", "action": "goto", "url": f"{origin}/probe.html"
             }]}), encoding="utf-8")
             result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("local/mock", _thread_id=thread_id))
-        assert result["ok"] is False and result["step"] == "password-page"
-        assert result.get("start_at") == "password-page", (result, commands)
+        # The page opened, so its step is done; the guard's message hands the rest to the person.
+        assert result["ok"] is True and result["steps"] == ["password-page"], (result, commands)
         assert result["message"].startswith(browser_control.PASSWORD_PAGE)
         assert password_steps == ["opened"]
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
-        await owner.close_thread(thread_id)
+        # The agent's close is refused while the person's password step owns the page.
+        await owner.shutdown()
 
 
 @pytest.mark.integration
@@ -210,7 +211,8 @@ async def test_installed_setup_steps_run_in_native_browser(tmp_path, monkeypatch
             ]}), encoding="utf-8")
             result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("shared-setup/run", _thread_id=thread_id))
             assert result == {"ok": True, "steps": ["open", "click"]}
-            assert await owner.run(thread_id, ("get", "text", "#result"), session="existing") == "1"
+            text = await owner.run(thread_id, ("get", "text", "#result"), session="existing")
+            assert text == "1" or json.loads(text).get("text") == "1", text
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

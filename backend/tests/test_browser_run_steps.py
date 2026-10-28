@@ -30,7 +30,8 @@ async def invoke(tool, monkeypatch, responses, **kwargs):
 def page_at(url, calls):
     async def fake_run(args, **_run_kwargs):
         calls.append(args)
-        return "ok" if args[0] != "get" else ("Console" if args[1] == "title" else url)
+        # The session renders a `get` as agent-browser's data object, as it does on a real page.
+        return "ok" if args[0] != "get" else json.dumps({"title": "Console"} if args[1] == "title" else {"url": url})
 
     return fake_run
 
