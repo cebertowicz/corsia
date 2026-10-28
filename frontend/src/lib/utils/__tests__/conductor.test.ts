@@ -18,7 +18,6 @@ import {
 } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
 import { composerSelectionFor } from '$lib/stores/composerSelection';
-import { _resetDesignatedSwitchRowForTests } from '$lib/stores/threadRow';
 import { applyPendingThreadModelSwitch } from '$lib/stores/threadModelSwitch';
 import { handleSessionUpdated } from '$lib/ws/handlersSession';
 
@@ -30,7 +29,6 @@ afterEach(() => {
 	activeThreadId.set(null);
 	activeModelId.set(null);
 	corsiaAgentId.set(null);
-	_resetDesignatedSwitchRowForTests();
 	_resetThreadModelTruthForTests();
 });
 
@@ -175,22 +173,22 @@ describe('fetchConductor', () => {
 	describe('a read that straddles a newer write', () => {
 		const switching = () => get(composerSelectionFor)('cond-1').switching;
 		// A read whose response is held until the test releases it.
-		function heldRead(fields: Record<string, unknown>) {
+		function heldRead(fields: Record<string, unknown>, threadId = 'cond-1') {
 			let release: () => void = () => {};
 			const gate = new Promise<void>((resolve) => { release = resolve; });
 			globalThis.fetch = vi.fn(async () => {
 				await gate;
 				return {
 					ok: true,
-					json: async () => ({ thread_id: 'cond-1', target: { thread_id: 'cond-1', ...fields } }),
+					json: async () => ({ thread_id: threadId, target: { thread_id: threadId, ...fields } }),
 				};
 			}) as unknown as typeof fetch;
 			return { done: fetchCorsiaAgent('tok'), release };
 		}
 
-		// The page has read the target once, so the designated thread's row exists for a 202 or frame to change.
-		async function seed() {
-			const first = heldRead({ pending_model: null, switch_status: null });
+		// The page has read the target once, so the thread's switch state exists for a 202 or frame to change.
+		async function seed(threadId = 'cond-1', fields: Record<string, unknown> = { pending_model: null, switch_status: null }) {
+			const first = heldRead(fields, threadId);
 			first.release();
 			await first.done;
 		}
@@ -220,6 +218,31 @@ describe('fetchConductor', () => {
 			await stale.done;
 			expect(switching()?.pending_model).toBeNull();
 			expect(switching()?.switch_status).toBeNull();
+		});
+
+		it('keeps each thread\'s switch when the user moves between projects', async () => {
+			await seed('cond-a');
+			// Project B's conductor read is in flight while A's conductor gets a 202.
+			const readB = heldRead({ pending_model: null, switch_status: null }, 'cond-b');
+			applyPendingThreadModelSwitch('cond-a', {
+				operation_id: 'op-a', status: 'preparing', pending_model: 'm/a', checkpoint_required: false,
+			});
+			readB.release();
+			await readB.done;
+
+			// B's read landed, so B's later frames count; A kept its own pending switch.
+			handleSessionUpdated({ thread_id: 'cond-b', pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room' });
+			expect(get(composerSelectionFor)('cond-b').switching).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+			expect(get(composerSelectionFor)('cond-a').switching).toMatchObject({ pending_model: 'm/a', switch_status: 'preparing' });
+		});
+
+		it('keeps a conductor\'s switch when the CORSIA agent is read in a project scope', async () => {
+			await seed('cond-1', { pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room' });
+			await seed('agent-1');
+
+			expect(switching()).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+			handleSessionUpdated({ thread_id: 'cond-1', pending_model: null, switch_status: null, switch_error: null });
+			expect(switching()?.pending_model).toBeNull();
 		});
 
 		it('keeps the newer of two reads that finish out of order', async () => {
