@@ -500,7 +500,7 @@ async def test_cc_warm_capture_carries_the_live_tool_list(tmp_path, monkeypatch)
     live_tools = ({"type": "function", "function": {"name": "read_file"}},)
 
     async def live(_thread):
-        return ("source-session", invocation, None, str(transcript), None, live_tools)
+        return ("source-session", invocation, None, str(transcript), None, live_tools, invocation.confinement)
 
     monkeypatch.setattr(cc, "_live_identity", live)
     source = await cc.capture_warm_source(

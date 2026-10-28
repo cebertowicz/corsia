@@ -442,7 +442,7 @@ async def test_cc_durable_capture_survives_process_eviction(tmp_path, monkeypatc
     monkeypatch.setattr(
         cc,
         "_registered_identity",
-        lambda _thread: ("source-session", invocation, None, str(transcript)),
+        lambda _thread: ("source-session", invocation, None, str(transcript), None, None, invocation.confinement),
     )
     source = await cc.capture_warm_source(
         "thread-1", _boundary(), target=_target("claude-code"), binary="claude"
@@ -523,7 +523,7 @@ async def test_cc_registered_capture_fails_closed_after_real_cleanup(tmp_path, m
     monkeypatch.setattr(
         cc,
         "_registered_identity",
-        lambda _thread: ("source-session", invocation, None, str(transcript)),
+        lambda _thread: ("source-session", invocation, None, str(transcript), None, None, invocation.confinement),
     )
     monkeypatch.setattr(
         cc_destination,
