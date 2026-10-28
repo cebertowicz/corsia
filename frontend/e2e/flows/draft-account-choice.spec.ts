@@ -16,7 +16,8 @@ function fixture(script: string, ...args: string[]): string {
 test('draft account is used by the first send', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Both viewport sizes are captured in this run');
 	const seeded = JSON.parse(fixture(`
-import json
+import json, os
+from pathlib import Path
 from connections.account_evidence import mark_discovery
 from connections.account_receipts import capture_receipt
 from connections import harness_usage
@@ -32,6 +33,9 @@ db.execute("""INSERT OR REPLACE INTO models (id,harness,provider,provider_model_
 a = default_account('codex', db=db)
 b = add_account('codex', 'Draft Picked Account', db=db)
 b = set_account_state(b['id'], 'signed_in', expected_revision=b['revision'], db=db)
+home = Path(b['source_home']).resolve()
+assert home.is_relative_to(Path(os.environ['CORSIA_STATE_DIR']).resolve())
+(home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'tokens': {'fixture': 'synthetic'}}))
 for account in (a, b):
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={model: {'available': True, 'context_window': 128000}}, db=db)
@@ -53,7 +57,7 @@ db.close()
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await openAppByUrl(page);
 	await page.getByRole('button', { name: 'New chat' }).first().click();
-		await page.locator('button.model-chip').click();
+	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
 	await page.getByText('E2E Draft Account', { exact: false }).first().click();
 	fixture(`
