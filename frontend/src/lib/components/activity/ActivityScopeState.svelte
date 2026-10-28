@@ -38,12 +38,16 @@
 {:else if kind === 'forbidden'}
 	<div class="activity-state" role="alert">
 		<strong>Activity isn’t available in this {scopeNoun}</strong>
-		<span>You don’t have access to this {scopeNoun}.</span>
+		<span>{scopeNoun === 'project'
+			? 'You don’t have access to this project. Use the sidebar to choose another project or return to Workspace.'
+			: 'You don’t have access to this workspace. Use the sidebar to open a project or chat.'}</span>
 	</div>
 {:else if kind === 'not-found'}
 	<div class="activity-state" role="alert">
 		<strong>This {scopeNoun} isn’t available</strong>
-		<span>Choose another {scopeNoun}.</span>
+		<span>{scopeNoun === 'project'
+			? 'Go back to Workspace or choose another project from the sidebar.'
+			: 'Use the sidebar to open a project or chat.'}</span>
 		{#if canGoWorkspace}
 			<Button variant="secondary" size="sm" onclick={onGoWorkspace}>Back to Workspace</Button>
 		{/if}

@@ -10,6 +10,7 @@
 	import { token } from '$lib/stores/auth';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { toasts } from '$lib/stores/toast';
+	import { deactivateSidebarAgent } from './sidebarAgentDeactivation';
 	import { uiScope, exitScope } from '$lib/stores/uiScope';
 	import { paletteOpen } from '$lib/stores/palette';
 	import { togglePin } from '$lib/stores/pinnedConversations';
@@ -22,10 +23,12 @@
 	import SidebarAttentionList from './SidebarAttentionList.svelte';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { updateStatus } from '$lib/stores/settings';
+
 	const updateAvailable = $derived($updateStatus?.available === true);
 
 	let projectNames = $derived(Object.fromEntries($projects.map((p) => [p.id, p.name])));
 	let activeProjects = $derived($projects.filter((p) => p.status === 'active'));
+
 	type ContextMenuKind = 'conversation' | 'agent' | 'conductor';
 
 	let {
@@ -128,24 +131,17 @@
 	async function contextMenuDeactivateAgent() {
 		const id = contextMenuThreadId;
 		const authToken = $token;
-		let reference: unknown;
 		closeContextMenu();
 		if (!id || !authToken) return;
-		try {
-			const query = new URLSearchParams({ token: authToken });
-			const response = await fetch(`/api/agents/${id}?${query}`, { method: 'DELETE' });
-			if (!response.ok) {
-				const body = await response.json().catch(() => ({})) as { detail?: string; reference?: unknown } | null;
-				reference = body?.reference;
-				throw new Error(`Deactivate failed (${response.status}): ${body?.detail ?? ''}`);
-			}
-			demoteAgentLocally(id);
-			toasts.show('Agent deactivated', 'success');
-		} catch (error) {
-			console.error('Could not deactivate agent', error);
-			toasts.show(`Couldn’t deactivate this agent. Try again.${typeof reference === 'string' && reference ? ` Reference: ${reference}` : ''}`, 'error');
+		const failure = await deactivateSidebarAgent(id, authToken);
+		if (failure) {
+			toasts.show(failure, 'error');
+			return;
 		}
+		demoteAgentLocally(id);
+		toasts.show('Agent deactivated', 'success');
 	}
+
 	function contextMenuArchive() {
 		const id = contextMenuThreadId;
 		closeContextMenu();

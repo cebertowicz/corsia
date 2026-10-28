@@ -17,8 +17,12 @@ describe('Activity scope messages', () => {
 					props: { kind, scopeNoun, onRetry: () => {}, onGoWorkspace: () => {} },
 				});
 				expect(host.textContent).toContain(expected);
-				if (kind === 'forbidden') expect(host.textContent).toContain(`You don’t have access to this ${scopeNoun}.`);
-				if (kind === 'not-found') expect(host.textContent).toContain(`Choose another ${scopeNoun}.`);
+				if (kind === 'forbidden') expect(host.textContent).toContain(scopeNoun === 'project'
+					? 'You don’t have access to this project. Use the sidebar to choose another project or return to Workspace.'
+					: 'You don’t have access to this workspace. Use the sidebar to open a project or chat.');
+				if (kind === 'not-found') expect(host.textContent).toContain(scopeNoun === 'project'
+					? 'Go back to Workspace or choose another project from the sidebar.'
+					: 'Use the sidebar to open a project or chat.');
 				unmount(component);
 			});
 		}

@@ -10,6 +10,7 @@ import { measurementScope } from '$lib/stores/measurement';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -64,7 +65,10 @@ describe('Sidebar deactivation', () => {
 
 	it.each([
 		[500, { detail: 'private detail', reference: 'abc123' }, 'Couldn’t deactivate this agent. Try again. Reference: abc123'],
-		[403, { detail: 'private detail' }, 'Couldn’t deactivate this agent. Try again.'],
+		[401, { detail: 'private detail' }, 'Your sign-in isn’t valid. In Settings → System, log out and sign in again.'],
+		[403, { detail: 'private detail' }, 'You don’t have access to deactivate this agent. You can continue in another chat.'],
+		[404, { detail: 'private detail', reference: 'ref404' }, 'This agent’s chat is no longer available. Refresh the page to update the sidebar. Reference: ref404'],
+		[400, { detail: 'private detail' }, 'Couldn’t deactivate this agent. You can continue in another chat.'],
 		[500, { detail: 'private detail', reference: 42 }, 'Couldn’t deactivate this agent. Try again.'],
 		[500, { detail: 'private detail', reference: '' }, 'Couldn’t deactivate this agent. Try again.'],
 	])('shows an actionable error without exposing server detail for status %i and %o', async (status, body, message) => {
@@ -72,6 +76,14 @@ describe('Sidebar deactivation', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		deactivate();
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe(message));
+		expect(get(threads).find((thread) => thread.id === 'agent-b')?.agent_enabled).toBe(1);
+	});
+
+	it('shows the shared connection message when the request cannot reach the server', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network'); }));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		deactivate();
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe(SERVER_UNREACHABLE));
 		expect(get(threads).find((thread) => thread.id === 'agent-b')?.agent_enabled).toBe(1);
 	});
 
