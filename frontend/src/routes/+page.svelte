@@ -2,11 +2,11 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
-	import { threads, activeThreadId, activeThread, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
+	import { threads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
 	import { toasts } from '$lib/stores/toast';
 	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
 	import { models } from '$lib/stores/modelsState';
-	import { draftAccountChoices } from '$lib/stores/composerSelection';
+	import { vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { loadThreads } from '$lib/stores/threadsLoad';
 	import { loadSettings, loadUpdateStatus } from '$lib/stores/settings';
 	import { connect, on, subscribeThread } from '$lib/ws';
@@ -35,7 +35,7 @@
 	import FirstRunHandoff from '$lib/components/FirstRunHandoff.svelte';
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
-	import { createdThreadRow, pinOtherDraftAccounts, prepareDraftThread } from '$lib/threadCreate';
+	import { buildNewThreadBody, createdThreadRow, createAccountRefusal, draftAccountForModel } from '$lib/threadCreate';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
@@ -106,7 +106,6 @@
 		threadSettingsOpen.set(false);
 		recordSettingsHomeThread(view, get(activeThreadId)); // Settings keeps the thread it opened over, so a file opened there has a tab to land in.
 		if (!options.preserveActiveThread) {
-			draftAccountChoices.set({});
 			activeThreadId.set(null);
 		}
 		activeView = view;
@@ -310,23 +309,23 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const choices = get(draftAccountChoices);
-		const { vendor, body } = prepareDraftThread(projectId, pendingEffort, inheritModel, get(models), choices);
+		const accountId = draftAccountForModel(get(draftAccountId), inheritModel, get(models), get(vendorAccounts));
+		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		});
 		if (!res.ok) {
-			toasts.show("Couldn't create the chat. Try again.", 'error');
+			const detail = await res.json().catch(() => null);
+			const refusal = accountId ? createAccountRefusal(res.status, detail?.detail, () => draftAccountId.set(null)) : null;
+			toasts.show(refusal ?? "Couldn't create the chat. Try again.", 'error');
 			throw new Error('Thread creation failed');
 		}
 		const data = await res.json();
-		draftAccountChoices.set({});
 		const thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
 		adoptCreatedThread(thread);
 		activeThreadId.set(data.thread_id);
-		await pinOtherDraftAccounts(data.thread_id, vendor, choices, (message) => toasts.show(message, 'error'));
 		messages.set([]);
 		clearThreadBuffers(data.thread_id);
 		sidebarOpen = false;
@@ -337,7 +336,7 @@
 
 	const selectThread = createHomeThreadSelector({
 		advanceIntent: () => selectionIntent++,
-		prepareChatSurface: (firstRun) => { draftAccountChoices.set({}); activeView = 'chat'; if (!firstRun) sidebarOpen = false; }, // a late first-run landing keeps the user's drawer
+		prepareChatSurface: (firstRun) => { activeView = 'chat'; if (!firstRun) sidebarOpen = false; }, // a late first-run landing keeps the user's drawer
 		loadThreads,
 		selectChatThread: (id, source, owner) => chatPanelRef?.selectThread(id, source, owner),
 	});

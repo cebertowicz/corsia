@@ -16,11 +16,6 @@ export interface PickerAccount {
 	choosable: boolean;
 }
 
-/** Overlay a draft's explicit account choice on the catalog's selected row. */
-export function markDraftAccount(rows: PickerAccount[], accountId?: string): PickerAccount[] {
-	return accountId ? rows.map((row) => ({ ...row, marked: row.account.id === accountId, pending: false })) : rows;
-}
-
 /** The effective rollover policy of the open thread's scope, per vendor. */
 export interface PickerPolicy {
 	rollover: boolean;

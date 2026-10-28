@@ -115,7 +115,16 @@ export function demoteAgentLocally(threadId: string): void {
 	threads.update((rows) => rows.map((r) => (r.id === threadId ? { ...r, ...off } : r)));
 }
 
-export const activeThreadId = writable<string | null>(null);
+// A draft choice belongs to the current chat surface and is discarded when it changes.
+export const draftAccountId = writable<string | null>(null);
+const activeThreadIdStore = writable<string | null>(null);
+export const activeThreadId = {
+	subscribe: activeThreadIdStore.subscribe,
+	set(id: string | null) {
+		draftAccountId.set(null);
+		activeThreadIdStore.set(id);
+	},
+};
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(

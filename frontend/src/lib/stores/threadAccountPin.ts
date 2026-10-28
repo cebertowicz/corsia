@@ -15,8 +15,13 @@ const REFUSALS: Record<string, string> = {
 export const PIN_FAILED = "Couldn't switch accounts. Try again.";
 
 /** The refusal's reason code, which the backend writes first in its detail (`<code>; <advice>`). */
-function reasonOf(detail: unknown): string | null {
+export function reasonOf(detail: unknown): string | null {
 	return typeof detail === 'string' ? detail.trim().match(/^[a-z0-9]+(?:_[a-z0-9]+)+/)?.[0] ?? null : null;
+}
+
+export function accountRefusalMessage(detail: unknown): string {
+	const reason = reasonOf(detail);
+	return (reason && REFUSALS[reason]) || PIN_FAILED;
 }
 
 /**
@@ -39,8 +44,7 @@ export async function pinThreadAccount(threadId: string, accountId: string): Pro
 		});
 		body = await response.json().catch(() => null);
 		if (!response.ok) {
-			const reason = reasonOf(body?.detail);
-			return { ok: false, message: (reason && REFUSALS[reason]) || PIN_FAILED };
+			return { ok: false, message: accountRefusalMessage(body?.detail) };
 		}
 	} catch {
 		return { ok: false, message: SERVER_UNREACHABLE };

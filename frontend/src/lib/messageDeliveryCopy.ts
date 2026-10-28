@@ -69,6 +69,7 @@ export const WAITING_FOR_MODEL_CHOICE = {
 } as const;
 
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
+export const ACCOUNT_PROJECT_DENIED = 'Your provider settings don’t allow this chat’s account.';
 
 const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
 const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
@@ -98,7 +99,7 @@ export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_
 	// does not say which, so no settings pointer: it could name a place with no toggle.
 	account_project_denied: {
 		label: WAITING_FOR_ACCOUNT,
-		title: `Your provider settings don’t allow this chat’s account. ${SWITCH_MODELS}.`,
+		title: `${ACCOUNT_PROJECT_DENIED} ${SWITCH_MODELS}.`,
 	},
 	project_policy_missing: {
 		label: WAITING_FOR_ACCOUNT,

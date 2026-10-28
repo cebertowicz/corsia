@@ -4,6 +4,8 @@ import type { UsageWindow } from './modelUsage';
 import type { VendorAccount } from './vendorAccounts';
 
 export type GroupState = 'ready' | 'limited' | 'signed_out' | 'unavailable';
+export const ACCOUNT_SIGNED_OUT = 'signed out';
+export const ACCOUNT_LIMITED = 'limited';
 
 /** One account in the picker: the rows of a connection and the state its rows report. */
 export interface ModelGroup {
@@ -24,7 +26,7 @@ export function canonicalName(model: Model): string {
 	return model.display_name ?? model.name;
 }
 
-function groupKey(model: Model): string {
+export function groupKey(model: Model): string {
 	const connection = model.connection ?? model.provider ?? model.backend;
 	return model.backend === 'network' && model.server_name ? `${connection}:${model.server_name}` : connection;
 }
@@ -242,12 +244,12 @@ function headerWindows(windows: UsageWindow[]): UsageWindow[] {
 
 /** What an account shows in the picker, at each window's own level: its figures, or the one state that replaces them. */
 export function accountSegments(account: VendorAccount): UsageSegment[] {
-	if (account.state === 'signed_out') return [{ text: 'signed out', level: 'normal' }];
+	if (account.state === 'signed_out') return [{ text: ACCOUNT_SIGNED_OUT, level: 'normal' }];
 	const usage = account.usage;
 	if (usage?.state === 'limited') {
 		if (checkInProgress(usage)) return [{ text: 'limited · checking', level: 'red' }];
 		const back = resetLabel(usage.resets_at, true);
-		return [{ text: limitedStatus('limited', back, 'back', Boolean(usage.check?.error)), level: 'red' }];
+		return [{ text: limitedStatus(ACCOUNT_LIMITED, back, 'back', Boolean(usage.check?.error)), level: 'red' }];
 	}
 	const spending = accountSpendingSegment(account);
 	if (spending) return [spending];
@@ -267,10 +269,10 @@ export function groupStatusSegments(group: ModelGroup, accounts: VendorAccount[]
 		if (usages.some(checkInProgress)) return [{ text: 'limited · checking', level: 'red' }];
 		const back = resetLabel(group.resetsAt, true);
 		const severalAccounts = accounts.length > 1;
-		const prefix = severalAccounts ? `All ${accounts.length} accounts limited` : 'limited';
+		const prefix = severalAccounts ? `All ${accounts.length} accounts limited` : ACCOUNT_LIMITED;
 		return [{ text: limitedStatus(prefix, back, severalAccounts ? 'first back' : 'back', usages.some((usage) => usage?.check?.error)), level: 'red' }];
 	}
-	return [{ text: group.state === 'signed_out' ? 'signed out' : 'unavailable', level: 'normal' }];
+	return [{ text: group.state === 'signed_out' ? ACCOUNT_SIGNED_OUT : 'unavailable', level: 'normal' }];
 }
 
 /** Every window with both numbers and its reset, one per line, shortest first; a stale window reads unknown. */
@@ -291,7 +293,7 @@ export function rowNote(model: Model, account?: VendorAccount | null): UsageSegm
 	if (turn.status_reason === 'missing_context_window') return { text: 'no context window', level: 'normal' };
 	if (turn.status_reason === 'usage_limited') {
 		const back = resetLabel(turn.resets_at, false);
-		return { text: back ? `limited · back ${back}` : 'limited', level: 'red' };
+		return { text: back ? `limited · back ${back}` : ACCOUNT_LIMITED, level: 'red' };
 	}
 	if (account && turn.status_reason && NOT_OFFERED.has(turn.status_reason)) {
 		return { text: `not offered on ${account.label.name}`, level: 'normal' };

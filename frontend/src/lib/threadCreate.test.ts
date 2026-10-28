@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { buildNewThreadBody, prepareDraftThread } from './threadCreate';
+import { describe, expect, it, vi } from 'vitest';
+import { buildNewThreadBody, createAccountRefusal, draftAccountForModel } from './threadCreate';
+import { PIN_FAILED, TURN_RUNNING } from './stores/threadAccountPin';
+import type { VendorAccount } from './stores/vendorAccounts';
 import type { Model } from './stores/models';
 
 describe('session creation helpers', () => {
@@ -9,9 +11,21 @@ describe('session creation helpers', () => {
 	});
 	it('sends the choice matching the current model vendor after a model change', () => {
 		const models = [{ id: 'codex/model', connection: 'codex' }] as Model[];
-		const result = prepareDraftThread('project-1', null, 'codex/model', models, { codex: 'chosen', 'claude-code': 'other' });
-		expect(result.vendor).toBe('codex');
-		expect(result.body).toEqual({ title: 'New Chat', project_id: 'project-1', model: 'codex/model', account_id: 'chosen' });
+		const accounts = [{ id: 'chosen', provider: 'codex' }, { id: 'other', provider: 'claude-code' }] as VendorAccount[];
+		expect(draftAccountForModel('chosen', 'codex/model', models, accounts)).toBe('chosen');
+		expect(draftAccountForModel('other', 'codex/model', models, accounts)).toBeNull();
+	});
+
+	it('maps account refusals using existing pin copy', () => {
+		const clear = vi.fn();
+		expect(createAccountRefusal(400, 'account_change_requires_idle; retry', clear)).toBe(TURN_RUNNING);
+		expect(createAccountRefusal(400, 'account_signed_out; retry', clear)).toBe('signed out');
+		expect(createAccountRefusal(400, 'usage_limited; retry', clear)).toBe('limited');
+		expect(createAccountRefusal(400, 'account_project_denied; retry', clear)).toBe('Your provider settings don’t allow this chat’s account.');
+		expect(createAccountRefusal(400, 'account_removed; retry', clear)).toBe(PIN_FAILED);
+		expect(clear).toHaveBeenCalledTimes(5);
+		expect(createAccountRefusal(500, 'account_removed; retry', clear)).toBeNull();
+		expect(clear).toHaveBeenCalledTimes(5);
 	});
 
 	it('builds the create-session payload from selected project and model state', () => {

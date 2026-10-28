@@ -1,6 +1,25 @@
-import { modelMatchesId, type Model } from '$lib/stores/models';
-import { pinThreadAccount } from '$lib/stores/threadAccountPin';
 import type { Thread } from '$lib/stores/threads';
+import { modelMatchesId, type Model } from '$lib/stores/models';
+import { ACCOUNT_LIMITED, ACCOUNT_SIGNED_OUT, groupKey } from '$lib/stores/modelGroups';
+import type { VendorAccount } from '$lib/stores/vendorAccounts';
+import { accountRefusalMessage, reasonOf } from '$lib/stores/threadAccountPin';
+import { ACCOUNT_PROJECT_DENIED } from '$lib/messageDeliveryCopy';
+
+export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[], accounts: VendorAccount[]): string | null {
+	const model = models.find((row) => modelMatchesId(row, modelId));
+	const account = accounts.find((row) => row.id === accountId);
+	return model && account && groupKey(model) === account.provider ? account.id : null;
+}
+
+export function createAccountRefusal(status: number, detail: unknown, clearChoice: () => void): string | null {
+	const reason = reasonOf(detail);
+	if (status !== 400 || !reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')) return null;
+	clearChoice();
+	if (reason === 'account_signed_out') return ACCOUNT_SIGNED_OUT;
+	if (reason === 'usage_limited') return ACCOUNT_LIMITED;
+	if (reason === 'account_project_denied') return ACCOUNT_PROJECT_DENIED;
+	return accountRefusalMessage(detail);
+}
 
 export function buildNewThreadBody({
 	projectId,
@@ -21,22 +40,6 @@ export function buildNewThreadBody({
 		body.reasoning_effort = reasoningEffort;
 	}
 	return body;
-}
-
-/** Snapshot the draft's account choice against the model being sent. */
-export function prepareDraftThread(projectId: string | null | undefined, reasoningEffort: string | null, modelId: string | null, models: Model[], choices: Record<string, string>) {
-	const model = models.find((entry) => modelMatchesId(entry, modelId));
-	const vendor = model?.connection ?? model?.provider ?? model?.backend;
-	return { vendor, body: buildNewThreadBody({ projectId, reasoningEffort, modelId, accountId: vendor ? choices[vendor] : undefined }) };
-}
-
-/** Preserve choices for other vendors through the existing account pin path. */
-export async function pinOtherDraftAccounts(threadId: string, vendor: string | undefined, choices: Record<string, string>, showError: (message: string) => void) {
-	for (const [choiceVendor, accountId] of Object.entries(choices)) {
-		if (choiceVendor === vendor) continue;
-		const result = await pinThreadAccount(threadId, accountId);
-		if (!result.ok) showError(result.message);
-	}
 }
 
 /** Construct the local thread row after creation succeeds. */

@@ -19,6 +19,7 @@ test('draft account is used by the first send', async ({ page }, testInfo) => {
 import json
 from connections.account_evidence import mark_discovery
 from connections.account_receipts import capture_receipt
+from connections import harness_usage
 from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, default_account, set_account_state
 from infra.database import get_db
@@ -33,7 +34,9 @@ b = add_account('codex', 'Draft Picked Account', db=db)
 b = set_account_state(b['id'], 'signed_in', expected_revision=b['revision'], db=db)
 for account in (a, b):
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
-    assert mark_discovery(account['id'], receipt=receipt, status='ready', models={model: {'available': True}}, db=db)
+    assert mark_discovery(account['id'], receipt=receipt, status='ready', models={model: {'available': True, 'context_window': 128000}}, db=db)
+db.commit()
+harness_usage.record_allowed(provider='codex', receipt=capture_receipt('codex', account_id=b['id'], db=db), source='discovery', db=db)
 other_model = 'claude-code/e2e-draft-account'
 db.execute("""INSERT OR REPLACE INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,backend,source,enabled,available,context_window,supports_vision,supports_tools,supports_reasoning,default_max_tokens,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'e2e',1,1,128000,0,1,0,8192,?,?)""", (other_model,'claude-code','claude-code','e2e-draft-account',other_model,'E2E Other Vendor','claude-code',now,now))
 first = default_account('claude-code', db=db)
@@ -43,16 +46,28 @@ for account in (first, other):
     receipt = capture_receipt('claude-code', account_id=account['id'], db=db)
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={other_model: {'available': True}}, db=db)
 db.commit()
-print(json.dumps({'chosen': b['id'], 'other': other['id']}))
+print(json.dumps({'chosen': b['id'], 'other': other['id'], 'default': a['id']}))
 db.close()
-`).trim()) as { chosen: string; other: string };
+`).trim()) as { chosen: string; other: string; default: string };
 	const { chosen, other } = seeded;
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await openAppByUrl(page);
 	await page.getByRole('button', { name: 'New chat' }).first().click();
-	await page.locator('button.model-chip').click();
+		await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
 	await page.getByText('E2E Draft Account', { exact: false }).first().click();
+	fixture(`
+import sys
+from connections import harness_usage
+from connections.account_receipts import capture_receipt
+from infra.database import get_db
+db = get_db()
+harness_usage.record_limited(provider='codex', receipt=capture_receipt('codex', account_id=sys.argv[1], db=db), reason='usage_limit', resets_at='2099-01-01T00:00:00+00:00', source='rate_limit_update', db=db)
+db.close()
+`, seeded.default);
+	await page.locator('button.model-chip').click();
+	await page.locator('button.model-chip').click();
+	await expect(page.locator('.limit-held')).toBeVisible();
 	const otherChooser = page.locator('.model-sheet button.picker-account-title').filter({ hasText: 'Claude Code' });
 	await expect(otherChooser).toBeVisible();
 	await otherChooser.click();
@@ -66,6 +81,8 @@ db.close()
 	await expect(row).toBeEnabled();
 	await row.click();
 	await expect(row).toHaveAttribute('aria-pressed', 'true');
+	await expect(page.locator('.limit-held')).toHaveCount(0);
+	await expect(page.locator('button.model-chip')).toContainText('E2E Draft Account');
 	const shotPath = (name: string) => process.env.CORSIA_E2E_SHOT_DIR
 		? path.join(process.env.CORSIA_E2E_SHOT_DIR, name) : testInfo.outputPath(name);
 	await page.screenshot({ path: shotPath('draft-1440.png'), animations: 'disabled' });
@@ -74,6 +91,7 @@ db.close()
 	await page.locator('button.model-chip').click();
 	const response = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/threads');
 	await page.getByRole('textbox', { name: 'Message CORSIA' }).fill('Hello');
+	await expect(page.locator('.send-btn')).toBeEnabled();
 	await page.getByRole('textbox', { name: 'Message CORSIA' }).press('Enter');
 	const created = await response;
 	expect(created.ok(), await created.text()).toBe(true);
@@ -88,13 +106,5 @@ print(row['account_id'] if row else '')
 db.close()
 `, threadId).trim();
 	expect(actual).toBe(chosen);
-	await expect.poll(() => fixture(`
-import sys
-from infra.database import get_db
-db = get_db()
-row = db.execute('SELECT account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?', (sys.argv[1], 'claude-code')).fetchone()
-print(row['account_id'] if row else '')
-db.close()
-`, threadId).trim()).toBe(other);
 	console.log('draft account evidence:', JSON.stringify({ chosen, actual, other }));
 });

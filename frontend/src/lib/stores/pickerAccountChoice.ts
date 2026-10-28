@@ -1,7 +1,7 @@
 import { bindConductorFromPicker } from '$lib/conductorSourcesApi';
 import { pinThreadAccount, type PinResult } from '$lib/stores/threadAccountPin';
 import { type PickerAccount } from '$lib/stores/accountPicker';
-import { draftAccountChoices } from '$lib/stores/composerSelection';
+import { draftAccountId } from '$lib/stores/threads';
 
 /**
  * The model picker's one account-choice path. A draft keeps its choice in the composer;
@@ -15,7 +15,7 @@ export async function choosePickerAccount(
 ): Promise<PinResult> {
 	if (row.marked || !row.choosable) return { ok: true, changed: false };
 	if (!threadId) {
-		draftAccountChoices.update((choices) => ({ ...choices, [row.account.provider]: row.account.id }));
+		draftAccountId.set(row.account.id);
 		return { ok: true, changed: true };
 	}
 	if (threadId === corsiaAgentId && !activeModelId) {

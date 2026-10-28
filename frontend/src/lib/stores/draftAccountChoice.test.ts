@@ -1,36 +1,29 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { afterEach, describe, expect, it } from 'vitest';
-import { markDraftAccount, type PickerAccount } from './accountPicker';
-import { choosePickerAccount } from './pickerAccountChoice';
-import { composerSelectionFor, draftAccountChoices } from './composerSelection';
-import { activeThreadId } from './threads';
-import { activeModelId } from './modelsState';
-import type { VendorAccount } from './vendorAccounts';
+import { token } from './auth';
+import { activeThreadId, draftAccountId } from './threads';
+import { loadModels } from './modelsLoad';
+import { models } from './modelsState';
 
-function row(provider: string, id: string, marked = false): PickerAccount {
-	return { account: { id, provider, state: 'signed_in' } as VendorAccount, marked, pending: false, order: null, choosable: true };
-}
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ models: [] }) }))); });
+afterEach(() => { token.set(null); activeThreadId.set(null); vi.unstubAllGlobals(); });
 
-afterEach(() => { activeThreadId.set(null); draftAccountChoices.set({}); activeModelId.set(null); });
-
-describe('draft account choices', () => {
-	it.each(['claude-code', 'codex'])('marks the selected %s row and keeps the model', async (vendor) => {
-		activeThreadId.set(null);
-		activeModelId.set('some-model');
-		const rows = [row(vendor, 'first', true), row(vendor, 'second')];
-		await choosePickerAccount(null, 'some-model', null, rows[1]);
-		const selection = get(composerSelectionFor)(null);
-		expect(markDraftAccount(rows, selection.accountChoices[vendor]).map((r) => r.marked)).toEqual([false, true]);
-		expect(selection.modelId).toBe('some-model');
+describe('draft account selection', () => {
+	it('reads the chosen account through the catalog', async () => {
+		token.set('test');
+		const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => ({ models: [{ id: 'codex/test', runs_on: [{ account_id: url.includes('account_id=chosen') ? 'chosen' : 'default', selected: true }] }] }) }));
+		vi.stubGlobal('fetch', fetcher);
+		draftAccountId.set('chosen');
+		await loadModels();
+		expect(fetcher.mock.calls.some(([url]) => url.includes('account_id=chosen'))).toBe(true);
+		expect(get(models)[0].runs_on?.[0].account_id).toBe('chosen');
 	});
-
-	it('keeps one choice per vendor across a model change and clears on a thread', async () => {
+	it('clears the choice when the chat surface is entered or left', () => {
+		draftAccountId.set('chosen');
+		activeThreadId.set('thread');
+		expect(get(draftAccountId)).toBeNull();
+		draftAccountId.set('chosen');
 		activeThreadId.set(null);
-		await choosePickerAccount(null, 'claude-code/model', null, row('codex', 'c'));
-		await choosePickerAccount(null, 'claude-code/model', null, row('claude-code', 'a'));
-		activeModelId.set('codex/model');
-		expect(get(draftAccountChoices)).toEqual({ codex: 'c', 'claude-code': 'a' });
-		activeThreadId.set('created');
-		expect(get(draftAccountChoices)).toEqual({});
+		expect(get(draftAccountId)).toBeNull();
 	});
 });
