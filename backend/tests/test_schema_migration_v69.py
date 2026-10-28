@@ -48,7 +48,7 @@ def test_startup_migration_drops_unwritten_columns_and_keeps_rows() -> None:
 
         result = migrate_to_current(db, 69)
 
-        assert SCHEMA_VERSION == 154
+        assert SCHEMA_VERSION == 155
         assert (result.migrated, result.from_version, result.to_version) == (True, 68, 69)
         assert not _DROPPED & _columns(db)
         row = db.execute(

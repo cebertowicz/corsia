@@ -18,7 +18,7 @@ from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges,
 from tools.grep_ripgrep import search_ripgrep
 from tools.search_scope import (
     THREADS_NOTICE, SearchScope, included_filter, keep_path, pattern_components,
-    reviewed_grep_reads,
+    reviewed_grep_reads, search_identity,
 )
 
 
@@ -167,7 +167,7 @@ class GrepTool(Tool):
         except PermissionError as exc:
             return f"Error: {exc}"
         search_dir = authorized.resolved
-        current_thread_id = kwargs.get("_thread_id")
+        current_thread_id, all_threads = search_identity(search_dir, kwargs.get("_thread_id"), all_threads)
         if not keep_path(search_dir, current_thread_id, all_threads):
             return f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}"
 

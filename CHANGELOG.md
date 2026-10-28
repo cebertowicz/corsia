@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Email replies check for newer messages and support attachments and your usual font.
+- The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.

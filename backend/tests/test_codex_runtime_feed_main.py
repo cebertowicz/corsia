@@ -141,7 +141,8 @@ def test_codex_switch_scope_accepts_only_the_explicit_source_model() -> None:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.execute(
-        "CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT, project_id TEXT)"
+        "CREATE TABLE threads "
+        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT)"
     )
     db.execute(
         "INSERT INTO threads (id,model,project_id) VALUES (?,?,?)",
@@ -177,7 +178,8 @@ def test_codex_switch_scope_accepts_an_explicit_unset_legacy_source() -> None:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.execute(
-        "CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT, project_id TEXT)"
+        "CREATE TABLE threads "
+        "(id TEXT PRIMARY KEY, model TEXT, project_id TEXT, confinement TEXT)"
     )
     db.execute(
         "INSERT INTO threads (id,model,project_id) VALUES (?,?,?)",
