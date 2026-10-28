@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import sqlite3
 import time
 
 import pytest
+from loguru import logger
 
 from core.turn_core import TurnIdentity
 from core.turn_core import persist_turn_start
@@ -13,7 +13,7 @@ from events import observe_rules
 from infra.database import get_db
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.thread_driver import admit_input
-from registry import connected_app_observation as observation_module
+from registry import tool_result_observation as observation_module
 from registry import models
 from registry.command_match import command_matches_rule
 from subagents.child_thread import persist_tool_use
@@ -395,11 +395,14 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
 
     monkeypatch.setattr(observation_module, "observe_command_result", fail_registration)
 
-    with caplog.at_level(logging.ERROR, logger="registry.connected_app_observation"):
+    sink = logger.add(caplog.handler, level="ERROR", format="{message}")
+    try:
         result = await BashTool().execute(
             "gh pr create --title warning",
             **_direct_shell_context(thread_id),
         )
+    finally:
+        logger.remove(sink)
 
     assert result.startswith(_URL)
     assert not result.startswith("Error")

@@ -9,7 +9,7 @@ import pytest
 
 from events.self_caused import is_self_caused, record_result
 from infra import state
-from registry.connected_app_observation import notice_for_result
+from registry.tool_result_observation import notice_for_result
 from tests.test_observe_rules import _agent, _owner, _tool, _write
 from tools.mcp_stamp import ConnectedAppResult
 
@@ -130,7 +130,7 @@ async def test_registry_marks_before_return_for_native_and_harness_paths(isolate
 
 def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeypatch):
     from events.connectors import ObservedArtifactDecl
-    from registry import connected_app_observation as observation
+    from registry import tool_result_observation as observation
     from registry.observer import CommandArtifactRegistrationError
 
     artifact = ObservedArtifactDecl(integration="github", type="pull-request", external_id="owner/repo#7")

@@ -25,7 +25,7 @@ from infra.project_repo_policy import (
 )
 from infra.repo_flock import fast_forward_repo_locked
 from tools.shared_write_detection import collect_shell_shared_write_notices
-from registry.connected_app_observation import observe_with_warning
+from registry.tool_result_observation import observe_with_warning
 from registry.registration_writer import origin_from_tool_context
 import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward

@@ -1,7 +1,7 @@
-"""Observe an in-memory stamped connected-app result."""
+"""Observe tool results and report artifact registration failures."""
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from infra.tool_result_errors import is_error_result
 from registry.observer import CommandArtifactRegistrationError, observe_command_result
@@ -9,9 +9,6 @@ from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed
 from tools.mcp_stamp import result_stamp
 from tools.shell_output import registration_warning as build_registration_warning
-
-log = logging.getLogger(__name__)
-
 
 async def observe_in_db(result: object, args: dict) -> object:
     """Observe on the DB pool, which doesn't carry context variables, so read the turn first."""
@@ -26,7 +23,6 @@ async def observe_in_db(result: object, args: dict) -> object:
 def observe_current_result(result: object, args: dict, thread_id: str | None, turn_id: str | None) -> object:
     """Observe the clean result before any tool notices are appended."""
     from events.self_caused import record_result
-    from loguru import logger
     from tools.mcp_stamp import restamp
 
     notices = []
@@ -49,10 +45,10 @@ def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: 
     try:
         observe_command_result(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
     except CommandArtifactRegistrationError as exc:
-        log.exception("connector command artifact registration failed in %s", thread_id)
+        logger.exception("connector command artifact registration failed in {}", thread_id)
         warning = build_registration_warning(exc.artifact, exc.error)
     except Exception as exc:
-        log.exception("connector command observation failed in %s", thread_id)
+        logger.exception("connector command observation failed in {}", thread_id)
         warning = build_registration_warning(None, exc)
     finally:
         for artifact in changed:

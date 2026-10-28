@@ -89,7 +89,7 @@ class ToolRegistry:
                 name, params, review_request_id=review_request_id,
             ))
             if isinstance(result, ConnectedAppResult):
-                from registry.connected_app_observation import observe_in_db
+                from registry.tool_result_observation import observe_in_db
                 result = await observe_in_db(result, resolve_dispatch(name, params)[1])
             # The reminder only touches plain text, so a stamped result earns it as text.
             plain = str(result) if isinstance(result, ConnectedAppResult) else result

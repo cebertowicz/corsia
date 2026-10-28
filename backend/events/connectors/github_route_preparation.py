@@ -113,8 +113,6 @@ def _prepare_route(
         return
     if identity is not None and router._record_source_facts_db(internal_event, identity, payload):
         prepared.reap_payload = payload
-    # Own-account or bot authors are suppressed for everyone, unlike the caller-only
-    # self-caused drop below, which preserves rule recipients.
     suppressed = router._self_authored_result(internal_event, payload)
     if suppressed is not None:
         prepared.result = suppressed
@@ -124,18 +122,18 @@ def _prepare_route(
     selected, routing_state = router._select_route(
         internal_event, payload, identity, external_id, tag_provenance, selected_pr,
     )
+    target_filter = None
+    if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
+        from events.connectors.github_self_caused import SelfCausedFilter
+
+        target_filter = SelfCausedFilter(delivery_id)
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
         # Routing chose no thread; rules may still add recipients, never change this result.
         apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state,
-                           scope=scope)
+                           scope=scope, target_filter=target_filter)
         return
     thread_id, wake_reason = selected
-    self_caused_event = False
-    if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
-        from events.self_caused import delivery_is_self_caused
-
-        self_caused_event = delivery_is_self_caused("github", delivery_id, thread_id)
     facts = scope.envelope.facts if scope and scope.envelope else None
     summary, details = router._summarize(internal_event, payload, external_id, facts)
     if tag_provenance:
@@ -152,13 +150,7 @@ def _prepare_route(
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
     apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
-                       scope)
-    # Person-account tool echoes spare only their caller, unlike the own-account
-    # identity filter above; other recipients and rules may still receive them.
-    if self_caused_event and prepared.result is None:
-        from events.connectors.github_rules import drop_delivery
-
-        drop_delivery(prepared, internal_event, "self_caused")
+                       scope, target_filter)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
