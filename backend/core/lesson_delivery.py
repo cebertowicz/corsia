@@ -116,7 +116,11 @@ def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
 
 
 def _context_paths(db: sqlite3.Connection, thread_id: str) -> set[str]:
-    """Files this thread's latest dispatched context delivered."""
+    """Files from the latest dispatched manifest, including a completed turn.
+
+    A task can start outside an active turn; loaded_targets only reads a running
+    turn and would miss that prior context (test_context_paths_read_the_threads_latest_manifest).
+    """
     from core.correction_learning import manifest_paths
 
     row = db.execute(
@@ -282,10 +286,13 @@ def start_trials(
     return delivered
 
 
-def attach_plan_result(db, result: dict, thread_id: str, direct_node: bool) -> None:
+def attach_plan_result(db, result: object, thread_id: str, direct_node: bool) -> None:
     """Attach trials to the task actually selected by a plan mutation."""
     from memory.node_text import started_node_id
 
+    result = getattr(result, "result", result)
+    if not isinstance(result, dict):
+        return
     node = result.get("node") if direct_node else None
     node_id = (str(node["id"]) if isinstance(node, dict) and node.get("kind") == "task" and node.get("id")
                else started_node_id(result.get("next")))

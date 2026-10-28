@@ -55,6 +55,7 @@ def env(tmp_path, monkeypatch) -> Env:
 
     workspace = _repo(tmp_path)
     select_workspace(monkeypatch, workspace)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve()])
     path = tmp_path / "lessons.db"
     db = _db(str(path))
     _seed_thread(db, THREAD)
@@ -105,6 +106,18 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
         THREAD, "place",
         {"entry_id": entry, "verdict": "trial", "placement": answer or _answer(), **GATE_FIELDS},
     )
+
+
+def test_trial_with_existing_target_section_is_refused_at_admission(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n\n## Lessons\nExisting.\n")
+    result = _place(env, _entry(env), _answer(
+        case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
+    ))
+    assert "already in context" in result
+    assert "may only add a new section" in result
+    assert not _skill(env).exists()
 
 
 def test_flagged_new_checkpoint_entry_records_an_overridden_trial_check(env: Env) -> None:
@@ -376,6 +389,9 @@ CASE = {
 
 
 async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_supplies(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     first = _entry(env)
     _place(env, first, _answer(
         case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
@@ -404,6 +420,9 @@ async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_suppl
 
 
 async def test_a_revision_never_keeps_stale_evidence_or_an_old_target(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     _place(env, _entry(env), _answer(case=CASE, target_file="context/rule.md", target_section="Lessons"))
     await _drain(env.worker)
     _place(env, _entry(env, [{"kind": "turn", "reference": "turn-19"}], "a new file"), _answer(
@@ -449,6 +468,9 @@ async def test_a_held_revision_offered_later_keeps_only_the_new_evidence_it_stat
 
 
 async def test_a_held_capture_keeps_its_case_and_its_offer_carries_it(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     literal = _entry(env, SAID, "the user said: that answer was wrong")
     entry = _entry(env, SAID, "always search the history first")
     case: dict[str, Any] = {"case": CASE, "cause": "rule_gap", "target_file": "context/rule.md"}

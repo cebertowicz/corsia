@@ -211,15 +211,25 @@ def test_target_matching_never_reuses_another_owners_trial(tmp_path, monkeypatch
 
 
 def test_plan_start_delivers_trial_even_when_prior_words_are_disabled(db, monkeypatch):
+    from types import SimpleNamespace
     from memory import node_start_recall
     from plans import public
+    from tools import plans as plan_tools
 
     node_id = _node("with")
     _resolved(monkeypatch, [_trial()])
     monkeypatch.setattr(public, "attributed_selection", lambda *_: {"node_id": node_id})
     monkeypatch.setattr(node_start_recall, "DELIVERY_ON", False)
     result = {"node": {"id": node_id, "kind": "task"}}
-    node_start_recall.attach_to_result(db, "start", result, caller_thread_id="thread")
+    class Connection:
+        def __getattr__(self, name):
+            return getattr(db, name)
+        def close(self):
+            pass
+    monkeypatch.setattr(plan_tools, "get_db", lambda: Connection())
+    monkeypatch.setattr(plan_tools, "_thread_actor", lambda *_: object())
+    monkeypatch.setattr(plan_tools, "mutate", lambda *a, **kw: SimpleNamespace(result=result))
+    plan_tools._mutation_operation("thread", {}, None, "plan", "start", {}, "m", {})
     assert result["trial_lessons"][0]["lesson_id"] == "new"
     assert db.execute("SELECT variant FROM guidance_loads").fetchone()[0] == "with"
 

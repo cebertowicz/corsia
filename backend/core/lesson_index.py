@@ -44,7 +44,6 @@ UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"
 MISPLACED = "its file is not in its owner's skills"
 PER_TASK = "trial lesson is delivered per task"
-CAP_OMITTED = "trial cap omitted it"
 HELD_PREFIX = "trial lesson not offered: "
 #: Follows a trial's name on its index line; an ordinary skill has none.
 TRIAL_MARK = " (trial, unproven)"

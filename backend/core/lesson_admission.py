@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from core import lesson_case, lesson_files
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
 from core.placement_decide import Decision, Destination, ThreadPlace
-from core.lesson_trial_targeting import TrialRefused, same_case, target_trials
+from core.lesson_trial_targeting import TrialRefused, additive_only, same_case, target_trials
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
 HUMAN_KINDS = frozenset({"user", "message"})
@@ -134,12 +134,13 @@ def admit(
     merge = next(((path, item) for path, item in opened if same_case(item, decision)), None)
     write_path = merge[0] if merge else destination.path
     identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture, pending)
-    _offered_elsewhere(db, place, str(decision.skill_name), write_path)
+    _ensure_name_available(db, place, str(decision.skill_name), write_path)
     from core.lesson_delivery import START_TOKEN_CAP, delivery_for_trial
     from core.token_estimation import _text_tokens
 
     rendered = lesson_files.read_trial(text)
     assert rendered is not None
+    additive_only(replace(decision, case_metadata=rendered.lesson.case_metadata))
     payload = delivery_for_trial(rendered, write_path, text.encode()).payload
     if _text_tokens(payload, None) > START_TOKEN_CAP:
         return Admission(identity, capture_id, "over-budget", case_metadata=pending)
@@ -288,11 +289,10 @@ def _render(
     return identity, text
 
 
-def _offered_elsewhere(
+def _ensure_name_available(
     db: sqlite3.Connection, place: ThreadPlace, name: str, path: Path,
-) -> list[dict[str, Any]]:
-    """The trial lessons this thread is offered now; refuses a name another skill holds."""
-    from core.lesson_index import partition
+) -> None:
+    """Refuse a name already held by another skill."""
     from core.skill_resolution import resolve_effective_skills
     from infra.config import WORKSPACE
 
@@ -306,4 +306,4 @@ def _offered_elsewhere(
                 f"skill_name {name} is already a skill at {row.path}; a trial "
                 "never replaces one. Choose a new name"
             ))
-    return partition(skills.included, skills.omitted, thread_id=place.thread_id, db=db).lessons
+    return None

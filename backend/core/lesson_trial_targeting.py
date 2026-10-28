@@ -97,12 +97,3 @@ def target_from_lesson(current: Any) -> str | None:
     metadata = current.lesson.case_metadata
     raw = metadata.get("new_target_path") or metadata.get("target_file")
     return canonical_target_path(str(raw), workspace=WORKSPACE) if raw else None
-
-
-def trial_row(current: Any) -> dict[str, str]:
-    """Project a trial for admission's caller-facing open/retired lists."""
-    return {
-        "name": current.name,
-        "target_file": target_from_lesson(current) or "",
-        "cause": current.lesson.case_metadata.get("cause") or "",
-    }

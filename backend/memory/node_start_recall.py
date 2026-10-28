@@ -75,8 +75,6 @@ def attach_to_result(
     result = getattr(result, "result", result)
     if not isinstance(result, dict):
         return
-    from core.lesson_delivery import attach_plan_result
-    attach_plan_result(db, result, caller_thread_id, operation in _NODE_OPERATIONS)
     if not DELIVERY_ON:
         return
     try:
