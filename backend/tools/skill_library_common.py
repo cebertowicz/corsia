@@ -25,13 +25,17 @@ def persistent_owner(thread_id: str, db) -> str:
 def index():
     """Load the raw-only library index as an actionable tool-level result."""
     from library import LibraryUnreachableError, load_index
-    from library.index import LibraryIndexValidationError
+    from library.index import LibraryIndexValidationError, UnsupportedConnectorPackError
 
     try:
         result = load_index()
     except LibraryUnreachableError as error:
         raise LibraryIndexError(
             "library_unreachable", "the library index is unavailable; continue without it and try again later",
+        ) from error
+    except UnsupportedConnectorPackError as error:
+        raise LibraryIndexError(
+            "library_invalid", "the library index contains an unsupported connector pack; continue without the library and report it to the conductor",
         ) from error
     except LibraryIndexValidationError as error:
         raise LibraryIndexError(

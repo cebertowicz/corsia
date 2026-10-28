@@ -14,6 +14,8 @@ from events.connectors import ConnectorManifest, EventTypeDecl, register
 LIBRARY_CONNECTOR = "library"
 LIBRARY_INTEGRATION = "library"
 INSTALLED_SKILL_TYPE = "installed-skill"
+INSTALLED_PACK_TYPE = "installed-pack"
+PACK_CHANGED_EVENT = "library.pack_changed"
 ITEM_CHANGED_EVENT = "library.item_changed"
 ITEM_WITHDRAWN_EVENT = "library.item_withdrawn"
 
@@ -60,7 +62,7 @@ def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
         return None
     return {
         "integration": LIBRARY_INTEGRATION,
-        "type": INSTALLED_SKILL_TYPE,
+        "type": INSTALLED_PACK_TYPE if event_type == PACK_CHANGED_EVENT else INSTALLED_SKILL_TYPE,
         "external_id": external_id,
     }
 
@@ -70,6 +72,16 @@ MANIFEST = register(ConnectorManifest(
     namespace=LIBRARY_CONNECTOR,
     version="1",
     event_types={
+        PACK_CHANGED_EVENT: EventTypeDecl(
+            PACK_CHANGED_EVENT,
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
+            _FILTERABLE,
+            artifact_type=INSTALLED_PACK_TYPE,
+            artifact_integration=LIBRARY_INTEGRATION,
+            event_class="informational",
+            collapse_fact="item_key",
+            digest_line_facts=_CHANGED_LINE_FACTS,
+        ),
         ITEM_CHANGED_EVENT: EventTypeDecl(
             ITEM_CHANGED_EVENT,
             ("external_id", "item_manifest", "library_index_generation", "installed_at"),

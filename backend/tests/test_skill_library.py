@@ -46,7 +46,7 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
     assert tool.name == "skill_library"
     assert TOOL_CATALOG["skill_library"].category == "memory"
     assert tool_pack("skill_library") == "memory"
-    assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove"]
+    assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove", "fetch_pack"]
     assert "local_edits_token" in tool.parameters["properties"]
     assert "local_edits_token" in tool.parameters["properties"]["discard_local_edits"]["description"]
 
@@ -223,7 +223,7 @@ def test_invalid_library_action_precedes_community_consent(isolated_db, monkeypa
     monkeypatch.setattr(skill_library, "_emit_action", lambda *_args: None)
 
     assert skill_library._execute("replace", "thread", {}, None, None, False) == {
-        "error": "invalid_action", "message": "action must be search, install, update, or remove",
+        "error": "invalid_action", "message": "action must be search, install, update, remove, or fetch_pack",
     }
 
 

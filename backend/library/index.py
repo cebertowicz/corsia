@@ -12,6 +12,8 @@ import time
 from typing import Any
 from urllib.request import urlopen
 
+import semver
+
 from library.items import COMMIT, REPOSITORY, LibraryItemError, validate_relative_path
 
 INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
@@ -29,6 +31,10 @@ class LibraryUnreachableError(LibraryIndexError):
 
 class LibraryIndexValidationError(LibraryIndexError):
     """Raised when an index does not have the minimum safe shape."""
+
+
+class UnsupportedConnectorPackError(LibraryIndexValidationError):
+    """The index contains a connector pack that this consumer cannot install."""
 
 
 @dataclass(frozen=True)
@@ -134,14 +140,35 @@ def _validate_index(payload: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _validate_skill(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise LibraryIndexValidationError("library index item must be an object")
+    kind = row.get("kind", "skill")
+    if kind not in {"skill", "pack"}:
+        raise LibraryIndexValidationError("library index item kind must be skill or pack")
+    if kind == "pack":
+        if row.get("pack_kind") == "connector":
+            raise UnsupportedConnectorPackError("connector packs are not supported")
+        if row.get("pack_kind") != "blueprint":
+            raise LibraryIndexValidationError("library pack kind must be blueprint")
+        if row.get("type") != "corsia-blueprint":
+            raise LibraryIndexValidationError("library blueprint type must be corsia-blueprint")
+        if not isinstance(row.get("digest"), str) or not _SHA256.fullmatch(row["digest"]):
+            raise LibraryIndexValidationError("library blueprint digest must be SHA-256")
     required = (
-        "name", "description", "version", "license", "source", "files", "withdrawn", "withdrawn_reason",
-    )
+        "name", "description", "version", "source", "files", "withdrawn", "withdrawn_reason",
+    ) + (("license",) if kind == "skill" else ())
     if not isinstance(row, dict) or any(field not in row for field in required):
         raise LibraryIndexValidationError("library index skill row is missing a required field")
-    for field in ("name", "description", "version", "license"):
+    for field in ("name", "description", "version") + (("license",) if kind == "skill" else ()):
         if not isinstance(row[field], str) or not row[field]:
             raise LibraryIndexValidationError(f"library index skill {field} must be a non-empty string")
+    if kind == "pack":
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", row["name"]):
+            raise LibraryIndexValidationError("library blueprint name must be a safe single path component")
+        try:
+            semver.Version.parse(row["version"])
+        except ValueError as error:
+            raise LibraryIndexValidationError("library blueprint version must be semver") from error
     if not isinstance(row["withdrawn"], bool):
         raise LibraryIndexValidationError("library index skill withdrawn must be a boolean")
     if row["withdrawn_reason"] is not None and not isinstance(row["withdrawn_reason"], str):
@@ -177,8 +204,12 @@ def _validate_skill(row: Any) -> dict[str, Any]:
             raise LibraryIndexValidationError(
                 "library index file sha256 must be 64 hexadecimal characters, optionally prefixed sha256:"
             )
-    if "SKILL.md" not in paths:
+    if kind == "skill" and "SKILL.md" not in paths:
         raise LibraryIndexValidationError("library index skill files must include SKILL.md")
+    if kind == "pack" and not {"manifest.yaml", "CHANGELOG.md"}.issubset(paths):
+        raise LibraryIndexValidationError("library blueprint must include manifest.yaml and CHANGELOG.md")
+    if kind == "pack" and any(any(part.startswith(".") for part in path.split("/")) for path in paths):
+        raise LibraryIndexValidationError("library blueprint cannot contain dotfiles")
     if len(paths) != len({path.casefold() for path in paths}):
         raise LibraryIndexValidationError("library index file paths must be unique, ignoring case")
     return dict(row)

@@ -9,6 +9,8 @@ from typing import Any
 
 from events.connectors.library import (
     INSTALLED_SKILL_TYPE,
+    INSTALLED_PACK_TYPE,
+    PACK_CHANGED_EVENT,
     ITEM_CHANGED_EVENT,
     ITEM_WITHDRAWN_EVENT,
     LIBRARY_CONNECTOR,
@@ -29,7 +31,7 @@ INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registra
       AND registrations.relationship_state IN ('owner-active', 'owner-pinned')"""
 
 
-def _installed_rows(db=None) -> list[dict[str, Any]]:
+def _installed_rows(db=None, *, artifact_type: str = INSTALLED_SKILL_TYPE) -> list[dict[str, Any]]:
     """Read only active installed-library artifacts, never scan the full registry."""
     from infra.database import get_db
 
@@ -37,7 +39,7 @@ def _installed_rows(db=None) -> list[dict[str, Any]]:
     connection = db or get_db()
     try:
         rows = connection.execute(
-            INSTALLED_ROWS_SQL, (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE),
+            INSTALLED_ROWS_SQL, (LIBRARY_INTEGRATION, artifact_type),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -64,7 +66,37 @@ def produce_once() -> int:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
+    if use_community_improvements:
+        for row in _installed_rows(artifact_type=INSTALLED_PACK_TYPE):
+            payload = _pack_notice_payload(row, items, index.generations)
+            if payload is not None:
+                deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
+                delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
+
+
+def _pack_notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]], generations: dict[str, int]) -> dict[str, Any] | None:
+    import semver
+
+    external_id = row.get("external_id")
+    if not isinstance(external_id, str):
+        return None
+    parts = external_id.rsplit("/", 2)
+    if len(parts) != 3:
+        return None
+    _owner, name, version = parts
+    item = items.get(name)
+    if not item or item.get("kind") != "pack" or item.get("pack_kind") != "blueprint" or item["withdrawn"]:
+        return None
+    try:
+        if semver.Version.parse(item["version"]) <= semver.Version.parse(version):
+            return None
+    except ValueError:
+        return None
+    return {"event_type": PACK_CHANGED_EVENT, "external_id": external_id, "name": name,
+            "installed_version": version, "library_version": item["version"],
+            "item_manifest": item["digest"], "library_index_generation": generations.get(name, 0),
+            "installed_at": version, "edited": False, "changed_files": []}
 
 
 def _notice_payload(
@@ -77,7 +109,7 @@ def _notice_payload(
     name = external_id.rpartition("/")[2]
     item = items.get(name)
     origin = read_origin(Path(path).parent)
-    if item is None or origin is None or not isinstance(origin.get("source"), str):
+    if item is None or item.get("kind", "skill") != "skill" or origin is None or not isinstance(origin.get("source"), str):
         return None
     edited, changed_files = local_edits(Path(path).parent, origin)
     base = {
