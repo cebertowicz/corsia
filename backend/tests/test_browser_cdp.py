@@ -1,11 +1,30 @@
 import io
 import json
+import logging
 import subprocess
 
 import pytest
 
 from host_access import browser_cdp, browser_clipboard, browser_dom_write
 from host_access.browser_cli import CommandResult
+
+
+@pytest.mark.asyncio
+async def test_cdp_error_logs_diagnostics_and_keeps_person_facing_error(caplog):
+    class Socket:
+        async def send(self, _message):
+            pass
+
+        async def recv(self):
+            return json.dumps({'id': 1, 'error': {'code': -32602, 'message': 'invalid parameters'}})
+
+    caplog.set_level(logging.DEBUG, logger=browser_cdp.__name__)
+    client = browser_cdp.CdpClient('ws://page')
+    client.socket = Socket()
+    with pytest.raises(browser_cdp.BrowserSessionError, match="This page couldn't be checked"):
+        await client.call('Input.dispatchKeyEvent', text='a')
+    assert 'Input.dispatchKeyEvent' in caplog.text
+    assert '-32602' in caplog.text and 'invalid parameters' in caplog.text
 
 
 @pytest.mark.asyncio
