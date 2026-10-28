@@ -768,6 +768,8 @@ for (const theme of ['light', 'dark'] as const) {
 			if (width === 393) {
 				await expect(chipBox(page)).toHaveCount(0);
 			} else {
+				// The document's covered chip may still be completing its outro as the image opens.
+				await expect(page.locator('[data-doc-reply-chip][inert]')).toHaveCount(0);
 				await expectChip(page, '1 new reply');
 				await expect(chipButton(page)).toHaveAttribute('title', '1 new reply');
 				const popover = page.locator('[data-popover]').filter({ hasText: 'Yes, the header is final. I attached the export.' });
