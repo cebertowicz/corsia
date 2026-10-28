@@ -297,7 +297,10 @@ def attach_at_start(
     db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
 ) -> None:
-    """Add a started task's trial guidance to its plan result or wake.
+    """Add a started task's trial guidance to the caller's own plan result.
+
+    Never to a plan wake: a wake can be dropped as stale before any Turn reads
+    it, and a receipt for guidance never seen would miscount both arms.
 
     Only the task Plans still attributes to the caller receives guidance. A
     failure never fails the plan operation; it is reported in ``facts``.
