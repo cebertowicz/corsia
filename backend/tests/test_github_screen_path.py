@@ -38,7 +38,7 @@ def screen(world, tmp_path, monkeypatch):
                          protect_base_checkout=False, db=db)
     db.commit()
     set_project_conductor(world['project'], OWNER, db=db)
-    observe_rules.sync_shipped_rules(db, world['project'])
+    observe_rules.sync_shipped_rules(db)
     install.sync(db, world['project'])
     key = install._key(world['project'])
     schedule = db.execute('SELECT script_path FROM automation_schedules WHERE id=?', (key + '_script',)).fetchone()

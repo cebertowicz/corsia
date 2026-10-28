@@ -296,9 +296,6 @@ def set_project_conductor(project_id: str, thread_id: str | None, db=None) -> bo
             (thread_id, now, project_id),
         )
         bump_context_epochs(_db, (previous, thread_id), now)
-        from events.observe_rules import sync_shipped_rules
-
-        sync_shipped_rules(_db, project_id)
         return True
 
 

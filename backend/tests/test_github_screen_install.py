@@ -24,7 +24,7 @@ def test_observe_sync_does_not_install_screen(isolated_db, tmp_path, monkeypatch
     monkeypatch.setattr(install, "_repos", lambda conn, project: ["example/repo"])
     monkeypatch.setattr(install, "owner_root", lambda owner, project, conn: tmp_path / owner)
     assert set_project_conductor("screen-project", "screen-owner", db=db)
-    observe_rules.sync_shipped_rules(db, "screen-project")
+    observe_rules.sync_shipped_rules(db)
     assert not _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
     assert not _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
 
