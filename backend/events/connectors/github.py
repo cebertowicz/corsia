@@ -31,7 +31,7 @@ from events.identity import (
 )
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
-from events.connectors.github_content_facts import content_facts, repository_name
+from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
 from infra.webhook_delivery_log import comment_object_key
@@ -166,14 +166,8 @@ def _classify(raw: dict[str, Any]) -> str:
     if raw.get("check_suite"):
         return "check.completed"
     action = raw.get("action", "")
-    if isinstance(raw.get("review"), dict):
-        return f"review.{action}"
-    if isinstance(raw.get("comment"), dict):
-        issue = _json_object(raw, "issue")
-        prefix = "pr_comment" if raw.get("pull_request") or issue.get("pull_request") else "issue_comment"
-        return f"{prefix}.{action}"
-    if raw.get("issue") and action == "edited":
-        return "issue.edited"
+    if kind := content_kind(raw):
+        return kind
     if raw.get("issue") and not raw.get("pull_request") and f"issue.{action}" in IDENTITY:
         return f"issue.{action}"
     if action == "closed":

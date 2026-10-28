@@ -14,6 +14,20 @@ def repository_name(raw: dict[str, Any]) -> Any:
     return repository.get("full_name") if isinstance(repository, dict) else None
 
 
+def content_kind(raw: dict[str, Any]) -> str | None:
+    """The kind of a review, a comment or an issue edit; None for anything else."""
+    action = raw.get("action", "")
+    if isinstance(raw.get("review"), dict):
+        return f"review.{action}"
+    if isinstance(raw.get("comment"), dict):
+        issue = raw.get("issue")
+        on_pr = raw.get("pull_request") or (isinstance(issue, dict) and issue.get("pull_request"))
+        return f"{'pr_comment' if on_pr else 'issue_comment'}.{action}"
+    if raw.get("issue") and action == "edited":
+        return "issue.edited"
+    return None
+
+
 def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     """Facts about the authored item, without its title or body."""
     author = event_author(raw)
