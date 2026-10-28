@@ -80,7 +80,7 @@ function mountComposer(threadId: string | null = null) {
 	}) as never }));
 	flushSync();
 	return {
-		props,
+		props, rowHost, sheetHost,
 		chip: () => rowHost.querySelector<HTMLButtonElement>('button.context-chip'),
 		donut: () => {
 			const chip = rowHost.querySelector<HTMLButtonElement>('button.context-chip');
@@ -261,7 +261,7 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 		expect(composer.headline()).toContain('42%');
 	});
 
-	it('keeps the carried reading when the sheet closes during refresh until the read lands', async () => {
+	it('shows the receipt when the sheet closes during refresh, then the new preview', async () => {
 		const composer = mountComposer();
 		setContextUsage('thread-a', measured('thread-a', 420) as never);
 		composer.props.sheetView = 'context';
@@ -274,7 +274,8 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 		expect(composer.donut()).toBe('~30%');
 		composer.props.sheetView = null;
 		flushSync();
-		expect(composer.donut()).toBe('~30%');
+		expect(composer.donut()).toBe('51%');
+		expect(host.textContent).not.toContain('Updating');
 		finish({ ok: true, json: async () => ({ preview: {
 			...measured('thread-a', 640), token_source: 'estimated', token_usage_available: false, preview: true,
 		} }) });
@@ -296,6 +297,7 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 		flushSync();
 		expect(composer.donut()).toBe('80%');
 		expect(composer.headline()).toContain('80%');
+		expect(host.textContent).toContain('Updating');
 		expect(previewCalls()).toHaveLength(2);
 	});
 
@@ -324,8 +326,19 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 
 		let finish!: (response: unknown) => void;
 		fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		const rowObserver = new MutationObserver(() => {});
+		const sheetObserver = new MutationObserver(() => {});
+		for (const [observer, target] of [[rowObserver, composer.rowHost], [sheetObserver, composer.sheetHost]] as const) {
+			observer.observe(target, { subtree: true, characterData: true, characterDataOldValue: true });
+		}
 		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
 		flushSync();
+		for (const observer of [rowObserver, sheetObserver]) {
+			const changes = observer.takeRecords();
+			observer.disconnect();
+			expect(changes.map(change => change.oldValue)).not.toContain('510');
+			expect(changes.map(change => change.oldValue)).not.toContain('51%');
+		}
 		expect(composer.donut()).toBe('~30%');
 		expect(composer.headline()).toContain('30%');
 		expect(host.textContent).toContain('Updating');

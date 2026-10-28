@@ -27,6 +27,11 @@ export function contextReading(
 	preview: ContextPreviewEntry | undefined,
 	owner: string,
 	measured: ContextUsage | null,
+	sheetOpen = false,
 ): ContextUsage | null {
-	return (preview?.owner === owner ? (preview.usage ?? preview.previous) : null) ?? measured;
+	if (preview?.owner === owner && preview.usage) return preview.usage;
+	if (sheetOpen && preview?.previous && (preview.owner === null || (preview.owner === owner && preview.loading))) {
+		return preview.previous;
+	}
+	return measured;
 }
