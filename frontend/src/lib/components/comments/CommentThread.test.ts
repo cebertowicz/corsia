@@ -131,7 +131,7 @@ describe('CommentThread', () => {
 		});
 	}
 
-	it('stamps the newest reply only after it is observed inside its scroll container', async () => {
+	it('stamps an unread reply only after it is observed in the viewport', async () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });

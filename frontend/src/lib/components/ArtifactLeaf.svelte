@@ -302,7 +302,7 @@
 						onReload={() => viewer?.reload()}
 						onOpenImage={openImage}
 						onDocumentPlace={recordDocumentPlace}
-						covered={imageOpen}
+						covered={documentCovered}
 						onLanded={() => { if (threadId && activeTab) consumeTabLanding(threadId, activeTab.instanceId); }}
 					/>
 				</div>
