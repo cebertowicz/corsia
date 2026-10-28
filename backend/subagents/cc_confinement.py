@@ -1,6 +1,6 @@
 """Where a confined Claude Code child runs and what it may read.
 
-A ``review`` child reads only its own empty working directory and the
+A ``untrusted`` child reads only its own empty working directory and the
 add-dirs its parent could already read, and holds no credential. The
 confinement is stored on the thread row. A cold launch reads that row;
 a live process retains the confinement it was launched with.
@@ -17,7 +17,7 @@ class ConfinementRefused(ValueError):
     """A confined launch cannot be given the reads or record it needs."""
 
 
-def review_working_dir(thread_id: str, project_id: str | None, db) -> str:
+def untrusted_working_dir(thread_id: str, project_id: str | None, db) -> str:
     """Create and return the child's own empty ``confined`` directory.
 
     It sits in the child's thread root, which is inside the workspace, so the
@@ -57,8 +57,8 @@ def require_readable_dirs(paths: list[str], workspace: str | None) -> tuple[str,
     return tuple(dict.fromkeys(resolved))
 
 
-def drop_review_credentials(env: dict[str, str]) -> None:
-    """Remove every credential a review child could use (design §8.1, "No tokens").
+def drop_untrusted_credentials(env: dict[str, str]) -> None:
+    """Remove every credential an untrusted child could use (design §8.1, "No tokens").
 
     The rule is the one agent shells use, so a name added later is covered too.
     """
@@ -82,7 +82,7 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
             return UNCONFINED
         return LaunchConfinement(launched.confinement, launched.add_dirs, launched.working_dir)
     from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
-    from subagents.cc_invocation import CONFINEMENT_REVIEW
+    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
     owned = db is None
     if owned:
@@ -97,7 +97,7 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
         if dirs is None:
             return UNCONFINED
         project_id = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
-        return LaunchConfinement(CONFINEMENT_REVIEW, dirs, review_working_dir(thread_id, project_id, db))
+        return LaunchConfinement(CONFINEMENT_UNTRUSTED, dirs, untrusted_working_dir(thread_id, project_id, db))
     finally:
         if owned:
             db.close()
@@ -106,7 +106,7 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
 def launch_tools(working_dir: str | None, confined: bool) -> tuple[object, tuple]:
     """The CORSIA tool registry and definitions a launch installs and budgets.
 
-    A review child has no tool bridge, so it gets neither, however it launches.
+    An untrusted child has no tool bridge, so it gets neither, however it launches.
     """
     if confined:
         return None, ()

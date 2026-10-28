@@ -9,8 +9,8 @@ import pytest
 from cc_runtime_fixtures import _seed_parent, child_db  # noqa: F401
 from subagents.cc_invocation import UNCONFINED, ClaudeInvocation, build_claude_cmd, permission_mode_for
 
-_REVIEW = dict(binary="claude", permission_mode=permission_mode_for("review"),
-               confinement="review", add_dirs=("/src",), working_dir="/child/confined")
+_REVIEW = dict(binary="claude", permission_mode=permission_mode_for("untrusted"),
+               confinement="untrusted", add_dirs=("/src",), working_dir="/child/confined")
 _PLAIN = dict(binary="claude", permission_mode="bypassPermissions")
 
 
@@ -27,13 +27,13 @@ def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
     _seed_parent(child_db, sid="child")
     _record("child", "first", ClaudeInvocation(**_REVIEW, session_id="first"))
     assert launch_confinement("child", None, child_db) == UNCONFINED
-    child_db.execute("UPDATE threads SET confinement='review', confined_read_dirs=? WHERE id='child'",
+    child_db.execute("UPDATE threads SET confinement='untrusted', confined_read_dirs=? WHERE id='child'",
                      (json.dumps(["/row"]),))
     child_db.commit()
     _record("child", "second", ClaudeInvocation(**_PLAIN))
-    monkeypatch.setattr("subagents.cc_confinement.review_working_dir", lambda *_args: "/child/confined")
+    monkeypatch.setattr("subagents.cc_confinement.untrusted_working_dir", lambda *_args: "/child/confined")
     result = launch_confinement("child", None, child_db)
-    assert (result.mode, result.add_dirs) == ("review", ("/row",))
+    assert (result.mode, result.add_dirs) == ("untrusted", ("/row",))
     row = dict(child_db.execute("SELECT * FROM threads WHERE id='child'").fetchone())
     assert tuple(map(str, context_roots(row))) == ("/row",)
     _, cwd, _ = codex_destination_scope(
@@ -42,7 +42,7 @@ def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
     assert cwd.endswith("codex-confined-cwd/child")
 
 
-@pytest.mark.parametrize("mode,dirs", [("review", "[]"), ("write", '["/src"]'), ("review", "{bad")])
+@pytest.mark.parametrize("mode,dirs", [("untrusted", "[]"), ("write", '["/src"]'), ("untrusted", "{bad")])
 def test_damaged_row_refuses_cold_launch(child_db, mode, dirs):
     from subagents.cc_confinement import ConfinementRefused, launch_confinement
     _seed_parent(child_db, sid="child")
@@ -72,8 +72,8 @@ def test_review_env_holds_no_credential_and_unconfined_env_is_unchanged(monkeypa
              "CORSIA_EVAL_TOKEN", "CORSIA_RESTART_CALLER_TOKEN")
     for name in names:
         monkeypatch.setenv(name, "secret")
-    review = CCStreamSession(binary="claude", session_id="s", confinement="review",
-                             add_dirs=("/src",), permission_mode=permission_mode_for("review"))
+    review = CCStreamSession(binary="claude", session_id="s", confinement="untrusted",
+                             add_dirs=("/src",), permission_mode=permission_mode_for("untrusted"))
     plain = CCStreamSession(binary="claude", session_id="s")
     assert not set(names) & set(review._build_env())
     assert set(names) <= set(plain._build_env())

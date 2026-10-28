@@ -27,7 +27,7 @@ def _dev_137() -> sqlite3.Connection:
 
 
 def test_v138_registers_the_task_intent_step() -> None:
-    assert SCHEMA_VERSION == 158
+    assert SCHEMA_VERSION == 160
     assert MIGRATIONS[137] is migrate_137_to_138
 
 
@@ -45,7 +45,7 @@ def test_existing_plan_nodes_survive_the_intent_migration() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.from_version, result.to_version) == (137, 158)
+        assert (result.from_version, result.to_version) == (137, 160)
         row = db.execute("SELECT intent,intent_node_id FROM plan_nodes WHERE id=?", (node.id,)).fetchone()
         assert tuple(row) == (None, None)
 

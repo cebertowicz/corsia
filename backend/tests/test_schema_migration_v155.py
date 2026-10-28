@@ -29,7 +29,7 @@ def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def test_v155_is_registered() -> None:
-    assert SCHEMA_VERSION == 158
+    assert SCHEMA_VERSION == 160
     assert MIGRATIONS[154] is migrate_154_to_155
 
 
@@ -38,7 +38,7 @@ def test_v155_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> 
     db = _legacy_db()
     try:
         initialize_schema(fresh)
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 158
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 160
         assert sorted(_columns(db)) == sorted(_columns(fresh))
         assert thread_confinement.read_dirs("old", db) is None
         assert {r[1] for r in db.execute("PRAGMA index_list(event_route_decisions)")} == {
@@ -155,12 +155,12 @@ def test_confinement_is_written_once_and_a_damaged_record_fails_closed() -> None
         initialize_schema(db)
         db.execute("INSERT INTO users (id,password_hash,created_at,password_changed_at) VALUES ('u','x','t','t')")
         db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('w','u','t','t','t')")
-        thread_confinement.record(db, "w", "review", ("/tmp/a",))
+        thread_confinement.record(db, "w", "untrusted", ("/tmp/a",))
         assert thread_confinement.read_dirs("w", db) == ("/tmp/a",)
         with pytest.raises(ValueError, match="already has a confinement"):
-            thread_confinement.record(db, "w", "review", ("/",))
-        with pytest.raises(ValueError, match="only a review confinement"):
-            thread_confinement.record(db, "w", "review", ())
+            thread_confinement.record(db, "w", "untrusted", ("/",))
+        with pytest.raises(ValueError, match="only an untrusted confinement"):
+            thread_confinement.record(db, "w", "untrusted", ())
         db.execute("UPDATE threads SET confined_read_dirs='not json' WHERE id='w'")
         with pytest.raises(thread_confinement.ConfinementRecordDamaged):
             thread_confinement.read_dirs("w", db)

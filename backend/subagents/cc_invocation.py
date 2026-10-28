@@ -13,24 +13,24 @@ from subagents.managed_launch import claude_project_discovery_args
 #: A launch with every CORSIA tool, as every managed child had before confinement.
 CONFINEMENT_NONE = "none"
 #: A launch that may only Read, Grep and Glob its working directory and add-dirs.
-CONFINEMENT_REVIEW = "review"
-CONFINEMENTS = (CONFINEMENT_NONE, CONFINEMENT_REVIEW)
+CONFINEMENT_UNTRUSTED = "untrusted"
+CONFINEMENTS = (CONFINEMENT_NONE, CONFINEMENT_UNTRUSTED)
 _CONFINEMENT_FIELDS = ("confinement", "add_dirs")
-#: The only tools a review launch has: Claude Code's own, run inside the provider.
-REVIEW_NATIVE_TOOLS = ("Read", "Grep", "Glob")
+#: The only tools an untrusted launch has: Claude Code's own, run inside the provider.
+UNTRUSTED_NATIVE_TOOLS = ("Read", "Grep", "Glob")
 
 
-def claude_review_profile_args() -> list[str]:
-    """Return the fixed Claude Code tool profile for a confined review child.
+def claude_untrusted_profile_args() -> list[str]:
+    """Return the fixed Claude Code tool profile for a confined untrusted child.
 
     The caller supplies the reviewed paths with ``--add-dir``. Keeping this
-    profile separate from normal managed-session construction prevents a review
+    profile separate from normal managed-session construction prevents an untrusted
     child from inheriting CORSIA MCP access, local settings, or any tool other
     than Read, Grep, and Glob.
     """
     return [
         *confined_claude_controls(),
-        "--tools", ",".join(REVIEW_NATIVE_TOOLS),
+        "--tools", ",".join(UNTRUSTED_NATIVE_TOOLS),
     ]
 
 
@@ -52,7 +52,7 @@ class ClaudeInvocation:
 
     def __post_init__(self) -> None:
         _require_confinement(self.confinement, self.add_dirs)
-        if self.confinement == CONFINEMENT_REVIEW and self.mcp_config:
+        if self.confinement == CONFINEMENT_UNTRUSTED and self.mcp_config:
             raise ValueError("a confined Claude Code launch has no CORSIA tool bridge")
 
 
@@ -63,8 +63,8 @@ def _require_confinement(confinement: object, add_dirs: object) -> None:
         not isinstance(path, str) or not path for path in add_dirs
     ):
         raise ValueError("Claude Code add-dirs must be non-empty path strings")
-    if (confinement == CONFINEMENT_REVIEW) != bool(add_dirs):
-        raise ValueError("only a review launch has add-dirs, and it needs at least one")
+    if (confinement == CONFINEMENT_UNTRUSTED) != bool(add_dirs):
+        raise ValueError("only an untrusted launch has add-dirs, and it needs at least one")
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class LaunchConfinement:
 
     mode: str = CONFINEMENT_NONE
     add_dirs: tuple[str, ...] = ()
-    working_dir: str | None = None  # a review child's own directory
+    working_dir: str | None = None  # an untrusted child's own directory
 
     @property
     def confined(self) -> bool:
@@ -84,15 +84,15 @@ UNCONFINED = LaunchConfinement()
 
 
 def permission_mode_for(confinement: str) -> str:
-    """The permission mode a launch runs with; review's is its profile's own."""
-    return CONFINED_PERMISSION_MODE if confinement == CONFINEMENT_REVIEW else "bypassPermissions"
+    """The permission mode a launch runs with; the confined mode uses its profile's own."""
+    return CONFINED_PERMISSION_MODE if confinement == CONFINEMENT_UNTRUSTED else "bypassPermissions"
 
 
 def stored_confinement(value: dict) -> tuple[str, tuple[str, ...]]:
     """Read one stored launch's confinement; a record without one is unconfined.
 
     Raises ``ValueError`` for a malformed value, so no reader can mistake a
-    damaged review record for an unconfined one.
+    damaged untrusted record for an unconfined one.
     """
     confinement = value.get("confinement", CONFINEMENT_NONE)
     add_dirs = value.get("add_dirs", [])
@@ -168,9 +168,9 @@ def claude_transcript_prefix_proof(
     return expected, digest.hexdigest()
 
 
-def _review_args(invocation: ClaudeInvocation) -> list[str]:
+def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
     """Read-only tools over the add-dirs; the profile sets the permission mode."""
-    args = [*claude_review_profile_args(), "--disable-slash-commands"]
+    args = [*claude_untrusted_profile_args(), "--disable-slash-commands"]
     for path in invocation.add_dirs:
         args += ["--add-dir", path]
     return args
@@ -206,7 +206,7 @@ def build_claude_cmd(
         "--output-format", "stream-json", "--verbose",
         "--include-partial-messages", "--include-hook-events",
     ]
-    confined = invocation.confinement == CONFINEMENT_REVIEW
+    confined = invocation.confinement == CONFINEMENT_UNTRUSTED
     if not confined:
         command += ["--permission-mode", invocation.permission_mode]
     if invocation.resume_session_id:
@@ -215,7 +215,7 @@ def build_claude_cmd(
         command += ["--session-id", invocation.session_id]
     if invocation.seed_file:
         command += ["--append-system-prompt-file", invocation.seed_file]
-    command += _review_args(invocation) if confined else _managed_args(invocation)
+    command += _untrusted_args(invocation) if confined else _managed_args(invocation)
     if invocation.model:
         command += ["--model", invocation.model]
     if invocation.effort:

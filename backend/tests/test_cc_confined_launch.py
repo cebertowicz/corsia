@@ -1,4 +1,4 @@
-"""A ``review`` Claude Code child launches read-only, every time it launches.
+"""A ``untrusted`` Claude Code child launches read-only, every time it launches.
 
 The eager spawn and the cold start after the live handle is gone both read
 the confinement from the stored launch record; an unconfined launch is
@@ -28,7 +28,7 @@ from subagents.cc_invocation import (
     build_claude_cmd,
     claude_invocation_from_metadata,
     claude_invocation_metadata,
-    claude_review_profile_args,
+    claude_untrusted_profile_args,
 )
 from subagents.managed_launch import claude_project_discovery_args
 
@@ -86,7 +86,7 @@ def _stored_invocation(db, thread_id: str) -> dict:
 
 def _assert_confined(launch: dict, reviewed: str, child_id: str) -> None:
     cmd = launch["cmd"]
-    profile = claude_review_profile_args()
+    profile = claude_untrusted_profile_args()
     start = cmd.index(profile[0])
     assert cmd[start:start + len(profile)] == profile
     assert cmd[cmd.index("--add-dir") + 1] == reviewed
@@ -117,13 +117,13 @@ async def test_review_spawn_and_cold_start_stay_confined(
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="review", add_dirs=(reviewed_dir,),
+        confinement="untrusted", add_dirs=(reviewed_dir,),
     )
     assert await _wait(lambda: rt.is_live(child_id))
     assert len(launches) == 1
     _assert_confined(launches[0], reviewed_dir, child_id)
     stored = _stored_invocation(child_db, child_id)
-    assert stored["confinement"] == "review" and stored["add_dirs"] == [reviewed_dir]
+    assert stored["confinement"] == "untrusted" and stored["add_dirs"] == [reviewed_dir]
     # On its row too, so a switch to another harness can't launch it unconfined.
     from infra.thread_confinement import read_dirs
     assert read_dirs(child_id, child_db) == (reviewed_dir,)
@@ -140,7 +140,7 @@ async def test_review_spawn_and_cold_start_stay_confined(
     assert len(launches) == 2
     _assert_confined(launches[1], reviewed_dir, child_id)
     assert launches[1]["cwd"] == launches[0]["cwd"]
-    assert _stored_invocation(child_db, child_id)["confinement"] == "review"
+    assert _stored_invocation(child_db, child_id)["confinement"] == "untrusted"
     await rt.retire(child_id)
 
 
@@ -161,7 +161,7 @@ async def test_cold_start_refuses_a_confined_child_whose_reads_left_scope(
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="review", add_dirs=(reviewed_dir,),
+        confinement="untrusted", add_dirs=(reviewed_dir,),
     )
     await rt.retire(child_id)
     shutil.rmtree(reviewed_dir)
@@ -206,7 +206,7 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="review", add_dirs=(reviewed_dir,),
+        confinement="untrusted", add_dirs=(reviewed_dir,),
     )
     reads = []
     reader = thread_confinement.read_dirs
@@ -230,7 +230,7 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
         child_id, target=cc_target("sonnet"), current_user_text="again",
         selection=None, provider_resume=True,
     )
-    assert reads == [child_id] and resumed.confinement.mode == "review"
+    assert reads == [child_id] and resumed.confinement.mode == "untrusted"
     assert resumed.tool_registry is None and resumed.tool_definitions == ()
     assert resumed.fit_section_tokens["tools"] == 0 and fits[-1][0]["tools"] == 0
     monkeypatch.setattr(cc_destination, "_LIVE", live)
@@ -268,7 +268,7 @@ async def test_review_spawn_launches_nothing_without_its_record(
         await rt.spawn(
             "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
             broadcast=lambda _sid, _message: None,
-            confinement="review", add_dirs=(reviewed_dir,),
+            confinement="untrusted", add_dirs=(reviewed_dir,),
         )
     assert launches == [] and rt._LIVE.count() == 0
 
@@ -292,7 +292,7 @@ async def test_delegate_task_refuses_a_read_path_outside_the_parents_scope(
 
     refused = await delegate_task._spawn_claude_code_child(
         parent_thread_id="parent", task="review", title=None,
-        model_id="claude-code/sonnet", confinement="review", read_paths=[str(outside)],
+        model_id="claude-code/sonnet", confinement="untrusted", read_paths=[str(outside)],
     )
     assert refused.startswith(f"Error: read path {outside} refused: ")
     assert "outside the sandbox" in refused
@@ -305,13 +305,13 @@ async def test_delegate_task_review_needs_paths_on_every_model(child_db, monkeyp
 
     _seed_parent(child_db)
     unpaired = await delegate_task._spawn(
-        "parent", {}, "task", {"model": "claude-code/sonnet", "confinement": "review"},
+        "parent", {}, "task", {"model": "claude-code/sonnet", "confinement": "untrusted"},
     )
-    assert unpaired.startswith("Error: confinement 'review' needs read_paths")
+    assert unpaired.startswith("Error: confinement 'untrusted' needs read_paths")
     stray = await delegate_task._spawn(
         "parent", {}, "task", {"model": "claude-code/sonnet", "read_paths": ["/w"]},
     )
-    assert stray.startswith("Error: confinement 'review' needs read_paths")
+    assert stray.startswith("Error: confinement 'untrusted' needs read_paths")
 
     def eligible(model, **_scope):
         return model, None
@@ -326,7 +326,7 @@ async def test_delegate_task_review_needs_paths_on_every_model(child_db, monkeyp
     )
     codex = await delegate_task._spawn(
         "parent", {}, "task",
-        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": ["/w"]},
+        {"model": "codex/gpt-5-codex", "confinement": "untrusted", "read_paths": ["/w"]},
     )
     assert codex.startswith("Error: read path /w refused:")
 
@@ -361,12 +361,12 @@ def test_unconfined_launch_is_unchanged():
 
 def test_invocation_rejects_inconsistent_confinement():
     with pytest.raises(ValueError):
-        ClaudeInvocation(binary="c", permission_mode="dontAsk", confinement="review")
+        ClaudeInvocation(binary="c", permission_mode="dontAsk", confinement="untrusted")
     with pytest.raises(ValueError):
         ClaudeInvocation(binary="c", permission_mode="p", add_dirs=("/w",))
     with pytest.raises(ValueError):
         ClaudeInvocation(
-            binary="c", permission_mode="dontAsk", confinement="review",
+            binary="c", permission_mode="dontAsk", confinement="untrusted",
             add_dirs=("/w",), mcp_config="cfg.json",
         )
     with pytest.raises(ValueError):
