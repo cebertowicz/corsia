@@ -63,10 +63,14 @@ class FirstRunBind:
 
 def _vendor_rows(provider: str, *, db) -> list[dict]:
     """The vendor's catalog models the picker lists, each as its account-independent row."""
+    from llm.harness_catalog import added_rows
     from llm.model_status import harness_base_row
 
     models = [row[0] for row in db.execute(
         "SELECT litellm_model FROM models WHERE harness=? AND enabled=1 ORDER BY litellm_model", (provider,))]
+    stored = {row[0] for row in db.execute("SELECT id FROM models WHERE harness=?", (provider,))}
+    models.extend(model for model, row in added_rows(db=db).items()
+                  if row['provider'] == provider and model not in stored)
     return [row for row in (harness_base_row(model, db=db) for model in models) if row is not None]
 
 

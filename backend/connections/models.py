@@ -166,27 +166,31 @@ def connection_available(provider: str, db=None) -> bool:
     This is the gate connection-conditional tools hang off.
     """
     _db = db or get_db()
-    try:
-        row = _db.execute(
-            "SELECT status FROM connections WHERE provider = ?", (provider,)
-        ).fetchone()
-        if not row:
-            return False
-        if row["status"] == ConnectionStatus.AVAILABLE.value:
-            return True
-        if provider not in VENDORS or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
-            return False
-        from connections import resolve_builtin_binary
-        from connections.account_evidence import current_ready_discovery
-        from connections.vendor_accounts import list_accounts
+    row = _db.execute(
+        "SELECT status FROM connections WHERE provider = ?", (provider,)
+    ).fetchone()
+    if not db:
+        _db.close()
+    return bool(row) and row["status"] == ConnectionStatus.AVAILABLE.value
 
-        if resolve_builtin_binary(provider, db=_db)[1] is None:
-            return False
-        return any(current_ready_discovery(account) is not None
-                   for account in list_accounts(provider=provider, db=_db))
+
+def provider_may_run(provider: str, db=None) -> bool:
+    """Whether a provider has a connection or a signed-in added account to try.
+
+    Per-account discovery and policy are checked at turn admission.
+    """
+    connection = db or get_db()
+    try:
+        row = connection.execute(
+            "SELECT 1 FROM connections c WHERE c.provider=? AND "
+            "(c.status='available' OR (c.status IN ('needs_auth','unverified') AND EXISTS "
+            "(SELECT 1 FROM vendor_accounts a WHERE a.connection_id=c.id "
+            "AND a.is_default=0 AND a.state='signed_in'))) LIMIT 1", (provider,)
+        ).fetchone()
+        return row is not None
     finally:
-        if not db:
-            _db.close()
+        if db is None:
+            connection.close()
 
 
 SOURCE_CHECK_KEY = "source_check"

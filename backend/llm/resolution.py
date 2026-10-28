@@ -59,6 +59,10 @@ class ExecutionTarget:
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
     if exact:
+        if exact['harness'] in ('claude-code', 'codex'):
+            from llm.harness_catalog import harness_row
+
+            return harness_row(model, db=db)
         return dict(exact)
     matches = db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (model,)
@@ -73,7 +77,17 @@ def _target_row(model: str, *, db) -> dict | None:
             ).fetchall()
     if len(matches) > 1:
         raise ValueError(f"ambiguous model transport identity: {model}")
-    return dict(matches[0]) if matches else None
+    if matches:
+        if matches[0]['harness'] in ('claude-code', 'codex'):
+            from llm.harness_catalog import harness_row
+
+            return harness_row(model, db=db)
+        return dict(matches[0])
+    if model.startswith(('claude-code/', 'codex/')):
+        from llm.harness_catalog import harness_row
+
+        return harness_row(model, db=db)
+    return None
 
 
 def catalog_row(model: str, *, db) -> dict | None:
@@ -100,11 +114,10 @@ def _resolve_non_native_target(
     harness: str, row: dict, metadata: dict, available: bool, connection
 ) -> tuple[bool, str | None, str, str | None]:
     """Resolve a harness-backed row's availability and transport identity."""
-    connection_row = connection.execute(
-        "SELECT status FROM connections WHERE provider = ?", (harness,)
-    ).fetchone()
+    from connections.models import provider_may_run
+
     reason: str | None = None
-    if not connection_row or connection_row["status"] != "available":
+    if not provider_may_run(harness, db=connection):
         available = False
         reason = "connection_unavailable"
     elif not available:
@@ -170,6 +183,8 @@ def resolve_execution_target(
 
         internal_reviewer = bool(metadata.get("internal_reviewer"))
         available = _dispatchable(row, harness)
+        if harness in ('claude-code', 'codex') and row.get('added_available'):
+            available = True
         if harness == "codex" and internal_reviewer:
             # The provider-owned review selector is intentionally hidden from
             # the user catalog but remains callable when Codex is connected.
@@ -303,9 +318,14 @@ def resolve_harness_selector(
         if len(rows) > 1:
             raise ValueError(f"ambiguous {harness} selector: {exact}")
         if not rows:
-            raise ModelUnavailableError(
-                exact, f"Model selector '{exact}' not found in catalog"
-            )
+            from llm.harness_catalog import harness_row
+
+            projected = harness_row(f'{harness}/{exact}', db=connection)
+            if projected is None:
+                raise ModelUnavailableError(
+                    exact, f"Model selector '{exact}' not found in catalog"
+                )
+            return resolve_execution_target(projected['id'], db=connection)
         return resolve_execution_target(rows[0]["id"], db=connection)
     finally:
         if close:

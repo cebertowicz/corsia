@@ -12,5 +12,5 @@ async def retry_unchecked(operation, account_id, binary, cleanup):
     if receipt is None:
         operation.status, operation.cause = 'failed', 'same_account'
         return
-    operation.status, operation.cause = 'completed', None
     await finish_signin(operation, receipt, binary, target_account_id=account_id)
+    operation.status, operation.cause = 'failed', 'same_account'

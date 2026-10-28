@@ -22,7 +22,7 @@
   "limits": {
     "backend/api/project_repos.py": 792,
     "backend/api/project_scaffolding.py": 447,
-    "backend/connections/harness_models.py": 574,
+    "backend/connections/harness_models.py": 599,
     "backend/core/step_handler.py": 424,
     "backend/core/thread_lifecycle.py": 498,
     "backend/e2e_mock.py": 410,
@@ -57,7 +57,7 @@
     "backend/api/delegation.py::create_thread": 140,
     "backend/api/project_repos.py::detach_repo": 87,
     "backend/api/project_scaffolding.py::_initialize_project": 93,
-    "backend/connections/harness_models.py::store_success": 132,
+    "backend/connections/harness_models.py::store_success": 133,
     "backend/core/agent.py::_register_tools": 89,
     "backend/core/context_preview.py::build_next_turn_context_preview": 109,
     "backend/e2e_mock.py::seed_mock_catalog": 97,

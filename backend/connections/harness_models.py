@@ -19,7 +19,6 @@ from connections.claude_discovery import (
 from connections.claude_unlisted import add_accepted_unlisted
 from connections.codex_discovery import discover_codex_models
 from connections.harness_legacy_fallback import remove_legacy_fallback
-from connections.harness_catalog_retirement import protected_selectors, retire_unlisted, save_success_envelope
 from connections.harness_model_rows import (
     CACHE_KEY,
     CLAUDE_SOURCE,
@@ -190,10 +189,34 @@ def record_runtime_context_observation(
         return window
 
 
+def _retire_unlisted(
+    connection, prior, current, timestamp: str, errors: dict[str, str],
+) -> None:
+    """Mark rows discovery no longer returns unavailable, with the probe's reason."""
+    retained = sorted(
+        set(prior) - set(current),
+        key=lambda selector: (
+            _metadata(prior[selector]).get("discovery_order", 2147483647),
+            selector,
+        ),
+    )
+    for retained_order, selector in enumerate(retained, start=len(current)):
+        row = prior[selector]
+        meta = _metadata(row)
+        if meta.get("reference_only"):
+            continue
+        meta["availability_reason"] = "not_returned_by_discovery"
+        meta["discovery_order"] = retained_order
+        connection.execute(
+            "UPDATE models SET available = 0, last_error = ?, "
+            "metadata_json = ?, updated_at = ? WHERE id = ?",
+            (errors.get(selector), json.dumps(meta, sort_keys=True), timestamp, row["id"]),
+        )
+
+
 def store_success(
     provider: str, rows: list[dict[str, Any]], *, harness_version: str,
     source: str, timestamp: str, db=None, unlisted_errors: dict[str, str] | None = None,
-    merge: bool = False,
 ) -> None:
     """Atomically persist discovery rows and the connection refresh envelope.
 
@@ -235,17 +258,14 @@ def store_success(
                 ):
                     raise ValueError(f"harness model collision: {model_id}")
 
-        protected = protected_selectors(provider, db=connection) if not merge else set()
-        if not merge:
-            retire_unlisted(connection, {key: value for key, value in prior.items() if key not in protected},
-                            current, timestamp, unlisted_errors or {})
+        _retire_unlisted(connection, prior, current, timestamp, unlisted_errors or {})
 
         backend = "cc" if provider == "claude-code" else "codex"
         for selector, (order, row) in current.items():
             model_id = f"{provider}/{selector}"
             old = prior.get(selector)
             meta = _metadata(old) if old else {}
-            resolved_identity = str(row.get("resolved_identity") or (meta.get("resolved_identity") if merge else "") or "")
+            resolved_identity = str(row.get("resolved_identity") or "")
             same_resolved_identity = bool(
                 old
                 and resolved_identity
@@ -264,7 +284,7 @@ def store_success(
             else:
                 meta.pop("alias_of", None)
             meta.update({
-                "resolved_identity": resolved_identity if merge and resolved_identity else row.get("resolved_identity"),
+                "resolved_identity": row.get("resolved_identity"),
                 "discovered_capabilities": row.get("capabilities") or {},
                 "is_default": bool(row.get("is_default")),
                 "harness_version": harness_version,
@@ -279,8 +299,6 @@ def store_success(
                 # discovery/runtime observation.
                 context_window = old.get("context_window")
             available = row.get("available") is True
-            if not available and old and old.get("available") and (merge or selector in protected):
-                available = True
             if not available:
                 meta["availability_reason"] = (
                     row.get("availability_reason") or "discovered_model_unavailable"
@@ -320,8 +338,15 @@ def store_success(
                     None, timestamp, timestamp, timestamp, timestamp,
                 ),
             )
-        if not merge:
-            save_success_envelope(provider, harness_version, source, timestamp, db=connection)
+        previous = read_discovery_envelope(provider, db=connection) or {}
+        _save_discovery_envelope(provider, {
+            **previous,
+            "harness_version": harness_version,
+            "source": source,
+            "refreshed_at": timestamp,
+            "attempted_at": timestamp,
+            "last_error": None,
+        }, db=connection)
 
 
 def store_failure(

@@ -54,9 +54,9 @@ def _required_harness_capabilities(harness: str) -> dict:
 
 
 def _harness_connection_available(provider: str) -> bool:
-    from connections.models import connection_available
+    from connections.models import provider_may_run
 
-    return connection_available(provider)
+    return provider_may_run(provider)
 
 
 def _harness_discovery_envelope(provider: str) -> dict | None:
@@ -317,18 +317,19 @@ def scoped_status_rows(*, thread_id: str | None = None, project_id: str | None =
 @fact_memo.memoized_reader
 def harness_base_row(model: str, *, db) -> dict | None:
     """One harness model's account-independent row, hidden or not, for a single-account decision."""
-    row = db.execute(
-        "SELECT * FROM models WHERE harness IN ('claude-code','codex') AND (id=? OR litellm_model=?) "
-        "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)).fetchone()
+    from llm.harness_catalog import harness_row
+
+    row = harness_row(model, db=db)
     if row is None:
         return None
-    from connections.models import connection_available
+    from connections.models import provider_may_run
     from llm.context_window import resolve_window_for_row
 
     row = dict(row)
     status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
-                                     resolve_window_for_row(row, db=db), connection_available(row["harness"], db=db))
-    return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason}
+                                     resolve_window_for_row(row, db=db), provider_may_run(row["harness"], db=db))
+    return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason,
+            "default_listed": row.get("default_listed", True)}
 
 
 def catalog_base_rows() -> list[dict]:
@@ -340,11 +341,12 @@ def catalog_base_rows() -> list[dict]:
     server_status = _network_server_status(servers)
     private_servers, local_servers = _server_locality(servers)
     loaded_ids_fn = _loaded_model_ids_fn()
+    from llm.harness_catalog import catalog_rows
     rows: list[dict] = []
-    harness_connections: dict[str, bool] = {}
-    for row in model_catalog.get_model_status_catalog_rows():
+    connections: dict[str, bool] = {}
+    for row in catalog_rows(model_catalog.get_model_status_catalog_rows()):
         entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers, local_servers,
-                              harness_connections=harness_connections)
+                              harness_connections=connections)
         if entry is not None:
             rows.append(entry)
     return rows
@@ -388,8 +390,11 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn,
         status = "unavailable"
         status_reason = "missing_context_window"
 
-    return _public_status_entry(
+    entry = _public_status_entry(
         row, harness=harness, provider=provider, backend=backend, meta=meta,
         context_window=context_window, status=status, status_reason=status_reason,
         private_servers=private_servers, local_servers=local_servers,
     )
+    if row.get('default_listed') is False:
+        entry['default_listed'] = False
+    return entry

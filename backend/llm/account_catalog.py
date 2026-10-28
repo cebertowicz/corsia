@@ -27,14 +27,18 @@ def account_model_status(account: dict, row: dict, *, project_ids: list, db, mov
     model = row["litellm_model"]
     provider = account["provider"]
     usage = project_for_model(stored_usage(provider=provider, account_id=account["id"], db=db), model=model, provider=provider)
-    if account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
+    reason: str | None
+    if account["source_home"] is None and row.get("default_listed") is False:
+        status, reason = "unavailable", "account_model_not_discovered"
+    elif account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
         status, reason = row["status"], row.get("status_reason")
     else:
         own = discovery_view(account)["discovery"].get("models", {}).get(model, {})
         status = "ready" if own.get("available", True) else "unavailable"
         reason = None if status == "ready" else own.get("availability_reason") or "discovered_model_unavailable"
     policy = account_reason(account, provider=provider, project_ids=project_ids, execution=True, model=model, db=db)
-    if policy == "account_model_not_discovered" and account["source_home"] is None and not move:
+    if (policy == "account_model_not_discovered" and account["source_home"] is None
+            and row.get("default_listed") is not False and not move):
         policy = None
     if policy:
         status, reason = "unavailable", policy

@@ -114,8 +114,22 @@ def account_fact_reason(account: dict | None, *, provider: str, policies: list,
 def account_reason(account: dict, *, provider: str, project_ids: list, execution: bool,
                    model: str | None = None, db) -> str | None:
     """Evaluate lifecycle and project state without interpreting usage limits."""
-    return account_fact_reason(account, provider=provider, execution=execution, model=model,
-                               policies=_policies(provider, project_ids, db=db))
+    reason = account_fact_reason(account, provider=provider, execution=execution, model=model,
+                                 policies=_policies(provider, project_ids, db=db))
+    if reason is None and execution and model and account and account['source_home'] is None:
+        stored = db.execute(
+            "SELECT available FROM models WHERE harness=? AND (id=? OR litellm_model=?) "
+            "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (provider, model, model, model),
+        ).fetchone()
+        if stored is None or not stored['available']:
+            from llm.harness_catalog import added_rows
+
+            added = added_rows(db=db).get(model)
+            if stored is None and added is not None:
+                return 'account_model_not_discovered'
+            if stored is not None and added and added['available']:
+                return 'account_runtime_pending'
+    return reason
 
 
 def _candidate(thread_id, provider, account_id, projects, *, db):

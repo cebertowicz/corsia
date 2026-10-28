@@ -2074,9 +2074,11 @@ async def test_repeat_unchecked_signin_rechecks_existing_account(scripted_vendor
     assert (await _finished(first['id']))['status'] == 'completed'
     await account_controls.start_signin(second['id'])
     outcome = await _finished(second['id'])
-    assert outcome['status'] == 'completed'
+    assert outcome['status'] == 'failed'
+    assert outcome['cause'] == 'same_account'
+    assert outcome['duplicate_of'] == first['id']
     assert reads == [first['id'], first['id']]
-    from infra.database import get_db
+    from llm.model_status import scoped_status_rows
 
-    with get_db() as db:
-        assert db.execute('SELECT available FROM models WHERE id=?', (provider + '/rechecked',)).fetchone()[0] == 1
+    row = next(row for row in scoped_status_rows(account_id=first['id']) if row['id'] == provider + '/rechecked')
+    assert next(entry for entry in row['runs_on'] if entry['account_id'] == first['id'])['status'] == 'ready'

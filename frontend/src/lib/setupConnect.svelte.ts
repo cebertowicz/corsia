@@ -195,7 +195,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 				} else if (entry?.phase === 'signing-in' && entry.accountId) {
 					const signin = await checkSignin(current, entry.accountId).catch(() => undefined);
 					if (signin?.status === 'completed' && signin.outcome == null) setConnect(vendor, { ...entry, checkingModels: true });
-					else if (signin === null || signin?.status === 'completed') { await deps.refreshSources(); setConnect(vendor, undefined); }
+					else if (signin === null || signin?.status === 'completed' || (signin?.status === 'failed' && signin.cause === 'same_account' && signin.outcome === 'ready')) { await deps.refreshSources(); setConnect(vendor, undefined); }
 					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin, entry.installed);
 				}
 			}

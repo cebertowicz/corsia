@@ -58,13 +58,6 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
         if not mark_discovery(context.account_id, receipt=receipt, status='ready', models=models,
                               harness_version=harness_version, cache_receipt=cache_receipt, db=connection):
             raise RuntimeError('account_refresh_superseded')
-        from connections.harness_model_rows import CLAUDE_SOURCE, CODEX_SOURCE
-        from connections.harness_models import store_success
-        from infra.time import utc_now_iso
-
-        store_success(provider, rows, harness_version=harness_version,
-                      source=CLAUDE_SOURCE if provider == 'claude-code' else CODEX_SOURCE,
-                      timestamp=utc_now_iso(), merge=True, db=connection)
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 
