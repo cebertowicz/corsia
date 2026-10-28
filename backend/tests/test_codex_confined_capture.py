@@ -1,8 +1,8 @@
-"""Capture the FULL model tools array, including hosted tools, on the pinned CLI.
+"""Capture the full model tools array on the installed admitted Codex version.
 
-No subscription, API key, external service, or production state is used. CI may
-lack the optional Codex binary; a release claiming this version must run this
-capture on its supported binary. See codex_confinement.CAPTURED_CODEX_VERSIONS.
+CI captures the newest version. The digest test requires every listed version
+be recaptured when the launch surface changes. No subscription, API key,
+external service, or production state is used.
 """
 from __future__ import annotations
 

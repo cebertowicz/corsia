@@ -14,16 +14,16 @@ from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
 from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
-# CI captures only the newest version. Changes to launch CONFIG, args, or the
-# tool filter must rerun the capture on every listed version in that PR, or
-# drop versions whose capture was not rerun.
-CAPTURED_CODEX_VERSIONS = frozenset({
-    "codex-cli 0.162.1", "codex-cli 0.163.0", "codex-cli 0.164.0", "codex-cli 0.165.0",
-})
+# test_captured_versions_match_launch_surface requires a capture for each digest.
+CAPTURED_CODEX_VERSIONS = {
+    "codex-cli 0.162.1": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
+    "codex-cli 0.163.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
+    "codex-cli 0.164.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
+    "codex-cli 0.165.0": "60da77d3cf6c06efdac163830192212616d68d65b7f3b901adb3c2b447224384",
+}
 # Each listed version passed the full-array capture on start and resume.
-# CONFIG keys were checked against Codex source (core/config.schema.json,
-# tools/spec_plan.rs) for 0.162.1 only; on later versions, network behaviour
-# rests on what the capture's stub provider sees.
+# CONFIG keys appear in core/config.schema.json for every listed version;
+# tools/spec_plan.rs and the capture cover tool planning and observed requests.
 # Environment tools independently enable apply_patch, even with shell disabled.
 CONFIG = (
     # Prevent plugin startup sync's hard-coded GitHub/ChatGPT requests too.
