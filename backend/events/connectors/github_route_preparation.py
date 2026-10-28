@@ -100,6 +100,7 @@ def _prepare_route(
                            scope=scope)
         return
     thread_id, wake_reason = selected
+    self_caused_event = False
     if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
         from events import self_caused
         from infra.database import get_db
@@ -110,10 +111,7 @@ def _prepare_route(
         finally:
             db.close()
         event_key = row[0] if row else None
-        if event_key and self_caused.is_self_caused("github", event_key, thread_id):
-            prepared.result = router._suppressed_result(
-                internal_event, "self_caused", thread_id=thread_id, external_id=external_id)
-            return
+        self_caused_event = bool(event_key and self_caused.is_self_caused("github", event_key, thread_id))
     summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
@@ -130,6 +128,10 @@ def _prepare_route(
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
     apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
                        scope)
+    if self_caused_event and prepared.result is None:
+        from events.connectors.github_rules import _drop
+
+        _drop(prepared, internal_event, "self_caused")
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:

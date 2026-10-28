@@ -22,7 +22,7 @@ def notice_for_result(thread_id: str, turn_id: str, args: dict, result: object) 
         from loguru import logger
 
         logger.exception("connected-app observation failed")
-        return ["Could not check whether to register this result. Register it manually if needed."]
+        return ["Couldn't check whether to register this result. Register it manually if needed."]
     finally:
         db.close()
     for artifact in changed:

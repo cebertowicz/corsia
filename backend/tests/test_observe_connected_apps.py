@@ -79,7 +79,7 @@ async def test_comment_marked_without_observe_rule_and_routing_suppresses_only_c
                "comment": {"id": 123, "body": "hello", "user": {"login": "human"}},
                "sender": {"login": "human", "type": "User"}}
     emitted = []
-    monkeypatch.setattr("events.router.emit_product_event", lambda *a, **kw: emitted.append((a, kw)))
+    monkeypatch.setattr("events.connectors.github_rules.emit_product_event", lambda *a, **kw: emitted.append((a, kw)))
     record_delivery_for_admission("issue_comment", "created", "delivery-1", "owner/repo", payload)
     with patch("events.router.delivery.deliver_to_thread", return_value=True):
         first = await route_event("webhook.github.pr_comment", payload, delivery_id="delivery-1")

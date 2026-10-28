@@ -90,7 +90,9 @@ class ToolRegistry:
             ))
             if isinstance(result, ConnectedAppResult):
                 from events.self_caused import record_current_result
-                await asyncio.to_thread(record_current_result, result)
+                notice = await asyncio.to_thread(record_current_result, result)
+                if notice:
+                    result = restamp(result, f"{result}\n\n{notice}")
             # The reminder only touches plain text, so a stamped result earns it as text.
             plain = str(result) if isinstance(result, ConnectedAppResult) else result
             result = restamp(result, await remind_current_turn(plain, name, params))
@@ -330,10 +332,7 @@ class ToolRegistry:
                 "Error: Tool execution requires an exact current session identity.",
             )
         turn_identity = state._current_turn_identity.get(None)
-        if turn_identity is not None and not isinstance(
-            turn_identity,
-            TurnIdentity,
-        ):
+        if turn_identity is not None and not isinstance(turn_identity, TurnIdentity):
             return (
                 None,
                 "Error: Tool execution turn identity is invalid.",

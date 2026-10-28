@@ -32,7 +32,7 @@ def record_result(thread_id: str | None, result: object) -> None:
             )
 
 
-def record_current_result(result: object) -> None:
+def record_current_result(result: object) -> str | None:
     """Record without withholding the completed tool result on failure."""
     from infra import state
     from loguru import logger
@@ -41,6 +41,8 @@ def record_current_result(result: object) -> None:
         record_result(state._current_thread_id.get(None), result)
     except Exception:
         logger.exception("Could not record connected-app event identity")
+        return "Couldn't record this result's event identity. Your own event may wake you again."
+    return None
 
 
 def is_self_caused(connector: str, event_key: str, thread_id: str) -> bool:
