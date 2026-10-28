@@ -4,13 +4,14 @@ Select with CORSIA_NATIVE_BROWSER_TEST=1 and absolute binary/Chrome paths.
 Generic integration suites do not install or launch this optional native dependency.
 """
 import asyncio
+import json
 import os
 from pathlib import Path
 import shutil
 
 import psutil
 import pytest
-from host_access import browser_cdp
+from host_access import browser_cdp, browser_pane
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 
@@ -72,6 +73,31 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
         await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
           <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+
+
+async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
+    async def serve(_reader, writer):
+        writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+    url = f'http://127.0.0.1:{port}/'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    try:
+        assert not (await browser_pane.open_url('native-pane-open', url)).startswith('Error:')
+        runtime = native_owner._sessions['native-pane-open']
+        binary = native_owner._native.path
+        result = await native_owner._invoke(
+            (binary, '--session', runtime.record.session, '--json', 'get', 'url'), timeout=30,
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout)['data']['url'] == url
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):
