@@ -12,15 +12,17 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
                    metadata: dict | None, created_at: str) -> None:
     """Place validated comments in the transaction that stores the input.
 
-    A retry replaces its original's unanswered comments; an answered one keeps
-    its thread beside the retry's.
+    A retry replaces its original's comments that have no answer and no reply;
+    any other keeps its thread beside the retry's.
     """
     retried_from = (metadata or {}).get('retried_from_message_id')
     if retried_from:
         db.execute(
             "DELETE FROM chat_comments WHERE thread_id=? AND user_message_id=? AND NOT EXISTS "
             "(SELECT 1 FROM chat_comment_answers a WHERE a.thread_id=chat_comments.thread_id "
-            "AND a.user_message_id=chat_comments.user_message_id AND a.cid=chat_comments.cid)",
+            "AND a.user_message_id=chat_comments.user_message_id AND a.cid=chat_comments.cid) "
+            "AND NOT EXISTS (SELECT 1 FROM chat_comments r WHERE r.thread_id=chat_comments.thread_id "
+            "AND r.root_user_message_id=chat_comments.user_message_id AND r.root_cid=chat_comments.cid)",
             (thread_id, retried_from),
         )
     comments = (metadata or {}).get('reply_context', {}).get('comments', [])

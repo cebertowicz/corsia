@@ -102,6 +102,23 @@ def test_retry_keeps_an_answered_original(isolated_db):
         db.close()
 
 
+def test_retry_keeps_an_original_with_a_reply(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        metadata = {'reply_context': {'comments': [{'cid': 'c2.1', 'seq': 1, 'note': 'why?'}]}}
+        place_comments(db, 'thread', 'failed', metadata, 't')
+        reply = {'reply_context': {'comments': [
+            {'cid': 'c3.1', 'seq': 1, 'note': 'and?', 'root_user_message_id': 'failed', 'root_cid': 'c2.1'}]}}
+        place_comments(db, 'thread', 'reply', reply, 'u')
+        place_comments(db, 'thread', 'retry', {**metadata, 'retried_from_message_id': 'failed'}, 'v')
+        rows = db.execute('SELECT user_message_id FROM chat_comments ORDER BY created_at').fetchall()
+        assert [row[0] for row in rows] == ['failed', 'reply', 'retry']
+    finally:
+        db.close()
+
+
 def test_live_refresh_requires_thread_owner(isolated_db):
     from main import app
     db = get_db()

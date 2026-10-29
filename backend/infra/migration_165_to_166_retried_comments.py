@@ -1,4 +1,4 @@
-"""Schema 166: a retried send's unanswered comments show once, on the retry."""
+"""Schema 166: a retried send's comments with no answer or reply show once, on the retry."""
 
 import sqlite3
 
@@ -8,7 +8,7 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
 
 
 def migrate_165_to_166(conn: sqlite3.Connection) -> None:
-    """Drop unanswered comment rows of a send that a later retry re-placed."""
+    """Drop a retried send's comment rows that have no answer and no reply."""
     if not _has_table(conn, 'chat_comments') or not _has_table(conn, 'messages'):
         return
     answered = (
@@ -21,5 +21,7 @@ def migrate_165_to_166(conn: sqlite3.Connection) -> None:
         "SELECT CASE WHEN json_valid(r.metadata) THEN json_extract(r.metadata,'$.retried_from_message_id') END "
         "FROM messages r WHERE r.thread_id=chat_comments.thread_id AND r.role='user' "
         "AND r.metadata LIKE '%retried_from_message_id%') "
-        f"AND NOT {answered}"
+        f"AND NOT {answered} "
+        "AND NOT EXISTS (SELECT 1 FROM chat_comments r WHERE r.thread_id=chat_comments.thread_id "
+        "AND r.root_user_message_id=chat_comments.user_message_id AND r.root_cid=chat_comments.cid)"
     )
