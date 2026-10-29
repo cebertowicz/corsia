@@ -82,6 +82,8 @@ def client(monkeypatch):
     rows = {"own": MANAGED, "mine": PERSONS}
     monkeypatch.setattr("llm.network_discovery.get_server", rows.get)
     monkeypatch.setattr("llm.network_discovery.update_server_status", lambda *a, **k: None)
+    # These tests exercise the saved startup preference, independent of host RAM.
+    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 32 * 1024**3)
     from api.network_servers import router
     app = FastAPI()
     app.include_router(router)
