@@ -46,7 +46,8 @@ class SignIn:
             shown["ref"] = self.ref
         if self.prompt is not None and self.status == "waiting":
             shown |= self.prompt
-        if self.status == "completed" and self.bind is not None:
+        if self.bind is not None and (self.status == "completed" or
+                                      (self.cause == "same_account" and self.bind.outcome is not None)):
             shown |= self.bind.public()
         # Completed and same-account refused sign-ins name their match.
         return (shown | {"duplicate_of": self.duplicate_of}

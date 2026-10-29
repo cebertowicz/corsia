@@ -283,18 +283,8 @@ def seed_mock_catalog() -> None:
                 ) in harness_rows
             ),
         )
-    for harness, binary in fixture_binaries.items():
-        if binary is None:
-            continue
-        config = {"binary": binary}
-        if harness == "codex":
-            config["app_server"] = True
-        db.execute(
-            """INSERT OR REPLACE INTO connections
-               (id,type,provider,config,status,scope,created_at,updated_at)
-               VALUES (?, 'cli', ?, ?, 'available', 'global', ?, ?)""",
-            (f"mock-{harness}", harness, json.dumps(config), now, now),
-        )
+    from e2e_connection_fixtures import seed_connections
+    seed_connections(db, fixture_binaries, now)
     db.commit()
     db.close()
 
