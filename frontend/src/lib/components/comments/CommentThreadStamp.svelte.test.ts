@@ -255,7 +255,26 @@ describe('CommentThread stamping', () => {
 		warn.mockRestore();
 	});
 
-	it('stamps both visible unread replies together and keeps the collapse point stable', async () => {
+	it('stamps the earlier reply while a later reply is still dwelling', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		render(onViewed);
+		vi.useFakeTimers();
+		try {
+			const observers = FakeObserver.live();
+			observers[0].report(true);
+			vi.advanceTimersByTime(100);
+			observers[1].report(true);
+			vi.advanceTimersByTime(1401);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+			vi.advanceTimersByTime(100);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('stamps both visible unread replies together and keeps the collapse point stable', () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
 		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
@@ -263,13 +282,19 @@ describe('CommentThread stamping', () => {
 		expect(newMarks()).toBe(2);
 		expect(host.textContent).toContain('Show 4 earlier replies');
 
-		for (const observer of FakeObserver.live()) observer.report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r5']]), { timeout: 3000 });
-		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(0);
-		expect(host.textContent).toContain('Show 4 earlier replies');
-		expect(host.textContent).toContain('reply r4');
-		expect(host.textContent).not.toContain('reply r0');
+		vi.useFakeTimers();
+		try {
+			for (const observer of FakeObserver.live()) observer.report(true);
+			vi.advanceTimersByTime(1501);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r5']]);
+			arrive({ newReplyIds: [] });
+			expect(newMarks()).toBe(0);
+			expect(host.textContent).toContain('Show 4 earlier replies');
+			expect(host.textContent).toContain('reply r4');
+			expect(host.textContent).not.toContain('reply r0');
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('shows only the server-reported unread reply while the thread is open', () => {
