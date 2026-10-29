@@ -268,10 +268,10 @@
       "sha256": "9b20693c953f26ffdb7a9dd492ea8d023514317b24988d98f370cf0eee395c8d"
     },
     {
-      "bytes": 4223,
+      "bytes": 4151,
       "kind": "skill",
       "path": "skills/decide-or-raise/SKILL.md",
-      "sha256": "8cc433cda7f1e9099b54c9b5d46e848ad73d99250432560fdf3beb5629c355b8"
+      "sha256": "a6718ac8f889a40c8e35681fb6d8ff6e5e6827dc5969db97b482ec4cf3ee7fa2"
     },
     {
       "bytes": 3279,
@@ -346,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 9002,
+      "bytes": 8928,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "7f8a3847ccd667fa2a4c79a301f51cb5a0d274e6b350f494ef4a6f78eae109e8"
+      "sha256": "a7f7490bac983cc3319db9016c32094d7d0b8deb61ace2d09b1ac1822950682d"
     },
     {
       "bytes": 5914,
