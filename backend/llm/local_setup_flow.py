@@ -126,16 +126,25 @@ def _in_progress_or_blocked() -> dict:
 
 
 async def _restart_installed(server_id: str) -> dict:
-    """Restart an installed model through the existing server lifecycle, without a download."""
+    """Check the live model list after starting a server with a historical hint."""
     from api.network_server_lifecycle import lifecycle_action
     from llm.catalog import discover_network_models
+    from llm.local_sources import catalog_membership
 
     try:
         result = await lifecycle_action(server_id, "start")
         if result.get("ok"):
             refreshed = await discover_network_models(server_id)
-            result = ({"ok": True, "existing": True, "server_id": server_id}
-                      if refreshed.get("ok") else local_setup_error("CORSIA couldn't refresh the local model list. Try again."))
+            if not refreshed.get("ok"):
+                result = local_setup_error("CORSIA couldn't refresh the local model list. Try again.")
+            else:
+                available, _enabled = await asyncio.to_thread(catalog_membership)
+                if f"omlx@{server_id}" in available:
+                    result = {"ok": True, "existing": True, "server_id": server_id}
+                else:
+                    stopped = await lifecycle_action(server_id, "stop")
+                    result = (local_setup_error("This computer can't run a local model well. Connect a subscription or an API key in the app.")
+                              if stopped.get("ok") else stopped)
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
@@ -164,15 +173,15 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
             return _in_progress_or_blocked()
         return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})
-    from llm.local_sources import installed_managed_server
+    from llm.local_sources import managed_server_with_known_model
 
-    installed = await asyncio.to_thread(installed_managed_server)
-    if installed is not None:
+    memory_ok = await asyncio.to_thread(local_setup_memory_ok)
+    known = await asyncio.to_thread(managed_server_with_known_model) if not memory_ok else None
+    if known is not None:
         if not ls._claim_operation("setup", onboarding=onboarding):
             return _in_progress_or_blocked()
-        ls.start_flight(_restart_installed(installed["id"]), "Starting")
+        ls.start_flight(_restart_installed(known["id"]), "Starting")
         return ls._in_progress_result()
-    memory_ok = await asyncio.to_thread(local_setup_memory_ok)
     ls.clear_result()
     subscription = await subscription_available() if no_subscription_only else None
     if subscription is not None:

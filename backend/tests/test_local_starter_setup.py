@@ -29,14 +29,29 @@ def test_ineligible_mac_does_not_start_a_managed_setup(monkeypatch):
     assert local_setup.flight_task() is None
 
 
-def test_installed_server_requires_a_matching_managed_catalog_row(monkeypatch):
+def test_known_model_hint_requires_discovered_managed_catalog_row(monkeypatch):
     from llm import local_sources
 
     monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **kwargs: {"id": "managed"})
-    monkeypatch.setattr(local_sources, "list_models", lambda **kwargs: [{"litellm_model": "omlx@other/m"}])
-    assert local_sources.installed_managed_server() is None
-    monkeypatch.setattr(local_sources, "list_models", lambda **kwargs: [{"litellm_model": "omlx@managed/m"}])
-    assert local_sources.installed_managed_server()["id"] == "managed"
+    rows = [{"litellm_model": "omlx@other/m", "source": "discovered"},
+            {"litellm_model": "omlx@managed/m", "source": "manual"}]
+    monkeypatch.setattr(local_sources, "list_models", lambda **kwargs: rows)
+    assert local_sources.managed_server_with_known_model() is None
+    rows[1]["source"] = "discovered"
+    assert local_sources.managed_server_with_known_model()["id"] == "managed"
+
+
+@pytest.mark.usefixtures("mac_local_model_host")
+def test_non_discovered_row_does_not_offer_start_below_floor(monkeypatch):
+    from llm import local_sources
+
+    server = {"id": "managed", "status": "offline"}
+    monkeypatch.setattr(local_sources, "local_setup_memory_ok", lambda: False)
+    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [server])
+    monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **_kwargs: server)
+    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: [{"litellm_model": "omlx@managed/m", "source": "manual"}])
+    source = local_sources._omlx_state((set(), set()), [])
+    assert source["eligible"] is False and source["reason_code"] == "no_models"
 
 
 @pytest.mark.usefixtures("mac_local_model_host")
@@ -47,7 +62,7 @@ def test_low_memory_projection_distinguishes_stopped_installed_server(monkeypatc
     server = {"id": "managed", "status": "disabled"}
     monkeypatch.setattr(local_sources, "local_setup_memory_ok", lambda: False)
     monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [])
-    monkeypatch.setattr(local_sources, "installed_managed_server", lambda: server if installed else None)
+    monkeypatch.setattr(local_sources, "managed_server_with_known_model", lambda: server if installed else None)
     monkeypatch.setattr(local_sources, "managed_omlx_executable", lambda: "/omlx")
     monkeypatch.setattr(local_sources, "managed_omlx_install_error", lambda: None)
     source = local_sources._omlx_state((set(), set()), [])
@@ -55,12 +70,13 @@ def test_low_memory_projection_distinguishes_stopped_installed_server(monkeypatc
     assert (source.get("reason_code") == "not_running") is installed
 
 
-def test_stopped_installed_model_restarts_below_floor_without_downloading(monkeypatch):
+@pytest.mark.parametrize("live_model", [True, False])
+def test_stopped_known_model_is_checked_below_floor_without_downloading(monkeypatch, live_model):
     from llm import local_sources
 
     monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
     monkeypatch.setattr(local_sources, "connected_local_server", lambda: None)
-    monkeypatch.setattr(local_sources, "installed_managed_server", lambda: {"id": "managed"})
+    monkeypatch.setattr(local_sources, "managed_server_with_known_model", lambda: {"id": "managed"})
     monkeypatch.setattr(local_setup, "_claim_operation", lambda *_args, **_kwargs: True)
     calls = []
 
@@ -77,15 +93,21 @@ def test_stopped_installed_model_restarts_below_floor_without_downloading(monkey
 
     monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", lifecycle)
     monkeypatch.setattr("llm.catalog.discover_network_models", discover)
+    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: (
+        [{"litellm_model": "omlx@managed/m", "enabled": True}] if live_model else []))
     monkeypatch.setattr(local_setup, "_download", no_download)
 
     async def scenario():
         result = await flow.begin_local_setup()
         assert result["in_progress"]
-        assert (await local_setup.flight_task())["existing"]
+        finished = await local_setup.flight_task()
+        if live_model:
+            assert finished["ok"] and finished["existing"]
+        else:
+            assert not finished["ok"] and "can't run a local model well" in finished["message"]
 
     asyncio.run(scenario())
-    assert calls == [("managed", "start"), ("managed", "discover")]
+    assert calls == [("managed", "start"), ("managed", "discover")] + ([] if live_model else [("managed", "stop")])
 
 
 def test_setup_uses_one_managed_flight_for_overlapping_requests(monkeypatch):

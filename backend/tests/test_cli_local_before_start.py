@@ -134,7 +134,7 @@ def _ineligible(monkeypatch):
 def test_ineligible_mac_with_installed_model_restarts_without_download(monkeypatch, entry):
     _subscription(monkeypatch, None)
     _ineligible(monkeypatch)
-    monkeypatch.setattr("llm.local_sources.installed_managed_server", lambda: {"id": "managed"})
+    monkeypatch.setattr("llm.local_sources.managed_server_with_known_model", lambda: {"id": "managed"})
 
     async def restart():
         entry.append("restart")

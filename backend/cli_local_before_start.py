@@ -134,16 +134,17 @@ async def _setup(force_local: bool) -> int:
         notice = None if force_local else await limited_subscription_message()
         if notice:
             print(f"     {notice}", flush=True)
-        from llm.local_sources import installed_managed_server
+        from llm.local_sources import managed_server_with_known_model
 
-        installed = await asyncio.to_thread(installed_managed_server)
-        if installed is not None:
+        memory_ok = await asyncio.to_thread(local_setup_memory_ok)
+        known = await asyncio.to_thread(managed_server_with_known_model) if not memory_ok else None
+        if not memory_ok and known is None:
+            return _needs_provider(limited=bool(notice), forced_local=force_local)
+        if known is not None:
             result = await local_setup_flow.begin_local_setup()
             if result.get("in_progress"):
                 result = await local_setup_flow.ls.flight_task()
         else:
-            if not await asyncio.to_thread(local_setup_memory_ok):
-                return _needs_provider(limited=bool(notice), forced_local=force_local)
             _installer_mode()
             result = await local_setup_flow._run_flight(on_stage=stages)
     finally:
