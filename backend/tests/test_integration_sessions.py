@@ -147,8 +147,6 @@ class TestSessionList:
             expected = []
             for row in rows:
                 item = dict(row)
-                if item.pop("read_restricted"):
-                    item["title"] = None
                 item["archived"] = 1 if row["lifecycle_state"] == "archived" and row["archived_reason"] == "user" else 0
                 expected.append(item)
             add_local_only_payload_fields(expected, db=db)
