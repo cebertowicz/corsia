@@ -80,8 +80,12 @@ def test_stopped_known_model_is_checked_below_floor_without_downloading(monkeypa
     monkeypatch.setattr(local_setup, "_claim_operation", lambda *_args, **_kwargs: True)
     calls = []
 
-    async def lifecycle(server_id, action):
-        calls.append((server_id, action))
+    async def start(cfg):
+        calls.append((cfg["server_id"], "start"))
+        return {"ok": True}
+
+    async def stop(cfg):
+        calls.append((cfg["server_id"], "stop"))
         return {"ok": True}
 
     async def discover(server_id):
@@ -91,7 +95,14 @@ def test_stopped_known_model_is_checked_below_floor_without_downloading(monkeypa
     async def no_download(*_args, **_kwargs):
         pytest.fail("restart must not download a model")
 
-    monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", lifecycle)
+    from types import SimpleNamespace
+    from api import network_server_lifecycle as lifecycle
+
+    server = {"id": "managed", "provider": "omlx", "kind": "managed", "source": "corsia", "instance_id": "corsia-managed", "status": "offline"}
+    monkeypatch.setattr(lifecycle.nd, "get_server", lambda _id: server)
+    monkeypatch.setattr(lifecycle.nd, "update_server_status", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_remember_managed_choice", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "for_provider", lambda _provider: SimpleNamespace(start_server=start, stop_server=stop))
     monkeypatch.setattr("llm.catalog.discover_network_models", discover)
     monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: (
         [{"litellm_model": "omlx@managed/m", "enabled": True}] if live_model else []))
@@ -104,7 +115,7 @@ def test_stopped_known_model_is_checked_below_floor_without_downloading(monkeypa
         if live_model:
             assert finished["ok"] and finished["existing"]
         else:
-            assert not finished["ok"] and "can't run a local model well" in finished["message"]
+            assert not finished["ok"] and finished["reason"] == "mac_cannot_run"
 
     asyncio.run(scenario())
     assert calls == [("managed", "start"), ("managed", "discover")] + ([] if live_model else [("managed", "stop")])

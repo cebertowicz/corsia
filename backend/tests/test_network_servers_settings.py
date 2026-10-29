@@ -100,6 +100,64 @@ def test_get_settings_503_when_daemon_unreachable(client):
 
 
 
+@pytest.mark.parametrize("case", ["empty", "model", "above_floor", "other_server"])
+def test_settings_start_confirms_managed_models_only_below_floor(client, monkeypatch, case):
+    from api import network_server_lifecycle as lifecycle
+    from llm import local_sources
+
+    server = {"id": "ns-test", "provider": "omlx", "kind": "managed", "source": "corsia",
+              "instance_id": "corsia-managed", "status": "offline"}
+    if case == "other_server":
+        server["source"] = "manual"
+    monkeypatch.setattr(lifecycle.nd, "get_server", lambda _id: server)
+    states = []
+    monkeypatch.setattr(lifecycle.nd, "update_server_status", lambda _id, *, status, **_kwargs: states.append(status))
+    monkeypatch.setattr(lifecycle, "_remember_managed_choice", lambda *_args: None)
+    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: (32 if case == "above_floor" else 24) * 1024**3)
+    discover = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr("llm.catalog.discover_network_models", discover)
+    monkeypatch.setattr(local_sources, "catalog_membership", lambda: ({"omlx@ns-test"} if case == "model" else set(), set()))
+    start = AsyncMock(return_value={"ok": True})
+    stop = AsyncMock(return_value={"ok": True})
+    with patch("llm.providers.omlx.start_server", start), patch("llm.providers.omlx.stop_server", stop):
+        response = client.post("/api/settings/network-servers/ns-test/lifecycle/start", headers={"Authorization": f"Bearer {_TOKEN}"})
+    assert response.status_code == 200
+    body = response.json()
+    if case == "empty":
+        assert body["ok"] is False and body["reason"] == "mac_cannot_run"
+        assert "Local models need at least 32 GB" in body["message"]
+        stop.assert_awaited_once_with({"server_id": "ns-test"})
+        assert states == ["offline"]
+        monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: False)
+        monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [server])
+        monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **_kwargs: server)
+        monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: [])
+        source = local_sources._omlx_state((set(), set()), [])
+        assert source["eligible"] is False and source["reason_code"] == "no_models"
+    else:
+        assert body["ok"] is True and states == ["online"]
+        stop.assert_not_awaited()
+    if case in {"empty", "model"}:
+        discover.assert_awaited_once_with("ns-test")
+    else:
+        discover.assert_not_awaited()
+
+
+def test_settings_start_reports_discovery_failure_without_claiming_a_model(client, monkeypatch):
+    from api import network_server_lifecycle as lifecycle
+
+    server = {"id": "ns-test", "provider": "omlx", "kind": "managed", "source": "corsia",
+              "instance_id": "corsia-managed", "status": "offline"}
+    monkeypatch.setattr(lifecycle.nd, "get_server", lambda _id: server)
+    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
+    monkeypatch.setattr("llm.catalog.discover_network_models", AsyncMock(return_value={"ok": False, "error": "offline"}))
+    with patch("llm.providers.omlx.start_server", new=AsyncMock(return_value={"ok": True})):
+        response = client.post("/api/settings/network-servers/ns-test/lifecycle/start", headers={"Authorization": f"Bearer {_TOKEN}"})
+    assert response.json()["ok"] is False
+    assert response.json()["message"] == "Couldn’t refresh the model list. Try again."
+    assert response.json()["ref"].startswith("local-")
+
+
 def test_lifecycle_invalid_action_400s(client):
     r = client.post(
         f"/api/settings/network-servers/ns-test/lifecycle/restart?token={_TOKEN}"

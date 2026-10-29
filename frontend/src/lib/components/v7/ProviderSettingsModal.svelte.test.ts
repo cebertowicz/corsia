@@ -140,6 +140,19 @@ describe('ProviderSettingsModal remove', () => {
 		expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST' });
 	});
 
+	it('shows the low-memory refusal when a started server has no model', async () => {
+		const message = 'Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.';
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: false, reason: 'mac_cannot_run', message })));
+		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'managed' as const, status: 'offline' as const, endpoints: [{ host: '127.0.0.1' }] };
+		component = mount(ProviderSettingsModal, {
+			target: document.body,
+			props: { provider: { ...provider, name: 'omlx', type: 'local', server: local } as never, onClose: vi.fn() },
+		});
+		flushSync();
+		button('Start').click();
+		await vi.waitFor(() => expect(document.body.textContent).toContain(message));
+	});
+
 	it('shows the reference beside a failed model list refresh', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
 			ok: false, message: 'Couldn’t refresh the model list. Try again.', ref: 'local-ab12',

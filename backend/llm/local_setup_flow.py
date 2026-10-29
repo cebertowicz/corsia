@@ -126,25 +126,13 @@ def _in_progress_or_blocked() -> dict:
 
 
 async def _restart_installed(server_id: str) -> dict:
-    """Check the live model list after starting a server with a historical hint."""
+    """Start a known managed server using the shared lifecycle confirmation."""
     from api.network_server_lifecycle import lifecycle_action
-    from llm.catalog import discover_network_models
-    from llm.local_sources import catalog_membership
 
     try:
         result = await lifecycle_action(server_id, "start")
         if result.get("ok"):
-            refreshed = await discover_network_models(server_id)
-            if not refreshed.get("ok"):
-                result = local_setup_error("CORSIA couldn't refresh the local model list. Try again.")
-            else:
-                available, _enabled = await asyncio.to_thread(catalog_membership)
-                if f"omlx@{server_id}" in available:
-                    result = {"ok": True, "existing": True, "server_id": server_id}
-                else:
-                    stopped = await lifecycle_action(server_id, "stop")
-                    result = (local_setup_error("This computer can't run a local model well. Connect a subscription or an API key in the app.")
-                              if stopped.get("ok") else stopped)
+            result = {"ok": True, "existing": True, "server_id": server_id}
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
