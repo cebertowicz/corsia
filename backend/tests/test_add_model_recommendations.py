@@ -1,11 +1,28 @@
 """The Add model list uses the Mac's room, including models already on disk."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from api import provider_local_models as route
 from llm.local_model import LocalModel
 
 GIB = 1024**3
+
+
+def test_fixture_quality_does_not_decrease_with_higher_bit_builds():
+    fixture = json.loads((Path(__file__).parent / 'fixtures/omlx_recommendations_v0.7.1rc1.json').read_text())
+    builds = [row for result in fixture['results'].values() for row in result['sections']['best']]
+    comparisons = 0
+    for lower in builds:
+        for higher in builds:
+            if lower['name'] == higher['name'] and lower['level'] < higher['level']:
+                comparisons += 1
+                assert lower['smarts_level'] <= higher['smarts_level'], (
+                    f"{higher['repo_id']} has lower quality than {lower['repo_id']}"
+                )
+    assert comparisons > 0
 
 
 @pytest.mark.asyncio
