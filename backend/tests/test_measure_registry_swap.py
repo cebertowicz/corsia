@@ -57,7 +57,7 @@ def database(tmp_path: Path):
     sync(seed, owner_thread_id="agent-b", path=own("agent-b"), text=MEASURES.replace("namespace: mail", "namespace: shop").replace("mail.triaged", "shop.triaged"))
     assert set(REGISTRY.events) == {"mail.triaged", "shop.triaged"}
     spec = json.dumps({"attributes": {"message_ref": "id"}, "dedupe": ["message_ref"]})
-    seed.execute("INSERT INTO measure_definitions VALUES ('agent-a','event','mail.late',1,?,?,'sha','t',0)", (spec, own("agent-a")))
+    seed.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) VALUES ('agent-a','event','mail.late',1,?,?,'sha','t',0)", (spec, own("agent-a")))
     seed.commit()
     yield path, seed
     seed.close()

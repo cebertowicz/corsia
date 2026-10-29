@@ -62,7 +62,7 @@ def _wound_back_to_v127(*, registry_present: bool = False) -> sqlite3.Connection
 
 
 def test_the_step_is_registered_at_127() -> None:
-    assert SCHEMA_VERSION == 164
+    assert SCHEMA_VERSION == 165
     assert MIGRATIONS[127] is migrate_127_to_128
 
 
@@ -70,7 +70,8 @@ def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -
     with closing(_fresh()) as fresh, closing(_wound_back_to_v127()) as db:
         migrate_127_to_128(db)
         for table in ("outcome_event_counters", "measure_definitions", "automation_schedules"):
-            assert _columns(db, table) == _columns(fresh, table)
+            current_columns = [column for column in _columns(fresh, table) if column[0] != "version_attr"]
+            assert _columns(db, table) == current_columns
         assert ("last_measures", "TEXT") in _columns(db, "automation_schedules")
         assert _key(db) == _key(fresh) == ["agent_thread_id", "day", "event_name", "counter"]
         for index in ("idx_outcome_events_agent_observed", "idx_measure_definitions_kind_name"):

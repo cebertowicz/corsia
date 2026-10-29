@@ -174,7 +174,8 @@ def test_a_departed_holders_namespace_is_taken_over_and_only_its_events_there_re
     else:
         connection.execute("UPDATE threads SET lifecycle_state=?, archived_reason=? WHERE id=?", (state, reason, OWNER))
     connection.execute(
-        "INSERT INTO measure_definitions VALUES (?, 'event', 'shop.triaged', 1, ?, '/elsewhere', 'sha', 't', 0)",
+        "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
+        "VALUES (?, 'event', 'shop.triaged', 1, ?, '/elsewhere', 'sha', 't', 0)",
         (OWNER, '{"attributes":{"message_ref":"id"},"dedupe":["message_ref"]}'),
     )
     result = sync(connection, owner_thread_id=OTHER, path=own(OTHER), text=MEASURES)

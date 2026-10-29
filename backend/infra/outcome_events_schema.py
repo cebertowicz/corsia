@@ -72,6 +72,7 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         file_sha256 TEXT NOT NULL,
         synced_at TEXT NOT NULL,
         removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1)),
+        version_attr TEXT,
         PRIMARY KEY (owner_thread_id, kind, name, version)
     );
     CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name

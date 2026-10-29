@@ -60,7 +60,8 @@ async def test_chat_comment_candidates(isolated_db, typed):
     messages = [item for item in batch.candidates if item.source_kind == 'message']
     assert [item.content for item in messages] == ([typed] if typed else [])
 
-    from core.corrections_recording import subject_key
+    from core.corrections_recording import ACTIVE_VERSION_SETTING, subject_key, version_key
+    from infra.settings import set_setting
     from jobs.corrections_activation import weekly_correction_figure
     from jobs.corrections_recording import _record_fact
     from core.correction_attribution import attributed_facts
@@ -73,6 +74,8 @@ async def test_chat_comment_candidates(isolated_db, typed):
     assert len(set(keys)) == 2
     db = _db()
     assert set(correction_facts(db, keys)) == set(keys)
+    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(_version())}, db=db)
+    db.commit()
     assert {fact.source_id for fact in attributed_facts(db) if fact.source_kind == 'chat_comment'} == {item.source_id for item in notes}
     db.close()
     again = await next_pending_batch(_version(), 20, None, since='2026-10-01T00:00:00Z')

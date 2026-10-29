@@ -62,7 +62,9 @@ def _seed_event(db, *, actor="owner"):
     follow = _task(db, plan.id, "Correction")
     db.execute("UPDATE plan_nodes SET follow_up_of=?,commitment_id=? WHERE id=?",
                (source.id, source.commitment_id, follow.id))
-    event = service._event(db, follow.id, "correction_created", actor_id=actor, provenance="test")
+    event = service._event(db, follow.id, "correction_created", actor_id=actor, provenance="test",
+                           payload={"source_node_id": source.id, "affected_node_ids": [],
+                                    "commitment_id": source.commitment_id})
     return source, event
 
 
@@ -153,15 +155,19 @@ def test_sent_back_at_same_timestamp_suppresses(db, monkeypatch):
     assert not record_self_caught_correction(db, correction)
 
 
-def test_self_caught_is_not_a_person_correction(db):
+def test_self_caught_is_attributed_to_work_but_not_a_person_correction(db):
     from core.correction_attribution import attributed_facts
     from core.self_caught_corrections import record_self_caught_correction
     from jobs.learning_report import PERSON_CORRECTION_SOURCES
 
-    _, event = _seed_event(db)
+    source, event = _seed_event(db)
     assert record_self_caught_correction(db, event)
     assert "self_caught" not in PERSON_CORRECTION_SOURCES
-    assert attributed_facts(db) == []
+    # KPI design 4.2 includes self-caught corrections in workflow attribution.
+    (fact,) = attributed_facts(db)
+    assert (fact.source_kind, fact.source_id, fact.node_id, fact.is_correction) == (
+        "self_caught", event, source.id, True,
+    )
 
 
 def test_startup_migration_backfills_and_runs_only_once(db):

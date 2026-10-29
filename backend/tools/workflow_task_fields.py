@@ -287,6 +287,13 @@ def judged_version(version: object) -> bool:
     return isinstance(version, str) and bool(version.strip()) and LOCAL_EDIT_MARK not in version
 
 
+def version_short_hash(version: str) -> str:
+    """A recorded version's content hash cut to 7 characters, keeping the local-edit mark when it has one."""
+    content = version.replace(LOCAL_EDIT_MARK, "")
+    short = content.rsplit(":", 1)[-1][:7]
+    return short if content == version else short + LOCAL_EDIT_MARK
+
+
 def _editable_workflow_version(path) -> str | None:
     """Return the last Git commit for one editable skill, marking local edits.
 

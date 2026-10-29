@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from api.measurement_agents import AGENTS_SORTS, TABLE_METRICS, build_agents
+from api.measurement_agent_kpis import router as agent_kpis_router
 from api.measurement_average import add_averages
 from api.measurement_cost import register_cost_route
 from api.measurement_findings import derive_findings_state
@@ -41,6 +42,7 @@ from core.measurement_scope import Grain, ScopeError
 router = APIRouter(prefix="/api/measurement", tags=["measurement"])
 router.include_router(limits_router)
 router.include_router(recent_router)
+router.include_router(agent_kpis_router)
 
 
 async def _monitor_client_disconnect(request: Request, cancellation_event: Event) -> None:

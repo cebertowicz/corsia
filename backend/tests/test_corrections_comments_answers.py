@@ -111,6 +111,7 @@ def _user_comment(db, artifact):
 
 def test_comment_and_decision_sources_attribute_from_recorded_target_and_arrival_time(db):
     """Non-message sources have both a fact-time target and canonical source arrival time."""
+    _activate(db)
     db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) "
                "VALUES ('attribution-plan','thread','owner','active',1,'t','t')")
     with raw_plan_seed(db):

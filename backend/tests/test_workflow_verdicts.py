@@ -114,6 +114,23 @@ def test_equal_ids_in_distinct_correction_source_namespaces_do_not_share_a_count
     assert (call.call, call.reason) == ("not_comparable", "counter_changed")
 
 
+def _with_plan_facts(made: list[Run], per_run: int) -> list[Run]:
+    """Add ``per_run`` sent-back facts, which no classifier judged, to each run."""
+    return [replace(run, corrections=run.corrections + tuple(
+        CorrectionFact("sent_back", f"{run.run_id}-r{k}", run.terminal_at, None, True) for k in range(per_run)))
+        for run in made]
+
+
+def test_plan_facts_count_beside_classified_facts_under_one_counter() -> None:
+    call = corrections_call(_with_plan_facts(runs("v2", 1), 1), runs("v1", 1))
+    assert (call.call, call.values) == ("worse", (1.0, 2.0))
+
+
+def test_plan_facts_alone_are_counted() -> None:
+    call = corrections_call(_with_plan_facts(runs("v2", 0), 2), _with_plan_facts(runs("v1", 0), 1))
+    assert (call.call, call.values) == ("worse", (1.0, 2.0))
+
+
 def test_not_comparable_coverage_under_half() -> None:
     measure = PlannedMeasure("escapes", "quality", "lower", "kpi", 0, 1, margin_gap=0.1, coverage=True)
     labelled = [("num", "observed", 1.0), ("den", "observed", 1.0)]
