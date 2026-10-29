@@ -233,6 +233,12 @@ def source_candidate(db, source_kind: str, source_id: str) -> CorrectionCandidat
     (the commented excerpt, or the decision's question and options) is one
     ``Agent`` context row before it, the shape the classifier was trained on.
     """
+    from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT
+
+    if source_kind == SOURCE_KIND_CHAT_COMMENT:
+        from jobs.chat_comment_corrections import chat_comment_candidate
+
+        return chat_comment_candidate(db, source_id)
     if source_kind == SOURCE_KIND_DOC_COMMENT:
         return _comment_candidate(db, source_id)
     if source_kind == SOURCE_KIND_DECISION_ANSWER:

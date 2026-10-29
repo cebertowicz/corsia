@@ -1,0 +1,77 @@
+"""Chat comments are independent correction inputs alongside typed replies."""
+import json
+
+import pytest
+
+from tests.test_corrections_recording import _db, _seed, _version
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["", "Typed correction."])
+async def test_chat_comment_candidates(isolated_db, typed):
+    from jobs.corrections_recording import next_pending_batch
+
+    db = _db()
+    _seed(db)
+    comments = [
+        {"cid": "c1.1", "quote": "Agent first", "note": "Fix first"},
+        {"cid": "c1.2", "quote": "Agent second", "note": "Fix second"},
+        {"cid": "c1.3", "quote": "Agent third", "note": "  "},
+    ]
+    db.execute("UPDATE messages SET content=?,metadata=? WHERE id='owner-message'", (typed, json.dumps({"reply_context": {"comments": comments}})))
+    for comment in comments:
+        db.execute("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES ('thread','prior','owner-message',?,'2026-10-01T00:01:00Z')", (comment['cid'],))
+    db.commit()
+    db.close()
+    batch = await next_pending_batch(_version(), 20, None, since="2026-10-01T00:00:00Z")
+    notes = [item for item in batch.candidates if item.source_kind == 'chat_comment']
+    assert {item.content for item in notes} == {'Fix first', 'Fix second'}
+    assert {item.context for item in notes} == {(('Agent', 'Agent first'),), (('Agent', 'Agent second'),)}
+    assert len({item.source_id for item in notes}) == 2
+    messages = [item for item in batch.candidates if item.source_kind == 'message']
+    assert [item.content for item in messages] == ([typed] if typed else [])
+
+    from core.corrections_recording import subject_key
+    from jobs.corrections_activation import weekly_correction_figure
+    from jobs.corrections_recording import _record_fact
+    from core.correction_attribution import attributed_facts
+    from core.lesson_corrections import correction_facts
+
+    payload = {'label': 'correction', 'truncated': False, 'original_tokens': 5, 'failure_reason': 'none'}
+    for item in notes:
+        assert _record_fact(item, payload, _version())
+    keys = [subject_key(item.source_kind, item.source_id) for item in notes]
+    assert len(set(keys)) == 2
+    db = _db()
+    assert set(correction_facts(db, keys)) == set(keys)
+    assert {fact.source_id for fact in attributed_facts(db) if fact.source_kind == 'chat_comment'} == {item.source_id for item in notes}
+    db.close()
+    again = await next_pending_batch(_version(), 20, None, since='2026-10-01T00:00:00Z')
+    assert not [item for item in again.candidates if item.source_kind == 'chat_comment']
+    assert weekly_correction_figure(_version(), since='2026-10-01T00:00:00Z', weeks=1) == 0
+
+
+def test_live_comment_arrival_and_non_owner_exclusion(isolated_db, monkeypatch):
+    from types import SimpleNamespace
+    from jobs import corrections_recording
+
+    db = _db()
+    _seed(db)
+    metadata = {'reply_context': {'comments': [{'cid': 'c1.1', 'quote': 'Agent words', 'note': 'Fix it'}]}}
+    db.execute('UPDATE messages SET content=?,metadata=? WHERE id=?', ('', json.dumps(metadata), 'owner-message'))
+    db.execute("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES ('thread','prior','owner-message','c1.1','2026-10-01T00:01:00Z')")
+    db.commit()
+    seen = []
+    monkeypatch.setattr('jobs.corrections_realtime.notify', lambda kind, source: seen.append((kind, source)))
+    accepted = SimpleNamespace(message_id='owner-message', duplicate=False)
+    corrections_recording.notify_if_owner(accepted, role='user', content='', metadata=metadata)
+    assert seen == [('chat_comment', 'c1.1:owner-message')]
+    candidate = corrections_recording.candidate_for_source(*seen[0])
+    assert candidate.arrived and candidate.content == 'Fix it'
+    assert corrections_recording._record_fact(candidate, {'label': 'correction', 'truncated': False, 'original_tokens': 2, 'failure_reason': 'none'}, _version())
+    notes = db.execute("SELECT summary FROM context_change_journal WHERE object_kind='thread_context'").fetchall()
+    assert any('chat comment' in row[0] and 'Fix it' in row[0] for row in notes)
+    db.execute('UPDATE messages SET metadata=? WHERE id=?', (json.dumps({**metadata, 'sender_kind': 'agent'}), 'owner-message'))
+    db.commit()
+    assert corrections_recording.candidate_for_source(*seen[0]) is None
+    db.close()

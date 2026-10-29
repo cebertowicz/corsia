@@ -27,6 +27,7 @@ from typing import Iterable, Mapping
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
     COMMENT_SUBJECT_PREFIX,
+    CHAT_COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     DECISION_SUBJECT_PREFIX,
     LABEL_CORRECTION,
@@ -34,6 +35,7 @@ from core.corrections_recording import (
     LABEL_NOT_CORRECTION,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_CHAT_COMMENT,
     SOURCE_KIND_MESSAGE,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
@@ -68,6 +70,16 @@ _SOURCES_SQL = f"""
       FROM facts f LEFT JOIN doc_comments c
         ON c.id=substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_CHAT_COMMENT}',substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),
+        c.created_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id
+      FROM facts f LEFT JOIN chat_comments c
+        ON c.cid=substr(substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),1,
+                        instr(substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),':')-1)
+        AND c.user_message_id=substr(substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),
+                                     instr(substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),':')+1)
+      LEFT JOIN messages m ON m.id=c.user_message_id AND m.thread_id=c.thread_id
+      WHERE f.subject_key LIKE '{CHAT_COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),
         {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes,f.agent_thread_id

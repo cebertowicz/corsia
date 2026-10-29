@@ -157,9 +157,17 @@ def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object)
     from jobs.corrections_realtime import notify
 
     try:
-        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
-            notify(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if not accepted.duplicate:
+            if is_owner_authored_message(role=role, content=content, metadata=metadata):
+                _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
+                notify(SOURCE_KIND_MESSAGE, accepted.message_id)
+            from core.corrections_recording import _metadata, is_wrapper_or_delivery
+
+            context = _metadata(metadata).get("reply_context")
+            if role == "user" and isinstance(context, dict) and context.get("comments") and not is_wrapper_or_delivery(content, metadata):
+                from jobs.chat_comment_corrections import notify_chat_comments
+
+                notify_chat_comments(accepted.message_id)
     except Exception:
         logger.exception("corrections classifier admission notification failed")
 
@@ -249,7 +257,10 @@ async def next_pending_batch(
     keys: list[PendingCandidateKey] = await run_in_db(
         pending_source_candidate_keys, version, batch_size, before, since,
     )
+    from jobs.chat_comment_corrections import pending_chat_comment_keys
+
     for owner_user_id in await run_in_db(owner_user_ids):
+        keys.extend(await run_in_db(pending_chat_comment_keys, version, batch_size, owner_user_id, before, since))
         keys.extend(
             await run_in_db(
                 pending_candidate_keys, version, batch_size, owner_user_id, before, since,
