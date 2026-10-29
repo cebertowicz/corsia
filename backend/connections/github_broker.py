@@ -16,13 +16,13 @@ import subprocess
 from typing import Callable
 
 from connections.github_agent_home import TOKEN_NAMES
-from connections.github_read_request import GithubReadRefused, parse_gh_args
+from connections.github_read_request import (
+    AUTH_PROBE, GH_HOST, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG, GithubReadRefused, parse_gh_args,
+)
 from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credential_text
 
 __all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker"]
 log = logging.getLogger(__name__)
-GH_HOST = "github.com"
-_AUTH_PROBE = ["auth", "status"]
 
 
 def _scrub(text: str) -> str:
@@ -55,8 +55,12 @@ class GithubReadBroker:
         except GithubReadRefused as exc:
             log.warning("github-broker: refused (%s) %s", exc.reason, _scrub(exc.detail)[:120])
             raise GithubReadRefused(exc.reason, _scrub(exc.detail)[:120]) from None
+        probe = tuple(argv) == AUTH_PROBE
         try:
             result = self._inner(argv, timeout=timeout)
+            if probe and result.returncode != 0 and UNSUPPORTED_FLAG.search(str(result.stderr or "")):
+                argv = list(SINGLE_ACCOUNT_PROBE)
+                result = self._inner(argv, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise subprocess.TimeoutExpired([_scrub(part) for part in argv], exc.timeout) from None
         except OSError as exc:
@@ -64,14 +68,14 @@ class GithubReadBroker:
         stdout = str(result.stdout or "")
         return subprocess.CompletedProcess(
             [_scrub(part) for part in argv], result.returncode,
-            _scrub(stdout) if argv == _AUTH_PROBE else stdout, _scrub(str(result.stderr or "")),
+            _scrub(stdout) if probe else stdout, _scrub(str(result.stderr or "")),
         )
 
     def _vet(self, args: list[str], input_text: str | None) -> list[str]:
         if input_text is not None:
             raise GithubReadRefused("input_not_allowed")
-        if args == _AUTH_PROBE:
-            return args
+        if tuple(args) == AUTH_PROBE:
+            return list(args)
         return parse_gh_args(args).argv()
 
 

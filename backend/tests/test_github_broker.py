@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from connections.github_broker import GithubReadBroker, GithubReadRefused
+from connections.github_read_request import AUTH_PROBE
 from events.connectors import github_notifications_feed as feed
 from github_broker_fixtures import OK, REPO, REPO_ID, Inner, make_broker, refusal, secret
 
@@ -52,12 +53,32 @@ def test_a_custom_media_type_and_conditional_headers_pass(broker, inner) -> None
 
 
 def test_the_auth_probe_runs_and_nothing_else_of_auth_does(broker, inner) -> None:
-    broker(["auth", "status"], timeout=5.0)
-    assert inner.calls == [["auth", "status"]]
+    broker(list(AUTH_PROBE), timeout=5.0)
+    assert inner.calls == [["auth", "status", "--hostname", "github.com", "--active"]]
     inner.calls.clear()
-    for args in (["auth", "token"], ["auth", "status", "--show-token"], ["auth", "login"],
+    for args in (["auth", "status"], ["auth", "token"], ["auth", "status", "--show-token"], ["auth", "login"],
                  ["repo", "view"], ["pr", "merge", "1"], []):
         assert refusal(broker, inner, args) == "command_not_allowed"
+
+
+def test_a_gh_without_active_gets_the_single_account_probe() -> None:
+    class OldGh(Inner):
+        def __call__(self, args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess:
+            self.calls.append(list(args))
+            if "--active" in args:
+                return subprocess.CompletedProcess(args, 1, "", "unknown flag: --active\n")
+            return subprocess.CompletedProcess(args, 0, "Logged in to github.com", "")
+
+    inner = OldGh()
+    result = make_broker(inner)(list(AUTH_PROBE), timeout=5.0)
+    assert result.returncode == 0
+    assert inner.calls == [list(AUTH_PROBE), ["auth", "status", "--hostname", "github.com"]]
+
+
+def test_a_failing_active_probe_is_not_retried(inner) -> None:
+    inner.result = ("", "github.com\n  X Failed to log in to github.com account someone\n", 1)
+    assert make_broker(inner)(list(AUTH_PROBE), timeout=5.0).returncode == 1
+    assert inner.calls == [list(AUTH_PROBE)]
 
 
 @pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE", "post", "OPTIONS"])
@@ -247,7 +268,7 @@ def test_stderr_and_the_auth_probe_lose_token_shapes_and_known_environment_token
     inner.result = ("", text, 1)
     failed = broker(["api", "user"]).stderr
     inner.result = (f"Logged in\n  - Token: {secret('gho')} {known}", "", 0)
-    probe = broker(["auth", "status"]).stdout
+    probe = broker(list(AUTH_PROBE)).stdout
     for cleaned in (failed, probe):
         for leaked in (secret("gho"), "github_pat_A1b2", known):
             assert leaked not in cleaned

@@ -12,7 +12,7 @@ export type LocalPick = {
 	ref?: string;
 };
 
-export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers.';
+export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory.';
 export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = `${LOW_MEMORY_LOCAL_MODEL_SENTENCE} Connect a subscription or an API provider.`;
 
 const PICK = '/api/setup/local-model';

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE
 from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
@@ -78,7 +79,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception:  # noqa: BLE001 — an unreadable auth state is "not signed in"
