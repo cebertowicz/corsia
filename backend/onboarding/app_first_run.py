@@ -258,7 +258,7 @@ def _seed_descriptors(
         nodes = db.execute(
             "SELECT id, workflow_step, state, archived_at, revision "
             "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app' "
-            "ORDER BY CASE WHEN workflow_step='3:ask' THEN 0 ELSE 1 END",
+            "ORDER BY parent_id IS NULL",
             (listing["plan"]["id"],),
         )
         for node in nodes:

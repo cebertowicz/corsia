@@ -1,7 +1,14 @@
-"""Seed the actionable question under the first-run app connections phase."""
+"""Seed the actionable question under the first-run app connections phase.
+
+applicable_steps() lists the top-level first-run steps; this is the one seeded
+child of a step. Step 3 is a phase so app tasks can sit under it, and a phase is
+never next_step, so this task is what offers the step.
+"""
+
+import sqlite3
 
 
-def seed_ask(plan_id, *, db):
+def seed_ask(plan_id: str, *, db: sqlite3.Connection) -> None:
     from plans import public
 
     phase = db.execute(
