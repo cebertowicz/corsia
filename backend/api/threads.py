@@ -49,12 +49,18 @@ async def list_threads(token: str, archived: int = 0):
         # sets it, because every child it creates is a hidden subagent.
         # AP2 forbids re-introducing a semantic classification column that
         # could resurrect the old divergence.
+        from infra.thread_confinement import Reader, hidden_clause, project_thread
+
+        reader = Reader.from_user(user)
+        visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
-               (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1) as last_message
+               CASE WHEN {visible} THEN
+                 (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
+               END as last_message
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params = [user['id']]
+        params: list = [*identity, user["id"]]
         if conductor_ids:
             placeholders = ','.join('?' * len(conductor_ids))
             sql += f" AND (s.id NOT IN ({placeholders}) OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived'))"
@@ -66,7 +72,7 @@ async def list_threads(token: str, archived: int = 0):
             projected = []
             coordination = []
             for row in rows:
-                item = dict(row)
+                item = project_thread(reader, row)
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'

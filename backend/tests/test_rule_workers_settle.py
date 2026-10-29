@@ -214,15 +214,31 @@ async def test_a_settled_workers_later_turn_wakes_its_owner_as_an_ordinary_child
         await asyncio.sleep(0.02)
     assert turn is not None, "the worker's turn never completed"
     assert starts(rule)[0][0] == "started"
-    assert completion(turn[0]) is None and completions() == []
+    assert await asyncio.to_thread(completion, turn[0]) is None and completions() == []
 
     monkeypatch.setattr(worker_runner, "poke", poke)
     await settle_all()
     assert starts(rule)[0][0] == "returned" and completions() == []
 
-    insert_message(worker, "assistant", "Answered the owner.", metadata={"turn_id": "owner-asked"})
-    assert completion("owner-asked") == OWNER
-    assert completions() == [f"{PARENT_COMPLETION_HEADING}\n\nAnswered the owner."]
+    def start_later_turn() -> None:
+        with write_transaction(None, scope="test_later_turn") as db:
+            db.execute(
+                "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+                "VALUES ('owner-asked',?,0,'claude-code/sonnet','running','2099-01-01','boot')", (worker,),
+            )
+            insert_message(worker, "assistant", "Answered the owner.", metadata={"turn_id": "owner-asked"}, db=db)
+
+    def finish_later_turn() -> None:
+        with write_transaction(None, scope="test_finish_turn") as db:
+            db.execute("UPDATE active_turns SET status='completed' WHERE id='owner-asked'")
+
+    await asyncio.to_thread(start_later_turn)
+    assert await asyncio.to_thread(completion, "owner-asked") is None and completions() == []
+    await asyncio.to_thread(finish_later_turn)
+    assert await asyncio.to_thread(completion, "owner-asked") == OWNER
+    assert completions() == [
+        f"{PARENT_COMPLETION_HEADING}\n\nfrom an untrusted agent; contains outside content\n\nAnswered the owner."
+    ]
 
 
 # 4 -- schema-invalid output: no_result {reason: invalid}; the same request starts nothing, a bumped attempt starts one.
