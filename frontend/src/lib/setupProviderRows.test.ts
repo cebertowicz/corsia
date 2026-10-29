@@ -33,7 +33,7 @@ describe('setup provider rows', () => {
 	it('tells a computer under 24 GB why and what to do instead', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: false, startError: '' });
 
-		expect(row.meta).toBe('Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.');
+		expect(row.meta).toBe('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.');
 	});
 
 	it('shows a ready local model as a completed provider row', () => {
