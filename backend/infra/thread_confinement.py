@@ -173,7 +173,7 @@ class ChildOutput:
         reply from the latest Turn, and only once that Turn completed. Unconfined
         legacy transcripts may lack turn metadata, so their bound is the start.
         """
-        from plans.delegation_turn_end import instant
+        from infra.time import utc_storage_datetime as instant
 
         turn = db.execute(
             "SELECT id, status, started_at FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
