@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from importlib.resources import files
 
 import httpx
 import litellm
@@ -9,6 +10,47 @@ import pytest
 
 from infra.database import get_db
 from llm import catalog_cloud, live_cost_map
+
+
+@pytest.mark.asyncio
+async def test_bundled_map_refresh_uses_real_litellm_functions(monkeypatch):
+    backup = json.loads(files("litellm").joinpath("model_prices_and_context_window_backup.json").read_text())
+    model = next(key for key, value in backup.items() if value.get("litellm_provider") == "openai")
+    original = litellm.model_cost
+    monkeypatch.setattr(litellm, "model_cost", original)
+    monkeypatch.setattr(
+        litellm, "open_ai_chat_completion_models", set(litellm.open_ai_chat_completion_models) - {model},
+    )
+    client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=backup, request=request))
+    monkeypatch.setattr(live_cost_map.httpx, "AsyncClient", lambda **kwargs: client(transport=transport, **kwargs))
+
+    await live_cost_map._refresh()
+
+    assert litellm.model_cost is not original
+    assert model in litellm.model_cost
+    assert model in litellm.open_ai_chat_completion_models
+
+
+@pytest.mark.asyncio
+async def test_refresh_code_failure_is_logged_and_restores_bundled_map(monkeypatch, caplog):
+    bundled = litellm.model_cost
+    monkeypatch.setattr(litellm, "model_cost", bundled)
+    monkeypatch.setattr(live_cost_map.GetModelCostMap, "_get_backup_model_count", lambda: 0)
+    monkeypatch.setattr(live_cost_map.GetModelCostMap, "validate_model_cost_map", lambda *_a: True)
+    monkeypatch.setattr(live_cost_map, "_invalidate_model_cost_lowercase_map", lambda: None)
+    def broken(**_kwargs):
+        raise TypeError("incompatible LiteLLM API")
+
+    monkeypatch.setattr(litellm, "add_known_models", broken)
+    client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}, request=request))
+    monkeypatch.setattr(live_cost_map.httpx, "AsyncClient", lambda **kwargs: client(transport=transport, **kwargs))
+
+    await live_cost_map._refresh()
+
+    assert litellm.model_cost is bundled
+    assert any("refresh code broke" in record.message and record.exc_info for record in caplog.records)
 
 
 @pytest.mark.asyncio

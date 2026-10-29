@@ -16,23 +16,33 @@ _refresh_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task] = {}
 
 
 async def _refresh() -> None:
+    bundled_map = litellm.model_cost
     try:
         async with asyncio.timeout(_REFRESH_TIMEOUT):
             async with httpx.AsyncClient(timeout=_REFRESH_TIMEOUT) as client:
                 response = await client.get(litellm.model_cost_map_url)
                 response.raise_for_status()
                 model_map = response.json()
-            if not GetModelCostMap.validate_model_cost_map(
-                model_map, GetModelCostMap._get_backup_model_count()
-            ):
-                return  # LiteLLM logs the validation failure.
-            model_map = _expand_model_aliases(model_map)
-            # LiteLLM's proxy reload uses the same replacement and cache refresh.
-            litellm.model_cost = model_map
-            _invalidate_model_cost_lowercase_map()
-            litellm.add_known_models(model_cost_map=model_map)
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
         log.warning("LiteLLM cost map refresh failed; using bundled map: %s", exc)
+        return
+    except Exception:
+        log.exception("LiteLLM cost map refresh code broke; using bundled map")
+        return
+
+    try:
+        if not GetModelCostMap.validate_model_cost_map(
+            model_map, GetModelCostMap._get_backup_model_count()
+        ):
+            return  # LiteLLM logs the validation failure.
+        model_map = _expand_model_aliases(model_map)
+        # LiteLLM's proxy reload uses the same replacement and cache refresh.
+        litellm.model_cost = model_map
+        _invalidate_model_cost_lowercase_map()
+        litellm.add_known_models(model_cost_map=model_map)
+    except Exception:
+        litellm.model_cost = bundled_map
+        log.exception("LiteLLM cost map refresh code broke; using bundled map")
 
 
 def start_refresh() -> asyncio.Task:
