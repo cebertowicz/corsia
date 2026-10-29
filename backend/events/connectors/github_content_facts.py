@@ -6,6 +6,7 @@ from typing import Any
 from events.guard import event_author
 from events.connectors.github_label_events import label_names
 from events.connectors.github_ownership import is_own
+from events.connectors.github_screen.floor import edited_item_version
 
 
 def repository_name(raw: dict[str, Any]) -> Any:
@@ -55,10 +56,11 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(head, dict) and action in ("opened", "synchronize"):
         version = head.get("sha")
     elif action == "edited":
-        item_id, updated = item.get("id"), item.get("updated_at")
-        version = f"{item_id}:{updated}" if item_id is not None and updated else None
+        version = edited_item_version(item, review=isinstance(raw.get("review"), dict))
     elif action == "opened":
         version = item.get("number")
+    elif action == "submitted" and isinstance(raw.get("review"), dict):
+        version = item.get("id") if isinstance(item.get("body"), str) and item["body"] else None
     else:
         version = item.get("id")
     if version is not None:

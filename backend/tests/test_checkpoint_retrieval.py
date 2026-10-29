@@ -13,6 +13,8 @@ guessing or silently widening its search.
 
 from __future__ import annotations
 
+from infra.thread_confinement import Reader
+
 from checkpoint_retrieval_fixtures import _install_checkpoint, fresh_db
 
 # Re-exported so pytest resolves the fixture in this module's tests.
@@ -29,7 +31,7 @@ def test_narrative_is_searchable(fresh_db):
         narrative="We rejected the polling design and chose event routing.",
     )
 
-    hits = search_checkpoints(fresh_db, "polling", caller_thread_id="t1", limit=5)
+    hits = search_checkpoints(fresh_db, "polling", reader=Reader.agent("t1"), limit=5)
 
     assert len(hits) == 1
     assert hits[0]["thread_id"] == "t1"
@@ -47,7 +49,7 @@ def test_frozen_continuity_is_searchable(fresh_db):
         continuity=[{"statement": "The staging bucket is eu-west-1."}],
     )
 
-    hits = search_checkpoints(fresh_db, "eu-west-1", caller_thread_id="t1", limit=5)
+    hits = search_checkpoints(fresh_db, "eu-west-1", reader=Reader.agent("t1"), limit=5)
 
     assert len(hits) == 1
     assert hits[0]["thread_id"] == "t1"
@@ -64,8 +66,8 @@ def test_older_epoch_is_retrievable_but_labeled_historical(fresh_db):
     fresh_db.execute("UPDATE threads SET history_epoch=1 WHERE id='t1'")
     fresh_db.commit()
 
-    hit = search_checkpoints(fresh_db, "budget", caller_thread_id="t1", limit=5)[0]
-    exact = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+    hit = search_checkpoints(fresh_db, "budget", reader=Reader.agent("t1"), limit=5)[0]
+    exact = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
 
     assert hit["historical"] is True and hit["history_epoch"] == 0
     assert exact["historical"] is True and exact["history_epoch"] == 0
@@ -100,7 +102,7 @@ def test_entry_hit_collapses_generations_and_reports_canonical_revision(fresh_db
         checkpoint_id="cp-latest",
     )
 
-    hit = search_checkpoints(fresh_db, "event routing", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "event routing", reader=Reader.agent("t1"))[0]
 
     assert hit == {
         "kind": "continuity_entry",
@@ -141,7 +143,7 @@ def test_entry_hit_reports_retirement(fresh_db):
     )
     fresh_db.commit()
 
-    hit = search_checkpoints(fresh_db, "staging region", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "staging region", reader=Reader.agent("t1"))[0]
 
     assert hit["entry_state"] == "retired"
     assert hit["retired_reason"] == "superseded"
@@ -162,7 +164,7 @@ def test_entry_state_is_missing_when_the_canonical_row_is_gone(fresh_db):
     )
     fresh_db.commit()
 
-    hit = search_checkpoints(fresh_db, "memory durable", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "memory durable", reader=Reader.agent("t1"))[0]
 
     assert hit["entry_state"] == "missing"
 
@@ -190,7 +192,7 @@ def test_same_entry_id_in_different_epochs_does_not_deduplicate(fresh_db):
     )
 
     hits = search_checkpoints(
-        fresh_db, "routing", caller_thread_id="t1", per_thread=2
+        fresh_db, "routing", reader=Reader.agent("t1"), per_thread=2
     )
 
     assert {(hit["history_epoch"], hit["entry_id"]) for hit in hits} == {(0, 1), (1, 1)}
@@ -209,7 +211,7 @@ def test_deleted_pointer_checkpoint_removes_its_entry_index_row(fresh_db):
     fresh_db.execute("DELETE FROM checkpoints WHERE id=?", (checkpoint_id,))
     fresh_db.commit()
 
-    assert search_checkpoints(fresh_db, "pointer", caller_thread_id="t1") == []
+    assert search_checkpoints(fresh_db, "pointer", reader=Reader.agent("t1")) == []
 
 
 def test_search_uses_canonical_result_primary_text(fresh_db):
@@ -224,7 +226,7 @@ def test_search_uses_canonical_result_primary_text(fresh_db):
     }
     _install_checkpoint(fresh_db, thread_id="t1", narrative="Routine.", continuity=[entry])
 
-    hit = search_checkpoints(fresh_db, "migration verification", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "migration verification", reader=Reader.agent("t1"))[0]
 
     assert hit["kind"] == "continuity_entry"
     assert hit["statement"] == "The migration verification passed."
@@ -244,7 +246,7 @@ def test_entry_fts_ranks_a_full_match_over_an_earlier_partial_match(fresh_db):
         ],
     )
 
-    hit = search_checkpoints(fresh_db, "event routing", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "event routing", reader=Reader.agent("t1"))[0]
 
     assert hit["statement"] == "Event routing handles retries."
 
@@ -264,7 +266,7 @@ def test_query_terms_split_across_entries_fall_back_to_narrative_evidence(fresh_
     )
 
     hits = search_checkpoints(
-        fresh_db, "durable checkpoint", caller_thread_id="t1", limit=2, per_thread=2
+        fresh_db, "durable checkpoint", reader=Reader.agent("t1"), limit=2, per_thread=2
     )
 
     assert [hit["kind"] for hit in hits] == ["narrative"]
@@ -293,7 +295,7 @@ def test_unreadable_candidate_snapshot_remains_visible(fresh_db):
     )
     fresh_db.commit()
 
-    hit = search_checkpoints(fresh_db, "staging region", caller_thread_id="t1")[0]
+    hit = search_checkpoints(fresh_db, "staging region", reader=Reader.agent("t1"))[0]
 
     assert hit["kind"] == "narrative"
     assert hit["checkpoint_id"] == corrupt
@@ -309,7 +311,7 @@ def test_uninstalled_generations_are_not_returned(fresh_db):
         status="failed",
     )
 
-    assert search_checkpoints(fresh_db, "kafka", caller_thread_id="t1", limit=5) == []
+    assert search_checkpoints(fresh_db, "kafka", reader=Reader.agent("t1"), limit=5) == []
 
 
 def test_one_hit_per_thread_by_default(fresh_db):
@@ -324,7 +326,7 @@ def test_one_hit_per_thread_by_default(fresh_db):
             checkpoint_id=f"cp-{n}",
         )
 
-    hits = search_checkpoints(fresh_db, "migration", caller_thread_id="t1", limit=5)
+    hits = search_checkpoints(fresh_db, "migration", reader=Reader.agent("t1"), limit=5)
 
     assert len(hits) == 1, "expected the newest generation for the thread only"
     assert hits[0]["checkpoint_id"] == "cp-2"
@@ -348,7 +350,7 @@ def test_candidate_ranking_keeps_other_owned_threads_in_scope(fresh_db):
             checkpoint_id=f"cp-t1-{n}",
         )
 
-    hits = search_checkpoints(fresh_db, "migration", caller_thread_id="t1", limit=2)
+    hits = search_checkpoints(fresh_db, "migration", reader=Reader.agent("t1"), limit=2)
 
     assert {hit["thread_id"] for hit in hits} == {"t1", "t2"}
 
@@ -375,7 +377,7 @@ def test_entry_relevance_outranks_newer_cumulative_narrative(fresh_db):
     )
 
     hit = search_checkpoints(
-        fresh_db, "durable memory writes checkpoint", caller_thread_id="t1"
+        fresh_db, "durable memory writes checkpoint", reader=Reader.agent("t1")
     )[0]
 
     assert hit["kind"] == "continuity_entry"
@@ -391,7 +393,7 @@ def test_search_logs_one_reason_to_a_real_log_sink(fresh_db):
     sink = logger.add(records.append, level="INFO", format="{message}")
     try:
         _install_checkpoint(fresh_db, thread_id="t1", narrative="Current routing.")
-        search_checkpoints(fresh_db, "routing", caller_thread_id="t1")
+        search_checkpoints(fresh_db, "routing", reader=Reader.agent("t1"))
     finally:
         logger.remove(sink)
 
@@ -409,7 +411,7 @@ def test_search_logs_an_unresolved_caller_separately_from_no_hits(fresh_db):
     records: list[str] = []
     sink = logger.add(records.append, level="INFO", format="{message}")
     try:
-        search_checkpoints(fresh_db, "routing", caller_thread_id="unknown-thread")
+        search_checkpoints(fresh_db, "routing", reader=Reader.agent("unknown-thread"))
     finally:
         logger.remove(sink)
 
@@ -426,7 +428,7 @@ def test_results_carry_provenance_and_generation_time(fresh_db):
         fresh_db, thread_id="t1", narrative="Chose SQLite over Postgres.",
     )
 
-    hit = search_checkpoints(fresh_db, "postgres", caller_thread_id="t1", limit=5)[0]
+    hit = search_checkpoints(fresh_db, "postgres", reader=Reader.agent("t1"), limit=5)[0]
 
     assert hit["checkpoint_id"] == cid
     assert hit["thread_id"] == "t1"
@@ -442,7 +444,7 @@ def test_exact_read_returns_the_generation(fresh_db):
         fresh_db, thread_id="t1", narrative="A long narrative body.",
     )
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
 
     assert got["checkpoint_id"] == cid
     assert got["thread_id"] == "t1"
@@ -453,7 +455,7 @@ def test_missing_exact_read_is_an_explicit_typed_error(fresh_db):
     """Unavailable must not be guessed at, widened, or blamed on the caller."""
     from memory.checkpoint_search import get_checkpoint
 
-    got = get_checkpoint(fresh_db, "cp-does-not-exist", caller_thread_id="t1")
+    got = get_checkpoint(fresh_db, "cp-does-not-exist", reader=Reader.agent("t1"))
 
     assert got["error_code"] == "not_found"
     assert got["next_action"] == "verify_source_result"
@@ -468,7 +470,7 @@ def test_exact_read_pages_by_bytes(fresh_db):
         fresh_db, thread_id="t1", narrative="ABCDEFGHIJ" * 10,
     )
 
-    page = get_checkpoint(fresh_db, cid, caller_thread_id="t1", offset_bytes=10, limit_bytes=5)
+    page = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"), offset_bytes=10, limit_bytes=5)
 
     assert page["narrative"] == "ABCDE"
     assert page["offset_bytes"] == 10
@@ -485,7 +487,7 @@ def test_recent_listing_is_newest_first_and_bounded(fresh_db):
             checkpoint_id=f"cp-{n}",
         )
 
-    got = recent_checkpoints(fresh_db, "t1", caller_thread_id="t1", limit=2)
+    got = recent_checkpoints(fresh_db, "t1", reader=Reader.agent("t1"), limit=2)
 
     assert [g["checkpoint_id"] for g in got] == ["cp-3", "cp-2"]
 
@@ -524,7 +526,7 @@ def test_malformed_continuity_does_not_break_a_generation(fresh_db):
     )
     fresh_db.commit()
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
 
     assert got["narrative"] == "Body."
     assert got["continuity"] == []
@@ -541,7 +543,7 @@ def test_exact_read_labels_a_superseded_epoch_historical(fresh_db):
     fresh_db.execute("UPDATE threads SET history_epoch=1 WHERE id='t1'")
     fresh_db.commit()
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
 
     assert got["historical"] is True
     assert got["history_epoch"] == 0
@@ -554,7 +556,7 @@ def test_byte_paging_is_actually_bytes(fresh_db):
     # 10 characters, 20 bytes in UTF-8.
     cid = _install_checkpoint(fresh_db, thread_id="t1", narrative="é" * 10)
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1", offset_bytes=0, limit_bytes=4)
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"), offset_bytes=0, limit_bytes=4)
 
     assert got["total_bytes"] == 20
     assert len(got["narrative"].encode("utf-8")) <= 4
@@ -566,7 +568,7 @@ def test_byte_paging_does_not_split_a_character(fresh_db):
 
     cid = _install_checkpoint(fresh_db, thread_id="t1", narrative="é" * 10)
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1", offset_bytes=0, limit_bytes=3)
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"), offset_bytes=0, limit_bytes=3)
 
     assert got["narrative"] == "é"
 
@@ -586,7 +588,7 @@ def test_continuity_tolerates_any_json_type(fresh_db):
         )
         fresh_db.commit()
 
-        got = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+        got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
 
         assert got["narrative"] == "Body.", payload
         assert got["continuity"] == [], payload
@@ -608,7 +610,7 @@ def test_search_bounds_rows_in_sql(fresh_db):
             checkpoint_id=f"cp-many-{n}",
         )
 
-    hits = search_checkpoints(fresh_db, "migration", caller_thread_id="t1", limit=3)
+    hits = search_checkpoints(fresh_db, "migration", reader=Reader.agent("t1"), limit=3)
 
     assert len(hits) == 3
 
@@ -624,8 +626,8 @@ def test_next_offset_is_a_byte_offset_the_caller_can_resume_from(fresh_db):
 
     cid = _install_checkpoint(fresh_db, thread_id="t1", narrative="é" * 10)
 
-    first = get_checkpoint(fresh_db, cid, caller_thread_id="t1", offset_bytes=0, limit_bytes=5)
-    second = get_checkpoint(fresh_db, cid, caller_thread_id="t1", offset_bytes=first["next_offset_bytes"], limit_bytes=5
+    first = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"), offset_bytes=0, limit_bytes=5)
+    second = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"), offset_bytes=first["next_offset_bytes"], limit_bytes=5
     )
 
     assert first["next_offset_bytes"] == 4, "2 chars = 4 bytes consumed"
@@ -654,8 +656,8 @@ def test_corrupt_continuity_is_reported_not_silently_emptied(fresh_db):
     )
     fresh_db.commit()
 
-    empty = get_checkpoint(fresh_db, good, caller_thread_id="t1")
-    corrupt = get_checkpoint(fresh_db, bad, caller_thread_id="t1")
+    empty = get_checkpoint(fresh_db, good, reader=Reader.agent("t1"))
+    corrupt = get_checkpoint(fresh_db, bad, reader=Reader.agent("t1"))
 
     assert empty["continuity"] == [] and empty["continuity_unreadable"] is False
     assert corrupt["continuity"] == [] and corrupt["continuity_unreadable"] is True

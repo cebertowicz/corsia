@@ -92,7 +92,7 @@ export function buildResumeThreads(
 			id: thread.id,
 			title: thread.title || 'Untitled chat',
 			projectId: thread.project_id ?? null,
-			ownerType: isNavAgent(thread) ? 'agent' as const : 'thread' as const,
+			ownerType: thread.coordination || isNavAgent(thread) ? 'agent' as const : 'thread' as const,
 			activity: activity[thread.id] ?? null,
 			updatedAt: thread.updated_at,
 			lastMessage: thread.last_message?.trim() || null,
@@ -182,7 +182,7 @@ export function buildActivityGroups(
 		rows.push({
 			entry,
 			thread,
-			ownerType: thread && isNavAgent(thread) ? 'agent' : 'thread',
+			ownerType: thread && (thread.coordination || isNavAgent(thread)) ? 'agent' : 'thread',
 			state: planCardState(entry),
 		});
 		grouped.set(groupId, rows);

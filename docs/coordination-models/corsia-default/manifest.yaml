@@ -49,8 +49,8 @@ files:
     sha256: 1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e
   - kind: routing
     path: context/SPAWN-POLICY.md
-    bytes: 4534
-    sha256: 9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192
+    bytes: 4584
+    sha256: 69758642a956d48b405ea60080825baa755bc7af31fc8a5c7b98953bb609551d
 starter_roster:  # default; max applies to the starter roster; later roles go through conductor-bootstrap roster design
   - {role: conductor, required: true}
   - {role: owner, required: false, max: 1, template: responsibility-template}

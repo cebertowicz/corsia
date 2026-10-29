@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
+	import { activeThread, activeThreadId, coordinationThreads, isNavAgent } from '$lib/stores/threads';
 	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { requestModelSheet } from '$lib/stores/modelSheetRequest';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
@@ -31,7 +31,7 @@
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
-	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
+	const designatedName = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 
 	// isConductor only when no thread is active at all (home/conductor landing).

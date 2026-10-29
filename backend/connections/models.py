@@ -174,6 +174,25 @@ def connection_available(provider: str, db=None) -> bool:
     return bool(row) and row["status"] == ConnectionStatus.AVAILABLE.value
 
 
+def provider_may_run(provider: str, db=None) -> bool:
+    """Whether a provider has a connection or a signed-in added account to try.
+
+    Per-account discovery and policy are checked at turn admission.
+    """
+    connection = db or get_db()
+    try:
+        row = connection.execute(
+            "SELECT 1 FROM connections c WHERE c.provider=? AND "
+            "(c.status='available' OR (c.status IN ('needs_auth','unverified') AND EXISTS "
+            "(SELECT 1 FROM vendor_accounts a WHERE a.connection_id=c.id "
+            "AND a.is_default=0 AND a.state='signed_in'))) LIMIT 1", (provider,)
+        ).fetchone()
+        return row is not None
+    finally:
+        if db is None:
+            connection.close()
+
+
 SOURCE_CHECK_KEY = "source_check"
 
 

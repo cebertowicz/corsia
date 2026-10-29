@@ -1,6 +1,6 @@
 ---
 name: decision-brief
-description: Use before sending the user any substantive message (analysis, options, a proposal, a review result, a status update, a blocker or a request) to compress it to the message rule in core context, keep long form in an artifact, and raise a choice through the plan decision. Not for a one-line answer, tool narration, or agent-to-agent messages.
+description: Use before sending the user any substantive message (analysis, options, a proposal, a review result, a status update, a blocker or a request) to compress it to the message rule in skill `asking-the-person`, keep long form in an artifact, and raise a choice through the plan decision. Not for a one-line answer, tool narration, or agent-to-agent messages.
 metadata:
   corsia-data: corsia.yaml
   corsia-format: "1"

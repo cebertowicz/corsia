@@ -31,6 +31,7 @@ from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
+from events.worker_labels import injection_sign_text, labelled_summary
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -80,9 +81,7 @@ def _parked(db: sqlite3.Connection, envelope: EventEnvelope) -> bool:
 
 def _digest_details(envelope: EventEnvelope, collapse_fact: str | None) -> dict[str, Any]:
     """Facts for the note, minus ``message_id``, which would defeat collapsing."""
-    details: dict[str, Any] = {
-        k: v for k, v in envelope.facts.items() if k != "message_id"
-    }
+    details: dict[str, Any] = {k: v for k, v in envelope.facts.items() if k != "message_id"}
     details["event_id"] = envelope.event_id
     value = envelope.facts.get(collapse_fact) if collapse_fact else None
     if value is not None:
@@ -91,7 +90,7 @@ def _digest_details(envelope: EventEnvelope, collapse_fact: str | None) -> dict[
 
 
 def _summary(envelope: EventEnvelope) -> str:
-    return f"{envelope.type} from {envelope.provenance.get('source', 'platform')}"
+    return labelled_summary(f"{envelope.type} from {envelope.provenance.get('source', 'platform')}", envelope.facts)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -109,13 +108,16 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
     whole; only a line past the cap is cut, and it says how much is missing.
     """
     facts = []
-    for key in line_facts:
+    for key in dict.fromkeys((*line_facts, *(('source', 'item', 'item_version', 'kind', 'injection_signs')
+                                           if envelope.facts.get('source') == 'outside' else ()))):
         value = envelope.facts.get(key)
-        if value is None:
+        if value is None and not (key == "injection_signs" and key in envelope.facts):
             continue
         rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
+        if key == "injection_signs":
+            rendered = injection_sign_text(envelope.connector, envelope.facts) or rendered
         facts.append(f"{key}={rendered}")
     line = _summary(envelope)
     if facts:
@@ -147,6 +149,8 @@ def _deliver_target(
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
             return PlatformDelivery(event_id, thread, DUPLICATE)
         wake_details: dict[str, Any] = {**envelope.facts, "event_id": event_id}
+        if signs := injection_sign_text(envelope.connector, envelope.facts):
+            wake_details["injection_signs_text"] = signs
         if notes:
             wake_details["rule_notes"] = list(notes)
         enqueue_event_wake(
@@ -175,6 +179,7 @@ def rule_event(
         envelope.event_id, envelope.connector or "", envelope.type,
         watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
         trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
+        origin=envelope.origin,
     )
 
 
@@ -265,6 +270,7 @@ def deliver_rule_adds(
             continue
         deliveries.append(made)
         outcomes += settle_rule_delivery(db, plan, thread, delivery, made.outcome, ride=False)
+    plan.added = outcomes
     return deliveries, outcomes
 
 
@@ -321,10 +327,7 @@ def deliver_envelope_sync(
     """
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve(conn)
-        filtered = [
-            target_filter(target, conn) if target_filter is not None else None
-            for target in targets
-        ]
+        filtered = [target_filter(target, conn) if target_filter is not None else None for target in targets]
         skipped = [target.thread for target, reason in zip(targets, filtered) if reason is not None]
         event = rule_event(envelope)
         plan = None
@@ -333,12 +336,16 @@ def deliver_envelope_sync(
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
-        deliveries = [
-            PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
-            if reason is not None
-            else _deliver_routed(conn, envelope, target, decl, plan)
-            for target, reason in zip(targets, filtered)
-        ]
+
+        def deliver(pairs: Iterable[tuple[Target, str | None]]) -> list[PlatformDelivery]:
+            return [_deliver_routed(conn, envelope, target, decl, plan) if reason is None
+                    else PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
+                    for target, reason in pairs]
+
+        # The no-owner fallback waits until rules' own deliveries say whether one took the event.
+        pairs = list(zip(targets, filtered))
+        fallback = [pair for pair in pairs if pair[0].no_owner]
+        deliveries = deliver(pair for pair in pairs if not pair[0].no_owner)
         if plan is not None:
             outcomes = list(plan.settled)
             for made in deliveries:
@@ -350,6 +357,8 @@ def deliver_envelope_sync(
             added, added_outcomes = deliver_rule_adds(conn, envelope, decl, plan, target_filter)
             deliveries += added
             rules.record(conn, plan.event, [*outcomes, *added_outcomes])
+        if plan is None or not plan.handled_by():
+            deliveries += deliver(fallback)
         emit_route_events(envelope, deliveries)
         return deliveries, plan
 

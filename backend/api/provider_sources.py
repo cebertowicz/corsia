@@ -60,7 +60,22 @@ def _harness_source(provider: str) -> dict[str, Any]:
 
     # The first-run card's account lines (the picker's account rows for this vendor)
     # and the conductor's binding when its account was removed or turned off.
-    accounts, lost_binding = source_account_view(provider)
+    accounts, lost_binding = source_account_view(provider, source_state=view["state"])
+    from connections.models import provider_may_run
+    from connections.vendor_accounts import resolve_account_id
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        default_id = resolve_account_id(provider, db=db)
+        added_ready = (view['state'] in ('needs_auth', 'unverified') and provider_may_run(provider, db=db)
+                       and any(account['account_id'] != default_id and account['state'] == 'ready'
+                               for account in accounts))
+    finally:
+        db.close()
+    if added_ready:
+        view = {**view, 'state': 'ready', 'reason': None}
+        fix = None
     source = {
         "source": provider, "name": name, **view, "fix": fix,
         "accounts": accounts, "lost_binding": lost_binding,

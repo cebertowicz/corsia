@@ -24,7 +24,8 @@ class LessonReportTool(Tool):
             "evidence covers completed weeks only, excluding the current week even for range=all. "
             "all/project/agent are existing same-user view filters. Lists 20 rows, preview 5; "
             "pass next_cursor with the same filters for more. state=watch|trial lists only those; rows carry a one-line statement from the validated lesson body. Detail needs lesson_id and preferably version. "
-            "Indexed offers and body reads prove exposure, not use or benefit; unknowns stay null with reasons. "
+            "Indexed offers (per call, older installs), task-start deliveries and body reads prove exposure, not use or benefit. "
+            "Unknowns stay null with reasons. "
             "Unidentified body receipts preserve raw hashes/references without guessing a behavioral version. "
             "A changed snapshot requires starting again without cursor. No lifecycle writes or model call."
         )

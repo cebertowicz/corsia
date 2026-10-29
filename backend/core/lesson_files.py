@@ -50,8 +50,23 @@ HOLD_REASONS = {
     "no-selective-trigger": (
         "it has no trigger and boundary that say when it applies and when it does not"
     ),
-    "over-budget": "the trial lessons already offered fill the lesson index budget",
+    "over-budget": "the trial exceeds the task-start guidance budget",
+    "target-full": "the target file already has two trials running, or a trial on the same section",
 }
+
+
+def section_key(section: str) -> str:
+    """Key a section name the same way as a Markdown heading."""
+    return section.lstrip("#").strip().casefold()
+
+
+def has_section(text: str, section: str) -> bool:
+    """Whether Markdown text already has a heading named section."""
+    wanted = section_key(section)
+    return any(
+        section_key(line) == wanted
+        for line in text.splitlines() if line.startswith("#")
+    )
 
 
 @dataclass(frozen=True)
@@ -176,7 +191,11 @@ def read_trial(text: str) -> TrialFile | None:
     """The trial a ``SKILL.md`` text is, or None when it is not a valid lesson."""
     from core.skill_validation import validate_skill_text
 
-    parsed = validate_skill_text(text)
+    return trial_from_validation(validate_skill_text(text))
+
+
+def trial_from_validation(parsed) -> TrialFile | None:
+    """Return a trial from an already validated file snapshot."""
     lesson = parse_lesson(parsed.metadata) if parsed.ok else None
     if lesson is None or not parsed.name or not parsed.description:
         return None

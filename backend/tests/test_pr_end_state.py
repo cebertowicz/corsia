@@ -222,6 +222,10 @@ class TestConnectorClassifier:
             map_github_event("issues", {"action": "opened"}),
             map_github_event("issue_comment", {"action": "created", "issue": {}}),
             map_github_event("issue_comment", {"action": "created", "issue": {"pull_request": {"url": "u"}}}),
+            map_github_event("issue_comment", {"action": "edited", "issue": {}}),
+            map_github_event("issue_comment", {"action": "edited", "issue": {"pull_request": {"url": "u"}}}),
+            map_github_event("pull_request_review", {"action": "submitted"}),
+            map_github_event("pull_request_review", {"action": "edited"}),
         }
 
         declared = {decl.routed_event for decl in MANIFEST.event_types.values() if decl.routed_event}

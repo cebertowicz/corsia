@@ -127,7 +127,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking presence",
     ),
     "post_update": _Entry(
-        "history",
+        "history", core=True,
         summary=POST_UPDATE_SUMMARY,
         activity="Posting update",
     ),

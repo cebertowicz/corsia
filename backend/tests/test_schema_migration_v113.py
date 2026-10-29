@@ -32,7 +32,7 @@ def _type_for(db: sqlite3.Connection, identity_id: str) -> str:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 164
     assert MIGRATIONS[112] is migrate_112_to_113
 
 

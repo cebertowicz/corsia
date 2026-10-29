@@ -35,8 +35,8 @@ def test_upgrade_renames_modes_and_preserves_other_values():
             ('{"claude_invocation":{"confinement":"review"}}',),
         )
         db.commit()
-        assert SCHEMA_VERSION == 162 and MIGRATIONS[159] is migrate_159_to_160
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 162
+        assert SCHEMA_VERSION >= 160 and MIGRATIONS[159] is migrate_159_to_160
+        assert migrate_to_current(db, 160).to_version == 160
         assert dict(db.execute("SELECT id,confinement FROM threads")) == {
             "old": "untrusted", "other": "none", "null": None,
         }
@@ -50,7 +50,7 @@ def test_upgrade_renames_modes_and_preserves_other_values():
         initialize_schema(fresh)
         for table in ("threads", "artifact_identities"):
             assert list(db.execute(f"PRAGMA table_info({table})")) == list(fresh.execute(f"PRAGMA table_info({table})"))
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert not migrate_to_current(db, 160).migrated
     finally:
         db.close()
         fresh.close()

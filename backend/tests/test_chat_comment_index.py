@@ -16,26 +16,26 @@ def test_chat_migration_follows_thread_confinement():
     from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
     from infra.schema import SCHEMA_VERSION
 
-    from infra.migration_161_to_162_chat_comment_roots import migrate_161_to_162
-    assert SCHEMA_VERSION == 162
+    from infra.migration_163_to_164_chat_comment_roots import migrate_163_to_164
+    assert SCHEMA_VERSION >= 164
     assert MIGRATIONS[154] is migrate_154_to_155
     assert MIGRATIONS[155] is migrate_155_to_156
-    assert MIGRATIONS[161] is migrate_161_to_162
+    assert MIGRATIONS[163] is migrate_163_to_164
 
 
 def test_root_migration_preserves_existing_index_rows():
     from infra.database_migrations import migrate_to_current
-    from infra.migration_161_to_162_chat_comment_roots import migrate_161_to_162
+    from infra.migration_163_to_164_chat_comment_roots import migrate_163_to_164
 
     with sqlite3.connect(':memory:') as db:
         migrate_155_to_156(db)
         db.execute("INSERT INTO chat_comments VALUES ('thread','target','sender','c1.1','t')")
-        db.execute('PRAGMA user_version=161')
+        db.execute('PRAGMA user_version=163')
         db.commit()
-        result = migrate_to_current(db, 162)
-        assert (result.from_version, result.to_version) == (161, 162)
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 162
-        migrate_161_to_162(db)
+        result = migrate_to_current(db, 164)
+        assert (result.from_version, result.to_version) == (163, 164)
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 164
+        migrate_163_to_164(db)
         assert db.execute('SELECT user_message_id,cid,root_user_message_id,root_cid FROM chat_comments').fetchone() == ('sender', 'c1.1', None, None)
 
 

@@ -129,7 +129,7 @@ def _prepare_route(
         target_filter = SelfCausedFilter(delivery_id)
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
-        # Routing chose no thread; rules may still add recipients, never change this result.
+        # Rules may add recipients or settle an otherwise unhandled rule-only item.
         apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state,
                            scope=scope, target_filter=target_filter)
         return

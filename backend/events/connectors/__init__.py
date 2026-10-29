@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from events.connector_workflows import ShippedWorkflowDecl
 from events.connectors.receiver import ReceiverDecl
 from events.identity_formula import RelationshipDecl
 
@@ -87,6 +88,7 @@ class ConnectorManifest:
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
         default_factory=dict)
     shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
+    shipped_workflows: Mapping[str, ShippedWorkflowDecl] = field(default_factory=dict)
     app_identities: frozenset[str] = frozenset()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()

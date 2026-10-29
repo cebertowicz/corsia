@@ -46,7 +46,7 @@ def verify(
             f"destination {destination!r} is not a file in the workspace; name "
             "the file that carries the lesson (a proposal is verdict proposed)"
         )
-    skills = _skills(db, thread_id, workspace)
+    skills = offered_skills(db, thread_id, workspace)
     held = _held_trial(skills, path)
     if held is not None:
         raise NotThere(
@@ -86,7 +86,7 @@ def _resolve(
     return None
 
 
-def _skills(db: sqlite3.Connection, thread_id: str, workspace: Path):
+def offered_skills(db: sqlite3.Connection, thread_id: str, workspace: Path):
     """The thread's skills as its next installed index would split them."""
     from core.lesson_index import partition
     from core.placement_answer import thread_place

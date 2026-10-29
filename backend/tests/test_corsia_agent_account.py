@@ -525,6 +525,21 @@ def test_source_accounts_read_the_vendors_models_once_whatever_the_account_count
     assert both > 0 and model_reads() == both
 
 
+@pytest.mark.parametrize("state", ["not_installed", "unverified"])
+def test_empty_catalog_keeps_fresh_default_out_of_source_accounts(conductor, monkeypatch, state):
+    from api import provider_sources
+    from connections.source_state import apply_check
+
+    db, _work, _personal = conductor
+    monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
+    db.execute("DELETE FROM models WHERE harness='claude-code'")
+    apply_check("claude-code", state, "check failed", db=db)
+    db.commit()
+    source = provider_sources._harness_source("claude-code")
+    assert source["state"] == state
+    assert source["accounts"] == []
+
+
 def test_a_vendor_listing_no_model_has_no_account_lines(conductor):
     db, _work, personal = conductor
     _discover(db, personal)
@@ -624,6 +639,82 @@ def _refresh_to(outcome, db, account):
         await asyncio.to_thread(read)
         return AccountRefreshResult(provider, account["id"], status="ready", model_count=1)
     return refresh
+
+
+@pytest.mark.asyncio
+async def test_failed_first_check_appears_on_sources_without_catalog_models(conductor, monkeypatch):
+    from api import provider_sources
+    from infra.auth import require_user
+
+    db, work, personal = conductor
+    db.execute("DELETE FROM models WHERE harness='codex'")
+    set_legacy_policy(None, "codex", allowlist=[personal["id"]], db=db)
+    db.commit()
+
+    async def failed(provider, **_kwargs):
+        return AccountRefreshResult(provider, personal["id"], status="failed")
+
+    operation, _ = await _signin(monkeypatch, db, personal, failed)
+    assert operation.public()["outcome"] == "unchecked"
+    app = FastAPI()
+    app.include_router(provider_sources.router)
+    app.dependency_overrides[require_user] = lambda: {"id": "user"}
+    with TestClient(app) as client:
+        response = client.get("/api/providers/sources")
+    assert response.status_code == 200
+    source = next(row for row in response.json()["sources"] if row["source"] == "codex")
+    assert [(row["account_id"], row["state"]) for row in source["accounts"]] == [(personal["id"], "unchecked")]
+
+
+@pytest.mark.asyncio
+async def test_same_identity_retry_reports_bound_original_ready(conductor, monkeypatch):
+    from connections.vendor_accounts import list_accounts
+    from api import provider_sources
+
+    db, work, personal = conductor
+    async def failed(provider, **_kwargs):
+        return AccountRefreshResult(provider, personal["id"], status="failed")
+    first, _ = await _signin(monkeypatch, db, personal, failed)
+    assert first.public()["outcome"] == "unchecked"
+    second = set_account_state(work["id"], "signed_out", expected_revision=get_account(work["id"])["revision"])
+    operation = account_controls.SignIn(work["id"], "codex", second["revision"], process=ExitedLogin(),
+                                        bind=FirstRunBind(CONDUCTOR, "user"))
+    async def same_identity(*_args):
+        return True, {"account_fp": f"synthetic-{personal['id']}"}, None
+    async def cleanup(_account):
+        return None
+    monkeypatch.setattr(account_controls, "_vendor_status", same_identity)
+    monkeypatch.setattr(account_controls, "_cleanup", cleanup)
+    monkeypatch.setattr(harness_models, "refresh_provider", _refresh_to("ready", db, personal))
+    await account_controls._hold(operation, work["source_home"], "/synthetic/codex")
+    from api.vendor_accounts import check_vendor_signin
+    monkeypatch.setitem(account_controls._SIGNINS, work["id"], operation)
+    public = await check_vendor_signin(work["id"])
+    assert (public["status"], public["cause"], public["outcome"]) == ("failed", "same_account", "ready")
+    assert public["duplicate_of"] == personal["id"]
+    assert _bindings(db) == {"codex": personal["id"]}
+    lines = provider_sources._harness_source("codex")["accounts"]
+    assert next(line for line in lines if line["account_id"] == personal["id"])["state"] == "ready"
+    assert [account["id"] for account in list_accounts(provider="codex", db=db)
+            if not account["is_default"] and account["state"] == "signed_in"] == [personal["id"]]
+    assert get_account(work["id"], db=db)["state"] == "signed_out"
+    from llm.model_status import scoped_status_rows
+    model = next(row for row in scoped_status_rows(account_id=personal["id"]) if row["id"] == MODEL)
+    assert next(row for row in model["runs_on"] if row["account_id"] == personal["id"])["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_same_account_retry_without_receipt_does_not_report_outcome(conductor, monkeypatch):
+    from connections.account_signin_retry import retry_unchecked
+
+    db, work, personal = conductor
+    operation = account_controls.SignIn(work["id"], "codex", work["revision"], bind=FirstRunBind(CONDUCTOR, "user"))
+    async def cleanup(_account):
+        return None
+    monkeypatch.setattr("connections.account_signin_retry.unchecked_repeat_receipt", lambda _account_id: None)
+    await retry_unchecked(operation, personal["id"], "/synthetic/codex", cleanup)
+    assert operation.public()["cause"] == "same_account"
+    assert "outcome" not in operation.public()
 
 
 @pytest.mark.asyncio
@@ -738,3 +829,24 @@ def test_the_account_list_marks_a_signed_in_account_that_has_no_usable_model(con
     assert {row["id"]: row["no_usable_model"] for row in listed if not row["is_default"]} == {
         work["id"]: False, personal["id"]: True}
     assert renamed["no_usable_model"] is True  # a single-account response carries it too
+
+
+def test_clean_default_added_discovery_binds_setup(conductor):
+    from types import SimpleNamespace
+    from connections.account_discovery_commit import commit_discovery_bundle
+    from connections.corsia_agent_account import signin_outcome
+    from connections.vendor_accounts import record_default_identity
+
+    db, work, _ = conductor
+    db.execute("UPDATE connections SET status='needs_auth' WHERE provider='codex'")
+    db.commit()
+    record_default_identity('codex', {}, db=db)
+    receipt = receipt_of('codex', work['id'], db=db)
+    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
+        [{'selector_id': 'setup-model', 'available': True, 'resolved_identity': 'setup-model', 'context_window': 200000}],
+        context=SimpleNamespace(receipt=receipt, account_id=work['id']), harness_version='1', db=db)
+    assert result.status == 'ready'
+    outcome = signin_outcome(work['id'], 'ready', RefreshObservation(receipt, utc_now_iso()),
+                             bind=FirstRunBind(CONDUCTOR, 'user'))
+    assert outcome == ('ready', None)
+    assert _marked() == [work['id']]

@@ -5,8 +5,7 @@
 passed through: the broker rebuilds the argv from the vetted request, so what
 runs is exactly what was checked. The policy, in one place:
 
-* REST only, methods ``GET`` and ``HEAD``; GraphQL is refused because its
-  path is not listed;
+* REST only, methods ``GET`` and ``HEAD``; GraphQL is refused by name;
 * an API path, never a URL: ``gh api`` itself accepts any URL, and would send
   the person's token to its host;
 * repository paths and GitHub's numeric repository pagination paths, plus
@@ -73,6 +72,8 @@ def _vet_path(path: str) -> str:
     path = path.removeprefix("/")
     base = path.partition("?")[0]
     decoded = unquote(base)
+    if decoded.split("/", 1)[0].lower() == "graphql":
+        raise GithubReadRefused("graphql_not_allowed")
     if re.search(r"%(2f|5c|2e|00)", base, re.IGNORECASE) or any(
         part in ("", ".", "..") for part in decoded.split("/")
     ):

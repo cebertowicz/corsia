@@ -341,6 +341,21 @@ def test_turn_selection_and_settings_read_one_account_order(accounts):
     assert selection == full == units == [second["id"], default["id"]]
 
 
+def test_preloaded_accounts_keep_policy_and_removed_filter(accounts):
+    from connections.account_policy import permitted_accounts
+    from connections.provider_policy import set_policy
+    from connections.vendor_accounts import list_accounts, set_account_state
+
+    db, default, second, third = accounts
+    set_account_state(third['id'], 'removed', expected_revision=third['revision'], db=db)
+    set_policy('destination-project', 'codex', rollover=True, order=[], disabled=[second['id']],
+               expected_revision=0, db=db)
+    rows = list_accounts(provider='codex', include_removed=True, db=db)
+    loaded = permitted_accounts('codex', project_ids=['destination-project'], db=db, accounts=rows)
+    fetched = permitted_accounts('codex', project_ids=['destination-project'], db=db)
+    assert [row['id'] for row in loaded] == [row['id'] for row in fetched] == [default['id']]
+
+
 def test_unsaved_policy_skips_disabled_default_and_denies_when_all_are_disabled(accounts):
     from connections.account_policy import chosen_account_id, turn_account
     from connections.provider_policy import set_policy

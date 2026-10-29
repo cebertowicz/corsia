@@ -955,6 +955,16 @@ async def test_second_sign_in_for_a_vendor_is_refused_while_one_is_held(scripted
     assert (await _finished(other["id"]))["status"] == "completed"
 
 
+def _checked_account(provider, account_id):
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope='test_checked_account') as db:
+        receipt = capture_receipt(provider, account_id=account_id, db=db)
+        assert mark_discovery(account_id, receipt=receipt, status='ready', models={}, db=db)
+
+
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 async def test_a_repeated_account_is_refused_and_names_the_oldest_signed_in_match(scripted_vendor_clis):
@@ -970,6 +980,9 @@ async def test_a_repeated_account_is_refused_and_names_the_oldest_signed_in_matc
     third = add_account("claude-code", "Third")
     record_evidence(third["id"], identity=identity)
     set_account_state(third["id"], "signed_in", expected_revision=0)
+    # The oldest match has already been checked.
+    from infra.db_async import run_in_db
+    await run_in_db(_checked_account, 'claude-code', third['id'])
     _created(third["id"], "2026-01-01T00:00:00+00:00")
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
@@ -997,6 +1010,9 @@ async def test_codex_repeated_account_is_refused_by_its_fingerprint(scripted_ven
         _identity_file(row["source_home"], "codex", "workspace-private", "user-private")
     await account_controls.start_signin(first["id"])
     assert (await _finished(first["id"]))["duplicate_of"] is None
+    # The match has already been checked.
+    from infra.db_async import run_in_db
+    await run_in_db(_checked_account, 'codex', first['id'])
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
         "account_id": second["id"], "route": "browser", "status": "failed", "cause": "same_account",
@@ -2023,3 +2039,103 @@ async def test_same_default_row_delayed_login_A_receipts_cannot_mutate_login_B(a
     await observe_turn_error(session, {'codexErrorInfo': 'usageLimitExceeded'})
     assert usage.stored_usage(provider='codex', account_id=default['id'], db=db) == stored
     assert get_account(default['id'], db=db) == before
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_claude_setup_recovers_after_first_discovery_fails(scripted_vendor_clis, monkeypatch):
+    from connections import account_controls, harness_models
+    from connections.account_discovery_types import AccountRefreshResult
+    from connections.corsia_agent_account import FirstRunBind
+    from connections.source_state import apply_check
+    from connections.vendor_accounts import add_account, list_accounts
+    from infra.corsia_agent import set_corsia_agent
+    from infra.database import get_db
+    from api.provider_sources import _harness_source
+    from llm.model_status import scoped_status_rows
+
+    account = scripted_vendor_clis['claude-code']
+    db = get_db()
+    try:
+        db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES ('first-run','user',NULL,'t','t')")
+        db.execute("DELETE FROM models WHERE harness='claude-code'")
+        assert set_corsia_agent('first-run', db=db)
+        apply_check('claude-code', 'needs_auth', 'signed out', db=db)
+        db.commit()
+    finally:
+        db.close()
+    reads = []
+
+    async def discover(provider, **kwargs):
+        reads.append(kwargs['account_id'])
+        if len(reads) == 1:
+            return AccountRefreshResult(provider, kwargs['account_id'], status='failed')
+        from connections.account_discovery_commit import commit_discovery_bundle
+        from infra.db_async import run_in_db
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+            [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
+            context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
+            harness_version='1')
+
+    monkeypatch.setattr(harness_models, 'refresh_provider', discover)
+    await account_controls.start_signin(account['id'], bind=FirstRunBind('first-run', 'user'))
+    assert (await _finished(account['id']))['outcome'] == 'unchecked'
+    line = next(row for row in _harness_source('claude-code')['accounts'] if row['account_id'] == account['id'])
+    assert line['state'] == 'unchecked'
+    again = add_account('claude-code', 'Again')
+    _identity_file(again['source_home'], 'claude-code', 'person@example.test', 'org-synthetic-1')
+    await account_controls.start_signin(again['id'], bind=FirstRunBind('first-run', 'user'))
+    result = await _finished(again['id'])
+    assert (result['status'], result['cause'], result['outcome']) == ('failed', 'same_account', 'ready')
+    assert result['duplicate_of'] == account['id']
+    assert next(row for row in _harness_source('claude-code')['accounts'] if row['account_id'] == account['id'])['state'] == 'ready'
+    model = next(row for row in scoped_status_rows(account_id=account['id']) if row['id'] == 'claude-code/rechecked')
+    assert next(row for row in model['runs_on'] if row['account_id'] == account['id'])['status'] == 'ready'
+    signed_in = [row['id'] for row in list_accounts(provider='claude-code') if not row['is_default'] and row['state'] == 'signed_in']
+    assert signed_in == [account['id']]
+    assert _account(again['id'])['state'] == 'signed_out'
+    assert _account(again['id'])['auth_cleanup'] is not None
+    assert reads == [account['id'], account['id']]
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['claude-code', 'codex'])
+async def test_repeat_unchecked_signin_rechecks_existing_account(scripted_vendor_clis, monkeypatch, provider):
+    from connections import account_controls, harness_models
+    from connections.account_discovery_types import AccountRefreshResult
+    from connections.vendor_accounts import add_account
+
+    first = scripted_vendor_clis[provider]
+    second = add_account(provider, 'Again')
+    identity = ('person@example.test', 'org-synthetic-1') if provider == 'claude-code' else ('workspace-private', 'user-private')
+    for account in (first, second):
+        _identity_file(account['source_home'], provider, *identity)
+    reads = []
+
+    async def discover(provider, **kwargs):
+        reads.append(kwargs['account_id'])
+        if len(reads) == 1:
+            return AccountRefreshResult(provider, kwargs['account_id'], status='failed')
+        from types import SimpleNamespace
+        from connections.account_discovery_commit import commit_discovery_bundle
+        from infra.db_async import run_in_db
+
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+            [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
+            context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
+            harness_version='1')
+
+    monkeypatch.setattr(harness_models, 'refresh_provider', discover)
+    await account_controls.start_signin(first['id'])
+    assert (await _finished(first['id']))['status'] == 'completed'
+    await account_controls.start_signin(second['id'])
+    outcome = await _finished(second['id'])
+    assert outcome['status'] == 'failed'
+    assert outcome['cause'] == 'same_account'
+    assert outcome['duplicate_of'] == first['id']
+    assert reads == [first['id'], first['id']]
+    from llm.model_status import scoped_status_rows
+
+    row = next(row for row in scoped_status_rows(account_id=first['id']) if row['id'] == provider + '/rechecked')
+    assert next(entry for entry in row['runs_on'] if entry['account_id'] == first['id'])['status'] == 'ready'

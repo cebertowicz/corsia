@@ -21,6 +21,7 @@ vi.mock('$lib/stores/viewport', async () => {
 });
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
+import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
@@ -82,6 +83,27 @@ afterEach(() => {
 });
 
 describe('ImageCommentLightbox', () => {
+	it('shows the document reply chip for replies arriving while its image is open', async () => {
+		const step = vi.fn();
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
+		} });
+		await settle();
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		docComments.update((current) => ({ ...current, 'art-img': current['art-img'].map((item, index) => index === 1 ? { ...item, newReplyIds: ['new-reply'] } : item) }));
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button');
+		expect(chip?.textContent).toContain('1 new reply');
+		chip!.click();
+		expect(step).toHaveBeenCalledOnce();
+	});
+
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');
