@@ -39,8 +39,8 @@ Your design assumed your own setup, tools, data or habits: a plugin, a code repo
 - Picture two people unlike the one in front of you. If it fails for them, it isn't done.
 
 ## 8. You said it was done when it wasn't
-You reported success from a plan, a passing piece, or a tool that returned OK, and the person found it broken.
-- Done means you saw the real result work, where the person will use it, against what they asked. Say exactly what you checked and what you didn't.
+You reported success from a plan, the code, a passing piece, or a tool that returned OK, and the person found it broken.
+- Done means you used it the way the person will, where they will (for example: opened the screen and tapped through it, sent the message and read what arrived, read the document as they'll read it), and it worked against what they asked. Code that reads right and tests that pass are not that. Say exactly what you checked and what you didn't.
 - Never make the person find your problems one at a time. Check the whole thing before you hand it over.
 
 ## 9. You sat on it
