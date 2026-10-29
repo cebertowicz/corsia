@@ -39,7 +39,7 @@ describe('setup local warm', () => {
 		warm.destroy();
 	});
 
-	it.each(['a server error', 'a failure', 'unreachable', 'non-JSON'])('records why and finishes normally when warm is %s', async (outcome) => {
+	it.each(['a server error', 'a failure', 'unreachable', 'non-JSON'])('warns and finishes normally without a second report when warm is %s', async (outcome) => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
@@ -55,12 +55,13 @@ describe('setup local warm', () => {
 		expect(warm.running).toBe(false);
 		expect(warm.percent).toBeNull();
 		expect(warn).toHaveBeenCalledTimes(1);
-		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(1));
+		expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('skip_reason='))).toHaveLength(0);
 		warn.mockRestore();
 		warm.destroy();
 	});
 
 	it('does not report a failure when the warm is cancelled', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		let started = false;
 		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
@@ -76,10 +77,12 @@ describe('setup local warm', () => {
 		warm.destroy();
 		await warm.finish();
 		await Promise.resolve();
-		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(0);
+		expect(warn).not.toHaveBeenCalled();
+		warn.mockRestore();
 	});
 
 	it('does not report a failure when cancelled while reading the response', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		let reading = false;
 		let rejectBody!: (error: Error) => void;
 		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
@@ -94,7 +97,8 @@ describe('setup local warm', () => {
 		rejectBody(new DOMException('Aborted', 'AbortError'));
 		await warm.finish();
 		await Promise.resolve();
-		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(0);
+		expect(warn).not.toHaveBeenCalled();
+		warn.mockRestore();
 	});
 
 	it('reports a missing candidate once per session and again after a reset', async () => {

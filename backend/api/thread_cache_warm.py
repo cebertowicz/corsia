@@ -9,6 +9,8 @@ from api.thread_cache_warm_probe import (
     probe_is_memory_hot, shape_warm_messages,
     probe_progress,
     warm_transport_identity,
+    _is_warmable_omlx_target,
+    _has_positive_context_evidence,
 )
 from infra.auth import authenticate
 from infra.database import get_db
@@ -22,19 +24,6 @@ from llm.resolution import (
 )
 
 router = APIRouter()
-
-
-def _is_warmable_omlx_target(target: ExecutionTarget) -> bool:
-    return bool(
-        target.available
-        and target.harness == "native"
-        and target.provider == "omlx"
-        and target.backend == "network"
-    )
-
-
-def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
-    return target.context_window is not None and target.context_window > 0
 
 
 def _warm_suppressed(suppression: str) -> dict:
@@ -376,25 +365,36 @@ async def warm_session_cache(
     if not user:
         raise HTTPException(401)
     if skip_reason is not None:
-        if skip_reason not in {"no_candidate", "agent_has_model", "first_run_not_pending", "warm_failed"}:
+        if skip_reason not in {"no_candidate", "agent_has_model", "first_run_not_pending"}:
             raise HTTPException(400, "Invalid skip reason")
         logger.info("warm_session_cache skipped: {}", skip_reason)
         return {"ok": True}
-    loaded = _load_warm_target(thread_id, user["id"], model)
-    if isinstance(loaded, dict):
-        return loaded
-    target, project_id, reasoning_effort, thread_context = loaded
-    proved = await _prove_warm_target(target, thread_id)
-    if isinstance(proved, dict):
-        return proved
-    messages, tools, prompt_shape = await _build_warm_prefix(
-        thread_id,
-        project_id,
-        proved,
-        reasoning_effort,
-        thread_context,
-    )
-    return await _submit_warm(
-        thread_id, proved, messages, tools, prompt_shape, wait,
-        user_id=user["id"] if progress else None, requested_model=model,
-    )
+    from api.thread_warm_diagnostics import log_warm_failure
+
+    stage = "target"
+    try:
+        loaded = _load_warm_target(thread_id, user["id"], model)
+        if isinstance(loaded, dict):
+            log_warm_failure(stage, loaded)
+            return loaded
+        target, project_id, reasoning_effort, thread_context = loaded
+        stage = "proof"
+        proved = await _prove_warm_target(target, thread_id)
+        if isinstance(proved, dict):
+            log_warm_failure(stage, proved)
+            return proved
+        stage = "prefix"
+        messages, tools, prompt_shape = await _build_warm_prefix(
+            thread_id, project_id, proved, reasoning_effort, thread_context,
+        )
+        stage = "provider"
+        result = await _submit_warm(
+            thread_id, proved, messages, tools, prompt_shape, wait,
+            user_id=user["id"] if progress else None, requested_model=model,
+        )
+    except Exception:
+        log_warm_failure(stage)
+        raise
+    if not result.get("ok"):
+        log_warm_failure(stage, result)
+    return result

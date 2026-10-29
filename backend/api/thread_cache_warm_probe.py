@@ -5,6 +5,19 @@ from __future__ import annotations
 from llm.resolution import ExecutionTarget
 
 
+def _is_warmable_omlx_target(target: ExecutionTarget) -> bool:
+    return bool(
+        target.available
+        and target.harness == "native"
+        and target.provider == "omlx"
+        and target.backend == "network"
+    )
+
+
+def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
+    return target.context_window is not None and target.context_window > 0
+
+
 def warm_transport_identity(target: ExecutionTarget) -> tuple[str, str] | None:
     from llm.local_backends import OmlxBackend, find_backend
 

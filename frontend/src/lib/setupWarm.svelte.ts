@@ -3,7 +3,7 @@ import { getModelDispatchId } from '$lib/stores/models';
 import { setupModelWorks, type SetupModel } from '$lib/setupModels';
 import { on } from '$lib/ws/events';
 
-type SkipReason = 'no_candidate' | 'agent_has_model' | 'first_run_not_pending' | 'warm_failed';
+type SkipReason = 'no_candidate' | 'agent_has_model' | 'first_run_not_pending';
 
 function logSkip(threadId: string, session: string, reason: SkipReason): void {
 	const query = new URLSearchParams({ token: session, skip_reason: reason });
@@ -116,12 +116,10 @@ export function createSetupWarm() {
 					const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
 					const body: { ok?: boolean } | null = await response.json().catch(() => null);
 					if (!signal.aborted && (!response.ok || !body || body.ok === false)) {
-						logSkip(lookup.target.thread_id, session, 'warm_failed');
 						console.warn('Setup warm did not finish', response.status);
 					}
 				} catch {
 					if (!signal.aborted) {
-						logSkip(lookup.target.thread_id, session, 'warm_failed');
 						console.warn('Setup warm failed');
 					}
 				}
