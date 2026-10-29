@@ -1072,18 +1072,13 @@ def _activate_cap_trial(env: Env, number: int, section: str | None, *, owner: st
     return path
 
 
-@pytest.mark.parametrize(("target", "held"), [("context/shared.md", True), ("context/other.md", False)])
-async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> None:
+async def test_trials_on_different_sections_all_run(env: Env) -> None:
     for number in (1, 2):
         _activate_cap_trial(env, number, f"Part {number}")
-    reply = _place(env, _entry(env), _answer(new_target_path=target, target_section="Part 3"))
+    reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part 3"))
     await _drain(env.worker)
-    if held:
-        assert "two trials" in reply
-        assert not _skill(env).exists()
-        assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
-    else:
-        assert _skill(env).exists()
+    assert "queued" in reply
+    assert _skill(env).exists()
 
 
 @pytest.mark.parametrize(("existing_section", "requested_section", "target", "held"), [
@@ -1100,9 +1095,9 @@ async def test_trial_section_conflicts(env: Env, existing_section, requested_sec
     reply = _place(env, _entry(env), answer)
     await _drain(env.worker)
     if held:
-        assert "wait for a trial on the target file to finish and call place again" in reply
-        assert "if the only other trial changes a named section, set target_section to a different section" in reply
-        assert "A trial with no section conflicts with every trial on the file" in reply
+        assert "wait for the conflicting trial on the target file to finish and call place again" in reply
+        assert "or set target_section to a section no other trial on the file changes" in reply
+        assert "A trial with no section changes the whole file and conflicts with every trial on it" in reply
         assert not _skill(env).exists()
         assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
     else:
@@ -1205,7 +1200,7 @@ async def test_watch_promotion_counts_its_retained_target(env: Env) -> None:
     ))
     reply = _place(env, _entry(env))
     await _drain(env.worker)
-    assert "two trials" in reply
+    assert "wait for the conflicting trial on the target file to finish" in reply
     assert lesson_files.read_trial(_skill(env).read_text()).lesson.state == "watch"
 
 

@@ -44,9 +44,9 @@ FIXES = {
     ),
     "over-budget": "shorten the trial guidance so it fits at task start",
     "target-full": (
-        "wait for a trial on the target file to finish and call place again; or, if the only "
-        "other trial changes a named section, set target_section to a different section. "
-        "A trial with no section conflicts with every trial on the file"
+        "wait for the conflicting trial on the target file to finish and call place again, "
+        "or set target_section to a section no other trial on the file changes. "
+        "A trial with no section changes the whole file and conflicts with every trial on it"
     ),
 }
 
@@ -168,7 +168,7 @@ def _target_full(
     db: sqlite3.Connection, place: ThreadPlace, decision: Decision,
     merge: Any, destination: Destination, revising: bool,
 ) -> bool:
-    """Count trials on the effective target a revision keeps."""
+    """Whether another offered trial changes the same section of the effective target."""
     metadata = decision.case_metadata
     if not (metadata.get("target_file") or metadata.get("new_target_path")):
         return False
@@ -182,7 +182,7 @@ def _target_full(
     others = [row.trial for row in split.per_task if row.trial is not None
               and row.path.resolve() != existing and target_from_lesson(row.trial) == normalized]
     section = metadata.get("target_section")
-    return len(others) >= 2 or any(
+    return any(
         not section or not item.lesson.case_metadata.get("target_section")
         or lesson_files.section_key(str(section)) == lesson_files.section_key(
             str(item.lesson.case_metadata["target_section"])
