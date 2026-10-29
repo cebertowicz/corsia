@@ -913,7 +913,9 @@ async def test_nightly_pass_failure_still_emits_the_metric(run_db, monkeypatch, 
 
 def test_salvage_copies_edits_and_non_cache_files(repo, monkeypatch, isolated):
     monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
-    _exclude(repo, ".qa/\n.pip-cache/\n")
+    _exclude(repo, ".qa/\nnode_modules/\nresults_cache/\n")
+    _git(repo, "config", "diff.external", "false")
+    _git(repo, "config", "color.ui", "always")
     wt = _add(repo, "salvage")
     (wt / "README").write_text("edited\n")
     (wt / "scratch").mkdir()
@@ -921,23 +923,39 @@ def test_salvage_copies_edits_and_non_cache_files(repo, monkeypatch, isolated):
     (wt / "scratch" / "odd\nname").write_text("odd\n")
     (wt / ".qa").mkdir()
     (wt / ".qa" / "report.json").write_text("{}")
+    # Untracked work under cache-like names is still work.
+    for path in ("build/gen.py", "llm/prompt_cache/new.py", "target/notes.md"):
+        (wt / path).parent.mkdir(parents=True, exist_ok=True)
+        (wt / path).write_text("work\n")
+    (wt / "results_cache").mkdir()
+    (wt / "results_cache" / "data.csv").write_text("data\n")
     (wt / "node_modules").mkdir()
     (wt / "node_modules" / "x.js").write_text("cache")
-    (wt / ".pip-cache").mkdir()
-    (wt / ".pip-cache" / "y").write_text("cache")
+    (wt / ".review-venv.x" / "lib").mkdir(parents=True)
+    (wt / ".review-venv.x" / "pyvenv.cfg").write_text("home = /usr\n")
+    (wt / ".review-venv.x" / "lib" / "site.py").write_text("cache")
+    (wt / "scratch" / "tool-cache").mkdir()
+    (wt / "scratch" / "tool-cache" / "CACHEDIR.TAG").write_text("Signature\n")
+    (wt / "scratch" / "tool-cache" / "blob").write_text("cache")
     (wt / "scratch" / "link").symlink_to("notes.md")
     _age(repo, wt, 8 * DAY)
 
     report = _run(repo)
     saved = next((repo.parent / "repo-salvage").glob("*/salvage"))
     assert report.removed == report.salvaged == 1 and not wt.exists()
-    assert "+edited" in (saved / "changes.patch").read_text()
+    patch = (saved / "changes.patch").read_text()
+    assert patch.startswith("diff --git") and "+edited" in patch and "\x1b[" not in patch
     assert (saved / "files/scratch/notes.md").read_text() == "notes\n"
     assert (saved / "files/scratch" / "odd\nname").read_text() == "odd\n"
     assert (saved / "files/.qa/report.json").read_text() == "{}"
+    for path in ("build/gen.py", "llm/prompt_cache/new.py", "target/notes.md"):
+        assert (saved / "files" / path).read_text() == "work\n"
+    assert (saved / "files/results_cache/data.csv").read_text() == "data\n"
     assert (saved / "files/scratch/link").is_symlink()
     assert not (saved / "files/node_modules").exists()
-    assert not (saved / "files/.pip-cache").exists()
+    assert not (saved / "files/.review-venv.x").exists()
+    assert not (saved / "files/scratch/tool-cache").exists()
+    _git(repo, "config", "--unset", "color.ui")
     assert _git(repo, "branch", "--list", "b-salvage") == "b-salvage"
     emit_report(report)
     assert isolated[-1]["salvaged"] == 1

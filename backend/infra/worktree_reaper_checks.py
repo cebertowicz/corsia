@@ -46,9 +46,12 @@ class CheckContext:
     _open_prs: set[str] | None = field(default=None, init=False)
     _prs_loaded: bool = field(default=False, init=False)
 
-    def open_pr_branches(self) -> set[str] | None:
-        """Open-PR head branches, read once per pass; None when unknown."""
-        if not self._prs_loaded:
+    def open_pr_branches(self, *, fresh: bool = False) -> set[str] | None:
+        """Open-PR head branches, read once per pass; None when unknown.
+
+        ``fresh`` re-reads them, as the pre-removal recheck must.
+        """
+        if fresh or not self._prs_loaded:
             self._prs_loaded = True
             self._open_prs = open_pr_branches(self.repo)
         return self._open_prs
@@ -127,9 +130,7 @@ def _status_verdict(
         return status
     if ctx.now - idle < threshold:
         return status
-    if fresh:
-        ctx._prs_loaded = False
-    prs = ctx.open_pr_branches()
+    prs = ctx.open_pr_branches(fresh=fresh)
     if prs is None:
         return "pr_state_unknown"
     if entry and (entry.branch or "").removeprefix("refs/heads/") in prs:

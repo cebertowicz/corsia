@@ -197,10 +197,18 @@ def _is_disposable(ignored: str) -> bool:
             and parts[-1] in DISPOSABLE_NON_DIRECTORY_NAMES
         )
         or any(
-            part in DISPOSABLE_DIRS or "cache" in part or "venv" in part
-            or part.endswith(".egg-info") for part in directories
+            part in DISPOSABLE_DIRS or part.endswith(".egg-info") for part in directories
         )
     )
+
+
+def is_tool_output_dir(path: Path) -> bool:
+    """Return whether a directory marks itself as a virtualenv or a cache.
+
+    The marker, not the name, decides: a directory merely named ``build`` or
+    ``results_cache`` may hold someone's work.
+    """
+    return (path / "pyvenv.cfg").is_file() or (path / "CACHEDIR.TAG").is_file()
 
 
 def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:

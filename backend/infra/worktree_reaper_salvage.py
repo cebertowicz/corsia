@@ -8,7 +8,11 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from infra.worktree_reaper_probe import GIT_TIMEOUT_SECONDS, _is_disposable
+from infra.worktree_reaper_probe import (
+    GIT_TIMEOUT_SECONDS,
+    _is_disposable,
+    is_tool_output_dir,
+)
 
 
 class SalvageError(RuntimeError):
@@ -35,16 +39,34 @@ def _selected(worktree: Path) -> list[Path]:
     ])
     records = iter(os.fsdecode(status).split("\0"))
     selected: list[Path] = []
+    marked: dict[Path, bool] = {}
+
+    def in_tool_output(relative: Path) -> bool:
+        # Untracked files are listed one by one, so a virtualenv or cache
+        # shows up only through the marker in one of its parents.
+        for parent in list(relative.parents)[:-1]:
+            if parent not in marked:
+                marked[parent] = is_tool_output_dir(worktree / parent)
+            if marked[parent]:
+                return True
+        return False
     for record in records:
         if record.startswith("2 "):
             next(records, None)  # original path of a rename
         if not record.startswith(("? ", "! ")):
             continue
+        # Untracked paths are not gitignored, so they are someone's work: only a
+        # self-marked virtualenv or cache is left out. Ignored paths also drop
+        # the named cache directories the repository ignores.
+        ignored = record.startswith("! ")
         name = record[2:]
-        if _is_disposable(name):
+        if (ignored and _is_disposable(name)) or in_tool_output(Path(name)):
             continue
         path = worktree / name
         if name.endswith("/") and not path.is_symlink():
+            if is_tool_output_dir(path):
+                continue
+
             def fail(exc: OSError) -> None:
                 raise exc
 
@@ -53,14 +75,18 @@ def _selected(worktree: Path) -> list[Path]:
                 for directory in dirs[:]:
                     child = root / directory
                     relative = child.relative_to(worktree).as_posix()
-                    if _is_disposable(relative + "/"):
-                        dirs.remove(directory)
-                    elif child.is_symlink():
+                    if child.is_symlink():
                         dirs.remove(directory)
                         selected.append(child.relative_to(worktree))
+                    elif is_tool_output_dir(child) or (
+                        ignored and _is_disposable(relative + "/")
+                    ):
+                        dirs.remove(directory)
                 selected.extend(
                     (root / filename).relative_to(worktree) for filename in files
-                    if not _is_disposable((root / filename).relative_to(worktree).as_posix())
+                    if not (ignored and _is_disposable(
+                        (root / filename).relative_to(worktree).as_posix()
+                    ))
                 )
         else:
             selected.append(Path(name))
@@ -85,7 +111,11 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float) -> Path:
             f"worktree: {worktree}\nbranch: {branch}\nHEAD: {head}\n", encoding="utf-8",
             errors="surrogateescape",
         )
-        patch = _git_output(worktree, ["diff", "HEAD", "--binary"])
+        # The person's diff settings (external tool, textconv, color) would
+        # write display output instead of a patch that applies.
+        patch = _git_output(worktree, [
+            "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color",
+        ])
         if patch:
             (destination / "changes.patch").write_bytes(patch)
         selected = _selected(worktree)
@@ -93,8 +123,6 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float) -> Path:
             target = destination / "files" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(worktree / relative, target, follow_symlinks=False)
-        if any(not os.path.lexists(destination / "files" / relative) for relative in selected):
-            raise SalvageError("copied file is missing")
         return destination
     except (OSError, UnicodeError, SalvageError) as exc:
         if created:
