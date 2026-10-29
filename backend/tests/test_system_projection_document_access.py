@@ -6,7 +6,7 @@ from api.files_revision import _writable
 from core.system_projection import ensure_system_projection, is_system_projection_path
 from doceditor.document_save import DocumentSave, DocumentSaveError, _validate_document_write
 from infra import config
-from registry.path_access import ReadRefused, checked_read
+from registry.path_access import ReadRefused, checked_read, path_allowed
 
 
 def project_system_file(workspace):
@@ -71,6 +71,32 @@ def test_a_workspace_skill_opens_from_a_project_and_saves_only_from_the_workspac
     assert _writable(skill, [workspace])
     with pytest.raises(ReadRefused):
         checked_read(str(beside), [project])
+
+
+def test_files_no_loader_delivers_stay_with_the_workspace_scope(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    undelivered = [
+        workspace / 'skills' / 'alpha' / 'scripts' / 'run.py',
+        workspace / 'skills' / 'alpha' / 'references' / 'notes.md',
+        workspace / 'skills' / 'alpha' / 'nested' / 'SKILL.md',
+        workspace / 'context' / 'roles' / 'agent' / 'notes.txt',
+        workspace / 'context' / 'roles' / 'agent' / 'drafts' / 'old.md',
+        workspace / 'context' / 'roles' / 'reviewer' / '10-role.md',
+        workspace / 'context' / 'roles' / 'reviewer' / 'skills' / 'alpha' / 'SKILL.md',
+    ]
+    for path in undelivered:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('not delivered')
+    project = workspace / 'projects' / 'example'
+    project.mkdir(parents=True)
+    monkeypatch.setattr(config, 'WORKSPACE', workspace)
+
+    for path in undelivered:
+        # ``POST /api/files/register`` gates on the same ``path_allowed``.
+        assert not path_allowed(path, [project])
+        with pytest.raises(ReadRefused):
+            checked_read(str(path), [project])
+        assert checked_read(str(path), [workspace]) == path
 
 
 def test_a_workspace_role_file_opens_from_a_project_and_saves_only_from_the_workspace(tmp_path, monkeypatch):

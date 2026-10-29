@@ -11,6 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from core.context_source_paths import role_file_label
+from core.role_context_sources import ROLE_ORDER
+from core.skill_scanning import skill_files
 from core.workspace_context_sources import is_read_only_context_path
 from core.workspace_layout import resolve_workspace_root
 from infra import config
@@ -29,18 +32,21 @@ class FileLookup(NamedTuple):
 def shared_context_path(path: Path, *, db=None) -> bool:
     """Whether every scope reads ``path``: a read-only context file, or a workspace skill or role file.
 
-    Workspace skills and role files (``context/roles/<role>/``, role skills
-    included) reach agents in every scope; saving one still needs the
-    workspace scope.
+    Only the files the loaders deliver to every scope qualify: a role file
+    they read, and a ``SKILL.md`` in the workspace or a role's skill folder.
+    Anything else under those folders stays with the workspace scope, as does
+    saving any of them.
     """
     if is_read_only_context_path(path, config.WORKSPACE, db=db):
         return True
-    root = resolve_workspace_root(config.WORKSPACE)
+    root = resolve_workspace_root(config.WORKSPACE).resolve(strict=False)
     resolved = path.resolve(strict=False)
-    return any(
-        resolved.is_relative_to(shared.resolve(strict=False))
-        for shared in (root / "skills", root / "context" / "roles")
-    )
+    if role_file_label(resolved, root) is not None:
+        return True
+    if resolved.name != "SKILL.md":
+        return False
+    skill_roots = (root, *(root / "context" / "roles" / role for role in ROLE_ORDER))
+    return any(resolved in skill_files(skill_root) for skill_root in skill_roots)
 
 
 def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
