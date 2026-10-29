@@ -75,12 +75,10 @@ def last_turn(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
 
 
 def final_message(db: sqlite3.Connection, worker: str, turn_id: str) -> str | None:
-    row = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC, rowid DESC LIMIT 1",
-        (worker, turn_id),
-    ).fetchone()
+    """Read the same completed answer as delegation before checking its result schema."""
+    from infra.thread_confinement import ChildOutput
+
+    row = ChildOutput.read(db, worker).answer(db, turn_id=turn_id)
     return None if row is None else str(row["content"])
 
 

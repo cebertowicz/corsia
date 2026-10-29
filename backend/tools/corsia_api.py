@@ -97,6 +97,11 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
             f"Route is off-limits for corsia_api (person-only): {reason}; "
             "use the human surface and report the missing capability"
         )
+    from infra.thread_confinement import Reader, internal_route_restriction
+
+    restriction = await run_in_db(internal_route_restriction, Reader.agent(actor), user_id, route, scope)
+    if restriction is not None:
+        return {"status": 200, "data": restriction.payload()}
     status = 500
     response = bytearray()
     response_headers: dict[bytes, bytes] = {}

@@ -36,7 +36,10 @@ def project(isolated_db, tmp_path, monkeypatch):
 
 
 def _installed(db):
-    return [dict(row) for row in db.execute("SELECT * FROM event_rules WHERE scope='project:screen-project' ORDER BY id")]
+    key = install._key("screen-project")
+    return [dict(row) for row in db.execute("SELECT * FROM event_rules WHERE scope='project:screen-project' "
+                                          "AND id IN (?,?,?) ORDER BY id",
+                                          (key + '_opened', key + '_synchronize', key + '_start'))]
 
 
 def test_boot_installs_existing_projects_and_rebinds_package_updates(project, tmp_path, monkeypatch):

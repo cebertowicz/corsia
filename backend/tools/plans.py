@@ -73,18 +73,8 @@ def _thread_actor(thread_id, actor_row, turn_identity=None, call_ids=None) -> Pl
     )
 
 
-def _current_operation(thread_id, actor_row, ensure, read: dict):
-    """Execute one current-plan operation on a worker database connection.
-
-    The default read is the compact status; ``mode='full'`` is one body-free
-    page of the whole plan, continued by its ``cursor``, with folded finished
-    work counted rather than listed unless ``include_folded``; ``node_id`` is
-    one node exactly; ``section``/``cursor`` continue one status section.
-    ``known_revision`` answers ``unchanged`` when that page is still at that
-    revision, which only the node page can prove. ``plan_ensure`` ensures
-    first, then reads the same way. ``thread_id`` (plan_read only) reads that
-    thread's plan the same three ways, never creating it.
-    """
+def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
+    """Read/ensure the actor's plan, or read another thread's without creating it."""
 
     db = get_db()
     try:
@@ -112,6 +102,11 @@ def _current_operation(thread_id, actor_row, ensure, read: dict):
                 include_folded=include_folded, thread_id=other, db=db,
             )
         if other is not None:
+            from infra.thread_confinement import read_restriction
+
+            restriction = read_restriction(db, reader, other)
+            if restriction is not None:
+                return restriction.payload()
             return public.addressed_to(page, other, db=db)
         return page
     finally:
@@ -132,9 +127,11 @@ async def _execute_current(kwargs: dict[str, Any], *, ensure: bool) -> str:
     read = {key: kwargs.get(key) for key in keys}
     foreign = read["thread_id"] not in (None, thread_id)
     started = time.monotonic()
+    from infra.thread_confinement import Reader
+
     try:
         result = await run_in_db(partial(
-            _current_operation, thread_id, actor_row, ensure, read
+            _current_operation, thread_id, actor_row, ensure, read, Reader.from_tool(kwargs)
         ))
         reply = json.dumps(result, sort_keys=True)
     except PermissionError:

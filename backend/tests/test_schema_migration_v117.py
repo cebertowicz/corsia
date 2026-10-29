@@ -39,7 +39,7 @@ def _indexes(db: sqlite3.Connection) -> set[str]:
 
 
 def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
-    assert SCHEMA_VERSION == 162 and MIGRATIONS[116] is migrate_116_to_117
+    assert SCHEMA_VERSION == 163 and MIGRATIONS[116] is migrate_116_to_117
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
         db.executescript(_V116_TABLE + """
@@ -62,7 +62,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
             "VALUES ('s2','t','w','script','300','n',1,'t','c','u')"
         )
         indexes = _indexes(db)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 162)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 163)
     assert row == ("s1", "cadence", 2, 5, None, None, None)
     assert {"idx_automation_schedules_due", "idx_automation_schedules_scope"} <= indexes
 

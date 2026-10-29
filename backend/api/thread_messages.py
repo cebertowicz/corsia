@@ -10,6 +10,7 @@ from infra.chat_comment_index import attach_comments
 from infra.database import get_db
 from infra.db_async import run_in_db, run_read
 from infra.queries import get_thread_for_user
+from infra.thread_confinement import Reader, RestrictedRead, transcript_restriction
 from api.thread_inbox_actions import (
     retry_thread_delivery_now,
     run_inbox_message_action,
@@ -111,6 +112,10 @@ async def get_messages(
     def _query():
         db = get_db()
         try:
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            restriction = transcript_restriction(Reader.from_user(user), thread) if thread is not None else None
+            if restriction is not None:
+                return (restriction, [])
             if from_id is not None and to_id is not None:
                 result = read_authorized_run_range(
                     db, thread_id, limit, from_id, to_id, before, user_id=user["id"],
@@ -141,6 +146,8 @@ async def get_messages(
     if result is None:
         raise HTTPException(404)
     result, chat_replies = result
+    if isinstance(result, RestrictedRead):
+        return {"messages": [], **result.payload()}
     if isinstance(result, dict):
         return {**result, **({'chat_reply_items': chat_replies} if chat_replies else {})}
 
@@ -171,8 +178,12 @@ async def get_tool_result(
     def _query():
         db = get_db()
         try:
-            if not get_thread_for_user(thread_id, user["id"], db=db):
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            if not thread:
                 return None
+            restriction = transcript_restriction(Reader.from_user(user), thread)
+            if restriction is not None:
+                return restriction
             return load_tool_result(db, thread_id, message_id, tool_call_id)
         finally:
             db.close()
@@ -180,4 +191,4 @@ async def get_tool_result(
     result = await run_in_db(_query)
     if result is None:
         raise HTTPException(404)
-    return {"result": result}
+    return result.payload() if isinstance(result, RestrictedRead) else {"result": result}

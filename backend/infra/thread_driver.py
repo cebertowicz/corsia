@@ -121,18 +121,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    answer = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC,rowid DESC LIMIT 1",
-        (child_id, turn_id),
-    ).fetchone()
+    from infra.thread_confinement import ChildOutput
+
+    answer = ChildOutput.read(db, child_id).final_reply(db, turn_id=turn_id)
     # The wrapper carries the child's result. A Turn that produced none has
     # nothing to deliver, and waking the parent for it is a model call per
     # blank Turn — a legitimately unchanged wait would never be quiet.
     if answer is None:
         return None
-    content = f"{PARENT_COMPLETION_HEADING}\n\n{str(answer['content']).strip()}"
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))

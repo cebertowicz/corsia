@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from events.envelope import EventEnvelope
 from events.identity import (
     GITHUB_INTEGRATION,
+    ISSUE_TYPE,
     PR_TYPE,
     RoutingIdentity,
     check_suite_pr_metadata_from_event,
@@ -32,6 +33,7 @@ from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
+from events.connectors.github_screen.workflow import triage_capture, triage_validate, triage_version, triage_workflow
 from events.identity_formula import MalformedEventError, RelationshipDecl
 
 _CHECK_TO_PR = RelationshipDecl("check_suite", "check_to_pull_request", "pull-request")
@@ -57,6 +59,10 @@ GITHUB_ROUTED_EVENTS = {
     "issue.opened": "webhook.github.issue_opened",
     "issue_comment.created": "webhook.github.issue_comment",
     "pr_comment.created": "webhook.github.pr_comment",
+    "issue_comment.edited": "webhook.github.issue_comment_edited",
+    "pr_comment.edited": "webhook.github.pr_comment_edited",
+    "review.submitted": "webhook.github.review_submitted",
+    "review.edited": "webhook.github.review_edited",
 }
 
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
@@ -175,11 +181,15 @@ def _check_suite_facts(cs: Mapping[str, Any], selected_pr: Mapping[str, Any] | N
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
     number = facts.get("pr_number")
+    artifact_type = PR_TYPE
+    if number is None:
+        issue = _json_object(raw, "issue")
+        number = issue.get("number")
+        artifact_type = PR_TYPE if issue.get("pull_request") else ISSUE_TYPE
     if number is None:
         return None
-    repo = facts.get("repo")
-    return {"integration": GITHUB_INTEGRATION, "type": PR_TYPE,
-            "external_id": pr_external_id(repo, number)}
+    return {"integration": GITHUB_INTEGRATION, "type": artifact_type,
+            "external_id": pr_external_id(facts.get("repo"), number)}
 
 
 def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
@@ -318,6 +328,13 @@ MANIFEST = register(ConnectorManifest(
             source="outside", kind="pull request", item_fields=("repo", "pr_number", "item_version"),
             version=_screen_version, instructions=_screen_instructions,
             capture=_capture_screen, validate=_apply_screen,
+        ),
+    ), "github-outside-triage": ShippedWorkflowDecl(
+        load=triage_workflow,
+        result=ShippedResultContract(
+            source="outside", kind="triage", item_fields=("repo", "number", "item_version"),
+            version=triage_version, instructions=_screen_instructions,
+            capture=triage_capture, validate=triage_validate,
         ),
     )},
     resolve_relationships=_relationships,

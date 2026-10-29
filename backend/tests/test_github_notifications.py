@@ -111,7 +111,8 @@ def test_every_github_call_is_a_read(through_broker):
         assert "notifications/threads" not in call[-1]
 
 
-def test_polled_comment_routes_exactly_as_the_webhook_payload():
+def test_polled_comment_routes_exactly_as_the_webhook_payload(monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "reviewer-human")
     owner = mk_session("own-1")
     register_pr(REPO, PR, owner)
     comment = comment_object(501)
