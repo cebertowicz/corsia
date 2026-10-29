@@ -209,7 +209,7 @@ async def begin_settings_download(model: LocalModel) -> dict:
             return ls._in_progress_result()
         return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
     if not await asyncio.to_thread(local_setup_memory_ok):
-        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
+        return {"ok": False, "reason": "mac_cannot_run", "message": prepare.NO_LOCAL_MODEL}
     if not ls._claim_operation("settings", model):
         await resume_pending_setup()
         return _in_progress_or_blocked()

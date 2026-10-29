@@ -284,6 +284,18 @@ async def test_a_press_that_cannot_claim_the_operation_says_why_instead_of_repor
 
 
 @pytest.mark.asyncio
+async def test_settings_download_below_memory_floor_returns_shared_refusal(isolated_db, flight, monkeypatch):
+    from llm import local_setup_flow as flow
+    from llm.local_model import LocalModel
+    from llm.local_setup_prepare import NO_LOCAL_MODEL
+
+    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: False)
+    result = await flow.begin_settings_download(LocalModel.__new__(LocalModel))
+    assert result == {"ok": False, "reason": "mac_cannot_run", "message": NO_LOCAL_MODEL}
+    assert not flight._running()
+
+
+@pytest.mark.asyncio
 async def test_a_settings_press_that_cannot_claim_the_operation_says_why_and_logs_a_reference(isolated_db, flight, monkeypatch):
     from llm import local_setup_flow as flow, local_setup_operation
     from llm.local_model import LocalModel
