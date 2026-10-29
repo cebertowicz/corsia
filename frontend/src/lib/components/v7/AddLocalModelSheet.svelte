@@ -153,7 +153,7 @@
 	.theme-opt:hover { color: var(--text-primary); }
 	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
 	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (max-width: 768px) { .theme-opt::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%); } }
+	@media (max-width: 48rem) { .theme-opt::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%); } }
 	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
 	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>
