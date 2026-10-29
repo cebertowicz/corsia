@@ -78,7 +78,9 @@ require_loaded_service_owns_port() {
 }
 
 # macOS 15 rejects `bootout --wait` as an unrecognized target, so plain bootout
-# runs and the job's process exit is awaited here, inside the one deadline.
+# runs and teardown is confirmed here, inside the one deadline: launchd no
+# longer lists the job (so KeepAlive cannot start it again), and every PID it
+# reported before or during the bootout has exited.
 launchctl_bootout_wait() {
     "$PYTHON" -c '
 import os
@@ -98,6 +100,17 @@ def launchctl(*args):
     )
 
 
+def job():
+    """Return (loaded, pid); pid is "?" when launchd reports one we cannot read."""
+    loaded = launchctl("print", target)
+    if loaded.returncode != 0:
+        return False, None
+    match = re.search(r"^\s*pid = (\S+)$", loaded.stdout, re.MULTILINE)
+    if match is None:
+        return True, None
+    return True, int(match.group(1)) if match.group(1).isdigit() else "?"
+
+
 def running(pid):
     try:
         os.kill(pid, 0)
@@ -107,25 +120,35 @@ def running(pid):
 
 
 try:
-    loaded = launchctl("print", target)
-    match = re.search(r"^\s*pid = (\d+)$", loaded.stdout, re.MULTILINE)
-    pid = int(match.group(1)) if loaded.returncode == 0 and match else None
+    _, pid = job()
+    if pid == "?":
+        # Nothing is stopped yet, so this is a plain refusal with the job loaded.
+        sys.stderr.write(f"cannot read the PID launchd reports for {target}\n")
+        raise SystemExit(1)
+    seen = {pid} if pid is not None else set()
     completed = launchctl("bootout", target)
+    sys.stderr.write(completed.stderr)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+    while True:
+        loaded, pid = job()
+        if isinstance(pid, int):
+            seen.add(pid)
+        # An unreadable PID while still loaded keeps waiting, so it ends in 124.
+        if not loaded and not any(running(each) for each in seen):
+            break
+        if time.monotonic() >= deadline:
+            raise SystemExit(124)
+        time.sleep(0.2)
 except subprocess.TimeoutExpired:
     raise SystemExit(124)
-sys.stderr.write(completed.stderr)
-if completed.returncode != 0:
-    raise SystemExit(completed.returncode)
-while pid is not None and running(pid):
-    if time.monotonic() >= deadline:
-        raise SystemExit(124)
-    time.sleep(0.2)
 ' "$1" "$SERVICE_PID_EXIT_WAIT_SECONDS"
 }
 
 bootout_service_and_wait() {
     local domain="$1" label="$2" bootout_status
-    # launchd owns KeepAlive and termination; Python only bounds the native wait.
+    # launchd owns KeepAlive and termination; the wrapper confirms the job is
+    # unloaded and its processes have exited, inside one deadline.
     if launchctl_bootout_wait "$domain/$label"; then
         return 0
     else
