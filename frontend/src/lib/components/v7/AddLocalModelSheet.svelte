@@ -1,181 +1,136 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { token } from '$lib/stores/auth';
+	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { fetchLocalModelRecommendations, fetchSources, startLocalModelDownload, type LocalModelRecommendation } from '$lib/conductorSources';
-	import { localModelRecommendationMeta } from '$lib/stores/localModelRecommendationMeta';
+	import { cancelLocalDownload, deleteLocalModelDownload, fetchLocalModelRecommendations, fetchSources, startLocalModelDownload, type LocalModelRecommendation, type LocalModelRecommendations, type ModelSource } from '$lib/conductorSources';
+	import { token } from '$lib/stores/auth';
+	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import type { ProviderModel } from '$lib/stores/providerModels';
+	import { on } from '$lib/ws/events';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import ListRow from '$lib/components/ui/ListRow.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import AddModelBuildRow from './AddModelBuildRow.svelte';
+	import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
+	import { modelGroups } from './addModelRows';
 
 	interface Props { onClose: () => void; onStarted?: () => void; }
 	const { onClose, onStarted }: Props = $props();
 	let loading = $state(true);
 	let error = $state('');
-	/** Whether asking again can change the answer: not for a cause the person must fix first, such as Set up or an oMLX update. */
 	let retryable = $state(true);
-	let models = $state<LocalModelRecommendation[]>([]);
-	let downloaded = $state(new Set<string>());
-	let memoryGb = $state<number | null>(null);
-	let memoryRoomGb = $state<number | null>(null);
-	/** Setup's pick on this list, from the backend's one fit rule; no pick, no Recommended row. */
-	let recommendedRepository = $state<string | null>(null);
-	let diskFreeGb = $state<number | null>(null);
-	let starting = $state('');
-	/** The model already downloading (Settings or setup), named before the person picks another. */
-	let runningName = $state<string | null>(null);
-	let runningRepository = $state<string | null>(null);
+	let data = $state<LocalModelRecommendations | null>(null);
+	let download = $state<ModelSource['settings_download'] | null>(null);
+	let sort = $state<'quality' | 'speed'>('quality');
+	let busy = $state(false);
+	let rowError = $state<{ repository: string; message: string } | null>(null);
+	let confirmDelete = $state<ProviderModel | null>(null);
+	let stop: (() => void) | null = null;
+	const groups = $derived(modelGroups(data?.models ?? [], sort, data?.recommended_repository ?? null));
+	const running = $derived(Boolean(download && !download.failed && !download.finishing));
+	const runningListed = $derived(groups.some((group) => group.builds.some((build) => build.repository === download?.repository)));
 
-	async function load() {
-		loading = true; error = ''; retryable = true;
+	async function refreshList() {
 		const t = get(token);
-		if (!t) {
-			error = "Couldn’t check which models fit this computer.";
-			loading = false;
-			return;
-		}
+		if (!t) { error = 'Couldn’t check which models fit this computer.'; return; }
 		try {
-			const [body, sources] = await Promise.all([
-				fetchLocalModelRecommendations(t),
-				fetchSources(t).catch(() => []),
-			]);
-			const running = sources.find((source) => source.source === 'omlx')?.settings_download;
-			runningName = running && !running.failed ? running.name ?? 'A model' : null;
-			runningRepository = running && !running.failed ? running.repository : null;
-			if (body?.state !== 'ready') {
-				error = body?.message ?? "Couldn’t check which models fit this computer.";
-				retryable = body?.message === undefined;
+			const result = await fetchLocalModelRecommendations(t);
+			if (result.state !== 'ready') {
+				error = result.message ?? 'Couldn’t check which models fit this computer.';
+				retryable = !result.message;
 				return;
 			}
-			models = Array.isArray(body.models) ? body.models : [];
-			downloaded = new Set((body.downloads ?? []).filter((entry) => entry.status === 'available').map((entry) => entry.repository));
-			memoryGb = typeof body.memory_gb === 'number' ? body.memory_gb : null;
-			memoryRoomGb = typeof body.memory_room_gb === 'number' ? body.memory_room_gb : null;
-			recommendedRepository = typeof body.recommended_repository === 'string' ? body.recommended_repository : null;
-			diskFreeGb = typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null;
+			data = result; error = '';
 		} catch (caught) {
-			// A backend answer carries its status and its own sentence; anything else is a failed request.
 			const status = (caught as { status?: number }).status;
-			error = typeof status === 'number' && caught instanceof Error ? caught.message : "Couldn’t check which models fit this computer.";
+			error = typeof status === 'number' && caught instanceof Error ? caught.message : 'Couldn’t check which models fit this computer.';
 			retryable = typeof status !== 'number' || status >= 500;
 		}
-		finally { loading = false; }
 	}
-	async function download(repository: string) {
+	async function refreshDownload() {
 		const t = get(token);
-		if (!t) {
-			error = "Couldn't start the download. Try again.";
-			return;
-		}
-		starting = repository;
+		if (!t) return;
 		try {
-			await startLocalModelDownload(t, repository);
-			onStarted?.(); onClose();
-		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't start the download. Try again."; }
-		finally { starting = ''; }
+			const previous = download;
+			download = (await fetchSources(t)).find((source) => source.source === 'omlx')?.settings_download ?? null;
+			if (previous && !download) await refreshList();
+		} catch { /* Keep the last known state if the source cannot be read. */ }
 	}
-	function diskNeed(model: LocalModelRecommendation): string | null {
-		if (model.disk?.state !== 'insufficient') return null;
-		const required = model.disk.required_bytes;
-		return required ? `Needs ${Math.ceil(required / 1000 ** 3)} GB of disk` : 'Needs more disk space';
+	async function load() {
+		loading = true;
+		await Promise.all([refreshList(), refreshDownload()]);
+		loading = false;
 	}
-
-	// A row the backend says doesn't fit now names its need, sized from what oMLX says the model needs
-	// loaded, never from its download; no figure, no line. The backend's verdict is the only fit rule.
-	function memoryNeed(model: LocalModelRecommendation): string | null {
-		const resident = model.resident_bytes;
-		if (model.fits_now !== false || memoryRoomGb === null || typeof resident !== 'number' || resident <= 0) return null;
-		return `Needs ${Math.ceil(resident / 1024 ** 3)} GB of memory · ${Math.floor(memoryRoomGb)} GB free for a model now`;
+	async function start(repository: string) {
+		const t = get(token);
+		if (!t) { rowError = { repository, message: "Couldn't start the download. Try again." }; return; }
+		if (busy) return;
+		busy = true; rowError = null;
+		try { await startLocalModelDownload(t, repository); onStarted?.(); await refreshDownload(); }
+		catch (caught) { rowError = { repository, message: caught instanceof Error ? caught.message : 'Couldn’t start the download. Try again.' }; }
+		finally { busy = false; }
 	}
-
-	// The backend orders the list: models that fit the memory free now first, then the rest.
-	const fitting = $derived(models.filter((model) => model.fits_now !== false));
-	const needMore = $derived(models.filter((model) => model.fits_now === false));
-	// Quality in half steps: 3.5 reads as three and a half dots, never rounded up to four.
-	const level = (model: LocalModelRecommendation) => Math.min(5, Math.max(0, Math.round((model.smarts_level ?? 0) * 2) / 2));
-	const dotFill = (model: LocalModelRecommendation, n: number) => (level(model) >= n ? 'on' : level(model) >= n - 0.5 ? 'half' : 'off');
-
-	function meta(model: LocalModelRecommendation): string[] {
-		return localModelRecommendationMeta(model);
+	async function cancel() {
+		const t = get(token);
+		if (!t || busy) return;
+		busy = true;
+		try { await cancelLocalDownload(t); await refreshDownload(); }
+		catch { error = 'Couldn’t cancel the local model download. Try again.'; }
+		finally { busy = false; }
 	}
-
-	function joinedMeta(model: LocalModelRecommendation): string[] {
-		// Keep separators with their neighbours so narrow sheets never strand a dot at line end.
-		return [meta(model).join('\u00a0·\u00a0')];
+	async function deleteFailed(repository: string) {
+		const t = get(token);
+		if (!t || busy) return;
+		busy = true; rowError = null;
+		try { await deleteLocalModelDownload(t, repository); await refreshDownload(); await refreshList(); }
+		catch (caught) { rowError = { repository, message: caught instanceof Error ? caught.message : 'Couldn’t delete the download. Try again.' }; }
+		finally { busy = false; }
 	}
-
-	onMount(load);
+	function deleteBuild(build: LocalModelRecommendation) {
+		if (!download?.downloaded) { void deleteFailed(build.repository); return; }
+		confirmDelete = { id: build.repository, name: build.name, state: 'default', meta: '', caps: [], sizeBytes: build.download_size_gb * 1000 ** 3 };
+	}
+	function openSettings() { onClose(); requestSettingsSection('providers'); }
+	onMount(() => { void load(); stop = on('models_updated', () => { void refreshDownload(); }); });
+	onDestroy(() => stop?.());
 </script>
 
-{#snippet modelRow(model: LocalModelRecommendation)}
-	<div class="model-row" class:insufficient={Boolean(diskNeed(model))}>
-		<ListRow meta={joinedMeta(model)}>
-			{#snippet children()}
-				<span class="model-name">{model.name}</span>
-				{#if model.smarts_level !== undefined}
-					<span class="quality" role="img" aria-label={`Quality ${level(model)} of 5`}>
-						{#each [1, 2, 3, 4, 5] as n (n)}<span class="dot {dotFill(model, n)}"></span>{/each}
-					</span>
-				{/if}
-				{#if model.repository === recommendedRepository}<span class="recommended">Recommended</span>{/if}
-			{/snippet}
-			{#snippet detail()}
-				{#if diskNeed(model)}<span class="disk-need">{diskNeed(model)}</span>{/if}
-				{#if memoryNeed(model)}<span class="disk-need">{memoryNeed(model)}</span>{/if}
-			{/snippet}
-			{#snippet actions()}
-				{#if downloaded.has(model.repository)}
-					<span class="downloaded">Downloaded</span>
-				{:else if runningRepository === model.repository}
-					<span class="downloaded">Downloading</span>
-				{:else if !diskNeed(model)}
-					<Button size="sm" variant={model.repository === recommendedRepository ? 'primary' : 'chip'} loading={starting === model.repository} disabled={Boolean(starting) || runningName !== null} onclick={() => download(model.repository)}>Download</Button>
-				{/if}
-			{/snippet}
-		</ListRow>
-	</div>
-{/snippet}
-
-<Modal title="Add model" size="sm" {onClose}>
+<Modal title="Add model" size="md" {onClose}>
 	{#if loading}
 		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
 	{:else if error}
-		<div class="notice error">{error}{#if retryable}<Button size="sm" variant="secondary" onclick={load}>Retry</Button>{/if}</div>
-	{:else if models.length === 0}
-		<div class="notice">No recommended models fit this computer.</div>
+		<div class="notice error" role="alert">{error}<Button size="sm" variant="secondary" onclick={retryable ? load : openSettings}>{retryable ? 'Retry' : 'Open settings'}</Button></div>
 	{:else}
-		{#if runningName}<div class="notice running" role="status">{runningName} is downloading. Add another when it finishes, or cancel it on the oMLX row.</div>{/if}
-		<div class="section-line">Picked for this computer{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
-		{#if fitting.length === 0 && memoryRoomGb !== null}<div class="notice">Nothing fits the {Math.floor(memoryRoomGb)} GB free for a model now.</div>{/if}
-		{#each fitting as model (model.repository)}
-			{@render modelRow(model)}
-		{/each}
-		{#if needMore.length}
-			<h3>Needs more free memory</h3>
-			{#each needMore as model (model.repository)}
-				{@render modelRow(model)}
+		{#if running}<div class="notice" role="status">{download?.name ?? 'A model'} is downloading. {#if !runningListed}<Button size="sm" variant="ghost" disabled={busy} onclick={cancel}>Cancel</Button>{/if}</div>{/if}
+		{#if groups.length === 0}
+			<div class="notice">No recommended models fit this computer.</div>
+		{:else}
+			<div class="summary">Picked for this computer{data?.memory_gb == null ? '' : ` · ${data.memory_gb} GB memory`}{data?.memory_in_use_gb ? `, ${data.memory_in_use_gb} GB in use` : ''}{data?.disk_free_gb == null ? '' : ` · ${data.disk_free_gb} GB disk free`}</div>
+			<label class="sort">Sort by <select bind:value={sort}><option value="quality">Quality</option><option value="speed">Speed</option></select></label>
+			{#each groups as group (group.name)}
+				<section class="model">
+					<h3>{group.name}</h3>
+					{#each group.builds as build (build.repository)}
+						<AddModelBuildRow {group} {build} recommended={data?.recommended_repository === build.repository}
+							running={running && download?.repository === build.repository} percent={download?.percent ?? 0}
+							failed={Boolean(download?.failed && download.repository === build.repository)} downloaded={Boolean(download?.downloaded)}
+							{busy} otherRunning={running} error={rowError?.repository === build.repository ? rowError.message : ''}
+							onDownload={() => void start(build.repository)} onCancel={() => void cancel()} onDelete={() => deleteBuild(build)} />
+					{/each}
+				</section>
 			{/each}
 		{/if}
 	{/if}
 </Modal>
+{#if confirmDelete}
+	<LocalModelDeleteDownloadModal model={confirmDelete} onClose={() => confirmDelete = null} onDeleted={async () => { await refreshDownload(); await refreshList(); }} />
+{/if}
 
 <style>
 	.notice { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); padding: var(--space-3) 0; }
-	.notice.error { color: var(--red); justify-content: space-between; }
-	.notice.running { padding-top: 0; font-size: var(--text-footnote); }
-	.section-line { color: var(--text-secondary); font-size: var(--text-footnote); margin: 0 0 var(--space-2); }
-	h3 { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; margin: var(--space-3) 0 var(--space-2); }
-	.model-name { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-regular); }
-	.recommended { display: inline; color: var(--accent-text); font-size: var(--text-footnote); font-weight: 600; margin-left: var(--space-1); }
-	.disk-need { display: block; color: var(--text-tertiary); font-size: var(--text-footnote); margin-top: var(--space-1); }
-	/* One gap between rows whether or not a row carries a need line. */
-	.model-row + .model-row { margin-top: var(--space-3); }
-	.model-row :global(.row-detail:empty) { display: none; }
-	.insufficient { opacity: 0.58; }
-	.quality { display: inline-flex; gap: var(--space-1); margin-left: var(--space-2); vertical-align: middle; }
-	.dot { box-sizing: border-box; width: 0.5em; height: 0.5em; border-radius: var(--radius-circle); background: var(--bg-tertiary); border: 1px solid var(--border); }
-	.dot.on { background: var(--text-secondary); border-color: var(--text-secondary); }
-	.dot.half { background: linear-gradient(to right, var(--text-secondary) 50%, var(--bg-tertiary) 50%); border-color: var(--text-secondary); }
-	.downloaded { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.notice.error { color: var(--red-text); justify-content: space-between; }
+	.summary, .sort { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.sort { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; }
+	.sort select { color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font: inherit; }
+	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>

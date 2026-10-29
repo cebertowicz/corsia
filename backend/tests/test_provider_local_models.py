@@ -324,11 +324,12 @@ def _ready_recommender(monkeypatch, tmp_path, sections: dict[str, list[LocalMode
 
     monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "host_ram_bytes", lambda: 64 * 1024**3)
-    monkeypatch.setattr(provider_local_models, "model_room_bytes", lambda: room_gib * 1024**3)
+    monkeypatch.setattr(provider_local_models, "pin_room_bytes", lambda: room_gib * 1024**3)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.1")
     monkeypatch.setattr(provider_local_models, "_server", server)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", no_disk_models)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_loaded", no_disk_models)
     monkeypatch.setattr(provider_local_models, "ask_recommendations", recommended)
     monkeypatch.setattr(provider_local_models, "download_dir", model_dir)
     monkeypatch.setattr(
@@ -350,18 +351,49 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     assert result["recommended_repository"] == MODEL.repository
     assert result["models"] == [{
         **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3}, "fits_now": True,
+        "on_disk": False, "section": "best",
     }]
 
 
 @pytest.mark.asyncio
-async def test_recommended_row_is_setups_pick_not_omlxs_first_row(monkeypatch, tmp_path) -> None:
+async def test_recommended_row_is_first_fitting_best_list_build(monkeypatch, tmp_path) -> None:
     huge = LocalModel("Jundot/DeepSeek-V4-Flash", 1_000_000, 32_768, resident_bytes=163 * 1024**3)
     small = LocalModel("Jundot/Qwen3.6-35B-A3B", 1_000_000, 32_768, resident_bytes=40 * 1024**3)
-    _ready_recommender(monkeypatch, tmp_path, {"best": [huge], "faster": [small]}, room_gib=68)
+    _ready_recommender(monkeypatch, tmp_path, {"best": [huge, small]}, room_gib=68)
 
     result, _sections = await provider_local_models._recommendations()
 
     assert result["recommended_repository"] == small.repository
+
+
+@pytest.mark.asyncio
+async def test_recommended_skips_unavailable_build_but_keeps_owned_build(monkeypatch, tmp_path) -> None:
+    first = LocalModel("Jundot/first", 1_000_000, 32_768, resident_bytes=10 * 1024**3)
+    second = LocalModel("Jundot/second", 1_000_000, 32_768, resident_bytes=10 * 1024**3)
+    _ready_recommender(monkeypatch, tmp_path, {"best": [first, second]}, room_gib=22)
+    monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "insufficient"})
+
+    async def owned(_config):
+        return [{"identifier": second.model}]
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", owned)
+    result, _sections = await provider_local_models._recommendations()
+    assert result["recommended_repository"] == second.repository
+    assert next(row for row in result["models"] if row["repository"] == second.repository)["on_disk"] is True
+
+
+@pytest.mark.asyncio
+async def test_owning_another_build_does_not_change_recommendation(monkeypatch, tmp_path) -> None:
+    first = LocalModel("Jundot/first", 1_000_000, 32_768, resident_bytes=10 * 1024**3)
+    second = LocalModel("Jundot/second", 1_000_000, 32_768, resident_bytes=10 * 1024**3)
+    _ready_recommender(monkeypatch, tmp_path, {"best": [first, second]}, room_gib=22)
+
+    async def owned(_config):
+        return [{"identifier": second.model}]
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", owned)
+    result, _sections = await provider_local_models._recommendations()
+    assert result["recommended_repository"] == first.repository
 
 
 @pytest.mark.asyncio

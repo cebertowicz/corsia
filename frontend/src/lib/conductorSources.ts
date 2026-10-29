@@ -146,8 +146,15 @@ export type LocalModelRecommendation = {
 	/** oMLX's quality estimate, 0.5 to 5 dots, and its estimated decode speed. */
 	smarts_level?: number;
 	tokens_per_second?: number;
-	/** Whether the model fits the memory free for a model now. */
+	/** Whether the model fits this computer's total room for models. */
 	fits_now?: boolean;
+	/** Whether this exact build is already on this computer. */
+	on_disk?: boolean;
+	/** oMLX's raw quality estimate and section for ordering and attribution. */
+	smarts?: number;
+	section?: string;
+	table_on_ssd?: boolean;
+	table_bytes?: number;
 	/** Memory oMLX says the model needs once loaded; absent when oMLX gives none. */
 	resident_bytes?: number;
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
@@ -158,15 +165,17 @@ export type LocalModelDownload = { repository: string; model: string; status?: '
 export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
-	/** Setup's pick (the recommended row) first, then fits-now models, then the rest, each by quality then speed. */
+	/** Recommendations annotated with this computer's fit and disk state. */
 	models?: LocalModelRecommendation[];
 	/** Durable Settings download records for the add-model sheet. */
 	downloads?: LocalModelDownload[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
-	/** Memory a model may take now: free memory less the load reserve, the room setup's pick uses. */
+	/** Total room for models, after the load reserve. */
 	memory_room_gb?: number;
-	/** The row setup would pick now, by the same fit rule; null when the list has none. */
+	/** Memory occupied by currently loaded models. */
+	memory_in_use_gb?: number;
+	/** The first eligible build from oMLX's best list, if any. */
 	recommended_repository?: string | null;
 	disk_free_gb?: number;
 };

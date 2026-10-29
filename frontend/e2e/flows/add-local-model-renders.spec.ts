@@ -27,12 +27,12 @@ const recommendations = {
 		{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, smarts_level: 2, tokens_per_second: 90, resident_bytes: 12 * 1024 ** 3, fits_now: true, disk: { state: 'ready' } },
 		{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_bytes: 31 * 1000 ** 3, download_size_gb: 31, context_window: 262144, smarts_level: 4.5, tokens_per_second: 18, resident_bytes: 48 * 1024 ** 3, fits_now: false, disk: { state: 'insufficient', required_bytes: 31 * 1000 ** 3 } },
 	],
-};type RenderState = 'recommendations' | 'downloading' | 'complete' | 'under-24gb';
+};type RenderState = 'recommendations' | 'downloading' | 'complete' | '24gb';
 
 function sourceFor(state: RenderState) {
 	return {
 		source: 'omlx', name: 'Local model', state: 'ready',
-		eligible: state === 'under-24gb' ? false : true,
+		eligible: state === '24gb' ? false : true,
 		corsia_omlx_online: true,
 		settings_download: state === 'downloading'
 			? { repository: 'qwen/qwen3.8-27b', name: 'Qwen3.8-27B', percent: 40, failed: false }
@@ -46,7 +46,7 @@ function serverRow(id: string, display_name: string, size_bytes: number) {
 }
 
 function modelRows(state: RenderState) {
-	if (state === 'under-24gb') return { loaded: [], available: [] };
+	if (state === '24gb') return { loaded: [], available: [] };
 	if (state === 'downloading') return {
 		loaded: [serverRow('qwen3.8-flash-next', 'Qwen3.8-Flash-Next', 16 * 1024 ** 3)],
 		available: [serverRow('gemma-4-31b-it', 'Gemma 4 31B IT', 20 * 1024 ** 3)],
@@ -66,8 +66,8 @@ async function fixtureLocalModelState(page: Page, state: RenderState) {
 	});
 	await page.route('**/api/system/host-resources?**', async (route) => {
 		await route.fulfill({ json: {
-			device_name: 'This Mac', total_gb: state === 'under-24gb' ? 16 : 64,
-			free_gb: state === 'under-24gb' ? 10 : 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8,
+			device_name: 'This Mac', total_gb: state === '24gb' ? 24 : 64,
+			free_gb: state === '24gb' ? 10 : 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8,
 			safe_reserve_gb: 8, by_provider: {},
 		} });
 	});
@@ -171,13 +171,14 @@ async function capture(page: Page, name: string) {
 
 test('renders the approved local-model evidence states from intercepted fixtures', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'This evidence test sets its required desktop and phone viewports itself.');
-	test.setTimeout(120_000);
+	test.setTimeout(180_000);
 	for (const { viewport, theme } of [
 		{ viewport: { name: '1440', width: 1440, height: 900 }, theme: 'light' as const },
 		{ viewport: { name: '1440', width: 1440, height: 900 }, theme: 'dark' as const },
 		{ viewport: { name: '393', width: 393, height: 852 }, theme: 'light' as const },
+		{ viewport: { name: '393', width: 393, height: 852 }, theme: 'dark' as const },
 	]) {
-			for (const state of ['recommendations', 'downloading', 'complete', 'under-24gb'] as const) {
+			for (const state of ['recommendations', 'downloading', 'complete', '24gb'] as const) {
 				await page.unrouteAll({ behavior: 'ignoreErrors' });
 				await page.setViewportSize({ width: viewport.width, height: viewport.height });
 				await page.emulateMedia({ colorScheme: theme });
@@ -186,29 +187,28 @@ test('renders the approved local-model evidence states from intercepted fixtures
 				if (state === 'recommendations') {
 					await card.getByRole('button', { name: 'Add model', exact: true }).click();
 					const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
-					await expect(sheet).toContainText('Picked for this computer · 64 GB · 20 GB disk free');
+					await expect(sheet).toContainText('Picked for this computer · 64 GB memory · 20 GB disk free');
 					await expect(sheet).toContainText('Recommended');
-					await expect(sheet).toContainText('262k context · 4-bit · 20 GB · ~24 tokens/s est.');
-					await expect(sheet).toContainText('262k context · 4-bit · 16 GB · ~60 tokens/s est.');
-					await expect(sheet).toContainText('Needs 31 GB of disk');
-					await expect(sheet).toContainText('Needs 48 GB of memory · 40 GB free for a model now');
-					await expect(sheet.locator('h3')).toHaveText(['Needs more free memory']);
+					await expect(sheet).toContainText('20 GB · ~24 tokens/s');
+					await expect(sheet).toContainText('16 GB · ~60 tokens/s');
+					await expect(sheet).toContainText('Quality 4 of 5 · 256K context');
+					await expect(sheet).not.toContainText('Qwen3.8-27B');
+					await expect(sheet.getByRole('button', { name: /Download/ })).toHaveCount(3);
 				} else if (state === 'downloading') {
 					const downloadingRow = card.locator('.mr').filter({ hasText: 'Qwen3.8-27B' });
 					await expect(card).toContainText('Downloading 40%');
 					await expect(downloadingRow).toHaveCount(1);
 					// R6: the standard row; its switch is on the row, disabled until the model is on disk.
 					await expect(downloadingRow.locator('.tg')).toBeDisabled();
-					// The progress hairline is positioned against this row, not the provider block around it.
-					await expect(downloadingRow).toHaveClass(/dl-row/);
-					await expect(downloadingRow).toHaveCSS('position', 'relative');
+					// Download progress is text and a spinner, with no progress hairline.
+					expect(await downloadingRow.evaluate((row) => getComputedStyle(row, '::after').content)).toBe('none');
 					await expect(card.getByRole('button', { name: 'Cancel' })).toBeVisible();
 				} else if (state === 'complete') {
 					await expect(card).toContainText('262k context · 16 GB · 52 tokens/s');
 					await expect(card).toContainText('Settings measured on Macs like this one · omlx.ai');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 				} else {
-					await expect(page.getByText('16 GB memory', { exact: true })).toBeVisible();
+					await expect(page.getByText(/24 GB memory/)).toBeVisible();
 					await expect(card).toContainText('Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.');
 					await expect(card).not.toContainText('No models yet.');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);

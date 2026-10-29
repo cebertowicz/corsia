@@ -58,6 +58,9 @@ class LocalModel:
     #: oMLX's quality estimate (0.5-5 dots) and estimated decode speed; the sort's keys.
     smarts_level: float | None = field(default=None, compare=False)
     tokens_per_second: float | None = field(default=None, compare=False)
+    smarts: float | None = field(default=None, compare=False)
+    table_on_ssd: bool = field(default=False, compare=False)
+    table_bytes: int = field(default=0, compare=False)
 
     @property
     def model(self) -> str:
@@ -100,6 +103,11 @@ class LocalModel:
             result["smarts_level"] = self.smarts_level
         if self.tokens_per_second is not None:
             result["tokens_per_second"] = self.tokens_per_second
+        if self.smarts is not None:
+            result["smarts"] = self.smarts
+        if self.table_on_ssd:
+            result["table_on_ssd"] = True
+            result["table_bytes"] = self.table_bytes
         return result
 
 
@@ -140,6 +148,8 @@ def from_recommendation(raw: object) -> LocalModel | None:
     resident = raw.get("resident_bytes")
     smarts = raw.get("smarts_level")
     speed = raw.get("tokens_per_second")
+    raw_smarts = raw.get("smarts")
+    table_bytes = raw.get("table_bytes")
     return LocalModel(
         repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None,
         float(level) if isinstance(level, (int, float)) and not isinstance(level, bool) else None,
@@ -148,6 +158,9 @@ def from_recommendation(raw: object) -> LocalModel | None:
         resident if isinstance(resident, int) and not isinstance(resident, bool) and resident > 0 else None,
         float(smarts) if isinstance(smarts, (int, float)) and not isinstance(smarts, bool) else None,
         float(speed) if isinstance(speed, (int, float)) and not isinstance(speed, bool) else None,
+        float(raw_smarts) if isinstance(raw_smarts, (int, float)) and not isinstance(raw_smarts, bool) else None,
+        raw.get("table_on_ssd") is True,
+        table_bytes if isinstance(table_bytes, int) and not isinstance(table_bytes, bool) and table_bytes > 0 else 0,
     )
 
 
@@ -247,8 +260,7 @@ def order_models(sections: dict[str, list[LocalModel]], room_bytes: int) -> list
     """The one list CORSIA offers: setup's pick on top, the rest that fit ``room_bytes``, then what needs more.
 
     After the pick, each group runs by oMLX's quality level, then its estimated
-    speed. oMLX's section names are dropped. Setup's pick and the Add model
-    sheet's Recommended row are both this list's first fitting row.
+    speed. The Add model sheet independently chooses its eligible recommendation.
     """
     pick = pick_for_setup(sections, room_bytes)
     rows = sorted(_in_omlx_order(sections), key=_by_quality_then_speed)

@@ -3,6 +3,7 @@
 	import { deleteLocalModelDownload } from '$lib/conductorSources';
 	import { token } from '$lib/stores/auth';
 	import type { ProviderModel } from '$lib/stores/providerModels';
+	import { humanBytes } from '$lib/stores/providerModelUtils';
 	import { Button, Modal } from '$lib/components/ui';
 
 	interface Props {
@@ -14,7 +15,7 @@
 	const { model, onClose, onDeleted }: Props = $props();
 	let deleting = $state(false);
 	let error = $state('');
-	const size = $derived(model.sizeBytes ? `${(model.sizeBytes / (1000 ** 3)).toFixed(1)} GB` : null);
+	const size = $derived(model.sizeBytes ? humanBytes(model.sizeBytes) : null);
 
 	async function deleteDownload() {
 		const t = get(token);
