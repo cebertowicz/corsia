@@ -31,7 +31,7 @@ from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
-from events.worker_labels import labelled_summary
+from events.worker_labels import injection_sign_text, labelled_summary
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -119,6 +119,9 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
         facts.append(f"{key}={rendered}")
+    signs = injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
+    if signs:
+        facts.append(f"injection signs: {signs}")
     line = _summary(envelope)
     if facts:
         line = f"{line}: {', '.join(facts)}"

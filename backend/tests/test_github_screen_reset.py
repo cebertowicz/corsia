@@ -60,6 +60,42 @@ def test_conductor_designation_installs_screen_without_manual_sync(world):
 
 
 @pytest.mark.asyncio
+async def test_result_delivery_renders_sign_text_without_changing_facts(screen):
+    from core.injection_rules import INJECTION_RULES
+    from infra.database import get_db
+
+    screen["reply"].write_text(fenced({"payload": {"verdict": "safe", "categories": [], "findings": []},
+                                       "injection_signs": ["R3", "R4"]}))
+    await _route(screen["state"]["sha"])
+    await run_scripts()
+    await settle_all()
+    event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.result")
+    assert event["facts"]["injection_signs"] == ["R3", "R4"]
+    messages = [row[0] for row in get_db().execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
+    text = next(message for message in messages if "[EVENT: result]" in message)
+    for sign, rule in INJECTION_RULES:
+        if sign in ("R3", "R4"):
+            assert f"{sign} ({rule})" in text
+
+
+@pytest.mark.parametrize("event_type", ["worker.result", "worker.no_result"])
+def test_worker_signs_render_in_wake_and_digest_without_mutating_facts(event_type):
+    from core.injection_rules import INJECTION_RULES
+    from events.delivery import format_event_input
+    from events.envelope import normalize
+    from events.platform import _note_line
+
+    facts = {"source": "outside", "injection_signs": ["R3", "R4"]}
+    event = normalize("worker", {"run_id": "run-1", **facts}, event_type.removeprefix("worker."))
+    wake = format_event_input(event_type, "worker", facts)
+    note = _note_line(event, ())
+    for sign, rule in INJECTION_RULES:
+        if sign in facts["injection_signs"]:
+            assert f"{sign} ({rule})" in wake and f"{sign} ({rule})" in note
+    assert facts["injection_signs"] == event.facts["injection_signs"] == ["R3", "R4"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("valid", [True, False])
 async def test_result_and_no_result_keep_label_in_agent_delivery(screen, valid):
     from infra.database import get_db
