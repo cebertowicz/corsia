@@ -180,6 +180,59 @@ test('Add model recorded motion', async ({ browser }, info) => {
   }
 });
 
+test('Add model Sort reorder and held press recordings', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop' || !process.env.ADD_MODEL_SORT_MOTION_DIR);
+  test.setTimeout(240_000);
+  const out = process.env.ADD_MODEL_SORT_MOTION_DIR!;
+  for (const width of [1440, 393]) for (const motion of ['normal', 'reduce'] as const) {
+    for (const direction of ['quality-speed', 'speed-quality'] as const) {
+      const context = await browser.newContext({ baseURL: `http://127.0.0.1:${process.env.CORSIA_E2E_FRONTEND_PORT ?? '5178'}`, viewport: { width, height: width === 393 ? 852 : 900 }, reducedMotion: motion === 'reduce' ? 'reduce' : 'no-preference', recordVideo: { dir: out, size: { width, height: width === 393 ? 852 : 900 } } });
+      const page = await context.newPage();
+      await fixture(page, 'available'); await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
+      const card = page.locator('[data-server-card="omlx-local"]'); await card.locator('.pr-expand').click();
+      await card.getByRole('button', { name: 'Add model', exact: true }).click();
+      const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+      const speed = sheet.getByRole('radio', { name: 'Speed' });
+      await expect(speed).toBeVisible();
+      if (direction === 'speed-quality') { await speed.click(); await page.waitForTimeout(600); }
+      await page.waitForTimeout(500);
+      const target = sheet.getByRole('radio', { name: direction === 'quality-speed' ? 'Speed' : 'Quality' });
+      await page.evaluate(() => {
+        const samples: { time: number; rows: { name: string; top: number; opacity: number }[] }[] = [];
+        (window as any).sortSamples = samples;
+        const start = performance.now();
+        function sample() {
+          samples.push({ time: performance.now() - start, rows: [...document.querySelectorAll<HTMLElement>('.sorted-list')].flatMap(list => [...list.querySelectorAll<HTMLElement>('.model')].map(row => ({ name: row.querySelector('h3')?.textContent ?? '', top: row.getBoundingClientRect().top, opacity: Number(getComputedStyle(list).opacity) }))) });
+          if (performance.now() - start < 800) requestAnimationFrame(sample);
+        }
+        requestAnimationFrame(sample);
+      });
+      await target.click();
+      await page.waitForTimeout(800);
+      const samples = await page.evaluate(() => (window as any).sortSamples);
+      const fs = await import('node:fs/promises');
+      await fs.writeFile(`${out}/sort-${direction}-${width}-${motion}.json`, JSON.stringify(samples));
+      await expect(sheet.locator('h3').first()).toHaveText(direction === 'quality-speed' ? 'Gemma' : 'Qwen3.8 Flash Next');
+      const video = page.video()!; await context.close(); await video.saveAs(`${out}/sort-${direction}-${width}-${motion}.webm`);
+    }
+  }
+  for (const motion of ['normal', 'reduce'] as const) for (const control of ['sort', 'download'] as const) {
+    const context = await browser.newContext({ baseURL: `http://127.0.0.1:${process.env.CORSIA_E2E_FRONTEND_PORT ?? '5178'}`, viewport: { width: 1440, height: 900 }, reducedMotion: motion === 'reduce' ? 'reduce' : 'no-preference', recordVideo: { dir: out, size: { width: 1440, height: 900 } } });
+    const page = await context.newPage(); await fixture(page, 'available'); await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
+    const card = page.locator('[data-server-card="omlx-local"]'); await card.locator('.pr-expand').click(); await card.getByRole('button', { name: 'Add model', exact: true }).click();
+    const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+    const button = control === 'sort' ? sheet.getByRole('radio', { name: 'Speed' }) : sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ });
+    await expect(button).toBeVisible(); await page.waitForTimeout(600);
+    const box = (await button.boundingBox())!; await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+    await expect.poll(() => button.evaluate(el => getComputedStyle(el).scale)).toBe('0.96');
+    await page.waitForTimeout(300); await page.screenshot({ path: `${out}/press-${control}-${motion}-held.png` });
+    await page.waitForTimeout(300); await page.mouse.up();
+    if (control === 'sort') await expect(button).toHaveAttribute('aria-checked', 'true');
+    await page.waitForTimeout(200); await page.screenshot({ path: `${out}/press-${control}-${motion}-release.png` });
+    const video = page.video()!; await context.close(); await video.saveAs(`${out}/press-${control}-${motion}.webm`);
+  }
+});
+
 test('Add model sheet motion and Sort press', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop');
   await fixture(page, 'available');
