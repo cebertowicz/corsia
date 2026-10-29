@@ -8,6 +8,7 @@
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
+	import { LOW_MEMORY_LOCAL_MODEL_MESSAGE } from '$lib/setupLocalPick.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
@@ -216,7 +217,8 @@
 				actionMessage = data.message ?? success;
 			} else {
 				const reference = typeof data.ref === 'string' && data.ref ? ` Reference: ${data.ref}` : '';
-				actionError = `${data.message ?? data.detail ?? failure}${reference}`;
+				const message = data.reason === 'mac_cannot_run' ? LOW_MEMORY_LOCAL_MODEL_MESSAGE : data.message ?? data.detail ?? failure;
+				actionError = `${message}${reference}`;
 			}
 		} catch {
 			actionError = failure;

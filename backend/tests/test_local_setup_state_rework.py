@@ -55,12 +55,13 @@ async def test_restart_failure_and_refusal_reach_the_source_projection(flight, m
 
     result = await _restart_installed("server")
     assert result["ref"] == "local-123"
-    assert result["fix"] == "CORSIA couldn’t set up the local model."
+    assert result["fix"] == "CORSIA couldn’t start the local model."
     assert "Port is busy" not in str(result) and "Free the port" not in str(result)
     row = {}
     local_sources._project_local_flight(row, current())
     assert row["setup_error_message"] is None
     assert row["setup_error_reference"] == "local-123"
+    assert row["fix"] == "CORSIA couldn’t start the local model."
     assert "Port is busy" not in str(flight.setup_status())
     assert "Free the port" not in str(row)
 
@@ -68,6 +69,23 @@ async def test_restart_failure_and_refusal_reach_the_source_projection(flight, m
     local_sources._project_local_flight(row, current())
     assert row["setup_error_code"] == "mac_cannot_run"
     assert row["setup_error_message"] == NO_LOCAL_MODEL
+
+
+@pytest.mark.asyncio
+async def test_restart_exception_projects_safe_fix_and_never_trusts_provider_fix(flight, monkeypatch):
+    from llm import local_sources
+    from llm.local_setup_flow import _restart_installed
+    from onboarding.local_download_state import current
+
+    monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", AsyncMock(side_effect=RuntimeError("private detail")))
+    result = await _restart_installed("server")
+    assert result["fix"] == "CORSIA couldn’t start the local model."
+    assert result["ref"].startswith("local-")
+    flight._flight.result["fix"] = "private provider fix"
+    row = {}
+    local_sources._project_local_flight(row, current())
+    assert row["fix"] == "CORSIA couldn’t start the local model."
+    assert "private" not in str(row)
 
 
 @pytest.mark.asyncio

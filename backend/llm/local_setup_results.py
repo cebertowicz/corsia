@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
+RESTART_FAILURE_MESSAGE = "CORSIA couldn’t start the local model."
 CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."

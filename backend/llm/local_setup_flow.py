@@ -13,11 +13,8 @@ from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
 from llm.local_setup_gates import local_setup_memory_ok, limited_subscription_message, subscription_available
-from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_message, local_setup_error
+from llm.local_setup_results import RESTART_FAILURE_MESSAGE, SETUP_COMMAND, failure_cause, failure_message, local_setup_error
 from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
-
-
-_RESTART_FAILURE_MESSAGE = "CORSIA couldn’t start the local model."
 
 
 async def _setup_new_omlx(report: Callable[..., None], events: list[str],
@@ -139,14 +136,14 @@ async def _restart_installed(server_id: str) -> dict:
         elif result.get("reason") == "mac_cannot_run":
             result = {"ok": False, "reason": "mac_cannot_run", "message": prepare.NO_LOCAL_MODEL}
         else:
-            result = {**local_setup_error(_RESTART_FAILURE_MESSAGE), "ref": result.get("ref")}
+            result = {**local_setup_error(RESTART_FAILURE_MESSAGE), "fix": RESTART_FAILURE_MESSAGE, "ref": result.get("ref")}
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
     except Exception:
         ref = new_reference("local")
         ls.log.exception("Local model restart failed reference=%s", ref)
-        result = {**local_setup_error(_RESTART_FAILURE_MESSAGE), "ref": ref}
+        result = {**local_setup_error(RESTART_FAILURE_MESSAGE), "fix": RESTART_FAILURE_MESSAGE, "ref": ref}
     return ls.finish_flight({**result, "restart": True})
 
 

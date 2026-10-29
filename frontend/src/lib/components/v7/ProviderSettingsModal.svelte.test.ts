@@ -177,7 +177,8 @@ describe('ProviderSettingsModal remove', () => {
 		});
 		flushSync();
 		button('Start').click();
-		await vi.waitFor(() => expect(document.body.textContent).toContain(message));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.'));
+		expect(document.body.textContent).not.toContain(message);
 	});
 
 	it('shows the reference beside a failed model list refresh', async () => {

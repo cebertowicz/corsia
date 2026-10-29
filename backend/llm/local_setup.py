@@ -16,7 +16,7 @@ from llm import local_model, local_setup_download, local_setup_operation
 from llm.local_model import LocalModel
 from llm.local_profiles import format_size
 from llm.local_setup_disk import require_free_disk
-from llm.local_setup_results import setup_fix
+from llm.local_setup_results import RESTART_FAILURE_MESSAGE, setup_fix
 
 STATES = frozenset({"starting", "downloading", "ready", "stopped", "setup_failed", "start_failed", "failed"})
 EVENT_CATEGORY = "local_setup"
@@ -289,7 +289,9 @@ def setup_status() -> dict[str, Any]:
         "restart": restart,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": (None if restart else failed.get("fix")) or setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        "fix": (RESTART_FAILURE_MESSAGE if restart and failed.get("reason") != "mac_cannot_run"
+                else failed.get("fix") if not restart and failed.get("fix")
+                else setup_fix(failed.get("cause"), failed.get("bytes_to_free")))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 
