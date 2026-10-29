@@ -14,6 +14,7 @@
 	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
 	import { finishSetupWindow } from '$lib/setupWindow';
+	import { updateToastSuppressed } from '$lib/update/store';
 
 	let {
 		isAuthenticated,
@@ -96,6 +97,11 @@
 	// The backend, not this tab, knows whether a signed-in person finished setup. Read once per session, never during setup itself.
 	let setupResume = $state(false);
 	let setupChecked = false;
+	$effect(() => {
+		if (setupMode !== 'flow') return;
+		updateToastSuppressed.set(true);
+		return () => updateToastSuppressed.set(false);
+	});
 	$effect(() => {
 		if (!isAuthenticated) { setupChecked = false; return; }
 		if (setupMode === 'flow') { setupChecked = true; return; }
