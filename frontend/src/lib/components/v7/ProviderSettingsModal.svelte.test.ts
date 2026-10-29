@@ -124,6 +124,22 @@ describe('ProviderSettingsModal remove', () => {
 		expect(document.body.textContent).not.toContain('Remove provider…');
 	});
 
+	it('starts a stopped managed model server through its lifecycle action', async () => {
+		const fetcher = vi.fn().mockResolvedValue(Response.json({ ok: true, message: 'Model server started.' }));
+		vi.stubGlobal('fetch', fetcher);
+		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'managed' as const, status: 'offline' as const, endpoints: [{ host: '127.0.0.1' }] };
+		component = mount(ProviderSettingsModal, {
+			target: document.body,
+			props: { provider: { ...provider, name: 'omlx', type: 'local', server: local } as never, onClose: vi.fn() },
+		});
+		flushSync();
+		button('Start').click();
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Model server started.'));
+		expect(fetcher).toHaveBeenCalledOnce();
+		expect(String(fetcher.mock.calls[0][0])).toContain('/ns-local/lifecycle/start');
+		expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+	});
+
 	it('shows the reference beside a failed model list refresh', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
 			ok: false, message: 'Couldn’t refresh the model list. Try again.', ref: 'local-ab12',

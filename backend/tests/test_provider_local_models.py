@@ -44,6 +44,18 @@ def _corsia_server(monkeypatch, servers: list[dict]) -> None:
 
 
 @pytest.mark.asyncio
+async def test_24_gib_without_installed_model_refuses_recommendations_and_download(monkeypatch) -> None:
+    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
+    monkeypatch.setattr(local_downloads, "all", lambda: [])
+    monkeypatch.setattr(provider_local_models, "_clear_failed_record", lambda _model_id: None)
+    view = await provider_local_models.recommendations(_user={})
+    assert view["state"] == "low_memory" and view["models"] == []
+    with pytest.raises(HTTPException) as raised:
+        await provider_local_models.download_model({"repository": MODEL.repository}, _user={})
+    assert raised.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_server_refuses_a_persons_own_omlx_without_an_admin_call(monkeypatch) -> None:
     _omlx_rows(monkeypatch, [{"id": "studio", "status": "online", "source": "discovered"}])
     called = False
