@@ -183,7 +183,21 @@ def _rename_project_conductor(db, project, updates):
         return
     before = db.execute('SELECT * FROM threads WHERE id = ?', (project['conductor_thread_id'],)).fetchone()
     if before and before['title'] == conductor_title(project['name']):
-        retitle_thread(db, before, conductor_title(updates['name']), updates['updated_at'])
+        title = conductor_title(updates['name'])
+        retitle_thread(db, before, title, updates['updated_at'])
+        return before['id'], title
+    return None
+
+
+def _notify_project_update(user_id, renamed, updated_at):
+    notify_projects_changed(user_id)
+    if renamed:
+        from infra import state
+        thread_id, title = renamed
+        state.broadcast_event(thread_id, user_id, {
+            'type': 'session_updated', 'thread_id': thread_id, 'title': title,
+            'updated_at': updated_at,
+        })
 
 
 @router.patch("/{project_id}")
@@ -193,7 +207,7 @@ async def update_project(token: str, project_id: str, body: ProjectUpdate):
     if not user:
         raise HTTPException(401)
 
-    updates = {}
+    updates: dict = {}
     if body.name is not None:
         updates["name"] = body.name
     if body.description is not None:
@@ -253,19 +267,20 @@ async def update_project(token: str, project_id: str, body: ProjectUpdate):
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             values = list(updates.values()) + [project_id]
             db.execute(f"UPDATE projects SET {set_clause} WHERE id = ?", values)
-            _rename_project_conductor(db, project, updates)
+            renamed = _rename_project_conductor(db, project, updates)
 
         return _project_api_projection(
             _get_project(project_id, db=db),
             db=db,
-        )
+        ), renamed
 
     result = await run_in_db(_update)
     if result is None:
         raise HTTPException(404, "Project not found")
     if result == "duplicate":
         raise HTTPException(409, f"A project named '{updates['name']}' already exists")
-    return {"ok": True, "project": result}
+    _notify_project_update(user['id'], result[1], updates['updated_at'])
+    return {"ok": True, "project": result[0]}
 
 
 @router.post("/{project_id}/transition")

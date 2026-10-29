@@ -52,7 +52,7 @@
 	// An unresolved lookup stays clickable: a failed fetch must not read as
 	// "no conductor" — only the API's explicit absent answer disables the entry.
 	// The workspace scope's occupant is the CORSIA agent; a project's is its conductor.
-	let entryLabel = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
+	let entryLabel = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title ?? 'Loading…');
 	let conductorClickable = $derived(conductorThreadId !== null || !conductorKnownAbsent);
 	let conductorState = $derived(conductorThreadId ? $threadActivity[conductorThreadId] : undefined);
 	let conductorBusy = $derived(conductorState === 'active');

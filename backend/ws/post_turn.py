@@ -13,7 +13,7 @@ from loguru import logger
 
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
-from infra.passive_changes import append_agent_roster_transition
+from infra.thread_titles import retitle_thread, write_thread_title
 from core.thread_history import generate_thread_title
 
 
@@ -71,19 +71,11 @@ async def ensure_thread_title(
                 current_title = current["title"] if current else DEFAULT_THREAD_TITLE
                 if current_title and current_title != DEFAULT_THREAD_TITLE:
                     return False
-                db.execute(
-                    "UPDATE threads SET title = ?, updated_at = ? WHERE id = ?",
-                    (title, utc_now_iso(), thread_id),
-                )
+                now = utc_now_iso()
                 if current is not None and title != current_title:
-                    updated = dict(current)
-                    updated["title"] = title
-                    append_agent_roster_transition(
-                        db,
-                        before=current,
-                        after=updated,
-                        summary=f"Agent responsibility map updated: {title}",
-                    )
+                    retitle_thread(db, current, title, now)
+                else:
+                    write_thread_title(db, thread_id, title, now)
                 return True
 
         saved = await run_in_db(_save_title)

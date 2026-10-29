@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
-import { activeThreadId, threads, coordinationThreads } from '$lib/stores/threads';
+import { activeThreadId, allThreads } from '$lib/stores/threads';
 import { openThread } from '$lib/stores/openThread';
 import { contextAttachTarget } from '$lib/stores/contextAttach';
 import { clearDocPickerTarget } from '$lib/stores/docPickerTarget';
@@ -43,11 +43,11 @@ export async function selectHomeThread(
 	paneOpen.set(false);
 	await tick();
 	if (!ownsSelection()) return;
-	if (![...get(threads), ...get(coordinationThreads)].some((thread) => thread.id === id)) {
+	if (!get(allThreads).some((thread) => thread.id === id)) {
 		await ports.loadThreads();
 		if (!ownsSelection()) return;
 	}
-	const thread = [...get(threads), ...get(coordinationThreads)].find((candidate) => candidate.id === id);
+	const thread = get(allThreads).find((candidate) => candidate.id === id);
 	if (thread) {
 		if (!ownsSelection()) return;
 		await enterThreadScope(thread, firstRunOwner);

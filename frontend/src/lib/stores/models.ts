@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { activeModelId, getModelDispatchId, models, workspaceModels } from './modelsState';
 import { plainErrorText } from '../plainError';
-import { activeThreadId, threads, coordinationThreads, type Thread } from './threads';
+import { activeThreadId, threads, type Thread } from './threads';
 import { setContextUsage } from './contextUsageByThread';
 import {
 	applyPendingThreadModelSwitch,
@@ -186,7 +186,6 @@ export function acceptThreadModelTruth(
 		return updated;
 	};
 	threads.update(updateRows);
-	coordinationThreads.update(updateRows);
 	if (get(activeThreadId) === threadId) {
 		setActiveModel(model);
 		if (activeModelBefore !== model) setContextUsage(threadId, null);

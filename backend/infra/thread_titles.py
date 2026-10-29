@@ -1,4 +1,7 @@
-"""Canonical persisted thread-title write."""
+"""Shared title writes and standalone title-only roster transitions.
+
+Combined roster mutations record their whole transition in their own transaction.
+"""
 
 from infra.passive_changes import append_agent_roster_transition
 

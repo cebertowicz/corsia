@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ThreadContextPanel from './ThreadContextPanel.svelte';
 	import ThreadAgentPanel from './ThreadAgentPanel.svelte';
-	import { activeThread, activeThreadId } from '$lib/stores/threads';
+	import { activeThread, activeThreadId, allThreads } from '$lib/stores/threads';
 	import { token } from '$lib/stores/auth';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { fetchScopeTarget, type CoordinationTarget } from '$lib/utils/conductor';
@@ -38,7 +38,7 @@
 	const projectId = $derived(conductor ? scopeTarget?.project_id ?? null : $activeThread?.project_id ?? null);
 	const agentScope = $derived(projectId ? 'project' : 'workspace');
 	// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
-	const designatedName = $derived(scopeTarget?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
+	const designatedName = $derived($allThreads.find(row => row.id === $activeThreadId)?.title ?? 'Chat');
 </script>
 
 <div class="ts-scroll">
@@ -51,7 +51,7 @@
 			<p class="sec-hint">Files pinned to this chat.</p>
 			<ThreadContextPanel
 				threadId={settingsThreadId}
-				hiddenThread={scopeTarget ? { id: scopeTarget.thread_id, title: scopeTarget.title ?? designatedName, project_id: scopeTarget.project_id ?? null, bootloader_files: scopeTarget.bootloader_files ?? null } : null}
+				hiddenThread={scopeTarget ? { id: scopeTarget.thread_id, title: designatedName, project_id: scopeTarget.project_id ?? null, bootloader_files: scopeTarget.bootloader_files ?? null } : null}
 				onHiddenThreadFilesChanged={(files) => { if (scopeTarget) scopeTarget = { ...scopeTarget, bootloader_files: files }; }}
 				onBrowseExisting={onBrowseContextFiles}
 			/>

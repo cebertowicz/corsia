@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { subagentThreadRows } from './subagents';
 import { updateThreadRow } from './threadRow';
-import { activeThreadId, reasoningEffort, threads } from './threads';
+import { activeThreadId, reasoningEffort, allThreads } from './threads';
 
 /** A thread's effort wherever it lives: the open thread's global, its list row, or a worker's own row. */
 function writeThreadEffort(threadId: string, effort: string | null): void {
@@ -22,7 +22,7 @@ export async function saveReasoningEffort(threadId: string, effort: string | nul
 	if (!state || state.inflight === 0) {
 		const current = threadId === get(activeThreadId)
 			? get(reasoningEffort)
-			: get(threads).find(s => s.id === threadId)?.reasoning_effort ?? get(subagentThreadRows).get(threadId)?.reasoning_effort ?? null;
+			: get(allThreads).find(s => s.id === threadId)?.reasoning_effort ?? get(subagentThreadRows).get(threadId)?.reasoning_effort ?? null;
 		state = { latest: state?.latest ?? 0, latestFailed: false, inflight: 0, confirmed: current };
 		saves.set(threadId, state);
 	}

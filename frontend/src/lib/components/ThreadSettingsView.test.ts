@@ -2,7 +2,9 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ThreadSettingsView from './ThreadSettingsView.svelte';
-import { activeThreadId, threads, type Thread } from '$lib/stores/threads';
+import Header from './Header.svelte';
+import RailScopedSection from './RailScopedSection.svelte';
+import { activeThreadId, threads, allThreads, type Thread } from '$lib/stores/threads';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { fetchScopeTarget } from '$lib/utils/conductor';
 import { uiScope } from '$lib/stores/uiScope';
@@ -97,6 +99,7 @@ describe('ThreadSettingsView', () => {
 
 		it('shows a loading state, then context and skills without the Agent section', async () => {
 			activeThreadId.set('conductor-1');
+			allThreads.set([{ ...baseThread, id: 'conductor-1', title: 'Conductor', coordination: 'conductor', project_id: 'corsia' }]);
 			let resolve!: (lookup: { kind: 'target'; target: typeof target }) => void;
 			vi.mocked(fetchScopeTarget).mockReturnValue(new Promise((r) => { resolve = r; }) as never);
 
@@ -112,9 +115,30 @@ describe('ThreadSettingsView', () => {
 			expect(host.textContent).not.toContain('Make agent');
 		});
 
+		it('updates the visible settings name when the designated row is renamed', async () => {
+			activeThreadId.set('conductor-1');
+			allThreads.set([{ ...baseThread, id: 'conductor-1', title: 'Conductor', coordination: 'conductor', project_id: 'corsia' }]);
+			vi.mocked(fetchScopeTarget).mockResolvedValue({ kind: 'target', target } as never);
+			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
+			const headerHost = document.createElement('div');
+			const railHost = document.createElement('div');
+			host.append(headerHost, railHost);
+			const header = mount(Header, { target: headerHost, props: { conductorThreadId: 'conductor-1', activeView: 'chat', onToggleSidebar: () => {}, onTogglePane: () => {} } });
+			const rail = mount(RailScopedSection, { target: railHost, props: { conductorThreadId: 'conductor-1' } });
+			await flush();
+			allThreads.update(rows => rows.map(row => ({ ...row, title: 'Renamed conductor' })));
+			await flush();
+			expect(host.textContent).toContain('Managing skills for Renamed conductor');
+			expect(headerHost.textContent).toContain('Renamed conductor');
+			expect(railHost.textContent).toContain('Renamed conductor');
+			unmount(header);
+			unmount(rail);
+		});
+
 		it('names the workspace scope\'s designated thread CORSIA, not Conductor', async () => {
 			uiScope.set(null);
 			activeThreadId.set('agent-1');
+			allThreads.set([{ ...baseThread, id: 'agent-1', title: 'CORSIA', coordination: 'corsia' }]);
 			vi.mocked(fetchScopeTarget).mockResolvedValue({
 				kind: 'target',
 				target: { thread_id: 'agent-1', title: null, project_id: null, bootloader_files: [] },
@@ -132,7 +156,7 @@ describe('ThreadSettingsView', () => {
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
-			expect(host.textContent).toContain('Conductor settings unavailable');
+			expect(host.textContent).toContain('Chat settings unavailable');
 			expect(host.textContent).not.toContain('Context files');
 		});
 
@@ -142,7 +166,7 @@ describe('ThreadSettingsView', () => {
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
-			expect(host.textContent).toContain('Conductor settings unavailable');
+			expect(host.textContent).toContain('Chat settings unavailable');
 		});
 
 		it('refetches when the active thread changes', async () => {
@@ -156,7 +180,7 @@ describe('ThreadSettingsView', () => {
 			activeThreadId.set('conductor-2');
 			await flush();
 			expect(fetchScopeTarget).toHaveBeenCalledTimes(2);
-			expect(host.textContent).toContain('Conductor settings unavailable');
+			expect(host.textContent).toContain('Chat settings unavailable');
 		});
 	});
 });

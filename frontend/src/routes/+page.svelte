@@ -2,7 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
-	import { threads, coordinationThreads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
+	import { threads, allThreads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
 	import { toasts } from '$lib/stores/toast';
 	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
 	import { models } from '$lib/stores/modelsState';
@@ -271,7 +271,7 @@
 			activeView,
 			uiScopeName: $uiScope?.name ?? null,
 			activeThreadId: $activeThreadId, conductorThreadId,
-			threads: [...$threads, ...$coordinationThreads],
+			threads: $allThreads,
 			closeThreadSettings,
 			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,

@@ -116,9 +116,10 @@ export function mergeMessageDelivery(existing: Message, incoming: Message): Mess
 	return { ...existing, ...incoming };
 }
 
-export const threads = writable<Thread[]>([]);
-export const coordinationThreads = writable<Thread[]>([]);
-
+export const allThreads = writable<Thread[]>([]);
+const visibleThreads = derived(allThreads, rows => rows.filter(row => !row.coordination));
+export const threads = { subscribe: visibleThreads.subscribe, set: allThreads.set, update: allThreads.update };
+export const coordinationThreads = derived(allThreads, rows => rows.filter(row => !!row.coordination));
 /** Demote locally but keep responsibility, paths, domains and notes so re-promoting prefills them. */
 export function demoteAgentLocally(threadId: string): void {
 	const off = { agent_enabled: 0, agent_status: 'inactive' };
@@ -251,9 +252,8 @@ export const reasoningEffort = writable<string | null>(null);
 
 /** Optimistically rename a thread and restore its prior title if persistence fails. */
 export async function saveThreadTitle(threadId: string, title: string, token: string): Promise<void> {
-	const target = get(coordinationThreads).some((thread) => thread.id === threadId) ? coordinationThreads : threads;
 	let previousTitle = '';
-	target.update((rows) => rows.map((thread) => {
+	threads.update((rows) => rows.map((thread) => {
 		if (thread.id !== threadId) return thread;
 		previousTitle = thread.title;
 		return { ...thread, title };
@@ -266,7 +266,7 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		});
 		if (!response.ok) throw new Error(`Rename failed (${response.status})`);
 	} catch (error) {
-		target.update((rows) => rows.map((thread) => (
+		threads.update((rows) => rows.map((thread) => (
 			thread.id === threadId ? { ...thread, title: previousTitle } : thread
 		)));
 		throw error;

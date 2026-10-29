@@ -54,36 +54,25 @@ async def list_threads(token: str, archived: int = 0):
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params: list = [user["id"]]
+        params = [user['id']]
         if conductor_ids:
-            sql += f" AND s.id NOT IN ({','.join('?' * len(conductor_ids))})"
+            placeholders = ','.join('?' * len(conductor_ids))
+            sql += f" AND (s.id NOT IN ({placeholders}) OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived'))"
             params.extend(conductor_ids)
         sql += " ORDER BY s.updated_at DESC"
-        # One SQLite step for every visible thread: a per-row fetch re-takes
-        # the GIL once per row, which under load cost seconds for ~800 rows.
-        rows = fetch_all(db, sql, params)
-        projected = []
-        for row in rows:
-            item = dict(row)
-            item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
-            projected.append(item)
         try:
+            rows = fetch_all(db, sql, params)
+            agent_id = get_corsia_agent(db=db) if conductor_ids else None
+            projected = []
             coordination = []
-            if conductor_ids:
-                coordination_sql = f"""SELECT s.*,
-                    (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1) AS last_message
-                    FROM threads s WHERE s.user_id = ?
-                    AND {thread_available_sql('s', include_user_archived=bool(archived))}
-                    AND s.spawned_by IS NULL
-                    AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived')
-                    AND s.id IN ({','.join('?' * len(conductor_ids))})
-                    ORDER BY s.updated_at DESC"""
-                agent_id = get_corsia_agent(db=db)
-                for row in fetch_all(db, coordination_sql, [user['id'], *conductor_ids]):
-                    item = dict(row)
+            for row in rows:
+                item = dict(row)
+                item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
+                if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'
-                    item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                     coordination.append(item)
+                else:
+                    projected.append(item)
             add_local_only_payload_fields([*projected, *coordination], db=db)
             return projected, coordination
         finally:
