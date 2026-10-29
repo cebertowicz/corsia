@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { get } from 'svelte/store';
@@ -14,7 +15,7 @@
 	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
 	import { finishSetupWindow } from '$lib/setupWindow';
-	import { updateToastSuppressed } from '$lib/update/store';
+	import { setupMode } from '$lib/stores/setupMode';
 
 	let {
 		isAuthenticated,
@@ -93,23 +94,18 @@
 	} = $props();
 
 	const easeOutQuint = cubicOut;
-	let setupMode = $state<'login' | 'flow'>('login');
 	// The backend, not this tab, knows whether a signed-in person finished setup. Read once per session, never during setup itself.
 	let setupResume = $state(false);
 	let setupChecked = false;
-	$effect(() => {
-		if (setupMode !== 'flow') return;
-		updateToastSuppressed.set(true);
-		return () => updateToastSuppressed.set(false);
-	});
+	onDestroy(() => setupMode.set('login'));
 	$effect(() => {
 		if (!isAuthenticated) { setupChecked = false; return; }
-		if (setupMode === 'flow') { setupChecked = true; return; }
+		if ($setupMode === 'flow') { setupChecked = true; return; }
 		if (setupChecked) return;
 		setupChecked = true;
 		void fetchSetupProgress(get(token)).then((progress) => {
 			// An unreadable record leaves the app as it is: a failed read must never lock out someone who finished setup.
-			if (progress && !progress.setup_completed) { setupResume = true; setupMode = 'flow'; }
+			if (progress && !progress.setup_completed) { setupResume = true; $setupMode = 'flow'; }
 		});
 	});
 
@@ -135,14 +131,14 @@
 	}
 </script>
 
-{#if setupMode === 'flow'}
+{#if $setupMode === 'flow'}
 	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
 			resume={setupResume}
-			onExistingAccount={() => setupMode = 'login'}
-			onAccountCreated={() => setupMode = 'flow'}
+			onExistingAccount={() => $setupMode = 'login'}
+			onAccountCreated={() => $setupMode = 'flow'}
 			onFinished={() => {
-				setupMode = 'login';
+				$setupMode = 'login';
 				setupResume = false;
 				void finishSetupWindow();
 				// The route owns first-run selection. It waits for its actual ChatPanel
@@ -157,7 +153,7 @@
 	</div>
 {:else if !isAuthenticated}
 	<div class="auth-gate" out:authGateExit>
-		<LoginScreen onNoAccount={() => setupMode = 'flow'} />
+		<LoginScreen onNoAccount={() => $setupMode = 'flow'} />
 	</div>
 {:else}
 	<div class="app-gate" in:appGateEnter>

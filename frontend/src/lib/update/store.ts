@@ -1,5 +1,6 @@
 import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { setupMode } from '$lib/stores/setupMode';
 import { toasts } from '$lib/stores/toast';
 import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
@@ -81,7 +82,7 @@ function dismissNotice(forSuppression = false): void {
 function showNotice(status: UpdateStatus): void {
 	latestNoticeStatus = status;
 	const version = status.target_version;
-	if (get(updateToastSuppressed)) {
+	if (get(updateToastSuppressed) || get(setupMode) === 'flow') {
 		dismissNotice();
 		return;
 	}
@@ -90,10 +91,11 @@ function showNotice(status: UpdateStatus): void {
 	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
 
-updateToastSuppressed.subscribe((suppressed) => {
-	if (suppressed) dismissNotice(true);
-	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
-});
+derived([updateToastSuppressed, setupMode], ([$suppressed, $setupMode]) => $suppressed || $setupMode === 'flow')
+	.subscribe((suppressed) => {
+		if (suppressed) dismissNotice(true);
+		else if (latestNoticeStatus) showNotice(latestNoticeStatus);
+	});
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
 function dropProgressToast(): void {
