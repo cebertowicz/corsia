@@ -152,6 +152,9 @@ def _deliver_target(
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
             return PlatformDelivery(event_id, thread, DUPLICATE)
         wake_details: dict[str, Any] = {**envelope.facts, "event_id": event_id}
+        signs = injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
+        if signs:
+            wake_details["injection_signs_text"] = signs
         if notes:
             wake_details["rule_notes"] = list(notes)
         enqueue_event_wake(

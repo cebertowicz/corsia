@@ -32,12 +32,6 @@ def format_event_input(
     parts = [f"[EVENT: {internal_event}]", f"Summary: {summary}"]
     if details:
         parts.append(f"Details:\n{json.dumps(details, indent=2)}")
-        if internal_event in ("worker.result", "worker.no_result", "result", "no_result"):
-            from events.worker_labels import injection_sign_text
-
-            signs = injection_sign_text(details)
-            if signs:
-                parts.append(f"Injection signs: {signs}")
     if notice:
         parts.append(notice)
     return "\n".join(parts)

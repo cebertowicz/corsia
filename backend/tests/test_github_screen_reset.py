@@ -79,20 +79,26 @@ async def test_result_delivery_renders_sign_text_without_changing_facts(screen):
 
 
 @pytest.mark.parametrize("event_type", ["worker.result", "worker.no_result"])
-def test_worker_signs_render_in_wake_and_digest_without_mutating_facts(event_type):
+def test_worker_signs_render_in_wake_and_digest_without_mutating_facts(event_type, world, monkeypatch):
     from core.injection_rules import INJECTION_RULES
-    from events.delivery import format_event_input
+    from events.connectors.worker import MANIFEST
     from events.envelope import normalize
-    from events.platform import _note_line
+    from events import platform
+    from events.resolve import Target
+    from infra.database import get_db
 
     facts = {"source": "outside", "injection_signs": ["R3", "R4"]}
     event = normalize("worker", {"run_id": "run-1", **facts}, event_type.removeprefix("worker."))
-    wake = format_event_input(event_type, "worker", facts)
-    note = _note_line(event, ())
+    delivered = []
+    monkeypatch.setattr(platform, "enqueue_event_wake", lambda *args, **kwargs: delivered.append(args[3]))
+    target = Target(OWNER, "path_a_resolve", "owner", disposition="owner_wake")
+    platform._deliver_target(get_db(), event, target, MANIFEST.decl(event_type.removeprefix("worker.")))
+    wake = delivered[0]["injection_signs_text"]
+    note = platform._note_line(event, ())
     for sign, rule in INJECTION_RULES:
         if sign in facts["injection_signs"]:
             assert f"{sign} ({rule})" in wake and f"{sign} ({rule})" in note
-    assert facts["injection_signs"] == event.facts["injection_signs"] == ["R3", "R4"]
+    assert facts["injection_signs"] == event.facts["injection_signs"] == delivered[0]["injection_signs"] == ["R3", "R4"]
 
 
 @pytest.mark.asyncio
