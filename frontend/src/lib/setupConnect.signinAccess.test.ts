@@ -78,6 +78,17 @@ describe('a completed sign-in while models are checked', () => {
 		expect(flow.row(current).meta).toBe('Ready · me@example.com');
 	});
 
+	it.each([claude, codex])('shows Ready when a repeat sign-in recovers an existing $name account', async (source) => {
+		serve({ status: 'failed', cause: 'same_account', duplicate_of: 'existing', outcome: 'ready' });
+		let current: ModelSource = source;
+		const refresh = vi.fn(async () => { current = signedIn(source, 'ready'); });
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [current], refreshSources: refresh });
+		await flow.signIn(source);
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(flow.active).toBe(false);
+		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+	});
+
 	it('stops polling and refreshes when the backend has lost the sign-in', async () => {
 		const check: Record<string, unknown> = { status: 'completed', outcome: null };
 		const calls = serve(check);

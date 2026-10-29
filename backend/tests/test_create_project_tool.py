@@ -110,6 +110,9 @@ def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
         "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
     )
     conn.execute("CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TABLE connections (id TEXT PRIMARY KEY, provider TEXT NOT NULL)")
+    from infra.vendor_account_schema import VENDOR_ACCOUNT_SCHEMA_SQL
+    conn.executescript(VENDOR_ACCOUNT_SCHEMA_SQL)
     # The conductor's model binds its vendor account from the catalog; an
     # empty catalog reads that model's vendor as unknown, so nothing binds.
     conn.execute(

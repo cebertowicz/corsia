@@ -148,7 +148,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: provider == "claude-code")
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
@@ -165,7 +165,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: False)
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
@@ -181,7 +181,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: provider == "codex")
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
@@ -195,7 +195,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: False)
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
@@ -253,7 +253,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: provider == "claude-code")
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
@@ -273,7 +273,7 @@ class TestModelsCatalog:
         import connections.models as cm
         from llm import catalog as model_catalog
 
-        monkeypatch.setattr(cm, "connection_available",
+        monkeypatch.setattr(cm, "provider_may_run",
                             lambda provider, db=None: provider == "codex")
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
