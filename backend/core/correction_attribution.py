@@ -1,4 +1,4 @@
-"""Which plan node each classified owner source belongs to: the single owner of that join.
+"""Which plan node each correction fact belongs to: the single owner of that join.
 
 The workflow verdict (``core.workflow_verdict_read``) calls this module, and any later Measurement
 read of corrections by task must too; none re-derives the rule. For one ``measurement.correction``
@@ -16,6 +16,9 @@ the workflow verdict because they are correction sources that feed the learning 
 every workflow is **Not in a workflow**, which is not the same as Unattributed; ``workflow_run_of``
 makes that split. Facts labelled ``unreadable`` are never counted (``core.corrections_recording``),
 and neither are retracted ones.
+
+Sent-back and self-caught facts come from plan events, not the classifier: each sits on the node its
+``review_rejected`` or ``correction_created`` event names, and carries no classifier version.
 """
 from __future__ import annotations
 
@@ -117,12 +120,12 @@ _TIMED_SQL = _SOURCES_SQL + f"""
 
 @dataclass(frozen=True)
 class AttributedFact:
-    """One classified owner source, the classifier version that counted it, and its node."""
+    """One correction source, the classifier version that counted it (None: a plan event, no classifier), and its node."""
 
     source_kind: str
     source_id: str
     source_at: str | None
-    counter: str
+    counter: str | None
     is_correction: bool
     node_id: str | None
 
@@ -180,8 +183,7 @@ def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
         attributes = json.loads(row['attributes'])
         kind = str(attributes.get('source_kind') or '')
         facts.append(AttributedFact(kind, str(attributes.get('source_id') or ''), row['source_at'],
-                                    str(attributes.get('asset_version') or ''),
-                                    attributes.get('label') == LABEL_CORRECTION,
+                                    None, attributes.get('label') == LABEL_CORRECTION,
                                     row['source_node']))
     return facts
 

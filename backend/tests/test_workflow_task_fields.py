@@ -22,6 +22,7 @@ from tools.workflow_task_fields import (
     Workflow,
     append_add_notice,
     append_close_notice,
+    version_short_hash,
 )
 
 
@@ -586,3 +587,12 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
     assert result["node"]["workflow_version"] == (
         f"system:{entry.path}:{manifest.version}:{entry.sha256}"
     )
+
+
+@pytest.mark.parametrize(("version", "short"), [
+    ("0123456789abcdef", "0123456"),
+    ("0123456789abcdef·dirty+fedcba9876543210", "0123456·dirty"),
+    ("system:skills/x/SKILL.md:0.4.1:abcdef0123+456789", "abcdef0"),
+])
+def test_version_short_hash_names_the_content_hash(version: str, short: str) -> None:
+    assert version_short_hash(version) == short

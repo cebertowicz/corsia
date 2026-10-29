@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 import sqlite3
+from typing import Any, NamedTuple
 
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.cost_identity import IdentityResolver
@@ -34,6 +35,16 @@ class Result:
     reason: str | None = None
 
 
+class Prepared(NamedTuple):
+    """A workflow's period-independent inputs, loaded once per request."""
+
+    nodes: list
+    times: dict
+    ledger: list
+    membership: dict[str, str]
+    pricing: tuple[Any, Any] | None  # (identity resolver, endpoint listings) when cost_usd is read
+
+
 def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -> tuple:
     """Load scoped nodes and shared workflow roots."""
     from core.workflow_verdict_read import run_roots  # imports api.*, which imports this module
@@ -47,7 +58,7 @@ def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -
 
 
 def prepare_builtin(db: sqlite3.Connection, workflow: str, user_id: str, scope: MeasurementScope,
-                    names: set[str], ledger=None, scoped=None) -> tuple:
+                    names: set[str], ledger=None, scoped=None) -> Prepared:
     """Load period-independent workflow inputs once per request."""
     from core.workflow_verdict_read import terminal_times
 
@@ -61,19 +72,21 @@ def prepare_builtin(db: sqlite3.Connection, workflow: str, user_id: str, scope: 
     times = terminal_times(db, list(wanted)) if nodes and 'runs' in names else {}
     if ledger is None and nodes and 'corrections' in names:
         ledger = attributed_facts(db)
-    return nodes, times, ledger or [], membership
+    pricing = (IdentityResolver(db), endpoint_listings(db)) if nodes and 'cost_usd' in names else None
+    return Prepared(nodes, times, ledger or [], membership, pricing)
 
 
 def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id: str,
-                 scope: MeasurementScope, start: str, end: str, prepared=None) -> Result:
+                 scope: MeasurementScope, start: str, end: str, prepared: Prepared | None = None) -> Result:
     """Read a builtin in [start,end), grouped by its task's workflow_version."""
     if builtin not in {'runs', 'fresh_tokens', 'cost_usd', 'corrections', 'active_hours'}:
         raise ValueError('unknown workflow builtin')
-    nodes, times, ledger, membership = prepared if prepared is not None else prepare_builtin(db, workflow, user_id, scope, {builtin})
+    nodes, times, ledger, membership, pricing = (
+        prepared if prepared is not None else prepare_builtin(db, workflow, user_id, scope, {builtin}))
     if not nodes:
-        return Result({}, 'Not tracked: this workflow has no tasks')
+        return Result({}, 'This workflow has no tasks')
     if builtin == 'active_hours':
-        return Result({}, 'Not tracked: presence is not recorded per task')
+        return Result({}, "Active time isn't recorded per task")
     versions = {r['id']: r['workflow_version'] for r in nodes}
     ids = json.dumps(list(membership))
     totals: defaultdict[str | None, list] = defaultdict(lambda: [0, 0, 0])
@@ -114,10 +127,10 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
             WHERE u.plan_node_id IN (SELECT value FROM json_each(?))
               AND datetime(u.created_at)>=datetime(?) AND datetime(u.created_at)<datetime(?)""")
         rows = [dict(row) for row in db.execute(sql, (ids, start, end)).fetchall()]
-        resolve = IdentityResolver(db)
+        resolve, listings = pricing or (IdentityResolver(db), endpoint_listings(db))
         for row in rows:
             row['model'] = resolve(row).key
-        for row in classify_usage_rows(rows, endpoint_listings(db)):
+        for row in classify_usage_rows(rows, listings):
             total = totals[versions[membership[row['node_id']]]]
             total[1] += row['records']
             if row['outcome'] == 'priced':

@@ -56,7 +56,7 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
     reason = next((builtins[name].reason for name in needed if builtins[name].reason), None)
     if reason:
         return {'value': None, 'n': 0, 'coverage': None, 'label': None, 'label_mix': {},
-                'unknown': 0, 'status': reason, 'partial': False}
+                'unknown': 0, 'status': 'not tracked', 'reason': reason, 'partial': False}
     raw_num = _in_bucket(selected["num"], start, end, version)
     numerator = distinct(raw_num, num_spec.get("distinct"))
     formula = spec["formula"]

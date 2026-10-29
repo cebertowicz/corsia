@@ -16,6 +16,7 @@ from core.workflow_builtin_operands import Value, prepare_builtin, read_builtin,
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
+from tools.workflow_task_fields import version_short_hash
 
 router = APIRouter()
 
@@ -38,7 +39,7 @@ def _versions(rows) -> list[dict[str, Any]]:
             first[version] = row.ts
     ordered = sorted((version for version in first if version not in ("", "legacy")), key=lambda version: first[version])
     labels: list[dict[str, Any]] = [{"version": version, "label": f"v{index}", "first_seen": first[version].isoformat(),
-               "short_hash": version[:7]} for index, version in enumerate(ordered, 1)]
+               "short_hash": version_short_hash(version)} for index, version in enumerate(ordered, 1)]
     if "legacy" in first:
         labels.insert(0, {"version": "legacy", "label": "Legacy (rebuilt)", "first_seen": first["legacy"].isoformat(), "short_hash": None})
     if "" in first:
@@ -89,6 +90,13 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
         scoped = scoped_runs(db, user_id, scope) if workflow_names else None
         prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, wanted, ledger, scoped)
                     for workflow, wanted in workflow_names.items()}
+        windows = list(zip(boundaries, boundaries[1:]))
+        # Each workflow's builtins are read once per period, however many KPIs use them.
+        builtin_reads = {workflow: [{name: read_builtin(db, builtin=name, workflow=workflow, user_id=user_id, scope=scope,
+                                                        start=start.isoformat(), end=end.isoformat(),
+                                                        prepared=prepared[workflow])
+                                     for name in wanted} for start, end in windows]
+                         for workflow, wanted in workflow_names.items()}
         results = []
         for item in kpis:
             spec = item["spec"]
@@ -99,15 +107,12 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
             version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
             if builtin_names and item['workflow']:
                 version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')
-                                 for row in prepared[item['workflow']][0]]
+                                 for row in prepared[item['workflow']].nodes]
             versions = _versions(version_rows)
             periods = []
             for index, period in enumerate((*grain.periods, grain.current)):
-                start, end = boundaries[index:index + 2]
-                builtin_results = {name: read_builtin(db, builtin=name, workflow=item['workflow'], user_id=user_id,
-                                                      scope=scope, start=start.isoformat(), end=end.isoformat(),
-                                                      prepared=prepared[item['workflow']])
-                                   for name in builtin_names}
+                start, end = windows[index]
+                builtin_results = {name: builtin_reads[item['workflow']][index][name] for name in builtin_names}
                 value = evaluate(spec, events, start, end,
                                  builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
                                  selected=selected)

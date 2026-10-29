@@ -28,6 +28,26 @@ def test_verdict_and_builtins_agree_on_workflow_runs_and_corrections(db):
     assert read_builtin(db, builtin='corrections', **kwargs).versions[run.version].value == sum(f.is_correction for f in run.corrections)
 
 
+def test_verdict_counts_classified_and_sent_back_corrections_as_the_builtin_does(db):
+    from core.workflow_verdicts import BUILTIN_WINDOW_DAYS, CORRECTIONS, PlannedMeasure, _counter, _sample
+
+    node(db, 'old', version='v1', ended='2026-10-03T00:00:00Z')
+    activate(db)
+    seed_correction(db, 'one')
+    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
+               "VALUES ('r','old','test','review_rejected','{}','2026-10-03T06:00:00Z')")
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES ('sb','sb','measurement.correction','corsia','observed','2026-10-03',"
+               "'2026-10-03','plan-review-rejected:r',?)", (json.dumps({'source_kind': 'sent_back', 'label': 'correction'}),))
+    run = read_snapshot(db, now=datetime(2026, 10, 19, tzinfo=timezone.utc)).workflows[0].runs[0]
+    measure = PlannedMeasure(CORRECTIONS, 'quality', 'lower', 'builtin', BUILTIN_WINDOW_DAYS, floor=0.02)
+    counter = _counter(measure, [run])
+    assert counter not in (None, False)
+    kwargs = dict(workflow='sdlc-process', user_id='steve', scope=MeasurementScope('all', 'root'),
+                  start='2026-10-01', end='2026-10-04')
+    assert _sample(measure, run, counter).num == read_builtin(db, builtin='corrections', **kwargs).versions['v1'].value == 2
+
+
 def test_phase_descendants_share_one_run_and_corrections(db):
     from tests.plan_writer_authorizer import raw_plan_seed
     from tests.test_workflow_verdict_read import correction, usage

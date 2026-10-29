@@ -62,9 +62,11 @@ def test_no_tasks_and_presence_untracked(client):
     definition(db, path, 'kpi', 'runs', {'formula': 'count', 'num': {'builtin': 'runs'}, 'min_n': 1})
     definition(db, path, 'kpi', 'presence', {'formula': 'count', 'num': {'builtin': 'active_hours'}, 'min_n': 1})
     db.commit()
-    assert period(read(http), 'runs')['status'] == 'Not tracked: this workflow has no tasks'
+    runs = period(read(http), 'runs')
+    assert (runs['status'], runs['reason']) == ('not tracked', 'This workflow has no tasks')
     task(db, 'one', 'hash')
     db.commit()
     db.close()
     row = period(read(http), 'presence')
-    assert row['value'] is None and row['status'] == 'Not tracked: presence is not recorded per task'
+    assert row['value'] is None and row['status'] == 'not tracked'
+    assert row['reason'] == "Active time isn't recorded per task"
