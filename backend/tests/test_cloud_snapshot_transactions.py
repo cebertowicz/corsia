@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -217,7 +218,8 @@ async def test_cloud_discovery_http_reports_only_committed_rows(
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     key_store_providers.set_provider_key("anthropic", "snapshot-test-value-1")
     models = _models("anthropic")
-    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: models)
+    monkeypatch.setattr("llm.external_provider.fetch_external_models", AsyncMock(return_value=[]))
+    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda _ids: models)
     db = database.get_db()
     if fail_commit:
         db.set_authorizer(lambda action, arg, *_:
@@ -254,7 +256,8 @@ async def test_cloud_discovery_broadcasts_only_when_the_stored_models_changed(is
     from infra.state import ws
 
     models = _models("anthropic")
-    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: models)
+    monkeypatch.setattr("llm.external_provider.fetch_external_models", AsyncMock(return_value=[]))
+    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda _ids: models)
     notify = Mock()
     monkeypatch.setattr(ws, "notify_models_changed", notify)
 

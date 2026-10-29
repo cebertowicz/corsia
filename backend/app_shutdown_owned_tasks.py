@@ -20,6 +20,7 @@ async def shutdown_owned_tasks(
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
     from llm.local_setup_prepare import prepare_task
+    from llm.live_cost_map import refresh_task
     from tools.agent_shell_tools import prefetch_task as agent_tool_prefetch_task
     from tools.mcp_oauth_flow import stop_all as stop_app_signins
 
@@ -32,6 +33,7 @@ async def shutdown_owned_tasks(
         ("local model setup", flight_task()),
         ("local model pick", prepare_task()),
         ("agent tool prefetch", agent_tool_prefetch_task()),
+        ("LiteLLM cost map refresh", refresh_task()),
         *zip(
             ("provider auto-start", "cloud discovery", "network discovery",
              "harness discovery", "continuity drive"),

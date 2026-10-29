@@ -289,7 +289,12 @@ async def test_cloud_discovery_releases_transaction_when_commit_fails(
 
     from infra.database import get_db
     from llm import catalog_cloud
+    from unittest.mock import AsyncMock
 
+    monkeypatch.setattr(
+        "llm.external_provider.fetch_external_models",
+        AsyncMock(return_value=["claude-sonnet-4"]),
+    )
     db = get_db()
 
     failing = _CommitFailure(db)

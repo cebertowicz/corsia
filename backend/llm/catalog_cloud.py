@@ -102,14 +102,11 @@ def _openai_discovered(api_models: list[dict]) -> list[dict]:
     return discovered
 
 
-def _anthropic_discovered() -> list[dict]:
-    import litellm
-
+def _anthropic_discovered(model_ids: list[str]) -> list[dict]:
     discovered: list[dict] = []
-    for key in litellm.model_cost:
+    for key in model_ids:
         if (
             not key.startswith("claude-")
-            or "-202" in key
             or "instant" in key
             or "claude-2" in key
             or "claude-3-" in key
@@ -242,14 +239,25 @@ async def discover_cloud_models(provider: str, api_key: str) -> dict:
         except Exception as exc:
             result["error"] = str(exc)
             return result
+        from llm.live_cost_map import wait_for_refresh
+
+        await wait_for_refresh()
         discovered = _openai_discovered(api_models)
 
     elif provider == "anthropic":
+        from llm.external_provider import fetch_external_models
+        from llm.live_cost_map import wait_for_refresh
+
         try:
-            discovered = _anthropic_discovered()
+            model_ids = await fetch_external_models("https://api.anthropic.com", "anthropic", api_key)
+        except httpx.HTTPStatusError as exc:
+            result["error"] = f"API returned {exc.response.status_code}"
+            return result
         except Exception as exc:
             result["error"] = str(exc)
             return result
+        await wait_for_refresh()
+        discovered = _anthropic_discovered(model_ids)
 
     else:
         result["error"] = f"Cloud discovery not implemented for {provider}"

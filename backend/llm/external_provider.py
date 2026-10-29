@@ -169,19 +169,12 @@ async def fetch_external_models(
     api_base: str, dialect: str, api_key: str | None
 ) -> list[str]:
     """Return the model ids an external endpoint exposes via ``/v1/models``."""
+    from llm.external_model_probe import fetch_model_ids
     from llm.network_endpoints import models_probe_url
 
-    headers = auth_headers(dialect, api_key)
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.get(models_probe_url(api_base, dialect=dialect), headers=headers)
-        resp.raise_for_status()
-        data = resp.json() or {}
-    ids: list[str] = []
-    for m in (data.get("data") or []):
-        mid = m.get("id") if isinstance(m, dict) else None
-        if isinstance(mid, str) and mid:
-            ids.append(mid)
-    return ids
+    return await fetch_model_ids(
+        models_probe_url(api_base, dialect=dialect), dialect, auth_headers(dialect, api_key)
+    )
 
 
 def _external_discovery_config(
@@ -376,6 +369,9 @@ async def discover_external_models(server_id: str) -> dict:
     shapes, levels_error = await discovery_shapes(dialect, api_base, model_ids)
     if levels_error:
         result["reasoning_levels_error"] = levels_error
+    from llm.live_cost_map import wait_for_refresh
+
+    await wait_for_refresh()
     try:
         result = await run_in_db(
             _reconcile_external_models,

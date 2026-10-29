@@ -280,6 +280,7 @@ def integration_client(integration_workspace):
     import automation.restart_startup as restart_startup
     import connections
     import llm.network_discovery as network_discovery
+    import llm.live_cost_map as live_cost_map
     import ws.presence_control as presence_control
     import infra.bulletin_live as bulletin_live
     from main import app
@@ -320,6 +321,11 @@ def integration_client(integration_workspace):
             "_startup_harness_discovery",
             _skip_external_harness_discovery,
         ))
+        # A cloud discovery waiting on the startup map can otherwise resume
+        # after a per-test database reset has begun.
+        suspended.enter_context(patch.object(
+            app_lifecycle, "_startup_cloud_discovery", _skip_external_harness_discovery,
+        ))
         # Startup's init_db would re-seed the session database's CLI rows from
         # whatever this host has installed, undoing the deterministic rows
         # ``_init_isolated_db_schema`` seeded (#2975).
@@ -329,6 +335,7 @@ def integration_client(integration_workspace):
         # The session app cannot refresh mutable rollup caches while per-test
         # fixtures repeatedly replace the active isolated database.
         suspended.enter_context(patch.object(usage_rollup, "schedule_refresh", lambda: None))
+        suspended.enter_context(patch.object(live_cost_map, "_refresh", _skip_external_harness_discovery))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(
                 patch.object(module, loop_name, _suspend_forever)

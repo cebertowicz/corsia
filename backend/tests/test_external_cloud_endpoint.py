@@ -86,6 +86,37 @@ async def test_discovery_records_the_published_window(isolated_db, model_table, 
 
 
 @pytest.mark.asyncio
+async def test_discovery_waits_for_live_reference_window(isolated_db, monkeypatch):
+    import asyncio
+    import litellm
+    from llm import live_cost_map
+
+    release = asyncio.Event()
+    waiting = asyncio.Event()
+    monkeypatch.setattr(litellm, "model_cost", {})
+
+    async def refresh():
+        await release.wait()
+        litellm.model_cost = {"dashscope/qwen-flash": {"max_input_tokens": 997_952}}
+
+    wait_for_refresh = live_cost_map.wait_for_refresh
+
+    async def observe_wait():
+        waiting.set()
+        await wait_for_refresh()
+
+    monkeypatch.setattr(live_cost_map, "_refresh", refresh)
+    monkeypatch.setattr(live_cost_map, "wait_for_refresh", observe_wait)
+    live_cost_map.start_refresh()
+    discovery = asyncio.create_task(_discover(monkeypatch))
+    await asyncio.wait_for(waiting.wait(), timeout=10)
+    assert not discovery.done()
+    release.set()
+    sid = await discovery
+    assert _windows(sid)["qwen-flash"] == 997_952
+
+
+@pytest.mark.asyncio
 async def test_the_users_window_wins_over_the_published_one(isolated_db, model_table, monkeypatch):
     sid = await _discover(monkeypatch, meta={"context_window": 65_536})
 
