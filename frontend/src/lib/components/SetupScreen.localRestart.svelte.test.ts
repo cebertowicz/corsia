@@ -59,14 +59,17 @@ describe('Setup local model below the setup floor', () => {
 	});
 
 	it('shows a refreshed asynchronous failure and offers retry', async () => {
-		await openSetup('not_running', { ok: true, in_progress: true }, { local_state: 'failed', setup_error_code: 'other', setup_error_message: 'oMLX exited unexpectedly.', setup_error_reference: 'local-456', fix: 'CORSIA couldn’t start the local model.' });
+		await openSetup('not_running', { ok: true, in_progress: true }, { local_state: 'failed', setup_error_code: null, setup_error_message: null, setup_error_reference: 'local-fixture', fix: 'CORSIA couldn’t start the local model.' });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('local-456'));
+		await vi.waitFor(() => expect(host.textContent).toContain('local-fixture'));
 		const row = host.querySelector('section[aria-label="Local model"]')!;
-		expect(row.textContent).not.toContain('oMLX exited unexpectedly.');
 		expect(row.textContent).toContain('CORSIA couldn’t start the local model.');
-		expect(row.textContent).toContain('Retry');
-		(row.querySelector('button') as HTMLButtonElement).click();
+		expect(row.textContent).toContain('Reference: local-fixture');
+		const buttons = [...row.querySelectorAll('button')];
+		expect(buttons.some((button) => button.textContent?.trim() === 'Save a report')).toBe(true);
+		const retry = buttons.find((button) => button.textContent?.trim() === 'Retry');
+		expect(retry).toBeDefined();
+		retry!.click();
 		await vi.waitFor(() => expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(2));
 	});
 
