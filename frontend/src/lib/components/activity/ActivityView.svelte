@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { everyThread } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/everyThread';
 	import { threadActivity } from '$lib/stores/activity';
 	import {
 		projects,

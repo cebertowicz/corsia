@@ -3,7 +3,7 @@
 	import { backOut } from 'svelte/easing';
 	import { tick } from 'svelte';
 	import { paletteOpen } from '$lib/stores/palette';
-	import { everyThread } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/everyThread';
 	import { projects as projectsStore, loadProjects, type ProjectPick } from '$lib/stores/projects';
 	import { createProjectOpen } from '$lib/stores/overlays';
 	import { projectAccent } from '$lib/utils/projectColors';

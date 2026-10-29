@@ -1,6 +1,7 @@
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
-import { activeThreadId, everyThread } from '$lib/stores/threads';
+import { activeThreadId } from '$lib/stores/threads';
+import { everyThread } from '$lib/stores/everyThread';
 import { openThread } from '$lib/stores/openThread';
 import { contextAttachTarget } from '$lib/stores/contextAttach';
 import { clearDocPickerTarget } from '$lib/stores/docPickerTarget';

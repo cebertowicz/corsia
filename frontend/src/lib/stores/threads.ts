@@ -118,8 +118,6 @@ export function mergeMessageDelivery(existing: Message, incoming: Message): Mess
 
 export const threads = writable<Thread[]>([]);
 export const coordinationThreads = writable<Thread[]>([]);
-/** Every listed thread, coordination rows included, for readers that look a thread up by id or search across all. */
-export const everyThread = derived([threads, coordinationThreads], ([$threads, $coordination]) => [...$threads, ...$coordination]);
 
 /** Demote locally but keep responsibility, paths, domains and notes so re-promoting prefills them. */
 export function demoteAgentLocally(threadId: string): void {
