@@ -233,14 +233,68 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             await _exercise_clipboard(thread, connection, endpoint)
 
 
+async def _drag_selection(thread, connection, start, end):
+    for kind, x, button in (('mousePressed', start[0], 'left'),
+                            ('mouseMoved', end[0], 'left'),
+                            ('mouseReleased', end[0], 'left')):
+        await browser_pane.mouse_event(thread, {
+            'type': 'input_mouse', 'eventType': kind, 'x': x, 'y': start[1],
+            'button': button, 'clickCount': 1,
+        }, connection)
+
+
+async def _select_text(thread, connection, endpoint, selector, text, frame=None):
+    # Fixture styling makes character boundaries measurable for both inputs and text nodes.
+    expression = """(() => {
+        const frame = %s ? document.querySelector(%s) : null;
+        const doc = frame ? frame.contentDocument : document;
+        const element = doc.querySelector(%s);
+        element.style.cssText = 'font: 20px monospace; padding: 2px; border: 2px solid black;';
+        const rect = element.getBoundingClientRect();
+        const outer = frame ? frame.getBoundingClientRect() : {left: 0, top: 0};
+        const frameBorder = frame ? frame.clientLeft : 0;
+        const frameTop = frame ? frame.clientTop : 0;
+        const canvas = doc.createElement('canvas');
+        canvas.getContext('2d').font = getComputedStyle(element).font;
+        const width = canvas.getContext('2d').measureText(%s).width;
+        const x = outer.left + frameBorder + rect.left + 4;
+        const y = outer.top + frameTop + rect.top + rect.height / 2;
+        return {start: [x + 0.2, y], end: [x + width, y]};
+    })()""" % (json.dumps(frame), json.dumps(frame), json.dumps(selector), json.dumps(text))
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        result = await cdp.call('Runtime.evaluate', expression=expression, returnByValue=True)
+    points = result['result']['value']
+    await _drag_selection(thread, connection, points['start'], points['end'])
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        check = """(() => { const doc = %s ? document.querySelector(%s).contentDocument : document;
+          const el = doc.querySelector(%s); return el.selectionStart == null ? doc.getSelection().toString() :
+          el.value.slice(el.selectionStart, el.selectionEnd); })()""" % (
+              json.dumps(frame), json.dumps(frame), json.dumps(selector))
+        result = await cdp.call('Runtime.evaluate', expression=check, returnByValue=True)
+    assert result['result']['value'] == text
+
+
+async def _select_cross_origin_field(thread, connection, cdp):
+    # Child fixture has zero body margin and a 2px border/padding on its input.
+    result = await cdp.call('Runtime.evaluate', expression="""(() => {
+      const frame = document.querySelector('iframe'); const r = frame.getBoundingClientRect();
+      const x = r.left + frame.clientLeft + 4; const y = r.top + frame.clientTop + 15;
+      return {start: [x + 0.2, y], end: [x + 160, y]}; })()""", returnByValue=True)
+    points = result['result']['value']
+    await _drag_selection(thread, connection, points['start'], points['end'])
+    result = await cdp.call('Runtime.evaluate', expression="""new Promise(resolve => {
+      const poll = () => clipboardEvents.includes('selection:Cross origin') ? resolve(true) : setTimeout(poll, 20);
+      poll(); setTimeout(() => resolve(false), 5000); })""", awaitPromise=True, returnByValue=True)
+    assert result['result']['value'] is True
+
+
 async def _exercise_clipboard(thread, connection, endpoint):
     try:
         async with browser_cdp.CdpClient(endpoint) as cdp:
             await cdp.call('Runtime.evaluate', expression=(
                 "document.body.innerHTML = '<p id=source>Copied text</p><input id=destination>';"
-                "window.clipboardEvents = []; for (const kind of ['copy', 'cut', 'paste']) document.addEventListener(kind, e => clipboardEvents.push(e.type));"
-                "const range = document.createRange(); range.selectNodeContents(document.querySelector('#source'));"
-                "getSelection().removeAllRanges(); getSelection().addRange(range);"))
+                "window.clipboardEvents = []; for (const kind of ['copy', 'cut', 'paste']) document.addEventListener(kind, e => clipboardEvents.push(e.type));"))
+        await _select_text(thread, connection, endpoint, '#source', 'Copied text')
         replies = []
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
         assert replies == [{'type': 'clipboard_selection', 'id': 1, 'text': 'Copied text'}]
@@ -263,8 +317,8 @@ async def _exercise_clipboard(thread, connection, endpoint):
                 "document.body.innerHTML = '<iframe></iframe>';"
                 "const frame = document.querySelector('iframe');"
                 "frame.contentDocument.body.innerHTML = '<input value=\"Cut me here\">';"
-                "for (const kind of ['copy', 'cut', 'paste']) frame.contentDocument.addEventListener(kind, e => clipboardEvents.push('frame-' + e.type));"
-                "const input = frame.contentDocument.querySelector('input'); input.focus(); input.setSelectionRange(0, 7);"))
+                "for (const kind of ['copy', 'cut', 'paste']) frame.contentDocument.addEventListener(kind, e => clipboardEvents.push('frame-' + e.type));"))
+        await _select_text(thread, connection, endpoint, 'input', 'Cut me ', frame='iframe')
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 11}, replies.append)
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2, 'cut': True}, replies.append)
         async with browser_cdp.CdpClient(endpoint) as cdp:
@@ -279,18 +333,15 @@ async def _exercise_clipboard(thread, connection, endpoint):
         assert result['result']['value'] == ['frame-copy', 'frame-cut', 'frame-paste']
         # Cross-origin copy and paste are exercised by the separate OOPIF test.
         # Cut deletes only the copied selection, in a text field and in an editable region.
-        for request, setup, read in (
-                # Each setup is a block: top-level const persists across evaluates and would redeclare.
-                (3, "{ document.body.innerHTML = '<input id=field value=\"Cut me here\">';"
-                    "const field = document.querySelector('#field'); field.focus(); field.setSelectionRange(0, 7); }",
-                 "document.querySelector('#field').value"),
-                (4, "{ document.body.innerHTML = '<div id=editor contenteditable>Cut me here</div>';"
-                    "const editor = document.querySelector('#editor'); editor.focus();"
-                    "const range = document.createRange(); range.setStart(editor.firstChild, 0); range.setEnd(editor.firstChild, 7);"
-                    "getSelection().removeAllRanges(); getSelection().addRange(range); }",
-                 "document.querySelector('#editor').textContent")):
+        for request, setup, read, selector in (
+                # Each fixture is replaced before selecting its first seven characters.
+                (3, "document.body.innerHTML = '<input id=field value=\"Cut me here\">'",
+                 "document.querySelector('#field').value", '#field'),
+                (4, "document.body.innerHTML = '<div id=editor contenteditable>Cut me here</div>'",
+                 "document.querySelector('#editor').textContent", '#editor')):
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 assert 'exceptionDetails' not in await cdp.call('Runtime.evaluate', expression=setup)
+            await _select_text(thread, connection, endpoint, selector, 'Cut me ')
             replies.clear()
             await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': request, 'cut': True}, replies.append)
             async with browser_cdp.CdpClient(endpoint) as cdp:
@@ -307,11 +358,10 @@ async def _exercise_clipboard(thread, connection, endpoint):
 async def _check_page_handled_clipboard(thread, connection, endpoint):
     for stop in (False, True):
         async with browser_cdp.CdpClient(endpoint) as cdp:
-            expression = """{ document.activeElement.blur(); const r = document.createRange(); r.selectNodeContents(document.querySelector('#source'));
-              getSelection().removeAllRanges(); getSelection().addRange(r);
-              document.addEventListener('copy', e => { e.clipboardData.setData('text/plain', 'custom page text');
+            expression = """{ document.addEventListener('copy', e => { e.clipboardData.setData('text/plain', 'custom page text');
               e.preventDefault(); %s }, {once: true}); }""" % ('e.stopPropagation();' if stop else '')
             await cdp.call('Runtime.evaluate', expression=expression)
+        await _select_text(thread, connection, endpoint, '#source', 'Copied text')
         handled = []
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 10}, handled.append)
         if stop:
@@ -328,9 +378,30 @@ def popup_fixture():
                   document.querySelector('#result').textContent = e.data; });</script>''',
         # Close after the click returns: a synchronous close can tear the target down before
         # the click's own mouse-release is acknowledged, which the stock client reports as a timeout.
-        '/clipboard-child': b'''<!doctype html><input id="field" value="Cross origin">
+        '/clipboard-child': b'''<!doctype html><style>body { margin: 0 } input { font: 20px monospace;
+            padding: 2px; border: 2px solid black; width: 220px; }</style><input id="field" value="Cross origin">
             <script>const field = document.querySelector('#field');
-            window.addEventListener('message', () => { field.focus(); field.select(); parent.postMessage('ready', '*'); });
+            window.addEventListener('message', event => {
+              if (event.data === 'focus') { parent.postMessage('ready', '*'); return; }
+              if (event.data?.type !== 'clipboard-diagnostic-request') return;
+              let node = document.activeElement;
+              const active = [];
+              while (node) {
+                active.push({tag: node.tagName, id: node.id || null});
+                if (!node.shadowRoot?.activeElement) break;
+                node = node.shadowRoot.activeElement;
+              }
+              let selected = document.getSelection()?.toString() || '';
+              if (node && ['INPUT', 'TEXTAREA'].includes(node.tagName)) {
+                selected = node.type === 'password' ? '[password omitted]' :
+                  (node.selectionStart == null ? '' : node.value.slice(node.selectionStart, node.selectionEnd));
+              }
+              event.source.postMessage({type: 'clipboard-diagnostic-response', nonce: event.data.nonce,
+                active, selected,
+                hasFocus: document.hasFocus(), visibilityState: document.visibilityState,
+                copyEnabled: document.queryCommandEnabled('copy')}, '*');
+            });
+            field.addEventListener('mouseup', () => parent.postMessage('selection:' + field.value.slice(field.selectionStart, field.selectionEnd), '*'));
             field.addEventListener('paste', e => parent.postMessage('paste:' + e.clipboardData.getData('text/plain'), '*'));
             </script>''',
         '/popup': b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
@@ -395,13 +466,16 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 child = base.replace('127.0.0.1', 'localhost') + '/clipboard-child'
                 setup = """new Promise((resolve, reject) => {
                     window.clipboardEvents = [];
-                    window.addEventListener('message', e => { clipboardEvents.push(e.data); if (e.data === 'ready') resolve(true); });
+                    window.addEventListener('message', e => { if (typeof e.data !== 'string') return;
+                        clipboardEvents.push(e.data); if (e.data === 'ready') resolve(true); });
                     const frame = document.createElement('iframe'); frame.src = %s;
                     frame.onload = () => frame.contentWindow.postMessage('focus', '*'); document.body.append(frame);
                     setTimeout(() => reject(Error('frame not ready')), 5000);
                 })""" % json.dumps(child)
                 result = await cdp.call('Runtime.evaluate', expression=setup, awaitPromise=True, returnByValue=True)
                 assert result['result']['value'] is True
+                # Root-target pointer coordinates include the iframe border and child body margin.
+                await _select_cross_origin_field(thread, connection, cdp)
                 replies = []
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
                 assert replies[0].get('error'), f'cross-origin copy replies: {replies!r}'
