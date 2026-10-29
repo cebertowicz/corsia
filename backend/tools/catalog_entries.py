@@ -248,7 +248,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_read": _Entry(
         "email", status="active", authority="conductor-api", account_bound=True,
-        summary="Read one email after the local screen; a flagged message returns no body",
+        summary="Read one email as untrusted data, with a notice if flagged or unscreened",
         activity="Reading mail",
     ),
     "google_connect": _Entry(
