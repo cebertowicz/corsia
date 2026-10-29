@@ -8,7 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
-- Mail flagged or unscreened by the local screen reaches agents marked, with the reason shown.
+- Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
 - Chat, Files, and project and workspace messages use clearer, consistent names.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Updates show the data upgrade step while your data is being upgraded.
