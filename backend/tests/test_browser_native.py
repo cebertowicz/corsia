@@ -22,6 +22,7 @@ from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwne
 from ws import browser_clipboard, browser_stream
 from ws.browser_frames import PaneFrames
 from tests.browser_clipboard_diagnostics import native_clipboard_diagnostics  # noqa: F401
+from tests.browser_native_window import wait_for_headed_window
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
@@ -230,16 +231,20 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             await preload.call('Page.enable')
             await preload.call('Page.addScriptToEvaluateOnNewDocument', source=browser_screencast.PRELOAD,
                                worldName=browser_screencast.WORLD, runImmediately=True)
+            if headed:
+                await wait_for_headed_window(endpoint)
             await _exercise_clipboard(thread, connection, endpoint)
 
 
 async def _drag_selection(thread, connection, start, end):
-    for kind, x, button in (('mousePressed', start[0], 'left'),
+    # BrowserPaneInput.press moves to the point before pressing, including taps.
+    for kind, x, button in (('mouseMoved', start[0], 'none'),
+                            ('mousePressed', start[0], 'left'),
                             ('mouseMoved', end[0], 'left'),
                             ('mouseReleased', end[0], 'left')):
         await browser_pane.mouse_event(thread, {
             'type': 'input_mouse', 'eventType': kind, 'x': x, 'y': start[1],
-            'button': button, 'clickCount': 1,
+            'button': button, 'clickCount': 0 if kind == 'mouseMoved' else 1,
         }, connection)
 
 
@@ -440,6 +445,8 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
         assert not (await native_owner.run(thread, ('open', base), show_window=headed)).startswith('Error:')
         endpoint = await native_owner.page_endpoint(thread)
         try:
+            if headed:
+                await wait_for_headed_window(endpoint)
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call('Page.enable')
                 await cdp.call('Page.addScriptToEvaluateOnNewDocument', source=browser_screencast.PRELOAD,

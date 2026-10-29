@@ -40,6 +40,8 @@ jobs:
           node-version: '20'
       - name: Install isolated pinned dependencies
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends x11-utils
           python -m venv .venv
           .venv/bin/python -m pip install -r backend/requirements.lock
           npm install --prefix "$RUNNER_TEMP/browser-cli" --no-audit --no-fund agent-browser@0.31.2
