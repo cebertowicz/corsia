@@ -125,7 +125,8 @@ describe('ProviderSettingsModal remove', () => {
 	});
 
 	it('starts a stopped managed model server through its lifecycle action', async () => {
-		const fetcher = vi.fn().mockResolvedValue(Response.json({ ok: true, message: 'Model server started.' }));
+		let finish!: (response: Response) => void;
+		const fetcher = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => new Promise<Response>((resolve) => { finish = resolve; }));
 		vi.stubGlobal('fetch', fetcher);
 		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'managed' as const, status: 'offline' as const, endpoints: [{ host: '127.0.0.1' }] };
 		component = mount(ProviderSettingsModal, {
@@ -134,10 +135,36 @@ describe('ProviderSettingsModal remove', () => {
 		});
 		flushSync();
 		button('Start').click();
+		flushSync();
+		expect(button('Starting…').disabled).toBe(true);
+		expect(button('Test connection').disabled).toBe(true);
+		expect(document.body.textContent).not.toContain('Testing…');
+		finish(Response.json({ ok: true, message: 'Model server started.' }));
 		await vi.waitFor(() => expect(document.body.textContent).toContain('Model server started.'));
 		expect(fetcher).toHaveBeenCalledOnce();
 		expect(String(fetcher.mock.calls[0][0])).toContain('/ns-local/lifecycle/start');
 		expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+	});
+
+	it.each([
+		{ action: 'Stop', pending: 'Stopping…' },
+		{ action: 'Reload models', pending: 'Reloading…' },
+	])('labels $action while its request is pending', async ({ action, pending }) => {
+		let finish!: (response: Response) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'managed' as const, endpoints: [{ host: '127.0.0.1' }] };
+		component = mount(ProviderSettingsModal, {
+			target: document.body,
+			props: { provider: { ...provider, name: 'omlx', type: 'local', server: local } as never, onClose: vi.fn() },
+		});
+		flushSync();
+		button(action).click();
+		flushSync();
+		expect(button(pending).disabled).toBe(true);
+		expect(button('Test connection').disabled).toBe(true);
+		expect(document.body.textContent).not.toContain('Testing…');
+		finish(Response.json({ ok: true }));
+		await vi.waitFor(() => expect(button(action).disabled).toBe(false));
 	});
 
 	it('shows the low-memory refusal when a started server has no model', async () => {

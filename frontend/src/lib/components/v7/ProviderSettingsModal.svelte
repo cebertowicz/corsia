@@ -46,6 +46,8 @@
 	let actionError = $state('');
 	let actionMessage = $state('');
 	let busy = $state(false);
+	let testing = $state(false);
+	let daemonAction = $state<'start' | 'stop' | 'reload' | null>(null);
 
 	const hasServer = $derived(!!provider.server);
 
@@ -81,18 +83,18 @@
 	function clearMessages() { actionError = ''; actionMessage = ''; }
 
 	async function handleTest() {
-		clearMessages(); busy = true;
+		clearMessages(); busy = true; testing = true;
 		const r = await testProvider(provider.name);
-		busy = false;
+		busy = false; testing = false;
 		if (r.ok) actionMessage = r.message ?? 'Connection OK';
 		else actionError = r.error ?? 'Test failed';
 	}
 
 	async function handleTestLocal() {
-		clearMessages(); busy = true;
+		clearMessages(); busy = true; testing = true;
 		if (provider.server?.kind === 'external') {
 			const r = await testNetworkServer(provider.server.id);
-			busy = false;
+			busy = false; testing = false;
 			if (r.ok) actionMessage = r.message;
 			else actionError = r.message;
 			await loadHostGroups();
@@ -130,7 +132,7 @@
 		} catch {
 			actionError = 'Couldn’t test the connection. Try again.';
 		} finally {
-			busy = false;
+			busy = false; testing = false;
 		}
 	}
 
@@ -198,7 +200,7 @@
 
 	async function handleDaemonAction(action: 'start' | 'stop' | 'reload') {
 		if (!provider.server) return;
-		clearMessages(); busy = true;
+		clearMessages(); busy = true; daemonAction = action;
 		const failure = action === 'reload' ? 'Couldn’t refresh the model list. Try again.'
 			: `Couldn’t ${action} the model server. Try again.`;
 		const success = action === 'reload' ? 'Model list refreshed.'
@@ -219,7 +221,7 @@
 		} catch {
 			actionError = failure;
 		} finally {
-			busy = false;
+			busy = false; daemonAction = null;
 			await loadHostGroups();
 		}
 	}
@@ -241,19 +243,19 @@
 
 		<div class="actions">
 			{#if provider.type === 'cloud'}
-				<Button disabled={busy} onclick={handleTest}>{busy ? 'Testing…' : 'Test connection'}</Button>
+				<Button disabled={busy} onclick={handleTest}>{testing ? 'Testing…' : 'Test connection'}</Button>
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
-						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>{daemonAction === 'stop' ? 'Stopping…' : 'Stop'}</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>{daemonAction === 'reload' ? 'Reloading…' : 'Reload models'}</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>{daemonAction === 'start' ? 'Starting…' : 'Start'}</Button>
 					{/if}
-					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
+					<Button disabled={busy} onclick={handleTestLocal}>{testing ? 'Testing…' : 'Test connection'}</Button>
 
 				{:else}
-					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
+					<Button disabled={busy} onclick={handleTestLocal}>{testing ? 'Testing…' : 'Test connection'}</Button>
 				{/if}
 			{/if}
 			{#if provider.type !== 'harness'}
