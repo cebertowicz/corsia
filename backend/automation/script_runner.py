@@ -234,22 +234,18 @@ async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str,
             refusals.setdefault(code, (
                 "the event intake failed unexpectedly" if code == "internal_error"
                 else "event intake is unavailable"))
-            continue
-        if result.refusal is not None:
-            refusals.setdefault(result.refusal.code, result.refusal.text)
-        if (schedule.payload or {}).get("event_type") == event["type"] and event["facts"].get("staging_path"):
-            from automation.worker_inputs import owner_root, remove_staging_dir
+        else:
+            if result.refusal is not None:
+                refusals.setdefault(result.refusal.code, result.refusal.text)
+        finally:
+            if (schedule.payload or {}).get("event_type") == event["type"] and event["facts"].get("staging_path"):
+                from automation.worker_inputs import remove_unclaimed_staging
 
-            event_id = f"{producer}:{report.run_id}:{index}"
-            def clean_unclaimed():
-                db = get_db()
-                claimed = db.execute(
-                    "SELECT 1 FROM event_route_decisions WHERE event_id=? AND request_identity IS NOT NULL LIMIT 1",
-                    (event_id,),
-                ).fetchone()
-                if not claimed:
-                    remove_staging_dir(owner_root(schedule.thread_id, schedule.scope_id, db), event["facts"]["staging_path"])
-            await run_in_db_unless_owned(None, clean_unclaimed)
+                await run_in_db_unless_owned(
+                    None, lambda: remove_unclaimed_staging(
+                        schedule.thread_id, schedule.scope_id, f"{producer}:{report.run_id}:{index}",
+                        event["facts"]["staging_path"], get_db()),
+                )
     if not refusals:
         return report
     shown = [

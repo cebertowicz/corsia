@@ -70,11 +70,7 @@ async def test_result_and_no_result_keep_label_in_agent_delivery(screen, valid):
     await run_scripts()
     await settle_all()
     db = get_db()
-    if valid:
-        delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
-    else:
-        delivered = [row[0] for row in db.execute("SELECT summary FROM context_change_journal "
-                     "WHERE object_id='pr-owner' AND object_kind='thread_context'")]
+    delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
     assert delivered and any(LABEL in text for text in delivered), delivered
     event = next(item for item in screen["state"]["admitted"] if item["event_type"].startswith("worker."))
     assert event["facts"]["source"] == "outside"

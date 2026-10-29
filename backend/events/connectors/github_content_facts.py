@@ -57,13 +57,15 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
         version = head.get("sha")
     elif action == "edited" and isinstance(raw.get("review"), dict):
         item_id, body = item.get("id"), item.get("body")
-        version = (f"{item_id}:{hashlib.sha256(body.encode()).hexdigest()[:12]}"
+        version = (f"{item_id}:{hashlib.sha256(body.encode('utf-8', 'surrogatepass')).hexdigest()[:12]}"
                    if item_id is not None and isinstance(body, str) else None)
     elif action == "edited":
         item_id, updated = item.get("id"), item.get("updated_at")
         version = f"{item_id}:{updated}" if item_id is not None and updated else None
     elif action == "opened":
         version = item.get("number")
+    elif action == "submitted" and isinstance(raw.get("review"), dict):
+        version = item.get("id") if isinstance(item.get("body"), str) and item["body"] else None
     else:
         version = item.get("id")
     if version is not None:

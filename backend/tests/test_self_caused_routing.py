@@ -14,7 +14,8 @@ from tools.registry import ToolRegistry
 
 
 @pytest.mark.asyncio
-async def test_self_caused_comment_keeps_rule_recipient_and_passive_change(isolated_db, resolved, sent):
+async def test_self_caused_comment_keeps_rule_recipient_and_passive_change(isolated_db, resolved, sent, monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "human")
     _project("proj-a")
     _agent("owner")
     _agent("watcher")

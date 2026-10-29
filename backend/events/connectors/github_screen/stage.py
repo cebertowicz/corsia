@@ -123,7 +123,7 @@ def stage_item(event: dict, project: str, root: Path, tracked_repo: str | None, 
     if kind.endswith(".edited"):
         if kind.startswith("review."):
             body = item.get("body")
-            current = f"{item_id}:{hashlib.sha256(body.encode()).hexdigest()[:12]}" if isinstance(body, str) else None
+            current = f"{item_id}:{hashlib.sha256(body.encode('utf-8', 'surrogatepass')).hexdigest()[:12]}" if isinstance(body, str) else None
         else:
             current = f"{item_id}:{item.get('updated_at')}" if item.get("updated_at") else None
         if current != str(version):

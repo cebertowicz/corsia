@@ -171,11 +171,38 @@ async def test_failed_start_cleans_staging(triage, local_model):
             db.execute('UPDATE threads SET local_only=1 WHERE id=?', (OWNER,))
     await run_in_db(restrict_owner)
     local_model['status'] = 'available'
-    await route('issue_comment', 'created')
+    result = await route('pr_comment', 'created')
+    assert (result.outcome.value, result.reason) == ('parked', 'rule_only')
     await run_scripts()
     assert await worker_runner.drive() == 0
     assert starts(triage['key'] + '_triage_start')[0][0] == 'refused'
+    assert any(a['event_type'] == 'worker.no_result' for a in triage['state']['admitted'])
+    from infra.database import get_db
+    contents = [row[0] for row in get_db().execute('SELECT content FROM messages WHERE thread_id=?', ('pr-owner',))]
+    wakes = [content for content in contents if '[EVENT: no_result]' in content]
+    assert len(wakes) == 1 and 'not loaded' in wakes[0], contents
     assert not list((triage['folder'] / 'staging').glob('triage-*'))
+
+
+@pytest.mark.asyncio
+async def test_intake_exception_cleans_staging(triage, monkeypatch):
+    from events import intake
+    original = intake.admit_event
+    staged = []
+
+    async def fail_staged(**kwargs):
+        if kwargs['event_type'].endswith('.item_staged'):
+            staged.append(kwargs['facts']['staging_path'])
+            assert (triage['folder'] / 'staging' / staged[-1]).is_dir()
+            raise RuntimeError('intake failed')
+        return await original(**kwargs)
+
+    monkeypatch.setattr(intake, 'admit_event', fail_staged)
+    await route('issue_comment', 'created')
+    await run_scripts()
+    assert len(staged) == 1
+    assert not list((triage['folder'] / 'staging').glob('triage-*'))
+    assert starts(triage['key'] + '_triage_start') == []
 
 
 @pytest.mark.asyncio
@@ -188,9 +215,54 @@ async def test_pr_comment_owner_gets_one_result_and_no_raw_event(triage):
     assert github.MANIFEST.build_artifact_ref('pr_comment.created', facts, raw) == {
         'integration': 'github', 'type': 'pull-request', 'external_id': 'o/r#1'}
     result = await route('pr_comment', 'created')
-    assert (result.outcome.value, result.thread_id) == ('accepted', 'pr-owner')
+    assert (result.outcome.value, result.reason, result.thread_id) == ('parked', 'rule_only', None)
     await run_scripts()
     await settle_all()
     contents = [row[0] for row in get_db().execute('SELECT content FROM messages WHERE thread_id=?', ('pr-owner',))]
     assert sum('[EVENT: result]' in content for content in contents) == 1
     assert not any('safe item' in content for content in contents)
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_owner_gets_one_result_and_no_raw_event(triage):
+    from infra.database import get_db
+    from registry import models
+    from tests.event_routing_helpers import mk_session
+
+    mk_session('issue-owner', project_id=triage['project'])
+    models.register_artifact(integration='github', type='issue', external_id='o/r#1', parent_thread_id='issue-owner', title='Issue')
+    result = await route('issue_comment', 'created')
+    assert (result.outcome.value, result.reason, result.thread_id) == ('parked', 'rule_only', None)
+    await run_scripts()
+    await settle_all()
+    contents = [row[0] for row in get_db().execute('SELECT content FROM messages WHERE thread_id=?', ('issue-owner',))]
+    assert sum('[EVENT: result]' in content for content in contents) == 1
+    assert not any('safe item' in content for content in contents)
+
+
+@pytest.mark.asyncio
+async def test_inside_created_comment_still_routes(triage, monkeypatch):
+    from events.connectors import github_content_facts
+    monkeypatch.setattr(github_content_facts, 'is_own', lambda login: login == 'inside-user')
+    result = await route('pr_comment', 'created', author='inside-user')
+    assert (result.outcome.value, result.thread_id) == ('accepted', 'pr-owner')
+    await run_scripts()
+    assert starts(triage['key'] + '_triage_start') == []
+
+
+@pytest.mark.asyncio
+async def test_empty_submitted_review_starts_nothing(triage):
+    for body in (None, ''):
+        await route('review', 'submitted', body=body)
+        await run_scripts()
+    assert starts(triage['key'] + '_triage_review_submitted') == []
+    assert starts(triage['key'] + '_triage_start') == []
+
+
+@pytest.mark.asyncio
+async def test_edited_review_with_lone_surrogate_reaches_worker(triage):
+    triage['item']['body'] = '\ud800'
+    await route('review', 'edited', body='\ud800')
+    await run_scripts()
+    await settle_all()
+    assert starts(triage['key'] + '_triage_start')[0][0] == 'returned'

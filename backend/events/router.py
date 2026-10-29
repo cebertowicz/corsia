@@ -11,13 +11,12 @@ from loguru import logger
 
 from events import dead_letter, delivery, guard
 from events.identity import (
-    CHECK_SUITE_COMPLETED_EVENTS,
-    PrResolutionError,
-    check_suite_pr_metadata_from_event,
-    resolve_identity,
+    CHECK_SUITE_COMPLETED_EVENTS, PrResolutionError,
+    check_suite_pr_metadata_from_event, resolve_identity,
 )
 from events.resolve import resolve_targets
 from events.connectors import github_pr_notice
+from events.connectors.github_content_facts import content_facts
 from events.connectors.github import (
     github_event_class as _github_event_class,
     github_routing_envelope,
@@ -214,8 +213,10 @@ def _select_route(
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
-    if internal_event in {"webhook.github.issue_comment_edited", "webhook.github.pr_comment_edited",
-                          "webhook.github.review_submitted", "webhook.github.review_edited"}:
+    if (internal_event in {"webhook.github.issue_comment_edited", "webhook.github.pr_comment_edited",
+                           "webhook.github.review_submitted", "webhook.github.review_edited"}
+        or (internal_event in {"webhook.github.issue_comment", "webhook.github.pr_comment"}
+            and content_facts(payload)["author_origin"] == "outside")):
         return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason="rule_only"), routing_state
     if tag is not None and identity is not None:
         routing_state = registry_models.routing_registrations(*identity)
