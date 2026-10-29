@@ -160,7 +160,7 @@ describe('AddLocalModelSheet', () => {
 		await render({ state: 'ready', models: [{ name: 'Qwen', repository: 'Jundot/Qwen', disk: { state: 'unknown' } }] });
 		const button = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === 'Download')!;
 		expect(button.disabled).toBe(false);
-		expect(document.body.textContent).not.toContain('Couldn’t check free disk space');
+		expect(document.body.querySelector('.model')?.textContent).toContain('Couldn’t check free disk space');
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: "Couldn't check free disk space. Try again." }) })));
 		button.click();
 		await vi.waitFor(() => expect(document.body.querySelector('.model [role="alert"]')?.textContent).toContain("Couldn't check free disk space. Try again."));

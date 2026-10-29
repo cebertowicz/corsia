@@ -27,7 +27,7 @@
 	const quality = $derived(buildQuality(group, build));
 	const need = $derived(build.disk?.state === 'insufficient'
 		? `${build.disk.required_bytes ? `Needs ${Math.ceil(build.disk.required_bytes / 1000 ** 3)} GB of disk` : 'Needs more disk space'}${build.disk.free_bytes == null ? '' : ` · ${Math.floor(build.disk.free_bytes / 1000 ** 3)} GB free`}`
-		: '');
+		: build.disk?.state === 'unknown' ? 'Couldn’t check free disk space' : '');
 </script>
 
 <div class="build" class:stack={failed}>
@@ -53,7 +53,7 @@
 			<Button size="sm" variant="ghost" ariaLabel={`Retry download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'start'} onclick={onDownload}>Retry</Button>
 			<Button size="sm" variant="ghost" ariaLabel={`Delete download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'delete'} onclick={onDelete}>Delete download</Button>
 		{:else if !build.on_disk}
-			<Button size="sm" variant="secondary" ariaLabel={`Download ${group.name} ${buildName}`} disabled={busy || otherRunning || Boolean(need)} loading={pendingAction === 'start'} onclick={onDownload}>Download</Button>
+			<Button size="sm" variant="secondary" ariaLabel={`Download ${group.name} ${buildName}`} disabled={busy || otherRunning || build.disk?.state === 'insufficient'} loading={pendingAction === 'start'} onclick={onDownload}>Download</Button>
 		{/if}
 	</div>
 </div>
