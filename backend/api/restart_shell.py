@@ -41,7 +41,11 @@ _corsia_lifecycle_cleanup() {
     _corsia_cleanup_curl="${_corsia_lifecycle_curl:-${CORSIA_RESTART_CURL:-}}"
     if [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
-        && { [ "$_corsia_lifecycle_is_update" != true ] || [ "$_corsia_unconfirmed_bootout" != true ]; } \
+        && [ "$_corsia_lifecycle_is_update" = true ] \
+        && [ "$_corsia_unconfirmed_bootout" = true ]; then
+        printf 'Lifecycle drain cleanup held: launchd teardown unconfirmed\n'
+    elif [ "$_corsia_lifecycle_done" != true ] \
+        && [ "$_corsia_lifecycle_status" -ne 0 ] \
         && [ -n "$_corsia_cleanup_token" ] \
         && [ -n "$_corsia_cleanup_port" ] \
         && [ -n "$_corsia_cleanup_operation" ] \

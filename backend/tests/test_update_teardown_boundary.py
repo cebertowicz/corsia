@@ -43,3 +43,5 @@ return 0
         assert child.wait(timeout=5) == expected
     observed = calls.read_text() if calls.exists() else ""
     assert ("DELETE" in observed) is delete_expected
+    log = (tmp_path / "lifecycle.log").read_text()
+    assert ("cleanup held: launchd teardown unconfirmed" in log) is scenario.startswith("bootout_")
