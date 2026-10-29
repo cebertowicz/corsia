@@ -68,10 +68,7 @@ def target_trials(
     open_trials, retired = [], []
     normalized = target(decision)
     for path in sorted((place.tray / "skills").glob("*/SKILL.md")):
-        try:
-            current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            continue
+        current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
         if (
             current is None
             or current.lesson.owner != place.thread_id

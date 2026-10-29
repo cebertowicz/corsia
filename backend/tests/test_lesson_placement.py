@@ -1099,7 +1099,7 @@ async def test_trial_section_conflicts(env: Env, existing_section, requested_sec
     reply = _place(env, _entry(env), answer)
     await _drain(env.worker)
     if held:
-        assert "wait for a trial on this file to finish and call place again" in reply
+        assert "wait for a trial on the target file to finish and call place again" in reply
         assert "when the only other trial changes a different named section" in reply
         assert not _skill(env).exists()
         assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
@@ -1129,6 +1129,39 @@ def test_inherited_offered_trial_counts(env: Env) -> None:
     _activate_cap_trial(env, 1, "Part A", owner="ancestor")
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
     assert "captured hypothesis" in reply
+
+
+async def test_capture_retry_keeps_target_for_same_case_merge(env: Env) -> None:
+    existing = _activate_cap_trial(env, 1, "Part A")
+    entry = _entry(env)
+    first = _answer(trial={"boundary": None}, case=CASE, cause="rule_gap",
+                    new_target_path="context/shared.md", target_section="Part A")
+    assert "captured hypothesis" in _place(env, entry, first)
+    await _drain(env.worker)
+    [capture] = (env.tray / "context" / "captures").glob("*.md")
+    assert lesson_files.read_capture(capture.read_text()).case_metadata.get("new_target_path") == "context/shared.md"
+    reply = _place(env, entry, _answer())
+    assert "queued" in reply
+    await _drain(env.worker)
+    assert existing.exists() and not _skill(env).exists()
+    assert _state(env, entry) == ("retired", "written")
+
+
+async def test_watch_promotion_retained_target_checks_retired_match(env: Env) -> None:
+    from core.lesson_trials import Trial
+
+    retired = _activate_cap_trial(env, 1, "Part A")
+    retired.write_text(retired.read_text().replace("state: trial", "state: retired"))
+    watch = _skill(env)
+    watch.parent.mkdir(parents=True)
+    watch.write_text(lesson_files.render_trial(
+        lesson_id="00000000-0000-0000-0000-000000000003", owner=THREAD, name="cite-the-head",
+        description="Use for checks.", text="Check it.",
+        trial=Trial(kind="hypothesis", state="watch", review_after="2030-01-01T00:00:00+00:00"),
+        source_refs=TURN, case_metadata={"new_target_path": "context/shared.md", "target_section": "Part A", "cause": "rule_gap"},
+    ))
+    reply = _place(env, _entry(env), _answer())
+    assert "retired trial has the same target" in reply
 
 
 async def test_revising_a_trial_does_not_conflict_with_itself(env: Env) -> None:
