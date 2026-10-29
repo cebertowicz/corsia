@@ -287,7 +287,7 @@ def integration_client(integration_workspace):
     from fastapi.testclient import TestClient
     from unittest.mock import patch
 
-    async def _skip_external_harness_discovery() -> list[dict]:
+    async def _skip_startup_network_refreshes() -> list[dict]:
         return []
 
     async def _suspend_forever(*_args) -> None:
@@ -319,12 +319,12 @@ def integration_client(integration_workspace):
         suspended.enter_context(patch.object(
             app_lifecycle,
             "_startup_harness_discovery",
-            _skip_external_harness_discovery,
+            _skip_startup_network_refreshes,
         ))
         # A cloud discovery waiting on the startup map can otherwise resume
         # after a per-test database reset has begun.
         suspended.enter_context(patch.object(
-            app_lifecycle, "_startup_cloud_discovery", _skip_external_harness_discovery,
+            app_lifecycle, "_startup_cloud_discovery", _skip_startup_network_refreshes,
         ))
         # Startup's init_db would re-seed the session database's CLI rows from
         # whatever this host has installed, undoing the deterministic rows
@@ -335,7 +335,7 @@ def integration_client(integration_workspace):
         # The session app cannot refresh mutable rollup caches while per-test
         # fixtures repeatedly replace the active isolated database.
         suspended.enter_context(patch.object(usage_rollup, "schedule_refresh", lambda: None))
-        suspended.enter_context(patch.object(live_cost_map, "_refresh", _skip_external_harness_discovery))
+        suspended.enter_context(patch.object(live_cost_map, "_refresh", _skip_startup_network_refreshes))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(
                 patch.object(module, loop_name, _suspend_forever)

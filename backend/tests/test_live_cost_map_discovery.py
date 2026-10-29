@@ -1,29 +1,18 @@
 """Startup refresh and provider discovery share one cost-map result."""
 
 import asyncio
-from unittest.mock import AsyncMock
+import json
 
 import httpx
 import litellm
 import pytest
 
-from llm import catalog_cloud, external_provider, live_cost_map
-
-
-@pytest.fixture
-def discovery_store(monkeypatch):
-    monkeypatch.setattr(catalog_cloud, "_provider_rows", lambda _provider: [])
-    monkeypatch.setattr(
-        catalog_cloud, "_persist_cloud_models",
-        lambda _p, models, _now: [{**model, "id": model["provider_model_id"]} for model in models],
-    )
-    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+from infra.database import get_db
+from llm import catalog_cloud, live_cost_map
 
 
 @pytest.mark.asyncio
-async def test_pending_startup_refresh_does_not_block_start_and_discovery_uses_live_values(
-    monkeypatch, discovery_store,
-):
+async def test_pending_refresh_makes_unbundled_anthropic_model_discoverable(monkeypatch, isolated_db):
     entered = asyncio.Event()
     release = asyncio.Event()
     model = "claude-opus-5-5"
@@ -34,7 +23,8 @@ async def test_pending_startup_refresh_does_not_block_start_and_discovery_uses_l
     monkeypatch.setattr(live_cost_map, "_invalidate_model_cost_lowercase_map", lambda: None)
     monkeypatch.setattr(live_cost_map.GetModelCostMap, "_get_backup_model_count", lambda: 0)
     monkeypatch.setattr(live_cost_map.GetModelCostMap, "validate_model_cost_map", lambda *_a: True)
-    monkeypatch.setattr(external_provider, "fetch_external_models", AsyncMock(return_value=[model]))
+    monkeypatch.setattr("llm.hosted_catalog.cloud_models.reasoning_shape_for", lambda *_a: None)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
 
     class Client:
         def __init__(self, **_kwargs):
@@ -67,11 +57,22 @@ async def test_pending_startup_refresh_does_not_block_start_and_discovery_uses_l
 
 
 @pytest.mark.asyncio
-async def test_failed_startup_refresh_keeps_dev_fallback(monkeypatch, discovery_store, caplog):
+async def test_failed_refresh_preserves_missing_stored_model_and_skips_dated_ids(
+    monkeypatch, isolated_db, caplog,
+):
     model = "claude-sonnet-5-5"
-    bundled = {}
+    dated = "claude-sonnet-4-5-20250929"
+    bundled = {dated: {"max_input_tokens": 200000}}
     monkeypatch.setattr(litellm, "model_cost", bundled)
-    monkeypatch.setattr(external_provider, "fetch_external_models", AsyncMock(return_value=[model]))
+    monkeypatch.setattr("llm.hosted_catalog.cloud_models.reasoning_shape_for", lambda *_a: None)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    catalog_cloud._persist_cloud_models("anthropic", [{
+        "provider_model_id": model, "litellm_model": f"anthropic/{model}",
+        "display_name": model, "featured": True, "input_cost_per_1m": 3,
+        "output_cost_per_1m": 15, "context_window": 500000,
+        "max_output_tokens": 16000, "supports_vision": True,
+        "supports_tools": True, "supports_reasoning": False,
+    }], "before")
 
     class Client:
         def __init__(self, **_kwargs):
@@ -89,50 +90,16 @@ async def test_failed_startup_refresh_keeps_dev_fallback(monkeypatch, discovery_
     monkeypatch.setattr(live_cost_map.httpx, "AsyncClient", Client)
     live_cost_map.start_refresh()
     result = await catalog_cloud.discover_cloud_models("anthropic", "test-key")
+    assert result["ok"] and result["models"] == []
     assert litellm.model_cost is bundled
-    assert result["models"][0]["input_cost_per_1m"] == 0
-    assert result["models"][0]["context_window"] is None
+    rows = get_db().execute(
+        "SELECT provider_model_id, context_window, metadata_json FROM models "
+        "WHERE provider = ? AND provider_model_id IN (?, ?)",
+        ("anthropic", model, dated),
+    ).fetchall()
+    assert len(rows) == 1 and rows[0]["provider_model_id"] == model
+    assert rows[0]["context_window"] == 500000
+    metadata = json.loads(rows[0]["metadata_json"])
+    assert metadata["input_cost_per_1m"] == 3
+    assert metadata["output_cost_per_1m"] == 15
     assert sum("cost map refresh failed" in r.message for r in caplog.records) == 1
-
-
-@pytest.mark.asyncio
-async def test_anthropic_endpoint_pagination_includes_dated_and_unbundled_models(monkeypatch):
-    seen = []
-    pages = [
-        {"data": [{"id": "claude-sonnet-4-6-20260101"}], "has_more": True, "last_id": "cursor"},
-        {"data": [{"id": "claude-opus-5-5"}], "has_more": False},
-    ]
-
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            pass
-
-        async def get(self, url, **kwargs):
-            seen.append((url, kwargs))
-            return httpx.Response(200, json=pages.pop(0), request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(external_provider.httpx, "AsyncClient", Client)
-    ids = await external_provider.fetch_external_models("https://api.anthropic.com", "anthropic", "test-key")
-    assert ids == ["claude-sonnet-4-6-20260101", "claude-opus-5-5"]
-    assert seen[0][0].endswith("/v1/models")
-    assert seen[1][1]["params"] == {"after_id": "cursor"}
-    assert [row["provider_model_id"] for row in catalog_cloud._anthropic_discovered(ids)] == ids
-
-
-@pytest.mark.asyncio
-async def test_anthropic_probe_http_failure_matches_openai(monkeypatch, discovery_store):
-    request = httpx.Request("GET", "https://example.invalid/v1/models")
-    response = httpx.Response(401, request=request)
-    monkeypatch.setattr(
-        external_provider, "fetch_external_models",
-        AsyncMock(side_effect=httpx.HTTPStatusError("failed", request=request, response=response)),
-    )
-    assert await catalog_cloud.discover_cloud_models("anthropic", "test-key") == {
-        "ok": False, "models": [], "error": "API returned 401",
-    }

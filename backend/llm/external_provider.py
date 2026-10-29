@@ -169,12 +169,19 @@ async def fetch_external_models(
     api_base: str, dialect: str, api_key: str | None
 ) -> list[str]:
     """Return the model ids an external endpoint exposes via ``/v1/models``."""
-    from llm.external_model_probe import fetch_model_ids
     from llm.network_endpoints import models_probe_url
 
-    return await fetch_model_ids(
-        models_probe_url(api_base, dialect=dialect), dialect, auth_headers(dialect, api_key)
-    )
+    headers = auth_headers(dialect, api_key)
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(models_probe_url(api_base, dialect=dialect), headers=headers)
+        resp.raise_for_status()
+        data = resp.json() or {}
+    ids: list[str] = []
+    for m in (data.get("data") or []):
+        mid = m.get("id") if isinstance(m, dict) else None
+        if isinstance(mid, str) and mid:
+            ids.append(mid)
+    return ids
 
 
 def _external_discovery_config(
@@ -375,10 +382,7 @@ async def discover_external_models(server_id: str) -> dict:
     try:
         result = await run_in_db(
             _reconcile_external_models,
-            server_id,
-            server,
-            dialect,
-            model_ids,
+            server_id, server, dialect, model_ids,
             caps or {},
             _now(),
             result,
