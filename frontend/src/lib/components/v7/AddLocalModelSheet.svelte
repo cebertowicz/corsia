@@ -160,6 +160,10 @@
 	.summary { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.sort { margin: var(--space-3) 0; }
 	/* Sort's touch targets extend beyond its visible segments on phones. */
+	@media (max-width: 48rem) {
+		.sort .segment { position: relative; }
+		.sort .segment::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%); }
+	}
 	/* Under reduced motion the list before and after a re-sort share one cell and crossfade. */
 	.sorted { display: grid; }
 	.sorted-list { grid-area: 1 / 1; min-width: 0; }

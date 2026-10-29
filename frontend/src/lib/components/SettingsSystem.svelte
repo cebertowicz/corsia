@@ -231,5 +231,4 @@
 	.confirm-text { font-size: var(--text-caption); color: var(--text-secondary); }
 	.confirm-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
 	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
-	/* Theme uses the shared segmented-control treatment. */
 </style>

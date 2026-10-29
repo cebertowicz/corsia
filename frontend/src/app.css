@@ -5,10 +5,6 @@
 .segment:hover { color: var(--text-primary); }
 .segment.active { background: var(--accent-wash); color: var(--accent-text); }
 .segment:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-@media (max-width: 48rem) {
-  [aria-label="Sort models"] .segment { position: relative; }
-  [aria-label="Sort models"] .segment::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%); }
-}
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
