@@ -697,7 +697,7 @@ async def test_same_identity_retry_reports_bound_original_ready(conductor, monke
     assert next(line for line in lines if line["account_id"] == personal["id"])["state"] == "ready"
     assert [account["id"] for account in list_accounts(provider="codex", db=db)
             if not account["is_default"] and account["state"] == "signed_in"] == [personal["id"]]
-    assert get_account(work["id"], db=db)["state"] == "signed_out"
+    assert get_account(work["id"], db=db)["state"] == "removed"
     from llm.model_status import scoped_status_rows
     model = next(row for row in scoped_status_rows(account_id=personal["id"]) if row["id"] == MODEL)
     assert next(row for row in model["runs_on"] if row["account_id"] == personal["id"])["status"] == "ready"
