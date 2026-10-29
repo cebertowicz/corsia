@@ -71,6 +71,30 @@ def test_added_rows_read_once_per_fact_scope(accounts, monkeypatch):
     assert calls == ['claude-code', 'codex', 'claude-code', 'codex']
 
 
+@pytest.mark.parametrize('provider', ['codex', 'claude-code'])
+def test_fresh_schema_without_added_accounts_reports_unavailable(isolated_db, provider):
+    from connections.harness_models import store_success
+    from connections.models import upsert_connection
+    from infra.database import get_db
+    from llm.model_status import scoped_status_rows
+    from llm.resolution import resolve_execution_target
+
+    upsert_connection(type='cli', provider=provider, status='available', config={'binary': '/bin/test'})
+    db = get_db()
+    try:
+        store_success(provider, [_row('fresh-default')], harness_version='1', source='test', timestamp='t', db=db)
+        db.execute("UPDATE connections SET status='needs_auth' WHERE provider=?", (provider,))
+        db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE is_default=1")
+        db.commit()
+        assert db.execute('SELECT COUNT(*) FROM vendor_accounts WHERE is_default=0').fetchone()[0] == 0
+        target = resolve_execution_target(provider + '/fresh-default', db=db)
+        assert not target.available and target.availability_reason == 'connection_unavailable'
+        row = next(row for row in scoped_status_rows() if row['id'] == provider + '/fresh-default')
+        assert (row['status'], row['status_reason']) == ('unavailable', 'connection_unavailable')
+    finally:
+        db.close()
+
+
 def test_provider_gate_refuses_missing_binary_and_no_added_signin(accounts):
     from connections.models import provider_may_run
     from connections.vendor_accounts import get_account, set_account_state

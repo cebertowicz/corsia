@@ -86,7 +86,7 @@ def _target_row(model: str, *, db) -> dict | None:
     if model.startswith(('claude-code/', 'codex/')):
         from llm.harness_catalog import added_rows
 
-        return added_rows(db=db).get(model)
+        return added_rows(db=db, provider=model.partition('/')[0]).get(model)
     return None
 
 

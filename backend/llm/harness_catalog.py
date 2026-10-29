@@ -19,6 +19,7 @@ def added_rows(*, db, provider: str | None = None) -> dict[str, dict]:
 def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
     """Project discovery from account rows a caller already read."""
     from connections.account_evidence import current_ready_discovery
+    from llm.context_window import discovered_window
 
     rows: dict[str, dict] = {}
     for account in accounts:
@@ -44,7 +45,7 @@ def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
                 'provider_model_id': model[len(vendor) + 1:], 'backend': 'cc' if vendor == 'claude-code' else 'codex',
                 'display_name': evidence.get('display_name') or model[len(vendor) + 1:],
                 'description': evidence.get('description') or '', 'source': 'account_discovery',
-                'enabled': 1, 'available': available, 'context_window': evidence.get('context_window'),
+                'enabled': 1, 'available': available, 'context_window': discovered_window(evidence),
                 'supports_vision': 'image' in (capabilities.get('input_modalities') or []),
                 'supports_tools': 1, 'supports_reasoning': bool(capabilities.get('effort_levels') or capabilities.get('reasoning_efforts')),
                 'metadata_json': json.dumps(metadata), 'last_error': None, 'default_listed': False,
