@@ -18,7 +18,7 @@ def _columns(db: sqlite3.Connection) -> list[str]:
 
 
 def test_fresh_schema_has_the_table_and_the_step_is_registered() -> None:
-    assert SCHEMA_VERSION == 165
+    assert SCHEMA_VERSION == 166
     assert MIGRATIONS[120] is migrate_120_to_121
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
@@ -41,7 +41,7 @@ def test_startup_migration_creates_the_table_and_keeps_threads(tmp_path) -> None
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 118, 165)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 118, 166)
         assert "recorded_revision" in _columns(db)
         assert db.execute("SELECT id FROM threads").fetchall() == [("kept",)]
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

@@ -67,6 +67,58 @@ def test_places_each_comment_on_its_target_and_ignores_missing_targets(isolated_
         db.close()
 
 
+def test_retry_replaces_its_originals_unanswered_comments(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("UPDATE threads SET user_id='person' WHERE id='thread'")
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        comment = {'id': 'k1', 'cid': 'c2.1', 'seq': 1, 'from_off': 0, 'to_off': 4, 'quote': 'text', 'note': 'why?'}
+        failed = {'reply_context': {'comments': [comment]}}
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('failed','thread','user','',?,'t',2)", (json.dumps(failed),))
+        place_comments(db, 'thread', 'failed', failed, 't')
+        retried = {**failed, 'retried_from_message_id': 'failed'}
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('retry','thread','user','',?,'u',3)", (json.dumps(retried),))
+        place_comments(db, 'thread', 'retry', retried, 'u')
+        page = [{'id': 'target', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', page)
+        assert [thread['user_message_id'] for thread in page[0]['chat_comments']] == ['retry']
+    finally:
+        db.close()
+
+
+def test_retry_keeps_an_answered_original(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        metadata = {'reply_context': {'comments': [{'cid': 'c2.1', 'seq': 1, 'note': 'why?'}]}}
+        place_comments(db, 'thread', 'ambiguous', metadata, 't')
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','ambiguous','c2.1','answer','u')")
+        place_comments(db, 'thread', 'retry', {**metadata, 'retried_from_message_id': 'ambiguous'}, 'v')
+        rows = db.execute('SELECT user_message_id FROM chat_comments ORDER BY created_at').fetchall()
+        assert [row[0] for row in rows] == ['ambiguous', 'retry']
+    finally:
+        db.close()
+
+
+def test_retry_keeps_an_original_with_a_reply(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        metadata = {'reply_context': {'comments': [{'cid': 'c2.1', 'seq': 1, 'note': 'why?'}]}}
+        place_comments(db, 'thread', 'failed', metadata, 't')
+        reply = {'reply_context': {'comments': [
+            {'cid': 'c3.1', 'seq': 1, 'note': 'and?', 'root_user_message_id': 'failed', 'root_cid': 'c2.1'}]}}
+        place_comments(db, 'thread', 'reply', reply, 'u')
+        place_comments(db, 'thread', 'retry', {**metadata, 'retried_from_message_id': 'failed'}, 'v')
+        rows = db.execute('SELECT user_message_id FROM chat_comments ORDER BY created_at').fetchall()
+        assert [row[0] for row in rows] == ['failed', 'reply', 'retry']
+    finally:
+        db.close()
+
+
 def test_live_refresh_requires_thread_owner(isolated_db):
     from main import app
     db = get_db()

@@ -411,3 +411,38 @@ async def test_retry_resends_a_failed_input_verbatim(isolated_db, monkeypatch) -
     assert call is not None
     assert call.args[2] == content
     assert call.kwargs["trim_content"] is False
+
+
+@pytest.mark.asyncio
+async def test_retry_resends_a_comments_only_send(isolated_db, monkeypatch) -> None:
+    """A send of only comments has no text; its Retry resends the comments instead of answering 409."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from api import thread_inbox_actions
+    from infra.database import get_db
+    import infra.send_service as send_service
+
+    _insert_session("comments-thread")
+    comments = [{"cid": "c2.1", "seq": 1, "from_off": 0, "to_off": 4, "quote": "text", "note": "why?"}]
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,created_at,seq,metadata,"
+            "delivery_state,delivery_error,write_outcome) VALUES "
+            "('failed-comments','comments-thread','user','','t1',2,?,'failed','x','proved_no_write')",
+            (json.dumps({"reply_context": {"comments": comments}}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+    sent = AsyncMock(return_value=SimpleNamespace(message_id="retried-1", driver="native"))
+    monkeypatch.setattr(send_service, "send_thread_input", sent)
+
+    response = await thread_inbox_actions.retry_thread_delivery_now("comments-thread", "failed-comments", "user-1")
+
+    assert response["revived_message_id"] == "retried-1"
+    call = sent.await_args
+    assert call is not None
+    assert call.args[2] == ""
+    assert call.kwargs["metadata"]["reply_context"]["comments"] == comments
