@@ -196,6 +196,30 @@ def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
     assert with_history < 25
 
 
+def test_successor_claim_reads_added_accounts_once(monkeypatch) -> None:
+    """An added-only model shares account facts across successor admission checks."""
+    statements = []
+    real_db = _db
+
+    class TracedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def set_progress_handler(self, callback, steps):
+            self.connection.set_trace_callback(
+                (lambda sql: statements.append(sql) if 'a.discovery_json' in sql else None)
+                if callback is not None else None
+            )
+            return self.connection.set_progress_handler(callback, steps)
+
+    monkeypatch.setitem(globals(), '_db', lambda: TracedConnection(real_db()))
+    _finish_turn_progress_calls(0)
+    assert len(statements) == 1
+
+
 def test_terminal_settles_an_unsettled_plan_dispatch_without_a_hold() -> None:
     """A Turn that dies mid-call closes its dispatch and keeps valid work.
 

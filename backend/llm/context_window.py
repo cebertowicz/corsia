@@ -34,6 +34,11 @@ class ModelContextWindowUnknown(ValueError):
     """Raised when the DB has no per-model context-window value."""
 
 
+def discovered_window(evidence: Mapping[str, Any]) -> Any:
+    """Read the provider window from account discovery for catalog projection."""
+    return evidence.get('context_window')
+
+
 def effective_usage_window(selected: object, reported: object) -> int | None:
     """Keep the resolved model limit, capped by any physical runtime evidence.
 
