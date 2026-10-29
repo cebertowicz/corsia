@@ -85,7 +85,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     text = raw.decode("utf-8", errors="replace")
     db = get_db()
     try:
-        if live_open:
+        if live_open and writable:
             _live_open_setup(p, project_id, thread_id, db)
         artifact_type = registry_service.classify(p)
         if thread_id:

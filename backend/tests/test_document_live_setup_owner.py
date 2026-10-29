@@ -15,6 +15,33 @@ from tests.test_document_live_file_tools import opened
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
 
 
+def test_live_open_prepares_only_writable_documents(ownership_scope, monkeypatch):
+    from api.files_load import read_document
+    from unittest.mock import Mock
+
+    scope = ownership_scope
+    projection = scope['workspace'] / '.corsia' / 'context' / 'example.md'
+    projection.parent.mkdir(parents=True)
+    projection.write_text('system content', encoding='utf-8')
+    normal = scope['root'] / 'note.md'
+    normal.write_text('ordinary content', encoding='utf-8')
+    manager = Mock()
+    manager.setup_shared.side_effect = AssertionError('read-only open must not prepare writes')
+    monkeypatch.setattr('doceditor.live_runtime.get_documents', lambda: manager)
+    monkeypatch.setattr('infra.guidance_targets.guidance_target', lambda *_: None)
+    user_id = scope['db'].execute('SELECT user_id FROM threads WHERE id=?', (scope['owner'],)).fetchone()[0]
+    result = read_document(str(projection), user_id, 'project-alpha', scope['owner'], live_open=True)
+    assert result['text'] == 'system content'
+    assert result['writable'] is False
+    manager.setup_shared.assert_not_called()
+
+    manager.setup_shared.side_effect = None
+    result = read_document(str(normal), user_id, 'project-alpha', scope['owner'], live_open=True)
+    assert result['text'] == 'ordinary content'
+    assert result['writable'] is True
+    manager.setup_shared.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_open_setup_failure_blocks_live_write_until_success(ownership_scope, tmp_path, monkeypatch):
     scope = ownership_scope
