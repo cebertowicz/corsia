@@ -72,7 +72,7 @@ def test_linux_runtime_root_path_and_readable_grant_match_installer(home, monkey
     root.mkdir(parents=True)
     assert managed_runtime.runtime_cache_root() == root
     expected = [str(managed_runtime.runtime_bin_dir(kind, root=root)) for kind in ('node', 'uv', 'gh')]
-    assert agent_shell_tools.shell_environment('/usr/bin:/bin', 'one')['PATH'].split(':') == [
+    assert agent_shell_tools.shell_environment('/usr/bin:/bin')['PATH'].split(':') == [
         '/usr/bin', '/bin', *expected,
     ]
     assert agent_shell_tools.readable_dirs() == [root]
@@ -112,9 +112,8 @@ def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
         assert cache.is_relative_to(tempfile.gettempdir())  # a temp root, which the sandbox lets shells write
     assert set(agent_shell_tools.CACHE_ENV_NAMES) <= set(shell_env_pass_names().split(","))
     other = safehouse_subprocess_env("thread-2")
-    assert not {env[name] for name in agent_shell_tools.CACHE_ENV_NAMES} & {
-        other[name] for name in agent_shell_tools.CACHE_ENV_NAMES
-    }
+    assert all(env[name] == other[name] for name in agent_shell_tools.CACHE_ENV_NAMES)
+    assert caches == [Path(tempfile.gettempdir()) / "corsia-agent-cache" / name for name in ("npm", "pip", "uv")]
 
 
 async def _prefetched(monkeypatch, ensure) -> None:

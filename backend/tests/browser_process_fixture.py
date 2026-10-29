@@ -170,6 +170,9 @@ def synthetic_browser(monkeypatch):
     monkeypatch.setattr(browser_executables, 'private_native', lambda path: path)
     monkeypatch.setattr(browser_executables, 'trusted_chrome', lambda path: path)
     monkeypatch.setattr(browser_executables, 'verify_google', lambda path: None)
+    # The synthetic Chrome has no OS process; real process recording has its own tests.
+    from host_access import browser_owner_lock
+    monkeypatch.setattr(browser_owner_lock, 'record_launched_chrome', lambda *_: None)
 
     async def chrome_launch(executable, *, profile, headless, ua):
         target = Path(profile) if profile else root / f'ephemeral-{len(fake.chrome_calls)}'
@@ -198,4 +201,7 @@ def synthetic_browser(monkeypatch):
     monkeypatch.setattr(browser_cli, 'downloaded_chrome_executable', lambda: psutil.Process().exe())
     yield fake
     fake.finish()
+    if owner._lifetime_lock is not None:
+        browser_owner_lock.release(owner._lifetime_lock)
+        owner._lifetime_lock = None
     shutil.rmtree(root)
