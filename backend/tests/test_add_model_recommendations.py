@@ -35,7 +35,7 @@ async def test_recommendations_use_total_room_and_include_loaded_build(monkeypat
         return {'id': 'local'}
 
     async def status(_cfg):
-        return [{'identifier': loaded.model, 'loaded': True, 'size_bytes': 40 * GIB}]
+        return [{'id': loaded.model, 'loaded': True, 'estimated_size': 40 * GIB}]
 
     async def recommendations(_server_id):
         return {'best': [loaded, other, too_large]}

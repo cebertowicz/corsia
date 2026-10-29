@@ -43,7 +43,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
     from llm.providers.omlx_lifecycle import read_models_status
 
     status = await read_models_status({"server_id": server["id"]})
-    on_disk = {row["identifier"] for row in status or []}
+    on_disk = {row["id"] for row in status or [] if isinstance(row, dict) and row.get("id")}
     if status is not None:
         local_downloads.reconcile(on_disk)
     downloads = [item.view() for item in local_downloads.all()]
@@ -90,7 +90,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         "downloads": downloads,
         "recommended_repository": recommended.repository if recommended is not None else None,
         "memory_gb": round(host_ram_bytes() / 1024**3),
-        "memory_in_use_gb": round(sum(row.get("size_bytes", 0) or 0 for row in status if row["loaded"]) / 1024**3),
+        "memory_in_use_gb": round(sum(int(row.get("estimated_size") or 0) for row in status if isinstance(row, dict) and row.get("loaded") is True) / 1024**3),
         "memory_room_gb": round(room_bytes / 1024**3, 2),
         "disk_free_gb": round(disk_free_bytes / 1000**3) if isinstance(disk_free_bytes, int) else None,
     }, sections

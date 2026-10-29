@@ -373,7 +373,7 @@ async def test_recommended_skips_unavailable_build_but_keeps_owned_build(monkeyp
     monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "insufficient"})
 
     async def owned(_config):
-        return [{"identifier": second.model, "loaded": False, "size_bytes": 0}]
+        return [{"id": second.model, "loaded": False, "estimated_size": 0}]
 
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", owned)
     result, _sections = await provider_local_models._recommendations()
@@ -388,7 +388,7 @@ async def test_owning_another_build_does_not_change_recommendation(monkeypatch, 
     _ready_recommender(monkeypatch, tmp_path, {"best": [first, second]}, room_gib=22)
 
     async def owned(_config):
-        return [{"identifier": second.model, "loaded": False, "size_bytes": 0}]
+        return [{"id": second.model, "loaded": False, "estimated_size": 0}]
 
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", owned)
     result, _sections = await provider_local_models._recommendations()

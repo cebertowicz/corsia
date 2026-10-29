@@ -112,41 +112,32 @@ async def check_server(cfg: dict) -> dict[str, Any]:
 
 async def _loaded_snapshot(cfg: dict) -> tuple[list[dict], bool]:
     """Read once; retain known loaded rows and say whether the snapshot is complete."""
-    api_base = _api_base(cfg)
-    if not api_base:
+    models = await read_models_status(cfg)
+    if models is None:
         return [], False
     try:
-        headers = await public_headers(cfg, url=f"{api_base}/models/status")
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(f"{api_base}/models/status", headers=headers)
-            if resp.status_code != 200:
-                return [], False
-            payload = resp.json()
-            models = payload.get("models") if isinstance(payload, dict) else None
-            if not isinstance(models, list):
-                return [], False
-            complete = all(
-                isinstance(m, dict) and bool(m.get("id")) and isinstance(m.get("loaded"), bool)
-                for m in models
-            )
-            rows = [
-                {
-                    "identifier": m.get("id", ""),
-                    "server_id": cfg.get("server_id"),
-                    "server_name": cfg.get("instance_name"),
-                    "status": "loaded",
-                    "size_bytes": int(m.get("estimated_size") or 0),
-                    "context_length": extract_context_length(m),
-                    "engine_type": m.get("engine_type"),
-                    "pinned": m.get("pinned"),
-                    "thinking_default": m.get("thinking_default"),
-                    "preserve_thinking_default": m.get("preserve_thinking_default"),
-                    "last_access": m.get("last_access"),
-                }
-                for m in models if isinstance(m, dict) and m.get("id") and m.get("loaded") is True
-            ]
-            return rows, complete
-    except (httpx.HTTPError, OmlxPublicAuthError, ValueError, TypeError) as e:
+        complete = all(
+            isinstance(m, dict) and bool(m.get("id")) and isinstance(m.get("loaded"), bool)
+            for m in models
+        )
+        rows = [
+            {
+                "identifier": m.get("id", ""),
+                "server_id": cfg.get("server_id"),
+                "server_name": cfg.get("instance_name"),
+                "status": "loaded",
+                "size_bytes": int(m.get("estimated_size") or 0),
+                "context_length": extract_context_length(m),
+                "engine_type": m.get("engine_type"),
+                "pinned": m.get("pinned"),
+                "thinking_default": m.get("thinking_default"),
+                "preserve_thinking_default": m.get("preserve_thinking_default"),
+                "last_access": m.get("last_access"),
+            }
+            for m in models if isinstance(m, dict) and m.get("id") and m.get("loaded") is True
+        ]
+        return rows, complete
+    except (ValueError, TypeError) as e:
         log.warning("oMLX loaded status failed: %s", e)
         return [], False
 
@@ -163,11 +154,10 @@ async def list_loaded(cfg: dict) -> list[dict]:
     return rows
 
 
-async def read_models_status(cfg: dict) -> list[dict] | None:
+async def read_models_status(cfg: dict) -> list | None:
     """Read the complete model status once, or report an unavailable snapshot."""
     api_base = _api_base(cfg)
     if not api_base:
-        log.warning("oMLX model status failed: missing endpoint")
         return None
     try:
         headers = await public_headers(cfg, url=f"{api_base}/models/status")
@@ -181,9 +171,7 @@ async def read_models_status(cfg: dict) -> list[dict] | None:
         if not isinstance(models, list):
             log.warning("oMLX model status failed: invalid model list")
             return None
-        return [{"identifier": m.get("id", ""), "loaded": m.get("loaded") is True,
-                 "size_bytes": int(m.get("estimated_size") or 0)}
-                for m in models if isinstance(m, dict) and m.get("id")]
+        return models
     except (httpx.HTTPError, OmlxPublicAuthError, ValueError, TypeError) as e:
         log.warning("oMLX model status failed: %s", e)
         return None
@@ -191,29 +179,20 @@ async def read_models_status(cfg: dict) -> list[dict] | None:
 
 async def list_disk_models(cfg: dict) -> list[dict]:
     """Return discovered-but-not-loaded models from ``GET /v1/models/status``."""
-    api_base = _api_base(cfg)
-    if not api_base:
-        return []
+    models = await read_models_status(cfg)
     try:
-        headers = await public_headers(cfg, url=f"{api_base}/models/status")
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(f"{api_base}/models/status", headers=headers)
-            if resp.status_code != 200:
-                return []
-            return [
-                {
-                    "identifier": m.get("id", ""),
-                    "size_bytes": int(m.get("estimated_size") or 0),
-                    "context_length": extract_context_length(m),
-                    "server_id": cfg.get("server_id"),
-                    "server_name": cfg.get("instance_name"),
-                }
-                for m in (resp.json().get("models") or [])
-                if m.get("id") and m.get("loaded") is False
-            ]
-    except (httpx.HTTPError, ValueError) as e:
-        from loguru import logger
-        logger.warning(f"oMLX list_disk_models failed: {e}")
+        return [
+            {
+                "identifier": m.get("id", ""),
+                "size_bytes": int(m.get("estimated_size") or 0),
+                "context_length": extract_context_length(m),
+                "server_id": cfg.get("server_id"),
+                "server_name": cfg.get("instance_name"),
+            }
+            for m in models or [] if isinstance(m, dict) and m.get("id") and m.get("loaded") is False
+        ]
+    except (ValueError, TypeError) as e:
+        log.warning("oMLX list_disk_models failed: %s", e)
         return []
 
 

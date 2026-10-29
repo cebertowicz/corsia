@@ -51,8 +51,8 @@ def test_read_models_status_returns_loaded_and_disk_rows(monkeypatch):
     ]})})
     _patch_httpx(monkeypatch, router)
     assert asyncio.run(read_models_status(CFG_PUBLIC)) == [
-        {"identifier": "loaded", "loaded": True, "size_bytes": 42},
-        {"identifier": "disk", "loaded": False, "size_bytes": 12},
+        {"id": "loaded", "loaded": True, "estimated_size": 42},
+        {"id": "disk", "loaded": False, "estimated_size": 12},
     ]
     assert len(router.calls) == 1
 

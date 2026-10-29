@@ -132,8 +132,8 @@
 			<div class="sorted">
 				{#key $prefersReducedMotion ? sort : null}
 					<div class="sorted-list" in:peerFade out:peerFade>
-						{#each groups as group (group.name)}
-							<section class="model" animate:flip={moveParams()}>
+						{#each groups as group, i (group.name)}
+							<section class="model" style:z-index={groups.length - i} animate:flip={moveParams()}>
 								<h3>{group.name}</h3>
 								{#each group.builds as build (build.repository)}
 									<AddModelBuildRow {group} {build} recommended={data?.recommended_repository === build.repository}
@@ -163,6 +163,6 @@
 	/* Under reduced motion the list before and after a re-sort share one cell and crossfade. */
 	.sorted { display: grid; }
 	.sorted-list { grid-area: 1 / 1; min-width: 0; }
-	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); background: var(--bg-secondary); }
+	.model { position: relative; padding: var(--space-3) 0; border-top: 1px solid var(--border); background: var(--bg-secondary); }
 	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>
