@@ -17,7 +17,7 @@ from tools.tool_surface import ToolCallTool, ToolsLoadTool
 
 CORE = [
     "bash", "continuity_edit", "edit_file", "glob", "grep", "list_dir",
-    "multi_edit", "plan_read", "plan_update", "read_file", "tool_call",
+    "multi_edit", "plan_read", "plan_update", "post_update", "read_file", "tool_call",
     "tools_load", "write_file",
 ]
 

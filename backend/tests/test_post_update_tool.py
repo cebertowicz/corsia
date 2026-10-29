@@ -166,6 +166,6 @@ def test_post_update_reaches_native_claude_code_and_codex(tmp_path):
     codex = {tool["name"] for tool in to_dynamic_tool_specs(external)}
 
     assert "post_update" in registry.tool_names
-    assert "post_update" in pack_members()["history"]
-    assert {"tools_load", "tool_call"} <= cc
-    assert {"tools_load", "tool_call"} <= codex
+    assert "post_update" not in pack_members()["history"]
+    assert {"tools_load", "tool_call", "post_update"} <= cc
+    assert {"tools_load", "tool_call", "post_update"} <= codex

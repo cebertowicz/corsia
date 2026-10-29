@@ -259,7 +259,7 @@ async def test_replayed_reminder_renders_unchanged(deleg_db):
 
 
 def test_post_update_is_reachable_on_every_harness_surface():
-    """One advertised list serves native, Claude Code and Codex; post_update rides its tools_load index."""
+    """One advertised list serves native, Claude Code and Codex directly."""
     from subagents.harness_tool_bridge import build_tool_registry
     from tools.catalog import is_reachable
     from tools.tool_surface import TOOL_CALL, TOOLS_LOAD, pack_index, reachable_tool_names
@@ -267,11 +267,11 @@ def test_post_update_is_reachable_on_every_harness_surface():
     registry = build_tool_registry()
     assert registry.has("post_update") and is_reachable("post_update")
     assert "post_update" in reachable_tool_names(registry)
-    assert "- post_update:" in pack_index(registry)
+    assert "- post_update:" not in pack_index(registry)
     from subagents.harness_tool_bridge import dynamic_tool_definitions
 
     advertised = {d["function"]["name"] for d in dynamic_tool_definitions(registry)}
-    assert {TOOLS_LOAD, TOOL_CALL} <= advertised
+    assert {TOOLS_LOAD, TOOL_CALL, "post_update"} <= advertised
 
 
 def test_guidance_names_what_is_worth_sending_and_rejects_noise():

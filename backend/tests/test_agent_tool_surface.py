@@ -160,6 +160,9 @@ async def test_native_cc_and_codex_share_canonical_plan_surface(tmp_path, monkey
     codex_by_name = {item["name"]: item["inputSchema"] for item in codex}
 
     assert native_by_name == canonical_by_name
+    post_update = native_by_name["post_update"]["function"]["parameters"]
+    assert "text" in post_update["required"]
+    assert post_update == cc_by_name["post_update"] == codex_by_name["post_update"]
     assert _ADVERTISED_PLAN_TOOLS <= native_by_name.keys()
     from tools.catalog import pack_members
 
