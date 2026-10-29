@@ -152,13 +152,22 @@ def _plans_hear(source_kind: str, source_id: str) -> None:
 
 
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
-    """Hand the corrections worker an admitted owner message; best effort, never failing the send."""
+    """Hand Plans and the corrections worker an admitted owner message; best effort, never failing the send.
+
+    Plans hears any message holding the person's words, comment notes included;
+    the corrections worker still takes typed text only.
+    """
     from core.corrections_recording import is_owner_authored_message
     from jobs.corrections_realtime import notify
 
     try:
-        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
+        from plans.public import person_message_words
+
+        if accepted.duplicate:
+            return
+        if person_message_words(role=role, content=content, metadata=metadata):
             _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if is_owner_authored_message(role=role, content=content, metadata=metadata):
             notify(SOURCE_KIND_MESSAGE, accepted.message_id)
     except Exception:
         logger.exception("corrections classifier admission notification failed")
