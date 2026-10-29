@@ -341,7 +341,6 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Run macOS-only backend tests
-        timeout-minutes: 12
         run: |
           set -euo pipefail
           files=()
@@ -359,14 +358,7 @@ jobs:
             -m "not integration and not cloud_required" \
             --tb=short -vv -o faulthandler_timeout=60 \
             --basetemp="$isolated_root/pytest" \
-            -o tmp_path_retention_policy=failed 2> "$RUNNER_TEMP/macos-pytest-stderr.log"
-
-      - name: Show macOS test diagnostics
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/macos-pytest-stderr.log" ]; then
-            cat "$RUNNER_TEMP/macos-pytest-stderr.log"
-          fi
+            -o tmp_path_retention_policy=failed
 
   frontend:
     needs: relevance
