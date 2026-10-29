@@ -12,3 +12,10 @@ def migrate_163_to_164(conn: sqlite3.Connection) -> None:
         synced_at TEXT NOT NULL,
         PRIMARY KEY (owner_thread_id, file_path)
     )""")
+    conn.execute("""INSERT INTO measure_files(owner_thread_id,file_path,file_sha256,version_attr,synced_at)
+        SELECT owner_thread_id,file_path,file_sha256,NULL,synced_at FROM (
+            SELECT owner_thread_id,file_path,file_sha256,synced_at,
+                   ROW_NUMBER() OVER (PARTITION BY owner_thread_id,file_path
+                                      ORDER BY synced_at DESC, rowid DESC) AS rank
+            FROM measure_definitions
+        ) WHERE rank=1""")

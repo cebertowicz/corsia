@@ -31,6 +31,8 @@ from core.corrections_recording import (
     DECISION_SUBJECT_PREFIX,
     LABEL_CORRECTION,
     MESSAGE_SUBJECT_PREFIX,
+    SENT_BACK_SUBJECT_PREFIX,
+    SELF_CAUGHT_SUBJECT_PREFIX,
     LABEL_NOT_CORRECTION,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
@@ -159,23 +161,23 @@ def plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
 
     Missing source events and missing corrected nodes stay unattributed.
     """
-    rows = db.execute("""
+    rows = db.execute(f"""
         SELECT f.subject_key,e.created_at AS source_at,f.attributes,n.id AS source_node
         FROM outcome_events f
         LEFT JOIN plan_node_events e ON e.id = CASE
-          WHEN f.subject_key LIKE 'plan-review-rejected:%'
-            THEN substr(f.subject_key, length('plan-review-rejected:') + 1)
-          WHEN f.subject_key LIKE 'plan-correction-created:%'
-            THEN substr(f.subject_key, length('plan-correction-created:') + 1)
-          END AND ((f.subject_key LIKE 'plan-review-rejected:%' AND e.event='review_rejected')
-                OR (f.subject_key LIKE 'plan-correction-created:%' AND e.event='correction_created'))
+          WHEN f.subject_key LIKE '{SENT_BACK_SUBJECT_PREFIX}%'
+            THEN substr(f.subject_key, length('{SENT_BACK_SUBJECT_PREFIX}') + 1)
+          WHEN f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'
+            THEN substr(f.subject_key, length('{SELF_CAUGHT_SUBJECT_PREFIX}') + 1)
+          END AND ((f.subject_key LIKE '{SENT_BACK_SUBJECT_PREFIX}%' AND e.event='review_rejected')
+                OR (f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%' AND e.event='correction_created'))
         LEFT JOIN plan_nodes n ON n.id = CASE
           WHEN e.event='review_rejected' THEN e.node_id
           WHEN e.event='correction_created' AND json_valid(e.payload_json)
             THEN json_extract(e.payload_json,'$.source_node_id') END
         WHERE f.event_name=? AND f.retracted_at IS NULL
-          AND (f.subject_key LIKE 'plan-review-rejected:%'
-            OR f.subject_key LIKE 'plan-correction-created:%')
+          AND (f.subject_key LIKE '{SENT_BACK_SUBJECT_PREFIX}%'
+            OR f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%')
     """, (CORRECTION_EVENT,)).fetchall()
     facts = []
     for row in rows:

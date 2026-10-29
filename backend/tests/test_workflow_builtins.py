@@ -51,6 +51,24 @@ def test_spanning_period_and_version(db):
     assert read(db, 'runs', '2026-10-04', '2026-10-06').versions['v1'].value == 1
 
 
+def test_usage_respects_half_hour_boundaries(db):
+    node(db, 'old')
+    for identity, at, prompt in [('before', '2026-10-02T00:29:59Z', 1_000_000),
+                                 ('start', '2026-10-02T00:30:00Z', 2_000_000),
+                                 ('inside', '2026-10-02T01:29:59Z', 3_000_000),
+                                 ('end', '2026-10-02T01:30:00Z', 4_000_000)]:
+        usage(db, identity, 'old', prompt=prompt)
+        db.execute('UPDATE llm_usage SET created_at=? WHERE id=?', (at, identity))
+    for builtin in ('fresh_tokens', 'cost_usd'):
+        result = read(db, builtin, '2026-10-02T00:30:00Z', '2026-10-02T01:30:00Z').versions['v1']
+        assert result.n == 2
+        assert result.value and result.value > 0
+    assert read(db, 'fresh_tokens', '2026-10-02T00:30:00Z', '2026-10-02T01:30:00Z').versions['v1'].value == 5_000_000
+    selected = read(db, 'cost_usd', '2026-10-02T00:30:00Z', '2026-10-02T01:30:00Z').versions['v1'].value
+    whole = read(db, 'cost_usd', '2026-10-02T00:00:00Z', '2026-10-02T02:00:00Z').versions['v1'].value
+    assert selected == whole / 2
+
+
 def test_only_latest_active_classifier_counts(db):
     node(db, 'old')
     activate(db)

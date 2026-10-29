@@ -13,7 +13,7 @@ from tools.workflow_owners import thread_workflow_owners
 
 def definitions(db: sqlite3.Connection, owner: str) -> list[dict[str, Any]]:
     """Return latest live definitions and file metadata for an agent."""
-    rows = db.execute("""SELECT d.kind,d.name,d.version,d.spec_json,d.file_path,f.version_attr,f.owner_thread_id
+    rows = db.execute("""SELECT d.kind,d.name,d.version,d.spec_json,d.file_path,f.version_attr
         FROM measure_definitions d LEFT JOIN measure_files f
           ON f.owner_thread_id=d.owner_thread_id AND f.file_path=d.file_path
         WHERE d.owner_thread_id=? AND d.version=(SELECT MAX(v.version) FROM measure_definitions v
@@ -21,7 +21,7 @@ def definitions(db: sqlite3.Connection, owner: str) -> list[dict[str, Any]]:
           AND d.removed=0""", (owner,)).fetchall()
     workflows = thread_workflow_owners(owner, db)
     return [{"kind": row[0], "name": row[1], "version": row[2], "spec": json.loads(row[3]),
-             "file_path": row[4], "version_attr": row[5], "version_rule_synced": row[6] is not None,
+             "file_path": row[4], "version_attr": row[5],
              "workflow": workflow_for_file(row[4], owner, workflows)} for row in rows]
 
 
@@ -61,6 +61,7 @@ def facts(db: sqlite3.Connection, owner: str, project: str | None, declarations:
     params = MeasurementScope(project="all", agent=owner).params(user_id)
     workers = {r[0] for r in db.execute(scope_cte() + "SELECT id FROM scope_threads", params)}
     declared = {d["name"]: d for d in declarations if d["kind"] == "event"}
+    user_threads = {r[0] for r in db.execute("SELECT id FROM threads WHERE user_id=?", (user_id,))}
     rows = db.execute("""SELECT event_name,ts,subject_key,project_id,agent_thread_id,attributes,provenance,corroborated_by
         FROM outcome_events WHERE event_name IN (SELECT value FROM json_each(?)) AND retracted_at IS NULL""",
         (json.dumps(sorted(names | set(declared))),)).fetchall()
@@ -74,7 +75,7 @@ def facts(db: sqlite3.Connection, owner: str, project: str | None, declarations:
         elif row["event_name"].startswith("github."):
             if str(attrs.get("repo", "")).lower() not in repositories:
                 continue
-        elif project is None or row["project_id"] != project:
+        elif project is None or row["project_id"] != project or row["agent_thread_id"] not in user_threads:
             continue
         attrs["_declared_by_owner"] = definition is not None and row["agent_thread_id"] in workers
         version = attrs.get("workflow_version")

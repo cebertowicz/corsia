@@ -110,6 +110,19 @@ def test_descendant_facts_respect_user_scope(client):
     assert period(read(http), "items")["value"] == 1
 
 
+def test_undeclared_events_stay_within_user(client):
+    http, path = client
+    db = get_db()
+    definition(db, path, "kpi", "items", {"formula": "count", "num": {"event": "other.done"}, "min_n": 1})
+    _seed_thread(db, "same-user", project_id="p", agent=True)
+    _seed_thread(db, "foreign-user", user_id="other", project_id="p", agent=True)
+    fact(db, "other.done", 5, {"key": "allowed"}, agent="same-user")
+    fact(db, "other.done", 6, {"key": "excluded"}, agent="foreign-user")
+    db.commit()
+    db.close()
+    assert period(read(http), "items")["value"] == 1
+
+
 def test_late_label_anchors_to_run_and_version(client):
     http, path = client
     db = get_db()
@@ -154,9 +167,9 @@ def test_synced_version_attribute_and_missing_metadata(client):
     fact(db, "demo.done", 6, {"revision": "rev1"})
     db.commit()
     db.close()
-    unsynced = item(read(http), "items")
-    assert unsynced["version_status"] == "version rule not synced yet; run measure_sync"
-    assert any(v["label"] == unsynced["version_status"] for v in unsynced["versions"])
+    missing = item(read(http), "items")
+    assert "version_status" not in missing
+    assert any(v["label"] == "Unversioned" for v in missing["versions"])
     db = get_db()
     db.execute("INSERT INTO measure_files VALUES ('owner',?,'hash','revision','2026-01-01')", (str(path / "measures.yaml"),))
     db.commit()

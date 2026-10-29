@@ -46,7 +46,8 @@ class WorkflowHistory:
     owner: str | None
     runs: tuple[Run, ...]
     definitions: tuple[Definition, ...] = ()
-    version_attr: str | None = None  # The verdict read side currently passes None.
+    # Verdicts retain their existing version selection; adopting file rules changes judged runs.
+    version_attr: str | None = None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
 
     def _in_start_order(self) -> list[Run]:

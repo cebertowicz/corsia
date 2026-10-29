@@ -30,7 +30,7 @@ def _repositories(db, project: str | None) -> set[str]:
             for repo in github_repositories_for_policy(policy)}
 
 
-def _versions(rows, version_rule_synced: bool = True) -> list[dict[str, Any]]:
+def _versions(rows) -> list[dict[str, Any]]:
     first: dict[str, datetime] = {}
     for row in rows:
         version = row.version or ""
@@ -42,8 +42,7 @@ def _versions(rows, version_rule_synced: bool = True) -> list[dict[str, Any]]:
     if "legacy" in first:
         labels.insert(0, {"version": "legacy", "label": "Legacy (rebuilt)", "first_seen": first["legacy"].isoformat(), "short_hash": None})
     if "" in first:
-        label = "Unversioned" if version_rule_synced else "version rule not synced yet; run measure_sync"
-        labels.append({"version": "", "label": label, "first_seen": first[""].isoformat(), "short_hash": None})
+        labels.append({"version": "", "label": "Unversioned", "first_seen": first[""].isoformat(), "short_hash": None})
     return labels
 
 
@@ -97,11 +96,7 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
             version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
             if builtin_names and item['workflow']:
                 version_rows += _task_versions(db, user_id, scope, item['workflow'])
-            version_rule_synced = item['version_rule_synced'] and all(
-                entry['version_rule_synced'] for entry in declarations
-                if entry['kind'] == 'event' and (entry['file_path'] == item['file_path']
-                                                  or entry['name'] in event_names(spec)))
-            versions = _versions(version_rows, version_rule_synced)
+            versions = _versions(version_rows)
             periods = []
             for index, period in enumerate((*grain.periods, grain.current)):
                 start, end = boundaries[index:index + 2]
@@ -120,9 +115,7 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
                     by_version.append({"version": version["version"], **part})
                 periods.append({"period": period, **value, "versions": by_version})
             results.append({"name": item["name"], "definition_version": item["version"], "spec": spec,
-                            "workflow": item["workflow"], "versions": versions, "periods": periods,
-                            "version_status": None if version_rule_synced else
-                            "version rule not synced yet; run measure_sync"})
+                            "workflow": item["workflow"], "versions": versions, "periods": periods})
         return {"scope": scope.response(), "kpis": results}
     finally:
         db.close()

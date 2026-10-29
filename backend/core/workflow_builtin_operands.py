@@ -80,7 +80,7 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
             SELECT u.plan_node_id,SUM({FRESH_TOKEN_SQL}) AS amount,COUNT(*) AS n,
                    SUM({FRESH_TOKEN_UNKNOWN_SQL}) AS unknown FROM llm_usage u
             WHERE u.plan_node_id IN (SELECT value FROM json_each(?))
-              AND strftime('%Y-%m-%d %H:00:00',u.created_at)>=datetime(?) AND strftime('%Y-%m-%d %H:00:00',u.created_at)<datetime(?)
+              AND datetime(u.created_at)>=datetime(?) AND datetime(u.created_at)<datetime(?)
             GROUP BY u.plan_node_id
         """, (ids, start, end)).fetchall()
         for row in rows:
@@ -91,7 +91,7 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
     else:
         sql = grouped_usage_sql({'node_id': 'u.plan_node_id'}, """llm_usage u
             WHERE u.plan_node_id IN (SELECT value FROM json_each(?))
-              AND strftime('%Y-%m-%d %H:00:00',u.created_at)>=datetime(?) AND strftime('%Y-%m-%d %H:00:00',u.created_at)<datetime(?)""")
+              AND datetime(u.created_at)>=datetime(?) AND datetime(u.created_at)<datetime(?)""")
         rows = [dict(row) for row in db.execute(sql, (ids, start, end)).fetchall()]
         resolve = IdentityResolver(db)
         for row in rows:
