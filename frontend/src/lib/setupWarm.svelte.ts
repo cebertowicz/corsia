@@ -55,6 +55,7 @@ export function createSetupWarm() {
 	let running = $state(false);
 	let percent = $state<number | null>(null);
 	let attempted = '';
+	let noCandidateSession: string | null = null;
 	let pending: Promise<void> | null = null;
 	let controller: AbortController | null = null;
 	let stopSubscription: (() => void) | undefined;
@@ -76,13 +77,17 @@ export function createSetupWarm() {
 
 	function start(catalog: SetupModel[], session: string | null): void {
 		const candidate = catalog.find((row) => row.connection === 'omlx' && row.backend === 'network' && setupModelWorks(row));
-		if (!session) return;
+		if (!session) { noCandidateSession = null; return; }
 		if (!candidate) {
-			void fetchCorsiaAgent(session).then((lookup) => {
-				if (lookup.kind === 'target') logSkip(lookup.target.thread_id, session, 'no_candidate');
-			}).catch(() => {});
+			if (noCandidateSession !== session) {
+				noCandidateSession = session;
+				void fetchCorsiaAgent(session).then((lookup) => {
+					if (lookup.kind === 'target') logSkip(lookup.target.thread_id, session, 'no_candidate');
+				}).catch(() => {});
+			}
 			return;
 		}
+		noCandidateSession = null;
 		const model = getModelDispatchId(candidate);
 		if (!model || attempted === model || running) return;
 		attempted = model;

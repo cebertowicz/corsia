@@ -188,7 +188,16 @@ describe('SetupScreen completion', () => {
 
 		const calls = vi.mocked(fetch).mock.calls.map(([url, init]) => ({ url: String(url), method: init?.method ?? 'GET', body: init?.body }));
 		// The agent's model stays unset: the person picks it on the first chat.
-		expect(calls.filter((call) => call.url.startsWith('/api/threads') && call.method !== 'GET')).toEqual([]);
+		const threadWrites = calls.filter((call) => call.url.startsWith('/api/threads') && call.method !== 'GET');
+		expect(threadWrites.filter((call) => call.method === 'PATCH' || call.url.split('?')[0].endsWith('/set-model'))).toEqual([]);
+		expect(threadWrites).toHaveLength(1);
+		for (const call of threadWrites) {
+			const url = new URL(call.url, 'http://localhost');
+			expect(call.method).toBe('POST');
+			expect(url.pathname).toBe('/api/threads/corsia-thread/warm');
+			expect(['no_candidate', 'agent_has_model', 'first_run_not_pending', 'warm_failed']).toContain(url.searchParams.get('skip_reason'));
+			expect(url.searchParams.get('skip_reason')).toBe('no_candidate');
+		}
 		const progress = calls.filter((call) => call.url === '/api/setup/progress' && call.method === 'PUT').map((call) => JSON.parse(String(call.body)));
 		expect(progress.at(-1)).toMatchObject({ completed: true });
 	});
