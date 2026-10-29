@@ -10,7 +10,7 @@ from api.restart_shell import spawn_restart_lifecycle
 
 @pytest.mark.parametrize(
     ("scenario", "expected"),
-    [("timeout", 200), ("unloaded", 200), ("loaded", 1), ("success", 200),
+    [("timeout", 200), ("unloaded", 200), ("loaded", 1), ("loaded64", 1), ("success", 200),
      ("refusal", 1), ("refusal200", 1)],
 )
 def test_update_exit_distinguishes_teardown(tmp_path, scenario, expected):
@@ -20,9 +20,9 @@ def test_update_exit_distinguishes_teardown(tmp_path, scenario, expected):
 source "{service}"
 fail() {{ :; }}
 launchctl_bootout_wait() {{
-    case "$SCENARIO" in timeout) return 124 ;; success) return 0 ;; *) return 1 ;; esac
+    case "$SCENARIO" in timeout) return 124 ;; success) return 0 ;; loaded64) return 64 ;; *) return 1 ;; esac
 }}
-service_is_loaded() {{ [ "$SCENARIO" = loaded ]; }}
+service_is_loaded() {{ [ "$SCENARIO" = loaded ] || [ "$SCENARIO" = loaded64 ]; }}
 if [ "$SCENARIO" = refusal200 ]; then exit 200; fi
 if [ "$SCENARIO" != refusal ]; then
     bootout_service_and_wait domain label || :
