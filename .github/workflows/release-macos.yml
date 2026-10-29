@@ -1,6 +1,8 @@
 name: Build unsigned macOS app
 
 on:
+  schedule:
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -27,26 +29,61 @@ env:
   DEV_UPDATER_ENDPOINT: https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json
 
 jobs:
-  verify:
-    name: Verify build input
+  hourly:
+    name: Check hourly dev build
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
+      statuses: write
+    outputs:
+      commit_sha: ${{ steps.decision.outputs.commit_sha }}
+      should_build: ${{ steps.decision.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - id: decision
+        env:
+          HOURLY_DEV_BUILD: ${{ vars.HOURLY_DEV_BUILD }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash desktop/scripts/hourly-dev-build.sh
+      - name: Mark the dev build pending
+        if: steps.decision.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ steps.decision.outputs.commit_sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=pending -f context=dev-build
+
+  verify:
+    needs: hourly
+    if: always() && (github.event_name == 'workflow_dispatch' || (needs.hourly.result == 'success' && needs.hourly.outputs.should_build == 'true'))
+    name: ${{ github.event_name == 'schedule' && format('Dev build {0}', needs.hourly.outputs.commit_sha) || 'Verify build input' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
     outputs:
       commit_sha: ${{ steps.tag.outputs.commit_sha }}
       release_tag: ${{ steps.tag.outputs.release_tag }}
       should_build: ${{ steps.tag.outputs.should_build }}
     steps:
+      - name: Mark a manual dev build pending
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'dev' && github.ref == 'refs/heads/dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=pending -f context=dev-build
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
           fetch-depth: 0
       - id: tag
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          case "${{ inputs.channel }}" in
+          case "${{ github.event_name == 'schedule' && 'dev' || inputs.channel }}" in
             stable)
               git check-ref-format "refs/tags/$RELEASE_TAG"
               [[ "$RELEASE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
@@ -60,7 +97,7 @@ jobs:
               should_build=true
               ;;
             dev)
-              [ "$GITHUB_REF" = "refs/heads/dev" ] || {
+              [ "$GITHUB_REF" = "refs/heads/dev" ] || [ "$GITHUB_EVENT_NAME" = schedule ] || {
                 echo "dev channel builds must be dispatched from refs/heads/dev" >&2
                 exit 1
               }
@@ -119,7 +156,7 @@ jobs:
       contents: read
     env:
       RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
-      CHANNEL: ${{ inputs.channel }}
+      CHANNEL: ${{ github.event_name == 'schedule' && 'dev' || inputs.channel }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -159,3 +196,34 @@ jobs:
           path: CORSIA.app.zip
           if-no-files-found: error
           retention-days: 7
+
+  dev-status:
+    name: Complete dev build status
+    needs: [hourly, verify, build]
+    if: always() && ((github.event_name == 'schedule' && needs.hourly.outputs.should_build == 'true') || (github.event_name == 'workflow_dispatch' && inputs.channel == 'dev' && github.ref == 'refs/heads/dev'))
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Record the outcome
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
+          HOURLY_RESULT: ${{ needs.hourly.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          state=success
+          if [ "$HOURLY_RESULT" = cancelled ] || [ "$VERIFY_RESULT" = cancelled ] || [ "$BUILD_RESULT" = cancelled ]; then
+            state=error
+          elif [ "$HOURLY_RESULT" = failure ] || [ "$VERIFY_RESULT" = failure ] || [ "$BUILD_RESULT" = failure ]; then
+            state=failure
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f "state=$state" -f context=dev-build
+      - name: Record cancellation
+        if: ${{ cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=error -f context=dev-build
