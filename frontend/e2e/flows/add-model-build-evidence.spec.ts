@@ -288,3 +288,58 @@ test('Add model approved build states', async ({ page }, info) => {
     }
   }
 });
+
+// The changed build rows under long names, a disk that can't fit a build, a list long enough to scroll, and the
+// list's error and empty answers.
+test('Add model robustness states', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  test.setTimeout(240_000);
+  const long = { ...builds[0], name: 'Qwen3.8 Coder Next Instruct Extended Context', repository: 'org/Qwen3.8-Coder-Next-Instruct-Extended-Context-oQ4e-mtp' };
+  const blocked = { ...builds[1], disk: { state: 'insufficient', required_bytes: 160e9, free_bytes: 80e9 } };
+  const many = ['Gemma Small', 'Llama', 'Mistral', 'Phi', 'Granite', 'Olmo'].flatMap((name, i) => [4, 8].map(bits => ({
+    ...builds[2], name, repository: `org/${name.replace(' ', '-')}-oQ${bits}e`, quantization_bits: bits, download_size_gb: 10 + i * 6 + bits, download_size_bytes: (10 + i * 6 + bits) * 1e9, tokens_per_second: 120 - i * 10 - bits,
+  })));
+  const answers: Record<string, () => object> = {
+    long: () => ({ models: [long, builds[2]], recommended_repository: long.repository, disk_free_gb: 200 }),
+    disk: () => ({ models: [builds[0], blocked], recommended_repository: builds[0].repository, disk_free_gb: 80 }),
+    many: () => ({ models: [...builds, ...many], recommended_repository: builds[0].repository, disk_free_gb: 200 }),
+    empty: () => ({ models: [], recommended_repository: null, disk_free_gb: 200 }),
+  };
+  for (const viewport of [{ name: '1440', width: 1440, height: 900 }, { name: '393', width: 393, height: 852 }]) {
+    for (const theme of ['light', 'dark'] as const) {
+      for (const state of ['long', 'disk', 'many', 'empty', 'error'] as const) {
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({ colorScheme: theme });
+        await fixture(page, 'available');
+        // Registered after the fixture, so it answers first.
+        await page.route('**/api/providers/local/recommendations', route => state === 'error'
+          ? route.fulfill({ status: 503, body: '' })
+          : route.fulfill({ json: { state: 'ready', memory_gb: 256, memory_in_use_gb: 0, memory_room_gb: 240, downloads: [], ...answers[state]() } }));
+        await loginByUrl(page);
+        await openSettings(page);
+        await openSettingsSection(page, 'Providers');
+        const card = page.locator('[data-server-card="omlx-local"]');
+        await card.locator('.pr-expand').click();
+        await card.getByRole('button', { name: 'Add model', exact: true }).click();
+        const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+        if (state === 'long') await expect(sheet).toContainText('Qwen3.8 Coder Next Instruct Extended Context');
+        if (state === 'disk') {
+          await expect(sheet).toContainText('Needs 160 GB of disk · 80 GB free');
+          await expect(sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ6e/ })).toBeDisabled();
+        }
+        if (state === 'empty') await expect(sheet).toContainText('No recommended models fit this computer.');
+        if (state === 'error') {
+          await expect(sheet).toContainText('Couldn’t check which models fit this computer.');
+          await expect(sheet.getByRole('button', { name: 'Retry' })).toBeVisible();
+        }
+        if (state === 'many') {
+          await expect(sheet).toContainText('Olmo');
+          if (shots) await page.screenshot({ path: `${shots}/many-top-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+          await sheet.getByText('Olmo', { exact: true }).scrollIntoViewIfNeeded();
+        }
+        if (shots) await page.screenshot({ path: `${shots}/${state === 'many' ? 'many-scrolled' : state}-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+      }
+    }
+  }
+});
