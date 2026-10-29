@@ -38,6 +38,7 @@ def test_no_upstream_refusal_and_retry(tmp_path: Path) -> None:
     before = git(repo, "rev-parse", "HEAD")
     result = prepare(repo)
     assert result.returncode == 47
+    assert "Redeploy refused: branch main has no upstream — checkout left untouched" in result.stderr
     assert git(repo, "rev-parse", "HEAD") == before
     assert git(repo, "status", "--porcelain") == ""
     assert (repo / "code.txt").read_text() == "original code\n"
@@ -72,6 +73,7 @@ def test_diverged_refusal_and_retry(tmp_path: Path) -> None:
     tracked_before = git(repo, "rev-parse", "origin/main")
     result = prepare(repo)
     assert result.returncode == 48
+    assert "Redeploy refused: branch main and its upstream have diverged — checkout left untouched" in result.stderr
     assert "Not possible to fast-forward" in result.stderr
     assert git(repo, "rev-parse", "HEAD") == before
     assert git(repo, "status", "--porcelain") == ""
