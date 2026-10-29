@@ -74,7 +74,7 @@ async def route(kind, action, **kwargs):
 @pytest.mark.parametrize('kind,action', [('issue_comment', 'created'), ('pr_comment', 'created'),
                                          ('issue_comment', 'edited'), ('pr_comment', 'edited'),
                                          ('review', 'submitted'), ('review', 'edited')])
-async def test_unhandled_content_is_parked_as_facts_only(world, monkeypatch, kind, action):
+async def test_unhandled_outside_content_is_dead_lettered_as_facts_only(world, monkeypatch, kind, action):
     from events.connectors.github import GITHUB_ROUTED_EVENTS
     from events.router import route_event
     from infra.database import get_db

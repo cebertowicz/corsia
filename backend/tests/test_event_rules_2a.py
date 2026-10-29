@@ -881,8 +881,10 @@ def test_a_watch_ends_only_where_a_rule_added_the_delivery(isolated_db, monkeypa
     monkeypatch.setattr("events.platform.resolve_targets", _no_thread)
     made = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-3"))
 
-    # Routing chose no thread, so the rule added a wake and that delivery ends the wait.
-    assert ("owner", "woke") in {(d.thread_id, d.outcome) for d in made}
+    # Routing chose no thread, so the rule added a wake and that delivery ends the wait;
+    # the rule took the event, so it is not also dead-lettered.
+    assert {(d.thread_id, d.outcome) for d in made} == {("owner", "woke")}
+    assert _rows("SELECT id FROM dead_letter_events") == []
     assert _armed(node) == 0
 
 

@@ -59,7 +59,6 @@ def apply_webhook_rules_sync(
             return None
         added, outcomes = deliver_rule_adds(conn, envelope, decl, plan, target_filter)
         rules.record(conn, event, [*plan.settled, *outcomes])
-        plan.settled.extend(outcomes)
         emit_route_events(envelope, added)
         return plan
 

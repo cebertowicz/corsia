@@ -100,6 +100,17 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit - len(marker)] + marker
 
 
+def _ownerless(target: Target) -> bool:
+    """No owner to deliver to. An owner that has gone inactive is a fault, never a fallback."""
+    return (target.thread is None and target.resolution in ("dead_letter", "triage")
+            and target.reason != "owner_inactive")
+
+
+def _sign_text(envelope: EventEnvelope) -> str | None:
+    """A worker event's injection signs, each with its rule; ``None`` for any other event."""
+    return injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
+
+
 def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
     """The agent's note line: the event plus the type's declared line facts.
 
@@ -116,10 +127,9 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
         rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
+        if key == "injection_signs":
+            rendered = _sign_text(envelope) or rendered
         facts.append(f"{key}={rendered}")
-    signs = injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
-    if signs:
-        facts.append(f"injection signs: {signs}")
     line = _summary(envelope)
     if facts:
         line = f"{line}: {', '.join(facts)}"
@@ -150,8 +160,7 @@ def _deliver_target(
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
             return PlatformDelivery(event_id, thread, DUPLICATE)
         wake_details: dict[str, Any] = {**envelope.facts, "event_id": event_id}
-        signs = injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
-        if signs:
+        if signs := _sign_text(envelope):
             wake_details["injection_signs_text"] = signs
         if notes:
             wake_details["rule_notes"] = list(notes)
@@ -272,6 +281,7 @@ def deliver_rule_adds(
             continue
         deliveries.append(made)
         outcomes += settle_rule_delivery(db, plan, thread, delivery, made.outcome, ride=False)
+    plan.added = outcomes
     return deliveries, outcomes
 
 
@@ -340,14 +350,16 @@ def deliver_envelope_sync(
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
-        deliveries = [
-            PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
-            if reason is not None
-            else _deliver_routed(conn, envelope, target, decl, plan)
-            for target, reason in zip(targets, filtered)
-            if not (target.thread is None and target.resolution in ("dead_letter", "triage")
-                    and plan is not None and plan.handled_by())
-        ]
+        def deliver(pairs: Iterable[tuple[Target, str | None]]) -> list[PlatformDelivery]:
+            return [PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
+                    if reason is not None
+                    else _deliver_routed(conn, envelope, target, decl, plan)
+                    for target, reason in pairs]
+
+        # The ownerless fallback waits until rules' own deliveries say whether one took the event.
+        pairs = list(zip(targets, filtered))
+        fallback = [pair for pair in pairs if _ownerless(pair[0])]
+        deliveries = deliver(pair for pair in pairs if not _ownerless(pair[0]))
         if plan is not None:
             outcomes = list(plan.settled)
             for made in deliveries:
@@ -359,6 +371,8 @@ def deliver_envelope_sync(
             added, added_outcomes = deliver_rule_adds(conn, envelope, decl, plan, target_filter)
             deliveries += added
             rules.record(conn, plan.event, [*outcomes, *added_outcomes])
+        if plan is None or not plan.handled_by():
+            deliveries += deliver(fallback)
         emit_route_events(envelope, deliveries)
         return deliveries, plan
 
