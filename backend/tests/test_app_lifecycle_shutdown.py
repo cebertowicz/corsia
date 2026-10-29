@@ -77,7 +77,7 @@ def _isolate_lifespan(monkeypatch) -> None:
         def live_count(self) -> int:
             return 0
 
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: None)
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
@@ -188,7 +188,7 @@ async def test_frontend_prerequisite_precedes_database_and_runtime_startup(monke
         "ensure_frontend_built",
         lambda: events.append("frontend"),
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
 
     async with app_lifecycle.lifespan(FastAPI()):
         assert events[:2] == ["frontend", "init_db"]
@@ -208,7 +208,7 @@ async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(mon
         intervals_at_database_start.append(sys.getswitchinterval())
         raise _StopStartup
 
-    monkeypatch.setattr(app_lifecycle, "_initialize_startup", stop_at_database_start)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "initialize_startup", stop_at_database_start)
     try:
         with pytest.raises(_StopStartup):
             async with app_lifecycle.lifespan(FastAPI()):
@@ -255,7 +255,7 @@ async def test_predecessor_direct_uvicorn_lifespan_fails_before_database(
         "ensure_frontend_built",
         ensure_frontend_built,
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", init_db)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", init_db)
 
     with pytest.raises(RuntimeError, match="frontend release pairing failed"):
         async with app_lifecycle.lifespan(main.app):
@@ -270,7 +270,7 @@ async def test_durable_write_recovery_runs_immediately_after_schema_init(monkeyp
 
     _isolate_lifespan(monkeypatch)
     events: list[str] = []
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
     monkeypatch.setattr(
         durable_writes,
         "recover_write_intents",

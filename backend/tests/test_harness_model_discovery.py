@@ -1453,6 +1453,26 @@ async def test_cancelled_waiter_does_not_pin_completed_single_flight(
     assert discovery_calls == 2
 
 
+async def test_claude_status_failure_records_unknown_under_the_original_fence(monkeypatch):
+    from connections import account_identity, claude_discovery, source_state
+
+    writes = []
+    fence = object()
+
+    async def run_in_db(fn, *args, **kwargs):
+        if fn is account_identity.capture_default_observation:
+            return fence
+        writes.append((fn, args, kwargs))
+
+    async def spawn(*args, **kwargs):
+        raise OSError('unavailable')
+
+    monkeypatch.setattr(claude_discovery, 'run_in_db', run_in_db)
+    monkeypatch.setattr(claude_discovery.asyncio, 'create_subprocess_exec', spawn)
+    assert await claude_discovery.auth_status_state('/mock/claude') == source_state.UNVERIFIED
+    assert writes == [(account_identity.observe_discovered_identity, ('claude-code', {'_login_status': 'unknown'}), {'token': fence})]
+
+
 async def test_claude_catalog_of_a_signed_out_cli_is_needs_auth_not_ready(monkeypatch):
     """A signed-out CLI still lists its static models; that must not read as ready."""
     from connections import claude_discovery, source_state

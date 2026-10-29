@@ -173,19 +173,30 @@ async def auth_status_state(binary: str) -> str:
     """needs_auth only when ``claude auth status`` exits 1; anything else is unverified.
 
     A failed session says something went wrong, not that the user is signed
-    out, so ask the CLI's own answer once, bounded. Only the exit code is read:
-    the output carries the account's email and is never captured.
+    out, so ask the CLI's own answer once, bounded. The JSON login flag is read
+    without retaining the account details the output can contain.
     """
+    from connections.account_identity import capture_default_observation, claude_login_status, observe_discovered_identity
+
+    observation = await run_in_db(capture_default_observation, "claude-code")
     try:
         process = await asyncio.create_subprocess_exec(
             binary, "auth", "status", stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             env=clean_claude_env(),
         )
         async with killed_on_exit(process):
-            code = await asyncio.wait_for(process.wait(), timeout=AUTH_STATUS_TIMEOUT_SECONDS)
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=AUTH_STATUS_TIMEOUT_SECONDS)
+        code = process.returncode
+        try:
+            report = json.loads(stdout)
+        except ValueError:
+            report = None
+        status = claude_login_status(report, code)
+        await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": status}, token=observation)
     except (OSError, asyncio.TimeoutError) as exc:
         log.warning("claude auth status did not answer: %s", type(exc).__name__)
+        await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": "unknown"}, token=observation)
         return source_state.UNVERIFIED
     return source_state.NEEDS_AUTH if code == 1 else source_state.UNVERIFIED
 

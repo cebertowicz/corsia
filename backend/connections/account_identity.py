@@ -45,6 +45,14 @@ def codex_identity(home: str | Path) -> dict[str, str]:
         return {}
 
 
+def claude_login_status(report: object, code: int | None) -> str:
+    """Classify the CLI status without retaining its account details."""
+    flag = report.get("loggedIn") if isinstance(report, dict) else None
+    if flag is False and code in (0, 1):
+        return "signed_out"
+    return "signed_in" if flag is True and code == 0 else "unknown"
+
+
 async def default_identity(provider: str) -> dict[str, str]:
     """Read the ambient Default only, never signing it in or out."""
     if provider == "codex":
@@ -66,8 +74,11 @@ async def default_identity(provider: str) -> dict[str, str]:
         async with killed_on_exit(process):
             async with asyncio.timeout(_COMMAND_SECONDS):
                 stdout, _ = await process.communicate()
-        report = json.loads(stdout) if process.returncode == 0 else None
-        if not isinstance(report, dict) or report.get("loggedIn") is not True:
+        report = json.loads(stdout)
+        status = claude_login_status(report, process.returncode)
+        if status == "signed_out":
+            return {"_login_status": status}
+        if status != "signed_in":
             return {}
         return profile.facts_from_status(report)
     except (OSError, TimeoutError, ValueError):
@@ -106,10 +117,12 @@ def observe_discovered_identity(provider: str, identity: dict, *, token, db=None
     Unreadable or incomplete facts are not evidence that the login changed, so
     they record nothing: the last known identity, receipt and usage stand.
     """
-    from connections.account_observation import has_comparison_facts
+    from connections.account_observation import commit_default_visibility, has_comparison_facts
 
-    if token is None or not has_comparison_facts(provider, identity):
+    if token is None:
         return True
+    if not has_comparison_facts(provider, identity) and identity.get('_login_status') != 'signed_out':
+        return commit_default_visibility(provider, identity, token=token, db=db)
     return record_default_identity(provider, identity, token=token,
                                    schedule_usage_check=False, db=db).accepted
 
@@ -138,4 +151,6 @@ async def refresh_default_identity(provider: str):
         identity = await default_identity(provider)
     except Exception:  # noqa: BLE001 - a failed ambient read must clear the old comparison snapshot
         identity = {}
+    if provider == 'codex':
+        identity = {**identity, '_login_status': 'not_read'}
     return await run_in_db(record_default_identity, provider, identity, token=token)

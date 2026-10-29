@@ -28,7 +28,7 @@
 		renameVendorAccount,
 		signOutVendorAccount,
 		startVendorSignin,
-		vendorAccounts,
+		vendorAccounts, visibleVendorAccounts, rememberVisibleSignin,
 		type SigninResult,
 		type VendorAccount,
 	} from '$lib/stores/vendorAccounts';
@@ -58,15 +58,15 @@
 	// The historical view owns its removed accounts, so a later plain reload of the shared list cannot strand it.
 	let historicalAccounts = $state<VendorAccount[] | null>(null);
 	const showHistorical = $derived(historicalAccounts !== null);
-
 	const removedAccounts = $derived((historicalAccounts ?? []).filter((account) => account.provider === provider.name));
-	const accounts = $derived([...$vendorAccounts.filter((account) => account.provider === provider.name && account.state !== 'removed' && !removedAccounts.some((removed) => removed.id === account.id)), ...removedAccounts]);
+	const accounts = $derived(visibleVendorAccounts($vendorAccounts, provider.name, removedAccounts));
 	const showRows = $derived(accounts.length > 0 || Object.keys(signin).length > 0);
-	const rolloverActive = $derived(!!policyProvider?.rollover && policyProvider.units.length >= 2);
+	const visibleUnitCount = $derived((policyProvider?.units ?? []).filter((unit) => accounts.some((account) => account.id === unit.id && account.state !== 'removed')).length);
+	const rolloverActive = $derived(!!policyProvider?.rollover && visibleUnitCount >= 2);
 	// The saved rollover order is the order of `units`: numbered rows follow it, and accounts with no unit (removed ones) follow, unnumbered.
 	const rows = $derived.by(() => {
 		const byId = new Map(accounts.filter((account) => account.state !== 'removed').map((account) => [account.id, account]));
-		const ordered = (policyProvider?.units ?? []).flatMap((unit, position) => byId.has(unit.id) ? [{ account: byId.get(unit.id)!, unit, position }] : []);
+		const ordered = (policyProvider?.units ?? []).filter((unit) => byId.has(unit.id)).map((unit, position) => ({ account: byId.get(unit.id)!, unit, position }));
 		const numbered = new Set(ordered.map((row) => row.account.id));
 		return [...ordered, ...accounts.filter((account) => !numbered.has(account.id)).map((account) => ({ account, unit: undefined, position: -1 }))];
 	});
@@ -124,8 +124,8 @@
 	}
 
 	function rememberSignin(result: SigninResult) {
-		signin = { ...signin, [result.account_id]: result };
-		if (result.status === 'refused') void focusHolder(result);
+		signin = rememberVisibleSignin(signin, result, $vendorAccounts);
+		if (signin[result.account_id] && result.status === 'refused') void focusHolder(result);
 	}
 
 	function clearSignin(accountId: string) {
@@ -282,7 +282,7 @@
 			<Button size="sm" variant="ghost" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 		</div>
 	{:else}
-		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
+		{#if policyProvider && visibleUnitCount >= 2 && policyProvider.capabilities.rollover}
 			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} /><PolicySaveStatus id="rollover-policy-status" pending={policyState.isPending(rolloverTarget)} failure={policyState.failureText(rolloverTarget)} /></span></div>
 		{/if}
 		{#each rows as { account, unit, position } (account.id)}
@@ -313,7 +313,7 @@
 								{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
 									<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
 								{/if}
-								{#if unit}
+								{#if unit && visibleUnitCount >= 2}
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
 										enabled={unit.enabled}
@@ -322,8 +322,8 @@
 										pending={policyState.isPending(unitTarget) || policyState.isPending(`order:${provider.name}:${account.id}`)}
 										failure={policyState.failureText(unitTarget) ?? policyState.failureText(`order:${provider.name}:${account.id}`)}
 										position={rolloverActive ? position : null}
-										total={policyProvider?.units.length ?? 0}
-										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}
+										total={visibleUnitCount}
+										onmove={(direction) => policyState.move(policyProvider!, account.id, direction, accounts.filter((row) => row.state !== 'removed').map((row) => row.id))}
 										ontoggle={(value) => policyState.setEnabled(policyProvider!, account.id, value)}
 									/>
 								{/if}
