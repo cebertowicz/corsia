@@ -232,6 +232,8 @@ def _seed_descriptors(
         )
     }
     desired = {f"{step['step_number']}:{step.get('vendor', 'common')}" for step in descriptors}
+    if "3:common" in desired:
+        desired.add("3:ask")
     for index, step in enumerate(descriptors):
         workflow_step = f"{step['step_number']}:{step.get('vendor', 'common')}"
         if workflow_step in existing:
@@ -248,10 +250,15 @@ def _seed_descriptors(
             provenance="onboarding.app_first_run",
             db=db,
         )
+    if "3:ask" in desired and "3:ask" not in existing:
+        from onboarding.app_first_run_children import seed_ask
+
+        seed_ask(listing["plan"]["id"], db=db)
     if reconcile:
         nodes = db.execute(
             "SELECT id, workflow_step, state, archived_at, revision "
-            "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
+            "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app' "
+            "ORDER BY CASE WHEN workflow_step='3:ask' THEN 0 ELSE 1 END",
             (listing["plan"]["id"],),
         )
         for node in nodes:
