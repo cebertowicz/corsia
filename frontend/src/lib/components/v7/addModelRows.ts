@@ -30,7 +30,7 @@ export function buildQuality(group: ModelGroup, build: LocalModelRecommendation)
 		.sort((a, b) => (b.quantization_bits ?? 0) - (a.quantization_bits ?? 0));
 	const rank = tied.findIndex((other) => other.repository === build.repository);
 	const suffix = tied.length > 1 && rank < tied.length - 1
-		? ` · ${rank === 0 ? 'best' : rank === 1 ? '2nd-best' : `${rank + 1}th-best`} build`
+		? ` · ${rank === 0 ? 'best' : rank === 1 ? '2nd-best' : rank === 2 ? '3rd-best' : `${rank + 1}th-best`} build`
 		: '';
 	return `Quality ${build.smarts_level} of 5${suffix}`;
 }
