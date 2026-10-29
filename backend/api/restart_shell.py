@@ -29,6 +29,7 @@ _corsia_lifecycle_is_update=false
 [ "${2:-}" != restart-prepared ] || _corsia_lifecycle_is_update=true
 readonly _corsia_lifecycle_is_update
 _corsia_lifecycle_done=false
+_corsia_teardown_possible=false
 _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
     trap - EXIT HUP INT TERM
@@ -43,9 +44,9 @@ _corsia_lifecycle_cleanup() {
         && [ "$_corsia_lifecycle_is_update" = true ] \
         && [ -n "$_corsia_cleanup_port" ] \
         && [ -n "$_corsia_cleanup_curl" ]; then
-        "$_corsia_cleanup_curl" --silent --show-error --fail --max-time 5 \
+        "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
             --output /dev/null --write-out 'Lifecycle backend health HTTP %{http_code}\n' \
-            "http://127.0.0.1:${_corsia_cleanup_port}/api/health" \
+            "http://127.0.0.1:${_corsia_cleanup_port}/api/health" 2>/dev/null \
             || printf 'Lifecycle backend health curl exit %s\n' "$?"
     elif [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
@@ -54,13 +55,22 @@ _corsia_lifecycle_cleanup() {
         && [ -n "$_corsia_cleanup_operation" ] \
         && [ -n "$_corsia_cleanup_curl" ]
     then
-        "$_corsia_cleanup_curl" --silent --show-error --fail --max-time 5 \
+        "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
             --output /dev/null --write-out 'Lifecycle drain cleanup HTTP %{http_code}\n' \
             --request DELETE --get \
             --data-urlencode "token=$_corsia_cleanup_token" \
             --data-urlencode "operation_id=$_corsia_cleanup_operation" \
-            "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" \
+            "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" 2>/dev/null \
             || printf 'Lifecycle drain cleanup curl exit %s\n' "$?"
+    fi
+    # Reserve 200 for an update whose teardown may have happened. A normal
+    # pre-teardown failure must never accidentally use that sentinel.
+    if [ "$_corsia_lifecycle_is_update" = true ] && [ "$_corsia_lifecycle_status" -ne 0 ]; then
+        if [ "$_corsia_teardown_possible" = true ]; then
+            _corsia_lifecycle_status=200
+        elif [ "$_corsia_lifecycle_status" -eq 200 ]; then
+            _corsia_lifecycle_status=1
+        fi
     fi
     exit "$_corsia_lifecycle_status"
 }

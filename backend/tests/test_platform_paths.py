@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import plistlib
 import re
 import shlex
 import sqlite3
@@ -47,7 +48,7 @@ def test_app_bundle_root_is_a_path_check_on_the_module_location(tmp_path, monkey
     assert paths.app_bundle_root() is None
 
 
-def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
+def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend(tmp_path, monkeypatch):
     paths = _platform_paths()
     repo = Path(__file__).resolve().parents[2]
     rust = (repo / "desktop" / "src-tauri" / "src" / "app_paths.rs").read_text()
@@ -69,6 +70,15 @@ def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
         "CORSIA.app.previous",
         "CORSIA.app.staged",
     ]
+    # The backend must find the same staged app named by the launcher and Rust.
+    from automation.update_verification import _target_still_staged
+
+    bundle = tmp_path / "CORSIA.app"
+    plist = tmp_path / sorted(rust_names)[1] / "Contents" / "Info.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_bytes(plistlib.dumps({"CORSIAVersion": "1.2.3"}))
+    monkeypatch.setattr(paths, "app_bundle_root", lambda: bundle)
+    assert _target_still_staged("1.2.3")
 
 
 def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):

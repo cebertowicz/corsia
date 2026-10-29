@@ -154,6 +154,7 @@ service_stop() {
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service stop" "$BACKEND_PORT" || warn "Drain did not complete; stopping anyway"
     fi
+    _corsia_teardown_possible=true
     if ! systemctl --user stop "$(service_label).service"; then
         [ "$drain_attempted" = false ] || cancel_failed_drain "$(current_drain_url "$BACKEND_PORT")" "$CORSIA_RESTART_OPERATION_ID" || :
         fail "Couldn’t stop the systemd service; check its status and try again"

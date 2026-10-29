@@ -256,13 +256,14 @@ async def _launch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str | None = None,
+    on_launch: Callable[[object, str, Path], None] | None = None,
 ) -> object:
     """Launch the detached lifecycle process or compensate its failed handoff."""
     log_path: Path | None = None
     try:
         log_path = restart_log_path(f"restart-{operation_id}.log" if prepared else "restart.log")
         with log_path.open("w") as log_fh:
-            return spawn_restart_lifecycle(
+            process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
                 restart_env,
@@ -294,6 +295,11 @@ async def _launch_settings_restart(
         if release_failed:
             detail += f" {_RELEASE_FAILURE_NOTE}"
         raise HTTPException(500, detail) from exc
+    # Once the child exists, a watcher setup failure must not settle a lifecycle
+    # that may still be stopping the backend.
+    if on_launch is not None:
+        on_launch(process, operation_id, log_path)
+    return process
 
 
 async def prelaunch_settings_restart(
@@ -308,6 +314,7 @@ async def prelaunch_settings_restart(
     trigger: str | None = "manual",
     target_version: str | None = None,
     claim: Callable[[object], bool] | None = None,
+    on_launch: Callable[[object, str, Path], None] | None = None,
 ) -> tuple[str, object] | None:
     """Hand Settings restart ownership from acquisition through child launch."""
     prepared = mode == "update"
@@ -366,6 +373,7 @@ async def prelaunch_settings_restart(
             script_args,
             restart_log_path,
             caller_token=caller_token,
+            on_launch=on_launch,
         )
         return operation_id, process
     finally:

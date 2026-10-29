@@ -34,6 +34,31 @@ async def test_each_failed_update_keeps_its_lifecycle_and_cleanup_log(tmp_path, 
         text = (tmp_path / f"restart-{operation_id}.log").read_text()
         assert "Safe update refused" in text
         assert "Lifecycle backend health HTTP 503" in text
-        assert "curl: server error" in text
+        assert "curl: server error" not in text
         assert "Lifecycle backend health curl exit 22" in text
         assert "test-only-credential" not in text
+
+
+@pytest.mark.asyncio
+async def test_watcher_setup_failure_does_not_abort_a_launched_restart(tmp_path, monkeypatch):
+    from api import settings_restart
+    from automation import restart
+
+    child = object()
+    monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", lambda *_a, **_kw: child)
+    aborted = []
+
+    async def abort(*args, **kwargs):
+        aborted.append((args, kwargs))
+        return True
+
+    def watcher(*_args):
+        raise OSError("watcher setup failed")
+
+    monkeypatch.setattr(restart, "abort_restart_control", abort)
+    with pytest.raises(OSError, match="watcher setup failed"):
+        await settings_restart._launch_settings_restart(
+            "a" * 32, True, tmp_path / "corsia", {}, [],
+            lambda name: tmp_path / name, on_launch=watcher,
+        )
+    assert not aborted

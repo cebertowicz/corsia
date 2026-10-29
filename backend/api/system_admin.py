@@ -82,11 +82,11 @@ async def launch_update(
         claim=claim,
         trigger=trigger,
         target_version=target_version,
+        on_launch=_watch_update_process,
     )
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
-    _watch_update_process(process, operation_id)
     return operation_id, process
 
 

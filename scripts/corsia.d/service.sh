@@ -96,6 +96,9 @@ raise SystemExit(completed.returncode)
 
 bootout_service_and_wait() {
     local domain="$1" label="$2" bootout_status
+    local prior_teardown_possible="${_corsia_teardown_possible:-false}"
+    # Until launchd proves the job remains loaded, a stop may have taken effect.
+    _corsia_teardown_possible=true
     # launchd owns KeepAlive and termination; Python only bounds the native wait.
     if launchctl_bootout_wait "$domain/$label"; then
         return 0
@@ -107,6 +110,7 @@ bootout_service_and_wait() {
         return 2
     fi
     if service_is_loaded; then
+        _corsia_teardown_possible="$prior_teardown_possible"
         return 1
     fi
     fail "$label bootout did not confirm teardown completed; launchd no longer reports the job and no replacement was started"
