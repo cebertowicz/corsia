@@ -1,5 +1,5 @@
 import { test } from '../support/test';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -177,6 +177,26 @@ async function selectThread(page: Page, title: string) {
 			return box === null ? null : Math.round(box.x);
 		}).toBe(0);
 	}
+}
+
+/**
+ * A sticky footer in the drawer's scroller must sit on the scroller's bottom edge wherever the content is scrolled. The scroller's own
+ * bottom padding opens a strip under a sticky footer that the content scrolls through, so the footer floats above the sheet's edge. Returns
+ * whether the content overflowed at all: with nothing to scroll there is no strip to see.
+ */
+async function footerSitsOnScrollerEdge(dialog: Locator, footerSelector: string): Promise<boolean> {
+	const body = dialog.locator('.drawer-body');
+	const scrolls = await body.evaluate((el) => el.scrollHeight > el.clientHeight);
+	if (!scrolls) return false;
+	for (const position of [0, 0.5, 1]) {
+		const geometry = await body.evaluate((el, [fraction, selector]) => {
+			el.scrollTop = (el.scrollHeight - el.clientHeight) * (fraction as number);
+			const footer = el.querySelector(selector as string)!.getBoundingClientRect();
+			return { scrollerBottom: el.getBoundingClientRect().bottom, footerBottom: footer.bottom };
+		}, [position, footerSelector]);
+		expect(geometry.footerBottom, `footer at scroll ${position}: ${JSON.stringify(geometry)}`).toBeCloseTo(geometry.scrollerBottom, 0);
+	}
+	return true;
 }
 
 test.describe('@flow:host-access @surface:shell reviewed host access', () => {
@@ -386,6 +406,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(viewport!.height);
 		}
 
+		expect(await footerSitsOnScrollerEdge(dialog, '.decision-actions'), 'the long purpose overflows the sheet').toBe(true);
+
 		await dialog.getByRole('button', { name: 'Approve' }).click();
 		await expect(page.locator('.active-chip .countdown')).toContainText(':');
 		await expect(page.locator('.active-chip')).not.toContainText(ownerTitle);
@@ -486,6 +508,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		expect(revokeBoxAtRest).toBeTruthy();
 		expect(revokeBoxAtRest!.y).toBeGreaterThanOrEqual(0);
 		expect(revokeBoxAtRest!.y + revokeBoxAtRest!.height).toBeLessThanOrEqual(viewport!.height);
+		await footerSitsOnScrollerEdge(activeDialog, '.active-drawer-actions');
 
 		// Escape closes the drawer without revoking, and returns focus to the
 		// trigger that opened it -- the drawer's own contract, reused as-is.
