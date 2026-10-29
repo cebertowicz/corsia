@@ -102,8 +102,7 @@ async def test_discover_cloud_models_notifies_when_catalog_changes(monkeypatch):
     import llm.catalog_cloud as catalog_cloud
     from infra.state import ws
 
-    monkeypatch.setattr("llm.external_provider.fetch_external_models", AsyncMock(return_value=[]))
-    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda _ids: [])
+    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: [])
     monkeypatch.setattr(catalog_cloud, "_persist_cloud_models", lambda *_a, **_k: [])
     reads = iter([[], [("new-model",)]])
     monkeypatch.setattr(catalog_cloud, "_provider_rows", lambda _p: next(reads))
