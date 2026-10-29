@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Setup shows when it is retrying a failed model source check.
 - Signing in again with the same account after its model check fails keeps only the original account.
 - On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No local model we tested handles CORSIA's first-run work reliably on 24 GB.
 - The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
