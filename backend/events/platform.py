@@ -81,9 +81,7 @@ def _parked(db: sqlite3.Connection, envelope: EventEnvelope) -> bool:
 
 def _digest_details(envelope: EventEnvelope, collapse_fact: str | None) -> dict[str, Any]:
     """Facts for the note, minus ``message_id``, which would defeat collapsing."""
-    details: dict[str, Any] = {
-        k: v for k, v in envelope.facts.items() if k != "message_id"
-    }
+    details: dict[str, Any] = {k: v for k, v in envelope.facts.items() if k != "message_id"}
     details["event_id"] = envelope.event_id
     value = envelope.facts.get(collapse_fact) if collapse_fact else None
     if value is not None:
@@ -347,6 +345,8 @@ def deliver_envelope_sync(
             if reason is not None
             else _deliver_routed(conn, envelope, target, decl, plan)
             for target, reason in zip(targets, filtered)
+            if not (target.thread is None and target.resolution in ("dead_letter", "triage")
+                    and plan is not None and plan.handled_by())
         ]
         if plan is not None:
             outcomes = list(plan.settled)

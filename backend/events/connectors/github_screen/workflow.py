@@ -37,6 +37,7 @@ def triage_version() -> str:
     directory = WORKFLOW_DIR.parent / "github-outside-triage"
     content = ((directory / "SKILL.md").read_bytes() + b"\0" + (directory / "corsia.yaml").read_bytes()
                + b"\0" + (WORKFLOW_DIR.parent / "stage.py").read_bytes()
+               + b"\0" + (WORKFLOW_DIR.parent / "floor.py").read_bytes()
                + b"\0" + (WORKFLOW_DIR.parent / "result.py").read_bytes() + b"\0" + injection_rule_text().encode())
     return hashlib.sha256(content).hexdigest()
 

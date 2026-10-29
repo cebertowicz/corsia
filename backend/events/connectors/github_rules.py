@@ -8,8 +8,7 @@ webhook's name; a check suite's pull request is the one routing selected.
 Recipients a rule adds are delivered through the platform path
 (``events.platform``). For the routed thread a rule can only drop the delivery
 (its writer's own) or ride it with a note. When routing chose no thread, rules
-can only add recipients, and today's result stands. Existing comment routes
-also have declared types; edited and review types await rule-only admission.
+can only add recipients. A rule-only outside item is dead-lettered if no rule handles it.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from events import rule_reads
+from events import rule_reads, rules
 from events.connectors.github import CHECK_SUITE_PR, MANIFEST
 from events.envelope import EventEnvelope, normalize
 from events.github_mapper import ends_artifact
@@ -113,10 +112,9 @@ def apply_routed_rules(
     """Deliver what rules add, then drop or annotate the routed delivery in ``prepared``.
 
     ``prepared.thread_id`` is ``None`` when routing chose no thread; ``prepared.result``
-    then already holds today's result, which rules never change, and the
-    ``scope`` read before the gate (:func:`rule_scope`) scopes the rules. Rules
-    only add: when reading or evaluating them fails, the routed delivery and its
-    notice go ahead as routing prepared them, and the failure is logged.
+    then holds routing's result; an unhandled rule-only item is dead-lettered.
+    ``scope`` read before the gate (:func:`rule_scope`) scopes the rules. When
+    evaluation fails, the failure is logged and the item remains unhandled.
     """
     scope = scope or RuleScope()
     # _self_authored_result filters the agent's own account for everyone; a
@@ -130,11 +128,21 @@ def apply_routed_rules(
         finally:
             db.close()
     skipped = (prepared.thread_id,) if reason is not None and prepared.thread_id is not None else ()
+    plan = None
     if scope.any_rule:
         try:
-            _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope, target_filter, skipped)
+            plan = _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope, target_filter, skipped)
         except Exception:
             logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
+    if prepared.result is not None and prepared.result.reason == "rule_only" and not (plan and plan.handled_by()):
+        from events.connectors.github_content_facts import content_facts
+        from events.router import _dead_letter_result
+
+        facts = content_facts(payload)
+        safe = {key: facts[key] for key in ("author", "link", "item_version") if key in facts}
+        prepared.result = _dead_letter_result(internal_event, safe,
+            "no triage rule handled this item; install the outside-content screen or check its rules",
+            prepared.result.external_id)
     if reason is not None:
         drop_delivery(prepared, internal_event, reason)
 
@@ -143,7 +151,7 @@ def _apply(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
     wake_reason: str | None, scope: RuleScope, target_filter: Filter | None, skipped: tuple[str, ...],
-) -> None:
+) -> rules.RulePlan | None:
     try:
         envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)
     except MalformedEventError as exc:
@@ -157,17 +165,18 @@ def _apply(
         ends_artifact=ends_artifact(internal_event),
         repository_projects=scope.repository_projects, target_filter=target_filter, skipped=skipped)
     if plan is None or thread is None:
-        return
+        return plan
     if thread in plan.drops:
         drop_delivery(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
         return
     ride = plan.rides.get(thread)
     if ride is None:
-        return
+        return plan
     prepared.rule_plan = plan
     if ride.notes:
         # The writers' own notes ride the routed wake; nothing else changes.
         prepared.details = {**(prepared.details or {}), "rule_notes": list(ride.notes)}
+    return plan
 
 
 def drop_delivery(prepared: PreparedRoute, internal_event: str, reason: str) -> None:

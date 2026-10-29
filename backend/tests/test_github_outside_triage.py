@@ -71,6 +71,33 @@ async def route(kind, action, **kwargs):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind,action', [('issue_comment', 'created'), ('pr_comment', 'created'),
+                                         ('issue_comment', 'edited'), ('pr_comment', 'edited'),
+                                         ('review', 'submitted'), ('review', 'edited')])
+async def test_unhandled_content_is_parked_as_facts_only(world, monkeypatch, kind, action):
+    from events.connectors.github import GITHUB_ROUTED_EVENTS
+    from events.router import route_event
+    from infra.database import get_db
+    from registry import models
+    from tests.event_routing_helpers import mk_session
+
+    mk_session('item-owner', project_id=world['project'])
+    models.register_artifact(integration='github', type='issue' if kind == 'issue_comment' else 'pull-request',
+                             external_id='o/r#1', parent_thread_id='item-owner', title='Item')
+    monkeypatch.setattr('events.connectors.github_content_facts.is_own', lambda login: False)
+    raw = payload(kind, action, body='PRIVATE BODY')
+    raw['comment' if 'comment' in kind else 'review']['html_url'] = 'https://example.test/item'
+    result = await route_event(GITHUB_ROUTED_EVENTS[f'{kind}.{action}'], raw)
+    assert result.outcome.value == 'dead_lettered'
+    assert 'install the outside-content screen' in result.reason
+    row = get_db().execute('SELECT payload_json FROM dead_letter_events WHERE reason=?', (result.reason,)).fetchone()
+    facts = json.loads(row[0])
+    assert facts['author'] == 'outside-user' and facts['link'] == 'https://example.test/item'
+    assert facts['item_version'] is not None and 'PRIVATE BODY' not in row[0]
+    assert get_db().execute("SELECT count(*) FROM messages WHERE content LIKE '%PRIVATE BODY%'").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('kind,action', [('issue', 'opened'), ('issue_comment', 'created'), ('issue_comment', 'edited'), ('pr_comment', 'created'), ('pr_comment', 'edited'), ('review', 'submitted'), ('review', 'edited')])
 async def test_each_type_reaches_stage_and_worker(triage, kind, action):
     await route(kind, action)

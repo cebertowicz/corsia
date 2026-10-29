@@ -466,9 +466,9 @@ async def test_a_burst_wakes_a_rule_and_the_owner_on_every_event(isolated_db, se
 
     for n in range(50):
         assert (await route(SYNC, _sync(7, n))).outcome == RouteOutcome.ACCEPTED
-    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.PARKED
+    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.DEAD_LETTERED
 
-    # Every push wakes the owner; the outside comment is rule-only.
+    # Every push wakes the owner; the unhandled outside comment is dead-lettered.
     assert [thread for thread, _ in sent] == ["owner"] * 50
     assert all("rule_notes" not in content for _, content in sent)
     wakes = _wakes("watcher")
@@ -1238,6 +1238,8 @@ async def test_authored_rule_matches_github_content_facts(isolated_db, sent, mon
     await dispatch_github_webhook_for_replay(
         "issues" if kind == "issue.opened" else "issue_comment", raw, delivery_id=f"{kind}-{source}")
     assert _decisions(rule_id=rule["id"])[0]["outcome"] == "woke"
+    if kind != "issue.opened":
+        assert _rows("SELECT id FROM dead_letter_events") == []
 
 
 @pytest.mark.asyncio

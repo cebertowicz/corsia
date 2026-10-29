@@ -154,5 +154,6 @@ class RulePlan:
     settled: list[Outcome] = field(default_factory=list)      # outcomes with no delivery
 
     def handled_by(self) -> str | None:
-        """A rule that queued a run of its writer's script, or a worker start, with this event."""
-        return next((item.rule_id for item in self.settled if item.outcome == QUEUED), None)
+        """A rule that queued work or successfully delivered this event."""
+        return next((item.rule_id for item in self.settled
+                     if item.outcome in (QUEUED, WOKE, DIGESTED, DUPLICATE)), None)

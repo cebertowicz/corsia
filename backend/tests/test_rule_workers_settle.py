@@ -299,6 +299,27 @@ async def test_an_owner_without_such_a_script_is_woken_once(world):
     assert "worker-flow" in wake and "invalid" in wake and world["driven"] == [OWNER]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["result", "no_result"])
+async def test_script_consumes_worker_event_on_unowned_artifact(world, monkeypatch, kind):
+    from infra.database import get_db
+    from infra.database import write_transaction
+
+    world["reply"].write_text(fenced({"findings": []}) if kind == "result" else "no json here")
+    await _script_rule(owner_script(world, monkeypatch, "consume.sh"), kind)
+    rule = await make_rule()
+    await request()
+    with write_transaction(None, scope="test_unowned_artifact") as db:
+        db.execute("UPDATE event_route_decisions SET artifact_integration='github', artifact_type='pull-request', "
+                   "artifact_external_id='o/r#7' WHERE rule_id=?", (rule,))
+    await settle_all()
+    await run_scripts()
+    assert len(world["script_inputs"]) == 1
+    assert owner_wakes() == [] and world["driven"] == []
+    assert get_db().execute("SELECT count(*) FROM dead_letter_events WHERE internal_event=?",
+                            (kind,)).fetchone()[0] == 0
+
+
 # 6 -- a valid result on a request's artifact reaches that artifact's owner through rule 0.
 @pytest.mark.asyncio
 async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, monkeypatch):
