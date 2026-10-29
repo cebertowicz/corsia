@@ -123,12 +123,17 @@ class RemovalVerdict(Enum):
 
 
 def _status_verdict(
-    ctx: CheckContext, entry: WorktreeEntry | None, status: str | None,
+    ctx: CheckContext, entry: WorktreeEntry | None, path: Path, status: str | None,
     idle: float, threshold: float, *, fresh: bool = False,
 ) -> str | RemovalVerdict | None:
     if status is None or status == "status_error":
         return status
     if ctx.now - idle < threshold:
+        return status
+    # Git's admin files move only on Git commands; an editor writes the tree.
+    # Uncommitted work leaves only when nothing anywhere in it changed either.
+    newest = newest_tree_mtime(path)
+    if newest is None or ctx.now - newest < threshold:
         return status
     prs = ctx.open_pr_branches(fresh=fresh)
     if prs is None:
@@ -157,7 +162,9 @@ def candidate_skip_reason(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
         return status or "recent"
-    verdict = _status_verdict(ctx, candidate.entry, status, candidate.idle_since, threshold_seconds)
+    verdict = _status_verdict(
+        ctx, candidate.entry, candidate.path, status, candidate.idle_since, threshold_seconds,
+    )
     if isinstance(verdict, str):
         return verdict
     return (ctx.probe.skip_reason(candidate.path)
@@ -204,7 +211,8 @@ def recheck_before_removal(
         except ReaperGitError:
             return "status_error"
     verdict = _status_verdict(
-        ctx, entry, _status_reason(candidate.path, merged), idle, threshold_seconds, fresh=True,
+        ctx, entry, candidate.path, _status_reason(candidate.path, merged), idle,
+        threshold_seconds, fresh=True,
     )
     if isinstance(verdict, str):
         return verdict

@@ -8,6 +8,7 @@ therefore only exist inside the quarantine, which each run retries.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import os
 from pathlib import Path
 import shutil
@@ -17,6 +18,7 @@ import time
 from loguru import logger
 
 from infra.worktree_reaper_probe import git, git_detail, list_worktrees
+from infra.worktree_reaper_salvage import SalvageError
 
 QUARANTINE_DIR = "corsia-reaping"
 _DIRTY_MARKERS = ("contains modified or untracked files", "is dirty")
@@ -103,11 +105,15 @@ def sweep_quarantine(repo: Path) -> int:
     return removed
 
 
-def remove_worktree(repo: Path, worktree: Path, name: str, *, force: bool = False) -> str:
+def remove_worktree(
+    repo: Path, worktree: Path, name: str, *, force: bool = False,
+    salvage: Callable[[Path], object] | None = None,
+) -> str:
     """Quarantine then remove one checked worktree.
 
     ``force`` deletes scratch in a clean merged worktree or a worktree whose
-    uncommitted changes were salvaged after rechecking under the repo lock.
+    uncommitted changes ``salvage`` has just copied out of the quarantine. A
+    failed salvage moves the worktree back and re-raises its SalvageError.
 
     Returns ``removed``, ``move_failed`` (still in place, untouched),
     ``raced_dirty`` (moved back after Git refused a dirty tree) or
@@ -117,6 +123,18 @@ def remove_worktree(repo: Path, worktree: Path, name: str, *, force: bool = Fals
     moved = git(repo, ["worktree", "move", str(worktree), str(target)])
     if moved.returncode != 0:
         return "move_failed"
+    if salvage is not None:
+        try:
+            salvage(target)
+        except SalvageError:
+            restored = git(repo, ["worktree", "move", str(target), str(worktree)])
+            if restored.returncode != 0:
+                # Still registered, so the quarantine sweep keeps it.
+                logger.warning(
+                    "worktree_reaper: {} left in quarantine after a failed salvage; move back: {}",
+                    name, git_detail(restored),
+                )
+            raise
     removed = git(repo, ["worktree", "remove", *(["--force"] if force else []), str(target)])
     if removed.returncode == 0:
         return "removed"

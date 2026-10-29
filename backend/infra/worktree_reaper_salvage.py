@@ -1,4 +1,10 @@
-"""Copy uncommitted work out of an idle worktree before removal."""
+"""Copy uncommitted work out of an idle worktree before removal.
+
+The copy is read from the worktree after it has been moved into the
+quarantine, so nothing can write into it while it is copied, and its HEAD is
+pinned under ``refs/corsia-salvage/`` so a detached or unpublished base stays
+reachable once the worktree is gone.
+"""
 
 from __future__ import annotations
 
@@ -93,9 +99,13 @@ def _selected(worktree: Path) -> list[Path]:
     return selected
 
 
-def salvage_worktree(repo: Path, worktree: Path, name: str, now: float) -> Path:
-    """Copy tracked changes and non-disposable scratch, or remove the partial copy."""
-    root = repo.parent / f"{repo.name}-salvage" / datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+def salvage_worktree(repo: Path, worktree: Path, name: str, now: float, origin: Path) -> Path:
+    """Copy tracked changes and non-disposable scratch, or remove the partial copy.
+
+    ``worktree`` is the quarantined tree being read; ``origin`` is where it lived.
+    """
+    day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    root = repo.parent / f"{repo.name}-salvage" / day
     destination = root / name
     suffix = 1
     while os.path.lexists(destination):
@@ -107,10 +117,7 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float) -> Path:
         created = True
         branch = os.fsdecode(_git_output(worktree, ["rev-parse", "--abbrev-ref", "HEAD"])).strip()
         head = os.fsdecode(_git_output(worktree, ["rev-parse", "HEAD"])).strip()
-        (destination / "meta.txt").write_text(
-            f"worktree: {worktree}\nbranch: {branch}\nHEAD: {head}\n", encoding="utf-8",
-            errors="surrogateescape",
-        )
+        pin = f"refs/corsia-salvage/{day}/{destination.name}"
         # The person's diff settings (external tool, textconv, color) would
         # write display output instead of a patch that applies.
         patch = _git_output(worktree, [
@@ -118,11 +125,21 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float) -> Path:
         ])
         if patch:
             (destination / "changes.patch").write_bytes(patch)
-        selected = _selected(worktree)
-        for relative in selected:
+        skipped: list[str] = []
+        for relative in _selected(worktree):
+            source = worktree / relative
+            if not (source.is_symlink() or source.is_file()):
+                skipped.append(relative.as_posix())  # a socket or FIFO holds no work
+                continue
             target = destination / "files" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(worktree / relative, target, follow_symlinks=False)
+            shutil.copy2(source, target, follow_symlinks=False)
+        lines = [f"worktree: {origin}", f"branch: {branch}", f"HEAD: {head}", f"pinned: {pin}"]
+        lines += [f"not copied (special file): {item}" for item in skipped]
+        (destination / "meta.txt").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8", errors="surrogateescape",
+        )
+        _git_output(worktree, ["update-ref", pin, head])
         return destination
     except (OSError, UnicodeError, SalvageError) as exc:
         if created:

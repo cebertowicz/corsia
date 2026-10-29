@@ -11,7 +11,7 @@ product event per repository; that metric is the whole escalation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import time
 from pathlib import Path
 
@@ -71,6 +71,13 @@ class Skip:
 
 
 @dataclass
+class Salvaged:
+    name: str
+    owner_thread: str | None
+    destination: str
+
+
+@dataclass
 class RepoReport:
     """Outcome of one reaper pass over one repository."""
 
@@ -78,7 +85,7 @@ class RepoReport:
     trigger: str
     scanned: int = 0
     removed: int = 0
-    salvaged: int = 0
+    salvaged: list[Salvaged] = field(default_factory=list)
     orphan_removed: int = 0
     quarantine_removed: int = 0
     quarantine_entries: list[str] = field(default_factory=list)
@@ -120,7 +127,8 @@ def emit_report(report: RepoReport) -> None:
         "trigger": report.trigger,
         "scanned": report.scanned,
         "removed": report.removed,
-        "salvaged": report.salvaged,
+        "salvaged": len(report.salvaged),
+        "salvaged_to": [asdict(item) for item in report.salvaged[:METRIC_ITEM_CAP]],
         "remaining_count": report.remaining_count,
         "orphan_removed": report.orphan_removed,
         "quarantine_removed": report.quarantine_removed,
@@ -145,6 +153,7 @@ def _remove_candidate(
 ) -> bool:
     """Recheck and remove one candidate under the repo lock; False on repo_busy."""
     owner = candidate.owner_thread
+    copies: list[Path] = []
     try:
         with repo_lock(repo):
             reason = recheck_before_removal(
@@ -152,26 +161,32 @@ def _remove_candidate(
                 short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
             )
             salvaged = reason is RemovalVerdict.SALVAGE
-            if salvaged:
-                try:
-                    destination = salvage_worktree(repo, candidate.path, candidate.name, ctx.now)
-                except (SalvageError, OSError) as exc:
-                    report.skip(candidate.name, owner, "salvage_failed", idle_days, str(exc)[:240])
-                    return True
-                logger.info("worktree_reaper: salvaged {} to {}", candidate.name, destination)
+
+            def copy_out(quarantined: Path) -> None:
+                copies.append(salvage_worktree(
+                    repo, quarantined, candidate.name, ctx.now, candidate.path,
+                ))
+
             outcome = reason if isinstance(reason, str) else remove_worktree(
                 repo, candidate.path, candidate.name, force=merged or salvaged,
+                salvage=copy_out if salvaged else None,
             )
     except RepoBusyError:
         report.skip(candidate.name, owner, "repo_busy", idle_days)
         return False
+    except SalvageError as exc:
+        report.skip(candidate.name, owner, "salvage_failed", idle_days, str(exc)[:240])
+        return True
     except (OSError, ReaperGitError) as exc:
         report.skip(candidate.name, owner, "remove_error", idle_days, str(exc)[:240])
         return True
+    finally:
+        # A finished copy is reported even when removal then fails or waits.
+        for destination in copies:
+            logger.info("worktree_reaper: salvaged {} to {}", candidate.name, destination)
+            report.salvaged.append(Salvaged(candidate.name, owner, str(destination)))
     if outcome == "removed":
         report.removed += 1
-        if salvaged:
-            report.salvaged += 1
         forget_pr_terminal(candidate.path)
     else:
         reason = "quarantine_removal_pending" if outcome == "quarantine_pending" else outcome
