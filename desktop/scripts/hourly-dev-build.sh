@@ -15,7 +15,7 @@ feed="$(curl --fail --silent --show-error --location "$DEV_UPDATER_ENDPOINT")"
 version="$(jq -er '.version | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+-dev\\.[0-9]+$"))' <<<"$feed")"
 published_sha="$(git ls-remote "$remote" "refs/tags/v$version" | cut -f1)"
 if [ -z "$published_sha" ]; then
-  echo "published dev tag v$version is missing; skipping build" >&2
+  echo "published dev tag v$version is missing; failing the hourly check" >&2
   exit 1
 fi
 [[ "$published_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid published dev tag' >&2; exit 1; }
@@ -24,10 +24,10 @@ if [ "$head_sha" = "$published_sha" ]; then
   exit 0
 fi
 
-for state in queued in_progress; do
+for state in queued in_progress requested waiting pending; do
   runs="$(gh api --paginate --slurp "repos/$repo/actions/workflows/release-macos.yml/runs?status=$state&per_page=100")"
   if jq -e --arg current "${GITHUB_RUN_ID:-}" '[.[].workflow_runs[] | select((.id | tostring) != $current)] | length > 0' <<<"$runs" >/dev/null; then
-    echo 'another release build is queued or in progress'
+    echo 'another release build is active'
     exit 0
   fi
 done
