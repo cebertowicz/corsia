@@ -8,7 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - The update screen shows how many agents have paused while it waits for them.
-
+- The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
 - Sign an added Claude Code or Codex account in again from its row in Provider settings.

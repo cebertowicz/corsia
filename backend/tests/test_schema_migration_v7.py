@@ -320,7 +320,7 @@ def test_migrated_database_matches_a_fresh_one(legacy_db):
         # Steps 8, 9, and 11 through 15 do not touch checkpoint objects. Step
         # 10 adds one idle boundary index without changing the frozen schema-7
         # table or indexes above; each additive step has its own migration test.
-        assert SCHEMA_VERSION == 165
+        assert SCHEMA_VERSION == 166
     finally:
         fresh.close()
         migrated.close()
