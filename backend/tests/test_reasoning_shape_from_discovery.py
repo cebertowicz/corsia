@@ -5,7 +5,8 @@ come from ``detect_reasoning_effort`` run against the checkpoint template at
 https://huggingface.co/Jundot/Qwen3.8-27B-oQ4e-mtp/tree/04dc5509edd8670fc78cc8c2f74bf9b77b1f2acc.
 """
 
-from llm.catalog_network_models import _apply_admin_model, _parse_omlx_status
+from llm.catalog_network_models import _parse_omlx_status
+from llm.omlx_capabilities import apply_admin_model
 from llm.reasoning_config import reasoning_shape_from_discovery
 
 
@@ -55,7 +56,7 @@ _RC1_QWEN_ADMIN = {
 def _shape_from(status_entry: dict, admin_entry: dict | None) -> dict | None:
     canonical = _parse_omlx_status(_Response({"models": [status_entry]}))
     if admin_entry is not None:
-        _apply_admin_model(canonical, admin_entry)
+        apply_admin_model(canonical, admin_entry)
     return reasoning_shape_from_discovery(canonical[status_entry["id"]])
 
 

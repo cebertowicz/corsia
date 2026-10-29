@@ -93,9 +93,10 @@ def sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any
     for msg in messages:
         content = msg.get("content")
 
-        if isinstance(content, str) and not content:
+        assistant_tool_call = msg.get("role") == "assistant" and msg.get("tool_calls")
+        if isinstance(content, str) and (not content or (assistant_tool_call and not content.strip())):
             clean = dict(msg)
-            clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
+            clean["content"] = None if assistant_tool_call else "(empty)"
             result.append(clean)
             continue
 
