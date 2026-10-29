@@ -28,6 +28,7 @@ from core.measurement_scope import scope_cte
 from jobs.chat_comment_corrections import chat_comment_candidate
 from jobs.corrections_cursor import PendingCandidateKey, ScanCursor, before_clause, before_params
 
+
 def pending_candidate_keys(
     version: ClassifierVersion, batch_size: int, owner_user_id: str,
     before: ScanCursor | None = None, since: str | None = None,
