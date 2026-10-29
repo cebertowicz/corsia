@@ -126,7 +126,9 @@ def _stop_daemon(path: Path, directory: Path) -> None:
         process = identity.process_for_identity(pid)
         birth = identity.process_create_time(process)
         _stop_record(pid, birth, directory, session, None)
-    except (psutil.Error, OSError, identity.BrowserIdentityError, identity.BrowserPidAbsent):
+    except identity.BrowserPidAbsent:
+        return
+    except (psutil.Error, OSError, identity.BrowserIdentityError):
         if pid is not None:
             logger.warning("browser orphan could not be verified pid=%s", pid)
 

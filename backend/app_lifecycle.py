@@ -112,7 +112,10 @@ async def lifespan(app: FastAPI):
         from host_access.browser_orphan import close_dead_sessions
         from host_access.processes import PROCESS_OWNER
 
-        await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
+        try:
+            await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
+        except Exception:
+            logger.warning("browser orphan cleanup failed; startup continues")
         await remove_startup_leftovers()
         start_prefetch()
         await start_connected_app_runtime()

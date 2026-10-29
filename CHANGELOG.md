@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Browsers opened from this version are cleaned up when CORSIA starts after an unexpected exit.
+- Agent browsers left open when CORSIA quits unexpectedly now close the next time it starts.
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
 - Sign an added Claude Code or Codex account in again from its row in Provider settings.
 - Setup shows when it is retrying a failed model source check.

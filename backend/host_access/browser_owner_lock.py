@@ -18,7 +18,7 @@ def acquire(directory: Path, *, create: bool) -> int | None:
     """Hold a private owner lock or return None when it is absent or already held."""
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     if create:
-        flags |= os.O_CREAT | os.O_EXCL
+        flags |= os.O_CREAT
     try:
         fd = os.open(directory / LOCK_NAME, flags, 0o600)
     except FileNotFoundError:

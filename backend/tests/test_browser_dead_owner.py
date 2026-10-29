@@ -148,6 +148,21 @@ async def test_owner_holds_lock_before_first_launch_and_releases_after_shutdown(
     browser_owner_lock.release(fd)
 
 
+async def test_owner_retries_lock_after_another_holder_releases_it(tmp_path):
+    owner = SimpleNamespace(socket_dir=tmp_path, _lifetime_lock=None)
+    held = browser_owner_lock.acquire(tmp_path, create=True)
+    assert held is not None
+    try:
+        with pytest.raises(browser_identity.BrowserIdentityError, match="lock is unavailable"):
+            await browser_session_launch._acquire_owner_lock(owner)
+        assert owner._lifetime_lock is None
+    finally:
+        browser_owner_lock.release(held)
+    await browser_session_launch._acquire_owner_lock(owner)
+    assert owner._lifetime_lock is not None
+    browser_owner_lock.release(owner._lifetime_lock)
+
+
 async def test_cancelled_lock_acquisition_keeps_the_acquired_fd(tmp_path, monkeypatch):
     started = threading.Event()
     finish = threading.Event()
@@ -171,7 +186,7 @@ async def test_cancelled_lock_acquisition_keeps_the_acquired_fd(tmp_path, monkey
     browser_owner_lock.release(owner._lifetime_lock)
 
 
-def test_outside_and_unreadable_daemons_are_kept(recovery, tmp_path, monkeypatch):
+def test_outside_and_unreadable_daemons_are_kept(recovery, tmp_path, monkeypatch, caplog):
     root, fake, signalled = recovery
     directory = make_dir(root, "dead")
     (directory / f"{SESSION}.pid").write_text("101")
@@ -184,3 +199,13 @@ def test_outside_and_unreadable_daemons_are_kept(recovery, tmp_path, monkeypatch
     monkeypatch.setattr(fake[101], "environ", lambda: (_ for _ in ()).throw(PermissionError()))
     browser_orphan.close_dead_sessions(root / "own", root=root)
     assert not signalled
+    assert "browser orphan could not be verified" in caplog.text
+    caplog.clear()
+
+    def absent(_pid):
+        raise browser_identity.BrowserPidAbsent
+
+    monkeypatch.setattr(browser_identity, "process_for_identity", absent)
+    browser_orphan.close_dead_sessions(root / "own", root=root)
+    assert not signalled
+    assert "browser orphan could not be verified" not in caplog.text

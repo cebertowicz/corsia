@@ -183,6 +183,21 @@ async def test_frontend_prerequisite_precedes_database_and_runtime_startup(monke
         assert events[:2] == ["frontend", "init_db"]
 
 
+async def test_browser_orphan_sweep_failure_does_not_stop_startup(monkeypatch):
+    from host_access import browser_orphan
+
+    _isolate_lifespan(monkeypatch)
+    calls = []
+
+    def fail_sweep(_directory):
+        calls.append("sweep")
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions", fail_sweep)
+    async with app_lifecycle.lifespan(FastAPI()):
+        assert calls == ["sweep"]
+
+
 async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(monkeypatch):
     """The Uvicorn lifespan tunes GIL handoffs before DB startup can use workers."""
     import sys
