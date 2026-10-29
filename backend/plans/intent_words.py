@@ -51,8 +51,9 @@ def _phrase(quote: str) -> str:
 def message_words(*, role: object, content: object, metadata: object) -> str:
     """The person's own words in one stored message: its text, then each chat comment's note.
 
-    The one row-level rule for the person's words: relays, events and blanks give "".
-    A comment's quote is the agent's text it marks, never the person's words.
+    Plans' reading of ``is_owner_authored_message`` plus comment notes, so a comments-only
+    reply counts here though corrections, lessons and recall still need typed text.
+    Relays, events and blanks give "". A comment's quote is the agent's text it marks.
     """
     raw = content if isinstance(content, str) else ""
     if role != "user" or is_wrapper_or_delivery(raw, metadata):
@@ -102,11 +103,15 @@ def _message_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> 
 
 
 def _note_message_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
-    """Messages whose chat comment notes hold the quote; the message index covers text only."""
+    """Messages whose chat comment notes hold the quote; the message index covers text only.
+
+    Reads only the owner's comments (idx_threads_user, then idx_chat_comments_target), so its
+    cost is that person's comment count; it runs last, once no other source holds the quote.
+    """
     return [row["id"] for row in connection.execute(
-        f"""SELECT m.id FROM chat_comments c
+        f"""SELECT m.id FROM threads t
+            CROSS JOIN chat_comments c ON c.thread_id=t.id
             JOIN messages m ON m.id=c.user_message_id
-            JOIN threads t ON t.id=m.thread_id
             WHERE m.role='user' AND json_valid(m.metadata) AND {_SAME_OWNER}
               AND EXISTS (SELECT 1 FROM json_each(m.metadata,'$.reply_context.comments') e
                           WHERE json_extract(e.value,'$.cid')=c.cid
@@ -143,9 +148,9 @@ def _decision_ids(connection: sqlite3.Connection, quote: str, recipient: str) ->
 
 _CANDIDATES = (
     (SOURCE_KIND_MESSAGE, _message_ids),
-    (SOURCE_KIND_MESSAGE, _note_message_ids),
     (SOURCE_KIND_DOC_COMMENT, _comment_ids),
     (SOURCE_KIND_DECISION_ANSWER, _decision_ids),
+    (SOURCE_KIND_MESSAGE, _note_message_ids),
 )
 
 

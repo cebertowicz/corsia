@@ -91,3 +91,26 @@ def test_message_words_put_text_before_notes_and_skip_blank_notes():
     assert intent_words.message_words(role="assistant", content="Typed", metadata=metadata) == ""
     relayed = {**metadata, "sender_kind": "agent"}
     assert intent_words.message_words(role="user", content="", metadata=json.dumps(relayed)) == ""
+
+
+def test_a_comment_only_reply_reaches_plans_on_arrival_but_not_the_corrections_worker(monkeypatch):
+    from types import SimpleNamespace
+
+    from jobs import corrections_realtime, corrections_recording
+
+    heard, notified = [], []
+    monkeypatch.setattr("plans.public.person_words_arrived", lambda kind, source_id: heard.append(source_id))
+    monkeypatch.setattr(corrections_realtime, "notify", lambda kind, source_id: notified.append(source_id))
+    comments = {"reply_context": {"comments": [{"quote": "agent wrote", "note": NOTE}]}}
+
+    def send(message_id: str, content: str, metadata: object) -> None:
+        corrections_recording.notify_if_owner(
+            SimpleNamespace(message_id=message_id, duplicate=False), role="user", content=content, metadata=metadata,
+        )
+
+    send("comments-only", "", comments)
+    send("typed", "Typed words.", comments)
+    send("relayed", "", {**comments, "sender_kind": "agent"})
+
+    assert heard == ["comments-only", "typed"]
+    assert notified == ["typed"]
