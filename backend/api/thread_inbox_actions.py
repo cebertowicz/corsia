@@ -144,8 +144,7 @@ async def retry_thread_delivery_now(
     if state not in {"failed", "ambiguous"}:
         raise HTTPException(409, "This message has no retryable delivery outcome.")
     content, metadata = _retry_content(message)
-    if not content.strip():
-        raise HTTPException(409, "This message has no content to retry.")
+    # send_thread_input owns the empty-input rule.
     from infra.send_service import SendRejected, send_thread_input
 
     try:
