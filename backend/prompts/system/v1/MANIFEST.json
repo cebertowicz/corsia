@@ -82,10 +82,10 @@
       "sha256": "11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf"
     },
     {
-      "bytes": 4534,
+      "bytes": 4584,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/SPAWN-POLICY.md",
-      "sha256": "9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192"
+      "sha256": "69758642a956d48b405ea60080825baa755bc7af31fc8a5c7b98953bb609551d"
     },
     {
       "bytes": 730,
@@ -103,7 +103,7 @@
       "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "cd08dc6eb35db976ea2f3916ebd45b113f9b7f6abdeea371fd15f3f941124edc"
+      "sha256": "384a4d66e6977b41ad725e163981037f87458050fa3b7537500fb672380584d5"
     },
     {
       "bytes": 3492,
