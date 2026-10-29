@@ -219,8 +219,7 @@ describe('CommentThread stamping', () => {
 		FakeObserver.live()[0].report(false);
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		FakeObserver.live()[0].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]), { timeout: 3000 });
 	});
 
 	it('does not stamp in a hidden document, and stamps once when it becomes visible with the reply still fully visible', async () => {
