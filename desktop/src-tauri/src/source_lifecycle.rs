@@ -156,11 +156,10 @@ impl SourceLifecycle {
         if self.loaded_job()?.is_some() {
             return Err("launchd still lists the existing install".into());
         }
-        if !release_proof::port_refuses(self.source.port) {
-            return Err(format!(
-                "port {} still accepts connections",
-                self.source.port
-            ));
+        if let Some(port) = self.source.port {
+            if !release_proof::port_refuses(port) {
+                return Err(format!("port {port} still accepts connections"));
+            }
         }
         Ok(())
     }
@@ -244,8 +243,11 @@ impl SourceLifecycle {
     /// The source writes no launcher refusals, so no log is searched; the
     /// existing install is named by the failure's kind alone.
     fn wait_for_source(&self) -> Result<(), String> {
+        let Some(port) = self.source.port else {
+            return Ok(());
+        };
         wait_for_startup(
-            self.source.port,
+            port,
             None,
             || {
                 Ok(self
@@ -385,47 +387,38 @@ impl adoption::Lifecycle for SourceLifecycle {
         state: &Path,
         variable_names: &BTreeSet<String>,
     ) -> Result<(), ReadyError> {
-        let Some(printed) = self.loaded_job().map_err(ReadyError::Failed)? else {
-            // The source's own restart unloads the job and bootstraps it again, so an unloaded
-            // job with a restart in flight is restarting, not stopped: wait for it (or call it
-            // stuck) rather than offering a start that would race the restart's own.
-            return Err(match self.look_for_restart(state) {
-                RestartLook::Young | RestartLook::Stuck => ReadyError::Restarting,
-                RestartLook::Settled => ReadyError::NotRunning,
-                // A look that could not be read proves neither state: never claim one.
-                RestartLook::Unknown => ReadyError::Failed(
-                    "could not tell whether the existing install is restarting".into(),
-                ),
-            });
-        };
-        // The checkout that would stop it must be the one the loaded job was bootstrapped
-        // from. This is the narrowed copy of the checkout's own rule
-        // (`service_loaded_definition_matches` in scripts/corsia.d/service.sh), kept only
-        // because no released checkout exposes that check read-only: the plist's generation
-        // must be the one the loaded job reports, and anything else (no generation in the
-        // plist, none in the print) cannot be proven, exactly as `corsia stop` refuses it.
-        // Port, interpreter, workspace and state-directory mismatches are left to that stop.
-        let running = printed_working_directory(&printed);
-        let proven = matches!(
-            (self.source.generation.as_deref(), printed_generation(&printed)),
-            (Some(expected), Some(loaded)) if expected == loaded
-        );
-        // Both generations present and different, from the very folder the settings name: the
-        // plist was rewritten without a reload, which no folder wording describes.
-        let older_settings = matches!(
-            (self.source.generation.as_deref(), printed_generation(&printed)),
-            (Some(expected), Some(loaded)) if expected != loaded
-        ) && running.map(Path::new)
-            == Some(self.source.working_directory.as_path());
-        if older_settings {
-            return Err(ReadyError::OlderSettings);
-        }
-        if !proven {
-            return Err(ReadyError::WrongFolder {
-                running: running
-                    .map(|directory| self.shown(self.checkout_of(Path::new(directory)))),
-                checkout: self.shown(self.checkout_of(&self.source.working_directory)),
-            });
+        if self.source.plist.is_some() {
+            let Some(printed) = self.loaded_job().map_err(ReadyError::Failed)? else {
+                // An unloaded job may be in the middle of its own restart.
+                return Err(match self.look_for_restart(state) {
+                    RestartLook::Young | RestartLook::Stuck => ReadyError::Restarting,
+                    RestartLook::Settled => ReadyError::NotRunning,
+                    RestartLook::Unknown => ReadyError::Failed(
+                        "could not tell whether the existing install is restarting".into(),
+                    ),
+                });
+            };
+            // Match the checkout's loaded-definition rule before asking it to stop.
+            let running = printed_working_directory(&printed);
+            let proven = matches!(
+                (self.source.generation.as_deref(), printed_generation(&printed)),
+                (Some(expected), Some(loaded)) if expected == loaded
+            );
+            let older_settings = matches!(
+                (self.source.generation.as_deref(), printed_generation(&printed)),
+                (Some(expected), Some(loaded)) if expected != loaded
+            ) && running.map(Path::new)
+                == Some(self.source.working_directory.as_path());
+            if older_settings {
+                return Err(ReadyError::OlderSettings);
+            }
+            if !proven {
+                return Err(ReadyError::WrongFolder {
+                    running: running
+                        .map(|directory| self.shown(self.checkout_of(Path::new(directory)))),
+                    checkout: self.shown(self.checkout_of(&self.source.working_directory)),
+                });
+            }
         }
         let output = self
             .python(PREFLIGHT_PROGRAM)
@@ -487,11 +480,12 @@ impl adoption::Lifecycle for SourceLifecycle {
         let record = stop_record();
         // The process launchd runs for the source, read before the stop so a failed stop can
         // still be judged by whether that process let go.
-        let source_pid = self
-            .loaded_job()
-            .ok()
-            .flatten()
-            .and_then(|print| release_proof::pid_from_launchctl_print(&print));
+        let source_pid = if self.source.plist.is_some() {
+            self.loaded_job().ok().flatten()
+                .and_then(|print| release_proof::pid_from_launchctl_print(&print))
+        } else {
+            None
+        };
         let mut command = self.cli("stop");
         if let Some((file, _)) = &record {
             if let Ok(file) = file.try_clone() {
@@ -544,6 +538,18 @@ impl adoption::Lifecycle for SourceLifecycle {
         // the install has let go of everything adoption touches next: launchd and the port,
         // the process launchd ran, and the database. The source's bootout can report a failure
         // after launchd has already torn the job down (`bounded bootout exit 2`).
+        if self.source.plist.is_none() {
+            if !status.success() {
+                return Err(match refusal {
+                    Some(line) => format!("`corsia stop` exited {status}: {line}"),
+                    None => format!("`corsia stop` exited {status}"),
+                });
+            }
+            if let Some(why) = unrecorded {
+                return Err(format!("the stop could not be recorded ({why}), so the switch is being undone"));
+            }
+            return Ok(());
+        }
         let let_go = self.released(source_pid);
         if !status.success() {
             match &let_go {
@@ -574,6 +580,9 @@ impl adoption::Lifecycle for SourceLifecycle {
     }
 
     fn old_is_down(&mut self) -> Result<(), String> {
+        if self.source.plist.is_none() {
+            return Ok(());
+        }
         self.is_down()
             .map_err(|error| format!("the existing install is running again: {error}"))
     }
@@ -704,10 +713,10 @@ mod tests {
         );
         fs::create_dir_all(base.join("resources/backend")).unwrap();
         let source = adoption::SourceInstall {
-            plist: base.join("com.corsia.prod.plist"),
+            plist: Some(base.join("com.corsia.prod.plist")),
             state: base.join("state"),
             workspace: base.join("work"),
-            port: free_port(),
+            port: Some(free_port()),
             cli: base.join("checkout/scripts/corsia"),
             working_directory: base.join("checkout/backend"),
             generation: Some("gen-1".into()),
@@ -760,6 +769,21 @@ mod tests {
     }
 
     #[test]
+    fn unmanaged_stop_uses_checkout_cli_result_without_launchd_or_port() {
+        for (stop, expected) in [("exit 0", true), ("exit 9", false)] {
+            let mut home = home(stop, "exit 0", "exit 0");
+            home.lifecycle.source.plist = None;
+            home.lifecycle.source.port = None;
+            home.lifecycle.source.generation = None;
+            home.lifecycle.launchctl = home.root.path().join("missing-launchctl");
+            home.lifecycle.stop_clock = |_| Some("test-start".into());
+            let state = home.lifecycle.source.state.clone();
+            assert!(home.lifecycle.check_ready(&state, &BTreeSet::new()).is_ok());
+            assert_eq!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok(), expected);
+        }
+    }
+
+    #[test]
     fn bundled_python_receives_the_source_roots() {
         let home = home("rm -f LOADED", "touch LOADED", "env | sort");
         let output = home.lifecycle.python("ignored").output().unwrap();
@@ -782,7 +806,7 @@ mod tests {
         let cap = Duration::from_secs(3);
         let began = Instant::now();
         let error = wait_for_startup(
-            home.lifecycle.source.port,
+            home.lifecycle.source.port.unwrap(),
             None,
             || {
                 Ok(Some(
@@ -815,7 +839,7 @@ mod tests {
         let cap = Duration::from_secs(3);
         let began = Instant::now();
         let error = wait_for_startup(
-            home.lifecycle.source.port,
+            home.lifecycle.source.port.unwrap(),
             Some(&log),
             || Ok((calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0).then_some(pid)),
             cap,
@@ -837,7 +861,7 @@ mod tests {
         let began = Instant::now();
         assert_eq!(
             wait_for_startup(
-                home.lifecycle.source.port,
+                home.lifecycle.source.port.unwrap(),
                 None,
                 || Ok(None),
                 Duration::from_millis(30),
@@ -855,7 +879,7 @@ mod tests {
         let home = home("rm -f LOADED", "exit 0", "exit 0");
         assert_eq!(
             wait_for_startup(
-                home.lifecycle.source.port,
+                home.lifecycle.source.port.unwrap(),
                 None,
                 || Err("CORSIA couldn’t check whether the existing install is running".into()),
                 Duration::from_secs(3),
@@ -872,7 +896,7 @@ mod tests {
         let stalled = home("rm -f LOADED", "exit 0", "exit 0");
         assert_eq!(
             wait_for_startup(
-                stalled.lifecycle.source.port,
+                stalled.lifecycle.source.port.unwrap(),
                 None,
                 || Ok(Some(std::process::id())),
                 Duration::from_millis(30),
@@ -904,7 +928,7 @@ mod tests {
             fs::read_to_string(base.join("stop.cwd")).unwrap().trim(),
             base.join("checkout").to_str().unwrap()
         );
-        serve_health(home.lifecycle.source.port);
+        serve_health(home.lifecycle.source.port.unwrap());
         home.lifecycle.start_old().unwrap();
         assert_eq!(
             fs::read_to_string(base.join("start.env")).unwrap(),
@@ -997,7 +1021,7 @@ mod tests {
     #[test]
     fn a_stop_that_leaves_the_port_answering_is_not_a_stop() {
         let mut home = home("rm -f LOADED", "exit 0", "exit 0");
-        let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port)).unwrap();
+        let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port.unwrap())).unwrap();
         let error = home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
@@ -1306,7 +1330,7 @@ mod tests {
             &base.join("checkout/scripts/corsia"),
             "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/$1.env\"; touch \"$HOME/loaded\"",
         );
-        serve_health(home.lifecycle.source.port);
+        serve_health(home.lifecycle.source.port.unwrap());
         home.lifecycle.restart_existing().unwrap();
         assert_eq!(
             fs::read_to_string(base.join("restart.env")).unwrap(),
@@ -1434,7 +1458,7 @@ mod tests {
             .contains("running again"));
         fs::remove_file(home.root.path().join("loaded")).unwrap();
         home.lifecycle.old_is_down().unwrap();
-        let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port)).unwrap();
+        let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port.unwrap())).unwrap();
         assert!(home.lifecycle.old_is_down().is_err());
     }
 }

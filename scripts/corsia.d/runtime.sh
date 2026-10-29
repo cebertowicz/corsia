@@ -789,13 +789,13 @@ prove_backend_replaced() {
 }
 
 print_backend_status() {
-    local payload revision checkout topology pid
+    local payload identity revision backend_dirty frontend_dirty checkout_dirty checkout topology pid
     if ! payload=$(curl -sf --max-time 5 \
         "http://127.0.0.1:$BACKEND_PORT/api/version" 2>/dev/null); then
         fail "Backend health responded, but build identity could not be read"
         return 1
     fi
-    if ! revision=$(
+    if ! identity=$(
         printf '%s' "$payload" |
             python3 -c 'import json,sys
 payload = json.load(sys.stdin)
@@ -810,12 +810,16 @@ if not isinstance(frontend_sha, str) or frontend_sha != backend_sha:
     raise ValueError("frontend and backend revisions differ")
 if current_sha is not None and current_sha != backend_sha:
     raise ValueError("running backend and checkout revisions differ")
-print(backend_sha)' 2>/dev/null
+def state(value):
+    return "dirty" if value is True else "clean" if value is False else "unknown"
+print("\t".join((backend_sha, state(backend.get("dirty")),
+                 state(frontend.get("dirty")), state((backend.get("current_head") or {}).get("dirty")))))' 2>/dev/null
     ); then
         fail "Backend is reachable, but backend, frontend, and checkout revisions do not agree"
         return 1
     fi
 
+    IFS=$'\t' read -r revision backend_dirty frontend_dirty checkout_dirty <<< "$identity"
     checkout="$(serving_checkout_root)"
     if service_managed; then
         if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
@@ -831,6 +835,7 @@ print(backend_sha)' 2>/dev/null
     echo "  Serving on :$BACKEND_PORT"
     echo "  Checkout: $checkout"
     echo "  Revision: ${revision:0:12} (backend + frontend)"
+    echo "  Dirty state: backend $backend_dirty, frontend $frontend_dirty, checkout $checkout_dirty"
     echo "  Process: $topology"
 }
 
@@ -1173,11 +1178,11 @@ if (
     not isinstance(value, str)
     or not value
     or value == "unknown"
-    or payload.get("dirty") is not False
+    or (payload.get("dirty") is not False and not (len(sys.argv) > 2 and sys.argv[2] == "source" and payload.get("dirty") is True))
 ):
     raise SystemExit(1)
 print(value)
-' "$1/build-info.json" 2>/dev/null
+' "$1/build-info.json" "${2:-}" 2>/dev/null
 }
 
 frontend_release_matches_sha() {
@@ -1207,13 +1212,17 @@ clear_frontend_release_state() {
 }
 
 ensure_current_frontend_release_locked() {
-    local checkout="$1" fe stage prepared backup absent head_sha
+    local checkout="$1" fe stage prepared backup absent head_sha worktree_status fresh_source_build=false
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || return 0
     head_sha="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
     if [ -z "$head_sha" ]; then
         fail "Frontend startup refused: could not resolve the serving checkout revision"
+        return 1
+    fi
+    if ! worktree_status="$(git -C "$checkout" status --porcelain 2>/dev/null)"; then
+        fail "Frontend startup refused: could not read checkout status"
         return 1
     fi
     if is_backend_running; then
@@ -1236,7 +1245,7 @@ ensure_current_frontend_release_locked() {
             fail "Frontend startup refused: completed activation cleanup did not finish"
             return 1
         fi
-        return 0
+        [ -n "$worktree_status" ] || return 0
     fi
     if { [ -e "$backup" ] || [ -e "$absent" ]; } \
         && { [ -e "$fe/dist" ] || [ ! -f "$prepared" ] \
@@ -1251,12 +1260,13 @@ ensure_current_frontend_release_locked() {
             fail "Frontend startup refused: prepared build does not match checkout $head_sha; retained at $stage"
             return 1
         fi
-    elif frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+    elif [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         return 0
     else
         redeploy_build "$checkout" || return 1
-        if [ ! -e "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"
+        fresh_source_build=true
+        if [ ! -e "$prepared" ] || [ ! -s "$stage/index.html" ] \
+            || [ "$(frontend_release_sha "$stage" source)" != "$head_sha" ]
         then
             fail "Frontend startup refused: completed build does not match checkout $head_sha; retained at $stage"
             return 1
@@ -1268,9 +1278,17 @@ ensure_current_frontend_release_locked() {
         fail "Frontend startup refused: activated release cleanup did not complete"
         return 1
     fi
-    if ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+    if [ "$fresh_source_build" = true ]; then
+        [ -s "$fe/dist/index.html" ] && [ "$(frontend_release_sha "$fe/dist" source)" = "$head_sha" ] || {
+            fail "Frontend startup refused: activated assets do not match checkout $head_sha"
+            return 1
+        }
+    elif ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         fail "Frontend startup refused: activated assets do not match checkout $head_sha"
         return 1
+    elif [ -n "$worktree_status" ]; then
+        # Resolve prepared update ownership before building the working tree.
+        ensure_current_frontend_release_locked "$checkout" || return 1
     fi
 }
 

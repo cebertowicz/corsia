@@ -32,7 +32,6 @@ else
   else
     "$ROOT/desktop/scripts/build-macos-bundle.sh"
   fi
-  "$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$SOURCE_APP"
 fi
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
