@@ -54,7 +54,7 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
         "status": "failed", "phase": None, "kind": "update", "trigger": "manual",
         "failure_code": "disk_space",
         "failure_detail": json.dumps({"needed_bytes": 13, "free_bytes": 8,
-                                      "log_path": str(LOGS_DIR / f"restart-{operation_id}.log")}),
+                                      "log_path": str(LOGS_DIR / "restart.log")}),
     }
     prepare.assert_not_awaited()
     drain.assert_not_awaited()

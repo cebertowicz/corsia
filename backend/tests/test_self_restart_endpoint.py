@@ -948,7 +948,7 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
     assert json.loads(operation["failure_detail"]) == {
         "reason": "mismatch", "target_version": "0.4.2", "running_version": "0.4.1",
         "previous_version": "0.4.1",
-        "log_path": str(LOGS_DIR / f"restart-{rid}.log"),
+        "log_path": str(LOGS_DIR / "restart.log"),
     }
     assert sr.restart_holds_new_work() is False
     assert events == []

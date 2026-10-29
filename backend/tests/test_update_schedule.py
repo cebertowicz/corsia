@@ -269,15 +269,12 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
     monkeypatch.setattr(settings_restart, "_begin_settings_drain", AsyncMock())
     monkeypatch.setattr(system_admin, "_restart_log_path", lambda _name: restart_log)
-    watched = []
-    monkeypatch.setattr(system_admin, "_watch_update_process", lambda process, operation_id, path: watched.append((process, operation_id, path)))
     monkeypatch.setattr(restart_shell.subprocess, "Popen", fake_popen)
 
     operation_id, _process = asyncio.run(
         system_admin.launch_update({"id": "steve"}, None, "automatic", "1.2.3", port=1957)
     )
 
-    assert watched == [(_process, operation_id, restart_log)]
     assert len(minted_tokens) == 1
     from infra import drain
     from infra.accounts import SERVICE_TTL

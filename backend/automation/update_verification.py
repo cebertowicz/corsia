@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import plistlib
 
 from automation import self_restart
 from automation.restart_settlement import settle_restart_control
@@ -16,22 +15,6 @@ from infra import build_info, update_status
 #: for example after the app was restored by hand, and without this the
 #: operation would hold its banners and the restart lock indefinitely.
 UNCONFIRMED_UPDATE_SECONDS = 60.0
-
-
-def _target_still_staged(target: str) -> bool:
-    """A staged target shows the update did not reach the installed path."""
-    from infra.platform_paths import app_bundle_root
-
-    bundle = app_bundle_root()
-    if bundle is None:
-        return False
-    plist = bundle.with_name("CORSIA.app.staged") / "Contents" / "Info.plist"
-    try:
-        with plist.open("rb") as source:
-            staged_version = plistlib.load(source)["CORSIAVersion"]
-        return update_status.normalize_packaged_version(staged_version) == target
-    except (OSError, KeyError, TypeError, ValueError, plistlib.InvalidFileException):
-        return False
 
 
 def version_failure(operation: dict) -> tuple[str | None, dict]:
@@ -53,9 +36,7 @@ def version_failure(operation: dict) -> tuple[str | None, dict]:
         restored = previous is not None and running == update_status.normalize_packaged_version(previous)
     except (TypeError, ValueError):
         restored = False
-    if restored and not _target_still_staged(target):
-        return "rolled_back", {**detail, "reason": "mismatch"}
-    return "wrong_version_running", {**detail, "reason": "mismatch"}
+    return ("rolled_back" if restored else "wrong_version_running"), {**detail, "reason": "mismatch"}
 
 
 async def confirm_packaged_update(

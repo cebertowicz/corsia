@@ -52,16 +52,7 @@ def _update_failure_log(operation_id: str, error: str, failure_detail: str | Non
 
     detail = operation_detail({"failure_detail": failure_detail})
     if not detail.get("log_path"):
-        path = LOGS_DIR / f"restart-{operation_id}.log"
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists():
-                path.write_text(error + "\n")
-        except OSError:
-            from loguru import logger
-
-            logger.exception("Could not write update failure log {}", path)
-        detail["log_path"] = str(path)
+        detail["log_path"] = str(LOGS_DIR / "restart.log")
     return json.dumps(detail)
 
 

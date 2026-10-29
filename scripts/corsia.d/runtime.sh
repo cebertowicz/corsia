@@ -876,7 +876,6 @@ stop_backend() {
             fail "Port :$BACKEND_PORT is served by a process from another checkout (PID $PID); refusing to stop it"
             return 1
         }
-        _corsia_teardown_possible=true
         kill "$PID" 2>/dev/null
         for _ in $(seq 1 15); do
             kill -0 "$PID" 2>/dev/null || { ok "Backend stopped (PID $PID)"; return 0; }
