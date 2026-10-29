@@ -54,6 +54,23 @@ describe('setup CLI installer failure copy', () => {
 	});
 });
 
+describe('unchecked setup accounts', () => {
+	it.each([['claude-code', 'Claude Code', 'Claude'], ['codex', 'Codex', 'ChatGPT']] as const)('%s offers recovery for unchecked models', (vendor, name, accountName) => {
+		const source = { source: vendor, name, state: 'needs_auth' as const, accounts: [{ account_id: 'account', label: accountName, label_verified: true, identified: true, state: 'unchecked' as const, resets_at: null, corsia_agent_binding: false }] };
+		const flow = createSetupConnect({ token: () => null, sources: () => [source], refreshSources: async () => undefined });
+		const row = flow.row(source);
+		expect(row.meta).toBe(`Couldn’t check your ${accountName} models. Sign in again.`);
+		expect(row).toMatchObject({ error: true, canTurnOff: true, action: { label: 'Sign in' } });
+		expect(row.meta).not.toContain('Uses your');
+	});
+	it('keeps a ready account as Ready when another account is unchecked', () => {
+		const account = { account_id: 'account', label: 'Claude', label_verified: true, identified: true, resets_at: null, corsia_agent_binding: false };
+		const source = { source: 'claude-code', name: 'Claude Code', state: 'ready' as const, accounts: [{ ...account, state: 'unchecked' as const }, { ...account, account_id: 'ready', state: 'ready' as const }] };
+		const flow = createSetupConnect({ token: () => null, sources: () => [source], refreshSources: async () => undefined });
+		expect(flow.row(source)).toMatchObject({ meta: 'Ready · Claude', ready: true });
+	});
+});
+
 describe('setup sign-in failure copy', () => {
 	it('never puts an unknown cause code into the sentence', () => {
 		const copy = signinFailureCopy('codex', 'some_new_cause', 'signin-0123456789abcdef');
