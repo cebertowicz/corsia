@@ -21,6 +21,7 @@ const fixtures: Fixture[] = [
 	{ name: 'subscriptions', screen: 'subscriptions', cli: 'ready', element: 'Your subscriptions: Claude Code signed in, the ChatGPT question, Back and Continue' },
 	{ name: 'welcome', screen: 'welcome', element: 'Getting started: the Welcome copy and Continue, with the living mark beside it from 1280 wide' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
+	{ name: 'account-background-download', screen: 'account', local: 'downloading', element: 'Local model rail job: accent Downloading 42% · 12 min left, no hairline' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
 	{ name: 'account-mismatch', screen: 'mismatch', element: 'Passwords don’t match.' },
