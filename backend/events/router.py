@@ -214,6 +214,9 @@ def _select_route(
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
+    if internal_event in {"webhook.github.issue_comment_edited", "webhook.github.pr_comment_edited",
+                          "webhook.github.review_submitted", "webhook.github.review_edited"}:
+        return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason="rule_only"), routing_state
     if tag is not None and identity is not None:
         routing_state = registry_models.routing_registrations(*identity)
         thread_id = tag["thread_id"]

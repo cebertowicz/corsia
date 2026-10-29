@@ -49,7 +49,12 @@ def test_conductor_designation_installs_screen_without_manual_sync(world):
     assert set_project_conductor(world["project"], OWNER, db=db)
     key = install._key(world["project"])
     rules = db.execute("SELECT id FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchall()
-    assert {row[0] for row in rules} == {key + "_opened", key + "_synchronize", key + "_start"}
+    ids = {row[0] for row in rules}
+    assert {key + "_opened", key + "_synchronize", key + "_start"} <= ids
+    assert {key + '_triage_' + suffix for suffix in ('issue_opened', 'issue_comment_created',
+            'issue_comment_edited', 'pr_comment_created', 'pr_comment_edited', 'review_submitted',
+            'review_edited', 'start')} <= ids
+    assert len(ids) == 11
     assert set_project_conductor(world["project"], None, db=db)
     assert not db.execute("SELECT 1 FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchone()
 

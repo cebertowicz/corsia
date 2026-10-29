@@ -1,6 +1,7 @@
 """Content-author and item-version facts for GitHub normalization."""
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from events.guard import event_author
@@ -54,6 +55,10 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     head = container.get("head")
     if isinstance(head, dict) and action in ("opened", "synchronize"):
         version = head.get("sha")
+    elif action == "edited" and isinstance(raw.get("review"), dict):
+        item_id, body = item.get("id"), item.get("body")
+        version = (f"{item_id}:{hashlib.sha256(body.encode()).hexdigest()[:12]}"
+                   if item_id is not None and isinstance(body, str) else None)
     elif action == "edited":
         item_id, updated = item.get("id"), item.get("updated_at")
         version = f"{item_id}:{updated}" if item_id is not None and updated else None

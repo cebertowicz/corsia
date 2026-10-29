@@ -98,17 +98,17 @@ def test_no_author_text_requires_no_origin_read(monkeypatch):
     assert "o/r#7" in summary
 
 
-def test_review_types_normalize_but_are_not_routed(monkeypatch):
+def test_review_types_normalize_and_route_with_version(monkeypatch):
     from events.envelope import normalize
 
     monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: False)
     for action in ("submitted", "edited"):
         payload = {"action": action, "repository": {"full_name": "o/r"},
                    "pull_request": {"number": 7}, "review": {"id": 42,
-                   "updated_at": "2026-10-25T00:00:00Z", "user": {"login": "outside"}}}
+                   "body": "review", "user": {"login": "outside"}}}
         assert normalize("github", payload).type == f"review.{action}"
-        assert map_github_event("pull_request_review", payload) is None
+        assert map_github_event("pull_request_review", payload) == f"webhook.github.review_{action}"
         if action == "edited":
-            del payload["review"]["updated_at"]
+            del payload["review"]["body"]
             with pytest.raises(MalformedEventError):
                 normalize("github", payload)

@@ -105,22 +105,20 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
     if event_type == "issues" and action == "opened":
         return GITHUB_ROUTED_EVENTS["issue.opened"]
 
-    if event_type == "issue_comment":
-        if action == "created":
-            issue = payload.get("issue", {})
-            if issue.get("pull_request"):
-                if _is_noise_pr_comment(payload):
-                    return None
-                return "webhook.github.pr_comment"
-            return "webhook.github.issue_comment"
-        return None
+    if event_type == "issue_comment" and action in ("created", "edited"):
+        issue = payload.get("issue", {})
+        on_pr = bool(issue.get("pull_request"))
+        if on_pr and _is_noise_pr_comment(payload):
+            return None
+        return GITHUB_ROUTED_EVENTS[f"{'pr_comment' if on_pr else 'issue_comment'}.{action}"]
 
-    if event_type == "pull_request_review_comment":
-        if action == "created":
-            if _is_noise_pr_comment(payload):
-                return None
-            return "webhook.github.pr_comment"
-        return None
+    if event_type == "pull_request_review_comment" and action in ("created", "edited"):
+        if _is_noise_pr_comment(payload):
+            return None
+        return GITHUB_ROUTED_EVENTS[f"pr_comment.{action}"]
+
+    if event_type == "pull_request_review" and action in ("submitted", "edited"):
+        return GITHUB_ROUTED_EVENTS[f"review.{action}"]
 
     if event_type == "check_run":
         return None
