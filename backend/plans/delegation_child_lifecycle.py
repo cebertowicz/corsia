@@ -30,7 +30,7 @@ def notify_turn_error(
     """
     from datetime import datetime, timezone
 
-    from infra.thread_confinement import worker_error_for_agent
+    from infra.thread_confinement import ChildOutput
     from plans import delegation_turn_end, wait_causes
     from plans.delegation_child_rollover import has_rollover_successor
     from plans.delegation_error_episode import error_episode
@@ -49,6 +49,7 @@ def notify_turn_error(
         return
     parent_plan_id, worker = delegation
     provider_limit = is_provider_usage_or_quota_limit(error)
+    shared_error = ChildOutput.read(connection, worker).error(error)  # what the parent may read
 
     # A head held for its model has the same recovery as a limit (#3317).
     held_kind = wait_causes.stalled_why(connection, thread_id)
@@ -64,13 +65,13 @@ def notify_turn_error(
         _wake_parent(
             connection, parent_plan_id, worker, kind="child_turn_errored",
             subject_id=error_episode(connection, parent_plan_id, worker, error), child_plan_id=str(plan["id"]),
-            error=worker_error_for_agent(connection, worker, error),
+            error=shared_error,
         )
         return
     if held_kind == 'account':
         from connections import read_account_readiness
 
-        state, fields = text.account_wake_fields(read_account_readiness([worker], db=connection).get(worker), error)
+        state, fields = text.account_wake_fields(read_account_readiness([worker], db=connection).get(worker))
         _wake_parent(connection, parent_plan_id, worker, kind='child_provider_refused',
                      subject_id=error_episode(connection, parent_plan_id, worker, f'account\n{refused_on}\n{error}'), child_plan_id=str(plan['id']),
                      model=refused_on, account_hold_state=state, **fields)
@@ -86,7 +87,7 @@ def notify_turn_error(
     _wake_parent(
         connection, parent_plan_id, worker, kind="child_provider_refused",
         subject_id=error_episode(connection, parent_plan_id, worker, f"{refused_on}\n{resumes_at}"),
-        child_plan_id=str(plan["id"]), error=error,
+        child_plan_id=str(plan["id"]), error=shared_error,
         model=refused_on, resume_note=resume_note,
     )
 

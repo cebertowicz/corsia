@@ -91,15 +91,16 @@ def test_search_filters_before_limit_and_self_can_read(deleg_db, with_fts):
 
 
 def test_finished_result_rejects_intermediate_and_running(deleg_db):
-    from infra.thread_confinement import agent_result
+    from infra.thread_confinement import ChildOutput
 
     seed(deleg_db)
     add_final(deleg_db)
-    assert agent_result(deleg_db, "isolated") is None
+    child = ChildOutput.read(deleg_db, "isolated")
+    assert child.confined and child.answer(deleg_db) is None
     deleg_db.execute("UPDATE active_turns SET status='completed' WHERE id='isolated-turn'")
-    assert agent_result(deleg_db, "isolated")["content"] == CANARY
+    assert child.answer(deleg_db)["content"] == CANARY
     deleg_db.execute("UPDATE messages SET metadata=? WHERE id='final-row'", (json.dumps({"turn_id": "isolated-turn", "llm_tool_calls": [{"id": "x"}]}),))
-    assert agent_result(deleg_db, "isolated") is None
+    assert child.answer(deleg_db) is None
 
 
 @pytest.mark.asyncio
@@ -182,17 +183,18 @@ def test_error_notice_does_not_expose_worker_error(notice_db):
 
 
 @pytest.mark.asyncio
-async def test_untrusted_thread_title_is_never_generated(deleg_db, monkeypatch):
+async def test_untrusted_generated_title_is_withheld_only_at_read(deleg_db, monkeypatch):
+    from infra.thread_confinement import project_thread
     from ws import post_turn
 
     seed(deleg_db)
     deleg_db.execute("UPDATE threads SET title='New Chat' WHERE id='isolated'")
     deleg_db.commit()
-    generator = AsyncMock(return_value=CANARY)
-    monkeypatch.setattr(post_turn, "generate_thread_title", generator)
+    monkeypatch.setattr(post_turn, "generate_thread_title", AsyncMock(return_value=CANARY))
     await post_turn.ensure_thread_title("isolated", AsyncMock())
-    assert deleg_db.execute("SELECT title FROM threads WHERE id='isolated'").fetchone()[0] == "New Chat"
-    generator.assert_not_awaited()
+    row = deleg_db.execute("SELECT * FROM threads WHERE id='isolated'").fetchone()
+    assert project_thread(Reader.person(), row)["title"] == CANARY
+    assert project_thread(Reader.agent("sender-self"), row)["title"] is None
 
 
 def test_unconfined_agent_read_is_unchanged():

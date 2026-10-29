@@ -190,13 +190,13 @@ async def test_provider_words_do_not_make_raw_runtime_errors_shareable(deleg_db)
 
 @pytest.mark.parametrize("tool_metadata", [{"tool_calls": [{"id": "call"}]}, {"llm_tool_calls": "damaged"}])
 def test_terminal_result_skips_later_tool_call_rows(deleg_db, tool_metadata):
-    from infra.thread_confinement import agent_result
+    from infra.thread_confinement import ChildOutput
 
     _plant(deleg_db)
     deleg_db.execute("INSERT INTO messages (id,thread_id,role,content,metadata,seq,created_at) "
                      "VALUES ('later-tool-call','isolated','assistant',?,?,5,'2026-01-04')",
                      (INJECTION, json.dumps({"turn_id": "isolated-turn", **tool_metadata})))
-    assert agent_result(deleg_db, "isolated")["content"] == FINAL
+    assert ChildOutput.read(deleg_db, "isolated").answer(deleg_db)["content"] == FINAL
 
 
 @pytest.mark.asyncio

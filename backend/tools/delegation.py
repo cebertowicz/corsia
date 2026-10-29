@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from infra.db_async import run_in_db
-from infra.delegation_status import model_switch_status
+from infra.delegation_status import model_switch_status, read_delegate_status
 from infra.fresh_threads import create_visible_fresh_thread
 from infra.queries import get_thread_for_user
 from infra.send_service import SendRejected, send_thread_input
@@ -15,7 +15,6 @@ from infra.thread_input_types import held_admission_line
 from llm.delegation_model import dispatch_scope, eligible_delegation_model
 from tools.base import Tool
 from tools.delegation_completion import resolve_child_turn_for_parent
-from infra.delegation_status import read_delegate_status
 
 
 def _clean(value: Any) -> str | None:

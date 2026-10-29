@@ -74,9 +74,9 @@ def last_turn(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
 
 def final_message(db: sqlite3.Connection, worker: str, turn_id: str) -> str | None:
     """Read the same completed answer as delegation before checking its result schema."""
-    from infra.thread_confinement import agent_result
+    from infra.thread_confinement import ChildOutput
 
-    row = agent_result(db, worker, turn_id=turn_id)
+    row = ChildOutput.read(db, worker).answer(db, turn_id=turn_id)
     return None if row is None else str(row["content"])
 
 

@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from infra.held_admission import limited_admission
-from infra.thread_confinement import (
-    Reader, agent_result, checkpoint_for_reader, label_result, may_read_transcript, project_thread,
-)
+from infra.thread_confinement import ChildOutput, Reader, checkpoint_for_reader, project_thread
 
 
 def read_delegate_status(
@@ -28,10 +26,10 @@ def read_delegate_status(
             "SELECT id, status, started_at FROM active_turns WHERE thread_id=? AND status='running' "
             "ORDER BY started_at DESC LIMIT 1", (thread_id,),
         ).fetchone()
-        restricted = not may_read_transcript(reader, thread_row)
-        if restricted:
-            final = agent_result(db, thread_id) if message_count else None
-            recent = [] if final is None else [{**final, "content": label_result(final["content"])}]
+        child = ChildOutput.of(thread_row, reader)
+        if child.confined:
+            final = child.final_reply(db) if message_count else None
+            recent = [] if final is None else [final]
         else:
             rows = db.execute(
                 "SELECT id, role, content, metadata, created_at FROM messages WHERE thread_id=? "

@@ -297,19 +297,16 @@ FINAL_REPLY_CHARS = 2000
 
 
 def turn_reply(connection, worker: str):
-    """The shared final answer, with the return's existing tail budget."""
-    from infra.thread_confinement import Reader, agent_result, label_result, may_read_transcript
+    """What the worker said as its last words this Turn: ``{id, text}``, or None.
 
-    last = agent_result(connection, worker)
-    if last is None:
-        return None
-    thread = connection.execute("SELECT id, confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    text = str(last["content"]).strip()
-    if thread is not None and not may_read_transcript(Reader.agent(), thread):
-        text = label_result(text, tail_chars=FINAL_REPLY_CHARS)
-    elif len(text) > FINAL_REPLY_CHARS:
-        text = "…" + text[-FINAL_REPLY_CHARS:]
-    return {"id": str(last["id"]), "text": text}
+    The child's shared answer (``ChildOutput``), so a reply older than the latest
+    Turn's start never travels and a confined one travels labelled. The question
+    or result usually ends the reply, so the tail is what travels.
+    """
+    from infra.thread_confinement import ChildOutput
+
+    last = ChildOutput.read(connection, worker).final_reply(connection, tail_chars=FINAL_REPLY_CHARS)
+    return None if last is None else {"id": str(last["id"]), "text": last["content"]}
 
 
 def instant(value: str) -> datetime:

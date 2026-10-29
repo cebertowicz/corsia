@@ -14,13 +14,13 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
 
 ISOLATED_RESULT_LABEL = "from an untrusted agent; contains outside content"
 UNTRUSTED_TURN_ERROR = "Couldn't finish this untrusted agent's turn."
+UNTRUSTED_PROVIDER_LIMIT = "This untrusted agent hit a provider usage or quota limit."
 
 
 @dataclass(frozen=True)
@@ -107,21 +107,13 @@ def checkpoint_for_reader(reader: Reader, thread_row, checkpoint) -> dict | None
     return status
 
 
-def worker_error_for_agent(db: sqlite3.Connection, thread_id: str, error: str) -> str:
-    """Hide raw worker text; callers retain their already-classified provider/account notices."""
-    row = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
-    return UNTRUSTED_TURN_ERROR if row and not may_read_transcript(Reader.agent(), row) else error
-
-
 def project_runtime(reader: Reader, thread_row, truth: dict) -> dict:
     """Project liveness in the same place for all agent status readers."""
-    if may_read_transcript(reader, thread_row):
+    child = ChildOutput.of(thread_row, reader)
+    last = truth.get("last_turn")
+    if not child.confined or last is None or not last.get("error"):
         return truth
-    result = dict(truth)
-    if result.get("last_turn") is not None:
-        last = result["last_turn"]
-        result["last_turn"] = {**last, "error": UNTRUSTED_TURN_ERROR if last.get("error") else last.get("error")}
-    return result
+    return {**truth, "last_turn": {**last, "error": child.error(last["error"])}}
 
 
 async def read_runtime_for(reader: Reader, thread_id: str, thread_row, **kwargs) -> dict:
@@ -130,58 +122,90 @@ async def read_runtime_for(reader: Reader, thread_id: str, thread_row, **kwargs)
     return project_runtime(reader, thread_row, await read_runtime_truth(thread_id, thread_row, **kwargs))
 
 
-def label_result(text: str, *, tail_chars: int | None = None) -> str:
-    """Cap the answer before adding provenance, so every return retains the label."""
-    text = text.strip()
-    if tail_chars is not None and len(text) > tail_chars:
-        text = "…" + text[-tail_chars:]
-    return f"{ISOLATED_RESULT_LABEL}\n\n{text}"
+@dataclass(frozen=True)
+class ChildOutput:
+    """What of one child's reply or error may reach an agent other than that child.
 
-
-def agent_result(db: sqlite3.Connection, thread_id: str, *, turn_id: str | None = None) -> dict | None:
-    """The shared answer: a delivered assistant reply from the newest completed turn.
-
-    Unconfined legacy transcripts may lack turn metadata; their existing start-time
-    bound is applied here too, rather than independently by each delivery path.
+    The one boundary for every such consumer, decided once from the thread row.
+    Confined: the reply only with its provenance label, an error only as fixed
+    CORSIA text chosen by CORSIA's own classification. Unconfined: as written.
     """
-    thread = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
-    confined = thread is not None and not may_read_transcript(Reader.agent(), thread)
-    turn = db.execute(
-        "SELECT id, status, started_at FROM active_turns WHERE thread_id=? "
-        + ("AND status='completed' " if confined else "")
-        + "ORDER BY turn_order DESC LIMIT 1", (thread_id,),
-    ).fetchone()
-    if confined and (turn is None or (turn_id is not None and turn["id"] != turn_id)):
-        return None
-    where = "thread_id=? AND role='assistant' AND length(trim(content))>0 AND delivery_state='delivered'"
-    params: list = [thread_id]
-    if confined:
-        turn_id = turn["id"]
-        where += (
-            " AND seq IS NOT NULL AND json_valid(metadata)"
-            " AND COALESCE(json_extract(metadata, '$.llm_tool_calls'),'[]') IN ('[]','{}',0,'')"
-            " AND COALESCE(json_extract(metadata, '$.tool_calls'),'[]') IN ('[]','{}',0,'')"
-            " AND COALESCE(json_extract(metadata, '$.step_type'),'')<>'tool_calls'"
-        )
-    elif turn_id is None:
-        where += " AND seq IS NOT NULL"
-    if turn_id is not None:
-        where += " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?"
-        params.append(turn_id)
-    row = db.execute(
-        "SELECT id, role, content, created_at FROM messages WHERE " + where
-        + " ORDER BY seq DESC, rowid DESC LIMIT 1", params,
-    ).fetchone()
-    if row is None:
-        return None
-    if not confined and turn_id is None and turn is not None:
-        # A reply older than the latest turn's start may be a question already answered.
-        def instant(value):
-            parsed = datetime.fromisoformat(str(value))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        if instant(row["created_at"]) < instant(turn["started_at"]):
+
+    thread_id: str
+    confined: bool
+
+    @classmethod
+    def of(cls, thread_row, reader: Reader = Reader.agent()) -> ChildOutput:
+        return cls(str(thread_row["id"]), not may_read_transcript(reader, thread_row))
+
+    @classmethod
+    def read(cls, db: sqlite3.Connection, thread_id: str) -> ChildOutput:
+        """For an unrestricted agent; a child with no row fails closed, as it could have been confined."""
+        row = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+        return cls(thread_id, True) if row is None else cls.of(row)
+
+    def reply(self, text: str, *, tail_chars: int | None = None) -> str:
+        """Cap the answer before adding provenance, so every return keeps the label."""
+        text = str(text).strip()
+        if tail_chars is not None and len(text) > tail_chars:
+            text = "…" + text[-tail_chars:]
+        return f"{ISOLATED_RESULT_LABEL}\n\n{text}" if self.confined else text
+
+    def error(self, text: str) -> str:
+        if not self.confined:
+            return text
+        from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
+
+        return UNTRUSTED_PROVIDER_LIMIT if is_provider_usage_or_quota_limit(text) else UNTRUSTED_TURN_ERROR
+
+    def final_reply(
+        self, db: sqlite3.Connection, *, turn_id: str | None = None, tail_chars: int | None = None,
+    ) -> dict | None:
+        """The final answer as it may reach another agent."""
+        row = self.answer(db, turn_id=turn_id)
+        return None if row is None else {**row, "content": self.reply(row["content"], tail_chars=tail_chars)}
+
+    def answer(self, db: sqlite3.Connection, *, turn_id: str | None = None) -> dict | None:
+        """The child's final answer as written, the one selector; agents read it through ``final_reply``.
+
+        With no Turn named, a reply older than the latest Turn's start is dropped:
+        it may be a question already answered. A confined answer is a tool-free
+        reply from the latest Turn, and only once that Turn completed. Unconfined
+        legacy transcripts may lack turn metadata, so their bound is the start.
+        """
+        from plans.delegation_turn_end import instant
+
+        turn = db.execute(
+            "SELECT id, status, started_at FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
+            (self.thread_id,),
+        ).fetchone()
+        where = "thread_id=? AND role='assistant' AND length(trim(content))>0 AND delivery_state='delivered'"
+        params: list = [self.thread_id]
+        reply_turn = turn_id
+        if self.confined:
+            if turn is None or turn["status"] != "completed" or turn_id not in (None, turn["id"]):
+                return None
+            reply_turn = turn["id"]
+            where += (
+                " AND seq IS NOT NULL AND json_valid(metadata)"
+                " AND COALESCE(json_extract(metadata, '$.llm_tool_calls'),'[]') IN ('[]','{}',0,'')"
+                " AND COALESCE(json_extract(metadata, '$.tool_calls'),'[]') IN ('[]','{}',0,'')"
+                " AND COALESCE(json_extract(metadata, '$.step_type'),'')<>'tool_calls'"
+            )
+        elif turn_id is None:
+            where += " AND seq IS NOT NULL"
+        if reply_turn is not None:
+            where += " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?"
+            params.append(reply_turn)
+        row = db.execute(
+            "SELECT id, role, content, created_at FROM messages WHERE " + where
+            + " ORDER BY seq DESC, rowid DESC LIMIT 1", params,
+        ).fetchone()
+        if row is None or (
+            turn_id is None and turn is not None and instant(row["created_at"]) < instant(turn["started_at"])
+        ):
             return None
-    return dict(row)
+        return dict(row)
 
 
 def internal_route_restriction(reader: Reader, user_id: str, route, scope: dict) -> RestrictedRead | None:

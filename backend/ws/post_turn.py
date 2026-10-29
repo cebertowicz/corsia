@@ -35,7 +35,7 @@ async def ensure_thread_title(
         def _load_context():
             db = get_db()
             session = db.execute(
-                "SELECT title, model, confinement FROM threads WHERE id = ?",
+                "SELECT title, model FROM threads WHERE id = ?",
                 (thread_id,),
             ).fetchone()
             recent = db.execute(
@@ -49,8 +49,6 @@ async def ensure_thread_title(
             return dict(session) if session else None, [dict(r) for r in recent]
 
         session, recent = await run_in_db(_load_context)
-        if session and session.get("confinement") is not None:
-            return
         current_title = (session or {}).get("title") or DEFAULT_THREAD_TITLE
         if current_title and current_title != DEFAULT_THREAD_TITLE:
             return

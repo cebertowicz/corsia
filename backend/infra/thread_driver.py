@@ -121,15 +121,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    from infra.thread_confinement import Reader, agent_result, label_result, may_read_transcript
+    from infra.thread_confinement import ChildOutput
 
-    thread = db.execute("SELECT id, confinement FROM threads WHERE id=?", (child_id,)).fetchone()
-    confined = not may_read_transcript(Reader.agent(str(parent)), thread)
-    answer = agent_result(db, child_id, turn_id=turn_id)
+    answer = ChildOutput.read(db, child_id).final_reply(db, turn_id=turn_id)
+    # The wrapper carries the child's result. A Turn that produced none has
+    # nothing to deliver, and waking the parent for it is a model call per
+    # blank Turn — a legitimately unchanged wait would never be quiet.
     if answer is None:
         return None
-    text = label_result(answer["content"]) if confined else str(answer["content"]).strip()
-    content = f"{PARENT_COMPLETION_HEADING}\n\n{text}"
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))
