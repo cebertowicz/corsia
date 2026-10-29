@@ -232,7 +232,7 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             await preload.call('Page.addScriptToEvaluateOnNewDocument', source=browser_screencast.PRELOAD,
                                worldName=browser_screencast.WORLD, runImmediately=True)
             if headed:
-                await wait_for_headed_window(endpoint)
+                await wait_for_headed_window(endpoint, native_owner.socket_dir)
             await _exercise_clipboard(thread, connection, endpoint)
 
 
@@ -446,7 +446,7 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
         endpoint = await native_owner.page_endpoint(thread)
         try:
             if headed:
-                await wait_for_headed_window(endpoint)
+                await wait_for_headed_window(endpoint, native_owner.socket_dir)
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call('Page.enable')
                 await cdp.call('Page.addScriptToEvaluateOnNewDocument', source=browser_screencast.PRELOAD,

@@ -14,8 +14,9 @@ from host_access import browser_clipboard as clipboard
 
 
 class _ClipboardTrace(logging.Handler):
-    def __init__(self):
+    def __init__(self, socket_dir=None):
         super().__init__()
+        self.socket_dir = socket_dir
         self.events = []
         self.endpoints = set()
         self.pointer_endpoints = set()
@@ -34,7 +35,7 @@ class _ClipboardTrace(logging.Handler):
         self.events.append(entry)
         started = time.monotonic()
         if method == 'Input.dispatchKeyEvent' and step in ('copy key down', 'cut key down'):
-            entry['before_key'] = await _before_key(cdp, self.launch_time)
+            entry['before_key'] = await _before_key(cdp, self.launch_time, self.socket_dir)
         try:
             result = await self.original_call(cdp, method, step, **params)
             if method == "Runtime.evaluate":
@@ -170,33 +171,37 @@ async def _x_command(executable, *args, environment=None):
             await process.wait()
 
 
-def _x_environment():
-    if os.environ.get('DISPLAY'):
-        return dict(os.environ)
-    # Stock headed native starts Xvfb for Chrome without exporting DISPLAY back
-    # to pytest. Inspect only Chrome with this fixture's exact disposable profile.
-    profile = os.environ.get('AGENT_BROWSER_PROFILE')
-    if profile:
-        for process in psutil.process_iter(['cmdline']):
-            try:
-                if f'--user-data-dir={profile}' not in (process.info['cmdline'] or []):
-                    continue
-                values = process.environ()
-                if values.get('DISPLAY'):
-                    environment = dict(os.environ, DISPLAY=values['DISPLAY'])
-                    if values.get('XAUTHORITY'):
-                        environment['XAUTHORITY'] = values['XAUTHORITY']
-                    return environment
-            except (psutil.Error, OSError):
+def _x_environment(socket_dir):
+    # The client strips the fixture profile; identify its Chrome by the socket
+    # directory inherited from its daemon and use Chrome's actual profile.
+    if not socket_dir:
+        return None
+    for process in psutil.process_iter(['cmdline']):
+        try:
+            args = process.info['cmdline'] or []
+            profile = next((arg.partition('=')[2] for arg in args
+                            if arg.startswith('--user-data-dir=') and arg.partition('=')[2]), None)
+            if not profile:
                 continue
+            values = process.environ()
+            if values.get('AGENT_BROWSER_SOCKET_DIR') != str(socket_dir) or not values.get('DISPLAY'):
+                continue
+            environment = dict(os.environ, DISPLAY=values['DISPLAY'])
+            environment.pop('XAUTHORITY', None)
+            if values.get('XAUTHORITY'):
+                environment['XAUTHORITY'] = values['XAUTHORITY']
+            return environment, profile
+        except (psutil.Error, OSError):
+            continue
     return None
 
 
-async def _x_focus(result):
-    environment = _x_environment()
-    if environment is None:
+async def _x_focus(result, socket_dir):
+    owned = _x_environment(socket_dir)
+    if owned is None:
         result['unavailable'] = 'no DISPLAY for this fixture browser'
         return result
+    environment, _ = owned
     result['display'] = environment['DISPLAY']
     xdotool, xprop, xwininfo = (shutil.which(name) for name in ('xdotool', 'xprop', 'xwininfo'))
     for name, executable, args in (('input_focus', xdotool, ('getwindowfocus',)),
@@ -250,7 +255,7 @@ _CHILD_FOCUS_STATE = """new Promise(resolve => {
 })"""
 
 
-async def _before_key(cdp, launch_time):
+async def _before_key(cdp, launch_time, socket_dir):
     state = {'seconds_since_launch': round(time.monotonic() - launch_time, 6) if launch_time else None,
              'focused_frame_id': None, 'focused_frame_note': 'not exposed by these probes'}
     try:
@@ -273,7 +278,7 @@ async def _before_key(cdp, launch_time):
                 except Exception as exc:
                     state['child_at_pre_key'] = {'diagnostic_error': repr(exc)}
             state['x_focus'] = {}
-            await _x_focus(state['x_focus'])
+            await _x_focus(state['x_focus'], socket_dir)
     except Exception as exc:
         state['diagnostic_error'] = repr(exc)
     return state
@@ -322,7 +327,7 @@ async def _start_pointer_raf(trace, endpoint):
 @pytest.fixture
 async def native_clipboard_diagnostics(native_owner, monkeypatch, request):
     """Expose hidden helper errors only when a synthetic clipboard test fails."""
-    trace = _ClipboardTrace()
+    trace = _ClipboardTrace(native_owner.socket_dir)
     original_run = native_owner.run
 
     async def run_with_launch_time(*args, **kwargs):

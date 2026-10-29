@@ -12,6 +12,8 @@ async def test_failed_first_drag_reports_pointer_state_before_any_clipboard_call
     calls = []
 
     class Owner:
+        socket_dir = '/test/sockets'
+
         async def run(self, *args, **kwargs):
             pass
 
@@ -76,7 +78,7 @@ async def test_pre_key_probe_failure_does_not_block_clipboard_dispatch(monkeypat
         calls.append(step)
         return {'ok': True}
 
-    async def no_display(result):
+    async def no_display(result, socket_dir):
         result['unavailable'] = 'test'
 
     trace.original_call = dispatch
@@ -105,7 +107,7 @@ async def test_child_probe_is_taken_before_dispatch(monkeypatch):
                 return {'result': {'value': {'selected': 'Cross origin', 'hasFocus': True}}}
             return {}
 
-    async def no_display(result):
+    async def no_display(result, socket_dir):
         result['unavailable'] = 'test'
 
     monkeypatch.setattr(diagnostics, '_x_focus', no_display)
@@ -154,7 +156,7 @@ async def test_x_command_kills_process_when_cancelled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_x_focus_reports_child_map_when_xdotool_missing(monkeypatch):
-    monkeypatch.setenv('DISPLAY', ':test')
+    monkeypatch.setattr(diagnostics, '_x_environment', lambda socket_dir: ({'DISPLAY': ':test'}, '/actual/profile'))
     monkeypatch.setattr(diagnostics.shutil, 'which', lambda name: None if name == 'xdotool' else name)
 
     async def command(executable, *args, environment=None):
@@ -166,25 +168,48 @@ async def test_x_focus_reports_child_map_when_xdotool_missing(monkeypatch):
 
     monkeypatch.setattr(diagnostics, '_x_command', command)
     result = {}
-    await diagnostics._x_focus(result)
+    await diagnostics._x_focus(result, '/test/sockets')
     assert result['input_focus'] == 'unavailable: tool not installed'
     assert result['window_map'] == [{'window': '0xabc', 'map_state': ['Map State: IsViewable'], 'exit': 0}]
 
 
-def test_x_environment_uses_only_the_fixture_profile(monkeypatch):
-    monkeypatch.delenv('DISPLAY', raising=False)
-    monkeypatch.setenv('AGENT_BROWSER_PROFILE', '/test/own-profile')
+@pytest.mark.parametrize('ambient_display', [None, ':wrong'])
+def test_x_environment_uses_only_owned_chrome(monkeypatch, ambient_display):
+    if ambient_display:
+        monkeypatch.setenv('DISPLAY', ambient_display)
+    else:
+        monkeypatch.delenv('DISPLAY', raising=False)
+    monkeypatch.setenv('AGENT_BROWSER_PROFILE', '/test/unreceived-profile')
+    monkeypatch.setenv('XAUTHORITY', '/test/wrong-xauth')
 
     class Process:
-        def __init__(self, profile):
-            self.info = {'cmdline': [f'--user-data-dir={profile}']}
+        def __init__(self, args, values):
+            self.info = {'cmdline': args}
+            self.values = values
 
         def environ(self):
-            assert self.info['cmdline'] == ['--user-data-dir=/test/own-profile']
-            return {'DISPLAY': ':owned', 'XAUTHORITY': '/test/own-xauth'}
+            if self.values is None:
+                raise diagnostics.psutil.AccessDenied(pid=1)
+            return self.values
 
     monkeypatch.setattr(diagnostics.psutil, 'process_iter', lambda _: [
-        Process('/test/unrelated-profile'), Process('/test/own-profile')])
-    environment = diagnostics._x_environment()
+        Process(['other'], None),
+        Process(['--user-data-dir=/denied'], None),
+        Process(['--user-data-dir=/unrelated'], {'AGENT_BROWSER_SOCKET_DIR': '/other', 'DISPLAY': ':other'}),
+        Process(['--user-data-dir=/tmp/actual'], {'AGENT_BROWSER_SOCKET_DIR': '/test/sockets',
+                                                   'DISPLAY': ':owned', 'XAUTHORITY': '/test/own-xauth'}),
+    ])
+    environment, profile = diagnostics._x_environment('/test/sockets')
+    assert profile == '/tmp/actual'
     assert environment['DISPLAY'] == ':owned'
     assert environment['XAUTHORITY'] == '/test/own-xauth'
+    assert diagnostics._x_environment('/missing') is None
+
+
+def test_x_environment_does_not_inherit_unrelated_xauthority(monkeypatch):
+    monkeypatch.setenv('XAUTHORITY', '/wrong')
+    process = SimpleNamespace(info={'cmdline': ['--user-data-dir=/actual']},
+                              environ=lambda: {'AGENT_BROWSER_SOCKET_DIR': '/owned', 'DISPLAY': ':owned'})
+    monkeypatch.setattr(diagnostics.psutil, 'process_iter', lambda _: [process])
+    environment, _ = diagnostics._x_environment('/owned')
+    assert 'XAUTHORITY' not in environment
