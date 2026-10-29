@@ -466,10 +466,10 @@ async def test_a_burst_wakes_a_rule_and_the_owner_on_every_event(isolated_db, se
 
     for n in range(50):
         assert (await route(SYNC, _sync(7, n))).outcome == RouteOutcome.ACCEPTED
-    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.ACCEPTED
+    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.PARKED
 
-    # The owner's routing is untouched: every push and the comment wake it.
-    assert [thread for thread, _ in sent] == ["owner"] * 51
+    # Every push wakes the owner; the outside comment is rule-only.
+    assert [thread for thread, _ in sent] == ["owner"] * 50
     assert all("rule_notes" not in content for _, content in sent)
     wakes = _wakes("watcher")
     assert len(wakes) == 50

@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Signing in to an added Claude Code or Codex account makes its discovered models available during setup and in the model picker.
 - Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
 - Chat, Files, and project and workspace messages use clearer, consistent names.
+- A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Updates show the data upgrade step while your data is being upgraded.
 - Update settings show the changes for the update currently on offer.

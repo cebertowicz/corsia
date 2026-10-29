@@ -49,7 +49,12 @@ def test_conductor_designation_installs_screen_without_manual_sync(world):
     assert set_project_conductor(world["project"], OWNER, db=db)
     key = install._key(world["project"])
     rules = db.execute("SELECT id FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchall()
-    assert {row[0] for row in rules} == {key + "_opened", key + "_synchronize", key + "_start"}
+    ids = {row[0] for row in rules}
+    assert {key + "_opened", key + "_synchronize", key + "_start"} <= ids
+    assert {key + '_triage_' + suffix for suffix in ('issue_opened', 'issue_comment_created',
+            'issue_comment_edited', 'pr_comment_created', 'pr_comment_edited', 'review_submitted',
+            'review_edited', 'start')} <= ids
+    assert len(ids) == 11
     assert set_project_conductor(world["project"], None, db=db)
     assert not db.execute("SELECT 1 FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchone()
 
@@ -65,11 +70,7 @@ async def test_result_and_no_result_keep_label_in_agent_delivery(screen, valid):
     await run_scripts()
     await settle_all()
     db = get_db()
-    if valid:
-        delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
-    else:
-        delivered = [row[0] for row in db.execute("SELECT summary FROM context_change_journal "
-                     "WHERE object_id='pr-owner' AND object_kind='thread_context'")]
+    delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
     assert delivered and any(LABEL in text for text in delivered), delivered
     event = next(item for item in screen["state"]["admitted"] if item["event_type"].startswith("worker."))
     assert event["facts"]["source"] == "outside"

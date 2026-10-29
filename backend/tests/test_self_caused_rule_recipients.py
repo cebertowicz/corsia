@@ -9,6 +9,11 @@ from tests.test_event_rules_2a import _agent, _decisions, _project, _tool, _wake
 from tools.mcp_stamp import ConnectedAppResult
 
 
+@pytest.fixture(autouse=True)
+def inside_author(monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "human")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mark_owner,other_rule", [(False, False), (False, True), (True, True)],
                          ids=["owner-only", "unmarked-owner", "marked-owner"])
