@@ -105,7 +105,7 @@ def job():
     loaded = launchctl("print", target)
     if loaded.returncode != 0:
         return False, None
-    match = re.search(r"^\s*pid = (\S+)$", loaded.stdout, re.MULTILINE)
+    match = re.search(r"^\s*pid = (\S+)\s*$", loaded.stdout, re.MULTILINE)
     if match is None:
         return True, None
     return True, int(match.group(1)) if match.group(1).isdigit() else "?"
@@ -114,8 +114,10 @@ def job():
 def running(pid):
     try:
         os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        pass  # EPERM: alive, but not ours to signal.
     return True
 
 

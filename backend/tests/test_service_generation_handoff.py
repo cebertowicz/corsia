@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from service_script_fixtures import (  # noqa: F401
     isolated_launch_agents_dir,
     run_bash as _run_bash,
@@ -117,6 +118,21 @@ def _orphan_sleeper() -> int:
     ).stdout)
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _kill(pid: int) -> None:
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
+
+
 _UNLOADED = None
 
 
@@ -170,10 +186,7 @@ def test_launchctl_bootout_wait_returns_once_the_job_process_exits(tmp_path: Pat
     try:
         result = _run_bootout_wait(tmp_path, pid, f"os.kill({pid}, 9)")
     finally:
-        try:
-            os.kill(pid, 9)
-        except ProcessLookupError:
-            pass
+        _kill(pid)
 
     assert result.returncode == 0, result.stderr
     # No `--wait`: macOS 15 rejects it as an unrecognized target specifier.
@@ -238,27 +251,33 @@ def test_launchctl_bootout_wait_refuses_an_unreadable_pid_before_bootout(
     ]
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-def _kill(pid: int) -> None:
-    try:
-        os.kill(pid, 9)
-    except ProcessLookupError:
-        pass
-
-
 def test_launchctl_bootout_wait_times_out_while_the_job_process_lives(tmp_path: Path) -> None:
     pid = _orphan_sleeper()
     try:
         result = _run_bootout_wait(tmp_path, pid, "sys.exit(0)")
     finally:
-        os.kill(pid, 9)
+        _kill(pid)
+
+    assert result.returncode == 124
+
+
+def test_launchctl_bootout_wait_reads_a_pid_line_with_trailing_space(tmp_path: Path) -> None:
+    pid = _orphan_sleeper()
+    try:
+        result = _run_bootout_wait(tmp_path, f"{pid} ", "sys.exit(0)")
+    finally:
+        _kill(pid)
+
+    assert result.returncode == 124
+
+
+def test_launchctl_bootout_wait_counts_a_process_it_cannot_signal_as_alive(
+    tmp_path: Path,
+) -> None:
+    # PID 1 is root's launchd: kill(1, 0) fails with EPERM, never ESRCH.
+    if os.getuid() == 0:
+        pytest.skip("root may signal PID 1")
+    result = _run_bootout_wait(tmp_path, 1, "sys.exit(0)")
 
     assert result.returncode == 124
 
@@ -268,7 +287,7 @@ def test_launchctl_bootout_wait_returns_launchctl_failure(tmp_path: Path) -> Non
     try:
         result = _run_bootout_wait(tmp_path, pid, "sys.stderr.write('Boot-out failed: 5\\n'); sys.exit(5)")
     finally:
-        os.kill(pid, 9)
+        _kill(pid)
 
     assert result.returncode == 5
     assert "Boot-out failed: 5" in result.stderr
