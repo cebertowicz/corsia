@@ -402,6 +402,19 @@ def test_the_reapers_own_probes_do_not_move_the_idle_clock(repo, monkeypatch):
     assert worktree_reaper_scan.idle_since(repo, wt, _admin(wt)) == before
 
 
+def test_gc_rewriting_every_reflog_does_not_restart_the_idle_clock(repo):
+    wt = _add(repo, f"{UUID}-idle")
+    _age(repo, wt, 8 * DAY)
+
+    _git(repo, "reflog", "expire", "--all", "--expire=never")  # what `git gc` runs
+
+    assert time.time() - (_admin(wt) / "logs" / "HEAD").stat().st_mtime < DAY  # rewritten
+    assert time.time() - worktree_reaper_scan.idle_since(repo, wt, _admin(wt)) > 7 * DAY
+    report = _run(repo)
+    assert report.removed == 1 and report.skips == []
+    assert not wt.exists()
+
+
 # --- PR mapping ------------------------------------------------------------
 
 def _merged(repo: Path, branch: str, sha: str, *, fork: bool = False) -> dict[str, Any]:

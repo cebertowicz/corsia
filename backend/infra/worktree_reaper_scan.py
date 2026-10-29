@@ -20,7 +20,9 @@ _UUID_PREFIX = re.compile(
     r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:-|$)"
 )
 _SHORT_PREFIX = re.compile(r"^([0-9a-f]{8})(?:-|$)")
-_ADMIN_FILES = ("HEAD", "index", "logs/HEAD", "ORIG_HEAD")
+# No reflogs: ``git gc`` (reflog expire) rewrites every worktree's reflog at once, which
+# would restart every idle clock. A commit, checkout, reset or rebase writes ``index``.
+_ADMIN_FILES = ("HEAD", "index", "ORIG_HEAD")
 _BACKEND_FILE = Path(__file__).resolve()
 
 
@@ -63,22 +65,9 @@ def _mtime(path: Path) -> float | None:
         return None
 
 
-def _admin_branch(admin: Path) -> str | None:
-    try:
-        head = (admin / "HEAD").read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    prefix = "ref: refs/heads/"
-    return head[len(prefix):] if head.startswith(prefix) else None
-
-
 def idle_since(repo: Path, worktree: Path, admin: Path) -> float:
     """Return the newest activity mtime for one worktree, without Git."""
-    paths = [admin / name for name in _ADMIN_FILES]
-    branch = _admin_branch(admin)
-    if branch:
-        paths.append(repo / ".git" / "logs" / "refs" / "heads" / branch)
-    paths.append(worktree)
+    paths = [*(admin / name for name in _ADMIN_FILES), worktree]
     times = [value for value in map(_mtime, paths) if value is not None]
     return max(times) if times else 0.0
 
