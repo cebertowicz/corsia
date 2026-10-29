@@ -156,9 +156,9 @@ def _apply(
         envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)
     except MalformedEventError as exc:
         logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
-        return
+        return None
     if envelope is None:
-        return
+        return None
     thread = prepared.thread_id
     plan = apply_webhook_rules_sync(
         envelope, internal_event, routed_targets(thread, wake_reason, routing_state),
@@ -168,7 +168,7 @@ def _apply(
         return plan
     if thread in plan.drops:
         drop_delivery(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
-        return
+        return plan
     ride = plan.rides.get(thread)
     if ride is None:
         return plan
