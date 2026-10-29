@@ -100,17 +100,6 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit - len(marker)] + marker
 
 
-def _ownerless(target: Target) -> bool:
-    """No owner to deliver to. An owner that has gone inactive is a fault, never a fallback."""
-    return (target.thread is None and target.resolution in ("dead_letter", "triage")
-            and target.reason != "owner_inactive")
-
-
-def _sign_text(envelope: EventEnvelope) -> str | None:
-    """A worker event's injection signs, each with its rule; ``None`` for any other event."""
-    return injection_sign_text(envelope.facts) if envelope.connector == "worker" else None
-
-
 def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
     """The agent's note line: the event plus the type's declared line facts.
 
@@ -128,7 +117,7 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
         if key == "injection_signs":
-            rendered = _sign_text(envelope) or rendered
+            rendered = injection_sign_text(envelope.connector, envelope.facts) or rendered
         facts.append(f"{key}={rendered}")
     line = _summary(envelope)
     if facts:
@@ -160,7 +149,7 @@ def _deliver_target(
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
             return PlatformDelivery(event_id, thread, DUPLICATE)
         wake_details: dict[str, Any] = {**envelope.facts, "event_id": event_id}
-        if signs := _sign_text(envelope):
+        if signs := injection_sign_text(envelope.connector, envelope.facts):
             wake_details["injection_signs_text"] = signs
         if notes:
             wake_details["rule_notes"] = list(notes)
@@ -338,10 +327,7 @@ def deliver_envelope_sync(
     """
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve(conn)
-        filtered = [
-            target_filter(target, conn) if target_filter is not None else None
-            for target in targets
-        ]
+        filtered = [target_filter(target, conn) if target_filter is not None else None for target in targets]
         skipped = [target.thread for target, reason in zip(targets, filtered) if reason is not None]
         event = rule_event(envelope)
         plan = None
@@ -350,16 +336,16 @@ def deliver_envelope_sync(
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
+
         def deliver(pairs: Iterable[tuple[Target, str | None]]) -> list[PlatformDelivery]:
-            return [PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
-                    if reason is not None
-                    else _deliver_routed(conn, envelope, target, decl, plan)
+            return [_deliver_routed(conn, envelope, target, decl, plan) if reason is None
+                    else PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
                     for target, reason in pairs]
 
-        # The ownerless fallback waits until rules' own deliveries say whether one took the event.
+        # The no-owner fallback waits until rules' own deliveries say whether one took the event.
         pairs = list(zip(targets, filtered))
-        fallback = [pair for pair in pairs if _ownerless(pair[0])]
-        deliveries = deliver(pair for pair in pairs if not _ownerless(pair[0]))
+        fallback = [pair for pair in pairs if pair[0].no_owner]
+        deliveries = deliver(pair for pair in pairs if not pair[0].no_owner)
         if plan is not None:
             outcomes = list(plan.settled)
             for made in deliveries:

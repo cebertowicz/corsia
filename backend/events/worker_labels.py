@@ -7,10 +7,10 @@ from core.injection_rules import INJECTION_RULES
 OUTSIDE_CONTENT_LABEL = "from an untrusted agent; contains outside content"
 
 
-def injection_sign_text(facts: Mapping[str, Any]) -> str | None:
-    """Describe outside-content signs for delivery without changing their facts."""
+def injection_sign_text(connector: str, facts: Mapping[str, Any]) -> str | None:
+    """Describe a worker event's outside-content signs for delivery without changing their facts."""
     signs = facts.get("injection_signs")
-    if facts.get("source") != "outside" or not isinstance(signs, list) or not signs:
+    if connector != "worker" or facts.get("source") != "outside" or not isinstance(signs, list) or not signs:
         return None
     rules = dict(INJECTION_RULES)
     return ", ".join(f"{sign} ({rules[sign]})" if sign in rules else str(sign) for sign in signs)
