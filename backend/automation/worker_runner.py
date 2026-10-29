@@ -288,7 +288,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                 )
             except Exception as exc:  # CORSIA input failure, before any worker turn.
                 logger.exception("worker start {} could not capture its result record", row["id"])
-                raise inputs.StartRefused("Couldn’t read the workflow result inputs. Check the backend log, then send the event again.") from exc
+                raise inputs.StartRefused(f"Couldn’t read the workflow result inputs. {worker_settle.INVESTIGATE_RUN}") from exc
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "trace": run_input.get("trace") or [], "waited": waited,

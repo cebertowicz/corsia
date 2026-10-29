@@ -21,7 +21,8 @@ def github_read(path: str, *, accept: str | None = None) -> str:
         args += ["-H", f"Accept: {accept}"]
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode:
-        raise RuntimeError("GitHub read failed")
+        detail = result.stderr.strip()[:1000]
+        raise RuntimeError(f"GitHub read failed: {detail}" if detail else "GitHub read failed")
     return result.stdout
 
 

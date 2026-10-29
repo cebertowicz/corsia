@@ -14,6 +14,20 @@ def answer(payload, signs=None):
     return json.dumps({"payload": payload, "injection_signs": signs or []})
 
 
+def test_worker_facts_follow_late_workflow_registration(monkeypatch):
+    from dataclasses import replace
+    from events import connectors
+    from events.connectors import worker
+
+    github = connectors.get_manifest("github")
+    workflow_decl = next(iter(github.shipped_workflows.values()))
+    late = replace(workflow_decl, result=replace(workflow_decl.result, item_fields=("late_field",)))
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(github, shipped_workflows={"late": late}))
+    for kind in (worker.RESULT, worker.NO_RESULT):
+        assert "late_field" in worker.MANIFEST.decl(kind).filterable_fields
+        assert worker._extract_facts({"late_field": "value"}) == {"late_field": "value"}
+
+
 def test_email_screen_prompt_is_unchanged():
     import hashlib
     from connections.mail.email_screen import SYSTEM_PROMPT
@@ -78,7 +92,7 @@ def test_validator_defect_does_not_recover_invalid(monkeypatch):
     text = answer({"verdict": "flagged", "categories": ["credential reach"], "findings": []})
     outcome, facts = verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)
     assert outcome == "no_result" and "Couldn’t" in facts["reason"]
-    assert "Check the backend log" in facts["reason"]
+    assert "Ask the rule’s owner to investigate the run" in facts["reason"]
     assert verdict({"status": "completed"}, "not a result", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
 
 
