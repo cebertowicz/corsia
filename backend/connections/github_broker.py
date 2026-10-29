@@ -22,6 +22,9 @@ from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credenti
 __all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker"]
 log = logging.getLogger(__name__)
 GH_HOST = "github.com"
+# gh before 2.40 has no ``--active`` and holds one account per host, so the
+# probe without it asks the same question there.
+_SINGLE_ACCOUNT_PROBE = AUTH_PROBE[:-1]
 
 
 def _scrub(text: str) -> str:
@@ -54,8 +57,12 @@ class GithubReadBroker:
         except GithubReadRefused as exc:
             log.warning("github-broker: refused (%s) %s", exc.reason, _scrub(exc.detail)[:120])
             raise GithubReadRefused(exc.reason, _scrub(exc.detail)[:120]) from None
+        probe = tuple(argv) == AUTH_PROBE
         try:
             result = self._inner(argv, timeout=timeout)
+            if probe and result.returncode != 0 and "unknown flag: --active" in str(result.stderr or ""):
+                argv = list(_SINGLE_ACCOUNT_PROBE)
+                result = self._inner(argv, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise subprocess.TimeoutExpired([_scrub(part) for part in argv], exc.timeout) from None
         except OSError as exc:
@@ -63,7 +70,7 @@ class GithubReadBroker:
         stdout = str(result.stdout or "")
         return subprocess.CompletedProcess(
             [_scrub(part) for part in argv], result.returncode,
-            _scrub(stdout) if tuple(argv) == AUTH_PROBE else stdout, _scrub(str(result.stderr or "")),
+            _scrub(stdout) if probe else stdout, _scrub(str(result.stderr or "")),
         )
 
     def _vet(self, args: list[str], input_text: str | None) -> list[str]:

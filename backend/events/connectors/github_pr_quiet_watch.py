@@ -25,10 +25,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE
 from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
-from connections.github_read_request import AUTH_PROBE
 from events.connectors import github_notifications_feed as feed
 from events.connectors.github_read_budget import budget
 from infra.db_async import run_in_db
