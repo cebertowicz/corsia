@@ -376,6 +376,7 @@ test('Add model unknown disk retry', async ({ page }, info) => {
   const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
   const download = sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ });
   await expect(download).toBeEnabled();
+  await expect(sheet.locator('.model')).toContainText('Couldn’t check free disk space');
   if (shots) await page.screenshot({ path: `${shots}/unknown-disk-1440-light.png`, fullPage: true, animations: 'disabled', scale: 'css' });
   await download.click();
   await expect(sheet.locator('.model [role="alert"]')).toHaveText("Couldn't check free disk space. Try again.");
