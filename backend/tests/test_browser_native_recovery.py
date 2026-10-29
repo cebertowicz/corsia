@@ -111,8 +111,8 @@ async def _command(child, command: str) -> None:
 
 async def test_native_dead_owner_sweep_keeps_a_live_owner(tmp_path):
     """A dead native daemon and its Chrome exit, while the live lock protects its session."""
-    # Unix socket paths must fit the platform limit; the test owns this short temporary root.
-    with tempfile.TemporaryDirectory(prefix="corsia-native-", dir="/tmp") as short:
+    # Socket paths add 80 characters to the root under SOCKET_PATH_LIMIT, so the root stays as short as the real one.
+    with tempfile.TemporaryDirectory(prefix="cn-", dir="/tmp") as short:
         root = Path(short)
         (tmp_path / "sockets").symlink_to(root, target_is_directory=True)
         dead = live = None
