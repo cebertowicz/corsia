@@ -916,7 +916,8 @@ def test_prepare_current_release_returns_bounded_terminal_failure_with_full_log(
     ("returncode", "failure_code"),
     [
         (41, "fetch_failed"), (42, "build_failed"), (43, "index_locked"), (44, "checkout_detached"),
-        (45, "checkout_dirty"), (46, "restart_pending"), (99, "prepare_failed"),
+        (45, "checkout_dirty"), (46, "restart_pending"), (47, "checkout_no_upstream"),
+        (48, "checkout_diverged"), (99, "prepare_failed"),
     ],
 )
 def test_prepare_current_release_names_every_refusal_it_knows(

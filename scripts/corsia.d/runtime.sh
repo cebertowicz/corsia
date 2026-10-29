@@ -1040,11 +1040,13 @@ UPDATE_PREPARE_INDEX_LOCKED=43
 UPDATE_PREPARE_DETACHED=44
 UPDATE_PREPARE_DIRTY=45
 UPDATE_PREPARE_AWAITING_RESTART=46
+UPDATE_PREPARE_NO_UPSTREAM=47
+UPDATE_PREPARE_DIVERGED=48
 
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
-    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
+    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent pull_output ahead behind
 
     recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_INDEX_LOCKED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -1067,10 +1069,23 @@ prepare_redeploy_locked() {
         return "$UPDATE_PREPARE_AWAITING_RESTART"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
-    if ! git -C "$checkout" pull --ff-only; then
-        fail "Redeploy refused: git pull --ff-only failed (diverged / non-fast-forward / offline) — checkout left untouched"
+    if ! pull_output="$(LC_ALL=C git -C "$checkout" pull --ff-only 2>&1)"; then
+        printf '%s\n' "$pull_output" >&2
+        if [[ "$pull_output" == *"There is no tracking information for the current branch."* ]]; then
+            fail "Redeploy refused: branch $branch has no upstream — checkout left untouched"
+            return "$UPDATE_PREPARE_NO_UPSTREAM"
+        fi
+        if [[ "$pull_output" == *"Not possible to fast-forward, aborting."* ]]; then
+            read -r ahead behind <<< "$(git -C "$checkout" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null)"
+            if [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]] && (( ahead > 0 && behind > 0 )); then
+                fail "Redeploy refused: branch $branch and its upstream have diverged — checkout left untouched"
+                return "$UPDATE_PREPARE_DIVERGED"
+            fi
+        fi
+        fail "Redeploy refused: git pull --ff-only failed — checkout left untouched"
         return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
+    [ -z "$pull_output" ] || printf '%s\n' "$pull_output"
     redeploy_sync_python_dependencies "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     redeploy_build "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     echo "  Pull + dependency check + build OK"
