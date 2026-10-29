@@ -99,10 +99,18 @@ describe('AddLocalModelSheet', () => {
 		expect(options.map((option) => [option.textContent, option.getAttribute('aria-checked')])).toEqual([['Quality', 'true'], ['Speed', 'false']]);
 		const names = () => [...document.body.querySelectorAll('.model h3')].map((item) => item.textContent);
 		expect(names()).toEqual(['Slow', 'Fast']);
-		options[1].click();
+		expect(options.map((option) => option.tabIndex)).toEqual([0, -1]);
+		options[0].focus();
+		options[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 		flushSync();
 		expect(options[1].getAttribute('aria-checked')).toBe('true');
+		expect(options.map((option) => option.tabIndex)).toEqual([-1, 0]);
+		expect(document.activeElement).toBe(options[1]);
 		expect(names()).toEqual(['Fast', 'Slow']);
+		options[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+		flushSync();
+		expect(document.activeElement).toBe(options[0]);
+		expect(options[0].getAttribute('aria-checked')).toBe('true');
 	});
 
 	it('shows fitting models and hides those that exceed Mac room', async () => {
@@ -177,6 +185,46 @@ describe('AddLocalModelSheet', () => {
 		await unmount(component!); host.remove();
 		await render({ state: 'ready', memory_room_gb: 20, models: [row(undefined, 400)] });
 		expect(host.textContent).not.toContain('of memory');
+	});
+
+	it('shows the initiating download loading until a failed request settles', async () => {
+		await render({ state: 'ready', models: [
+			{ name: 'Qwen', repository: 'Jundot/Qwen', ...ready },
+			{ name: 'Other', repository: 'Jundot/Other', ...ready },
+		] });
+		let rejectRequest!: (reason: Error) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise((_resolve, reject) => { rejectRequest = reject; })));
+		const buttons = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.trim() === 'Download');
+		buttons[0].click(); flushSync();
+		expect(buttons[0].classList.contains('loading')).toBe(true);
+		expect(buttons.every((button) => button.disabled)).toBe(true);
+		expect(buttons[1].classList.contains('loading')).toBe(false);
+		rejectRequest(new Error('Start failed'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Start failed'));
+		expect(buttons[0].classList.contains('loading')).toBe(false);
+		expect(buttons.every((button) => !button.disabled)).toBe(true);
+	});
+
+	it.each([
+		['Retry', true, true], ['Delete download', true, true], ['Cancel', false, true], ['Cancel', false, false],
+	])('shows pending %s for a %s failure, listed=%s', async (action, failed, listed) => {
+		host = document.createElement('div'); document.body.appendChild(host); token.set('test-token');
+		let rejectRequest!: (reason: Error) => void;
+		vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+			if (init?.method && init.method !== 'GET') return new Promise((_resolve, reject) => { rejectRequest = reject; });
+			return Promise.resolve({ ok: true, json: async () => String(url).includes('/providers/sources')
+				? { sources: [{ source: 'omlx', settings_download: { name: 'Qwen', repository: 'Jundot/Qwen', percent: 12, failed, downloaded: false } }] }
+				: { state: 'ready', models: listed ? [{ name: 'Qwen', repository: 'Jundot/Qwen', ...ready }, { name: 'Other', repository: 'Jundot/Other', ...ready }] : [] } });
+		}));
+		component = mount(AddLocalModelSheet, { target: host, props: { onClose: vi.fn() } });
+		await vi.waitFor(() => expect(document.body.textContent).toContain(action));
+		const button = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === action)!;
+		button.click(); flushSync();
+		expect(button.classList.contains('loading')).toBe(true);
+		expect([...document.body.querySelectorAll<HTMLButtonElement>('.model button')].every((item) => item.disabled)).toBe(true);
+		rejectRequest(new Error('Request failed'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain(action === 'Cancel' ? 'Couldn’t cancel' : 'Request failed'));
+		if (listed) expect(button.classList.contains('loading')).toBe(false);
 	});
 
 	it('tells the person how to retry a download that cannot start', async () => {

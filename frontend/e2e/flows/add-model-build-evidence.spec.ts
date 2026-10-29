@@ -112,6 +112,74 @@ test('Add model WebKit keyboard actions', async ({}, info) => {
   }
 });
 
+test('Add model keyboard activation and Sort arrows', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  const announce = await liveSocket(page);
+  const state = await fixture(page, 'available');
+  const qwen = builds[0];
+  await loginByUrl(page);
+  await openSettings(page);
+  await openSettingsSection(page, 'Providers');
+  const card = page.locator('[data-server-card="omlx-local"]');
+  await card.locator('.pr-expand').click();
+  await card.getByRole('button', { name: 'Add model', exact: true }).click();
+  const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+  const sort = sheet.getByRole('radiogroup', { name: 'Sort models' });
+  await sort.getByRole('radio', { name: 'Quality' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(sort.getByRole('radio', { name: 'Speed' })).toBeFocused();
+  await expect(sheet.locator('h3').first()).toHaveText('Gemma');
+  await page.keyboard.press('ArrowLeft');
+  await expect(sort.getByRole('radio', { name: 'Quality' })).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(sheet.locator('h3').first()).toHaveText('Qwen3.8 Flash Next');
+  const download = sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ });
+  await download.focus(); await page.keyboard.press('Enter');
+  await expect(sheet).toContainText('Downloading 40%');
+  await sheet.getByRole('button', { name: /^Cancel download of Qwen3.8 Flash Next oQ4e-mtp$/ }).focus();
+  await page.keyboard.press('Space');
+  await expect(download).toBeEnabled();
+  state.setDownload({ repository: qwen.repository, name: qwen.name, percent: 40, failed: true, downloaded: false });
+  await announce();
+  const retry = sheet.getByRole('button', { name: /^Retry download of Qwen3.8 Flash Next oQ4e-mtp$/ });
+  await expect(retry).toBeVisible(); await retry.focus(); await page.keyboard.press('Enter');
+  await expect(sheet).toContainText('Downloading 40%');
+  state.setDownload({ repository: qwen.repository, name: qwen.name, percent: 40, failed: true, downloaded: false });
+  await announce();
+  const remove = sheet.getByRole('button', { name: /^Delete download of Qwen3.8 Flash Next oQ4e-mtp$/ });
+  await expect(remove).toBeVisible(); await remove.focus(); await page.keyboard.press('Space');
+  await expect(download).toBeEnabled();
+  expect(state.calls).toEqual(['POST /api/providers/local/downloads', 'POST /api/providers/local/cancel', 'POST /api/providers/local/downloads', `DELETE /api/providers/local/downloads/${encodeURIComponent(qwen.repository)}`]);
+});
+
+test('Add model recorded motion', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop' || !process.env.ADD_MODEL_MOTION_DIR);
+  const out = process.env.ADD_MODEL_MOTION_DIR!;
+  for (const motion of ['normal', 'reduce'] as const) {
+    for (const close of ['x', 'escape', 'scrim'] as const) {
+      const context = await browser.newContext({ baseURL: `http://127.0.0.1:${process.env.CORSIA_E2E_FRONTEND_PORT ?? '5178'}`, viewport: { width: 1440, height: 900 }, reducedMotion: motion === 'reduce' ? 'reduce' : 'no-preference', recordVideo: { dir: out } });
+      const page = await context.newPage();
+      await fixture(page, 'available'); await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
+      const card = page.locator('[data-server-card="omlx-local"]');
+      await card.locator('.pr-expand').click();
+      await card.getByRole('button', { name: 'Add model', exact: true }).click();
+      const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+      await expect(sheet.getByRole('radiogroup', { name: 'Sort models' })).toBeVisible();
+      await sheet.getByRole('radio', { name: 'Speed' }).click();
+      await expect(sheet.locator('h3').first()).toHaveText('Gemma');
+      await page.waitForTimeout(500);
+      if (close === 'x') await sheet.getByRole('button', { name: 'Close' }).click();
+      else if (close === 'escape') await page.keyboard.press('Escape');
+      else await page.mouse.click(5, 5);
+      await expect(sheet).toHaveCount(0);
+      await page.waitForTimeout(500);
+      const video = page.video()!;
+      await context.close();
+      await video.saveAs(`${out}/open-close-${close}-${motion}.webm`);
+    }
+  }
+});
+
 test('Add model sheet motion and Sort press', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop');
   await fixture(page, 'available');

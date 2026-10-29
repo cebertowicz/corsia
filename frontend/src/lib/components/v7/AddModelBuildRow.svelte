@@ -13,13 +13,14 @@
 		failed: boolean;
 		downloaded: boolean;
 		busy: boolean;
+		pendingAction: 'start' | 'cancel' | 'delete' | null;
 		otherRunning: boolean;
 		error: string;
 		onDownload: () => void;
 		onCancel: () => void;
 		onDelete: () => void;
 	}
-	const { group, build, recommended, running, percent, failed, downloaded, busy, otherRunning, error, onDownload, onCancel, onDelete }: Props = $props();
+	const { group, build, recommended, running, percent, failed, downloaded, busy, pendingAction, otherRunning, error, onDownload, onCancel, onDelete }: Props = $props();
 	const buildName = $derived(build.repository.split('/').at(-1)?.match(/(oQ[\d.]+e(?:-mtp)?|mlx-[\w.]+)$/i)?.[0] ?? '');
 	const size = $derived(typeof build.download_size_gb === 'number' ? `${Math.round(build.download_size_gb)} GB` : '');
 	const speed = $derived(build.tokens_per_second == null ? '' : `~${Math.round(build.tokens_per_second)} tokens/s`);
@@ -47,12 +48,12 @@
 	</div>
 	<div class="actions">
 		{#if running}
-			<Button size="sm" variant="ghost" ariaLabel={`Cancel download of ${group.name} ${buildName}`} disabled={busy} onclick={onCancel}>Cancel</Button>
+			<Button size="sm" variant="ghost" ariaLabel={`Cancel download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'cancel'} onclick={onCancel}>Cancel</Button>
 		{:else if failed}
-			<Button size="sm" variant="ghost" ariaLabel={`Retry download of ${group.name} ${buildName}`} disabled={busy} onclick={onDownload}>Retry</Button>
-			<Button size="sm" variant="ghost" ariaLabel={`Delete download of ${group.name} ${buildName}`} disabled={busy} onclick={onDelete}>Delete download</Button>
+			<Button size="sm" variant="ghost" ariaLabel={`Retry download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'start'} onclick={onDownload}>Retry</Button>
+			<Button size="sm" variant="ghost" ariaLabel={`Delete download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'delete'} onclick={onDelete}>Delete download</Button>
 		{:else if !build.on_disk}
-			<Button size="sm" variant="secondary" ariaLabel={`Download ${group.name} ${buildName}`} disabled={busy || otherRunning || Boolean(need)} onclick={onDownload}>Download</Button>
+			<Button size="sm" variant="secondary" ariaLabel={`Download ${group.name} ${buildName}`} disabled={busy || otherRunning || Boolean(need)} loading={pendingAction === 'start'} onclick={onDownload}>Download</Button>
 		{/if}
 	</div>
 </div>
