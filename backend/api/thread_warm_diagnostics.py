@@ -1,6 +1,23 @@
 """Safe diagnostic reasons for failed cache-warm requests."""
 
+from fastapi import HTTPException
 from loguru import logger
+
+
+def log_warm_skip(reason: str) -> dict:
+    if reason not in {"no_candidate", "agent_has_model", "first_run_not_pending"}:
+        raise HTTPException(400, "Invalid skip reason")
+    logger.info("setup warm: skipped: {}", reason)
+    return {"ok": True}
+
+
+def log_warm_result(progress: bool, stage: str, result: dict) -> dict:
+    if progress:
+        if result.get("ok"):
+            logger.info("setup warm: warmed")
+        else:
+            log_warm_failure(stage, result)
+    return result
 
 
 def log_warm_failure(stage: str, result: dict | None = None) -> None:
@@ -24,4 +41,4 @@ def log_warm_failure(stage: str, result: dict | None = None) -> None:
         reason = "prefix construction failed"
     else:
         reason = "provider warm failed"
-    logger.info("warm_session_cache skipped: warm_failed: {}", reason)
+    logger.info("setup warm: failed: {}", reason)

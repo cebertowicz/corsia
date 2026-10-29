@@ -101,21 +101,33 @@ describe('setup local warm', () => {
 		warn.mockRestore();
 	});
 
-	it('reports a missing candidate once per session and again after a reset', async () => {
+	it('does not report an empty initial catalog when a later candidate warms', async () => {
 		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
 			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
 			return json({ ok: true });
 		});
 		vi.stubGlobal('fetch', fetcher);
 		const warm = createSetupWarm();
-		warm.start([], 'one');
-		warm.start([], 'one');
+		warm.start([], 'session');
+		warm.start([local], 'session');
+		await warm.finish();
+		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason='))).toHaveLength(0);
+		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('progress=true'))).toHaveLength(1);
+		warm.destroy();
+	});
+
+	it('reports a missing candidate once at finish', async () => {
+		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
+			return json({ ok: true });
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const warm = createSetupWarm();
+		warm.start([], 'session');
+		expect(fetcher).not.toHaveBeenCalled();
+		await warm.finish();
+		await warm.finish();
 		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(1));
-		warm.start([], 'two');
-		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(2));
-		warm.start([], null);
-		warm.start([], 'two');
-		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(3));
 		warm.destroy();
 	});
 

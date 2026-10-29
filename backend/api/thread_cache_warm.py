@@ -364,24 +364,24 @@ async def warm_session_cache(
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    from api.thread_warm_diagnostics import log_warm_failure, log_warm_result, log_warm_skip
+
     if skip_reason is not None:
-        if skip_reason not in {"no_candidate", "agent_has_model", "first_run_not_pending"}:
-            raise HTTPException(400, "Invalid skip reason")
-        logger.info("warm_session_cache skipped: {}", skip_reason)
-        return {"ok": True}
-    from api.thread_warm_diagnostics import log_warm_failure
+        return log_warm_skip(skip_reason)
 
     stage = "target"
     try:
         loaded = _load_warm_target(thread_id, user["id"], model)
         if isinstance(loaded, dict):
-            log_warm_failure(stage, loaded)
+            if progress:
+                log_warm_failure(stage, loaded)
             return loaded
         target, project_id, reasoning_effort, thread_context = loaded
         stage = "proof"
         proved = await _prove_warm_target(target, thread_id)
         if isinstance(proved, dict):
-            log_warm_failure(stage, proved)
+            if progress:
+                log_warm_failure(stage, proved)
             return proved
         stage = "prefix"
         messages, tools, prompt_shape = await _build_warm_prefix(
@@ -393,8 +393,7 @@ async def warm_session_cache(
             user_id=user["id"] if progress else None, requested_model=model,
         )
     except Exception:
-        log_warm_failure(stage)
+        if progress:
+            log_warm_failure(stage)
         raise
-    if not result.get("ok"):
-        log_warm_failure(stage, result)
-    return result
+    return log_warm_result(progress, stage, result)

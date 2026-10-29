@@ -21,8 +21,7 @@ def test_skip_reason_logs_once_without_warming(monkeypatch, reason):
     finally:
         thread_cache_warm.logger.remove(sink)
     assert result == {"ok": True}
-    assert lines == [f"warm_session_cache skipped: {reason}"]
-    print(lines[0])
+    assert lines == [f"setup warm: skipped: {reason}"]
     load.assert_not_called()
 
 
@@ -49,13 +48,32 @@ def test_warm_failure_logs_one_safe_server_reason(monkeypatch, stage, expected):
     try:
         if stage == "prefix":
             with pytest.raises(ValueError):
-                asyncio.run(thread_cache_warm.warm_session_cache("thread", token="private", wait=True))
+                asyncio.run(thread_cache_warm.warm_session_cache("thread", token="private", wait=True, progress=True))
         else:
-            result = asyncio.run(thread_cache_warm.warm_session_cache("thread", token="private", wait=True))
+            result = asyncio.run(thread_cache_warm.warm_session_cache("thread", token="private", wait=True, progress=True))
             assert result["ok"] is False
     finally:
         thread_cache_warm.logger.remove(sink)
-    assert lines == [f"warm_session_cache skipped: warm_failed: {expected}"]
+    assert lines == [f"setup warm: failed: {expected}"]
+
+
+@pytest.mark.parametrize("progress, result, expected", [
+    (False, {"ok": False, "message": "model not loaded: private"}, []),
+    (True, {"ok": True}, ["setup warm: warmed"]),
+])
+def test_only_setup_warm_logs_outcome(monkeypatch, progress, result, expected):
+    monkeypatch.setattr(thread_cache_warm, "authenticate", lambda _: {"id": "user"})
+    monkeypatch.setattr(thread_cache_warm, "_load_warm_target", Mock(return_value=("target", None, None, {})))
+    monkeypatch.setattr(thread_cache_warm, "_prove_warm_target", AsyncMock(return_value="target"))
+    monkeypatch.setattr(thread_cache_warm, "_build_warm_prefix", AsyncMock(return_value=([], [], {})))
+    monkeypatch.setattr(thread_cache_warm, "_submit_warm", AsyncMock(return_value=result))
+    lines = []
+    sink = thread_cache_warm.logger.add(lambda msg: lines.append(msg.record["message"]))
+    try:
+        asyncio.run(thread_cache_warm.warm_session_cache("thread", wait=True, progress=progress))
+    finally:
+        thread_cache_warm.logger.remove(sink)
+    assert lines == expected
 
 
 def test_invalid_skip_reason_is_rejected_without_logging(monkeypatch):

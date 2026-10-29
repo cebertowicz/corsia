@@ -185,6 +185,7 @@ describe('SetupScreen completion', () => {
 		await openModels();
 		click('Start using CORSIA');
 		await vi.waitFor(() => expect(onFinished).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('skip_reason=no_candidate'))).toBe(true));
 
 		const calls = vi.mocked(fetch).mock.calls.map(([url, init]) => ({ url: String(url), method: init?.method ?? 'GET', body: init?.body }));
 		// The agent's model stays unset: the person picks it on the first chat.
