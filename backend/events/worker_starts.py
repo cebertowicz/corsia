@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from events import rule_runs
+from events.worker_labels import labelled_event
 from events.rule_outcomes import (
     DROPPED, INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, SKIPPED, START_WORKER, STARTED,
     Outcome, Rule, RuleEvent,
@@ -73,9 +74,9 @@ def queue(
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, request_identity=identity,
                                     run_input=json.dumps({
-                "event": {"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
-                          "rule_id": rule.id, "facts": dict(event.facts),
-                          "artifact": dict(event.artifact_ref) if event.artifact_ref else None},
+                "event": labelled_event({"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
+                          "rule_id": rule.id, "facts": dict(event.facts), "origin": event.origin,
+                          "artifact": dict(event.artifact_ref) if event.artifact_ref else None}),
                 "trace": [*event.trace, rule.id],
             }, ensure_ascii=False, default=str)))
     return outcomes
@@ -100,7 +101,7 @@ def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
     return db.execute(
         "SELECT d.id, d.rule_id, d.thread_id, d.request_identity, d.event_id, d.connector, "
         "d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
-        "r.workflow_id, r.enabled "
+        "r.workflow_id, r.enabled, r.origin, d.run_input "
         "FROM event_route_decisions d LEFT JOIN event_rules r ON r.id=d.rule_id "
         "WHERE d.outcome=? AND d.request_identity IS NOT NULL ORDER BY d.id LIMIT ?", (QUEUED, limit),
     ).fetchall()
@@ -161,7 +162,7 @@ def started_by(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
 
 _START = ("SELECT d.id, d.rule_id, d.thread_id, d.worker_thread_id, d.request_identity, d.event_id, "
           "d.connector, d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
-          "d.run_input, r.workflow_id FROM event_route_decisions d "
+          "d.run_input, r.workflow_id, r.origin FROM event_route_decisions d "
           "LEFT JOIN event_rules r ON r.id=d.rule_id ")
 
 

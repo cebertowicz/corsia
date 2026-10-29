@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.migration_115_to_116_corrections_checker_cleanup import migrate_115_to_116
 from infra.schema import SCHEMA_VERSION
 
@@ -59,6 +60,7 @@ def test_runs_when_migrating_an_existing_115_database(tmp_path):
     path = tmp_path / "state.db"
     with sqlite3.connect(path) as connection:
         _seed(connection)
+        connection.execute(_GUIDANCE_47_DDL[1])
         connection.execute("PRAGMA user_version=115")
     with sqlite3.connect(path) as connection:
         migrate_to_current(connection, SCHEMA_VERSION)

@@ -130,6 +130,7 @@ def test_existing_database_startup_does_not_scan_every_btree(monkeypatch) -> Non
 
     raw = _db()
     raw.executescript(EVENT_RULE_SCHEMA_SQL)
+    raw.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, conductor_thread_id TEXT)")
     raw.execute("CREATE TABLE existing_data (value TEXT)")
     raw.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 

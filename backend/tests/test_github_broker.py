@@ -104,8 +104,7 @@ def test_a_malformed_or_traversing_path_is_refused(broker, inner, path) -> None:
     "%67raphql", "graph%71l", "//graphql",
 ])
 def test_graphql_is_refused_by_the_path_rules(broker, inner, path) -> None:
-    expected = "full_url" if path.startswith("//") else (
-        "path_invalid" if path.partition("?")[0].endswith("/") else "path_not_allowed")
+    expected = "full_url" if path.startswith("//") else "graphql_not_allowed"
     for flags in ([], ["--method", "POST"], ["--method", "GET"]):
         assert refusal(broker, inner, ["api", *flags, path]) == expected
 
@@ -189,7 +188,7 @@ def test_the_broker_takes_the_parameters_run_gh_takes_and_no_others(broker, inne
 def test_a_refusal_reaches_a_poller_as_a_named_feed_error(broker, inner) -> None:
     with pytest.raises(feed.FeedError) as caught:
         feed.gh_get(broker, "graphql")
-    assert caught.value.error_class == "read_refused" and "path_not_allowed" in str(caught.value)
+    assert caught.value.error_class == "read_refused" and "graphql_not_allowed" in str(caught.value)
     assert inner.calls == []
 
 

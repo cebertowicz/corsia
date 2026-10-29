@@ -154,6 +154,7 @@ from tests.test_lesson_index import (  # noqa: E402,F401  (fixtures are imported
     _sources,
     _write,
     _trial_text,
+    _task_offers,
     db as lesson_db,
     workspace as lesson_workspace,
 )
@@ -168,11 +169,14 @@ def _listed(db, workspace):
     }
 
 
-def test_an_offered_trial_sets_lesson_id_on_the_skills_list(lesson_db, lesson_workspace):
+def test_an_offered_trial_sets_lesson_id_on_the_task_receipt(lesson_db, lesson_workspace):
     _write(lesson_workspace, "owner", "deploy", _plain("deploy"))
     _activate(lesson_db, lesson_workspace)
 
-    assert _listed(lesson_db, lesson_workspace) == {"cite-the-head": LESSON, "deploy": None}
+    [lesson] = _task_offers(lesson_db, lesson_workspace)
+    receipt = lesson_db.execute("SELECT lesson_id FROM guidance_loads WHERE variant='with'").fetchone()
+    assert lesson["id"] == receipt["lesson_id"] == LESSON
+    assert _listed(lesson_db, lesson_workspace) == {"deploy": None}
 
 
 def test_a_held_trial_carries_no_lesson_id_on_the_skills_list(lesson_db, lesson_workspace):

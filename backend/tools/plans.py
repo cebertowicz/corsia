@@ -7,6 +7,7 @@ import time
 from functools import partial
 from typing import Any
 
+from core.lesson_delivery import attach_plan_result
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
@@ -222,6 +223,7 @@ def _mutation_operation(
             workflow_task_fields.append_close_notice(
                 result.result, node_id=params["node_id"], db=db, workflows=workflows,
             )
+        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
         node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
         return result
     finally:
@@ -243,6 +245,7 @@ def _decision_operation(thread_id, actor_row, operation, plan_id, params, mutati
         if operation == "draft":
             return call(plan_id, **common, **params)
         result = call(params.pop("decision_id", None), **common, **params)
+        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
         node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
         return result
     finally:

@@ -51,6 +51,17 @@ def remove_start_dir(root: Path, decision_id: int) -> None:
     shutil.rmtree(start_dir(root, decision_id), ignore_errors=True)
 
 
+def remove_staging_dir(root: Path, value: Any) -> None:
+    """Remove a staged input directory, never the staging root itself."""
+    if not value:
+        return
+    folder = (root / "staging").resolve()
+    raw = Path(str(value))
+    path = (raw if raw.is_absolute() else folder / raw).resolve()
+    if path != folder and folder in path.parents:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def staging_dir(root: Path, value: Any) -> str | None:
     """The request's staging directory, only inside the owner's own staging folder."""
     if value is None or value == "":

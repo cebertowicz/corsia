@@ -5,6 +5,14 @@ from __future__ import annotations
 from memory.task_match import NodeText
 
 
+def started_node_id(block: object) -> str | None:
+    """Return the selected task when a plan operation actually started it."""
+    selected = block.get("selected") if isinstance(block, dict) else None
+    if not isinstance(selected, dict) or selected.get("how") not in {"started", "auto_selected"}:
+        return None
+    return str(selected["id"])
+
+
 def node_text(db, node_id: str) -> NodeText | None:
     """Title and criteria from the task; intent and quoted words from its canonical intent node.
 
