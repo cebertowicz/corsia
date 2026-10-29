@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE
 from events.connectors import github_notifications_feed as feed
 from events.connectors.github_read_budget import budget
 import infra.webhook_delivery_log as webhook_delivery_log
@@ -133,7 +134,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception as exc:  # noqa: BLE001 — status failures must keep their own cause

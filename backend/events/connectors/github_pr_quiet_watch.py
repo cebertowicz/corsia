@@ -28,6 +28,7 @@ from typing import Any
 from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
+from connections.github_read_request import AUTH_PROBE
 from events.connectors import github_notifications_feed as feed
 from events.connectors.github_read_budget import budget
 from infra.db_async import run_in_db
@@ -78,7 +79,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception:  # noqa: BLE001 — an unreadable auth state is "not signed in"

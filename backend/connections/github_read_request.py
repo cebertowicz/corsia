@@ -20,6 +20,10 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote
 
+#: The one non-``api`` call the broker passes through: is the active
+#: github.com account signed in? Plain ``gh auth status`` fails when any stored
+#: account fails, even with a working active one.
+AUTH_PROBE = ("auth", "status", "--hostname", "github.com", "--active")
 #: Paths outside ``/repos/...`` that the pollers read, and nothing more.
 NON_REPO_PATHS = frozenset({"notifications", "user", "rate_limit"})
 READ_METHODS = frozenset({"GET", "HEAD"})

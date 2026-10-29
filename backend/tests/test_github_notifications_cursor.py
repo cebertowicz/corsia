@@ -175,6 +175,23 @@ def test_auth_status_failure_is_not_mislabeled_signed_out(caplog):
     assert "TimeoutExpired" in caplog.text
 
 
+def test_only_the_active_account_decides_signed_in():
+    """A failing second stored account must not turn the poller off."""
+    from events.connectors import github_notifications as poller
+    from events.connectors import github_pr_quiet_watch as watch
+
+    calls: list[list[str]] = []
+
+    def gh(args, **_kwargs):
+        calls.append(list(args))
+        active = args == ["auth", "status", "--hostname", "github.com", "--active"]
+        return subprocess.CompletedProcess(args, 0 if active else 1, "", "")
+
+    assert poller.disabled_reason(gh) is None
+    assert watch.disabled_reason(gh) is None
+    assert calls == [["auth", "status", "--hostname", "github.com", "--active"]] * 2
+
+
 def test_failure_after_the_row_is_written_counts_as_handled():
     gh = FakeGh()
     gh.issue_comments = [comment_object(502)]
