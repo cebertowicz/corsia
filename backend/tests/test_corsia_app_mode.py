@@ -428,6 +428,28 @@ def _snapshot(root: Path) -> list[tuple[str, int, int, int]]:
     )
 
 
+def test_app_mode_keeps_bundled_tools_ahead_of_service_defaults(app):
+    bundled_bin = app.bundle / "Contents" / "Resources" / "bin"
+    service_bin = app.home / ".local" / "bin"
+    _executable(bundled_bin / "node", "#!/bin/sh\nprintf 'bundled-node\\n'\n")
+    _executable(bundled_bin / "npm", "#!/usr/bin/env node\n")
+    for name in ("node", "npm"):
+        _executable(service_bin / name, "#!/bin/sh\nprintf 'service-tool\\n'\n")
+    delegate = app.script.parent / "corsia.d" / "delegate.sh"
+    delegate.write_text(
+        delegate.read_text()
+        + "\nis_app_mode || exit 1\ncommand -v npm\ncommand -v node\nnpm --version\nexit 0\n"
+    )
+
+    result = app.run("start", PATH=f"{bundled_bin}:{app.env()['PATH']}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [
+        str(bundled_bin / "npm"), str(bundled_bin / "node"), "bundled-node"
+    ]
+    assert app.launchd_calls() == []
+
+
 def _make_read_only(root: Path) -> None:
     for path in [root, *root.rglob("*")]:
         if not path.is_symlink():

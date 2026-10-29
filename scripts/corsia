@@ -349,6 +349,10 @@ if [ "$(uname -s)" = Linux ]; then
 else
     source "$SCRIPT_DIR/corsia.d/service.sh"
 fi
+# Direct lifecycle calls and their backend children need the same installed
+# tools as the service, even before a fresh shell has loaded Homebrew.
+# Keep an explicitly selected toolchain ahead of these platform defaults.
+export PATH="$PATH:$SERVICE_PATH"
 source "$SCRIPT_DIR/corsia.d/delegate.sh"
 if is_app_mode; then
     app_mode_install_overrides
