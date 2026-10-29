@@ -17,22 +17,26 @@ from tests.test_shared_document_ownership import ownership_scope as ownership_sc
 
 def test_live_open_prepares_only_writable_documents(ownership_scope, monkeypatch):
     from api.files_load import read_document
+    from infra import config
     from unittest.mock import Mock
+    from tests.test_system_projection_document_access import project_system_file
 
     scope = ownership_scope
-    projection = scope['workspace'] / '.corsia' / 'context' / 'example.md'
-    projection.parent.mkdir(parents=True)
-    projection.write_text('system content', encoding='utf-8')
+    projection = project_system_file(scope['workspace'])
+    skill = config.WORKSPACE / 'skills' / 'alpha' / 'SKILL.md'
+    skill.parent.mkdir(parents=True)
+    skill.write_text('skill content', encoding='utf-8')
     normal = scope['root'] / 'note.md'
     normal.write_text('ordinary content', encoding='utf-8')
     manager = Mock()
-    manager.setup_shared.side_effect = AssertionError('read-only open must not prepare writes')
+    manager.setup_shared.side_effect = AssertionError('a read-only open must not prepare writes')
     monkeypatch.setattr('doceditor.live_runtime.get_documents', lambda: manager)
     monkeypatch.setattr('infra.guidance_targets.guidance_target', lambda *_: None)
     user_id = scope['db'].execute('SELECT user_id FROM threads WHERE id=?', (scope['owner'],)).fetchone()[0]
-    result = read_document(str(projection), user_id, 'project-alpha', scope['owner'], live_open=True)
-    assert result['text'] == 'system content'
-    assert result['writable'] is False
+    for read_only in (projection, skill):
+        result = read_document(str(read_only), user_id, 'project-alpha', scope['owner'], live_open=True)
+        assert result['text'] == read_only.read_text(encoding='utf-8')
+        assert result['writable'] is False
     manager.setup_shared.assert_not_called()
 
     manager.setup_shared.side_effect = None

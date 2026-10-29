@@ -1,8 +1,8 @@
 """One answer to "which registered file does this path name, inside this scope?".
 
 ``GET /api/files/revision`` and the chat's reference cards both ask it, so the
-rule that a path must sit under a scope root (or be a workspace context file),
-be a real file, and resolve to its registered identity has a single home.
+rule that a path must sit under a scope root (or be a read-only context file
+or a workspace skill), be a real file, and resolve to its registered identity has a single home.
 """
 
 from __future__ import annotations
@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from core.workspace_context_sources import is_workspace_context_path
+from core.workspace_context_sources import is_read_only_context_path
+from core.workspace_layout import resolve_workspace_root
 from infra import config
 from registry import service as registry_service
 
@@ -25,10 +26,16 @@ class FileLookup(NamedTuple):
 
 
 def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    """Whether ``path`` is under a scope root or is a workspace context file."""
+    """Whether ``path`` is under a scope root, a read-only context file, or a workspace skill.
+
+    Workspace skills reach every scope's agents, so every scope reads them;
+    saving one still needs the workspace scope.
+    """
+    skills = resolve_workspace_root(config.WORKSPACE) / "skills"
     return (
         any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
+        or is_read_only_context_path(path, config.WORKSPACE, db=db)
+        or path.resolve(strict=False).is_relative_to(skills.resolve(strict=False))
     )
 
 

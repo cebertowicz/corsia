@@ -139,8 +139,12 @@ def workspace_context_files(workspace: Path, *, db=None) -> list[WorkspaceContex
     return rows
 
 
-def is_workspace_context_path(path: Path, workspace: Path, *, db=None) -> bool:
-    """Identify canonical workspace bootstrap files and the System projection."""
+def is_read_only_context_path(path: Path, workspace: Path, *, db=None) -> bool:
+    """Whether every scope reads ``path`` and the doc API never saves it.
+
+    True for a canonical workspace bootstrap file and for a generated System
+    projection file.
+    """
     from core.system_projection import is_system_projection_path
 
     if is_system_projection_path(path, workspace):

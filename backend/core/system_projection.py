@@ -61,13 +61,13 @@ _CACHE: dict[Path, ProjectionState] = {}
 
 
 def is_system_projection_path(path: Path, workspace: Path) -> bool:
-    """Whether an existing file is inside the generated System projection."""
+    """Whether a file is one the last verified projection generated, not any ``.corsia`` file."""
+    root = resolve_workspace_root(workspace)
     try:
-        resolved = path.expanduser().resolve(strict=False)
-        projection = (resolve_workspace_root(workspace) / _PROJECTION_DIR).resolve(strict=False)
-        return resolved.is_file() and resolved.is_relative_to(projection)
-    except OSError:
+        relative = PurePosixPath(path.expanduser().resolve().relative_to((root / _PROJECTION_DIR).resolve()).as_posix())
+    except (OSError, ValueError):
         return False
+    return root in _CACHE and any(item.path == relative for item in _CACHE[root].resources)
 
 
 def ensure_system_projection(workspace: Path) -> Path | None:
