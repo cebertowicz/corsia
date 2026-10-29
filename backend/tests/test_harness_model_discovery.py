@@ -753,9 +753,9 @@ async def test_claude_adapter_uses_stream_json_control_plane_without_a_turn(monk
 
     monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
     async def _signed_in(_binary):
-        return "unverified"
+        return "unverified", "signed_in"
 
-    monkeypatch.setattr(claude_discovery, "auth_status_state", _signed_in)
+    monkeypatch.setattr(claude_discovery, "auth_status", _signed_in)
     monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
 
     payload = await harness_models.discover_claude_models("/bin/claude")
@@ -812,9 +812,9 @@ async def test_claude_adapter_reuses_an_unchanged_known_context_window(monkeypat
 
     monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
     async def _signed_in(_binary):
-        return "unverified"
+        return "unverified", "signed_in"
 
-    monkeypatch.setattr(claude_discovery, "auth_status_state", _signed_in)
+    monkeypatch.setattr(claude_discovery, "auth_status", _signed_in)
     monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
 
     payload = await claude_discovery.discover_claude_models("/bin/claude")
@@ -1453,6 +1453,31 @@ async def test_cancelled_waiter_does_not_pin_completed_single_flight(
     assert discovery_calls == 2
 
 
+async def test_claude_status_failure_records_unknown_under_the_failed_paths_fence(monkeypatch):
+    from connections import account_identity, claude_discovery, source_state
+
+    writes = []
+    fence = object()
+
+    async def run_in_db(fn, *args, **kwargs):
+        if fn is account_identity.capture_default_observation:
+            return fence
+        writes.append((fn, args, kwargs))
+        return {"provider": "claude-code"}
+
+    async def spawn(*args, **kwargs):
+        raise OSError('unavailable')
+
+    monkeypatch.setattr(claude_discovery, 'run_in_db', run_in_db)
+    monkeypatch.setattr(claude_discovery.asyncio, 'create_subprocess_exec', spawn)
+    # The read alone writes nothing, so a successful catalog keeps its own fence.
+    assert await claude_discovery.auth_status('/mock/claude') == (source_state.UNVERIFIED, 'unknown')
+    assert writes == []
+    with pytest.raises(claude_discovery.ClaudeCatalogCheckFailed):
+        await claude_discovery._record_failed_sign_in('/mock/claude', 'failed')
+    assert writes[0] == (account_identity.observe_discovered_identity, ('claude-code', {'_login_status': 'unknown'}), {'token': fence})
+
+
 async def test_claude_catalog_of_a_signed_out_cli_is_needs_auth_not_ready(monkeypatch):
     """A signed-out CLI still lists its static models; that must not read as ready."""
     from connections import claude_discovery, source_state
@@ -1469,20 +1494,20 @@ async def test_claude_catalog_of_a_signed_out_cli_is_needs_auth_not_ready(monkey
 
     recorded: list[str] = []
 
-    async def _run_in_db(fn, *args):
+    async def _run_in_db(fn, *args, **_kwargs):
         if fn is source_state.apply_check:
             recorded.append(args[1])
         return {"provider": "claude-code"}
 
     async def _signed_out(_binary):
-        return source_state.NEEDS_AUTH
+        return source_state.NEEDS_AUTH, "signed_out"
 
     async def _must_not_run(*_args, **_kwargs):
         raise AssertionError("a signed-out source must not be stored ready")
 
     monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
     monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
-    monkeypatch.setattr(claude_discovery, "auth_status_state", _signed_out)
+    monkeypatch.setattr(claude_discovery, "auth_status", _signed_out)
     monkeypatch.setattr(claude_discovery, "_record_catalog_success", _must_not_run)
 
     with pytest.raises(claude_discovery.ClaudeCatalogCheckFailed):

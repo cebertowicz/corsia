@@ -188,6 +188,7 @@ def claude_session(monkeypatch):
 
     # `claude auth status`: an exit code, "hang" (never answers) or an exception.
     auth: list = [0]
+    auth_stdout: list[bytes] = [b'']
     auth_calls: list[tuple] = []
 
     class _AuthProcess:
@@ -202,7 +203,8 @@ def claude_session(monkeypatch):
             self.returncode = -9
 
         async def communicate(self):
-            return b"", b""
+            self.returncode = await self.wait()
+            return auth_stdout[0], b""
 
     real_exec = asyncio.create_subprocess_exec
 
@@ -210,8 +212,8 @@ def claude_session(monkeypatch):
         if tuple(args[1:3]) != ("auth", "status"):
             return await real_exec(*args, **kwargs)
         auth_calls.append(args)
-        # The command's output must never be captured: it carries the account's email.
-        assert kwargs["stdout"] == asyncio.subprocess.DEVNULL
+        assert len(args) == 3
+        assert kwargs["stdout"] == asyncio.subprocess.PIPE
         assert kwargs["stderr"] == asyncio.subprocess.DEVNULL
         if isinstance(auth[0], BaseException):
             raise auth[0]
@@ -241,8 +243,36 @@ def claude_session(monkeypatch):
 
     answer.sessions = sessions
     answer.auth_status = auth_status
+    answer.auth_stdout = auth_stdout
     answer.auth_calls = auth_calls
     return answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome,output,expected', [
+    (1, b'{"loggedIn":false}', True),
+    (1, b'', False),
+    (1, b'not json', False),
+    (1, b'{"loggedIn":false', False),
+    (1, b'{"loggedIn":true}', False),
+    (0, b'{"loggedIn":true}', False),
+    ('hang', b'', False),
+])
+async def test_claude_default_visibility_requires_definite_status(isolated_db, client, claude_session, outcome, output, expected):
+    from connections.claude_discovery import ClaudeCatalogCheckFailed, _record_failed_sign_in
+    from connections.vendor_accounts import default_account
+
+    _put('claude-code', 'available')
+    claude_session.auth_status(1)
+    claude_session.auth_stdout[0] = b'{"loggedIn":false}'
+    with pytest.raises(ClaudeCatalogCheckFailed):
+        await _record_failed_sign_in('/bin/claude-code', 'failed')
+    assert default_account('claude-code')['identity']['default_comparison']['definitely_signed_out'] is True
+    claude_session.auth_status(outcome)
+    claude_session.auth_stdout[0] = output
+    with pytest.raises(ClaudeCatalogCheckFailed):
+        await _record_failed_sign_in('/bin/claude-code', 'failed')
+    assert default_account('claude-code')['identity']['default_comparison']['definitely_signed_out'] is expected
 
 
 @pytest.mark.real_harness_cli
@@ -418,6 +448,25 @@ class TestClaudeSignIn:
         self._recheck()
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["prior_state"]) == ("unverified", "ready")
+
+    def test_signing_back_in_shows_the_hidden_default_and_is_ready_on_the_first_refresh(
+        self, isolated_db, client, claude_session,
+    ):
+        from connections.claude_discovery import ClaudeCatalogCheckFailed, _record_failed_sign_in
+        from connections.vendor_accounts import default_account
+
+        _put("claude-code", "needs_auth")
+        claude_session.auth_status(1)
+        claude_session.auth_stdout[0] = b'{"loggedIn":false}'
+        with pytest.raises(ClaudeCatalogCheckFailed):
+            asyncio.run(_record_failed_sign_in("/bin/claude-code", "failed"))
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is True
+        claude_session(_listed())
+        claude_session.auth_status(0)
+        claude_session.auth_stdout[0] = b'{"loggedIn":true}'
+        self._recheck()
+        assert _sources(client)["claude-code"]["state"] == "ready"
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is False
 
     def test_a_listed_catalog_asks_auth_status_once_before_ready(
         self, isolated_db, client, claude_session,

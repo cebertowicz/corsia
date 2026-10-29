@@ -62,13 +62,27 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
+		it('shows the empty account state when the Default is definitely signed out', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
+				? Promise.resolve(response({ providers: [] }))
+				: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }] }))));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).toContain('No Codex accounts signed in');
+			expect(document.body.textContent).toContain('Add account');
+			expect(document.body.textContent).not.toContain('Managed by provider');
+			expect(document.querySelector('#vendor-account-default')).toBeNull();
+			unmount(component);
+		});
+
 		it('keeps the account row a plain menu trigger while exposing its policy toggle by account name', async () => {
 			token.set('test-token');
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
 				return path.startsWith('/api/provider-policy')
-					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
-					: Promise.resolve(response({ accounts: [defaultAccount] }));
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }, { id: 'work', label: 'Work', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount, workAccount] }));
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
@@ -89,8 +103,8 @@ describe('rendering and actions', () => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
 				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'Could not save subscriptions.' }, 500));
 				return path.startsWith('/api/provider-policy')
-					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
-					: Promise.resolve(response({ accounts: [defaultAccount] }));
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }, { id: 'work', label: 'Work', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount, workAccount] }));
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
@@ -108,11 +122,11 @@ describe('rendering and actions', () => {
 		it('keeps the error and offers Retry when the policy cannot be re-read after a failed save', async () => {
 			token.set('test-token');
 			let policyReads = 0;
-			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
+			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }, { id: 'work', label: 'Work', enabled: true }] }] };
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
 				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'provider policy revision changed', code: 'policy_changed' }, 409));
-				if (!path.startsWith('/api/provider-policy')) return Promise.resolve(response({ accounts: [defaultAccount] }));
+				if (!path.startsWith('/api/provider-policy')) return Promise.resolve(response({ accounts: [defaultAccount, workAccount] }));
 				return policyReads++ === 1 ? Promise.reject(new TypeError('Failed to fetch')) : Promise.resolve(response(policy));
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
@@ -135,6 +149,54 @@ describe('rendering and actions', () => {
 			const rowIds = () => [...document.querySelectorAll('[id^="vendor-account-"]')].map((row) => row.id.replace('vendor-account-', ''));
 			const numbers = () => [...document.querySelectorAll('.account-usage-row .order')].map((node) => node.textContent);
 			const moveButton = (name: string, direction: 'up' | 'down') => document.querySelector<HTMLButtonElement>(`[aria-label="Move ${name} ${direction}"]`)!;
+
+			it('hides rollover and account switches when only one policy account is visible', async () => {
+				token.set('test-token');
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [entry(['default', 'a'])] }))
+					: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }, signedIn('a', 'Alpha')] }))));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(rowIds()).toEqual(['a']));
+				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
+				expect(document.querySelector('[aria-label="Use Alpha"]')).toBeNull();
+				expect(numbers()).toEqual([]);
+				unmount(component);
+			});
+
+			it('keeps the switch on the one visible account while it is turned off, so it can be turned back on', async () => {
+				token.set('test-token');
+				const policy = { ...entry(['default', 'a']), disabled: ['a'], units: [{ id: 'default', label: 'default', enabled: true }, { id: 'a', label: 'a', enabled: false }] };
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [policy] }))
+					: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }, signedIn('a', 'Alpha')] }))));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
+				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
+				expect(numbers()).toEqual([]);
+				unmount(component);
+			});
+
+			it('moves between visible accounts when the hidden Default is in the saved order', async () => {
+				token.set('test-token');
+				let units = ['a', 'default', 'b'];
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+					if (init?.method === 'PUT') {
+						units = JSON.parse(String(init.body)).order;
+						return Promise.resolve(response(entry(units, units)));
+					}
+					return String(input).startsWith('/api/provider-policy')
+						? Promise.resolve(response({ providers: [entry(units, units)] }))
+						: Promise.resolve(response({ accounts: [signedIn('a', 'Alpha'), { ...defaultAccount, default_signed_out: true }, signedIn('b', 'Bravo')] }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2']));
+				expect(moveButton('Alpha', 'up').disabled).toBe(true);
+				expect(moveButton('Bravo', 'down').disabled).toBe(true);
+				moveButton('Alpha', 'down').click();
+				await vi.waitFor(() => expect(rowIds()).toEqual(['b', 'a']));
+				expect(units).toEqual(['b', 'default', 'a']);
+				unmount(component);
+			});
 
 			it('shows the saved rollover order, and a move visibly swaps the rows it acts on', async () => {
 				token.set('test-token');
@@ -194,7 +256,8 @@ describe('rendering and actions', () => {
 						: Promise.resolve(response({ accounts }));
 				}));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
-				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
+				await vi.waitFor(() => expect(rowIds()).toEqual(['a']));
+				expect(document.querySelector('[aria-label="Use Alpha"]')).toBeNull();
 				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
 
 				accounts = [signedIn('a', 'Alpha'), signedIn('b', 'Bravo')];
@@ -385,13 +448,18 @@ describe('rendering and actions', () => {
 			const fetch = vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
 				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
-				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'same_account', duplicate_of: 'default' }));
+				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'same_account', duplicate_of: 'default' }))
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount] }));
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
 			button('Sign in').click();
 			await settle();
-			expect(document.body.textContent).toContain('Already signed in as Plus account 1');
+			expect(fetch).toHaveBeenCalledTimes(4);
+			expect(document.querySelector('#vendor-account-work')).toBeNull();
+			const reached = document.querySelector('#vendor-account-default');
+			expect(reached?.textContent).toContain('Already signed in as Plus account 1');
+			expect([...reached!.querySelectorAll('button')].map((b) => b.textContent?.trim())).not.toContain('Sign in again');
 			unmount(component);
 		});
 
@@ -650,6 +718,23 @@ describe('sign-in submit', () => {
 	 await settle(); await settle();
 	 expect(document.body.textContent).toContain('Signed in, but the account list could not be reloaded.');
 	 expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
+	 unmount(component);
+	});
+	it('offers Retry when the list cannot be reloaded after a cancelled sign-in', async () => {
+	 const lists = [response({ accounts: [ambient, work] }), response({ detail: 'offline', ref: 'R-503' }, 503), response({ accounts: [ambient] })];
+	 vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+		const path = input instanceof Request ? input.url : String(input);
+		if (path.includes('/api/provider-policy')) return Promise.resolve(response({ providers: [] }));
+		if (path.includes('/signin')) return Promise.resolve(response({ account_id: 'work', status: 'cancelled', cause: null, route: 'browser' }));
+		return Promise.resolve(lists.shift()!);
+	 }));
+	 const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+	 await settle(); await settle();
+	 expect(document.body.textContent).toContain('Couldn’t load your accounts. Reference: R-503');
+	 // This suite signs no token in, so the policy's own Retry comes first.
+	 [...document.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.trim() === 'Retry').at(-1)!.click(); await settle(); await settle();
+	 expect(document.body.textContent).not.toContain('Couldn’t load your accounts.');
+	 expect(document.querySelector('#vendor-account-work')).toBeNull();
 	 unmount(component);
 	});
 	it('submits Add only once while the first keyboard request is pending', async () => {

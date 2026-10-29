@@ -18,7 +18,7 @@ DEFAULT_ACCOUNT_NAME = "Default"
 # The only causes a cleanup receipt may carry: fixed names from code, never provider text.
 AUTH_CLEANUP_CAUSES = frozenset({
     None, "claude_executable_missing", "codex_executable_missing", "github_executable_missing", "vendor_logout_failed",
-    "vendor_logout_unavailable", "sign_out_result_invalid", "sign_out_hook_failed", "default_home_untouched"})
+    "vendor_logout_unavailable", "sign_out_result_invalid", "sign_out_hook_failed", "signin_stop_failed", "default_home_untouched"})
 
 
 class AccountError(ValueError):

@@ -681,10 +681,12 @@ async def test_same_identity_retry_reports_bound_original_ready(conductor, monke
                                         bind=FirstRunBind(CONDUCTOR, "user"))
     async def same_identity(*_args):
         return True, {"account_fp": f"synthetic-{personal['id']}"}, None
-    async def cleanup(_account):
+    cleanup_calls = []
+    async def cleanup(account):
+        cleanup_calls.append(account['id'])
         return None
     monkeypatch.setattr(account_controls, "_vendor_status", same_identity)
-    monkeypatch.setattr(account_controls, "_cleanup", cleanup)
+    monkeypatch.setattr(account_controls.account_cleanup, "cleanup", cleanup)
     monkeypatch.setattr(harness_models, "refresh_provider", _refresh_to("ready", db, personal))
     await account_controls._hold(operation, work["source_home"], "/synthetic/codex")
     from api.vendor_accounts import check_vendor_signin
@@ -698,6 +700,7 @@ async def test_same_identity_retry_reports_bound_original_ready(conductor, monke
     assert [account["id"] for account in list_accounts(provider="codex", db=db)
             if not account["is_default"] and account["state"] == "signed_in"] == [personal["id"]]
     assert get_account(work["id"], db=db)["state"] == "removed"
+    assert cleanup_calls == [work['id']]
     from llm.model_status import scoped_status_rows
     model = next(row for row in scoped_status_rows(account_id=personal["id"]) if row["id"] == MODEL)
     assert next(row for row in model["runs_on"] if row["account_id"] == personal["id"])["status"] == "ready"

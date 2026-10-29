@@ -344,7 +344,7 @@ def test_startup_calls_converter_after_database_initialization(tmp_path, monkeyp
     for directory in ("UPLOADS_DIR", "LOGS_DIR", "RUNTIME_DIR"):
         monkeypatch.setattr(config, directory, tmp_path / directory)
     monkeypatch.setattr(prerequisites, "prepare_startup_prerequisites", record("prerequisites"))
-    monkeypatch.setattr(app_lifecycle, "init_db", record("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", record("init_db"))
     monkeypatch.setattr(conversion, "convert_legacy_project_paths", record("convert"))
     monkeypatch.setattr(durable_writes, "recover_write_intents", record("write_intents"))
     monkeypatch.setattr(relocate, "recover_interrupted_relocations", record("relocations"))
@@ -357,7 +357,7 @@ def test_startup_calls_converter_after_database_initialization(tmp_path, monkeyp
         def info(self, *_args: object) -> None:
             pass
 
-    app_lifecycle._initialize_startup(QuietLogger())
+    app_lifecycle.app_startup_init.initialize_startup(QuietLogger())
 
     assert calls.index("init_db") + 1 == calls.index("convert")
 

@@ -6,7 +6,7 @@ import { fetchCatalogInventory, harnessProviderModels, harnessSummaries, type Ha
 import { HARNESSES } from './harnessMembership';
 import { seedProviderModels } from './providerModels';
 import { readWorkspaceModels } from './modelsLoad';
-import { vendorAccounts } from './vendorAccounts';
+import { vendorAccounts, visibleVendorAccounts } from './vendorAccounts';
 
 const BASE = '';
 const t = () => get(token) || '';
@@ -81,7 +81,7 @@ function _modelCountLabel(count: number): string {
 }
 
 function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts)): string {
-	const accountCount = accounts.filter((account) => account.provider === name && account.state !== 'removed').length;
+	const accountCount = visibleVendorAccounts(accounts, name, []).length;
 	return accountCount > 0 ? `${accountCount} account${accountCount === 1 ? '' : 's'} · ${_modelCountLabel(modelCount)}` : _modelCountLabel(modelCount);
 }
 

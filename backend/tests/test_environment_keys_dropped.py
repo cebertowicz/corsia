@@ -54,7 +54,7 @@ def test_startup_drops_them_after_the_database_migration_has_read_them(launch_en
         monkeypatch.setattr(config, directory, tmp_path / directory)
     monkeypatch.setattr(prerequisites, "prepare_startup_prerequisites", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        app_lifecycle, "init_db", lambda: seen_by_migration.append("ANTHROPIC_API_KEY" in os.environ)
+        app_lifecycle.app_startup_init, "init_db", lambda: seen_by_migration.append("ANTHROPIC_API_KEY" in os.environ)
     )
     monkeypatch.setattr(conversion, "convert_legacy_project_paths", lambda *_a, **_k: None)
     monkeypatch.setattr(durable_writes, "recover_write_intents", lambda *_a, **_k: None)
@@ -66,7 +66,7 @@ def test_startup_drops_them_after_the_database_migration_has_read_them(launch_en
         def info(self, *_args: object) -> None:
             pass
 
-    app_lifecycle._initialize_startup(QuietLogger())
+    app_lifecycle.app_startup_init.initialize_startup(QuietLogger())
 
     assert seen_by_migration == [True]
     assert not any(variable in os.environ for variable in VARIABLES)

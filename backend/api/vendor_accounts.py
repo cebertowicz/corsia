@@ -137,6 +137,8 @@ async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_
     return _safe(account) | {"duplicate_of": await _read(accounts.duplicate_of, account, rows=rows),
                              "allow_overage": await run_read(_allow_overage, account),
                              "no_usable_model": account["id"] in no_model,
+                             "default_signed_out": bool(account["is_default"] and
+                                 (account["identity"].get(accounts.DEFAULT_COMPARISON) or {}).get("definitely_signed_out")),
                              "label": account_label(account, rows=numbered_rows),
                              **billing_views.get(account["id"], {"billing": None, "billing_revision": 0}),
                              "usage": await run_read(_usage, account)}

@@ -322,4 +322,16 @@ describe('groupByHost', () => {
 			'2 accounts · 3 models', '1 account · 1 model',
 		]);
 	});
+
+	it('counts only accounts visible in the settings list', () => {
+		vendorAccounts.set([
+			{ ...account('codex', 'default'), default_signed_out: true }, account('codex', 'work'),
+			{ ...account('claude-code', 'default'), default_signed_out: true },
+		]);
+		const groups = groupByHost([], [], null, [
+			{ name: 'codex', label: 'Codex', total: 3, ready: 3 },
+			{ name: 'claude-code', label: 'Claude Code', total: 1, ready: 1 },
+		]);
+		expect(groups[0].providers.map(provider => provider.subline)).toEqual(['1 account · 3 models', '1 model']);
+	});
 });

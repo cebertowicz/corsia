@@ -33,6 +33,7 @@ class SignIn:
     prompted: asyncio.Event = field(default_factory=asyncio.Event)
     bind: FirstRunBind | None = None  # the first-run screen's conductor, bound once this login reads Ready
     ref: str | None = None  # a failed sign-in's public reference, logged beside its cause
+    stop_failed: bool = False
 
     @property
     def held(self) -> bool:

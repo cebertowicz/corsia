@@ -43,6 +43,8 @@ export interface VendorAccount {
 	allow_overage?: boolean | null;
 	/** Signed in, but none of the vendor's models can run on this account. */
 	no_usable_model?: boolean;
+	/** The Default CLI has definitely reported that it is signed out. */
+	default_signed_out?: boolean;
 	/** Account-owned plan usage, rendered once in its Settings account row. */
 	usage?: VendorAccountUsage;
 	/** The recorded monthly price and charge day; null when no price is recorded. */
@@ -62,6 +64,23 @@ export interface SigninResult {
 	held_by?: string | null;
 	/** Support reference for a failure the person may report. */
 	ref?: string | null;
+}
+
+export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
+	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !account.default_signed_out && !removed.some((row) => row.id === account.id)), ...removed];
+}
+
+export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
+	// A same-account sign-in removes the added row, so its message moves to the account it reached.
+	const listed = (id: string | null | undefined) => accounts.some((account) => account.id === id);
+	const key = listed(result.account_id) ? result.account_id : result.cause === 'same_account' && listed(result.duplicate_of) ? result.duplicate_of : null;
+	const { [result.account_id]: _, ...rest } = signins;
+	return key ? { ...rest, [key]: result } : rest;
+}
+
+/** A list-reload failure line, with its support reference when the server gave one. */
+export function reloadErrorText(error: string, ref?: string): string {
+	return ref ? `${error} Reference: ${ref}` : error;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
@@ -203,7 +222,7 @@ export async function startVendorSignin(accountId: string): Promise<{ ok: boolea
 	if (!result.ok) return result;
 	if (wasSignedIn && result.data.status === 'waiting') {
 		const refreshed = await loadVendorAccounts();
-		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
 	}
 	return reconcileSignin(result.data);
 }
@@ -213,13 +232,15 @@ async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; sig
 		await loadVendorAccounts();
 		return { ok: true, signin };
 	}
-	if (signin.status !== 'completed' && signin.status !== 'already_signed_in') return { ok: true, signin };
-	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
-		? { ...account, state: 'signed_in', details_stale: true } : account));
+	const signedIn = signin.status === 'completed' || signin.status === 'already_signed_in';
+	if (!signedIn && signin.status !== 'cancelled' && signin.cause !== 'same_account') return { ok: true, signin };
+	if (signedIn) {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
+			? { ...account, state: 'signed_in', details_stale: true } : account));
+	}
 	const refreshed = await loadVendorAccounts();
-	return refreshed.ok
-		? { ok: true, signin }
-		: { ok: true, signin, error: 'Signed in, but the account list could not be reloaded.' };
+	if (refreshed.ok || refreshed.superseded) return { ok: true, signin };
+	return { ok: true, signin, error: reloadErrorText(signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.', refreshed.ref) };
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {

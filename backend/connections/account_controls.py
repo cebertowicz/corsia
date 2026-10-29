@@ -16,27 +16,21 @@ import json
 import logging
 from typing import Any
 
-from connections import account_login_wait, account_signin_prompt
+from connections import account_cleanup, account_login_wait, account_signin_prompt
 from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
 from connections.account_identity import codex_identity, refresh_default_identity
 from connections.account_lifecycle import change_state
-from connections.account_profiles import profile_for, sign_out_account
+from connections.account_profiles import profile_for
 from connections.account_receipts import account_receipt
 from connections.account_signin import SignIn, failure_reference
+from connections.account_leftovers import record_failed_stop, remove_if_leftover, settle_signin
 from connections.account_evidence import readiness_reason
 from connections.account_signin_commit import SameAccount, commit_signed_in
 from connections.corsia_agent_account import FirstRunBind, finish_signin
 from connections.harness_process import killed_on_exit
-from connections.vendor_accounts import (
-    AUTH_CLEANUP_CAUSES,
-    VENDORS,
-    AccountError,
-    duplicate_of,
-    get_account,
-    record_auth_cleanup,
-)
+from connections.vendor_accounts import VENDORS, AccountError, duplicate_of, get_account
 from infra.db_async import run_in_db
-from infra.time import utc_now_iso
+
 
 log = logging.getLogger(__name__)
 # Bounds the short status and logout commands only; a held sign-in has its own, longer bound.
@@ -46,7 +40,7 @@ _COMMAND_SECONDS = 30.0
 # browser that stops on a vendor page never calls back. A person who signs in finishes well
 # inside this.
 _SIGNIN_WAIT_SECONDS = 300.0
-_CLEANUP_STATUSES = ("done", "failed", "skipped", "pending")
+
 
 
 class _SigninWaitExpired(Exception):
@@ -163,7 +157,7 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         refusal = profile_for(operation.provider).signin_refusal
         if refusal is not None and (refused := await run_in_db(refusal, home, identity)) is not None:
             # The login stands in the home until the vendor's own logout removes it.
-            await _cleanup(await run_in_db(get_account, operation.account_id))
+            await account_cleanup.cleanup(await run_in_db(get_account, operation.account_id))
             operation.status, operation.cause = "failed", refused
             return
         if operation.provider in VENDORS:
@@ -173,7 +167,7 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
                 commit_signed_in, operation.account_id, operation.revision, identity)
         except SameAccount as repeat:
             from connections.account_signin_retry import retry_unchecked
-            await retry_unchecked(operation, str(repeat), binary, _cleanup)
+            await retry_unchecked(operation, str(repeat), binary, account_cleanup.cleanup)
             return
         except AccountError:
             operation.status, operation.cause = "superseded", "account_changed"
@@ -184,11 +178,12 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         operation.status, operation.cause = "failed", "signin_timed_out"
     except Exception as exc:  # noqa: BLE001 - nobody may be left waiting on a sign-in nothing is waiting on
         log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
+        if operation.status == "cancelled":
+            await record_failed_stop(operation)
         if operation.status == "waiting" or (operation.status == "completed" and operation.bind and operation.bind.outcome is None):
             operation.status, operation.cause = "failed", "signin_check_failed"
     finally:
-        if operation.status == "failed":
-            operation.ref = failure_reference(operation.provider, operation.cause)
+        await settle_signin(operation)
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
@@ -226,7 +221,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
             await _run(provider, account["source_home"], binary, "logout")
         except (OSError, TimeoutError):
             operation.status, operation.cause = "failed", "vendor_logout_unavailable"
-            operation.ref = failure_reference(provider, operation.cause)
+            await settle_signin(operation)
             return operation.public()
     if operation.status != "waiting":  # cancelled while the stale login was removed
         return operation.public()
@@ -234,7 +229,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
         operation.process = await _spawn(provider, account["source_home"], binary, "login")
     except OSError:
         operation.status, operation.cause = "failed", "vendor_login_unavailable"
-        operation.ref = failure_reference(provider, operation.cause)
+        await settle_signin(operation)
         return operation.public()
     if operation.status != "waiting":  # cancelled while the vendor process was starting
         await _stop(operation)
@@ -284,7 +279,9 @@ async def _drop(account_id: str) -> SignIn | None:
 
 
 async def cancel_signin(account_id: str) -> dict[str, Any]:
-    """Stop one held sign-in; the account keeps its state and the vendor's logout is never run.
+    """Stop one held sign-in; the account keeps its state, unless it never signed in and nothing refers to it.
+
+    Such a leftover is removed and its own home signed out (``account_leftovers``).
 
     A sign-in the vendor already finished is not cancelled: its real result is
     returned and its record stays.
@@ -299,6 +296,8 @@ async def cancel_signin(account_id: str) -> dict[str, Any]:
     if operation.status != "waiting":
         return operation.public()
     await _drop(account_id)
+    if not operation.stop_failed:
+        await remove_if_leftover(account_id)
     return operation.public()
 
 
@@ -344,19 +343,6 @@ async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, 
     return result
 
 
-async def vendor_logout(account: dict) -> dict[str, Any]:
-    """Run the vendor's own logout for this account's stored home; nothing falls back to another home."""
-    provider = account["provider"]
-    binary = await _binary(provider)
-    if binary is None:
-        return {"status": "failed", "cause": profile_for(provider).missing_cause}
-    try:
-        code, _ = await _run(provider, account["source_home"], binary, "logout")
-    except (OSError, TimeoutError):
-        return {"status": "failed", "cause": "vendor_logout_unavailable"}
-    return {"status": "done", "cause": None} if code == 0 else {"status": "failed", "cause": "vendor_logout_failed"}
-
-
 async def _leave(account_id: str, state: str, expected_revision: int) -> tuple[dict, dict]:
     """Commit the state and its holds first, then stop any sign-in and run the provider's sign-out.
 
@@ -365,25 +351,7 @@ async def _leave(account_id: str, state: str, expected_revision: int) -> tuple[d
     """
     account = await run_in_db(change_state, account_id, state, expected_revision=expected_revision)
     await _drop(account_id)
-    return account, await _cleanup(account)
-
-
-async def _cleanup(account: dict) -> dict:
-    """Run and record the same provider cleanup, also for a refused login."""
-    account_id = account["id"]
-    try:
-        result = await sign_out_account(account)
-        cleanup = {"status": result["status"], "cause": result.get("cause")}
-        # Only a fixed name is stored or shown, never free text from a provider.
-        named = isinstance(cleanup["cause"], (str, type(None))) and cleanup["cause"] in AUTH_CLEANUP_CAUSES
-        if cleanup["status"] not in _CLEANUP_STATUSES or not named:
-            cleanup = {"status": "failed", "cause": "sign_out_result_invalid"}
-    except Exception as exc:  # noqa: BLE001 - a provider hook's failure must not undo the committed state
-        log.warning("account %s sign-out hook failed: %s", account_id, type(exc).__name__)
-        cleanup = {"status": "failed", "cause": "sign_out_hook_failed"}
-    cleanup["at"] = utc_now_iso()
-    await run_in_db(record_auth_cleanup, account_id, cleanup)
-    return cleanup
+    return account, await account_cleanup.cleanup(account)
 
 
 async def sign_out(account_id: str, *, expected_revision: int) -> tuple[dict, dict]:

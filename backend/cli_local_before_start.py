@@ -107,12 +107,12 @@ async def _discover(stages: _Stages) -> None:
     """The server's startup initialization and harness discovery, without the server."""
     from loguru import logger
 
-    from app_lifecycle import _initialize_startup
+    from app_startup_init import initialize_startup
     from app_startup_runtime import _startup_harness_discovery
 
     # The first run builds the app here, exactly as the server's startup would.
     stages("Preparing CORSIA")
-    await asyncio.to_thread(_initialize_startup, logger)
+    await asyncio.to_thread(initialize_startup, logger)
     stages("Checking Claude Code and Codex")
     await _startup_harness_discovery()
 

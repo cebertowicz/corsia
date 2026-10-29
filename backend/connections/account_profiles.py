@@ -88,7 +88,7 @@ def home_root() -> Path:
 
 async def _vendor_sign_out(account: dict, source: Path, runtime: Path) -> dict:
     """Run the vendor's own logout for this account's home."""
-    from connections.account_controls import vendor_logout
+    from connections.account_cleanup import vendor_logout
 
     return await vendor_logout(account)
 

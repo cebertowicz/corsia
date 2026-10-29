@@ -327,7 +327,7 @@ class TestRelocationRecoveryIsWiredIntoStartup:
 
         import app_lifecycle
 
-        body = inspect.getsource(app_lifecycle._initialize_startup)
+        body = inspect.getsource(app_lifecycle.app_startup_init.initialize_startup)
         assert "recover_interrupted_relocations" in body
         assert body.index("recover_write_intents") < body.index(
             "recover_interrupted_relocations"
@@ -374,7 +374,7 @@ async def _run_lifespan_recovery(monkeypatch) -> None:
     def _stop(*_args, **_kwargs):
         raise _StopStartup()
 
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: None)
     monkeypatch.setattr(durable_writes, "recover_write_intents", lambda **kw: None)
     monkeypatch.setattr("app_startup_workspace.initialize_workspace", _stop)
     try:

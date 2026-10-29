@@ -118,7 +118,7 @@ def test_the_backend_startup_releases_a_finished_installs_marker():
 
     import app_lifecycle
 
-    assert "release_marker_at_startup" in inspect.getsource(app_lifecycle._initialize_startup)
+    assert "release_marker_at_startup" in inspect.getsource(app_lifecycle.app_startup_init.initialize_startup)
 
 
 def test_a_marker_that_will_not_go_at_startup_is_logged_and_never_stops_the_backend(app):
