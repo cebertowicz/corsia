@@ -141,7 +141,7 @@ def admit(
     hold = _incomplete(db, thread_id, epoch, entry, decision)
     if hold is not None:
         return Admission(capture_id, capture_id, hold, case_metadata=pending)
-    if trial.state == "trial" and _target_full(db, place, target_decision, merge, destination, revising):
+    if trial.state == "trial" and _section_taken(db, place, target_decision, merge, destination, revising):
         return Admission(capture_id, capture_id, "target-full", case_metadata=pending)
     if destination.path is None:
         raise TrialRefused("invalid-output", (
@@ -164,11 +164,11 @@ def admit(
     return Admission(identity, capture_id, None, text, destination_path=write_path)
 
 
-def _target_full(
+def _section_taken(
     db: sqlite3.Connection, place: ThreadPlace, decision: Decision,
     merge: Any, destination: Destination, revising: bool,
 ) -> bool:
-    """Whether another offered trial changes the same section of the effective target."""
+    """Whether another offered trial changes the same section of the effective target, or either changes the whole file."""
     metadata = decision.case_metadata
     if not (metadata.get("target_file") or metadata.get("new_target_path")):
         return False

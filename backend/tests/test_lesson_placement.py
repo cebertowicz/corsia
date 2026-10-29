@@ -1047,7 +1047,7 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
     assert _artifacts(env, capture) == 1
 
 
-def _activate_cap_trial(env: Env, number: int, section: str | None, *, owner: str = THREAD) -> Path:
+def _activate_section_trial(env: Env, number: int, section: str | None, *, owner: str = THREAD) -> Path:
     from core.lesson_trials import Trial
     from plans import lesson_reviews
 
@@ -1074,7 +1074,7 @@ def _activate_cap_trial(env: Env, number: int, section: str | None, *, owner: st
 
 async def test_trials_on_different_sections_all_run(env: Env) -> None:
     for number in (1, 2):
-        _activate_cap_trial(env, number, f"Part {number}")
+        _activate_section_trial(env, number, f"Part {number}")
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part 3"))
     await _drain(env.worker)
     assert "queued" in reply
@@ -1090,7 +1090,7 @@ async def test_trials_on_different_sections_all_run(env: Env) -> None:
     (None, None, "context/other.md", False),
 ])
 async def test_trial_section_conflicts(env: Env, existing_section, requested_section, target, held) -> None:
-    _activate_cap_trial(env, 1, existing_section)
+    _activate_section_trial(env, 1, existing_section)
     answer = _answer(new_target_path=target, target_section=requested_section)
     reply = _place(env, _entry(env), answer)
     await _drain(env.worker)
@@ -1107,13 +1107,13 @@ async def test_trial_section_conflicts(env: Env, existing_section, requested_sec
 def test_unrelated_owner_trials_do_not_hold_this_owner(env: Env) -> None:
     _seed_thread(env.db, "other-owner")
     for number in (1, 2):
-        _activate_cap_trial(env, number, f"Part {number}", owner="other-owner")
+        _activate_section_trial(env, number, f"Part {number}", owner="other-owner")
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part 1"))
     assert "queued" in reply
 
 
 def test_trial_with_stale_review_does_not_count(env: Env) -> None:
-    path = _activate_cap_trial(env, 1, "Part A")
+    path = _activate_section_trial(env, 1, "Part A")
     path.write_text(path.read_text().replace("Check it.", "Changed behavior."))
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
     assert "queued" in reply
@@ -1123,13 +1123,13 @@ def test_inherited_offered_trial_counts(env: Env) -> None:
     _seed_thread(env.db, "ancestor")
     env.db.execute("UPDATE threads SET spawned_by='ancestor' WHERE id=?", (THREAD,))
     env.db.commit()
-    _activate_cap_trial(env, 1, "Part A", owner="ancestor")
+    _activate_section_trial(env, 1, "Part A", owner="ancestor")
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
     assert "captured hypothesis" in reply
 
 
 async def test_same_case_merge_uses_heading_key(env: Env) -> None:
-    existing = _activate_cap_trial(env, 1, "Usage")
+    existing = _activate_section_trial(env, 1, "Usage")
     entry = _entry(env)
     reply = _place(env, entry, _answer(
         case=CASE, cause="rule_gap", new_target_path="context/shared.md", target_section="## usage",
@@ -1141,7 +1141,7 @@ async def test_same_case_merge_uses_heading_key(env: Env) -> None:
 
 
 async def test_capture_retry_keeps_target_for_same_case_merge(env: Env) -> None:
-    existing = _activate_cap_trial(env, 1, "Part A")
+    existing = _activate_section_trial(env, 1, "Part A")
     entry = _entry(env)
     first = _answer(trial={"boundary": None}, case=CASE, cause="rule_gap",
                     new_target_path="context/shared.md", target_section="Part A")
@@ -1159,7 +1159,7 @@ async def test_capture_retry_keeps_target_for_same_case_merge(env: Env) -> None:
 async def test_watch_promotion_retained_target_checks_retired_match(env: Env) -> None:
     from core.lesson_trials import Trial
 
-    retired = _activate_cap_trial(env, 1, "Part A")
+    retired = _activate_section_trial(env, 1, "Part A")
     retired.write_text(retired.read_text().replace("state: trial", "state: retired"))
     watch = _skill(env)
     watch.parent.mkdir(parents=True)
@@ -1189,7 +1189,7 @@ async def test_watch_promotion_counts_its_retained_target(env: Env) -> None:
     from core.lesson_trials import Trial
 
     for number in (1, 2):
-        _activate_cap_trial(env, number, f"Part {number}")
+        _activate_section_trial(env, number, f"Part {number}")
     path = _skill(env)
     path.parent.mkdir(parents=True)
     path.write_text(lesson_files.render_trial(
