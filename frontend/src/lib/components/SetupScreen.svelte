@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
+	import SetupSourceError from './SetupSourceError.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SetupWelcome from './SetupWelcome.svelte';
@@ -34,7 +35,6 @@
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
@@ -50,7 +50,7 @@
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
 	let accountKnown = $state(false), savedName = '', savedEmail = '';
-	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
+	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state(''), sourceRetry = $state<{ error: string; vendors: string[] } | null>(null);
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
 	let localPreparing = $state(false);
@@ -104,9 +104,10 @@
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = CLI_VENDORS.filter((vendor) => cliSignedIn(vendor) || cliPicked(vendor)).map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
+			if (sourceRetry?.vendors.includes(vendor)) return { key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', meta: '', busy: true };
 			if (!source || (sourceError && connectFlow.awaitingSource(vendor))) {
 				const name = vendor === 'codex' ? 'Codex' : 'Claude Code';
-				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true, action: { label: 'Retry', run: () => void refreshSources(true) } } : { key: vendor, name, meta: '', busy: true };
+				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true } : { key: vendor, name, meta: '', busy: true };
 			}
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
@@ -315,6 +316,10 @@
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
 	}
+	async function retrySources() {
+		sourceRetry = { error: sourceError, vendors: aiRows.filter((row) => CLI_VENDORS.some((vendor) => vendor === row.key) && row.error).map((row) => row.key) };
+		try { await refreshSources(true); } finally { sourceRetry = null; }
+	}
 	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
 	function finishSetup() {
 		return finishSetupWarmHandoff({
@@ -359,7 +364,6 @@
 		return () => { warm.destroy(); offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});
 </script>
-
 <SetupShell bind:this={shell} {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={view.title} lede={view.lede} primary={view.primary} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
@@ -383,16 +387,14 @@
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
 	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
-		<SetupAiRows rows={aiRows} />
-		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
+		<SetupAiRows rows={aiRows} disableRetry={sourceRetry !== null} />
+		<SetupSourceError error={sourceRetry?.error ?? sourceError} retrying={sourceRetry !== null} retry={retrySources} />
 	{/if}
 </SetupShell>
 <ConfirmDialog open={confirmConnect} title="Connect to another computer instead?" description="This stops the download on this computer." confirmLabel="Stop and connect" cancelLabel="Keep downloading" onConfirm={() => { confirmConnect = false; void connectToAnotherComputer(); }} onCancel={() => { confirmConnect = false; }} />
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
-
 <style>
 	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.error-text { margin: var(--space-2) var(--space-4); font-size: var(--text-subhead); }
 	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
 </style>

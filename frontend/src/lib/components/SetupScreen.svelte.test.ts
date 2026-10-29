@@ -317,8 +317,64 @@ describe('SetupScreen', () => {
 			await vi.advanceTimersByTimeAsync(3000); await tick();
 			const row = host.querySelector('section[aria-label="Claude Code"]');
 			expect(row?.textContent).toContain('Couldn’t check Claude Code.');
-			expect(row?.textContent).toContain('Retry');
+			expect(row?.textContent).not.toContain('Retry');
 			expect(row?.querySelector('.spinner')).toBeNull();
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it.each([
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: true },
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: false },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: true },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: false },
+	])('shows $name source retry pending and returns to success=$succeeds', async ({ vendor, name, choice, succeeds }) => {
+		sources = [{ source: vendor, name, state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			const url = String(input);
+			if (url.includes('/sources/recheck')) {
+				rechecks++;
+				if (rechecks === 1) return new Response('{}', { status: 500 });
+				if (rechecks > 2) return json({ sources });
+				return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+			}
+			if (url.includes('/models') && sources[0]?.state === 'ready') return json({ models: [{ connection: vendor, status: 'ready', runs_on: [{ selected: true, status: 'ready' }] }] });
+			return originalFetch(input, init);
+		});
+		vi.useFakeTimers();
+		try {
+			button(choice)?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = () => host.querySelector(`section[aria-label="${name}"]`);
+			const error = 'CORSIA couldn’t check your model sources. Try again.';
+			expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+			expect(host.textContent).toContain(error);
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+			button('Retry')!.click(); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + error + '"] .spinner')).toBeTruthy();
+			expect(button('Retry')?.disabled).toBe(true);
+			button('Retry')?.click(); expect(rechecks).toBe(2);
+			window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(0); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + error + '"] .spinner')).toBeTruthy();
+			expect(button('Retry')?.disabled).toBe(true);
+			if (succeeds) sources = [{ source: vendor, name, state: 'ready' }];
+			resolveRetry(succeeds ? json({ sources }) : new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+			if (succeeds) {
+				expect(host.textContent).not.toContain(error);
+				expect(row()?.textContent).toContain('Ready');
+			} else {
+				expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+				expect(host.textContent).toContain(error);
+				expect(button('Retry')?.disabled).toBe(false);
+			}
+			expect(row()?.querySelector('.spinner')).toBeNull();
 		} finally { vi.useRealTimers(); }
 	});
 

@@ -7,6 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Setup shows when it is retrying a failed model source check.
+
 - The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
 - An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - Find the CORSIA agent and project conductors in search and Activity, with each conductor named for its project.
