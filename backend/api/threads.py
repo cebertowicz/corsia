@@ -19,6 +19,7 @@ from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
 from infra.product_events import emit_product_event
 from infra.conductor import get_all_coordination_ids
+from infra.corsia_agent import get_corsia_agent
 from infra.fresh_threads import create_visible_fresh_thread
 from infra.local_only import add_local_only_payload_fields
 from infra.queries import (
@@ -53,30 +54,35 @@ async def list_threads(token: str, archived: int = 0):
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params: list = [user["id"]]
+        params = [user['id']]
         if conductor_ids:
-            sql += f" AND s.id NOT IN ({','.join('?' * len(conductor_ids))})"
+            placeholders = ','.join('?' * len(conductor_ids))
+            sql += f" AND (s.id NOT IN ({placeholders}) OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived'))"
             params.extend(conductor_ids)
         sql += " ORDER BY s.updated_at DESC"
-        # One SQLite step for every visible thread: a per-row fetch re-takes
-        # the GIL once per row, which under load cost seconds for ~800 rows.
-        rows = fetch_all(db, sql, params)
-        projected = []
-        for row in rows:
-            item = dict(row)
-            item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
-            projected.append(item)
         try:
-            add_local_only_payload_fields(projected, db=db)
-            return projected
+            rows = fetch_all(db, sql, params)
+            agent_id = get_corsia_agent(db=db) if conductor_ids else None
+            projected = []
+            coordination = []
+            for row in rows:
+                item = dict(row)
+                item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
+                if row['id'] in conductor_ids:
+                    item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'
+                    coordination.append(item)
+                else:
+                    projected.append(item)
+            add_local_only_payload_fields([*projected, *coordination], db=db)
+            return projected, coordination
         finally:
             db.close()
 
-    threads = await run_read(_query)
+    threads, coordination = await run_read(_query)
     from connections.harness_refresh import schedule_refresh_for_selections
 
     schedule_refresh_for_selections(thread.get("model") for thread in threads)
-    return {"threads": threads}
+    return {"threads": threads, "coordination": coordination}
 
 
 @router.post("/threads")

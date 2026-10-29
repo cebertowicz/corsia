@@ -3,7 +3,7 @@
 	import { backOut } from 'svelte/easing';
 	import { tick } from 'svelte';
 	import { paletteOpen } from '$lib/stores/palette';
-	import { threads } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/everyThread';
 	import { projects as projectsStore, loadProjects, type ProjectPick } from '$lib/stores/projects';
 	import { createProjectOpen } from '$lib/stores/overlays';
 	import { projectAccent } from '$lib/utils/projectColors';
@@ -33,7 +33,8 @@
 		q ? activeProjects.filter((p) => p.name.toLowerCase().includes(q)) : activeProjects
 	);
 	const filteredConversations = $derived(
-		$threads
+		[...$everyThread]
+			.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 			.filter((s) => !q || (s.title ?? '').toLowerCase().includes(q))
 			.slice(0, q ? 25 : 8)
 	);

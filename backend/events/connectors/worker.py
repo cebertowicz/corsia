@@ -51,7 +51,7 @@ MANIFEST = register(ConnectorManifest(
     version="1",
     event_types={
         RESULT: EventTypeDecl(RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="actionable"),
-        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="informational"),
+        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="actionable"),
     },
     classify=_classify,
     extract_facts=_extract_facts,

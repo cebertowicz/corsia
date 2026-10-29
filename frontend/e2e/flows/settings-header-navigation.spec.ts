@@ -39,9 +39,9 @@ test('@surface:navigation project and conductor settings use their own header ge
 		const conductor = page.locator('.scoped-item.conductor');
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await conductor.click();
-		await expect(page.locator('.shell-header').getByRole('button', { name: 'Conductor settings' })).toBeVisible();
-		await page.locator('.shell-header').getByRole('button', { name: 'Conductor settings' }).click();
-		await expect(page.locator('.shell-header')).toContainText('Conductor settings');
+		await expect(page.locator('.shell-header').getByRole('button', { name: 'Designated conductor settings' })).toBeVisible();
+		await page.locator('.shell-header').getByRole('button', { name: 'Designated conductor settings' }).click();
+		await expect(page.locator('.shell-header')).toContainText('Designated conductor settings');
 		await expect(page.getByText('Thread skills', { exact: true })).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, `conductor-settings-${width}`);
 		await page.locator('.shell-header .h-back').click();

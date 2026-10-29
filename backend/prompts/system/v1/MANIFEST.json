@@ -304,10 +304,10 @@
       "sha256": "96da6ee3de221748d683927e5cbf4947dc405479f72f38f8abc8ef044060cced"
     },
     {
-      "bytes": 3606,
+      "bytes": 3796,
       "kind": "skill",
       "path": "skills/github/SKILL.md",
-      "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
+      "sha256": "e50eb57e2a986686c1ded7a662ae14b9baf0cbbf4f1495888cc5c673aace9497"
     },
     {
       "bytes": 6558,
