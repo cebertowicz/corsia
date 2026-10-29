@@ -33,7 +33,7 @@ The default owner is set in skill `plans-and-workers`. Contributors keep authori
 
 ## Delegate only separable work
 
-Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; System context's delegation rule sets when. You remain accountable.
+Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; skill `plans-and-workers` sets when. You remain accountable.
 
 - Coupled mutable work has one writer. Keep or substantively review the plan; do not delegate planning and execution and forward the answer.
 - Fan out only over independent pieces (no shared files, state, or owner), no wider than you can inspect and integrate. Related or exploratory problems get one worker.

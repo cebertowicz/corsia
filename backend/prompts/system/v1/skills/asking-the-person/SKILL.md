@@ -1,6 +1,6 @@
 ---
 name: asking-the-person
-description: Use when asking the person for a decision, input, review, approval, or a hands-on action, or providing a substantive update.
+description: Use when asking the person for a decision, input, review, approval, or a hands-on action, providing a substantive update, or when their message corrects, replaces or stops your work.
 ---
 
 # Asking the person

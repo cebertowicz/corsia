@@ -27,7 +27,7 @@ Sometimes the choice exists only because the objective is wrong: acceptance crit
 
 ## 5. Decide or raise
 
-Apply the core authority and material-choice threshold to what remains unresolved. Decide inside established decision rights when the evidence is sufficient, and record the meaningful trade-off. A behavior change, external effect or costly operation already explicitly authorized does not need a second approval merely for having that effect.
+For what remains unresolved, apply rules 4 and 10 of the always-loaded "How to work here": an approval covers only what it names, and an outward action needs the person's yes unless they gave a standing one. Decide inside established decision rights when the evidence is sufficient, and record the meaningful trade-off. A behavior change, external effect or costly operation already explicitly authorized does not need a second approval merely for having that effect.
 
 Raise the unresolved choice when it exceeds the grant, changes accepted risk or commitments, conflicts with an invariant, reframes the objective, or belongs to another decision authority. Complete the evidence gathering and safe preparation first so the approver receives a concrete choice.
 

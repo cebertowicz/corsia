@@ -124,10 +124,10 @@
       "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
     },
     {
-      "bytes": 5291,
+      "bytes": 5284,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
-      "sha256": "99588dd553f0f98ea37d701c38621fc1d215a82e9b97433073a3988021f30ef2"
+      "sha256": "312c94365e7236730e095411b26c7b1ead15bcc9afb91b7b55884c4233c8fd36"
     },
     {
       "bytes": 3370,
@@ -136,10 +136,10 @@
       "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
     },
     {
-      "bytes": 3193,
+      "bytes": 3251,
       "kind": "skill",
       "path": "skills/asking-the-person/SKILL.md",
-      "sha256": "5b369844ffd1bfcf60f6cb313c546d180fd4a3196315d3ee1b8b9fb032946c6b"
+      "sha256": "8932d1298c385e563b165ac15bf4ed02eba32110616339422c4dfc5b5bc96921"
     },
     {
       "bytes": 18740,
@@ -268,10 +268,10 @@
       "sha256": "9b20693c953f26ffdb7a9dd492ea8d023514317b24988d98f370cf0eee395c8d"
     },
     {
-      "bytes": 4098,
+      "bytes": 4223,
       "kind": "skill",
       "path": "skills/decide-or-raise/SKILL.md",
-      "sha256": "0461110408c32880ff4ab8543d781f4923d1970dd36952d477b5f90cf5f756d2"
+      "sha256": "8cc433cda7f1e9099b54c9b5d46e848ad73d99250432560fdf3beb5629c355b8"
     },
     {
       "bytes": 3279,
@@ -346,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8898,
+      "bytes": 9002,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "50916d7a28e9a86a8512bafd9a2b331e122a8fbc43c6bd051c56bb1d81fd1b0b"
+      "sha256": "7f8a3847ccd667fa2a4c79a301f51cb5a0d274e6b350f494ef4a6f78eae109e8"
     },
     {
       "bytes": 5914,
