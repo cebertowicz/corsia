@@ -27,6 +27,7 @@ from typing import Iterable, Mapping
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
     COMMENT_SUBJECT_PREFIX,
+    CHAT_COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     DECISION_SUBJECT_PREFIX,
     LABEL_CORRECTION,
@@ -34,7 +35,9 @@ from core.corrections_recording import (
     LABEL_NOT_CORRECTION,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_CHAT_COMMENT,
     SOURCE_KIND_MESSAGE,
+    chat_comment_source_parts_sql,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
     version_key_sql,
@@ -48,6 +51,9 @@ def _ts(column: str) -> str:
     """One text form for stored timestamps written with either separator."""
     return f"replace({column},'T',' ')"
 
+
+_chat_source = f"substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1)"
+_chat_message, _chat_cid = chat_comment_source_parts_sql(_chat_source)
 
 _SOURCES_SQL = f"""
     WITH facts AS (
@@ -68,6 +74,13 @@ _SOURCES_SQL = f"""
       FROM facts f LEFT JOIN doc_comments c
         ON c.id=substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_CHAT_COMMENT}',substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),
+        c.created_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id
+      FROM facts f LEFT JOIN chat_comments c
+        ON c.cid={_chat_cid} AND c.user_message_id={_chat_message}
+      LEFT JOIN messages m ON m.id=c.user_message_id AND m.thread_id=c.thread_id
+      WHERE f.subject_key LIKE '{CHAT_COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),
         {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
@@ -135,7 +148,7 @@ def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tup
     ``start`` and ``end`` are stored UTC instants (``YYYY-MM-DD HH``), so rows outside the window are
     dropped by the read and never decoded.
 
-    Messages, document comments and decision answers only: a sent-back review is the reviewer's
+    Messages, chat comments, document comments and decision answers only: a sent-back review is the reviewer's
     and is counted as a rejection. Only facts of the activated classifier version are read
     (``active_corrections_version``): a version still backfilling, or never activated, is not
     served. A source that version classified more than once counts once, by its latest fact.
