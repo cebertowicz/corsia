@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { flip } from 'svelte/animate';
+	import { quintOut } from 'svelte/easing';
 	import { get } from 'svelte/store';
 	import { cancelLocalDownload, deleteLocalModelDownload, fetchLocalModelRecommendations, fetchSources, startLocalModelDownload, type LocalModelRecommendation, type LocalModelRecommendations, type ModelSource } from '$lib/conductorSources';
 	import { token } from '$lib/stores/auth';
 	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import type { ProviderModel } from '$lib/stores/providerModels';
 	import { on } from '$lib/ws/events';
+	import { ms, peerFade } from '$lib/popoverMotion';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
@@ -101,6 +105,8 @@
 		const group = (event.currentTarget as HTMLElement).parentElement;
 		group?.querySelector<HTMLButtonElement>(`[data-sort="${sort}"]`)?.focus();
 	}
+	/** A re-sorted model slides to its new place (quintOut is --ease-entrance's curve); reduced motion crossfades instead. */
+	const moveParams = () => ({ duration: $prefersReducedMotion ? 0 : ms('--dur-standard'), easing: quintOut });
 	function openSettings() { onClose(); requestSettingsSection('providers'); }
 	onMount(() => { void load(); stop = on('models_updated', () => { void refreshDownload(); }); });
 	onDestroy(() => stop?.());
@@ -123,18 +129,24 @@
 					<button class="theme-opt" class:active={sort === 'speed'} role="radio" data-sort="speed" onkeydown={sortKey} tabindex={sort === 'speed' ? 0 : -1} aria-checked={sort === 'speed'} onclick={() => (sort = 'speed')}>Speed</button>
 				</div>
 			</div>
-			{#each groups as group (group.name)}
-				<section class="model">
-					<h3>{group.name}</h3>
-					{#each group.builds as build (build.repository)}
-						<AddModelBuildRow {group} {build} recommended={data?.recommended_repository === build.repository}
-							running={running && download?.repository === build.repository} percent={download?.percent ?? 0}
-							failed={Boolean(download?.failed && download.repository === build.repository)} downloaded={Boolean(download?.downloaded)}
-							{busy} pendingAction={pending?.repository === build.repository ? pending.action : null} otherRunning={running} error={rowError?.repository === build.repository ? rowError.message : ''}
-							onDownload={() => void start(build.repository)} onCancel={() => void cancel()} onDelete={() => deleteBuild(build)} />
-					{/each}
-				</section>
-			{/each}
+			<div class="sorted">
+				{#key $prefersReducedMotion ? sort : null}
+					<div class="sorted-list" in:peerFade out:peerFade>
+						{#each groups as group (group.name)}
+							<section class="model" animate:flip={moveParams()}>
+								<h3>{group.name}</h3>
+								{#each group.builds as build (build.repository)}
+									<AddModelBuildRow {group} {build} recommended={data?.recommended_repository === build.repository}
+										running={running && download?.repository === build.repository} percent={download?.percent ?? 0}
+										failed={Boolean(download?.failed && download.repository === build.repository)} downloaded={Boolean(download?.downloaded)}
+										{busy} pendingAction={pending?.repository === build.repository ? pending.action : null} otherRunning={running} error={rowError?.repository === build.repository ? rowError.message : ''}
+										onDownload={() => void start(build.repository)} onCancel={() => void cancel()} onDelete={() => deleteBuild(build)} />
+								{/each}
+							</section>
+						{/each}
+					</div>
+				{/key}
+			</div>
 		{/if}
 	{/if}
 </Modal>
@@ -154,6 +166,9 @@
 	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
 	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	@media (max-width: 48rem) { .theme-opt::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%); } }
+	/* Under reduced motion the list before and after a re-sort share one cell and crossfade. */
+	.sorted { display: grid; }
+	.sorted-list { grid-area: 1 / 1; min-width: 0; }
 	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
 	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>
