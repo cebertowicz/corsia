@@ -109,9 +109,9 @@ def test_runs_use_first_terminal_instant_across_states(db):
 
 
 def test_untracked_and_unknown_cost(db):
-    assert read(db, 'runs').reason == 'not tracked: this workflow has no tasks'
+    assert read(db, 'runs').reason == 'Not tracked: this workflow has no tasks'
     node(db, 'old')
     usage(db, 'u', 'old', model='not-a-listed-model', manifest=None)
-    assert read(db, 'active_hours').reason == 'not tracked: presence is not recorded per task'
+    assert read(db, 'active_hours').reason == 'Not tracked: presence is not recorded per task'
     cost = read(db, 'cost_usd').versions['v1']
     assert cost.value is None and cost.unknown == 1 and cost.n == 1

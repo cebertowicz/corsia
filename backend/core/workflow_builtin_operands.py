@@ -71,9 +71,9 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
         raise ValueError('unknown workflow builtin')
     nodes, times, ledger, membership = prepared if prepared is not None else prepare_builtin(db, workflow, user_id, scope, {builtin})
     if not nodes:
-        return Result({}, 'not tracked: this workflow has no tasks')
+        return Result({}, 'Not tracked: this workflow has no tasks')
     if builtin == 'active_hours':
-        return Result({}, 'not tracked: presence is not recorded per task')
+        return Result({}, 'Not tracked: presence is not recorded per task')
     versions = {r['id']: r['workflow_version'] for r in nodes}
     ids = json.dumps(list(membership))
     totals: defaultdict[str | None, list] = defaultdict(lambda: [0, 0, 0])
