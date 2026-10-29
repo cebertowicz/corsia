@@ -30,7 +30,7 @@ QUOTE_CHARS = 160
 # Several comment or answer notes can arrive in one digest (a round of review); each of those asks for one triage.
 TRIAGE_TOGETHER = (
     "If several correction notes reach you together, triage them as one: look for one general cause "
-    "and re-check the whole artifact or decision, not each comment separately."
+    "and re-check the whole artifact, reply or decision, not each comment separately."
 )
 
 

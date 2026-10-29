@@ -141,6 +141,11 @@ def _first_unread(raw: object, newest: int, dropped: list[dict]) -> dict | None:
     return {"seq": seq, "truncated": raw.get("truncated") is True}
 
 
+def comment_cid(input_order: int, index: int) -> str:
+    """Return the committed cid for a zero-based raw comment index."""
+    return format_cid(input_order, index + 1)
+
+
 def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
     if not isinstance(raw, list):
         dropped.append(_dropped("comments", "not_list"))
@@ -167,7 +172,7 @@ def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -
             dropped.append(_dropped("comments", reason, index=index))
             continue
         # Admission holds the write transaction until input order is incremented.
-        cid = format_cid(input_order, index + 1)
+        cid = comment_cid(input_order, index)
         comments.append({key: item[key] for key in (
             "id", "seq", "from_off", "to_off", "quote", "anchor_prefix", "anchor_suffix", "note",
         )} | {"cid": cid})

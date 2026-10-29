@@ -205,6 +205,28 @@ def self_caught_dedupe_key(correction_event_id: str) -> str:
     return f"correction:{SOURCE_KIND_SELF_CAUGHT}:{correction_event_id}"
 
 
+def chat_comment_source_id(message_id: str, cid: str) -> str:
+    """Identify a comment by its colon-free cid and sending message."""
+    return f"{cid}:{message_id}"
+
+
+def chat_comment_source_id_sql(alias: str) -> str:
+    """SQL source identity for an indexed chat comment."""
+    return f"{alias}.cid || ':' || {alias}.user_message_id"
+
+
+def chat_comment_source_parts(source_id: str) -> tuple[str, str] | None:
+    """Decode a source identity to (message id, cid)."""
+    cid, separator, message_id = source_id.partition(':')
+    return (message_id, cid) if separator else None
+
+
+def chat_comment_source_parts_sql(source_id: str) -> tuple[str, str]:
+    """SQL expressions for the message id and cid of a source identity."""
+    separator = f"instr({source_id},':')"
+    return f"substr({source_id},{separator}+1)", f"substr({source_id},1,{separator}-1)"
+
+
 def decision_answer_source_id(decision_id: str, revision: object) -> str:
     """The stable source id for one answered revision of a plan decision."""
     return f"{decision_id}:{revision}"
@@ -259,14 +281,14 @@ def is_wrapper_or_delivery(
 
 
 def is_owner_authored_message(
-    *, role: object, content: object, metadata: object,
+    *, role: object, content: object, metadata: object, allow_blank: bool = False,
 ) -> bool:
     """Return whether one stored row is an owner's authored, non-system message.
 
     Scope membership is a query responsibility; this reusable predicate owns the
     row-level definition shared by the recording job and the served measure.
     """
-    if role != "user" or not isinstance(content, str) or not content.strip():
+    if role != "user" or not isinstance(content, str) or (not allow_blank and not content.strip()):
         return False
     return not is_wrapper_or_delivery(content, metadata)
 

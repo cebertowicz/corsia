@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from jobs.corrections_cursor import PendingCandidateKey, ScanCursor, before_clause, before_params
+from jobs.chat_comment_corrections import chat_comment_candidate
 
 from core.corrections_input import (
     CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, agent_context, owner_text, shape_context,
@@ -27,36 +28,7 @@ from core.corrections_recording import (
 from core.measurement_scope import scope_cte
 
 
-@dataclass(frozen=True)
-class PendingCandidateKey:
-    """The ordering keys required before hydrating one classifier input."""
-
-    rowid: int | None
-    source_kind: str
-    source_id: str
-    thread_id: str | None
-    project_id: str | None
-    created_at: str
-
-
-ScanCursor = tuple[str, str, str]
-"""The last selected ``(created_at, source_kind, source_id)``; the scan reads strictly before it."""
-
-
-def _before_params(before: ScanCursor | None) -> dict[str, str | None]:
-    created_at, source_kind, source_id = before if before is not None else (None, None, None)
-    return {"before_created_at": created_at, "before_source_kind": source_kind, "before_source_id": source_id}
-
-
-def _before_clause(source_kind: str, id_expression: str, created_expression: str = "created_at") -> str:
-    """One descending cursor definition for every correction source."""
-    return f"""(:before_created_at IS NULL
-                 OR {created_expression} < :before_created_at
-                 OR ({created_expression}=:before_created_at AND (
-                     :source_kind < :before_source_kind
-                     OR (:source_kind=:before_source_kind AND {id_expression} < :before_source_id)
-                 )))"""
-
+# Cursor and key definitions are shared by both scan modules.
 
 def pending_candidate_keys(
     version: ClassifierVersion, batch_size: int, owner_user_id: str,
@@ -76,7 +48,7 @@ def pending_candidate_keys(
             JOIN scope_threads scoped ON scoped.id=m.thread_id
             JOIN threads t ON t.id=m.thread_id
             WHERE {owner_filter}
-              AND {_before_clause('message', 'm.id', 'm.created_at')}
+              AND {before_clause('message', 'm.id', 'm.created_at')}
               AND (:since_created_at IS NULL OR m.created_at >= :since_created_at)
               AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
@@ -89,7 +61,7 @@ def pending_candidate_keys(
             {
                 **owner_filter_params,
                 **version_filter_params,
-                **_before_params(before),
+                **before_params(before),
                 "source_kind": SOURCE_KIND_MESSAGE,
                 "user_id": owner_user_id,
                 "scope_project": "all",
@@ -128,7 +100,7 @@ def pending_source_candidate_keys(
         version_filter, version_filter_params = version_match_sql("e", version)
         params = {
             **version_filter_params,
-            **_before_params(before),
+            **before_params(before),
             "correction_event": CORRECTION_EVENT,
             "comment_prefix": COMMENT_SUBJECT_PREFIX,
             "decision_type": DECISION_TYPE,
@@ -142,7 +114,7 @@ def pending_source_candidate_keys(
             FROM doc_comments c
             WHERE c.author_kind='user'
               AND ({comment_target_sql('c')}) IS NOT NULL
-              AND {_before_clause('doc_comment', 'c.id', 'c.created_at')}
+              AND {before_clause('doc_comment', 'c.id', 'c.created_at')}
               -- A range on idx_doc_comments_user_created: the read stops at the window's start.
               AND c.created_at >= COALESCE(:since_created_at, '')
               AND NOT EXISTS (
@@ -165,7 +137,7 @@ def pending_source_candidate_keys(
               -- A coarse prefilter, never narrower than Plans' ``answer_note``, which
               -- ``source_candidate`` applies to each selected answer.
               AND COALESCE(json_extract(d.metadata,'$.plan_decision.answer.text'),'')<>''
-              AND {_before_clause(SOURCE_KIND_DECISION_ANSWER, 'd.external_id', decision_created_at)}
+              AND {before_clause(SOURCE_KIND_DECISION_ANSWER, 'd.external_id', decision_created_at)}
               AND (:since_created_at IS NULL OR {decision_created_at} >= :since_created_at)
               AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
@@ -236,8 +208,6 @@ def source_candidate(db, source_kind: str, source_id: str) -> CorrectionCandidat
     from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT
 
     if source_kind == SOURCE_KIND_CHAT_COMMENT:
-        from jobs.chat_comment_corrections import chat_comment_candidate
-
         return chat_comment_candidate(db, source_id)
     if source_kind == SOURCE_KIND_DOC_COMMENT:
         return _comment_candidate(db, source_id)

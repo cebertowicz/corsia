@@ -51,6 +51,45 @@ async def test_chat_comment_candidates(isolated_db, typed):
     assert weekly_correction_figure(_version(), since='2026-10-01T00:00:00Z', weeks=1) == 0
 
 
+def test_send_comment_notification_requires_no_database(monkeypatch):
+    from types import SimpleNamespace
+    from jobs import corrections_recording
+
+    seen = []
+    monkeypatch.setattr('infra.database.get_db', lambda: pytest.fail('send hook read database'))
+    monkeypatch.setattr('jobs.corrections_realtime.notify', lambda *args: seen.append(args))
+    metadata = {'reply_context': {'comments': [{'cid': 'c1.1', 'note': 'Fix'}]}}
+    corrections_recording.notify_if_owner(SimpleNamespace(message_id='m', duplicate=False, input_order=1), role='user', content='', metadata=metadata)
+    assert seen == [('chat_comment', 'c1.1:m')]
+    seen.clear()
+    corrections_recording.notify_if_owner(SimpleNamespace(message_id='m', duplicate=False, input_order=1), role='user', content='[EVENT: system]', metadata=metadata)
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_cursor_paging_and_owner_scope(isolated_db):
+    from jobs.chat_comment_corrections import pending_chat_comment_keys
+    from jobs.corrections_recording import next_pending_batch
+
+    db = _db()
+    _seed(db)
+    metadata = {'reply_context': {'comments': [{'cid': 'c1.1', 'quote': 'q', 'note': 'fix'}]}}
+    db.execute("UPDATE messages SET metadata=? WHERE id='owner-message'", (json.dumps(metadata),))
+    db.execute("INSERT INTO chat_comments VALUES ('thread','prior','owner-message','c1.1','2026-10-01T00:01:00Z')")
+    db.commit()
+    db.close()
+    assert len(pending_chat_comment_keys(_version(), 10, 'owner')) == 1
+    assert pending_chat_comment_keys(_version(), 10, 'another-owner') == []
+    first = await next_pending_batch(_version(), 1, None)
+    key = first.selected_keys[0]
+    assert key.source_kind == 'message'
+    second = await next_pending_batch(_version(), 1, (key.created_at, key.source_kind, key.source_id))
+    chat = second.selected_keys[0]
+    assert chat.source_kind == 'chat_comment'
+    third = await next_pending_batch(_version(), 1, (chat.created_at, chat.source_kind, chat.source_id))
+    assert not third.selected_keys
+
+
 def test_live_comment_arrival_and_non_owner_exclusion(isolated_db, monkeypatch):
     from types import SimpleNamespace
     from jobs import corrections_recording
@@ -63,7 +102,7 @@ def test_live_comment_arrival_and_non_owner_exclusion(isolated_db, monkeypatch):
     db.commit()
     seen = []
     monkeypatch.setattr('jobs.corrections_realtime.notify', lambda kind, source: seen.append((kind, source)))
-    accepted = SimpleNamespace(message_id='owner-message', duplicate=False)
+    accepted = SimpleNamespace(message_id='owner-message', duplicate=False, input_order=1)
     corrections_recording.notify_if_owner(accepted, role='user', content='', metadata=metadata)
     assert seen == [('chat_comment', 'c1.1:owner-message')]
     candidate = corrections_recording.candidate_for_source(*seen[0])
@@ -72,6 +111,9 @@ def test_live_comment_arrival_and_non_owner_exclusion(isolated_db, monkeypatch):
     notes = db.execute("SELECT summary FROM context_change_journal WHERE object_kind='thread_context'").fetchall()
     assert any('chat comment' in row[0] and 'Fix it' in row[0] for row in notes)
     db.execute('UPDATE messages SET metadata=? WHERE id=?', (json.dumps({**metadata, 'sender_kind': 'agent'}), 'owner-message'))
+    db.commit()
+    assert corrections_recording.candidate_for_source(*seen[0]) is None
+    db.execute('UPDATE messages SET content=?,metadata=? WHERE id=?', ('[EVENT: system]', json.dumps(metadata), 'owner-message'))
     db.commit()
     assert corrections_recording.candidate_for_source(*seen[0]) is None
     db.close()

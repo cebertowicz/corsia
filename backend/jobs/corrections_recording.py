@@ -161,13 +161,16 @@ def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object)
             if is_owner_authored_message(role=role, content=content, metadata=metadata):
                 _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
                 notify(SOURCE_KIND_MESSAGE, accepted.message_id)
-            from core.corrections_recording import _metadata, is_wrapper_or_delivery
+            if is_owner_authored_message(role=role, content=content, metadata=metadata, allow_blank=True):
+                from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id
+                from infra.reply_context import comment_cid
 
-            context = _metadata(metadata).get("reply_context")
-            if role == "user" and isinstance(context, dict) and context.get("comments") and not is_wrapper_or_delivery(content, metadata):
-                from jobs.chat_comment_corrections import notify_chat_comments
-
-                notify_chat_comments(accepted.message_id)
+                context = metadata.get("reply_context", {}) if isinstance(metadata, dict) else {}
+                comments = context.get("comments", []) if isinstance(context, dict) else []
+                if isinstance(comments, list):
+                    for index, comment in enumerate(comments):
+                        if isinstance(comment, dict) and isinstance(comment.get("note"), str) and comment["note"].strip():
+                            notify(SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id(accepted.message_id, comment_cid(accepted.input_order, index)))
     except Exception:
         logger.exception("corrections classifier admission notification failed")
 
@@ -220,7 +223,7 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
 def unreadable_facts(db, version: ClassifierVersion) -> int:
     """Count served unreadable facts in the Measurement window, once per source.
 
-    Message and document-comment facts count, including legacy facts that lack a
+    Message, chat-comment and document-comment facts count, including legacy facts that lack a
     source-kind attribute. Decision answers stay triage-only. The ``(event_name,
     ts)`` index bounds the read to the window's correction facts.
     """
