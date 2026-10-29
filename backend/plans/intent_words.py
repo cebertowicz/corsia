@@ -1,6 +1,7 @@
 """Server-resolved, append-only evidence for a plan node's intent."""
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Iterable
@@ -11,7 +12,7 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
-    is_owner_authored_message,
+    is_wrapper_or_delivery,
     owner_message_sql_predicate,
 )
 
@@ -47,9 +48,29 @@ def _phrase(quote: str) -> str:
     return '"' + quote.replace('"', '""') + '"'
 
 
+def message_words(*, role: object, content: object, metadata: object) -> str:
+    """The person's own words in one stored message: its text, then each chat comment's note.
+
+    The one row-level rule for the person's words: relays, events and blanks give "".
+    A comment's quote is the agent's text it marks, never the person's words.
+    """
+    raw = content if isinstance(content, str) else ""
+    if role != "user" or is_wrapper_or_delivery(raw, metadata):
+        return ""
+    text = raw.strip()
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except ValueError:
+        parsed = None
+    context = parsed.get("reply_context") if isinstance(parsed, dict) else None
+    comments = context.get("comments") if isinstance(context, dict) else None
+    notes = [item["note"].strip() for item in comments or ()
+             if isinstance(item, dict) and isinstance(item.get("note"), str) and item["note"].strip()]
+    return "\n".join(([text] if text else []) + notes)
+
+
 def _is_person_message(row: sqlite3.Row) -> bool:
-    # The one row-level rule for the person's own words: relays, events and blanks are not.
-    return is_owner_authored_message(role=row["role"], content=row["content"], metadata=row["metadata"])
+    return bool(message_words(role=row["role"], content=row["content"], metadata=row["metadata"]))
 
 
 def _is_agent_message(row: sqlite3.Row) -> bool:
@@ -80,6 +101,21 @@ def _message_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> 
     )]
 
 
+def _note_message_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
+    """Messages whose chat comment notes hold the quote; the message index covers text only."""
+    return [row["id"] for row in connection.execute(
+        f"""SELECT m.id FROM chat_comments c
+            JOIN messages m ON m.id=c.user_message_id
+            JOIN threads t ON t.id=m.thread_id
+            WHERE m.role='user' AND json_valid(m.metadata) AND {_SAME_OWNER}
+              AND EXISTS (SELECT 1 FROM json_each(m.metadata,'$.reply_context.comments') e
+                          WHERE json_extract(e.value,'$.cid')=c.cid
+                            AND instr(json_extract(e.value,'$.note'), :token) > 0)
+            GROUP BY m.id ORDER BY m.created_at DESC,m.id DESC LIMIT :limit""",
+        {"token": _token(quote), "recipient": recipient, "limit": _QUOTE_CANDIDATES},
+    )]
+
+
 def _comment_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
     from core.correction_targets import comment_target_sql
 
@@ -107,6 +143,7 @@ def _decision_ids(connection: sqlite3.Connection, quote: str, recipient: str) ->
 
 _CANDIDATES = (
     (SOURCE_KIND_MESSAGE, _message_ids),
+    (SOURCE_KIND_MESSAGE, _note_message_ids),
     (SOURCE_KIND_DOC_COMMENT, _comment_ids),
     (SOURCE_KIND_DECISION_ANSWER, _decision_ids),
 )
@@ -115,7 +152,7 @@ _CANDIDATES = (
 def _quoted(connection: sqlite3.Connection, quote: str, recipient: str) -> tuple[str, str] | None:
     """The newest source of the person's words holding ``quote`` that may reach ``recipient``.
 
-    Candidates are chosen by content alone; ``person_input.load`` is the one
+    Candidates are chosen by their words alone; ``person_input.load`` is the one
     reader of the person's words and ``source_reaches_thread`` the one scope rule.
     """
     from memory.node_start_recall import source_reaches_thread
@@ -233,8 +270,9 @@ def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str
     row = turn_origin(connection, turn_id)
     if row is None:
         return False
-    person = _is_person_message(row)
-    append(connection, node_id, [{"quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES),
+    words = message_words(role=row["role"], content=row["content"], metadata=row["metadata"])
+    person = bool(words)
+    append(connection, node_id, [{"quote": bounded_text(words or row["content"].strip(), MAX_QUOTE_BYTES),
                                   "author": "person" if person else "agent", "role": "origin",
                                   "source_kind": "message", "source_id": row["id"]}], revision=revision)
     return person

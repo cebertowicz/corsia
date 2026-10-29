@@ -20,7 +20,6 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
-    is_owner_authored_message,
 )
 from plans import intent_words, node_states, service
 
@@ -114,13 +113,12 @@ def load(db, kind: str, source_id: str) -> Source | None:
             """SELECT m.role,m.content,m.metadata,m.thread_id,m.created_at,t.project_id FROM messages m
                JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (source_id,),
         ).fetchone()
-        if row is None or not is_owner_authored_message(
+        words = "" if row is None else intent_words.message_words(
             role=row["role"], content=row["content"], metadata=row["metadata"],
-        ):
-            return None
-        return Source(
-            kind, source_id, str(row["content"]), str(row["created_at"]), str(row["thread_id"]), row["project_id"],
         )
+        if not words:
+            return None
+        return Source(kind, source_id, words, str(row["created_at"]), str(row["thread_id"]), row["project_id"])
     if kind == SOURCE_KIND_DOC_COMMENT:
         from jobs.corrections_scanning import source_candidate
 
