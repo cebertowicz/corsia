@@ -297,8 +297,9 @@ def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace
     with write_transaction(db, scope="measure_sync") as connection:
         retire, taken = _claim_namespace(connection, namespace, owner, held, now)
         connection.executemany(_INSERT, inserts + retire)
-        connection.execute("UPDATE measure_definitions SET version_attr=? WHERE owner_thread_id=? AND file_path=?",
-                           (version_attr, owner, path))
+        connection.execute("UPDATE measure_definitions SET version_attr=? "
+                           "WHERE owner_thread_id=? AND file_path=? AND version_attr IS NOT ?",
+                           (version_attr, owner, path, version_attr))
     result: dict[str, Any] = {"namespace": namespace, "items": changes}
     if taken:
         result["namespace_takeover"] = taken
