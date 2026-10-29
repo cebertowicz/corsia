@@ -20,6 +20,7 @@ from infra.passive_changes import append_agent_roster_transition
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.time import utc_now_iso
+from infra.thread_titles import write_thread_title
 from llm.catalog import dispatch_form_error, is_dispatchable_model
 from plans import public
 from thread import runtime_boundary
@@ -157,10 +158,7 @@ def _write_metadata_patch(
         context_boundary_changed = False
         archive_changed = False
         if title_changed:
-            db.execute(
-                "UPDATE threads SET title = ?, updated_at = ? WHERE id = ?",
-                (title, now, thread_id),
-            )
+            write_thread_title(db, thread_id, title, now)
             changed = True
         if "project_id" in body:
             project_result = _write_project_patch(db, thread_id, project_id, old_project_id, now)

@@ -155,7 +155,7 @@ def test_the_migration_leaves_a_live_fact_alone_and_the_step_is_registered():
         assert record_rejection_correction(db, _seed_rejection(db, "worker"))
         migrate_143_to_144(db)
         assert len(_facts(db)) == 1
-        assert SCHEMA_VERSION == 162 and MIGRATIONS[143] is migrate_143_to_144
+        assert SCHEMA_VERSION == 163 and MIGRATIONS[143] is migrate_143_to_144
     finally:
         db.close()
 
