@@ -67,6 +67,8 @@ describe('update model', () => {
 		['index_locked', "Another program is using CORSIA's files.", 'Retry', 'Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. CORSIA kept running and nothing was changed.'],
 		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
 		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Retry', 'Save or discard them, then select Retry. CORSIA kept running and nothing was changed.'],
+		['checkout_no_upstream', "This branch isn't set to track another branch.", 'Retry', "Ask the CORSIA agent to set the branch it should track, then select Retry. CORSIA kept running and your code wasn't changed."],
+		['checkout_diverged', 'This branch and the branch it tracks have both changed.', 'Retry', "Ask the CORSIA agent to combine their changes, then select Retry. CORSIA kept running and your code wasn't changed."],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
 		['rolled_back', "Couldn't start the new version.", 'Retry'],
 		['version_unverified', "Couldn't confirm the new version.", 'Retry', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
@@ -76,6 +78,14 @@ describe('update model', () => {
 		expect(copy.headline).toBe(headline);
 		expect(copy.retryLabel).toBe(retryLabel);
 		if (body) expect(copy.body).toBe(body);
+	});
+
+	it.each([
+		['checkout_no_upstream', 'has no upstream', "The branch my-feature isn't set to track another branch."],
+		['checkout_diverged', 'and its upstream have diverged', 'The branch my-feature and the branch it tracks have both changed.'],
+	] as const)('names the branch in %s when its log is available', (code, cause, headline) => {
+		const result = failureCopy({ ...failure(code), log: `Redeploy refused: branch my-feature ${cause} — checkout left untouched` });
+		expect(result.headline).toBe(headline);
 	});
 
 	it('offers a restart when it can recover an unfinished update', () => {

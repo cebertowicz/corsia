@@ -50,6 +50,8 @@ export interface FailureCopy {
 
 // Only where nothing was touched: the disk check and a download that never advanced the checkout.
 const RAN_ON = 'CORSIA kept running and nothing was changed.';
+// A failed pull can update Git's tracking refs, but not the checked-out code.
+const CODE_UNCHANGED = "CORSIA kept running and your code wasn't changed.";
 // The checkout may already hold the new version, so this claims only what is certain.
 const KEPT_VERSION = 'CORSIA is still running the version it had.';
 
@@ -59,6 +61,11 @@ function refusal(headline: string, body: string, retryLabel: string | null): Fai
 
 function stopped(headline: string, body: string): FailureCopy {
 	return refusal(headline, body, 'Retry');
+}
+
+function branchLabel(failure: UpdateFailure): string {
+	const branch = failure.log?.match(/Redeploy refused: branch (\S+) (?:has no upstream|and its upstream have diverged)/)?.[1];
+	return branch ? `The branch ${branch}` : 'This branch';
 }
 
 function diskCopy(detail: string | null): FailureCopy {
@@ -168,6 +175,10 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
 			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then select Retry. ${RAN_ON}`, 'Retry');
+		case 'checkout_no_upstream':
+			return refusal(`${branchLabel(failure)} isn't set to track another branch.`, `Ask the CORSIA agent to set the branch it should track, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
+		case 'checkout_diverged':
+			return refusal(`${branchLabel(failure)} and the branch it tracks have both changed.`, `Ask the CORSIA agent to combine their changes, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
 		case 'restart_pending':
 			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
 		default:
