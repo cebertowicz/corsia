@@ -1,6 +1,6 @@
 import { localHostRefusal } from './localHostRefusal';
 
-type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string; message?: string; reason?: string };
+type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string; reason?: string };
 
 export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
 
@@ -12,12 +12,12 @@ export async function requestLocalStart(session: string | null): Promise<LocalSt
 	});
 	const body = await response.json().catch(() => null);
 	const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-	const fix = localHostRefusal(body) ?? (typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined);
 	if (response.ok && body?.ok !== false) return { result: 'started', reference };
 	const detail = body?.detail && typeof body.detail === 'object' ? body.detail : body;
-	const message = typeof detail?.message === 'string' ? detail.message : undefined;
 	const reason = typeof detail?.reason === 'string' ? detail.reason : undefined;
-	return { result: 'failed', reference, fix: fix ?? LOCAL_START_NETWORK_FAILURE, message, reason };
+	const heldFix = 'Quit CORSIA completely, reopen it, then press Retry.';
+	const fix = localHostRefusal(body) ?? (reason === 'operation_held' && detail?.fix === heldFix ? heldFix : LOCAL_START_NETWORK_FAILURE);
+	return { result: 'failed', reference, fix, reason };
 }
 
 /** The backend's own account refusal names the cause; a validation 422 has no string detail. */

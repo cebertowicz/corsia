@@ -9,7 +9,7 @@ export type LocalRowState = ModelSource;
 export type LocalRowInput = {
 	source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean;
 	/** The pre-start is under way (oMLX installing, starting, picking, then starting the download): progress, never a Download button. */
-	preparing?: boolean; startError: string; startMessage?: string; startFix?: string; startReference?: string; freeDisk?: number;
+	preparing?: boolean; startError: string; startFix?: string; startReference?: string; freeDisk?: number;
 	/** A cloud model works, so the local one is no longer the only way through setup and may be turned off. */
 	cloudReady?: boolean;
 	/** The person turned the switch off mid-download and is being asked to confirm. */
@@ -37,7 +37,7 @@ function downloadedGb(sizeGb: number | null, percent?: number | null): number | 
 
 /** Present one local lifecycle and one cause-specific recovery action. */
 export function setupLocalRow(input: LocalRowInput): AiRow {
-	const { source, pick, eligible, downloading, preparing = false, ready, startError, startMessage, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, turnOffFailed, start, stop, check, confirmStop, turnOff } = input;
+	const { source, pick, eligible, downloading, preparing = false, ready, startError, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, turnOffFailed, start, stop, check, confirmStop, turnOff } = input;
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
@@ -53,10 +53,9 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	if (startError || LOCAL_FAILURE_STATES.has(source?.local_state ?? '')) {
 		const cause = startError || source?.setup_error_code;
 		const reference = startError ? startReference : source?.setup_error_reference;
-		const message = startError ? startMessage : source?.setup_error_message;
 		const fix = startError ? startFix : source?.fix;
-		if (cause === 'mac_cannot_run') return { ...row, meta: message ?? LOW_MEMORY_LOCAL_MODEL_MESSAGE };
-		const meta = [message, fix].filter((part, index, parts) => part && parts.indexOf(part) === index).join(' ');
+		if (cause === 'mac_cannot_run') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
+		const meta = fix ?? 'CORSIA couldn’t start local setup. Try again.';
 		return { ...row, meta, reference, error: true, reportable: true, action: { label: 'Retry', run: start } };
 	}
 	if (canRestartStoppedLocal(source)) {

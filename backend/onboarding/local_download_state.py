@@ -30,11 +30,10 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         cause = status.get("cause")
         if cause in _SAFE_CAUSES or (status.get("restart") is True and cause == "mac_cannot_run"):
             detail["cause"] = cause
-        # Restart messages are the same lifecycle response already shown by Settings;
-        # installer output remains excluded from this shared projection.
-        message = status.get("message")
-        if status.get("restart") is True and isinstance(message, str) and message:
-            detail["message"] = message[:512]
+        # Only the known low-memory refusal is safe to project from a restart.
+        if status.get("restart") is True and cause == "mac_cannot_run":
+            from llm.local_setup_prepare import NO_LOCAL_MODEL
+            detail["message"] = NO_LOCAL_MODEL
         bytes_to_free = status.get("bytes_to_free")
         if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
             detail["bytes_to_free"] = bytes_to_free

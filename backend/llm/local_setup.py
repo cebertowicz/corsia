@@ -272,6 +272,12 @@ def setup_status() -> dict[str, Any]:
         result, downloaded=_flight.downloaded,
     )
     failed = result or {}
+    restart = failed.get("restart") is True
+    if restart:
+        from llm.local_setup_prepare import NO_LOCAL_MODEL
+        message = NO_LOCAL_MODEL if failed.get("reason") == "mac_cannot_run" else None
+    else:
+        message = failed.get("message")
     return {
         "state": state, "model": model.repository if model else None,
         "percent": _flight.download_percent,
@@ -279,11 +285,11 @@ def setup_status() -> dict[str, Any]:
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
         "cause": (result.get("cause") or result.get("reason")) if result else None,
-        "message": result.get("message") if result else None,
-        "restart": result.get("restart") is True if result else False,
+        "message": message,
+        "restart": restart,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": failed.get("fix") or setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        "fix": (None if restart else failed.get("fix")) or setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 

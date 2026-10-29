@@ -46,12 +46,13 @@ describe('Setup local model below the setup floor', () => {
 		await vi.waitFor(() => expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(1));
 	});
 
-	it('shows the actual immediate restart failure and offers retry', async () => {
+	it('hides unknown immediate failure details, shows the reference and offers retry', async () => {
 		await openSetup('not_running', { ok: false, message: 'The server could not bind its port.', fix: 'Free the port, then try again.', ref: 'local-123' });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('The server could not bind its port.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		const row = host.querySelector('section[aria-label="Local model"]')!;
-		expect(row.textContent).toContain('Free the port, then try again.');
+		expect(row.textContent).not.toContain('The server could not bind its port.');
+		expect(row.textContent).not.toContain('Free the port, then try again.');
 		expect(row.textContent).toContain('local-123');
 		(row.querySelector('button') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(2));
@@ -60,9 +61,10 @@ describe('Setup local model below the setup floor', () => {
 	it('shows a refreshed asynchronous failure and offers retry', async () => {
 		await openSetup('not_running', { ok: true, in_progress: true }, { local_state: 'failed', setup_error_code: 'other', setup_error_message: 'oMLX exited unexpectedly.', setup_error_reference: 'local-456', fix: 'Try again.' });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('oMLX exited unexpectedly.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('local-456'));
 		const row = host.querySelector('section[aria-label="Local model"]')!;
-		expect(row.textContent).toContain('local-456');
+		expect(row.textContent).not.toContain('oMLX exited unexpectedly.');
+		expect(row.textContent).toContain('Try again.');
 		expect(row.textContent).toContain('Retry');
 		(row.querySelector('button') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(2));
@@ -72,7 +74,7 @@ describe('Setup local model below the setup floor', () => {
 		const message = "This computer can't run a local model well. Connect a subscription or an API key in the app.";
 		await openSetup('not_running', { ok: true, in_progress: true }, { reason_code: 'no_models', local_state: 'failed', setup_error_code: 'mac_cannot_run', setup_error_message: message });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain(message));
+		await vi.waitFor(() => expect(host.textContent).toContain('Smaller models and future updates may bring them to computers with less memory.'));
 		const row = host.querySelector('section[aria-label="Local model"]')!;
 		expect(row.querySelector('button')).toBeNull();
 		expect(calls.filter((call) => call.startsWith('POST') && call.includes('local'))).toHaveLength(1);

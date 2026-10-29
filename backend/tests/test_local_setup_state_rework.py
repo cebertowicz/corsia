@@ -51,12 +51,20 @@ async def test_restart_failure_and_refusal_reach_the_source_projection(flight, m
         {"ok": False, "reason": "mac_cannot_run", "message": "No model fits. Connect a provider."},
     ])
     monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", lifecycle)
-    for expected in ("Port is busy.", "No model fits. Connect a provider."):
-        await _restart_installed("server")
-        row = {}
-        local_sources._project_local_flight(row, current())
-        assert row["setup_error_message"] == expected
+    from llm.local_setup_prepare import NO_LOCAL_MODEL
+
+    await _restart_installed("server")
+    row = {}
+    local_sources._project_local_flight(row, current())
+    assert row["setup_error_message"] is None
+    assert row["setup_error_reference"] == "local-123"
+    assert "Port is busy" not in str(flight.setup_status())
+    assert "Free the port" not in str(row)
+
+    await _restart_installed("server")
+    local_sources._project_local_flight(row, current())
     assert row["setup_error_code"] == "mac_cannot_run"
+    assert row["setup_error_message"] == NO_LOCAL_MODEL
 
 
 @pytest.mark.asyncio
