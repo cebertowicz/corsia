@@ -1,4 +1,5 @@
 const STEPS = 20;
+export const replyVisibilityThresholds = Array.from({ length: STEPS + 1 }, (_, index) => index / STEPS);
 
 /** The viewport height left after every clipping container around the reply, as the observer clips it. */
 function visibleHeight(element: HTMLElement, viewport: DOMRectReadOnly) {
@@ -17,7 +18,7 @@ function visibleHeight(element: HTMLElement, viewport: DOMRectReadOnly) {
  * A reply is on screen when fully visible, or when it is taller than the area and its visible part fills it.
  * A filling reply's ratio stops changing, so the last callback can fall up to one threshold step short of full.
  */
-function onScreen(entry: IntersectionObserverEntry, element: HTMLElement) {
+export function onScreen(entry: IntersectionObserverEntry, element: HTMLElement) {
 	if (entry.intersectionRatio === 1) return true;
 	const area = entry.rootBounds ? visibleHeight(element, entry.rootBounds) : 0;
 	const height = entry.boundingClientRect.height;
@@ -52,7 +53,7 @@ export function createReplyVisibility(onVisible: (id: string) => void, onHidden:
 				if (visible === next) return;
 				visible = next;
 				if (next) onVisible(id); else onHidden(id);
-			}, { threshold: Array.from({ length: STEPS + 1 }, (_, index) => index / STEPS) });
+			}, { threshold: replyVisibilityThresholds });
 			observers.set(id, { element, observer });
 			observer.observe(element);
 		}

@@ -104,7 +104,7 @@ async def test_cursor_paging_and_owner_scope(isolated_db):
     _seed(db)
     metadata = {'reply_context': {'comments': [{'cid': 'c1.1', 'quote': 'q', 'note': 'fix'}]}}
     db.execute("UPDATE messages SET metadata=? WHERE id='owner-message'", (json.dumps(metadata),))
-    db.execute("INSERT INTO chat_comments VALUES ('thread','prior','owner-message','c1.1','2026-10-01T00:01:00Z')")
+    db.execute("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES ('thread','prior','owner-message','c1.1','2026-10-01T00:01:00Z')")
     db.commit()
     db.close()
     assert len(pending_chat_comment_keys(_version(), 10, 'owner')) == 1

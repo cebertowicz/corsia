@@ -325,6 +325,19 @@ describe('InputBar send and queue preparation', () => {
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
+	it('reports counts for the comments and replies sent with a message', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
+		component.getDrafts().set('thread-2', { content: 'hello', attachments: [], comments: [{ ...anchor, id: 'comment' }, { ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
+		activeThreadId.set('thread-2'); flushSync();
+		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
+		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
+		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ comment_count: 2, reply_count: 1 }));
+		expect(wsMocks.sendMessage.mock.calls[0][6]).toHaveLength(2);
+	});
+
 	it('clears the composer after the local send and keeps its draft for recovery', async () => {
 		const { composer, onAutoCreateThread, onSend } = await mountPreparedComposer({
 			switchThreadOnSend: false,
@@ -346,6 +359,8 @@ describe('InputBar send and queue preparation', () => {
 					thread_id: 'thread-1',
 					char_count: 15,
 					attachment_count: 1,
+					comment_count: 0,
+					reply_count: 0,
 				},
 			);
 		expect(component!.getInputText()).toBe('');

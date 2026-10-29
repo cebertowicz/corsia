@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
+	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -41,7 +42,7 @@
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
 		focused?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
@@ -56,6 +57,8 @@
 		keepReplyVisible?: boolean;
 		/** Document comment surfaces present threads on the sheet rather than as nested cards. */
 		flat?: boolean;
+		/** Chat answers have independent seen stamps for each comment. */
+		viewEachUnread?: boolean;
 		/** The drawer's quote already says text changed; a flat popover still needs the state message. */
 		hideOrphan?: boolean;
 		/** Easing out of the list: a resolved card keeps its card form until it is gone, instead of switching to the resolved row first. */
@@ -111,6 +114,7 @@
 	let observeTick = $state(0);
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
+	const stampedReplies = new Set<string>();
 	// Keep the collapse point stable while this thread is mounted, even as the server clears New marks.
 	// Otherwise replies would disappear from under the reader when the viewed stamp lands.
 	const seenForCollapse = new Set<string>();
@@ -138,6 +142,15 @@
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		if (!onViewed || document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
+		if (viewEachUnread) {
+			if (stampedReplies.has(replyId)) return;
+			stampedReplies.add(replyId);
+			onViewed(comment.id, replyId).catch((err) => {
+				stampedReplies.delete(replyId);
+				console.warn('Could not record the viewed reply', err);
+			});
+			return;
+		}
 		const position = comment.replies.findIndex((r) => r.id === replyId);
 		if (position < 0 || position <= comment.replies.findIndex((r) => r.id === lastStamped)) return;
 		const previous = lastStamped;
@@ -151,6 +164,10 @@
 	function advanceStamp() {
 		stampTimer = null;
 		const unread = new Set(comment.newReplyIds ?? []);
+		if (viewEachUnread) {
+			for (const replyId of unread) if (dwelled.has(replyId)) stamp(replyId);
+			return;
+		}
 		let through: string | undefined;
 		for (const reply of comment.replies) {
 			if (!reply.id || !unread.has(reply.id)) continue;
@@ -374,8 +391,7 @@
 	.ct-chev.open { transform: rotate(90deg); }
 	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
 	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
-	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; padding: 0; cursor: pointer; }
-	.ct-link:hover { text-decoration: underline; }
+	/* The link treatment is shared in comment-link.css. */
 	.ct-res-hint { font-size: var(--text-caption); color: var(--text-tertiary); }
 
 </style>

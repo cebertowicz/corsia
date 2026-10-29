@@ -92,8 +92,11 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		document.documentElement.style.setProperty('--doc-visual-viewport-offset', `${vv.offsetTop}px`);
 	};
 
+	let blurTimer: ReturnType<typeof setTimeout> | undefined;
 	const onFocusIn = (e: FocusEvent) => {
 		if (!isEditableTarget(e.target)) return;
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
+		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '60px');
 		document.documentElement.style.setProperty('--floater-bottom-pad', '4px');
 		document.documentElement.style.setProperty('--messages-pad-top', 'calc(var(--safe-top) + 12px)');
@@ -105,8 +108,8 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		}));
 	};
 
-	const onFocusOut = (e: FocusEvent) => {
-		if (!isEditableTarget(e.target)) return;
+	const clearKeyboardInset = () => {
+		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '0px');
 		document.documentElement.style.removeProperty('--floater-bottom-pad');
 		document.documentElement.style.removeProperty('--messages-pad-top');
@@ -115,6 +118,12 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		requestAnimationFrame(() => requestAnimationFrame(() => {
 			options.chatPanel()?.restoreBottomOffset();
 		}));
+	};
+	const onFocusOut = (e: FocusEvent) => {
+		if (!isEditableTarget(e.target)) return;
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
+		// Keep the current gesture stable through its synthesized click.
+		blurTimer = setTimeout(clearKeyboardInset, 0);
 	};
 
 	updateCanvasShift();
@@ -131,6 +140,7 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		window.removeEventListener('corsia:navigate', handleNavigateEvent);
 		document.removeEventListener('focusin', onFocusIn);
 		document.removeEventListener('focusout', onFocusOut);
+		if (blurTimer !== undefined) clearTimeout(blurTimer);
 		window.visualViewport?.removeEventListener('scroll', updateCanvasShift);
 		window.visualViewport?.removeEventListener('resize', updateCanvasShift);
 	};

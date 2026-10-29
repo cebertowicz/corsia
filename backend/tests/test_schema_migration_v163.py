@@ -44,7 +44,7 @@ def test_upgrade_disposable_database_through_runner(tmp_path):
             ('a', 'Alpha', 'alpha'), ('b', 'Beta', 'custom'),
         ])
         db.commit()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 163
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == SCHEMA_VERSION
         assert db.execute('SELECT id,title,updated_at FROM threads ORDER BY id').fetchall() == [
             ('alpha', 'Alpha Conductor', 'old'), ('custom', 'My name', 'old'), ('ws', 'CORSIA', 'old'),
         ]
