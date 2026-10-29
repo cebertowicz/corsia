@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from tools import mail_guard_runtime
-from tools.email_read import UNSCREENED, flagged_text
+
 from tools.mail_guard import FLAGGED, UNCHECKED, Message
 
 
@@ -18,7 +19,7 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
         return target, [target, newer], [], 0
 
     async def screened(*args):
-        return f"Error: {flagged_text('R1')}"
+        return json.dumps({"screen": {"state": "flagged", "rule": "R1"}, "body": "malicious instructions"})
 
     async def fetch_body(*args):
         return newer.body
@@ -43,7 +44,7 @@ async def test_unscreened_message_says_it_was_not_screened(monkeypatch):
     target = Message("old", "thread", "Taylor <taylor@example.test>", "Budget", now, "old")
 
     async def screened(*args):
-        return f"Error: {UNSCREENED}"
+        return json.dumps({"screen": {"state": "unscreened"}, "body": "old"})
 
     async def fetch_body(*args):
         return target.body
