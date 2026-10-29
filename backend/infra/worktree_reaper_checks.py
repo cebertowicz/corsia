@@ -8,6 +8,7 @@ a pass.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 import os
 from pathlib import Path
 
@@ -114,30 +115,53 @@ def _entry_reason(entry: WorktreeEntry | None) -> str | None:
     return None
 
 
+class RemovalVerdict(Enum):
+    SALVAGE = "salvage"
+
+
+def _status_verdict(
+    ctx: CheckContext, entry: WorktreeEntry | None, status: str | None,
+    idle: float, threshold: float, *, fresh: bool = False,
+) -> str | RemovalVerdict | None:
+    if status is None or status == "status_error":
+        return status
+    if ctx.now - idle < threshold:
+        return status
+    if fresh:
+        ctx._prs_loaded = False
+    prs = ctx.open_pr_branches()
+    if prs is None:
+        return "pr_state_unknown"
+    if entry and (entry.branch or "").removeprefix("refs/heads/") in prs:
+        return "open_pr"
+    return RemovalVerdict.SALVAGE
+
+
 def candidate_skip_reason(
     ctx: CheckContext, candidate: Candidate, threshold_seconds: float,
     *, merged: bool = False, short_threshold_seconds: float | None = None,
-) -> str | None:
-    """Run every check in order; return the first skip reason or None.
+) -> str | RemovalVerdict | None:
+    """Return a skip reason, salvage verdict, or clean removal verdict.
 
-    A ``merged`` worktree's commits are already in its merged PR, so it skips
-    the idle clock, scratch files and the owner's running turn: only a Git
-    lock, uncommitted tracked edits or a live process inside it keep it.
+    Merged clean worktrees retain their immediate removal path. Tracked edits
+    require the long idle clock and salvage even for merged worktrees.
     """
     reason = _entry_reason(candidate.entry)
     if reason:
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
+    status = _status_reason(candidate.path, merged)
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
-        return "recent"
-    return (
-        _status_reason(candidate.path, merged)
-        or ctx.probe.skip_reason(candidate.path)
-        or (None if merged else ctx.thread_skip_reason(candidate.owner_thread))
-    )
+        return status or "recent"
+    verdict = _status_verdict(ctx, candidate.entry, status, candidate.idle_since, threshold_seconds)
+    if isinstance(verdict, str):
+        return verdict
+    return (ctx.probe.skip_reason(candidate.path)
+            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread))
+            or verdict)
 
 
 def recheck_before_removal(
@@ -146,7 +170,7 @@ def recheck_before_removal(
     threshold_seconds: float,
     expected_head: str | None = None,
     *, merged: bool = False, short_threshold_seconds: float | None = None,
-) -> str | None:
+) -> str | RemovalVerdict | None:
     """Repeat every check against live state just before acting.
 
     A pass can run for minutes after the first check, so nothing cached is
@@ -168,11 +192,9 @@ def recheck_before_removal(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
-    if not merged and ctx.is_recent(
-        entry, idle_since(ctx.repo, candidate.path, candidate.admin),
-        threshold_seconds, short_threshold_seconds,
-    ):
-        return "recent"
+    idle = idle_since(candidate.path, candidate.admin)
+    if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
+        return _status_reason(candidate.path, merged) or "recent"
     if expected_head is not None:
         head = entry.head if entry else None
         try:
@@ -180,13 +202,15 @@ def recheck_before_removal(
                 return "ahead_of_pr"
         except ReaperGitError:
             return "status_error"
-    status = _status_reason(candidate.path, merged)
-    if status:
-        return status
-    ctx.probe.refresh()
-    return ctx.probe.skip_reason(candidate.path) or (
-        None if merged else ctx.thread_skip_reason(candidate.owner_thread, fresh=True)
+    verdict = _status_verdict(
+        ctx, entry, _status_reason(candidate.path, merged), idle, threshold_seconds, fresh=True,
     )
+    if isinstance(verdict, str):
+        return verdict
+    ctx.probe.refresh()
+    return (ctx.probe.skip_reason(candidate.path)
+            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread, fresh=True))
+            or verdict)
 
 
 def orphan_skip_reason(

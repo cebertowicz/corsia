@@ -1,4 +1,4 @@
-"""Automatic cleanup of merged or idle, clean linked worktrees under ``<repo>/.worktrees/``.
+"""Automatic cleanup of merged or idle linked worktrees under ``<repo>/.worktrees/``.
 
 ``reap`` is the one entry point. Two existing triggers call it and it adds no
 loop of its own: the ``pr_merged`` router hook (``worktree_reaper_pr``) and a
@@ -22,6 +22,7 @@ from infra.project_repo_policy import RepoPolicy, list_registered_repo_policies
 from infra.repo_flock import RepoBusyError, repo_lock
 from infra.worktree_reaper_checks import (
     CheckContext,
+    RemovalVerdict,
     candidate_skip_reason,
     orphan_skip_reason,
     recheck_before_removal,
@@ -33,6 +34,7 @@ from infra.worktree_reaper_remove import (
     remove_worktree,
     sweep_quarantine,
 )
+from infra.worktree_reaper_salvage import SalvageError, salvage_worktree
 from infra.worktree_reaper_scan import Candidate, Orphan, scan_repo
 from infra.worktree_reaper_store import (
     forget_pr_terminal,
@@ -76,6 +78,7 @@ class RepoReport:
     trigger: str
     scanned: int = 0
     removed: int = 0
+    salvaged: int = 0
     orphan_removed: int = 0
     quarantine_removed: int = 0
     quarantine_entries: list[str] = field(default_factory=list)
@@ -117,6 +120,7 @@ def emit_report(report: RepoReport) -> None:
         "trigger": report.trigger,
         "scanned": report.scanned,
         "removed": report.removed,
+        "salvaged": report.salvaged,
         "remaining_count": report.remaining_count,
         "orphan_removed": report.orphan_removed,
         "quarantine_removed": report.quarantine_removed,
@@ -147,8 +151,16 @@ def _remove_candidate(
                 ctx, candidate, IDLE_THRESHOLD_SECONDS, expected_head, merged=merged,
                 short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
             )
-            outcome = reason or remove_worktree(
-                repo, candidate.path, candidate.name, force=merged,
+            salvaged = reason is RemovalVerdict.SALVAGE
+            if salvaged:
+                try:
+                    destination = salvage_worktree(repo, candidate.path, candidate.name, ctx.now)
+                except (SalvageError, OSError) as exc:
+                    report.skip(candidate.name, owner, "salvage_failed", idle_days, str(exc)[:240])
+                    return True
+                logger.info("worktree_reaper: salvaged {} to {}", candidate.name, destination)
+            outcome = reason if isinstance(reason, str) else remove_worktree(
+                repo, candidate.path, candidate.name, force=merged or salvaged,
             )
     except RepoBusyError:
         report.skip(candidate.name, owner, "repo_busy", idle_days)
@@ -158,6 +170,8 @@ def _remove_candidate(
         return True
     if outcome == "removed":
         report.removed += 1
+        if salvaged:
+            report.salvaged += 1
         forget_pr_terminal(candidate.path)
     else:
         reason = "quarantine_removal_pending" if outcome == "quarantine_pending" else outcome
@@ -243,11 +257,11 @@ def reap(
             ctx, candidate, IDLE_THRESHOLD_SECONDS, merged=merged,
             short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
         )
-        if reason is not None and mode == "pr_terminal" and head is not None:
+        if isinstance(reason, str) and mode == "pr_terminal" and head is not None:
             # Blocked at merge time (a live process, a Git lock, uncommitted
             # edits): the nightly pass retries it under the same merged rules.
             remember_pr_terminal(candidate.path, head)
-        if reason is not None:
+        if isinstance(reason, str):
             report.skip(candidate.name, candidate.owner_thread, reason, idle_days)
             continue
         removed_before = report.removed

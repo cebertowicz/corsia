@@ -106,8 +106,8 @@ def sweep_quarantine(repo: Path) -> int:
 def remove_worktree(repo: Path, worktree: Path, name: str, *, force: bool = False) -> str:
     """Quarantine then remove one checked worktree.
 
-    ``force`` lets Git delete untracked files too; only a merged worktree whose
-    tracked files were just rechecked clean under the repo lock passes it.
+    ``force`` deletes scratch in a clean merged worktree or a worktree whose
+    uncommitted changes were salvaged after rechecking under the repo lock.
 
     Returns ``removed``, ``move_failed`` (still in place, untouched),
     ``raced_dirty`` (moved back after Git refused a dirty tree) or

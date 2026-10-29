@@ -23,10 +23,11 @@ GH_TIMEOUT_SECONDS = 60.0
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,
 # generated build metadata, and symlinked dependency entries. Any other ignored
-# path (``.env``, seeded databases, local notes) blocks removal.
+# path (``.env``, seeded databases, local notes) requires salvage before removal.
 DISPOSABLE_DIRS = frozenset({
     "node_modules", ".venv", "__pycache__", ".pytest_cache", "dist", "build",
     ".svelte-kit", ".mypy_cache", ".ruff_cache", "test-results", "playwright-report",
+    "target", ".next", ".vite", ".turbo", ".tox", ".eggs", "coverage", ".cache",
 })
 DISPOSABLE_TOP_LEVEL_DIR_PREFIXES = (".check-pr-",)
 DISPOSABLE_FILES = frozenset({
@@ -195,7 +196,10 @@ def _is_disposable(ignored: str) -> bool:
             and bool(parts)
             and parts[-1] in DISPOSABLE_NON_DIRECTORY_NAMES
         )
-        or any(part in DISPOSABLE_DIRS for part in directories)
+        or any(
+            part in DISPOSABLE_DIRS or "cache" in part or "venv" in part
+            or part.endswith(".egg-info") for part in directories
+        )
     )
 
 
