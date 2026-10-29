@@ -54,6 +54,19 @@ def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_ro
     assert argv[:2] == [bundled, "serve"]
 
 
+def test_managed_supervisor_uses_relocatable_source_module(tmp_path, monkeypatch):
+    from llm import managed_omlx_binary
+    from llm.providers import omlx_supervisor as sup
+
+    environment = tmp_path / "moved" / "runtime"
+    monkeypatch.setattr(managed_omlx_binary, "source_omlx_environment", lambda: environment)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: str(environment / "bin" / "omlx"))
+    monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
+    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
+    assert isinstance(argv, list)
+    assert argv[:4] == [str(environment / "bin" / "python"), "-m", "omlx.cli", "serve"]
+
+
 def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
     from llm.providers import omlx_supervisor as sup
 

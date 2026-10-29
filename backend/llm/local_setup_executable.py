@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Callable
 
 from llm import managed_omlx_binary as managed
+from llm.omlx_release import OMLX_SHA256, OMLX_VERSION
 
 _BROKEN_RETURN_CODES = (126, 127)
 _broken_cache: dict[tuple, bool] = {}
@@ -101,12 +105,39 @@ def run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True, env=env)
 
 
-def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessError) -> str:
-    """Return card-safe Homebrew repair feedback."""
+def installer_failure_message(action: str, exc: OSError | subprocess.SubprocessError) -> str:
+    """Return the failing install step's last stderr line, bounded for the card."""
     stderr = str(getattr(exc, "stderr", "") or "")
-    detail = next((line.strip() for line in reversed(stderr.splitlines()) if line.strip()), "")
-    prefix = f"Homebrew couldn't {action} oMLX"
+    detail = next((line.strip()[:300] for line in reversed(stderr.splitlines()) if line.strip()), "")
+    prefix = f"Couldn't {action} oMLX"
     return f"{prefix}: {detail}. Try again." if detail else f"{prefix}. Try again."
+
+
+def install_omlx() -> None:
+    """Install the bundle's verified wheel into a private environment."""
+    wheel_name = f"omlx-{OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
+    url = f"https://github.com/jundot/omlx/releases/download/v{OMLX_VERSION}/{wheel_name}"
+    environment = managed.source_omlx_environment()
+    # A failed reinstall must not leave an earlier pin's marker claiming a complete runtime.
+    (environment / ".installed").unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="corsia-omlx-") as directory:
+        wheel = Path(directory) / wheel_name
+        steps = [
+            ("download", ["curl", "--fail", "--location", "--silent", "--show-error", url, "--output", str(wheel)]),
+            ("prepare", [sys.executable, "-m", "venv", str(environment)]),
+            ("install", [str(environment / "bin" / "python"), "-m", "pip", "install", "--no-cache-dir", str(wheel)]),
+        ]
+        for index, (action, command) in enumerate(steps):
+            try:
+                if index == 1:
+                    with wheel.open("rb") as source:
+                        digest = hashlib.file_digest(source, "sha256").hexdigest()
+                    if digest != OMLX_SHA256:
+                        raise RuntimeError("The oMLX download didn't match the expected file. Try again.")
+                run_command(command)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise RuntimeError(installer_failure_message(action, exc)) from exc
+        (environment / ".installed").write_text(OMLX_VERSION)
 
 
 def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False) -> None:
@@ -115,9 +146,11 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False) 
     if install_error:
         raise RuntimeError(install_error)
     if managed.managed_omlx_executable() is not None:
+        if managed.source_omlx_outdated():
+            progress("Updating oMLX")
+            install_omlx()
         return
     current = omlx_on_path()
-    brew = shutil.which("brew")
     if current is not None:
         if needs_repair or _is_broken_leftover(current):
             raise OwnOmlxUpgradeRequired(
@@ -125,19 +158,8 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False) 
                 "for a broken installation), then try again; or install the CORSIA app to use its bundled oMLX."
             )
         return
-    if not brew:
-        raise RuntimeError("Homebrew is required to install oMLX. Install Homebrew, then retry.")
     progress("Installing oMLX")
-    try:
-        run_command([brew, "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
-        try:
-            run_command([brew, "install", managed.OMLX_FORMULA])
-        except (OSError, subprocess.SubprocessError) as exc:
-            if not managed.command_output([brew, "list", "--versions", managed.OMLX_FORMULA]):
-                raise exc
-            run_command([brew, "link", "--overwrite", "omlx"])
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(homebrew_failure_message("install", exc)) from exc
+    install_omlx()
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")
