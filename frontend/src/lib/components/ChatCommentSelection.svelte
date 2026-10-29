@@ -130,8 +130,6 @@
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
 		document.addEventListener('selectionchange', readSelection);
-		let pressedIds: string[] = [];
-		const pointerDown = (event: PointerEvent) => { const hit = (event.target as Element | null)?.closest<HTMLElement>('[data-comment-ids]'); pressedIds = hit && messageRoot()?.contains(hit) ? hit.dataset.commentIds?.split(',') ?? [] : []; };
 		const replyClick = (event: Event) => {
 			const { threadId: sourceThread, messageId, commentId, target } = (event as CustomEvent<{ threadId: string; messageId: string; commentId: string; target: HTMLElement }>).detail;
 			const message = $messages.find(item => item.id === messageId && item.thread_id === threadId);
@@ -142,9 +140,7 @@
 		const click = (event: MouseEvent) => {
 			const root = messageRoot();
 			const target = event.target as Element | null;
-			const direct = target?.closest<HTMLElement>('[data-comment-ids]');
-			const hit = direct ?? (root && target === root ? [...root.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => pressedIds.some(id => el.dataset.commentIds?.split(',').includes(id))) : null);
-			pressedIds = [];
+			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
 			if (open || !hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const source = hit;
 			const ids = hit.dataset.commentIds?.split(',') ?? [];
@@ -156,13 +152,12 @@
 				if (comment) { beginReply(message, comment, source); return; }
 			}
 		};
-		document.addEventListener('pointerdown', pointerDown, true);
 		document.addEventListener('click', click);
 		document.addEventListener('chat-comment-reply', replyClick);
 		observer = new MutationObserver(() => { if (!painting) schedule(); });
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('pointerdown', pointerDown, true); document.removeEventListener('click', click); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);

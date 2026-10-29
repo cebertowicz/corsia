@@ -58,11 +58,13 @@ it('stamps each visible unread answer, including a tall answer filling the viewp
 	await vi.advanceTimersByTimeAsync(1499);
 	expect(fetcher).not.toHaveBeenCalled();
 	await vi.advanceTimersByTimeAsync(1);
+	await vi.advanceTimersByTimeAsync(1); // The shared dwell path coalesces stamps on the next task.
 	expect(fetcher).toHaveBeenCalledTimes(1);
 	expect(fetcher.mock.calls[0][0]).toContain('/messages/first/comments/one/viewed');
 	expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ assistant_message_id: 'same' });
 	second.report(true);
 	await vi.advanceTimersByTimeAsync(1500);
+	await vi.advanceTimersByTimeAsync(1);
 	expect(fetcher).toHaveBeenCalledTimes(2);
 	expect(fetcher.mock.calls[1][0]).toContain('/messages/second/comments/two/viewed');
 	delete (document as unknown as Record<string, unknown>).visibilityState;

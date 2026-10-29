@@ -192,13 +192,15 @@
 			content,
 			attachments: [...attachments],
 		};
+		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
 		emitProductEvent('composer', 'sent', {
 			thread_id: threadId,
 			char_count: content.length,
 			attachment_count: attachments.length,
+			comment_count: payloadComments.length,
+			reply_count: payloadComments.filter(comment => !!comment.root_cid).length,
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
-		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
 		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');

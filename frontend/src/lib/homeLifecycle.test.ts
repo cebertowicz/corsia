@@ -36,6 +36,21 @@ describe('keyboard inset focus ordering', () => {
 	};
 	const inset = () => document.documentElement.style.getPropertyValue('--kb-toolbar-inset');
 
+	it('keeps a non-chat button stable through a touch gesture after the pointer timer fires', () => {
+		input.focus();
+		pointer(button, 'pointerdown');
+		pointer(button, 'pointerup');
+		vi.advanceTimersByTime(0);
+		button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+		input.blur();
+		expect(inset()).toBe('60px');
+		button.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+		button.addEventListener('click', () => expect(inset()).toBe('60px'));
+		button.click();
+		vi.advanceTimersByTime(0);
+		expect(inset()).toBe('0px');
+	});
+
 	it('keeps the inset through pointerup and click before clearing it', () => {
 		input.focus();
 		pointer(button, 'pointerdown');
@@ -60,14 +75,16 @@ describe('keyboard inset focus ordering', () => {
 		expect(inset()).toBe('0px');
 	});
 
-	it('clears immediately on cancellation or blur without a press', () => {
+	it('clears after cancellation or blur without a press', () => {
 		input.focus();
 		pointer(button, 'pointerdown');
 		input.blur();
 		pointer(button, 'pointercancel');
+		vi.advanceTimersByTime(0);
 		expect(inset()).toBe('0px');
 		input.focus();
 		input.blur();
+		vi.advanceTimersByTime(0);
 		expect(inset()).toBe('0px');
 	});
 

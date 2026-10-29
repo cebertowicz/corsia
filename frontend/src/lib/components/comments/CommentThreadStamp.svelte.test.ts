@@ -38,10 +38,10 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, viewEachUnread = false) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; } } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, viewEachUnread } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {
@@ -61,6 +61,19 @@ afterEach(() => {
 });
 
 describe('CommentThread stamping', () => {
+	it('stamps each dwelled chat reply independently, including a tall reply', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		render(onViewed, true);
+		const observers = FakeObserver.live();
+		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r2')!.reportTall();
+		await dwell();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r1')!.report(true);
+		await dwell();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]);
+	});
+
 	it('stamps a tall reply filling the visible area', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };

@@ -114,6 +114,7 @@
 	let observeTick = $state(0);
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
+	const stampedReplies = new Set<string>();
 	// Keep the collapse point stable while this thread is mounted, even as the server clears New marks.
 	// Otherwise replies would disappear from under the reader when the viewed stamp lands.
 	const seenForCollapse = new Set<string>();
@@ -141,6 +142,15 @@
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		if (!onViewed || document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
+		if (viewEachUnread) {
+			if (stampedReplies.has(replyId)) return;
+			stampedReplies.add(replyId);
+			onViewed(comment.id, replyId).catch((err) => {
+				stampedReplies.delete(replyId);
+				console.warn('Could not record the viewed reply', err);
+			});
+			return;
+		}
 		const position = comment.replies.findIndex((r) => r.id === replyId);
 		if (position < 0 || position <= comment.replies.findIndex((r) => r.id === lastStamped)) return;
 		const previous = lastStamped;
@@ -154,6 +164,10 @@
 	function advanceStamp() {
 		stampTimer = null;
 		const unread = new Set(comment.newReplyIds ?? []);
+		if (viewEachUnread) {
+			for (const replyId of unread) if (dwelled.has(replyId)) stamp(replyId);
+			return;
+		}
 		let through: string | undefined;
 		for (const reply of comment.replies) {
 			if (!reply.id || !unread.has(reply.id)) continue;
@@ -178,7 +192,7 @@
 	$effect(() => {
 		observeTick;
 		newestReply;
-		replyVisibility.sync(el, !!onViewed && !viewEachUnread, JSON.parse(unreadKey));
+		replyVisibility.sync(el, !!onViewed, JSON.parse(unreadKey));
 	});
 	$effect(() => () => replyVisibility.clear());
 	function onVisibilityChange() {
@@ -303,7 +317,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving}
-			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} onUnreadViewed={viewEachUnread ? (replyId) => onViewed?.(comment.id, replyId) ?? Promise.resolve() : undefined} />
+			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}

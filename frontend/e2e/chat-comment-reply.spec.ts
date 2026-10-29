@@ -40,6 +40,7 @@ test('reply from the thread and edit the pending highlight before sending', asyn
   await page.locator('.sel-comment').click();
   await page.getByPlaceholder('Comment…').fill('First comment');
   await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
   await expect(page.getByRole('button', { name: /Edit comment/ })).toBeVisible();
   await seedMockResponses(request, [{ content: 'Received comment' }]);
   await chatComposer(page).fill('Please address this');
