@@ -21,6 +21,7 @@ from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_clipboard, browser_stream
 from ws.browser_frames import PaneFrames
+from tests.browser_clipboard_diagnostics import native_clipboard_diagnostics  # noqa: F401
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
@@ -219,7 +220,7 @@ async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatc
 
 
 @pytest.mark.parametrize('headed', [False, True])
-async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch, headed):
+async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch, headed, native_clipboard_diagnostics):
     thread, connection = 'native-clipboard', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     with popup_fixture() as base:
@@ -361,7 +362,7 @@ def popup_fixture():
 
 
 @pytest.mark.parametrize('headed', [False, True])
-async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, headed):
+async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, headed, native_clipboard_diagnostics):
     thread, connection = 'native-clipboard-oopif', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     with popup_fixture() as base:
