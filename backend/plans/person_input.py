@@ -37,15 +37,22 @@ _RUNNING = ("running", "review")
 
 @dataclass(frozen=True)
 class Source:
-    """One arrival of the person's words: what they said, when, to whom, and the nodes it names."""
+    """One arrival of the person's words: what they said, when, to whom, and the nodes it names.
+
+    ``parts`` are the passages they wrote separately; a quote lies within one.
+    """
 
     kind: str
     id: str
-    words: str
+    parts: tuple[str, ...]
     said_at: str
     thread_id: str
     project_id: str | None
     links: tuple[str, ...] = ()
+
+    @property
+    def words(self) -> str:
+        return "\n".join(self.parts)
 
 
 def arrived(source_kind: str, source_id: str) -> None:
@@ -113,12 +120,12 @@ def load(db, kind: str, source_id: str) -> Source | None:
             """SELECT m.role,m.content,m.metadata,m.thread_id,m.created_at,t.project_id FROM messages m
                JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (source_id,),
         ).fetchone()
-        words = "" if row is None else intent_words.message_words(
+        parts = () if row is None else intent_words.message_word_parts(
             role=row["role"], content=row["content"], metadata=row["metadata"],
         )
-        if not words:
+        if not parts:
             return None
-        return Source(kind, source_id, words, str(row["created_at"]), str(row["thread_id"]), row["project_id"])
+        return Source(kind, source_id, parts, str(row["created_at"]), str(row["thread_id"]), row["project_id"])
     if kind == SOURCE_KIND_DOC_COMMENT:
         from jobs.corrections_scanning import source_candidate
 
@@ -130,7 +137,7 @@ def load(db, kind: str, source_id: str) -> Source | None:
                JOIN plan_node_artifact_links l ON l.artifact_id=c.artifact_id AND l.role='attention'
                WHERE c.id=? ORDER BY l.created_at,l.node_id""", (source_id,),
         ).fetchall()
-        return Source(kind, source_id, found.quote or "", found.created_at, found.thread_id, found.project_id,
+        return Source(kind, source_id, (found.quote or "",), found.created_at, found.thread_id, found.project_id,
                       tuple(str(row["node_id"]) for row in links))
     if kind == SOURCE_KIND_DECISION_ANSWER:
         return _decision(db, source_id)
@@ -154,7 +161,7 @@ def _decision(db, decision_id: str) -> Source | None:
     node = body.get("source_node_id")
     return Source(
         SOURCE_KIND_DECISION_ANSWER, decision_answer_source_id(decision_id, body.get("revision")),
-        answer_note(body.get("answer")) or "", str(body.get("answered_at") or ""), str(body["thread_id"]),
+        (answer_note(body.get("answer")) or "",), str(body.get("answered_at") or ""), str(body["thread_id"]),
         thread["project_id"], (str(node),) if node else (),
     )
 

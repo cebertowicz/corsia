@@ -15,6 +15,7 @@ from core.corrections_recording import (
     is_wrapper_or_delivery,
     owner_message_sql_predicate,
 )
+from core.reply_context import REPLY_CONTEXT_KEY
 
 MAX_INTENT_BYTES = 600
 MAX_QUOTE_BYTES = 400
@@ -48,26 +49,31 @@ def _phrase(quote: str) -> str:
     return '"' + quote.replace('"', '""') + '"'
 
 
-def message_words(*, role: object, content: object, metadata: object) -> str:
-    """The person's own words in one stored message: its text, then each chat comment's note.
+def message_word_parts(*, role: object, content: object, metadata: object) -> tuple[str, ...]:
+    """The person's own words in one stored message, one part per passage they wrote:
+    its text, then each chat comment's note.
 
     Plans' reading of ``is_owner_authored_message`` plus comment notes, so a comments-only
     reply counts here though corrections, lessons and recall still need typed text.
-    Relays, events and blanks give "". A comment's quote is the agent's text it marks.
+    Relays, events and blanks give (). A comment's quote is the agent's text it marks.
     """
     raw = content if isinstance(content, str) else ""
     if role != "user" or is_wrapper_or_delivery(raw, metadata):
-        return ""
+        return ()
     text = raw.strip()
     try:
         parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
     except ValueError:
         parsed = None
-    context = parsed.get("reply_context") if isinstance(parsed, dict) else None
+    context = parsed.get(REPLY_CONTEXT_KEY) if isinstance(parsed, dict) else None
     comments = context.get("comments") if isinstance(context, dict) else None
     notes = [item["note"].strip() for item in comments or ()
              if isinstance(item, dict) and isinstance(item.get("note"), str) and item["note"].strip()]
-    return "\n".join(([text] if text else []) + notes)
+    return tuple(([text] if text else []) + notes)
+
+
+def message_words(*, role: object, content: object, metadata: object) -> str:
+    return "\n".join(message_word_parts(role=role, content=content, metadata=metadata))
 
 
 def _is_person_message(row: sqlite3.Row) -> bool:
@@ -167,7 +173,7 @@ def _quoted(connection: sqlite3.Connection, quote: str, recipient: str) -> tuple
     for kind, candidates in _CANDIDATES:
         for candidate in candidates(connection, quote, recipient):
             source = person_input.load(connection, kind, candidate)
-            if (source is not None and wanted in _normal(source.words)
+            if (source is not None and any(wanted in _normal(part) for part in source.parts)
                     and source_reaches_thread(connection, source.thread_id, recipient)):
                 return kind, source.id
     return None
