@@ -183,17 +183,20 @@ def test_error_notice_does_not_expose_worker_error(notice_db):
 
 
 @pytest.mark.asyncio
-async def test_untrusted_generated_title_is_withheld_only_at_read(deleg_db, monkeypatch):
+async def test_untrusted_thread_is_never_auto_titled_and_title_withheld_at_read(deleg_db, monkeypatch):
     from infra.thread_confinement import project_thread
     from ws import post_turn
 
     seed(deleg_db)
     deleg_db.execute("UPDATE threads SET title='New Chat' WHERE id='isolated'")
+    deleg_db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES ('title-canary','isolated','assistant',?,?)", (CANARY, '2026-01-01'))
     deleg_db.commit()
-    monkeypatch.setattr(post_turn, "generate_thread_title", AsyncMock(return_value=CANARY))
+    title_llm = AsyncMock(return_value=CANARY)
+    monkeypatch.setattr(post_turn, "generate_thread_title", title_llm)
     await post_turn.ensure_thread_title("isolated", AsyncMock())
     row = deleg_db.execute("SELECT * FROM threads WHERE id='isolated'").fetchone()
-    assert project_thread(Reader.person(), row)["title"] == CANARY
+    title_llm.assert_not_called()
+    assert project_thread(Reader.person(), row)["title"] == "New Chat"
     assert project_thread(Reader.agent("sender-self"), row)["title"] is None
 
 

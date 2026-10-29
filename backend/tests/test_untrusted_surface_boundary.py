@@ -175,6 +175,19 @@ async def test_person_and_self_keep_private_status_and_transcript(deleg_db, monk
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_listing_reports_restriction_and_self_can_read(deleg_db):
+    from infra.thread_confinement import RESTRICTED_READ, Reader
+    from memory.checkpoint_search import recent_checkpoints
+    from tools.query_checkpoints import GetCheckpointsTool
+
+    _plant(deleg_db)
+    tool = GetCheckpointsTool()
+    assert await tool.execute(thread_id="isolated", _thread_id="sender-self") == RESTRICTED_READ.reason
+    assert INJECTION in await tool.execute(thread_id="isolated", _thread_id="isolated")
+    assert INJECTION in str(recent_checkpoints(deleg_db, "isolated", reader=Reader(is_person=True, thread_id="isolated")))
+
+
+@pytest.mark.asyncio
 async def test_provider_words_do_not_make_raw_runtime_errors_shareable(deleg_db):
     from api.delegation import thread_status
     from infra.internal_principal import internal_request

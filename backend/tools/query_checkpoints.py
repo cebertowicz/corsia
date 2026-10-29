@@ -137,7 +137,7 @@ class GetCheckpointsTool(Tool):
         **kwargs: Any,
     ) -> str:
         from infra.database import get_db
-        from memory.checkpoint_search import get_checkpoint, recent_checkpoints
+        from memory.checkpoint_search import caller_user_id, get_checkpoint, recent_checkpoints
 
         if checkpoint_id and thread_id:
             return (
@@ -148,7 +148,7 @@ class GetCheckpointsTool(Tool):
         # Authorization identity is the backend-injected calling thread, never
         # the caller-supplied thread_id: that argument is a filter, and letting
         # it stand in for identity would let a model name whose data it reads.
-        from infra.thread_confinement import Reader
+        from infra.thread_confinement import Reader, RestrictedRead, read_restriction
 
         reader = Reader.from_tool(kwargs)
         if not reader.thread_id:
@@ -171,6 +171,14 @@ class GetCheckpointsTool(Tool):
                         offset_bytes=offset_bytes,
                         limit_bytes=limit_bytes,
                     )
+                user_id = caller_user_id(db, reader.thread_id)
+                owned = db.execute(
+                    "SELECT 1 FROM threads WHERE id = ? AND user_id = ?", (target, user_id)
+                ).fetchone() if user_id is not None else None
+                if owned:
+                    restriction = read_restriction(db, reader, str(target))
+                    if restriction is not None:
+                        return restriction
                 return recent_checkpoints(
                     db, str(target), reader=reader, limit=limit
                 )
@@ -182,6 +190,8 @@ class GetCheckpointsTool(Tool):
         if checkpoint_id:
             return _format_exact(result)
 
+        if isinstance(result, RestrictedRead):
+            return result.reason
         if not result:
             return "No retained checkpoint generations for this thread."
         lines = [f"{len(result)} retained generation(s), newest first:\n"]

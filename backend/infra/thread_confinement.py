@@ -209,10 +209,10 @@ class ChildOutput:
 
 
 def internal_route_restriction(reader: Reader, user_id: str, route, scope: dict) -> RestrictedRead | None:
-    """Guard resolved internal API reads, including future buffer/context endpoints.
+    """Guard internal GET reads addressed by a thread, checkpoint or message id.
 
     Status is the one projected read; it returns the labelled completed result.
-    Other explicit thread/message/checkpoint reads share the transcript decision.
+    Other addressed reads share the transcript decision.
     """
     if scope["method"] != "GET" or route.path == "/api/delegation/threads/{thread_id}/status":
         return None
