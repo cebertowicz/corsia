@@ -16,29 +16,40 @@ export type JumpPort = {
 	generation: () => number;
 };
 
+type Item = { destination: AttentionDestination; threadId: string; generation: number; version: number };
+
 export function createChatReplyJumper(port: JumpPort) {
-	let pending: { destination: AttentionDestination; threadId: string; generation: number; version: number } | null = null;
+	let pending: Item | null = null;
 	let version = 0;
 	let running = false;
-	const current = (item: NonNullable<typeof pending>) =>
+	const current = (item: Item) =>
 		item.version === version && item.threadId === get(activeThreadId) && item.generation === port.generation();
+	const loadedFor = (item: Item) => get(messages).some(row => row.thread_id === item.threadId && row.id === item.destination.id);
+	const stubFor = (item: Item) => port.runs().find(run => run.firstSeq <= item.destination.seq! && item.destination.seq! <= run.lastSeq);
+	/** A page or Focus run read the jump needs is in flight or failed; its settling resumes the jump. */
+	const waiting = (item: Item) => {
+		if (port.pager().loading || port.pager().error) return true;
+		const run = loadedFor(item) ? undefined : stubFor(item);
+		const state = run && port.loads()[run.lastId];
+		return !!(state?.loading || state?.error);
+	};
 
-	async function run(item: NonNullable<typeof pending>): Promise<boolean> {
+	async function run(item: Item): Promise<boolean> {
 		const { destination, threadId } = item;
 		const target = { threadId, messageId: destination.id, seq: destination.seq!, cid: destination.cid! };
-		const loaded = () => get(messages).some(row => row.thread_id === threadId && row.id === target.messageId);
-		const stub = () => port.runs().find(run => run.firstSeq <= target.seq && target.seq <= run.lastSeq);
+		const loaded = () => loadedFor(item);
+		const stub = () => stubFor(item);
 		while (!loaded() && !stub() && port.pager().hasMore && !port.pager().error && !port.pager().loading && current(item)) {
 			const before = port.pager().oldestId;
 			await port.loadOlder();
 			if (port.pager().oldestId === before) break;
 		}
 		if (!current(item)) return false;
-		if (port.pager().loading || port.pager().error) return true;
+		if (waiting(item)) return true;
 		const run = stub();
 		while (!loaded() && run && current(item)) {
-			const state = port.loads()[run.lastId];
-			if (state?.loading || state?.error || state?.hasMore === false) break;
+			if (waiting(item)) return true;
+			if (port.loads()[run.lastId]?.hasMore === false) break;
 			await port.loadRun(run);
 		}
 		if (!loaded() || !current(item)) return false;
@@ -78,14 +89,14 @@ export function createChatReplyJumper(port: JumpPort) {
 	function resume(): void {
 		if (!pending || running) return;
 		if (!current(pending)) { pending = null; return; }
-		if (port.pager().loading || port.pager().error) return;
+		if (waiting(pending)) return;
 		const item = pending;
 		running = true;
 		void run(item).then((deferred) => {
 			if (pending === item && !deferred) pending = null;
 		}).finally(() => {
 			running = false;
-			if (pending && (!port.pager().loading && !port.pager().error)) resume();
+			if (pending && !waiting(pending)) resume();
 		});
 	}
 

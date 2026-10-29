@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { createPager } from '$lib/messagePager';
 import { createChatReplyJumper } from './chatReplyJump';
-import type { RunStub } from '$lib/focusRuns';
+import type { RunLoad, RunStub } from '$lib/focusRuns';
 
 const destination = (id: string) => ({ pane: 'chat-replies', id, seq: 5, cid: 'c1' });
 const row = (id: string, thread = 't1') => ({ id, thread_id: thread, seq: 5 } as never);
@@ -21,13 +21,13 @@ beforeEach(() => {
 });
 afterEach(() => { element.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-function setup(overrides: { runs?: RunStub[]; loadRun?: (run: RunStub) => Promise<void> } = {}) {
+function setup(overrides: { runs?: RunStub[]; loads?: () => Record<string, RunLoad>; loadRun?: (run: RunStub) => Promise<void> } = {}) {
 	const pager = createPager({ hasMore: true, oldestId: 'old' });
 	const loadOlder = vi.fn(async () => { messages.set([row('a')]); pager.oldestId = 'a'; });
 	const loadRun = vi.fn(overrides.loadRun ?? (async () => {}));
 	let generation = 1;
 	const jumper = createChatReplyJumper({
-		pager: () => pager, runs: () => overrides.runs ?? [], loads: () => ({}),
+		pager: () => pager, runs: () => overrides.runs ?? [], loads: overrides.loads ?? (() => ({})),
 		loadOlder, loadRun, element: () => element, generation: () => generation,
 	});
 	return { pager, jumper, loadOlder, loadRun, invalidate: () => { generation++; } };
@@ -96,5 +96,35 @@ describe('reply navigation while the pager settles', () => {
 		await vi.waitFor(() => expect(loadRun).toHaveBeenCalledTimes(1));
 		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
 		expect(loadOlder).not.toHaveBeenCalled();
+	});
+
+	const stub = { firstSeq: 1, lastSeq: 9, firstId: 'first', lastId: 'last' } as RunStub;
+	const load = (state: Partial<RunLoad>): RunLoad => ({ oldestId: null, hasMore: true, loading: false, error: false, coveredFirstId: 'first', ...state });
+
+	it('waits for a Focus run read already in flight, then lands', async () => {
+		let loads: Record<string, RunLoad> = { last: load({ loading: true }) };
+		const { jumper, loadRun } = setup({ runs: [stub], loads: () => loads });
+		jumper.jump(destination('a'));
+		await Promise.resolve();
+		expect(loadRun).not.toHaveBeenCalled();
+		messages.set([row('a')]);
+		loads = { last: load({ loading: false }) };
+		jumper.resume();
+		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		expect(loadRun).not.toHaveBeenCalled();
+	});
+
+	it('keeps the click through a failed Focus run read until its retry succeeds', async () => {
+		let loads: Record<string, RunLoad> = {};
+		const { jumper, loadRun } = setup({ runs: [stub], loads: () => loads, loadRun: async () => { loads = { last: load({ error: true }) }; } });
+		jumper.jump(destination('a'));
+		await vi.waitFor(() => expect(loadRun).toHaveBeenCalledTimes(1));
+		jumper.resume();
+		await Promise.resolve();
+		expect(loadRun).toHaveBeenCalledTimes(1);
+		messages.set([row('a')]);
+		loads = { last: load({ error: false }) };
+		jumper.resume();
+		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
 	});
 });

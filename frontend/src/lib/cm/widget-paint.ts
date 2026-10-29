@@ -7,7 +7,7 @@ const CLASSES = ['cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending'
 
 const PAINTED = [...CLASSES.map((name) => `.${name}`), '[data-comment-ids]'].join(',');
 
-/** Every comment drawn on an element, in the order they were painted. A pending mark has no comment to open, so it adds none. */
+/** Every comment drawn on an element, in the order they were painted. A pending document mark has no comment to open, so it adds none; chat opts its queued comments in through `wrapRange`. */
 export function addCommentId(el: HTMLElement, mark: Mark) {
 	if (mark.kind === 'pending') return;
 	const ids = (el.dataset.commentIds ?? '').split(',').filter(Boolean);
@@ -71,7 +71,10 @@ export function keepingSelection(el: HTMLElement, repaint: () => void) {
 
 const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
 
-/** Wraps the text nodes a range holds, so a mark follows the text inside formatting. */
+/**
+ * Wraps the text nodes a range holds, so a mark follows the text inside formatting.
+ * `interactivePending`: a chat comment queued for sending can still be edited, so its pending mark opens it like a saved one.
+ */
 export function wrapRange(range: Range, mark: Mark, interactivePending = false) {
 	const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT);
 	const nodes: Text[] = [];
