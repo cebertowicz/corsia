@@ -12,7 +12,8 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
                    metadata: dict | None, created_at: str) -> None:
     """Place validated comments in the transaction that stores the input.
 
-    A retry replaces its original's unanswered comments, so a comment shows once.
+    A retry replaces its original's unanswered comments; an answered one keeps
+    its thread beside the retry's.
     """
     retried_from = (metadata or {}).get('retried_from_message_id')
     if retried_from:
