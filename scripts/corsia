@@ -391,7 +391,7 @@ case "${1:-status}" in
             if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
                 echo "3/3  Starting…"
             else
-                echo "7/8  Starting…"
+                echo "4/4  Starting…"
             fi
         else
             echo "Starting CORSIA..."

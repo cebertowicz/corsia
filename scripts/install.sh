@@ -10,17 +10,15 @@
 #
 # Readable first, and safe to run again. Every step prints one line before it
 # acts. It finishes the whole install before CORSIA starts: prerequisites, the
-# Python environment, the first run (where your work lives, how you will use
-# CORSIA, your account), a working model source (a Claude Code or Codex
-# sign-in, else the local model, set up here with no server), and only then
-# starts CORSIA, prints the model-source summary and opens the browser. A
-# failed model setup exits non-zero and starts nothing. It saves no API token;
-# the summary uses a one-hour token that is never written to disk.
+# Python environment and workspace, then starts CORSIA and opens its existing
+# browser setup. Account creation and model selection happen there, so a
+# missing sign-in or local model never prevents opening setup. It saves no API token.
 #
 # A re-run never pulls: it prints the installed version, starts CORSIA only if
 # it is not running, and points at Settings > Update, which stays the only
 # update path. It never exports CORSIA_WORKSPACE and never touches the
-# launchd service, so the first-run block in scripts/corsia owns setup.
+# launchd service. The CLI owns workspace initialization; browser setup owns
+# the first account and model choices.
 
 set -euo pipefail
 
@@ -37,8 +35,8 @@ APP_URL="http://localhost:$BACKEND_PORT"
 # service. CORSIA_INSTALL_SERVICE_PATH replaces it for tests only.
 SERVICE_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SERVICE_PATH="${CORSIA_INSTALL_SERVICE_PATH:-$SERVICE_PATH}"
-# Questions are read from the terminal, never stdin. CORSIA_INSTALL_TTY
-# replaces it for tests only.
+# Administrator authentication for prerequisites uses the terminal, never
+# installer stdin. CORSIA_INSTALL_TTY replaces it for tests only.
 PROMPT_INPUT="${CORSIA_INSTALL_TTY:-/dev/tty}"
 # Test-only command seams. Production keeps the official installer and sudo.
 SUDO_COMMAND="${CORSIA_INSTALL_SUDO:-sudo}"
@@ -62,11 +60,6 @@ AGENT_BROWSER_PACKAGE="agent-browser@0.31"
 
 say() { printf '%s\n' "$*"; }
 stop() { printf '%s\n' "$@" >&2; exit 1; }
-
-open_prompt_input() {
-    { exec 3< "$PROMPT_INPUT"; } 2> /dev/null \
-        || stop "The installer asks a few questions and needs a terminal. Run it from Terminal."
-}
 
 check_platform() {
     [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] \
@@ -214,7 +207,7 @@ ensure_agent_browser() {
 }
 
 ensure_prereqs() {
-    say "1/8  Checking prerequisites"
+    say "1/4  Checking prerequisites"
     check_prereqs
     [ "${#INVISIBLE[@]}" -eq 0 ] || stop "${INVISIBLE[@]}"
     if [ "${#NEEDED[@]}" -gt 0 ]; then
@@ -282,7 +275,7 @@ ensure_python_env() {
     if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
         say "     Building…"
     else
-        say "3/8  Building"
+        say "3/4  Building"
     fi
     "$(service_which python3.11)" -m venv "$CORSIA_HOME/.venv"
     "$python" -m pip install --quiet --disable-pip-version-check \
@@ -292,11 +285,28 @@ ensure_python_env() {
 is_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 start_corsia() {
-    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" start 3<&-
+    # The CLI owns the local workspace; the browser creates the first account.
+    # With a bootstrap present, lifecycle start skips its terminal setup.
+    if [ ! -f "$CORSIA_HOME/config.json" ]; then
+        (cd "$CORSIA_HOME/backend" && "$CORSIA_HOME/.venv/bin/python" -m cli init --path "$HOME/corsia" --setup local)
+    fi
+    # An explicit --local keeps the existing offline setup path when no
+    # account exists yet; the authenticated running-server command needs one.
+    if [ "$LOCAL_SETUP_FORCED" -eq 1 ] && ! has_account; then
+        "$CORSIA_HOME/scripts/corsia" local setup --before-start < /dev/null
+    fi
+    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" start < /dev/null
 }
 
 summarize_sources() {
     "$CORSIA_HOME/scripts/corsia" sources --install-summary || :
+}
+
+has_account() {
+    # Authenticated post-start conveniences apply only after browser setup has
+    # created an account. A first install opens setup without minting credentials.
+    (cd "$CORSIA_HOME/backend" && "$CORSIA_HOME/.venv/bin/python" -c \
+        'from infra.accounts import has_users; raise SystemExit(0 if has_users() else 1)')
 }
 
 warm_corsia_agent() {
@@ -323,20 +333,6 @@ parse_args() {
 setup_local_model() {
     # A re-run with --local: the running server owns the setup flight.
     "$CORSIA_HOME/scripts/corsia" local setup --automatic --start-only || :
-}
-
-ensure_model_source() {
-    # Before CORSIA starts. The first run asks its questions here (steps 4 and
-    # 5); then a working Claude Code or Codex sign-in, else the local model.
-    local args=(local setup --before-start --if-no-subscription)
-    [ "$LOCAL_SETUP_FORCED" -eq 0 ] || args=(local setup --before-start)
-    local status=0
-    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" "${args[@]}" <&3 3<&- || status=$?
-    [ "$status" -eq 0 ] && return
-    # 3: no model source can work on this Mac until the person signs in; the
-    # lines above say how, so a bare retry line would only mislead.
-    [ "$status" -eq 3 ] && exit 1
-    stop "Run the install command again to retry."
 }
 
 # ---------------------------------------------------------------------------
@@ -603,7 +599,7 @@ linux_main() {
     say "CORSIA install"
     require_checkout
     check_platform_linux
-    open_prompt_input
+
     case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
@@ -626,10 +622,9 @@ linux_main() {
         say "     To update, use Settings › Update."
         exit 0
     fi
-    # The first run asks its questions inside start, from the terminal.
-    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" start <&3 3<&-
+    start_corsia
     say "     There is no local model on Linux: connect Claude Code, Codex or an API provider in the app."
-    summarize_sources
+    if has_account; then summarize_sources; fi
     open_browser_linux
 }
 
@@ -639,11 +634,11 @@ main() {
     say "CORSIA install"
     require_checkout
     check_platform
-    open_prompt_input
+
     ensure_prereqs
     git -C "$CORSIA_HOME" rev-parse --git-dir > /dev/null 2>&1 \
         || stop "$CORSIA_HOME exists but is not a CORSIA checkout. Move it aside, then run this again."
-    say "2/8  Using CORSIA $(installed_version) in ~/.corsia"
+    say "2/4  Using CORSIA $(installed_version) in ~/.corsia"
     ensure_python_env
     local brew
     if brew="$(find_brew)"; then
@@ -656,13 +651,15 @@ main() {
     if is_running; then
         say "     CORSIA is running at $APP_URL"
         say "     To update, use Settings › Update."
-        [ "$LOCAL_SETUP_FORCED" -eq 1 ] && setup_local_model
+        if [ "$LOCAL_SETUP_FORCED" -eq 1 ] && has_account; then setup_local_model; fi
         exit 0
     fi
-    ensure_model_source
     start_corsia
-    summarize_sources
-    warm_corsia_agent
+    if has_account; then
+        [ "$LOCAL_SETUP_FORCED" -eq 0 ] || setup_local_model
+        summarize_sources
+        warm_corsia_agent
+    fi
     open_browser
 }
 
