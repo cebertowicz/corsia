@@ -144,7 +144,7 @@ async def retry_thread_delivery_now(
     if state not in {"failed", "ambiguous"}:
         raise HTTPException(409, "This message has no retryable delivery outcome.")
     content, metadata = _retry_content(message)
-    if not content.strip():
+    if not content.strip() and not (metadata.get("reply_context") or {}).get("comments"):
         raise HTTPException(409, "This message has no content to retry.")
     from infra.send_service import SendRejected, send_thread_input
 
