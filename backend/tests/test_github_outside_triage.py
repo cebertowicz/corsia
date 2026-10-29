@@ -98,6 +98,19 @@ async def test_unhandled_content_is_parked_as_facts_only(world, monkeypatch, kin
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind,action', [('issue_comment', 'edited'), ('review', 'submitted')])
+async def test_unhandled_inside_content_stays_parked(world, monkeypatch, kind, action):
+    from events.connectors.github import GITHUB_ROUTED_EVENTS
+    from events.router import route_event
+    from infra.database import get_db
+
+    monkeypatch.setattr('events.connectors.github_content_facts.is_own', lambda login: True)
+    result = await route_event(GITHUB_ROUTED_EVENTS[f'{kind}.{action}'], payload(kind, action, body='inside'))
+    assert result.outcome.value != 'dead_lettered'
+    assert get_db().execute('SELECT count(*) FROM dead_letter_events').fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('kind,action', [('issue', 'opened'), ('issue_comment', 'created'), ('issue_comment', 'edited'), ('pr_comment', 'created'), ('pr_comment', 'edited'), ('review', 'submitted'), ('review', 'edited')])
 async def test_each_type_reaches_stage_and_worker(triage, kind, action):
     await route(kind, action)

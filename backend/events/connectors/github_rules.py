@@ -135,16 +135,22 @@ def apply_routed_rules(
         except Exception:
             logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
     if prepared.result is not None and prepared.result.reason == "rule_only" and not (plan and plan.handled_by()):
-        from events.connectors.github_content_facts import content_facts
-        from events.router import _dead_letter_result
+        _dead_letter_unhandled_outside(prepared, internal_event, payload)
+    if reason is not None:
+        drop_delivery(prepared, internal_event, reason)
 
-        facts = content_facts(payload)
+
+def _dead_letter_unhandled_outside(prepared: PreparedRoute, internal_event: str, payload: dict[str, Any]) -> None:
+    """Dead-letter an outside item no rule handled, facts only; inside edits and reviews stay parked."""
+    from events.connectors.github_content_facts import content_facts
+    from events.router import _dead_letter_result
+
+    facts = content_facts(payload)
+    if facts.get("author_origin") == "outside" and prepared.result is not None:
         safe = {key: facts[key] for key in ("author", "link", "item_version") if key in facts}
         prepared.result = _dead_letter_result(internal_event, safe,
             "no triage rule handled this item; install the outside-content screen or check its rules",
             prepared.result.external_id)
-    if reason is not None:
-        drop_delivery(prepared, internal_event, reason)
 
 
 def _apply(
