@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- If a model check fails during setup, the account shows that it needs checking and signing in again can make it ready.
+- An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - Signing in to an added Claude Code or Codex account makes its discovered models available during setup and in the model picker.
 - Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
 - Chat, Files, and project and workspace messages use clearer, consistent names.
