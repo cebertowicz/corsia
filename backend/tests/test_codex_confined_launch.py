@@ -24,11 +24,24 @@ from test_codex_confined_capture import definitions
     {"type": "function", "name": "clock"},
 ])
 def test_full_surface_refuses_any_extra_native_or_hosted_tool(extra):
-    with pytest.raises(ConfinementRefused, match="Choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         confinement.assert_tools([*definitions(), extra])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
 
 
-@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.163.0", ""])
+def test_missing_tool_refusal_has_same_message():
+    with pytest.raises(ConfinementRefused) as error:
+        confinement.assert_tools(definitions()[:-1])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
+
+
+@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.166.0", ""])
 @pytest.mark.asyncio
 async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, monkeypatch, version):
     binary = tmp_path / "fake-codex"
@@ -40,9 +53,24 @@ async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, mo
     session = CodexAppServerSession(binary=str(binary), task="review", corsia_thread_id="worker",
                                     dynamic_tools=definitions())
     monkeypatch.setattr(session, "build_env", lambda: pytest.fail("auth must not be projected"))
-    with pytest.raises(ConfinementRefused, match="choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         await session.start()
+    display_version = version.removeprefix("codex-cli ") or "(version unknown)"
+    assert str(error.value) == (
+        f"Couldn’t start this read-only agent on Codex {display_version}: "
+        "read-only agents work only on Codex 0.162.1, 0.163.0, 0.164.0 and 0.165.0. "
+        "Switch Codex to one of those, or choose another model."
+    )
     assert session._proc is None
+
+
+@pytest.mark.parametrize("version", sorted(confinement.CAPTURED_CODEX_VERSIONS))
+@pytest.mark.asyncio
+async def test_captured_versions_are_admitted(tmp_path, version):
+    binary = tmp_path / "fake-codex"
+    binary.write_text(f"#!{sys.executable}\nprint({version!r})\n")
+    binary.chmod(0o700)
+    await confinement.verify_version(str(binary))
 
 
 @pytest.mark.asyncio
@@ -54,7 +82,7 @@ async def test_start_and_resume_use_only_confined_definitions(monkeypatch):
     await session._start_or_resume_thread()
     method, params = request.call_args.args
     assert method == "thread/start" and params["environments"] == []
-    assert {tool["name"] for tool in params["dynamicTools"]} == confinement.REVIEW_READ_TOOLS
+    assert {tool["name"] for tool in params["dynamicTools"]} == confinement.UNTRUSTED_READ_TOOLS
     assert params["sandbox"] == "read-only" and params["approvalPolicy"] == "never"
     await session._start_or_resume_thread()
     method, params = request.call_args.args
@@ -152,7 +180,7 @@ async def test_codex_bridge_refuses_commands_web_auth_home_and_symlink(isolated_
     try:
         for name, params in (("bash", {"command": "id"}), ("web_search", {})):
             result = await registry.execute(name, params)
-            assert "not available to a confined review worker" in result
+            assert "not available to a confined untrusted worker" in result
         for path in (auth, grant / "auth-link"):
             result = await registry.execute("read_file", {"path": str(path)})
             assert "outside this confined worker's read paths" in result

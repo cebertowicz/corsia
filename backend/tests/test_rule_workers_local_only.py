@@ -67,13 +67,13 @@ async def test_ready_local_owner_starts_confined_on_own_model(local_model, world
     outcome, _, _, worker = starts(rule)[0]
     assert outcome == "started"
     child = get_db().execute("SELECT model, confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    assert tuple(child) == (LOCAL, "review")
+    assert tuple(child) == (LOCAL, "untrusted")
     assert local_model["bound"] == [LOCAL]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("restricted", [True, False], ids=["local-only", "ordinary"])
-async def test_unloaded_owner_model_is_refused_with_same_repair(local_model, monkeypatch, restricted):
+@pytest.mark.parametrize("policy", ["local-only", "cloud-off", "ordinary"])
+async def test_unloaded_owner_model_is_refused_with_same_repair(local_model, world, monkeypatch, policy):
     from automation import worker_runner
     from infra.database import get_db, write_transaction
     from tools import delegate_task
@@ -88,7 +88,11 @@ async def test_unloaded_owner_model_is_refused_with_same_repair(local_model, mon
 
     monkeypatch.setattr(intake, "admit_event", capture_event)
     with write_transaction(None, scope="owner_unloaded") as db:
-        db.execute("UPDATE threads SET local_only=? WHERE id=?", (int(restricted), OWNER))
+        if policy == "local-only":
+            db.execute("UPDATE threads SET local_only=1 WHERE id=?", (OWNER,))
+        elif policy == "cloud-off":
+            db.execute("INSERT INTO project_inference_policies (project_id, cloud_models_off) VALUES (?,1)",
+                       (world["project"],))
     local_model["status"] = "available"
     sent = AsyncMock()
     spawn = AsyncMock()
@@ -105,6 +109,7 @@ async def test_unloaded_owner_model_is_refused_with_same_repair(local_model, mon
     assert not get_db().execute("SELECT 1 FROM threads WHERE spawned_by=?", (OWNER,)).fetchone()
     sent.assert_not_awaited()
     spawn.assert_not_awaited()
+    assert local_model["bound"] == []
 
 
 @pytest.mark.asyncio

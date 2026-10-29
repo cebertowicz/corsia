@@ -7,9 +7,10 @@ schema library:
 - every node has ``type``: ``object``, ``array``, ``string``, ``integer``, ``number`` or
   ``boolean``, and may have ``description`` and ``default`` (used when an object's
   optional property is missing; a missing required one is invalid, default or not);
-- ``object`` has ``properties`` (name to node) and ``required`` (names among them);
-- ``array`` has ``items`` (one node);
-- ``string`` may have ``enum`` and ``unknown``, an enum value a string outside the enum
+- ``object`` has ``properties`` (name to node), ``required`` (names among them),
+  and may set ``additionalProperties: false``;
+- ``array`` has ``items`` (one node) and may declare ``maxItems``;
+- ``string`` may declare ``maxLength``, ``enum`` and ``unknown``, an enum value a string outside the enum
   becomes instead of failing;
 - ``integer`` and ``number`` may have ``coerce: true``, which reads a numeric string.
 
@@ -27,9 +28,9 @@ from typing import Any
 
 _TYPES = {"object", "array", "string", "integer", "number", "boolean"}
 _KEYS = {
-    "object": {"properties", "required"},
-    "array": {"items"},
-    "string": {"enum", "unknown"},
+    "object": {"properties", "required", "additionalProperties"},
+    "array": {"items", "maxItems"},
+    "string": {"enum", "unknown", "maxLength"},
     "integer": {"coerce"},
     "number": {"coerce"},
     "boolean": set(),
@@ -62,6 +63,8 @@ def schema_errors(schema: Any, path: str = "corsia.workflow.result", depth: int 
             return [*errors, f"{path}.properties must map names to schemas"]
         for name, node in properties.items():
             errors += schema_errors(node, f"{path}.properties.{name}", depth + 1)
+        if "additionalProperties" in schema and not isinstance(schema["additionalProperties"], bool):
+            errors.append(f"{path}.additionalProperties must be true or false")
         required = schema.get("required", [])
         if not isinstance(required, list) or any(name not in properties for name in required):
             errors.append(f"{path}.required must list names from properties")
@@ -79,6 +82,11 @@ def schema_errors(schema: Any, path: str = "corsia.workflow.result", depth: int 
             errors.append(f"{path}.unknown must be one of its enum")
     elif "coerce" in schema and not isinstance(schema["coerce"], bool):
         errors.append(f"{path}.coerce must be true or false")
+    limit_key = {"array": "maxItems", "string": "maxLength"}.get(kind)
+    if limit_key and limit_key in schema:
+        limit = schema[limit_key]
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+            errors.append(f"{path}.{limit_key} must be a non-negative integer")
     if not errors and "default" in schema:
         try:
             conform(schema["default"], schema, f"{path}.default")
@@ -93,8 +101,11 @@ def conform(value: Any, schema: dict[str, Any], path: str = "result") -> Any:
     if kind == "object":
         if not isinstance(value, dict):
             raise ResultInvalid(f"{path} must be an object")
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False and set(value) - set(properties):
+            raise ResultInvalid(f"{path} has unexpected properties")
         out = dict(value)
-        for name, node in schema.get("properties", {}).items():
+        for name, node in properties.items():
             if name in out:
                 out[name] = conform(out[name], node, f"{path}.{name}")
             elif name in schema.get("required", []):
@@ -105,10 +116,14 @@ def conform(value: Any, schema: dict[str, Any], path: str = "result") -> Any:
     if kind == "array":
         if not isinstance(value, list):
             raise ResultInvalid(f"{path} must be an array")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise ResultInvalid(f"{path} must have at most {schema['maxItems']} items")
         return [conform(item, schema["items"], f"{path}[{index}]") for index, item in enumerate(value)]
     if kind == "string":
         if not isinstance(value, str):
             raise ResultInvalid(f"{path} must be a string")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            raise ResultInvalid(f"{path} must have at most {schema['maxLength']} characters")
         enum = schema.get("enum")
         if enum and value not in enum:
             if "unknown" not in schema:

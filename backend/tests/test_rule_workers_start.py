@@ -58,7 +58,7 @@ async def test_a_matching_rule_starts_one_review_worker_that_reads_only_its_inpu
     assert get_db().execute("SELECT title FROM threads WHERE id=?", (worker,)).fetchone()[0] == "worker-flow"
     launch = _launch(worker)
     start_dir = world["folder"] / "workers" / str(_decision(rule))
-    assert launch["confinement"] == "review"
+    assert launch["confinement"] == "untrusted"
     assert launch["add_dirs"] == [str(world["staging"].resolve()), str(start_dir)]
 
     await settle_all()
@@ -243,7 +243,7 @@ async def test_verified_codex_owner_reaches_spawn(world, monkeypatch):
     from automation import worker_runner
     assert await worker_runner.drive() == 1
     probe.assert_awaited_once()
-    assert spawn.await_args.args[3]["confinement"] == "review"
+    assert spawn.await_args.args[3]["confinement"] == "untrusted"
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

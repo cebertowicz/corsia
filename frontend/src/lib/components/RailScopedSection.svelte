@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { threads, activeThread, activeThreadId, isNavAgent, saveThreadTitle } from '$lib/stores/threads';
+	import { threads, coordinationThreads, activeThread, activeThreadId, isNavAgent, saveThreadTitle } from '$lib/stores/threads';
 	import { canvasHeader } from '$lib/stores/canvasHeader';
 	import { threadActivity, descendantRunning } from '$lib/stores/activity';
 	import { token } from '$lib/stores/auth';
@@ -52,7 +52,7 @@
 	// An unresolved lookup stays clickable: a failed fetch must not read as
 	// "no conductor" — only the API's explicit absent answer disables the entry.
 	// The workspace scope's occupant is the CORSIA agent; a project's is its conductor.
-	let entryLabel = $derived($uiScope ? 'Conductor' : 'CORSIA');
+	let entryLabel = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 	let conductorClickable = $derived(conductorThreadId !== null || !conductorKnownAbsent);
 	let conductorState = $derived(conductorThreadId ? $threadActivity[conductorThreadId] : undefined);
 	let conductorBusy = $derived(conductorState === 'active');
@@ -175,10 +175,10 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? `${entryLabel} — this scope's main thread`
+			? `${entryLabel} — main chat for this ${$uiScope ? 'project' : 'workspace'}`
 			: conductorKnownAbsent
-				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this scope`
-				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
+				? `No main chat for this ${$uiScope ? 'project' : 'workspace'}`
+				: 'Open main chat'}
 	>
 		<button
 			type="button"

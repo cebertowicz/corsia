@@ -62,6 +62,23 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).toContain('Update');
 	});
 
+	it('shows the offered update notes instead of a completed older update', () => {
+		updateStatus.set(status({
+			available: true, target_version: '1.2.0',
+			changes: { kind: 'changelog', headline: null, items: ['New update notes'], more: 0 },
+			operation: {
+				operation_id: 'update-1', status: 'complete', target_version: '1.1.0',
+				changes: { kind: 'changelog', headline: null, items: ['Old update notes'], more: 0 },
+			},
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.textContent).toContain('1.2.0 available');
+		expect(host.querySelector('.offer')?.textContent).toContain('New update notes');
+		expect(host.querySelector('.offer')?.textContent).not.toContain('Old update notes');
+	});
+
 	it('puts the update in progress on the version line and hides the available version', () => {
 		updateStatus.set(status({
 			available: true, target_version: '1.1.0',

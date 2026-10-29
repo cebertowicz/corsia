@@ -31,7 +31,7 @@ async def test_guard_reads_are_repeated_for_each_draft(monkeypatch):
         return 'evidence'
 
     async def screen(account_id, source):
-        return '{"subject":"Topic","body":"evidence"}'
+        return '{"subject":"Topic","screen":{"state":"clean"},"body":"evidence"}'
 
     monkeypatch.setattr(guard_read.client, 'request_json', request)
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)

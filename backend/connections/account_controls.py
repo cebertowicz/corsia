@@ -172,9 +172,8 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
             operation.duplicate_of, receipt = await run_in_db(
                 commit_signed_in, operation.account_id, operation.revision, identity)
         except SameAccount as repeat:
-            operation.duplicate_of = str(repeat)
-            await _cleanup(await run_in_db(get_account, operation.account_id))
-            operation.status, operation.cause = "failed", "same_account"
+            from connections.account_signin_retry import retry_unchecked
+            await retry_unchecked(operation, str(repeat), binary, _cleanup)
             return
         except AccountError:
             operation.status, operation.cause = "superseded", "account_changed"

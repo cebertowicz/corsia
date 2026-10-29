@@ -200,7 +200,7 @@ async def _build_live(
 def _confined_record(
     request: CCSpawnRequest, child_id: str, working_dir: str | None, cc_alias: str,
 ) -> ClaudeInvocation | None:
-    """Store a review child's confinement before anything can launch it.
+    """Store an untrusted child's confinement before anything can launch it.
 
     Without this, a child whose first launch never ran would cold-start
     later from a record with no confinement, so with every tool.
@@ -219,23 +219,23 @@ def _confined_record(
 async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
     _check_live_cap()
-    from connections.models import connection_available
+    from connections.models import provider_may_run
     from registry.cc_session import notify_cc_session, persist_cc_session
 
-    if not connection_available("claude-code", db=db):
+    if not provider_may_run("claude-code", db=db):
         raise ValueError("Claude Code connection is not available")
     parent_metadata, bcast = _parent_context(request, db)
     working_dir = request.working_dir
     cc_alias = _validate_target(request)
     child_id = str(uuid.uuid4())
     if request.confinement != CONFINEMENT_NONE:
-        from subagents.cc_confinement import review_working_dir
+        from subagents.cc_confinement import untrusted_working_dir
 
-        working_dir = review_working_dir(child_id, request.project_id, db)
+        working_dir = untrusted_working_dir(child_id, request.project_id, db)
     name = request.title or request.task[:60]
     from subagents.harness_tool_bridge import build_tool_registry
 
-    # A review child has no tool bridge, so no CORSIA tools, as on every later launch.
+    # An untrusted child has no tool bridge, so no CORSIA tools, as on every later launch.
     tool_registry = None if request.confinement != CONFINEMENT_NONE else build_tool_registry(working_dir)
     user_id = _parent_user_id(request.parent_thread_id, db)
     epoch = await run_in_db(

@@ -30,6 +30,11 @@ def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch):
     argv = linux_shell.shell_argv('true', workspace, thread_id='one', policies=[], env={}, agent_account=account)
     assert any(argv[i:i + 4] == ['--perms', '0000', '--tmpfs', str(gh)] for i in range(len(argv)))
     assert not any(argv[i:i + 3] == ['--ro-bind', str(gh), str(gh)] for i in range(len(argv)))
+    absent = github_agent.AgentAccountView(state='not_installed', absent=True)
+    script_argv = linux_shell.shell_argv('true', workspace, thread_id='one', policies=[], env={},
+                                         agent_account=absent, extra_hidden_roots=[gh])
+    assert any(script_argv[i:i + 4] == ['--perms', '0000', '--tmpfs', str(gh)]
+               for i in range(len(script_argv)))
 
 
 def test_protected_overlay_pins_every_ancestor_before_overlay(linux_sandbox_root):

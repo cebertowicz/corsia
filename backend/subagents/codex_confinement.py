@@ -1,8 +1,8 @@
-"""Codex's version-pinned, bridge-only review-worker launch boundary.
+"""Codex's version-pinned, bridge-only untrusted-worker launch boundary.
 
-0.162.1 exposes no full model-request tools readback in app-server. The
-credential-free capture test checks the entire Responses tools array, including
-hosted tools, on start and resume. Other versions must refuse until recaptured.
+The credential-free capture test checked the entire Responses tools array,
+including hosted tools, on start and resume for each listed version. Other
+versions must refuse until captured.
 The harness process itself is not OS-sandboxed; paths are enforced by CORSIA.
 """
 from __future__ import annotations
@@ -12,10 +12,12 @@ import asyncio
 from infra.database import get_db
 from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
-from tools.confined_reads import REVIEW_READ_TOOLS
+from subagents.codex_versions import CAPTURED_CODEX_VERSIONS, captured_versions
+from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
-CAPTURED_CODEX_VERSION = "codex-cli 0.162.1"
-# Verified against rust-v0.162.1 core/config.schema.json and tools/spec_plan.rs.
+# Each listed version passed the full-array capture on start and resume.
+# CONFIG keys appear in core/config.schema.json for every listed version;
+# tools/spec_plan.rs and the capture cover tool planning and observed requests.
 # Environment tools independently enable apply_patch, even with shell disabled.
 CONFIG = (
     # Prevent plugin startup sync's hard-coded GitHub/ChatGPT requests too.
@@ -59,14 +61,14 @@ def assert_tools(definitions) -> None:
     names = []
     for definition in definitions:
         tool = definition.get("function", definition)
-        if definition.get("type") != "function" or tool.get("name") not in REVIEW_READ_TOOLS:
+        if definition.get("type") != "function" or tool.get("name") not in UNTRUSTED_READ_TOOLS:
             raise ConfinementRefused(
-                "Couldn’t start this read-only agent on Codex: CORSIA supplied an unsafe tool. Choose another model."
+                "Couldn’t start this read-only agent on Codex: it couldn’t be limited to reading files. Choose another model."
             )
         names.append(tool["name"])
-    if len(names) != len(REVIEW_READ_TOOLS) or set(names) != REVIEW_READ_TOOLS:
+    if len(names) != len(UNTRUSTED_READ_TOOLS) or set(names) != UNTRUSTED_READ_TOOLS:
         raise ConfinementRefused(
-            "Couldn’t start this read-only agent on Codex: CORSIA supplied the wrong tools. Choose another model."
+            "Couldn’t start this read-only agent on Codex: it couldn’t be limited to reading files. Choose another model."
         )
 
 
@@ -105,11 +107,13 @@ async def verify_version(binary: str | None = None) -> None:
             await process.wait()
         raise
     version = output.decode(errors="replace").strip()
-    if process.returncode != 0 or version != CAPTURED_CODEX_VERSION:
+    if process.returncode != 0 or version not in CAPTURED_CODEX_VERSIONS:
+        versions = captured_versions()
+        supported = ", ".join(versions[:-1]) + " and " + versions[-1] if len(versions) > 1 else versions[0]
         raise ConfinementRefused(
             f"Couldn’t start this read-only agent on Codex {version.removeprefix('codex-cli ') or '(version unknown)'}: "
-            "read-only agents run only on Codex 0.162.1 for now. "
-            "Switch Codex to 0.162.1, or choose another model."
+            f"read-only agents work only on Codex {supported}. "
+            "Switch Codex to one of those, or choose another model."
         )
 
 

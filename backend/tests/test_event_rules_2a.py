@@ -466,10 +466,10 @@ async def test_a_burst_wakes_a_rule_and_the_owner_on_every_event(isolated_db, se
 
     for n in range(50):
         assert (await route(SYNC, _sync(7, n))).outcome == RouteOutcome.ACCEPTED
-    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.ACCEPTED
+    assert (await route("webhook.github.pr_comment", _comment(7))).outcome == RouteOutcome.DEAD_LETTERED
 
-    # The owner's routing is untouched: every push and the comment wake it.
-    assert [thread for thread, _ in sent] == ["owner"] * 51
+    # Every push wakes the owner; the unhandled outside comment is dead-lettered.
+    assert [thread for thread, _ in sent] == ["owner"] * 50
     assert all("rule_notes" not in content for _, content in sent)
     wakes = _wakes("watcher")
     assert len(wakes) == 50
@@ -881,8 +881,10 @@ def test_a_watch_ends_only_where_a_rule_added_the_delivery(isolated_db, monkeypa
     monkeypatch.setattr("events.platform.resolve_targets", _no_thread)
     made = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-3"))
 
-    # Routing chose no thread, so the rule added a wake and that delivery ends the wait.
-    assert ("owner", "woke") in {(d.thread_id, d.outcome) for d in made}
+    # Routing chose no thread, so the rule added a wake and that delivery ends the wait;
+    # the rule took the event, so it is not also dead-lettered.
+    assert {(d.thread_id, d.outcome) for d in made} == {("owner", "woke")}
+    assert _rows("SELECT id FROM dead_letter_events") == []
     assert _armed(node) == 0
 
 
@@ -1238,6 +1240,8 @@ async def test_authored_rule_matches_github_content_facts(isolated_db, sent, mon
     await dispatch_github_webhook_for_replay(
         "issues" if kind == "issue.opened" else "issue_comment", raw, delivery_id=f"{kind}-{source}")
     assert _decisions(rule_id=rule["id"])[0]["outcome"] == "woke"
+    if kind != "issue.opened":
+        assert _rows("SELECT id FROM dead_letter_events") == []
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from core._tool_result_delivery_support import ToolResultBindingError
 from core.fork_cc_context import CCForkContext
 from infra.write_admission import sqlite_errorname_tag
-from subagents.cc_confinement import drop_review_credentials
+from subagents.cc_confinement import drop_untrusted_credentials
 from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation, build_claude_cmd
 from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 from subagents.cc_events import normalize_event
@@ -129,7 +129,7 @@ class CCStreamSession:
         apply_claude_config_dir(env, self.claude_dir)
         env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
         if self.confinement != CONFINEMENT_NONE:
-            drop_review_credentials(env)
+            drop_untrusted_credentials(env)
         return env
 
     async def start(self) -> None:

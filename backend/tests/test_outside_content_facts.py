@@ -1,6 +1,7 @@
 """Outside-content classification and fact boundaries."""
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -58,11 +59,17 @@ def test_content_author_and_versions(kind, action, expected):
     facts = MANIFEST.extract_facts(raw, None)
     assert facts["author"] == "outside" and facts["author_origin"] == "outside"
     assert "BODY_CANARY" not in json.dumps(facts) and "TITLE_CANARY" not in json.dumps(facts)
-    version = "head123" if kind == "pr" and action in ("opened", "synchronize") else "42:2026-10-26T00:00:00Z" if action == "edited" else 7 if action == "opened" else 42
+    version = ("head123" if kind == "pr" and action in ("opened", "synchronize") else
+               "42:" + hashlib.sha256(b"BODY_CANARY").hexdigest()[:12] if kind == "review" and action == "edited" else
+               "42:2026-10-26T00:00:00Z" if action == "edited" else 7 if action == "opened" else 42)
     assert facts["item_version"] == version
     if action == "edited" or kind == "review":
         event = {"pr_comment": "issue_comment", "issue_comment": "issue_comment", "issue": "issues", "review": "pull_request_review"}[kind]
-        assert map_github_event(event, raw) is None
+        mapped = map_github_event(event, raw)
+        if kind == "issue":
+            assert mapped is None
+        else:
+            assert mapped == MANIFEST.decl(expected).routed_event
 
 
 def test_unknown_and_suppression_share_author():

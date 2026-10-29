@@ -98,7 +98,7 @@ def _objects(db, table: str) -> dict[str, str]:
 
 
 def test_the_step_is_registered_and_106_is_current() -> None:
-    assert SCHEMA_VERSION == 158
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[105] is step.migrate_105_to_106
 
 

@@ -152,14 +152,34 @@ def _plans_hear(source_kind: str, source_id: str) -> None:
 
 
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
-    """Hand the corrections worker an admitted owner message; best effort, never failing the send."""
+    """Hand Plans and the corrections worker an admitted owner message; best effort, never failing the send.
+
+    Plans hears any message holding the person's words, comment notes included;
+    the corrections worker takes typed text as the message and each non-blank
+    chat comment note as its own source.
+    """
     from core.corrections_recording import is_owner_authored_message
     from jobs.corrections_realtime import notify
 
     try:
-        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
+        from plans.public import person_message_words
+
+        if accepted.duplicate:
+            return
+        if person_message_words(role=role, content=content, metadata=metadata):
             _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if is_owner_authored_message(role=role, content=content, metadata=metadata):
             notify(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if is_owner_authored_message(role=role, content=content, metadata=metadata, allow_blank=True):
+            from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id
+            from infra.reply_context import comment_cid
+
+            context = metadata.get("reply_context", {}) if isinstance(metadata, dict) else {}
+            comments = context.get("comments", []) if isinstance(context, dict) else []
+            if isinstance(comments, list):
+                for index, comment in enumerate(comments):
+                    if isinstance(comment, dict) and isinstance(comment.get("note"), str) and comment["note"].strip():
+                        notify(SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id(accepted.message_id, comment_cid(accepted.input_order, index)))
     except Exception:
         logger.exception("corrections classifier admission notification failed")
 
@@ -212,7 +232,7 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
 def unreadable_facts(db, version: ClassifierVersion) -> int:
     """Count served unreadable facts in the Measurement window, once per source.
 
-    Message and document-comment facts count, including legacy facts that lack a
+    Message, chat-comment and document-comment facts count, including legacy facts that lack a
     source-kind attribute. Decision answers stay triage-only. The ``(event_name,
     ts)`` index bounds the read to the window's correction facts.
     """
@@ -249,7 +269,10 @@ async def next_pending_batch(
     keys: list[PendingCandidateKey] = await run_in_db(
         pending_source_candidate_keys, version, batch_size, before, since,
     )
+    from jobs.chat_comment_corrections import pending_chat_comment_keys
+
     for owner_user_id in await run_in_db(owner_user_ids):
+        keys.extend(await run_in_db(pending_chat_comment_keys, version, batch_size, owner_user_id, before, since))
         keys.extend(
             await run_in_db(
                 pending_candidate_keys, version, batch_size, owner_user_id, before, since,

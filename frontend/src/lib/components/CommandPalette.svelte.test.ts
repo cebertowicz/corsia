@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import CommandPalette from './CommandPalette.svelte';
 import { paletteOpen } from '$lib/stores/palette';
-import { threads } from '$lib/stores/threads';
+import { threads, coordinationThreads } from '$lib/stores/threads';
 import { _setProjectsForTests } from '$lib/stores/projects';
 
 let host: HTMLElement;
@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
 	paletteOpen.set(false);
 	threads.set([]);
+	coordinationThreads.set([]);
 	_setProjectsForTests([]);
 	if (component) unmount(component);
 	component = null;
@@ -60,6 +61,21 @@ afterEach(() => {
 });
 
 describe('CommandPalette query results', () => {
+	it('finds coordination threads by their stored names', () => {
+		coordinationThreads.set([
+			{ id: 'corsia', user_id: 'user-1', profile: 'personal', title: 'CORSIA', model: null, coordination: 'corsia', created_at: '2026-10-02', updated_at: '2026-10-02' },
+			{ id: 'alpha', user_id: 'user-1', profile: 'personal', title: 'Alpha Conductor', model: null, coordination: 'conductor', project_id: 'project-alpha', created_at: '2026-10-03', updated_at: '2026-10-03' },
+		]);
+		renderPalette();
+		typeQuery('conductor');
+		expect(host.textContent).toContain('Alpha Conductor');
+		host.querySelector<HTMLButtonElement>('.res.sel')!.click();
+		expect(onPickConversation).toHaveBeenCalledWith('alpha');
+		paletteOpen.set(true);
+		flushSync();
+		typeQuery('corsia');
+		expect(host.textContent).toContain('CORSIA');
+	});
 	it('hides unmatched actions while showing empty result groups', () => {
 		renderPalette();
 		typeQuery('no-match');
@@ -68,7 +84,7 @@ describe('CommandPalette query results', () => {
 		expect(host.textContent).not.toContain('Go to workspace');
 		expect(host.textContent).not.toContain('New project');
 		expect(host.textContent).toContain('No matching projects.');
-		expect(host.textContent).toContain('No matching conversations.');
+		expect(host.textContent).toContain('No matching chats.');
 	});
 
 	it('hides archived projects in empty and matching-query results', () => {

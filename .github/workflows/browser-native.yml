@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/host_access/browser_*.py'
       - 'backend/host_access/processes.py'
+      - 'backend/tools/browser_*.py'
       - 'backend/tests/*browser*.py'
       - 'backend/requirements.lock'
       - '.github/workflows/browser-native.yml'
@@ -39,6 +40,10 @@ jobs:
           node-version: '20'
       - name: Install isolated pinned dependencies
         run: |
+          if ! command -v xwininfo >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends x11-utils
+          fi
           python -m venv .venv
           .venv/bin/python -m pip install -r backend/requirements.lock
           npm install --prefix "$RUNNER_TEMP/browser-cli" --no-audit --no-fund agent-browser@0.31.2
@@ -61,3 +66,18 @@ jobs:
             backend/tests/test_browser_native.py backend/tests/test_browser_real_socket.py \
             backend/tests/test_browser_restricted_ports.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60
+      - name: Verify setup steps run in the native browser
+        env:
+          CORSIA_BROWSER_E2E: '1'
+        run: |
+          # The runner resolves agent-browser from PATH; give it the pinned native binary by that name.
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -sf "$CORSIA_NATIVE_BROWSER_BINARY" "$RUNNER_TEMP/browser-bin/agent-browser"
+          # Same as the native owner fixture: without CI, stock native keeps Chrome's sandbox.
+          set -o pipefail
+          PATH="$RUNNER_TEMP/browser-bin:$PATH" env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
+            "backend/tests/test_browser_shared_e2e.py::test_installed_setup_steps_run_in_native_browser" \
+            "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
+            -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; both must actually run.
+          grep -q " 2 passed" "$RUNNER_TEMP/setup-steps.log"

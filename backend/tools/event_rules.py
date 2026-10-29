@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from events import rule_actions, rule_authoring, rule_listing, rule_runs, rule_types, rules
+from events import observe_rules, rule_actions, rule_authoring, rule_listing, rule_runs, rule_types, rules
 from infra import config
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -83,7 +83,8 @@ def _workflows(thread_id: str, project_id: str | None) -> dict[str, Any]:
 
 async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     """Send one declared event as this chat; the receipt, or the refusal with its fix."""
-    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error
+    from events.intake import admit_event, emitted_event_id
+    from events.intake_errors import failure_code, format_event_error
 
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:
@@ -122,7 +123,9 @@ class EventRulesTool(Tool):
             "`run_script` runs one of your script schedules (`script_id`, from automation_list; "
             "register it with automation_schedule without cadence_seconds so only rules start it) "
             "with the event as JSON on its stdin, within about a minute; it takes no `to`, `mode` "
-            "or `note`, and the event still reaches whoever it reaches today. An event the run "
+            "or `note`, and the event still reaches whoever it reaches today. For GitHub reads, "
+            "use `corsia github read <api-path>`; build the path from the rule's own fields, "
+            "never from event text. An event the run "
             "emits carries the rule, so a rule already in that chain is skipped, not run again; "
             "a run while you are paused is skipped and not replayed. A script runs once at a time, "
             f"so runs wait their turn; a match while {rule_runs.QUEUE_CAP} of its rule's runs wait "
@@ -138,9 +141,10 @@ class EventRulesTool(Tool):
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A paused chat gets a digest instead. "
-            "`kind: observe` (create) registers you to the file your shell command's output names: "
-            "give `tool: bash`, the command's leading words as `argv_prefix` (such as gh pr create) "
-            "and the `item_type` a connector reads from the command's output (`types` lists them), "
+            "`kind: observe` (create) registers you to the file a shell command's or connected app's output names: "
+            "for a command give `tool: bash` and the command's leading words as `argv_prefix` (such as gh pr create); "
+            "for a connected app give its upstream tool name as `tool` (not its CORSIA alias); "
+            "the connector that reads `item_type` names the apps it covers. Give the `item_type` a connector reads from the output (`types` lists them), "
             "and no `to`, `mode`, `note`, `match` or `action`. The result tells you what happened; "
             "a file that already has an owner is never taken from it. A shipped rule set's own "
             "observe rules are in list's `rule_sets` and cover every agent. "
@@ -185,10 +189,10 @@ class EventRulesTool(Tool):
                                       "name thread:<agent id> for a digest"},
                 "mode": {"type": "string", "enum": [rules.WAKE, rules.DIGEST]},
                 "note": {"type": "string", "maxLength": rules.NOTE_LIMIT},
-                "kind": {"type": "string", "enum": [rules.ROUTE, "observe"],
+                "kind": {"type": "string", "enum": [rules.ROUTE, observe_rules.OBSERVE],
                          "description": "create: route (the default) or observe"},
-                "tool": {"type": "string", "description": "create observe: the shell tool, bash"},
-                "argv_prefix": {"type": "array", "items": {"type": "string"}, "maxItems": 8,
+                "tool": {"type": "string", "description": "create observe: bash, or the connected app's upstream tool name"},
+                "argv_prefix": {"type": "array", "items": {"type": "string"}, "maxItems": observe_rules.MAX_PREFIX,
                                 "description": "create observe: the command's leading words, e.g. gh, pr, create"},
                 "item_type": {"type": "string",
                               "description": "create observe: the artifact type a connector reads from the output"},

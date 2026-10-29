@@ -35,15 +35,15 @@ def _dev_135() -> sqlite3.Connection:
     return db
 
 
-def test_upgrade_from_135_matches_a_fresh_install_and_seeds_only_the_shipped_rule(tmp_path):
+def test_upgrade_from_135_matches_a_fresh_install_and_seeds_only_shipped_rules(tmp_path):
     fresh = _fresh()
     upgraded = _dev_135()
     result = migrate_to_current(upgraded, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 158)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 163)
     sync_shipped_rules(upgraded)
     sync_shipped_rules(fresh)
     assert [tuple(r) for r in upgraded.execute(_OBJECTS)] == [tuple(r) for r in fresh.execute(_OBJECTS)]
-    shipped = {"event_rules": 1}  # the shipped rule set's observe row, never an agent's
+    shipped = {"event_rules": 2}  # the shipped rule set's observe rows, never an agent's
     for table in _TABLES:
         for db in (upgraded, fresh):
             assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == shipped.get(table, 0)

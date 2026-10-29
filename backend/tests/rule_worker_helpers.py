@@ -4,7 +4,7 @@ whose every answer is what the test writes to its reply file.
 
 Everything between the event and the worker's result runs for real: the ``event_rules``
 tool, intake and rule evaluation, the worker runner, ``delegate_task``'s spawn with the
-``review`` confinement, the Claude Code runtime and the settle. Only the owner's own
+``untrusted`` confinement, the Claude Code runtime and the settle. Only the owner's own
 turn after a wake is recorded instead of run.
 """
 
@@ -195,7 +195,7 @@ def owner_script(world, monkeypatch, name: str) -> str:
 
     world.setdefault("script_inputs", [])
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None, github_repo=None):
         world["script_inputs"].append(json.loads(stdin) if stdin is not None else None)
         return ScriptRun(0, b"", b"", False)
 

@@ -13,6 +13,11 @@ from registry import models
 from registry.ownership import rehome_artifact
 
 
+@pytest.fixture(autouse=True)
+def _historical_mode(monkeypatch):
+    monkeypatch.setattr(thread_confinement, "CONFINEMENT_UNTRUSTED", "review")
+
+
 @pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
 def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
     db = sqlite3.connect(":memory:")
@@ -307,5 +312,5 @@ def test_absent_or_partial_registry_is_a_noop():
 
 
 def test_migration_registered():
-    assert SCHEMA_VERSION == 158
+    assert SCHEMA_VERSION == 163
     assert MIGRATIONS[156] is migrate_156_to_157

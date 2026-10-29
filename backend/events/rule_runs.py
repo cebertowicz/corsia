@@ -25,6 +25,7 @@ import sqlite3
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from events.worker_labels import labelled_event
 from events.rule_outcomes import (
     DROPPED, FAILED, QUEUED, RAN, RUN_SCRIPT, RUNNING, SKIPPED, Outcome, Rule, RuleEvent,
 )
@@ -71,8 +72,9 @@ def queue(
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=QUEUE_FULL))
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, run_input=json.dumps({
-                "event": {"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
-                          "rule_id": rule.id, "facts": dict(event.facts)},
+                "event": labelled_event({"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
+                          "rule_id": rule.id, "facts": dict(event.facts), "origin": event.origin,
+                          **({"artifact": dict(event.artifact_ref)} if event.artifact_ref else {})}),
                 "trace": [*event.trace, rule.id],
             }, ensure_ascii=False, default=str)))
     return outcomes

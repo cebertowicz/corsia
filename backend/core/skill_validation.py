@@ -6,9 +6,10 @@ resolution.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -52,6 +53,8 @@ class SkillValidation:
     errors: list[str] = field(default_factory=list)
     # The CORSIA data (handler, workflow): the sidecar's, or a lesson block's.
     corsia: dict[str, Any] | None = None
+    raw_sha256: str | None = None
+    source_data: bytes | None = None
 
 
 def _lesson_block(meta: dict[str, Any]) -> dict[str, Any] | None:
@@ -308,9 +311,12 @@ def validate_skill_file(path: Path) -> SkillValidation:
     Read and parse errors are reported as validation errors.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        data = path.read_bytes()
         sidecar, problem = read_sidecar(path.parent)
-        return _validate(text, bundle=True, sidecar=sidecar, problem=problem)
+        return replace(
+            _validate(data.decode("utf-8"), bundle=True, sidecar=sidecar, problem=problem),
+            raw_sha256=hashlib.sha256(data).hexdigest(), source_data=data,
+        )
     except OSError as exc:
         return SkillValidation(
             ok=False,

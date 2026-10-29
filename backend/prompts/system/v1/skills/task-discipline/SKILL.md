@@ -1,15 +1,15 @@
 ---
 name: task-discipline
-description: Use when accepting, performing, re-scoping, delegating, waiting on, or closing work with more than one step, whenever a thread holds multiple tasks, and before substantive research, analysis, design, recommendations, artifacts, or mutations—procedures for the alignment, groundwork, and verification gates, the plan, and work with no established workflow.
+description: Use when accepting, performing, re-scoping, delegating, waiting on, or closing work with more than one step, whenever a thread holds multiple tasks, and before substantive research, analysis, design, recommendations, artifacts, or mutations—procedures for aligning on the request, groundwork, verification, the plan, and work with no established workflow.
 ---
 
 # Task discipline
 
-Core context defines the alignment, groundwork, and verification gates and their exits. This skill is how to meet them, and it applies to every agent, subagent, and task size.
+This skill is how to align on a request, ground your work in what exists, and verify it before calling it done. It applies to every agent, subagent, and task size.
 
 ## Alignment
 
-Core context's Alignment gate is the procedure. Mark an inferred part of `intent` `ASSUMED:` with its source.
+Before substantive work, record your reading on the task: `intent` holds the outcome, for whom, what done means, what is out, and how you settled what the request left open; `intent_words` quotes the request verbatim. Mark an inferred part of `intent` `ASSUMED:` with its source.
 
 ## Groundwork by work type
 
@@ -22,7 +22,7 @@ Inspect the primary target where it is actually used, then the owners and prior 
 
 Search the user's words and the underlying concept. Retrieve the applicable domain requirements, decisions and failure cases from the owner's canonical reference; citing its index alone is insufficient. Name what you reuse or amend, and why existing candidates fail before creating another.
 
-Apply the core groundwork gate to factual premises needed to proceed. Probe the intended combination and composed experience, not just each capability separately; record the actual result and revise the approach when it fails. A limit or target needs a source, measurement or explicitly confirmed assumption.
+Check each factual premise you need to proceed before building on it. Probe the intended combination and composed experience, not just each capability separately; record the actual result and revise the approach when it fails. A limit or target needs a source, measurement or explicitly confirmed assumption.
 
 ## Verification methods
 
@@ -49,7 +49,7 @@ Read the plan fresh before changing it. Each node has a plain title and acceptan
 
 ## Declared workflows
 
-If you are applying a skill (not just reading or reviewing it) whose `corsia.yaml` (named by `metadata.corsia-data` in its SKILL.md) has `workflow.steps`, and its **Applying these steps** note covers this run, create one phase for this run, then under it one task per step you will do. Each task's acceptance criteria is the step's `check`; its dependencies are the step's `after`. To skip an optional step, create no task: add `skipped: <step id>, <reason>` to the phase description, and give its dependents the skipped step's `after` instead (repeat if that step is skipped too). A required step whose check is already met still gets a task, completed normally. Before starting, rate each task's difficulty: the step's `difficulty` wins; if it has none, ask yourself: is the wanted result clear, is there a known way to do it here, is it one piece? Three yes is routine, one no standard, more hard. Also set each task's `size` (see **Size**). On add or insert, pass `workflow_ref` (the skill name), `workflow_step` (the step id, or `+<short-name>` for an added step), and `difficulty`; the version is recorded for you. For a step you add, put the reason in that task's description. If a rating proves wrong, use the existing `difficulty_rerated` path.
+If you are applying a skill (not just reading or reviewing it) whose `corsia.yaml` (named by `metadata.corsia-data` in its SKILL.md) has `workflow.steps`, and its **Applying these steps** note covers this run, create one phase for this run, then under it one task per step you will do. Each task's acceptance criteria is the step's `check`; its dependencies are the step's `after`. To skip an optional step, create no task: add `skipped: <step id>, <reason>` to the phase description, and give its dependents the skipped step's `after` instead (repeat if that step is skipped too). A required step whose check is already met still gets a task, completed normally. Before starting, rate each task's difficulty: the step's `difficulty` wins; if it has none, ask yourself: is the wanted result clear, is there a known way to do it here, is it one piece? Three yes is routine, one no standard, more hard. Also set each task's `size` (see **Size**). On add or insert, pass `workflow_ref` (the skill name), `workflow_step` (the step id, or `+<short-name>` for an added step), and `difficulty`. A step that names `workflow:` gets a phase instead of a task, set up exactly as a task would be (acceptance criteria, dependencies, `workflow_step`, and a `difficulty` rated the same way) except that its `workflow_ref` is the named workflow; plan the named workflow's steps inside it the same way. For a step you add, put the reason in that task's description. If a rating proves wrong, use the existing `difficulty_rerated` path.
 
 ## Delegated work
 

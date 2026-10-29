@@ -34,7 +34,7 @@ def _read_facts(raw: str) -> dict[str, Any] | Any:
 
 
 def _print_error(code: str, text: str, fix: str | None = None) -> None:
-    from events.intake import format_event_error
+    from events.intake_errors import format_event_error
 
     print(f"error: {format_event_error(code, text, fix)}", file=sys.stderr)
 
@@ -54,7 +54,8 @@ def _trace() -> tuple[str, ...] | None:
 
 
 def _cmd_emit(args: argparse.Namespace) -> int:
-    from events.intake import admit_event, emitted_event_id, failure_code
+    from events.intake import admit_event, emitted_event_id
+    from events.intake_errors import failure_code
 
     session = args.as_thread or os.environ.get("CORSIA_THREAD_ID")
     if not session:

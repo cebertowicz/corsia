@@ -265,8 +265,9 @@
 	.feedback-controls { flex: none; min-width: max-content; }
 	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
 	@container doc-header (max-width: 32.5rem) {
-		/* At chat-split and phone widths, the approved labelled controls remain one centered compact row. */
+		/* Keep the approved compact row; a held sender may wrap rather than leave the canvas. */
 		.document-tools { flex-wrap: nowrap; align-items: center; gap: 0; }
+		.document-tools:has(:global(.sending-now)) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
 		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}

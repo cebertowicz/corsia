@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { AttentionDestination, CommentReplyItem } from '$lib/api/attentionQueue';
-	import type { MessageCard } from '$lib/api/messageCards';
-	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
+	import UnreadReplyChip from '$lib/components/comments/UnreadReplyChip.svelte';
 	import { activeThreadId } from '$lib/stores/threads';
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -30,24 +29,9 @@
 		null as CommentReplyItem | null,
 	));
 	const singleDocument = $derived(documents.length === 1 ? documents[0] : null);
-	const countLabel = $derived(`${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}`);
-	const documentLabel = $derived(singleDocument ? singleDocument.detail.title : `${documents.length} documents`);
-	const chipLabel = $derived(documents.some(item => item.detail.destination.pane === 'chat-replies') ? countLabel : `${countLabel} · ${documentLabel}`);
-	const card = $derived.by((): MessageCard | null => {
-		const target = singleDocument ?? newest;
-		if (!target) return null;
-		return {
-			kind: 'artifact',
-			artifact_id: target.detail.destination.id,
-			title: chipLabel,
-			type: target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document',
-			icon: target.detail.destination.pane === 'chat-replies' ? 'message-square' : 'file-text',
-			name: chipLabel,
-			path: target.detail.destination.path ?? null,
-			available: true,
-			opens: true,
-		};
-	});
+	const target = $derived(singleDocument ?? newest);
+	const where = $derived(documents.some(item => item.detail.destination.pane === 'chat-replies')
+		? null : singleDocument ? singleDocument.detail.title : `${documents.length} documents`);
 
 	function openReplyDocument(): void {
 		const target = singleDocument ?? newest;
@@ -56,8 +40,6 @@
 
 </script>
 
-{#if card && unreadCount}
-	<section class="reply-chip-notice" aria-label="Unread agent replies">
-		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker onActivate={openReplyDocument} />
-	</section>
+{#if target && unreadCount}
+	<UnreadReplyChip artifactId={target.detail.destination.id} count={unreadCount} {where} type={target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document'} onOpen={openReplyDocument} />
 {/if}

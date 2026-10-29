@@ -23,11 +23,21 @@ def _targets(ids, *, db):
     for row in rows:
         grouped.setdefault(row['thread_id'], []).append(row)
     targets = {}
+    projected: dict[str, dict | None] = {}
     for thread, candidates in grouped.items():
-        exact = [r for r in candidates if r['catalog_id'] == str(r['model'] or '').strip()]
+        model = str(candidates[0]['model'] or '').strip()
+        exact = [r for r in candidates if r['catalog_id'] == model]
         chosen = exact or [r for r in candidates if r['catalog_id'] is not None]
         if len(chosen) == 1 and chosen[0]['harness'] in ('codex', 'claude-code'):
             targets[thread] = chosen[0]
+        elif not chosen and model.startswith(('codex/', 'claude-code/')):
+            from llm.harness_catalog import harness_row
+
+            if model not in projected:
+                projected[model] = harness_row(model, db=db)
+            row = projected[model]
+            if row is not None:
+                targets[thread] = {**dict(candidates[0]), 'catalog_id': row['id'], 'harness': row['harness']}
     return targets
 
 
@@ -50,7 +60,7 @@ def _accounts(choices, *, db):
 
 
 def _batch(ids, *, db) -> dict[str, AccountReadiness]:
-    from connections.account_policy import NOT_CONFIGURED, account_reason, thread_scope, turn_account
+    from connections.account_policy import NOT_CONFIGURED, account_reason, turn_account
     from connections.vendor_accounts import AccountError
 
     targets = _targets(ids, db=db)
@@ -75,7 +85,7 @@ def _batch(ids, *, db) -> dict[str, AccountReadiness]:
             continue  # Missing evidence never becomes ready.
         if choice_reason == NOT_CONFIGURED:
             choice_reason = None
-        project_id = thread_scope(thread, db=db)['project_id']
+        project_id = target['project_id']
         cause = choice_reason or (account_reason(
             account, provider=target['harness'], project_ids=[project_id] if project_id is not None else [],
             execution=True, model=str(target['model'] or '').strip(), db=db) if account is not None else None)

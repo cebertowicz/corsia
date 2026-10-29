@@ -18,17 +18,20 @@ from loguru import logger
 CORRECTION_EVENT = "measurement.correction"
 SOURCE_KIND_MESSAGE = "message"
 SOURCE_KIND_DOC_COMMENT = "doc_comment"
+SOURCE_KIND_CHAT_COMMENT = "chat_comment"
 SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
 SOURCE_KIND_SENT_BACK = "sent_back"
 SOURCE_KIND_SELF_CAUGHT = "self_caught"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
+CHAT_COMMENT_SUBJECT_PREFIX = "chat-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
 SENT_BACK_SUBJECT_PREFIX = "plan-review-rejected:"
 SELF_CAUGHT_SUBJECT_PREFIX = "plan-correction-created:"
 SUBJECT_PREFIXES = {
     SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
     SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
+    SOURCE_KIND_CHAT_COMMENT: CHAT_COMMENT_SUBJECT_PREFIX,
     SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
     SOURCE_KIND_SENT_BACK: SENT_BACK_SUBJECT_PREFIX,
     SOURCE_KIND_SELF_CAUGHT: SELF_CAUGHT_SUBJECT_PREFIX,
@@ -202,6 +205,28 @@ def self_caught_dedupe_key(correction_event_id: str) -> str:
     return f"correction:{SOURCE_KIND_SELF_CAUGHT}:{correction_event_id}"
 
 
+def chat_comment_source_id(message_id: str, cid: str) -> str:
+    """Identify a comment by its colon-free cid and sending message."""
+    return f"{cid}:{message_id}"
+
+
+def chat_comment_source_id_sql(alias: str) -> str:
+    """SQL source identity for an indexed chat comment."""
+    return f"{alias}.cid || ':' || {alias}.user_message_id"
+
+
+def chat_comment_source_parts(source_id: str) -> tuple[str, str] | None:
+    """Decode a source identity to (message id, cid)."""
+    cid, separator, message_id = source_id.partition(':')
+    return (message_id, cid) if separator else None
+
+
+def chat_comment_source_parts_sql(source_id: str) -> tuple[str, str]:
+    """SQL expressions for the message id and cid of a source identity."""
+    separator = f"instr({source_id},':')"
+    return f"substr({source_id},{separator}+1)", f"substr({source_id},1,{separator}-1)"
+
+
 def decision_answer_source_id(decision_id: str, revision: object) -> str:
     """The stable source id for one answered revision of a plan decision."""
     return f"{decision_id}:{revision}"
@@ -256,19 +281,19 @@ def is_wrapper_or_delivery(
 
 
 def is_owner_authored_message(
-    *, role: object, content: object, metadata: object,
+    *, role: object, content: object, metadata: object, allow_blank: bool = False,
 ) -> bool:
     """Return whether one stored row is an owner's authored, non-system message.
 
     Scope membership is a query responsibility; this reusable predicate owns the
     row-level definition shared by the recording job and the served measure.
     """
-    if role != "user" or not isinstance(content, str) or not content.strip():
+    if role != "user" or not isinstance(content, str) or (not allow_blank and not content.strip()):
         return False
     return not is_wrapper_or_delivery(content, metadata)
 
 
-def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
+def owner_message_sql_predicate(alias: str = "m", *, allow_blank: bool = False) -> tuple[str, dict[str, str]]:
     """Build the SQL-safe superset filter for ``is_owner_authored_message``.
 
     The Python predicate remains authoritative after fetching rows. This filter only
@@ -276,7 +301,9 @@ def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
     cannot starve a bounded pending-candidate scan.
     """
     params = {"owner_message_role": "user"}
-    clauses = [f"{alias}.role=:owner_message_role", f"length(trim({alias}.content, ' ' || char(9, 10, 13))) > 0"]
+    clauses = [f"{alias}.role=:owner_message_role"]
+    if not allow_blank:
+        clauses.append(f"length(trim({alias}.content, ' ' || char(9, 10, 13))) > 0")
     for index, prefix in enumerate(SYSTEM_WRAPPER_PREFIXES):
         # Exact, case-sensitive prefix test like str.startswith; LIKE folds ASCII case.
         key = f"owner_wrapper_prefix_{index}"

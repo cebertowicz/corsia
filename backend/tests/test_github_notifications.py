@@ -111,7 +111,8 @@ def test_every_github_call_is_a_read(through_broker):
         assert "notifications/threads" not in call[-1]
 
 
-def test_polled_comment_routes_exactly_as_the_webhook_payload():
+def test_polled_comment_routes_exactly_as_the_webhook_payload(monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "reviewer-human")
     owner = mk_session("own-1")
     register_pr(REPO, PR, owner)
     comment = comment_object(501)
@@ -133,7 +134,12 @@ def test_polled_comment_routes_exactly_as_the_webhook_payload():
 
     webhook_calls, polled_calls = asyncio.run(_run())
     assert len(webhook_calls) == 2
-    assert polled_calls == webhook_calls
+    # Each polled comment dispatches as its own background task, so the two
+    # deliveries may finish in either order; only their content must match.
+    def by_comment(call):
+        return call[3]["item_version"]
+
+    assert sorted(polled_calls, key=by_comment) == sorted(webhook_calls, key=by_comment)
     assert {call[0] for call in polled_calls} == {owner}
 
 

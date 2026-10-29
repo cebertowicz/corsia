@@ -23,7 +23,7 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -48,6 +48,9 @@
 		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
 		draftOpen?: boolean;
+		hasDraft?: boolean;
+		sheetUp?: boolean;
+		selectedThread?: string | null;
 		place?: ImageViewportPlace | null;
 		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
@@ -111,7 +114,8 @@
 	}
 	$effect(() => { if (loaded && comments.length) void showFocus(); });
 
-	$effect(() => { draftOpen = image.hasDraftText; });
+	$effect(() => { draftOpen = image.hasDraftText; hasDraft = !!image.draftRegion; });
+	$effect(() => { selectedThread = image.ui.state?.kind === 'thread' ? image.ui.state.id : null; });
 	$effect(() => {
 		const currentRoot = root;
 		const id = artifactId;
@@ -251,6 +255,7 @@
 			{artifactId}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
+			onSheetModalChange={(up) => sheetUp = up}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}

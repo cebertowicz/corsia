@@ -127,7 +127,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking presence",
     ),
     "post_update": _Entry(
-        "history",
+        "history", core=True,
         summary=POST_UPDATE_SUMMARY,
         activity="Posting update",
     ),
@@ -184,7 +184,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
-    "browser_run_steps": _Entry("browser", summary="Run named server-owned browser setup steps", activity="Running setup"),
+    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
@@ -248,7 +248,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_read": _Entry(
         "email", status="active", authority="conductor-api", account_bound=True,
-        summary="Read one email after the local screen; a flagged message returns no body",
+        summary="Read one email as untrusted data, with a notice if flagged or unscreened",
         activity="Reading mail",
     ),
     "google_connect": _Entry(

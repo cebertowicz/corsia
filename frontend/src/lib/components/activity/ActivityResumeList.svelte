@@ -43,7 +43,7 @@
 		{/each}
 	</div>
 {:else}
-	<p class="quiet-empty">Your recent threads will appear here.</p>
+	<p class="quiet-empty">Your recent chats will appear here.</p>
 {/if}
 
 <style>

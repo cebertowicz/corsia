@@ -88,6 +88,11 @@ async function open(hash, { answers = [], progress = 'advancing', reducedMotion 
 			if (command === 'read_startup_progress') {
 				if (progress === 'advancing') seq += 1;
 				reads += 1;
+				if (progress === 'old-then-migration') {
+					return reads === 1
+						? { schema: 1, pid: 111, seq: 100, phase: 'serving', done: null, total: null }
+						: { schema: 1, pid: 4242, seq: reads, phase: 'migrating', done: 1, total: 3 };
+				}
 				// The shell's reading once the service answers again with no update holding it.
 				if (reads > readyAfter) return { ready_url: origin };
 				return { schema: 1, pid: 4242, seq, phase: 'migrating', done: 1, total: 4 };
@@ -112,10 +117,19 @@ const percent = (page) => page.evaluate(() => Number.parseFloat(document.querySe
 const text = (page) => page.evaluate(() => document.body.textContent ?? '');
 
 try {
+	// A stopping service's last serving record must not hide the replacement's migration.
+	const replacement = await open(fragment(handoff({
+		model: { value: 15, step: 'restarting', mode: 'migration', lifted: 0, visitedMigration: false, lastAt: NOW },
+		downAt: NOW, seqChangedAt: null, lastSeq: null, lastPid: null,
+	})), { progress: 'old-then-migration' });
+	await replacement.clock.runFor(2_000);
+	if (!(await text(replacement)).includes('Upgrading your data')) fail('old serving progress hid the replacement migration');
+	if ((await percent(replacement)) >= 68) fail('replacement migration left its progress band');
+
 	// Mount and continuity: the same screen, at the same number, step, versions and theme, focused.
 	const page = await open(fragment(handoff()));
 	const shown = await percent(page);
-	if (shown !== 52.4) fail(`the handed-over 52.4% showed as ${shown}%`);
+	if (shown !== 52) fail(`the handed-over 52.4% showed as ${shown}% instead of 52%`);
 	const body = await text(page);
 	for (const line of ['Updating CORSIA', 'Upgrading your data', '2026.10.12 → 2026.10.13']) if (!body.includes(line)) fail(`the screen lacks "${line}"`);
 	const look = await page.evaluate(() => {
@@ -125,12 +139,12 @@ try {
 		document.body.append(probe);
 		const expected = getComputedStyle(probe).backgroundColor;
 		probe.remove();
-		return { theme: document.documentElement.dataset.theme, background: getComputedStyle(screen).backgroundColor, expected, focused: document.activeElement === screen, transition: getComputedStyle(screen.querySelector('.bar i')).transitionProperty };
+		return { theme: document.documentElement.dataset.theme, background: getComputedStyle(screen).backgroundColor, expected, focused: document.activeElement === screen, transition: getComputedStyle(screen.querySelector('.bar i')).transitionDuration };
 	});
 	if (look.theme !== 'light') fail(`the page drew the ${look.theme} theme, not the handed-over light one`);
 	if (look.background !== look.expected || look.background === 'rgba(0, 0, 0, 0)') fail(`the screen background ${look.background} is not the token ${look.expected}`);
 	if (!look.focused) fail('the screen did not take focus');
-	if (look.transition !== 'width') fail(`the bar transitions ${look.transition}, not its width, with motion allowed`);
+	if (look.transition !== '0s') fail(`the bar uses a CSS transition lasting ${look.transition}; its width is driven by count-up`);
 
 	// Advancing progress creeps on and never asks for a start.
 	await page.clock.runFor(10_000);
@@ -229,7 +243,7 @@ try {
 	]) {
 		const relaunched = await open(fragment(handoff({ route: "/?q=(it's)!*~", seqChangedAt: NOW - 5_000 })), { replay });
 		if (!relaunched.url().includes('/update.html#corsia-update=')) fail(`the ${name} page left for ${relaunched.url()} before its answer`);
-		if ((await percent(relaunched)) !== 52.4) fail(`the ${name} page did not draw the carried percentage before its answer`);
+		if ((await percent(relaunched)) !== 52) fail(`the ${name} page did not draw the carried whole-number percentage before its answer`);
 		if (replay.kind === 'startup') await relaunched.evaluate((startup) => window.__corsiaShowStartup?.(startup), replay.value);
 		else await relaunched.evaluate((reason) => window.__corsiaShowServiceFailure?.(reason), replay.value);
 		await relaunched.waitForURL(`${origin}/index.html`, { timeout: 5_000 }).catch(() => fail(`the ${name} hook did not return to the startup page`));
@@ -250,8 +264,8 @@ try {
 
 	// Reduced motion keeps the bar still.
 	const still = await open(fragment(handoff()), { reducedMotion: 'reduce' });
-	const stillBar = await still.evaluate(() => getComputedStyle(document.querySelector('.update-screen .bar i')).transitionProperty);
-	if (stillBar !== 'none') fail(`the bar still transitions ${stillBar} with reduced motion`);
+	const stillBar = await still.evaluate(() => getComputedStyle(document.querySelector('.update-screen .bar i')).transitionDuration);
+	if (Number.parseFloat(stillBar) > 0.00001) fail(`the bar still transitions for ${stillBar} with reduced motion`);
 
 	// No handoff, a forged one, or one carrying an action: no screen, no start; the window goes to the startup page.
 	for (const hash of ['', 'corsia-update=%7B%22v%22%3A1%7D', fragment({ ...handoff(), route: 'https://evil.example/' })]) {

@@ -12,7 +12,10 @@ import time
 from typing import Any
 from urllib.request import urlopen
 
+import semver
+
 from library.items import COMMIT, REPOSITORY, LibraryItemError, validate_relative_path
+from library.pack_validation import validate_blueprint_path
 
 INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
 _CACHE_NAME = "index.json"
@@ -35,7 +38,7 @@ class LibraryIndexValidationError(LibraryIndexError):
 class LibraryIndex:
     """Validated library rows and the age and per-item generation of the source used to read them."""
 
-    skills: tuple[dict[str, Any], ...]
+    items: tuple[dict[str, Any], ...]
     index_age: str
     refreshed: bool
     generations: dict[str, int]
@@ -126,32 +129,56 @@ def _write_cache(payload: tuple[dict[str, Any], ...], fetched_at: float, generat
 def _validate_index(payload: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(payload, dict) or not isinstance(payload.get("skills"), list):
         raise LibraryIndexValidationError("library index must contain a top-level skills list")
-    skills = tuple(_validate_skill(row) for row in payload["skills"])
-    names = [skill["name"].casefold() for skill in skills]
+    items = tuple(_validate_item(row) for row in payload["skills"] if not _unsupported_item(row))
+    names = [item["name"].casefold() for item in items]
     if len(names) != len(set(names)):
-        raise LibraryIndexValidationError("library index skill names must be unique, ignoring case")
-    return skills
+        raise LibraryIndexValidationError("library index item names must be unique, ignoring case")
+    return items
 
 
-def _validate_skill(row: Any) -> dict[str, Any]:
+def _unsupported_item(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    kind = row.get("kind", "skill")
+    return isinstance(kind, str) and (kind not in {"skill", "pack"} or (kind == "pack" and row.get("pack_kind") != "blueprint"))
+
+
+def _validate_item(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise LibraryIndexValidationError("library index item must be an object")
+    kind = row.get("kind", "skill")
+    if not isinstance(kind, str):
+        raise LibraryIndexValidationError("library index item kind must be skill or pack")
+    if kind == "pack":
+        if row.get("type") != "corsia-blueprint":
+            raise LibraryIndexValidationError("library blueprint type must be corsia-blueprint")
+        if not isinstance(row.get("digest"), str) or not _SHA256.fullmatch(row["digest"]):
+            raise LibraryIndexValidationError("library blueprint digest must be SHA-256")
     required = (
-        "name", "description", "version", "license", "source", "files", "withdrawn", "withdrawn_reason",
-    )
-    if not isinstance(row, dict) or any(field not in row for field in required):
-        raise LibraryIndexValidationError("library index skill row is missing a required field")
-    for field in ("name", "description", "version", "license"):
+        "name", "description", "version", "source", "files", "withdrawn", "withdrawn_reason",
+    ) + (("license",) if kind == "skill" else ())
+    if any(field not in row for field in required):
+        raise LibraryIndexValidationError("library index item row is missing a required field")
+    for field in ("name", "description", "version") + (("license",) if kind == "skill" else ()):
         if not isinstance(row[field], str) or not row[field]:
-            raise LibraryIndexValidationError(f"library index skill {field} must be a non-empty string")
+            raise LibraryIndexValidationError(f"library index item {field} must be a non-empty string")
+    if kind == "pack":
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", row["name"]):
+            raise LibraryIndexValidationError("library blueprint name must be a safe single path component")
+        try:
+            semver.Version.parse(row["version"])
+        except ValueError as error:
+            raise LibraryIndexValidationError("library blueprint version must be semver") from error
     if not isinstance(row["withdrawn"], bool):
-        raise LibraryIndexValidationError("library index skill withdrawn must be a boolean")
+        raise LibraryIndexValidationError("library index item withdrawn must be a boolean")
     if row["withdrawn_reason"] is not None and not isinstance(row["withdrawn_reason"], str):
-        raise LibraryIndexValidationError("library index skill withdrawn_reason must be a string or null")
+        raise LibraryIndexValidationError("library index item withdrawn_reason must be a string or null")
     if row["withdrawn"] and not row["withdrawn_reason"]:
-        raise LibraryIndexValidationError("withdrawn library skills must include withdrawn_reason")
+        raise LibraryIndexValidationError("withdrawn library items must include withdrawn_reason")
 
     source = row["source"]
     if not isinstance(source, dict):
-        raise LibraryIndexValidationError("library index skill source must be an object")
+        raise LibraryIndexValidationError("library index item source must be an object")
     for field in ("repository", "path", "commit"):
         if not isinstance(source.get(field), str) or not source[field]:
             raise LibraryIndexValidationError(f"library index source {field} must be a non-empty string")
@@ -163,7 +190,7 @@ def _validate_skill(row: Any) -> dict[str, Any]:
 
     files = row["files"]
     if not isinstance(files, list):
-        raise LibraryIndexValidationError("library index skill files must be a list")
+        raise LibraryIndexValidationError("library index item files must be a list")
     paths: list[str] = []
     for file_row in files:
         if not isinstance(file_row, dict):
@@ -171,14 +198,22 @@ def _validate_skill(row: Any) -> dict[str, Any]:
         path, sha256 = file_row.get("path"), file_row.get("sha256")
         if not isinstance(path, str):
             raise LibraryIndexValidationError("library index file path must be a string")
-        _validate_relative_path(path)
+        if kind == "pack":
+            try:
+                validate_blueprint_path(path)
+            except LibraryItemError as error:
+                raise LibraryIndexValidationError(f"library blueprint contains an unsafe path: {path!r}") from error
+        else:
+            _validate_relative_path(path)
         paths.append(path)
         if not isinstance(sha256, str) or not _SHA256.fullmatch(sha256):
             raise LibraryIndexValidationError(
                 "library index file sha256 must be 64 hexadecimal characters, optionally prefixed sha256:"
             )
-    if "SKILL.md" not in paths:
+    if kind == "skill" and "SKILL.md" not in paths:
         raise LibraryIndexValidationError("library index skill files must include SKILL.md")
+    if kind == "pack" and not {"manifest.yaml", "CHANGELOG.md"}.issubset(paths):
+        raise LibraryIndexValidationError("library blueprint must include manifest.yaml and CHANGELOG.md")
     if len(paths) != len({path.casefold() for path in paths}):
         raise LibraryIndexValidationError("library index file paths must be unique, ignoring case")
     return dict(row)

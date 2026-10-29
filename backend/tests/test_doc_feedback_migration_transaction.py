@@ -6,6 +6,7 @@ import pytest
 
 from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
 from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
+from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.migration_71_to_72_doc_feedback import migrate_71_to_72
 from infra.schema import SCHEMA_VERSION
 
@@ -53,6 +54,7 @@ def test_edit_step_keeps_writer_and_exact_ddl_for_both_existing_column_branches(
 
 def _partial71(db):
     # Synthetic partial schema exercises the canonical migration runner.
+    db.execute(_GUIDANCE_47_DDL[1])
     db.execute('CREATE TABLE sentinel(id TEXT PRIMARY KEY,value TEXT)')
     db.execute("INSERT INTO sentinel VALUES ('old','preserved')")
     db.execute('PRAGMA user_version=71')

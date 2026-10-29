@@ -2,12 +2,12 @@
 	import ToastNotice from '$lib/components/ToastNotice.svelte';
 	import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 
-	let { artifactId }: { artifactId: string | null } = $props();
+	let { artifactId, inBand = false }: { artifactId: string | null; inBand?: boolean } = $props();
 </script>
 
 {#if $deliveryConfirmation?.artifactId === artifactId}
 	{@const confirmation = $deliveryConfirmation}
-	<div class="delivery-confirmation">
+	<div class="delivery-confirmation" class:in-band={inBand}>
 		<!-- Same component as the global ToastContainer; the artifact canvas alone owns this bottom-of-canvas placement. -->
 		<ToastNotice toast={{ id: confirmation?.id ?? '', message: confirmation?.message ?? '', type: 'success' }} onDismiss={() => { if (confirmation) deliveryConfirmation.dismiss(confirmation.id); }} animateOut={false} />
 	</div>
@@ -25,5 +25,6 @@
 		min-width: 0;
 		pointer-events: none;
 	}
+	.delivery-confirmation.in-band { position: static; min-width: 0; }
 	.delivery-confirmation :global(.toast) { pointer-events: auto; }
 </style>
