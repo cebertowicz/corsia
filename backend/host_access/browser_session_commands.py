@@ -108,7 +108,7 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
         checked = args[1:2]
     if any(arg.startswith("-") for arg in checked) and tuple(args) not in {
         ("snapshot", "-i"), ("wait", "--load", "networkidle")
-    }:
+    } and tuple(args[:2]) != ("screenshot", "--full"):
         return False
     if pane:
         return (command == "open" and len(args) == 2 or
@@ -123,6 +123,7 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
             command == "fill" and len(args) == 3 and not args[1].startswith("-") or
             command == "wait" and len(args) == 2 and not args[1].startswith("-") or
             command == "screenshot" and len(args) == 2 and not args[1].startswith("-") or
+            tuple(args[:2]) == ("screenshot", "--full") and len(args) == 3 and not args[2].startswith("-") or
             command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}))
 
 
