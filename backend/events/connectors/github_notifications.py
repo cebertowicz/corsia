@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from connections.github_read_request import AUTH_PROBE
+from connections.github_read_request import AUTH_PROBE, SIGNED_OUT
 from events.connectors import github_notifications_feed as feed
 from events.connectors.github_read_budget import budget
 import infra.webhook_delivery_log as webhook_delivery_log
@@ -119,12 +119,8 @@ def _set_state(state: str, reason: str | None = None) -> None:
 
 
 def _is_signed_out(result: subprocess.CompletedProcess) -> bool:
-    """Whether ``gh auth status`` explicitly reports no authenticated GitHub host."""
-    output = f"{result.stdout}\n{result.stderr}".lower()
-    return result.returncode != 0 and (
-        "not logged into any github hosts" in output
-        or "not logged in to any github hosts" in output
-    )
+    """Whether the sign-in probe explicitly reports no account on github.com."""
+    return result.returncode != 0 and bool(SIGNED_OUT.search(f"{result.stdout}\n{result.stderr}"))
 
 
 def disabled_reason(runner: feed.GhRunner) -> str | None:

@@ -192,6 +192,23 @@ def test_only_the_active_account_decides_signed_in():
     assert calls == [["auth", "status", "--hostname", "github.com", "--active"]] * 2
 
 
+@pytest.mark.parametrize("stderr", [
+    "You are not logged into any GitHub hosts. To log in, run: gh auth login\n",
+    "You are not logged into any accounts on github.com\n",
+    'Hostname "github.com" not found among authenticated GitHub hosts\n',
+])
+def test_no_github_com_account_reads_signed_out(stderr):
+    """Signed in to another host only is signed out here, for both pollers."""
+    from events.connectors import github_notifications as poller
+    from events.connectors import github_pr_quiet_watch as watch
+
+    def gh(args, **_kwargs):
+        return subprocess.CompletedProcess(args, 1, "", stderr)
+
+    assert poller.disabled_reason(gh) == "gh_signed_out"
+    assert watch.disabled_reason(gh) == "gh_signed_out"
+
+
 def test_failure_after_the_row_is_written_counts_as_handled():
     gh = FakeGh()
     gh.issue_comments = [comment_object(502)]

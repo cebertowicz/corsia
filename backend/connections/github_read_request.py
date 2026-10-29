@@ -31,6 +31,10 @@ AUTH_PROBE = ("auth", "status", "--hostname", GH_HOST, "--active")
 SINGLE_ACCOUNT_PROBE = AUTH_PROBE[:-1]
 #: How a gh too old for a probe flag refuses it.
 UNSUPPORTED_FLAG = re.compile(r"unknown flag: --(?:json|active)\b", re.I)
+#: How the probe reports no account on github.com: none at all, none on this
+#: host ("not logged into any accounts on github.com"), or, on an older gh,
+#: 'Hostname "github.com" not found among authenticated GitHub hosts'.
+SIGNED_OUT = re.compile(r"not logged in|not found among authenticated", re.I)
 #: Paths outside ``/repos/...`` that the pollers read, and nothing more.
 NON_REPO_PATHS = frozenset({"notifications", "user", "rate_limit"})
 READ_METHODS = frozenset({"GET", "HEAD"})

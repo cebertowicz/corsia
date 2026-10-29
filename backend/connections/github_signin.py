@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-import re
 import subprocess
 
 from connections.github_agent_home import LOGIN, parse_status
-from connections.github_read_request import AUTH_PROBE, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG
+from connections.github_read_request import (
+    AUTH_PROBE, SIGNED_OUT, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG,
+)
 
 log = logging.getLogger(__name__)
 
@@ -16,8 +17,6 @@ log = logging.getLogger(__name__)
 # JSON flag exits non-zero with "unknown flag: --json".
 MIN_GH_VERSION = "2.81.0"
 UPDATE_GH_REASON = f"Update gh to {MIN_GH_VERSION} or later"
-
-_SIGNED_OUT = re.compile(r"not logged in", re.I)
 
 
 class GhUpdateRequired(Exception):
@@ -58,7 +57,7 @@ def _status_without_json(binary: str) -> tuple[bool | None, str | None]:
     if status is None:
         return None, None
     text = (status.stdout + status.stderr).decode("utf-8", "replace")
-    if status.returncode != 0 and _SIGNED_OUT.search(text):
+    if status.returncode != 0 and SIGNED_OUT.search(text):
         return False, None
     who = _run([binary, "api", "user", "--jq", ".login"])
     if who is None:
