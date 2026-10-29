@@ -3,6 +3,13 @@ import { getModelDispatchId } from '$lib/stores/models';
 import { setupModelWorks, type SetupModel } from '$lib/setupModels';
 import { on } from '$lib/ws/events';
 
+type SkipReason = 'no_candidate' | 'agent_has_model' | 'first_run_not_pending' | 'warm_failed';
+
+function logSkip(threadId: string, session: string, reason: SkipReason): void {
+	const query = new URLSearchParams({ token: session, skip_reason: reason });
+	void Promise.resolve().then(() => fetch(`/api/threads/${encodeURIComponent(threadId)}/warm?${query}`, { method: 'POST' })).catch(() => {});
+}
+
 type WarmProgressEvent = {
 	type: 'thread_warm_progress';
 	thread_id?: string;
@@ -69,7 +76,13 @@ export function createSetupWarm() {
 
 	function start(catalog: SetupModel[], session: string | null): void {
 		const candidate = catalog.find((row) => row.connection === 'omlx' && row.backend === 'network' && setupModelWorks(row));
-		if (!session || !candidate) return;
+		if (!session) return;
+		if (!candidate) {
+			void fetchCorsiaAgent(session).then((lookup) => {
+				if (lookup.kind === 'target') logSkip(lookup.target.thread_id, session, 'no_candidate');
+			}).catch(() => {});
+			return;
+		}
 		const model = getModelDispatchId(candidate);
 		if (!model || attempted === model || running) return;
 		attempted = model;
@@ -80,20 +93,33 @@ export function createSetupWarm() {
 		pending = (async () => {
 			try {
 				const lookup = await fetchCorsiaAgent(session);
-				if (signal.aborted || lookup.kind !== 'target' || lookup.target.model || !lookup.firstRunPending) return;
+				if (signal.aborted || lookup.kind !== 'target') return;
+				if (lookup.target.model) {
+					logSkip(lookup.target.thread_id, session, 'agent_has_model');
+					return;
+				}
+				if (!lookup.firstRunPending) {
+					logSkip(lookup.target.thread_id, session, 'first_run_not_pending');
+					return;
+				}
 				stopSubscription = on('thread_warm_progress', (event: WarmProgressEvent) => {
 					acceptProgress(event, lookup.target.thread_id, model);
 				});
 				const query = new URLSearchParams({ token: session, model, progress: 'true' });
 				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
-				const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
-				const body: { ok?: boolean; message?: string } | null = await response.json().catch(() => null);
-				// A warm that didn't finish leaves the normal cold-turn path; record why for diagnosis.
-				if (!response.ok || body?.ok === false) {
-					console.warn('Setup warm did not finish', response.status, body?.message ?? '');
+				try {
+					const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
+					const body: { ok?: boolean } | null = await response.json().catch(() => null);
+					if (!response.ok || !body || body.ok === false) {
+						logSkip(lookup.target.thread_id, session, 'warm_failed');
+						console.warn('Setup warm did not finish', response.status);
+					}
+				} catch {
+					logSkip(lookup.target.thread_id, session, 'warm_failed');
+					if (!signal.aborted) console.warn('Setup warm failed');
 				}
-			} catch (error) {
-				if (!signal.aborted) console.warn('Setup warm failed', error);
+			} catch {
+				if (!signal.aborted) console.warn('Setup warm failed');
 			} finally { stopProgress(); running = false; }
 		})();
 	}

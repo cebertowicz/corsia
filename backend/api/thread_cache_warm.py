@@ -366,6 +366,7 @@ async def warm_session_cache(
     model: str | None = None,
     wait: bool = False,
     progress: bool = False,
+    skip_reason: str | None = None,
 ):
     """Pre-warm the exact Native oMLX prefix; ``wait`` reports how it ended.
 
@@ -374,6 +375,11 @@ async def warm_session_cache(
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+    if skip_reason is not None:
+        if skip_reason not in {"no_candidate", "agent_has_model", "first_run_not_pending", "warm_failed"}:
+            raise HTTPException(400, "Invalid skip reason")
+        logger.info("warm_session_cache skipped: {}", skip_reason)
+        return {"ok": True}
     loaded = _load_warm_target(thread_id, user["id"], model)
     if isinstance(loaded, dict):
         return loaded
@@ -389,12 +395,6 @@ async def warm_session_cache(
         thread_context,
     )
     return await _submit_warm(
-        thread_id,
-        proved,
-        messages,
-        tools,
-        prompt_shape,
-        wait,
-        user_id=user["id"] if progress else None,
-        requested_model=model,
+        thread_id, proved, messages, tools, prompt_shape, wait,
+        user_id=user["id"] if progress else None, requested_model=model,
     )

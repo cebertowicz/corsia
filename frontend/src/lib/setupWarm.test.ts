@@ -39,12 +39,14 @@ describe('setup local warm', () => {
 		warm.destroy();
 	});
 
-	it.each(['a server error', 'a failure', 'unreachable'])('records why and finishes normally when warm is %s', async (outcome) => {
+	it.each(['a server error', 'a failure', 'unreachable', 'non-JSON'])('records why and finishes normally when warm is %s', async (outcome) => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
+			if (String(input).includes('skip_reason=')) return json({ ok: true });
 			if (outcome === 'unreachable') throw new TypeError('Failed to fetch');
 			if (outcome === 'a server error') return new Response('Internal Server Error', { status: 500 });
+			if (outcome === 'non-JSON') return new Response('invalid JSON');
 			return json({ ok: false, message: 'model not loaded' });
 		}));
 		const warm = createSetupWarm();
@@ -53,20 +55,36 @@ describe('setup local warm', () => {
 		expect(warm.running).toBe(false);
 		expect(warm.percent).toBeNull();
 		expect(warn).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(1));
 		warn.mockRestore();
 		warm.destroy();
 	});
 
-	it('does no work without a ready local model or a pending unbound agent', async () => {
-		const fetcher = vi.fn(async () => json({ target: { thread_id: 'agent', model: 'already-picked' }, first_run_pending: true }));
+	it('does no work without a session', async () => {
+		const fetcher = vi.fn();
 		vi.stubGlobal('fetch', fetcher);
 		const warm = createSetupWarm();
-		warm.start([{ ...local, status: 'unavailable' }], 'session');
 		warm.start([local], null);
-		expect(fetcher).not.toHaveBeenCalled();
-		warm.start([local], 'session');
 		await warm.finish();
-		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(fetcher).not.toHaveBeenCalled();
+		warm.destroy();
+	});
+
+	it.each([
+		['no_candidate', [{ ...local, status: 'unavailable' }], null, true],
+		['agent_has_model', [local], 'already-picked', true],
+		['first_run_not_pending', [local], null, false],
+	])('reports %s without waiting for the log call', async (reason, catalog, model, pending) => {
+		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent', model }, first_run_pending: pending });
+			return new Promise<Response>(() => {});
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const warm = createSetupWarm();
+		warm.start(catalog as SetupModel[], 'session');
+		await warm.finish();
+		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes(`skip_reason=${reason}`))).toHaveLength(1));
+		expect(warm.running).toBe(false);
 		warm.destroy();
 	});
 
