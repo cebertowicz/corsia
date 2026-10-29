@@ -17,7 +17,7 @@ def old_database():
     return db
 
 
-def test_adds_metadata_table_without_changing_existing_tables():
+def test_adds_version_attribute_without_changing_existing_rows():
     with closing(old_database()) as db:
         db.executemany("INSERT INTO measure_definitions VALUES (?,?,?,?)", [
             ('owner', '/a', 'old', '2026-01-01'), ('owner', '/a', 'new', '2026-01-02'),
@@ -25,14 +25,11 @@ def test_adds_metadata_table_without_changing_existing_tables():
         db.commit()
         migrate_to_current(db, 164)
         assert db.execute("SELECT id FROM sentinel").fetchone() == ("preserved",)
-        assert db.execute("SELECT owner_thread_id,file_path,file_sha256,version_attr,synced_at FROM measure_files ORDER BY 1,2").fetchall() == [
-            ('other', '/a', 'other', None, '2026-01-01'),
-            ('owner', '/a', 'new', None, '2026-01-02'),
-            ('owner', '/b', 'b', None, '2026-01-01')]
+        assert db.execute("SELECT version_attr FROM measure_definitions").fetchall() == [(None,)] * 4
         assert db.execute("PRAGMA user_version").fetchone()[0] == 164
 
 
-def test_failure_rolls_back_metadata_table_and_version(monkeypatch):
+def test_failure_rolls_back_column_and_version(monkeypatch):
     original = MIGRATIONS[163]
 
     def fail_after_create(db):

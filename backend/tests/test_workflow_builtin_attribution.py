@@ -1,7 +1,7 @@
 """Plan-sourced correction facts retain the corrected task identity."""
 import json
 
-from core.correction_attribution import plan_attributed_facts
+from core.correction_attribution import attributed_facts
 from tests.test_workflow_verdict_read import db, node
 
 
@@ -22,7 +22,7 @@ def test_plan_corrections_and_missing_sources(db):
                    'subject_key,attributes) VALUES (?,?,\'measurement.correction\',\'corsia\',\'observed\', '
                    "'2026-01-01','2026-01-01',?,?)",
                    (subject, subject, subject, json.dumps({'source_kind': kind, 'label': 'correction'})))
-    facts = plan_attributed_facts(db)
+    facts = attributed_facts(db)
     assert [f.node_id for f in facts] == ['rejected', 'source', None, None]
     assert facts[2].source_at is None and facts[3].source_at is None
 

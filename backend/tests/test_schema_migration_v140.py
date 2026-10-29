@@ -19,7 +19,6 @@ def _dev_139() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     db.execute("ALTER TABLE doc_review_requests DROP COLUMN requesting_node_id")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=139")
     db.commit()
     return db

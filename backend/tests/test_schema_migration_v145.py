@@ -21,7 +21,6 @@ def _v144() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     db.execute("ALTER TABLE connected_accounts DROP COLUMN endpoints_json")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=144")
     db.commit()
     return db

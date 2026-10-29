@@ -70,7 +70,8 @@ def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -
     with closing(_fresh()) as fresh, closing(_wound_back_to_v127()) as db:
         migrate_127_to_128(db)
         for table in ("outcome_event_counters", "measure_definitions", "automation_schedules"):
-            assert _columns(db, table) == _columns(fresh, table)
+            current_columns = [column for column in _columns(fresh, table) if column[0] != "version_attr"]
+            assert _columns(db, table) == current_columns
         assert ("last_measures", "TEXT") in _columns(db, "automation_schedules")
         assert _key(db) == _key(fresh) == ["agent_thread_id", "day", "event_name", "counter"]
         for index in ("idx_outcome_events_agent_observed", "idx_measure_definitions_kind_name"):
@@ -101,7 +102,6 @@ def test_the_counter_check_admits_the_four_new_counters_and_nothing_unwritten() 
 
 def test_the_runner_takes_a_127_database_to_current_and_stays_there() -> None:
     with closing(_wound_back_to_v127()) as db:
-        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.from_version, result.to_version) == (True, 127, SCHEMA_VERSION)
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION

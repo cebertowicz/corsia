@@ -43,7 +43,6 @@ def test_upgrade_disposable_database_through_runner(tmp_path):
         db.executemany("INSERT INTO projects (id,name,conductor_thread_id,created_at,updated_at) VALUES (?,?,?,'old','old')", [
             ('a', 'Alpha', 'alpha'), ('b', 'Beta', 'custom'),
         ])
-        db.execute('DROP TABLE measure_files')
         db.commit()
         assert migrate_to_current(db, SCHEMA_VERSION).to_version == 164
         assert db.execute('SELECT id,title,updated_at FROM threads ORDER BY id').fetchall() == [

@@ -453,7 +453,6 @@ def test_migration_preserves_reopened_rows_and_admits_rejected_rows(isolated_db)
         db.execute("CREATE INDEX idx_doc_feedback_batch_items_comment ON doc_feedback_batch_items(comment_id)")
         rewind_to_v88_policy(db)
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=82")
         db.commit()
 

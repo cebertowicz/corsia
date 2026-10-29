@@ -43,7 +43,6 @@ def test_startup_migration_adds_object_key_and_keeps_rows(tmp_path):
     path = tmp_path / "legacy-webhook-deliveries-v34.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("DROP INDEX idx_webhook_deliveries_object_key")
         db.execute("ALTER TABLE webhook_deliveries DROP COLUMN object_key")
         db.execute(

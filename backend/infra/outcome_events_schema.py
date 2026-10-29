@@ -62,14 +62,6 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         n INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0),
         PRIMARY KEY (agent_thread_id, day, event_name, counter)
     );
-    CREATE TABLE IF NOT EXISTS measure_files (
-        owner_thread_id TEXT NOT NULL,
-        file_path TEXT NOT NULL,
-        file_sha256 TEXT NOT NULL,
-        version_attr TEXT,
-        synced_at TEXT NOT NULL,
-        PRIMARY KEY (owner_thread_id, file_path)
-    );
     CREATE TABLE IF NOT EXISTS measure_definitions (
         owner_thread_id TEXT NOT NULL,
         kind TEXT NOT NULL CHECK (kind IN ('event', 'kpi', 'view')),
@@ -80,6 +72,7 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         file_sha256 TEXT NOT NULL,
         synced_at TEXT NOT NULL,
         removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1)),
+        version_attr TEXT,
         PRIMARY KEY (owner_thread_id, kind, name, version)
     );
     CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name

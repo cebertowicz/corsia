@@ -32,7 +32,6 @@ def test_startup_migration_adds_provider_reset_columns(tmp_path):
     path = tmp_path / "legacy-plan-liveness-v32.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("ALTER TABLE plan_liveness_wakes DROP COLUMN provider_reset_at")
         db.execute("ALTER TABLE plan_liveness_wakes DROP COLUMN provider_reset_turn_id")
         rewind_below_v42(db)

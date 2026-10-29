@@ -42,7 +42,6 @@ def test_v110_upgrade_unmarks_every_ordinary_host(isolated_db):
     # Marked while named "Token Plan", then re-added under a new name: the mark survives the rename.
     _insert(db, "renamed", "Workspace", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
     _insert(db, "named-allowed", "Token Plan", {"base_url": _ORDINARY, "agent_use_restriction": "allowed"})
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=110")
     db.commit()
 

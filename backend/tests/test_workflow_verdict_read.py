@@ -80,7 +80,8 @@ def usage(db, usage_id: str, node_id: str, model: str = "claude-code/opus", *, p
 def correction(db, message_id: str, node_id: str, *, at: str = "2026-10-06T00:00:00Z", label: str = "correction",
                counter: str = "c1") -> None:
     """One owner message, answered after a turn working ``node_id``, with a writer-recorded fact."""
-    from core.corrections_recording import ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE
+    from core.corrections_recording import ACTIVE_VERSION_SETTING, ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE, version_key
+    from infra.settings import set_setting
     from jobs.corrections_recording import _record_fact
 
     db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,plan_id,"
@@ -93,6 +94,7 @@ def correction(db, message_id: str, node_id: str, *, at: str = "2026-10-06T00:00
     candidate = CorrectionCandidate(SOURCE_KIND_MESSAGE, message_id, "root", None, "x", at)
     payload = {"label": label, "truncated": False, "original_tokens": 1, "failure_reason": "none"}
     version = ClassifierVersion("asset", counter, "head", 0.5, "policy")
+    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(version)}, db=db)
     assert _record_fact(candidate, payload, version) is True
 
 
@@ -119,7 +121,7 @@ def test_settled_means_terminal_and_past_the_window_and_failed_runs_are_not_outc
     node(db, "recent", ended="2026-10-18T00:00:00Z")
     node(db, "open", state="active")
     runs, _ = runs_of(read_snapshot(db, now=NOW))
-    assert (runs["failed"].terminal_at, runs["failed"].outcome) == ("2026-10-06T00:00:00Z", False)
+    assert (runs["failed"].terminal_at, runs["failed"].outcome) == ("2026-10-06 00:00:00", False)
     assert runs["done"].outcome and runs["done"].settled(3, NOW) and runs["failed"].settled(3, NOW)
     assert not runs["recent"].settled(3, NOW) and runs["recent"].settled(0, NOW)
     assert runs["open"].terminal_at is None and not runs["open"].settled(0, NOW)

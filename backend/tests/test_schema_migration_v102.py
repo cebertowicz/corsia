@@ -16,7 +16,6 @@ def test_migration_registered_and_adds_the_reviewer_index(tmp_path):
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         db.execute("DROP INDEX idx_doc_review_requests_reviewer")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=101")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

@@ -32,7 +32,6 @@ def test_startup_migration_adds_the_table_to_an_existing_database(tmp_path):
     path = tmp_path / "legacy-pane-views.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("DROP TABLE plan_pane_views")
         rewind_below_v42(db)
         rewind_to_v88_policy(db)
@@ -56,7 +55,6 @@ def test_migration_carries_each_readers_last_exit_over_as_seen(tmp_path):
     path = tmp_path / "seeded-pane-views.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("DROP TABLE plan_pane_views")
         for thread in ("left", "offset", "still-here"):
             db.execute(

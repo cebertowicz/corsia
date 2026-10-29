@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.measurement_partial import grain_instant
 from api.measurement_scope import resolve_grain, validate_scope
-from core.agent_kpi_formula import evaluate
+from core.agent_kpi_formula import evaluate, prepare
 from core.agent_kpi_operands import Event, timestamp
-from core.measurement_scope import scope_cte
-from core.workflow_builtin_operands import Value, read_builtin
+
+from core.workflow_builtin_operands import Value, prepare_builtin, read_builtin, scoped_runs
+from core.correction_attribution import attributed_facts
 from core.agent_kpi_read import definitions, event_names, facts
 from infra.auth import require_user
 from infra.database import get_db
@@ -46,16 +47,6 @@ def _versions(rows) -> list[dict[str, Any]]:
     return labels
 
 
-def _task_versions(db, user_id: str, scope, workflow: str) -> list[Event]:
-    rows = db.execute(scope_cte() + """
-        SELECT n.workflow_version, MIN(n.created_at) AS first_seen
-        FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
-        WHERE n.kind='task' AND n.workflow_ref=:workflow AND p.owner_kind='thread'
-          AND p.owner_id IN (SELECT id FROM scope_threads)
-        GROUP BY n.workflow_version
-    """, {**scope.params(user_id), 'workflow': workflow}).fetchall()
-    return [Event('', timestamp(row['first_seen']), {}, None, row['workflow_version'], 'Observed') for row in rows]
-
 
 def _builtin_value(result, version: str | None) -> Value:
     if result.reason:
@@ -85,9 +76,22 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
         events = facts(db, agent, actual_project, declarations, names, _repositories(db, actual_project))
         boundaries = [grain_instant(start) for start in grain.starts] + [grain_instant(grain.current_end)]
         now = datetime.now(timezone.utc)
+        workflow_names: dict[str, set[str]] = {}
+        for item in kpis:
+            spec = item['spec']
+            needed = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
+            if spec['formula'] == 'rate_per_run':
+                needed.add('runs')
+            if needed and item['workflow']:
+                workflow_names.setdefault(item['workflow'], set()).update(needed)
+        ledger = attributed_facts(db) if any('corrections' in names for names in workflow_names.values()) else []
+        scoped = scoped_runs(db, user_id, scope) if workflow_names else None
+        prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, names, ledger, scoped)
+                    for workflow, names in workflow_names.items()}
         results = []
         for item in kpis:
             spec = item["spec"]
+            selected = prepare(spec, events)
             file_events = {entry["name"] for entry in declarations
                            if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
             builtin_names = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
@@ -95,22 +99,25 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
                 builtin_names.add('runs')
             version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
             if builtin_names and item['workflow']:
-                version_rows += _task_versions(db, user_id, scope, item['workflow'])
+                version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')
+                                 for row in prepared[item['workflow']][0]]
             versions = _versions(version_rows)
             periods = []
             for index, period in enumerate((*grain.periods, grain.current)):
                 start, end = boundaries[index:index + 2]
                 builtin_results = {name: read_builtin(db, builtin=name, workflow=item['workflow'], user_id=user_id,
-                                                      scope=scope, start=start.isoformat(), end=end.isoformat())
+                                                      scope=scope, start=start.isoformat(), end=end.isoformat(),
+                                                      prepared=prepared[item['workflow']])
                                    for name in builtin_names}
                 value = evaluate(spec, events, start, end,
-                                 builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()})
+                                 builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
+                                 selected=selected)
                 value["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
                 by_version = []
                 for version in versions:
                     part = evaluate(spec, events, start, end, version["version"],
                                     builtins={name: _builtin_value(result, version['version'])
-                                              for name, result in builtin_results.items()})
+                                              for name, result in builtin_results.items()}, selected=selected)
                     part["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
                     by_version.append({"version": version["version"], **part})
                 periods.append({"period": period, **value, "versions": by_version})

@@ -27,7 +27,6 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     for name in _INDEXES:
         db.execute(f"DROP INDEX {name}")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=147")
     db.commit()
     return db

@@ -82,7 +82,6 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.from_version, result.to_version) == (True, 128, 164)
         account = google_account(db=db)
@@ -165,7 +164,6 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.to_version) == (True, 164)
         account = google_account(db=db)
@@ -186,7 +184,6 @@ def test_addressless_legacy_data_is_retired_without_an_account() -> None:
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.to_version) == (True, 164)
         assert google_account(db=db) is None
@@ -235,7 +232,6 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        db.execute("DROP TABLE measure_files")
         assert migrate_to_current(db, SCHEMA_VERSION).to_version == 164
 
 
@@ -305,7 +301,6 @@ def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
         assert account is not None
         account_id = str(account["id"])
 
-        db.execute("DROP TABLE measure_files")
         migrate_to_current(db, SCHEMA_VERSION)  # Remove runs on the current schema.
         db.execute("PRAGMA foreign_keys=ON")
         account_actions._remove_locally(account_id, ("person", "owner"), db=db)

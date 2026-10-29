@@ -13,9 +13,8 @@ from tools.workflow_owners import thread_workflow_owners
 
 def definitions(db: sqlite3.Connection, owner: str) -> list[dict[str, Any]]:
     """Return latest live definitions and file metadata for an agent."""
-    rows = db.execute("""SELECT d.kind,d.name,d.version,d.spec_json,d.file_path,f.version_attr
-        FROM measure_definitions d LEFT JOIN measure_files f
-          ON f.owner_thread_id=d.owner_thread_id AND f.file_path=d.file_path
+    rows = db.execute("""SELECT d.kind,d.name,d.version,d.spec_json,d.file_path,d.version_attr
+        FROM measure_definitions d
         WHERE d.owner_thread_id=? AND d.version=(SELECT MAX(v.version) FROM measure_definitions v
           WHERE v.owner_thread_id=d.owner_thread_id AND v.kind=d.kind AND v.name=d.name)
           AND d.removed=0""", (owner,)).fetchall()

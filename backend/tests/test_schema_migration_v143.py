@@ -35,7 +35,6 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
         " VALUES (?,'local',?,?,?,'t','t')",
         [(row_id, kind, row_id, metadata) for row_id, kind, metadata in rows],
     )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=142")
     db.commit()
 

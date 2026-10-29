@@ -36,7 +36,6 @@ def _legacy_db(path):
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO threads (id,user_id,title,created_at,updated_at)"
             " VALUES ('owner','user','Owner','t','t')"

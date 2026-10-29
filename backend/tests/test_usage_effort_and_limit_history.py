@@ -213,7 +213,6 @@ def test_the_migration_upgrades_an_existing_database_and_keeps_its_rows() -> Non
         db.execute("DROP TABLE limit_observations")
         db.execute(
             "INSERT INTO llm_usage (id,thread_id,model,created_at) VALUES ('old','t','m','2026-10-01')")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=97")
         db.commit()
 

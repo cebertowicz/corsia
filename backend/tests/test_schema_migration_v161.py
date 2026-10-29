@@ -24,7 +24,6 @@ def test_160_rules_survive_and_schema_matches_fresh():
         + old_sql[old_sql.index("    CREATE TABLE IF NOT EXISTS event_route_decisions ("):]
     )
     db.executescript(SCHEMA_SQL.replace(EVENT_RULE_SCHEMA_SQL, old_sql))
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=160")
     insert = ("INSERT INTO event_rules (id,created_at,updated_at,kind,scope,connector,origin,created_by,"
               "authority_ref,tool,argv_prefix,item_type) VALUES (?, 'a','a','observe','project:p','github',"

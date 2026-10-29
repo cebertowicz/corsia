@@ -37,7 +37,6 @@ def test_startup_migration_creates_the_table_and_keeps_threads(tmp_path) -> None
             "INSERT INTO threads (id,user_id,title,created_at,updated_at)"
             " VALUES ('kept','user','Kept','t','t')"
         )
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=118")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

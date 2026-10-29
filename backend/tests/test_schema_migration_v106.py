@@ -72,7 +72,6 @@ def _legacy() -> tuple[sqlite3.Connection, dict[str, str]]:
     rewind_plan_aggregates(db)
     db.execute("DROP TRIGGER bump_plan_revision_node_update")
     db.execute(_OLD_TRIGGER)
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=105")
     db.commit()
     return db, ids

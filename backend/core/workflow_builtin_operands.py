@@ -6,11 +6,11 @@ from dataclasses import dataclass
 import json
 import sqlite3
 
-from core.correction_attribution import measured_attributed_facts, plan_attributed_facts
+from core.correction_attribution import attributed_facts, workflow_run_of
 from core.cost_identity import IdentityResolver
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 from core.measurement_scope import MeasurementScope, scope_cte
-from core.workflow_verdict_read import _terminal_times
+
 
 
 def _in_window(db: sqlite3.Connection, times: list[str | None], start: str, end: str) -> set[int]:
@@ -35,30 +35,52 @@ class Result:
     reason: str | None = None
 
 
-def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id: str,
-                 scope: MeasurementScope, start: str, end: str) -> Result:
-    """Read a builtin in [start,end), grouped by its task's workflow_version.
+def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -> tuple:
+    """Load scoped nodes and shared workflow roots."""
+    from core.workflow_verdict_read import run_roots
 
-    Scope is the caller's validated Measurement scope; timestamps are UTC instants.
-    """
+    rows = db.execute(scope_cte() + """
+        SELECT n.id,n.parent_id,n.workflow_ref,n.workflow_version,n.created_at
+        FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
+        WHERE p.owner_kind='thread' AND p.owner_id IN (SELECT id FROM scope_threads)
+    """, scope.params(user_id)).fetchall()
+    return rows, run_roots(rows)
+
+
+def prepare_builtin(db: sqlite3.Connection, workflow: str, user_id: str, scope: MeasurementScope,
+                    names: set[str], ledger=None, scoped=None) -> tuple:
+    """Load period-independent workflow inputs once per request."""
+    from core.workflow_verdict_read import terminal_times
+
+    rows, roots = scoped if scoped is not None else scoped_runs(db, user_id, scope)
+    nodes = [row for row in roots if row['workflow_ref'] == workflow]
+    root_ids = {row['id'] for row in roots}
+    parents = {row['id']: row['parent_id'] for row in rows}
+    wanted = {row['id'] for row in nodes}
+    membership = {row['id']: run for row in rows
+                  if (run := workflow_run_of(row['id'], parents, root_ids)) in wanted}
+    times = terminal_times(db, list(wanted)) if nodes and 'runs' in names else {}
+    if ledger is None and nodes and 'corrections' in names:
+        ledger = attributed_facts(db)
+    return nodes, times, ledger or [], membership
+
+
+def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id: str,
+                 scope: MeasurementScope, start: str, end: str, prepared=None) -> Result:
+    """Read a builtin in [start,end), grouped by its task's workflow_version."""
     if builtin not in {'runs', 'fresh_tokens', 'cost_usd', 'corrections', 'active_hours'}:
         raise ValueError('unknown workflow builtin')
-    params = {**scope.params(user_id), 'workflow': workflow, 'start': start, 'end': end}
-    nodes = db.execute(scope_cte() + """
-        SELECT n.id,n.workflow_version FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
-        WHERE n.kind='task' AND n.workflow_ref=:workflow AND p.owner_kind='thread'
-          AND p.owner_id IN (SELECT id FROM scope_threads)
-    """, params).fetchall()
+    nodes, times, ledger, membership = prepared if prepared is not None else prepare_builtin(db, workflow, user_id, scope, {builtin})
     if not nodes:
         return Result({}, 'not tracked: this workflow has no tasks')
     if builtin == 'active_hours':
         return Result({}, 'not tracked: presence is not recorded per task')
     versions = {r['id']: r['workflow_version'] for r in nodes}
-    ids = json.dumps(list(versions))
+    ids = json.dumps(list(membership))
     totals: defaultdict[str | None, list] = defaultdict(lambda: [0, 0, 0])
     if builtin == 'runs':
         first: dict[str, str] = {}
-        for (node_id, _state), at in _terminal_times(db, list(versions), normalized=True).items():
+        for (node_id, _state), at in times.items():
             if at is not None and (node_id not in first or at < first[node_id]):
                 first[node_id] = at
         entries = list(first.items())
@@ -67,10 +89,10 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
             total[0] += 1
             total[1] += 1
     elif builtin == 'corrections':
-        facts = [fact for fact in (*measured_attributed_facts(db), *plan_attributed_facts(db))
-                 if fact.node_id in versions and fact.is_correction and fact.source_at is not None]
+        facts = [fact for fact in ledger
+                 if fact.node_id in membership and fact.is_correction and fact.source_at is not None]
         for index in _in_window(db, [fact.source_at for fact in facts], start, end):
-            total = totals[versions[facts[index].node_id]]
+            total = totals[versions[membership[facts[index].node_id]]]
             total[0] += 1
             total[1] += 1
     elif builtin == 'fresh_tokens':
@@ -84,7 +106,7 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
             GROUP BY u.plan_node_id
         """, (ids, start, end)).fetchall()
         for row in rows:
-            total = totals[versions[row['plan_node_id']]]
+            total = totals[versions[membership[row['plan_node_id']]]]
             total[0] += row['amount']
             total[1] += row['n']
             total[2] += row['unknown']
@@ -97,7 +119,7 @@ def read_builtin(db: sqlite3.Connection, *, builtin: str, workflow: str, user_id
         for row in rows:
             row['model'] = resolve(row).key
         for row in classify_usage_rows(rows, endpoint_listings(db)):
-            total = totals[versions[row['node_id']]]
+            total = totals[versions[membership[row['node_id']]]]
             total[1] += row['records']
             if row['outcome'] == 'priced':
                 total[0] += row['dollars']

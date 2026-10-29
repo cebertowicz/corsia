@@ -23,7 +23,6 @@ def _legacy_db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     db.execute("DROP TABLE measure_breaks")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=146")
     return db
 

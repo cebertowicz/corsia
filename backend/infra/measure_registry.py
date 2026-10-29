@@ -288,7 +288,7 @@ def _claim_namespace(connection: sqlite3.Connection, namespace: str, owner: str,
     return retire, taken
 
 
-def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str, version_attr: str | None = None, *, record_file: bool = False) -> dict[str, Any]:
+def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str, version_attr: str | None = None) -> dict[str, Any]:
     """Plan from one read outside the transaction, then write the finished rows in one short transaction."""
     now = datetime.now(timezone.utc).isoformat()
     latest = _latest(db.execute(_OWNER_ROWS, (owner,)))
@@ -297,14 +297,8 @@ def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace
     with write_transaction(db, scope="measure_sync") as connection:
         retire, taken = _claim_namespace(connection, namespace, owner, held, now)
         connection.executemany(_INSERT, inserts + retire)
-        if record_file:
-            connection.execute(
-                "INSERT INTO measure_files(owner_thread_id,file_path,file_sha256,version_attr,synced_at) "
-                "VALUES (?,?,?,?,?) ON CONFLICT(owner_thread_id,file_path) DO UPDATE SET "
-                "file_sha256=excluded.file_sha256,version_attr=excluded.version_attr,synced_at=excluded.synced_at "
-                "WHERE measure_files.file_sha256<>excluded.file_sha256 OR measure_files.version_attr IS NOT excluded.version_attr",
-                (owner, path, sha, version_attr, now),
-            )
+        connection.execute("UPDATE measure_definitions SET version_attr=? WHERE owner_thread_id=? AND file_path=?",
+                           (version_attr, owner, path))
     result: dict[str, Any] = {"namespace": namespace, "items": changes}
     if taken:
         result["namespace_takeover"] = taken
@@ -334,11 +328,18 @@ def sync(
         _check_workflow_file(path, workflow, owner_thread_id, workflows or {})
     else:
         _check_agent_file(path, owner_thread_id)
+        for kind, name, spec in items:
+            if kind == 'kpi':
+                if spec['formula'] == 'rate_per_run':
+                    raise ValueError(f'kpi {name}: rate_per_run requires a workflow')
+                for field in ('num', 'den'):
+                    if 'builtin' in spec.get(field, {}):
+                        raise ValueError(f'kpi {name}: {field}.builtin requires a workflow')
     sha = hashlib.sha256(text.encode()).hexdigest()
     normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
     for attempt in (1, 2):
         try:
-            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha, data.get("version_attr"), record_file=True)
+            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha, data.get("version_attr"))
             break
         except sqlite3.IntegrityError:
             if attempt == 2:

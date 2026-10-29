@@ -45,7 +45,6 @@ def test_startup_migration_drops_the_folded_mark_and_keeps_every_view(tmp_path):
     path = tmp_path / "pane-view-one-mark.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("DROP TABLE plan_pane_views")
         db.execute(_V48_TABLE)
         db.execute(

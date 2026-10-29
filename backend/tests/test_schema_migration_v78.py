@@ -107,7 +107,6 @@ def _build_existing_v77_database(path) -> None:
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=77")
         db.commit()
         # Without this the upgrade below would prove nothing: a database that

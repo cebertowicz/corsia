@@ -58,7 +58,6 @@ def _seed(path) -> None:
         _server(db, "ns-none", {"base_url": "https://example.test/v1"})
         _server(db, "ns-bad", "{not json")
         _server(db, "ns-gone", {FIELD: "gone-key-0003"}, status="removed")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=107")
         db.commit()
 
@@ -117,7 +116,6 @@ def test_a_second_start_is_a_no_op(state, tmp_path):
 
     with closing(sqlite3.connect(path)) as db:
         before = [tuple(r) for r in db.execute("SELECT id, metadata_json FROM network_servers ORDER BY id")]
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=107")
         db.commit()
     for backup in tmp_path.glob("*.bak"):
@@ -174,7 +172,6 @@ def test_a_key_the_store_cannot_take_stays_put_and_one_warning_counts_it(state, 
         initialize_schema(db)
         _server(db, "ns-spaced", {FIELD: unstorable})
         _server(db, "NS_Upper", {FIELD: "zz" + "testsecret" * 4})
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=107")
         db.commit()
     caplog.set_level(logging.INFO)
@@ -198,7 +195,6 @@ def test_a_stripped_server_key_is_overwritten_in_the_database_file(state, tmp_pa
         initialize_schema(db)
         for number in range(8):
             _server(db, f"ns-live{number}", {"label": "x" * 100, FIELD: planted})
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=107")
         db.commit()
 

@@ -57,15 +57,22 @@ def select(operand: Mapping[str, Any], facts: Sequence[Event]) -> list[Event]:
         for row in sorted(rows, key=lambda item: item.ts, reverse=order == "latest"):
             selected.setdefault(tuple(attribute(row, key) for key in operand[order]), row)
         rows = list(selected.values())
-    return [matched for row in rows if (matched := _join(row, operand.get("match", []), facts)) is not None]
-
-
-def _join(row: Event, clauses: Sequence[Mapping[str, Any]], facts: Sequence[Event]) -> Event | None:
+    clauses = operand.get("match", [])
+    indexes = []
     for clause in clauses:
-        key = clause["on"]
-        value = attribute(row, key)
-        matches = [fact for fact in facts if value is not None and fact.name == clause["event"]
-                   and attribute(fact, key) == value and matches_where(fact, clause.get("where", {}))]
+        index: dict[Any, list[Event]] = {}
+        for fact in facts:
+            if fact.name == clause["event"] and matches_where(fact, clause.get("where", {})):
+                index.setdefault(attribute(fact, clause["on"]), []).append(fact)
+        indexes.append(index)
+    return [matched for row in rows if (matched := _join(row, clauses, indexes)) is not None]
+
+
+def _join(row: Event, clauses: Sequence[Mapping[str, Any]],
+          indexes: Sequence[Mapping[Any, list[Event]]]) -> Event | None:
+    for clause, index in zip(clauses, indexes):
+        value = attribute(row, clause["on"])
+        matches = index.get(value, []) if value is not None else []
         count = len(matches)
         mode = clause["mode"]
         if (mode == "exists" and not count) or (mode == "absent" and count) or (mode == "exactly_one" and count != 1):

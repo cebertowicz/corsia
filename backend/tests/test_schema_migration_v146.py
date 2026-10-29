@@ -77,7 +77,6 @@ def test_v146_migrates_a_v145_batch_table_to_the_fresh_lane_shape() -> None:
                VALUES ('batch-1', 'document-1', 'user', 'user', 'owner', 'open',
                        't', 't', 't', 't', 't')"""
         )
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=145")
         db.commit()
 

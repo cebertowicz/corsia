@@ -313,7 +313,6 @@ def test_startup_migrates_existing_feedback_items_to_event_columns(tmp_path):
         )
         rewind_to_v88_policy(db)
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=80")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

@@ -13,7 +13,6 @@ def test_upgrade_repairs_roots_and_parents_but_preserves_review_leaf():
     fresh = sqlite3.connect(":memory:")
     try:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("ALTER TABLE threads DROP COLUMN confinement")
         db.execute("ALTER TABLE threads DROP COLUMN confined_read_dirs")
         db.execute("PRAGMA user_version=154")

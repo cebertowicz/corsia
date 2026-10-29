@@ -131,7 +131,6 @@ def _v137() -> sqlite3.Connection:
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V138)
     db.executescript(AUTOMATION_SCHEDULES_SQL.replace(_NULLABLE_NEXT_RUN, "next_run_at TEXT NOT NULL"))
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=137")
     db.commit()
     return db

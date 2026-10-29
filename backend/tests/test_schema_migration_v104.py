@@ -38,7 +38,6 @@ def _v103_database(path):
         # A file with both a legacy code row and an image row: only one may hold the key.
         _identity(db, "twin-code", type_="code", external_id="/ws/g.png", path="/ws/g.png")
         _identity(db, "twin-image", type_="image", external_id="/ws/g.png", path="/ws/g.png")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=103")
         db.commit()
 

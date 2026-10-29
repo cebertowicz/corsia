@@ -16,14 +16,14 @@ def _in_bucket(rows: Sequence[Event], start: datetime, end: datetime, version: s
     return [row for row in rows if start <= row.ts < end and (version is None or (row.version or "") == version)]
 
 
-def _coverage(spec: Mapping[str, Any], numerator: Sequence[Event], facts: Sequence[Event],
+def _coverage(spec: Mapping[str, Any], numerator: Sequence[Event], selected: Mapping[str, Sequence[Event]],
               start: datetime, end: datetime, version: str | None) -> dict[str, int] | None:
     coverage = spec.get("coverage")
     if not coverage:
         return None
     key = coverage["by"]
-    universe = _in_bucket(select(coverage["of"], facts), start, end, version)
-    labels = _in_bucket(select(coverage["labelled"], facts), start, end, version) if coverage.get("labelled") else numerator
+    universe = _in_bucket(selected["coverage_of"], start, end, version)
+    labels = _in_bucket(selected["coverage_labelled"], start, end, version) if coverage.get("labelled") else numerator
     eligible = {attribute(row, key) for row in universe} - {None, ""}
     labelled = {attribute(row, key) for row in labels} - {None, ""}
     return {"n": len(eligible), "k": len(eligible & labelled)}
@@ -35,11 +35,20 @@ def _labels(rows: Sequence[Event]) -> tuple[str | None, dict[str, int]]:
     return weakest, mix
 
 
+def prepare(spec: Mapping[str, Any], facts: Sequence[Event]) -> dict[str, list[Event]]:
+    """Select each operand once for all periods and versions."""
+    operands = {"num": spec["num"], "den": spec.get("den", {})}
+    coverage = spec.get("coverage") or {}
+    operands.update({"coverage_of": coverage.get("of", {}), "coverage_labelled": coverage.get("labelled", {})})
+    return {name: select(operand, facts) for name, operand in operands.items()}
+
+
 def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, end: datetime,
-             version: str | None = None, runs: Sequence[Event] = (),
-             builtins: Mapping[str, Any] | None = None) -> dict[str, Any]:
+             version: str | None = None, builtins: Mapping[str, Any] | None = None,
+             selected: Mapping[str, Sequence[Event]] | None = None) -> dict[str, Any]:
     """Compute one KPI in a period and optional version; None selects all versions."""
     num_spec = spec["num"]
+    selected = selected if selected is not None else prepare(spec, facts)
     builtins = builtins or {}
     needed = [op['builtin'] for op in (num_spec, spec.get('den', {})) if 'builtin' in op]
     if spec['formula'] == 'rate_per_run' and 'runs' in builtins:
@@ -48,10 +57,10 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
     if reason:
         return {'value': None, 'n': 0, 'coverage': None, 'label': None, 'label_mix': {},
                 'unknown': 0, 'status': reason, 'partial': False}
-    raw_num = _in_bucket(select(num_spec, facts), start, end, version)
+    raw_num = _in_bucket(selected["num"], start, end, version)
     numerator = distinct(raw_num, num_spec.get("distinct"))
     formula = spec["formula"]
-    coverage = _coverage(spec, raw_num, facts, start, end, version)
+    coverage = _coverage(spec, raw_num, selected, start, end, version)
     num_builtin = builtins.get(num_spec.get('builtin'))
     n = num_builtin.n if num_builtin else len(numerator)
     value: float | int | None = None
@@ -63,7 +72,7 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
     elif formula == "ratio":
         den_spec = spec["den"]
         den_builtin = builtins.get(den_spec.get('builtin'))
-        denominator = distinct(_in_bucket(select(den_spec, facts), start, end, version), den_spec.get("distinct"))
+        denominator = distinct(_in_bucket(selected["den"], start, end, version), den_spec.get("distinct"))
         n = den_builtin.n if den_builtin else len(denominator)
         divisor = den_builtin.value if den_builtin else len(denominator)
         if den_builtin:
@@ -77,7 +86,7 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
         value = total / divisor if divisor and total is not None else None
     elif formula == "rate_per_run":
         run_builtin = builtins.get('runs')
-        n = run_builtin.value if run_builtin else len(_in_bucket(runs, start, end, version))
+        n = run_builtin.value if run_builtin else 0
         total = num_builtin.value if num_builtin else len(numerator)
         if run_builtin:
             unknown += run_builtin.unknown

@@ -107,7 +107,6 @@ def _legacy_db(path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=59")
         db.commit()
     return ids, watched

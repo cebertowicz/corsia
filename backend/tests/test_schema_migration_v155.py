@@ -17,7 +17,6 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     db.execute("ALTER TABLE threads DROP COLUMN confinement")
     db.execute("ALTER TABLE threads DROP COLUMN confined_read_dirs")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=154")
     db.execute("INSERT INTO users (id,password_hash,created_at,password_changed_at) VALUES ('u','x','t','t')")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('old','u','t','t','t')")

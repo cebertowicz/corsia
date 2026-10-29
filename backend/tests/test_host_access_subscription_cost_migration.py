@@ -23,7 +23,6 @@ def test_migration_clears_canonical_subscription_estimates_idempotently() -> Non
         _row(db, "codex", "host_access_action_review", "codex/gpt-5.6-terra", 0.22)
         _row(db, "metered", "host_access_action_review", "openai/gpt-5", 0.33)
         _row(db, "other-source", "conversation", "claude-code/sonnet", 0.44)
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=91")
         db.commit()
 

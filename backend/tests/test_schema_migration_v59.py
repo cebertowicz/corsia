@@ -115,7 +115,6 @@ def _legacy_db(path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=58")
         db.commit()
     return ids, held
@@ -297,7 +296,6 @@ def test_a_pause_on_an_archived_plan_stays_where_it_is(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=58")
         db.commit()
 

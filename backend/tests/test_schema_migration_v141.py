@@ -119,7 +119,6 @@ def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_start
     for table in ("event_route_decisions", "event_rules"):
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=140")
     db.commit()
     result = migrate_to_current(db, SCHEMA_VERSION)

@@ -38,6 +38,7 @@ class Definition:
     synced_at: str
     removed: bool
     file_path: str
+    version_attr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class WorkflowHistory:
     owner: str | None
     runs: tuple[Run, ...]
     definitions: tuple[Definition, ...] = ()
-    # Verdicts retain their existing version selection; adopting file rules changes judged runs.
+    # Event-derived verdict runs use this rule in verdict slice 5.
     version_attr: str | None = None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
 

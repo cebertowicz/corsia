@@ -21,7 +21,6 @@ def _dev_137() -> sqlite3.Connection:
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
     db.execute("DROP TABLE plan_node_intent_words")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=137")
     db.commit()
     return db

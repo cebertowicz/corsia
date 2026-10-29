@@ -30,7 +30,6 @@ def test_v109_upgrade_marks_a_legacy_token_plan_endpoint_interactive_only(isolat
         "VALUES ('legacy','external','external','legacy','Alibaba Token Plan',443,'online','t','t','t',?)",
         (json.dumps({"base_url": "https://token-plan.example.com/v1"}),),
     )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=108")
     db.commit()
 
@@ -55,7 +54,6 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
         "VALUES ('allowed-v109','external','external','allowed-v109','Alibaba Token Plan',443,'online','t','t','t',?)",
         (json.dumps({"agent_use_restriction": "allowed"}),),
     )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=109")
     db.commit()
 
@@ -79,7 +77,6 @@ def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
             "VALUES (?,'external','external',?,'Alibaba Token Plan',443,'online','t','t','t',?)",
             (sid, sid, raw),
         )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=109")
     db.commit()
 
@@ -100,7 +97,6 @@ def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
         "VALUES ('existing','external','external','existing','Existing endpoint',443,'online','t','t','t',?)",
         (json.dumps({"base_url": "https://existing.example/v1"}),),
     )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=108")
     db.commit()
 

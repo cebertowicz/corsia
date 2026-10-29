@@ -209,7 +209,6 @@ def test_the_whole_chain_from_97_ends_current_with_the_bill_facts_intact(start: 
         db.execute(
             "INSERT INTO vendor_account_billing_facts(id,account_id,kind,amount_cents,start_date,end_date,"
             "account_revision,created_at) VALUES ('c1','chain-acct','subscription_rate',2000,'2026-02-17','9999-12-31',1,'t')")
-        db.execute("DROP TABLE measure_files")
         db.execute(f"PRAGMA user_version={start}")
         db.commit()
 

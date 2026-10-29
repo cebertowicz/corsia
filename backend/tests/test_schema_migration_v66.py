@@ -106,7 +106,6 @@ def test_migration_deletes_deleted_threads_rows_keeps_live_ones(
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=65")
         db.commit()
         again = migrate_to_current(db, SCHEMA_VERSION)

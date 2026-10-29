@@ -62,7 +62,6 @@ def _build_existing_v83_database(path) -> None:
         )
         for name in _EXPECTED_INDEXES:
             db.execute(f"DROP INDEX {name}")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=83")
         db.commit()
         # Without this the upgrade below would prove nothing.

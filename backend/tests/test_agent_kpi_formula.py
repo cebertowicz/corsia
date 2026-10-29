@@ -5,6 +5,7 @@ import pytest
 
 from core.agent_kpi_formula import evaluate
 from core.agent_kpi_operands import Event, matches_where, select
+from core.workflow_builtin_operands import Value
 
 
 def event(name, day, **attrs):
@@ -38,6 +39,26 @@ def test_push_without_suite_does_not_match_exists():
     rows = [event("push", 1, head="a"), event("push", 2, head="b"), event("suite", 3, head="b")]
     operand = {"event": "push", "match": [{"event": "suite", "on": "head", "mode": "exists"}]}
     assert [r.attrs["head"] for r in select(operand, rows)] == ["b"]
+
+
+@pytest.mark.parametrize('mode', ['exists', 'absent', 'exactly_one'])
+def test_match_agrees_with_scan_including_anchor_and_missing_keys(mode):
+    from dataclasses import replace
+    facts = [event('label', 10, key='a'), event('label', 11, key='b'), event('label', 12),
+             event('run', 1, key='a', version='old'), event('run', 3, key='a', version='new'),
+             event('run', 2, key='b', version='only')]
+    clause = {'event': 'run', 'on': 'key', 'mode': mode, 'anchor': True}
+    expected = []
+    for row in facts[:3]:
+        value = row.attrs.get('key')
+        matches = [r for r in facts if value is not None and r.name == 'run' and r.attrs.get('key') == value]
+        if (mode == 'exists' and not matches) or (mode == 'absent' and matches) or (mode == 'exactly_one' and len(matches) != 1):
+            continue
+        if matches:
+            anchor = max(matches, key=lambda r: r.ts)
+            row = replace(row, ts=anchor.ts, version=anchor.version)
+        expected.append(row)
+    assert select({'event': 'label', 'match': [clause]}, facts) == expected
 
 
 def test_coverage_sets_count_n_and_zero_requires_owner_activity():
@@ -76,4 +97,4 @@ def test_ratio_preserves_unknowns_from_sum_and_builtin_denominator():
 def test_formulas(formula, extra, expected):
     facts = [event("a", i, n=i, kind="yes" if i < 3 else "no") for i in (1, 2, 3)]
     spec = {"formula": formula, "num": {"event": "a"}, "min_n": 1, **extra}
-    assert evaluate(spec, facts, START, END, runs=[event("run", 1)])["value"] == expected
+    assert evaluate(spec, facts, START, END, builtins={"runs": Value(1, 1)})["value"] == expected

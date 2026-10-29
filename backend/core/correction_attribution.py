@@ -114,22 +114,6 @@ class AttributedFact:
     node_id: str | None
 
 
-def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
-    """Every readable correction fact with the plan node it is attributed to, or None (Unattributed)."""
-    rows = db.execute(_ATTRIBUTED_SQL).fetchall()
-    facts = []
-    for row in rows:
-        attributes = json.loads(row["attributes"])
-        facts.append(AttributedFact(
-            str(row["source_kind"]),
-            str(row["source_id"]),
-            None if row["source_at"] is None else str(row["source_at"]),
-            str(attributes.get("asset_version")),
-            attributes.get("label") == LABEL_CORRECTION,
-            None if row["node_id"] is None else str(row["node_id"]),
-        ))
-    return facts
-
 
 def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
     """Keep the latest classification for each source, preserving first on ties."""
@@ -143,7 +127,7 @@ def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
     return [row for _, row in latest.values()]
 
 
-def measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+def _measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     """Latest facts of Measurement's activated classifier, retaining task attribution."""
     rows = db.execute(_ATTRIBUTED_SQL + f" WHERE {_ACTIVE_VERSION_ONLY}").fetchall()
     facts = []
@@ -156,7 +140,7 @@ def measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
-def plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     """Plan-sourced correction facts, attributed to the work they corrected.
 
     Missing source events and missing corrected nodes stay unattributed.
@@ -190,6 +174,11 @@ def plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
+def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+    """Latest active person classifications and plan-sourced correction facts."""
+    return _measured_attributed_facts(db) + _plan_attributed_facts(db)
+
+
 def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:
     """The person's corrections arriving in [start, end) as (arrival time, target thread), one per source.
 
@@ -219,7 +208,7 @@ def workflow_run_of(node_id: str | None, parents: Mapping[str, str | None], runs
     """
     if node_id is None:
         return UNATTRIBUTED
-    roots, seen = set(runs), set()
+    roots, seen = runs if isinstance(runs, (set, frozenset)) else set(runs), set()
     current: str | None = node_id
     while current is not None and current not in seen:
         if current in roots:

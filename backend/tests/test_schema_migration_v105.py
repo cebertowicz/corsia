@@ -20,7 +20,6 @@ def test_migration_registered_and_adds_the_review_time_column(tmp_path):
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         db.execute("ALTER TABLE continuity_entries DROP COLUMN reviewed_at")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=104")
         db.commit()
         assert "reviewed_at" not in _columns(db)

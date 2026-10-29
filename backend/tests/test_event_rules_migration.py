@@ -30,7 +30,6 @@ def _dev_135() -> sqlite3.Connection:
     db = _fresh()
     for table in _TABLES:
         db.execute(f"DROP TABLE {table}")
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=135")
     db.commit()
     return db

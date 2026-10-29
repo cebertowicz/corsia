@@ -109,7 +109,6 @@ def test_a_v110_database_with_agent_use_terms_upgrades_through_v111_to_v112(isol
     db.execute(
         "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at) VALUES ('c1','a1','you','text comment','t','t')"
     )
-    db.execute("DROP TABLE measure_files")
     db.execute("PRAGMA user_version=110")
     db.commit()
 

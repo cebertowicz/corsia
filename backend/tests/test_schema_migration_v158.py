@@ -39,7 +39,6 @@ _ROWS: dict[str, tuple[str, object, str | None]] = {
 def _legacy_db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
-    db.execute("DROP TABLE measure_files")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('t','u','T','x','x')")
     for row_id, (content, metadata, _) in _ROWS.items():
         db.execute(

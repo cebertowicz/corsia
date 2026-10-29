@@ -103,7 +103,6 @@ def test_startup_migration_runs_from_45(tmp_path):
     path = tmp_path / "placement-answers.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES ('t', 'u', 'x', 'x')"
         )

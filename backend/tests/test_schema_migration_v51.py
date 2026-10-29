@@ -88,7 +88,6 @@ async def test_migrated_database_gives_new_threads_a_usable_roster_revision(isol
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=50")
         db.commit()
         migrate_to_current(db, SCHEMA_VERSION)

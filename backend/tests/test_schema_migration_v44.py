@@ -16,7 +16,6 @@ def test_startup_migration_copies_the_setting_and_keeps_the_legacy_row(tmp_path)
     path = tmp_path / "legacy-workspace-context-v43.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute(
             "INSERT INTO settings (key, value, updated_at) "
             "VALUES ('system_context', '{\"bootloader_files\": []}', 't')"

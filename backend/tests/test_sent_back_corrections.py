@@ -160,7 +160,7 @@ def test_the_migration_leaves_a_live_fact_alone_and_the_step_is_registered():
         db.close()
 
 
-def test_sent_back_facts_are_split_by_source_and_do_not_enter_trial_verdicts():
+def test_sent_back_facts_are_attributed_to_the_corrected_node():
     from core.correction_attribution import attributed_facts
     from core.sent_back_corrections import record_rejection_correction
 
@@ -173,7 +173,11 @@ def test_sent_back_facts_are_split_by_source_and_do_not_enter_trial_verdicts():
                GROUP BY source_kind"""
         ).fetchall()
         assert [(row["source_kind"], row["n"]) for row in rows] == [("sent_back", 1)]
-        assert attributed_facts(db) == []
+        facts = attributed_facts(db)
+        assert len(facts) == 1
+        assert facts[0].source_kind == "sent_back"
+        assert facts[0].node_id == facts[0].source_id.removeprefix("reject-")
+        assert facts[0].is_correction
     finally:
         db.close()
 
@@ -184,7 +188,6 @@ def test_a_v143_install_records_its_earlier_verdicts_when_it_starts():
     db = rejection_db(None)
     try:
         event_id = _seed_rejection(db, "worker")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=143")
         db.commit()
 

@@ -89,7 +89,6 @@ def test_the_step_is_safe_to_run_again() -> None:
 
 def test_the_runner_takes_a_125_database_to_current_and_stays_there() -> None:
     with closing(_wound_back_to_v125()) as db:
-        db.execute("DROP TABLE measure_files")
         result = migrate_to_current(db, SCHEMA_VERSION)
 
         assert (result.migrated, result.from_version, result.to_version) == (True, 125, SCHEMA_VERSION)

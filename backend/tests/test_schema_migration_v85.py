@@ -19,7 +19,6 @@ def test_startup_adds_review_requests_preserving_existing_state(tmp_path):
         rewind_to_v88_policy(db)
         db.execute("DROP TABLE doc_review_requests")
         db.execute("INSERT INTO threads(id,user_id,title,created_at,updated_at) VALUES ('keep','u','Kept','t0','t0')")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=84")
         db.commit()
     with closing(sqlite3.connect(path)) as db:

@@ -84,7 +84,6 @@ def _legacy_db(path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
     return plan.id, ids
@@ -160,7 +159,6 @@ def test_a_send_back_over_open_work_stays_failed(tmp_path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
         before = _rows(db)
@@ -183,7 +181,6 @@ def test_a_migrated_send_back_releases_what_it_held(tmp_path):
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=56")
         db.commit()
 

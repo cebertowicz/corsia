@@ -66,7 +66,6 @@ def test_startup_migration_from_76_matches_the_fresh_schema(tmp_path):
         conn.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         conn.execute("DROP TABLE system_bulletins")
         conn.execute("DROP TABLE system_bulletin_identity")
-        conn.execute("DROP TABLE measure_files")
         conn.execute("PRAGMA user_version=76")
         conn.commit()
     with closing(sqlite3.connect(path)) as conn:

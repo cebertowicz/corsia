@@ -220,7 +220,7 @@ from infra.migration_159_to_160_untrusted_confinement import migrate_159_to_160
 from infra.migration_160_to_161_self_caused import migrate_160_to_161
 from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
 from infra.migration_162_to_163_coordination_titles import migrate_162_to_163
-from infra.migration_163_to_164_measure_files import migrate_163_to_164
+from infra.migration_163_to_164_version_attr import migrate_163_to_164
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 

@@ -26,7 +26,6 @@ def test_startup_migration_adds_checkpoint_listing_index(tmp_path):
     path = tmp_path / "legacy-checkpoint-listing-v33.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DROP TABLE measure_files")
         db.execute("DROP INDEX checkpoints_listing")
         rewind_below_v42(db)
         rewind_to_v88_policy(db)

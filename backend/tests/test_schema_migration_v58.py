@@ -71,7 +71,6 @@ def _legacy_db(path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=57")
         db.commit()
     return ids, held
@@ -164,7 +163,6 @@ def test_a_plan_no_thread_owns_keeps_its_blocker_holds(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=57")
         db.commit()
 
@@ -200,7 +198,6 @@ def test_a_gone_owner_s_plan_is_retired_and_its_blockers_stay(tmp_path):
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
         db.execute("DROP TABLE system_bulletins")
         db.execute("DROP TABLE system_bulletin_identity")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=57")
         db.commit()
 

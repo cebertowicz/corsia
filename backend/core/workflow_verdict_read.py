@@ -25,6 +25,7 @@ from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
+from infra.measure_registry import workflow_for_file
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
@@ -73,15 +74,15 @@ def _model_groups(db: sqlite3.Connection, run_ids: Sequence[str]) -> dict[str, s
     return groups
 
 
-def _terminal_times(db: sqlite3.Connection, node_ids: Sequence[str], *, normalized: bool = False) -> dict[tuple[str, str], str]:
-    """First terminal times by state; optionally normalize with SQLite's datetime semantics."""
+def terminal_times(db: sqlite3.Connection, node_ids: Sequence[str]) -> dict[tuple[str, str], str]:
+    """First terminal times by state, normalized as UTC instants."""
     rows = db.execute("""
         SELECT node_id, CASE WHEN new_state='accepted_with_followup' THEN 'accepted' ELSE new_state END AS state,
-          MIN(CASE WHEN :normalized THEN datetime(created_at) ELSE created_at END) AS at FROM plan_node_events
+          MIN(datetime(created_at)) AS at FROM plan_node_events
         WHERE node_id IN (SELECT value FROM json_each(:ids))
           AND new_state IN ('accepted','accepted_with_followup','failed','closed')
         GROUP BY node_id, 2
-    """, {"ids": _ids(node_ids), "normalized": normalized}).fetchall()
+    """, {"ids": _ids(node_ids)}).fetchall()
     return {(row["node_id"], row["state"]): row["at"] for row in rows}
 
 
@@ -117,25 +118,20 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
     owner's current workflow skill still names the same ``measures.yaml`` beside its SKILL.md.
     """
     rows = [dict(row) for row in db.execute(
-        "SELECT owner_thread_id, kind, name, version, spec_json, file_path, synced_at, removed FROM measure_definitions"
+        "SELECT owner_thread_id, kind, name, version, spec_json, file_path, synced_at, removed, version_attr FROM measure_definitions"
     ).fetchall()]
-    workflow_of: dict[tuple[str, str], tuple[str, str]] = {}
-    for owner in {str(row["owner_thread_id"]) for row in rows}:
-        for workflow, entry in thread_workflow_owners(owner, db).items():
-            if entry.owner != owner or entry.named is not None:
-                continue
-            workflow_of[(owner, str(entry.skill_dir / "measures.yaml"))] = (workflow, owner)
+    workflows = {owner: thread_workflow_owners(owner, db) for owner in {str(row['owner_thread_id']) for row in rows}}
     by_workflow: dict[str, list[Definition]] = defaultdict(list)
     owners: dict[str, str] = {}
     for row in rows:
-        association = workflow_of.get((row["owner_thread_id"], str(Path(row["file_path"]))))
-        if association is None:
+        owner = row['owner_thread_id']
+        workflow = workflow_for_file(row['file_path'], owner, workflows[owner])
+        if workflow is None:
             continue
-        workflow, owner = association
         owners[workflow] = owner
         by_workflow[workflow].append(Definition(row["kind"], row["name"], int(row["version"]),
                                                 json.loads(row["spec_json"]), row["synced_at"],
-                                                bool(row["removed"]), row["file_path"]))
+                                                bool(row["removed"]), row["file_path"], row['version_attr']))
     return by_workflow, owners
 
 
@@ -178,7 +174,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
     judged = [node for node in roots if judged_version(node["workflow_version"])]
     judged_ids = {node["id"] for node in judged}
     models = _model_groups(db, [node["id"] for node in judged])
-    times = _terminal_times(db, [node["id"] for node in judged])
+    times = terminal_times(db, [node["id"] for node in judged])
     by_workflow: dict[str, list[Run]] = defaultdict(list)
     excluded: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for node in roots:
@@ -198,6 +194,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
             runs = [replace(run, kpi_rows=rows.get(run.run_id, {})) for run in runs]
         histories.append(WorkflowHistory(
             ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
+            version_attr=next((d.version_attr for d in definitions.get(ref, ()) if not d.removed), None),
             excluded={k: v for k, v in excluded.get(ref, {}).items()},
         ))
     plans, reached = _recorded(db)

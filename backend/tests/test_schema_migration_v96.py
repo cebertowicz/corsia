@@ -217,7 +217,6 @@ def test_v95_upgrade_lands_the_same_index_a_fresh_install_has(tmp_path) -> None:
         initialize_schema(db)
         _seed(db)
         db.execute(f"DROP INDEX {_INDEX}")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=95")
         db.commit()
         assert _index_rows(db) == {}
@@ -246,7 +245,6 @@ def test_the_step_repeats_cleanly_and_never_claims_the_version(tmp_path) -> None
         initialize_schema(db)
         _seed(db)
         db.execute(f"DROP INDEX {_INDEX}")
-        db.execute("DROP TABLE measure_files")
         db.execute("PRAGMA user_version=95")
         db.commit()
 
