@@ -7,6 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- When you type into an agent's document, the agent gets your edit as one change once you pause for 30 seconds, instead of a fragment every few seconds of typing.
+- Relative links inside a document's table cells open the linked file instead of saying the document is missing.
 - Source updates explain how to fix a branch with no tracking branch or a branch that has diverged from its tracked branch.
 - Source installs use the same local model server release as the app and show the cause if installation fails.
 - The update screen shows how many agents have paused while it waits for them.

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import batches, seed_document, seed_thread
-from doceditor import delivery_preference, feedback_batch_edits, feedback_batches
+from doceditor import delivery_preference, feedback_batch_core, feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 
 OWNER = {"Authorization": f"Bearer {OWNER_TOKEN}"}
@@ -75,7 +75,7 @@ def _save(db, owner_thread: str, *, author_kind: str = "user", author_id: str = 
 
 @pytest.mark.parametrize(
     ("immediate", "lane", "seconds"),
-    [(True, feedback_batches.IMMEDIATE, feedback_batches.IMMEDIATE_IDLE), (False, feedback_batches.DOCUMENT_HELD, feedback_batches.USER_IDLE)],
+    [(True, feedback_batches.IMMEDIATE, feedback_batch_core.EDIT_IDLE), (False, feedback_batches.DOCUMENT_HELD, feedback_batches.USER_IDLE)],
 )
 def test_a_persons_save_lands_in_the_lane_their_preference_names(isolated_db, immediate, lane, seconds):
     db = get_db()

@@ -208,7 +208,7 @@ def test_an_edit_only_batch_is_open_but_never_held_so_no_send_is_offered(client,
 
     feedback = _feedback(client, artifact)
     held = client.get(f"/api/doc-feedback/thread/{owner_thread}", headers=HEADERS).json()
-    # A person's save is immediate: open until its 5 s deadline, delivered by the server, never held for a Send.
+    # A person's save is immediate: open until the person pauses typing for 30 s, delivered by the server, never held for a Send.
     assert (feedback["open_count"], feedback["document_held_count"], feedback["image_held_count"]) == (1, 0, 0)
     assert held["artifacts"] == []
 
