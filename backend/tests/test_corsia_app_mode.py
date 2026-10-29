@@ -74,6 +74,11 @@ elif command == "bootout":
     if not loaded.exists():
         sys.exit(3)
     loaded.unlink()
+    # launchd ends the job's process before bootout is done with it.
+    try:
+        os.kill(int((state / "pid").read_text()), 9)
+    except ProcessLookupError:
+        pass
     # A migration that commits as that generation's process is stopped.
     migrated = state / "bootout_migrates"
     if migrated.exists() and migrated.read_text().split()[2] == (state / "generation").read_text():
@@ -299,7 +304,7 @@ os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 
 
 class App:
-    def __init__(self, root: Path, sleepers: list[subprocess.Popen]):
+    def __init__(self, root: Path, sleepers: list[int]):
         self.root = root
         self.bundle = root / "Applications" / "CORSIA.app"
         self.home = root / "home"
@@ -309,8 +314,8 @@ class App:
         self.launchd.mkdir()
         (self.launchd / "starts").write_text("0")
         # launchd's PIDs must be live Python processes, as uvicorn's are.
-        (self.launchd / "pids").write_text(" ".join(str(p.pid) for p in sleepers))
-        (self.launchd / "pid").write_text(str(sleepers[0].pid))
+        (self.launchd / "pids").write_text(" ".join(str(pid) for pid in sleepers))
+        (self.launchd / "pid").write_text(str(sleepers[0]))
         _python_tool(self.fakebin / "launchctl", _FAKE_LAUNCHCTL)
         _python_tool(self.fakebin / "curl", _FAKE_CURL)
         _python_tool(self.fakebin / "lsof", _FAKE_LSOF)
@@ -405,16 +410,24 @@ class App:
 
 @pytest.fixture
 def app(tmp_path):
+    # Orphaned at once, so launchd (PID 1) reaps one that bootout stops, as it
+    # does for a service; a pytest child would linger as a zombie instead.
     sleepers = [
-        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        int(subprocess.run(
+            ["/bin/sh", "-c", f'"{sys.executable}" -c "import time; time.sleep(600)" '
+             "</dev/null >/dev/null 2>&1 & echo $!"],
+            check=True, capture_output=True, text=True,
+        ).stdout)
         for _ in range(2)
     ]
     try:
         yield App(tmp_path, sleepers)
     finally:
         for sleeper in sleepers:
-            sleeper.kill()
-            sleeper.wait()
+            try:
+                os.kill(sleeper, 9)
+            except ProcessLookupError:
+                pass
         for path in [tmp_path, *tmp_path.rglob("*")]:
             if path.is_dir() and not path.is_symlink():
                 path.chmod(path.stat().st_mode | stat.S_IWUSR)
@@ -489,7 +502,7 @@ def test_app_mode_stop_can_stop_the_local_model_before_bootout(app):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert app.calls("curl_post")[-1].endswith("/api/system/stop-local-model")
-    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]
+    assert app.launchd_calls() == [f"bootout gui/{os.getuid()}/{LABEL}"]
 
 
 def test_app_mode_stop_keeps_the_service_when_the_local_model_will_not_stop(app):
@@ -530,7 +543,7 @@ def test_start_stop_and_restart_never_write_inside_a_read_only_bundle(app):
         assert result.returncode == 0, result.stdout + result.stderr
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
         f"kickstart -k {domain}/{LABEL}",
     ]
     assert app.calls("app") == [
@@ -629,7 +642,7 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     assert result.returncode == 0, result.stdout + result.stderr + str(app.calls("curl"))
     assert "lifecycle from 2.0.0+2" in result.stdout
     domain = f"gui/{os.getuid()}"
-    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.launchd_calls() == [f"bootout {domain}/{LABEL}"]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
         "--service unregister",
@@ -822,7 +835,7 @@ def test_a_failed_swap_starts_the_installed_app_again(app):
     assert "could not be installed (swap exit 42)" in result.stdout
     assert "lifecycle from" not in result.stdout
     domain = f"gui/{os.getuid()}"
-    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.launchd_calls() == [f"bootout {domain}/{LABEL}"]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
         "--service unregister",
@@ -848,8 +861,8 @@ def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
     assert (app.launchd / "rollback_reported").read_text() == "True"
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
-        f"bootout --wait {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
     ]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
@@ -880,7 +893,7 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     assert (app.launchd / "rollback_reported").read_text() == "True"
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
     ]
     assert app.calls("app") == [
         "--service unregister",
@@ -921,7 +934,7 @@ def test_after_the_swap_data_the_old_app_cannot_open_keeps_the_new_app(app):
     assert "went back to version" not in output
     assert not any("--update-rollback" in call for call in app.calls("app"))
     domain = f"gui/{os.getuid()}"
-    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.launchd_calls() == [f"bootout {domain}/{LABEL}"]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
     assert (app.launchd / "failed_operation").read_text() == OPERATION_ID
@@ -964,8 +977,8 @@ def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_a
     domain = f"gui/{os.getuid()}"
     # Stopped once for the swap and once for the rollback, then started again.
     assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
-        f"bootout --wait {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
+        f"bootout {domain}/{LABEL}",
     ]
     assert app.calls("app")[-2:] == ["--service unregister", "--service register"]
     assert app.generation() == "2.0.0+2"
@@ -980,4 +993,4 @@ def test_app_mode_stop_says_when_it_cannot_stop_the_local_model(app):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "--stop-local-model skipped: the backend is not answering" in result.stdout + result.stderr
     assert not any(call.endswith("/stop-local-model") for call in app.calls("curl_post"))
-    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]
+    assert app.launchd_calls() == [f"bootout gui/{os.getuid()}/{LABEL}"]

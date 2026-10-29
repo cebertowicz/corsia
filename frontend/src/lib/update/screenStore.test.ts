@@ -282,6 +282,14 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toBeNull();
 	});
 
+	it('leaves waiting immediately when the latched operation settles failed', () => {
+		const waiting = { ...inFlight(), phase: 'draining' as const, drain_total: 12, blocking: 9 };
+		updateStatus.set(status(waiting));
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', step: 'waiting' });
+		updateStatus.set(status({ ...waiting, status: 'failed', failure_code: 'launch_failed' }));
+		expect(get(updateScreenView)).toMatchObject({ mode: 'failed', serviceDown: false, failure: { retryLabel: expect.any(String) } });
+	});
+
 	it('keeps post-restart failures on the restart screen and completes only for the matching operation', () => {
 		updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:00:00Z' }));
 		tickUpdateScreen(1_000);

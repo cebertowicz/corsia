@@ -118,8 +118,6 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'ship it');
 	});
 
-	const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
-
 	function visibleObserver() {
 		vi.stubGlobal('IntersectionObserver', class {
 			constructor(private callback: IntersectionObserverCallback) {}
@@ -135,8 +133,7 @@ describe('CommentThread', () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
-		await dwell();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'));
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		vi.unstubAllGlobals();
 	});
 
@@ -145,13 +142,11 @@ describe('CommentThread', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
 		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
-		await dwell();
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await dwell();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
 		warn.mockRestore(); vi.unstubAllGlobals();
 	});
 
