@@ -343,7 +343,7 @@ describe('SetupScreen', () => {
 			localEligible = false; macosSupported = null;
 			await providersStep();
 			expect(rowNames()).toEqual(['Claude Code', 'API provider']);
-			expect(host.textContent).not.toContain('24 GB');
+			expect(host.textContent).not.toContain('Local models need at least 32 GB of memory');
 			expect(host.textContent).not.toContain('Local model');
 		});
 

@@ -15,12 +15,12 @@ afterEach(async () => {
 });
 
 describe('ProviderLocalModelControls', () => {
-	it('uses the source eligibility gate to replace Add model with the low-memory provider path', async () => {
+	it('offers the low-memory provider path when no local model is ready', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
 		token.set('tok');
 		const onAddProvider = vi.fn();
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: false }] }) })));
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: false }] }) })));
 		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider, corsiaManaged: true } });
 		await tick(); await tick(); flushSync();
 
@@ -32,6 +32,18 @@ describe('ProviderLocalModelControls', () => {
 		expect(onAddProvider).toHaveBeenCalledOnce();
 	});
 
+	it('hides the low-memory refusal and Add model when an existing local model is ready', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		token.set('tok');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: false }] }) })));
+		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
+		await tick(); await tick(); flushSync();
+
+		expect(host.textContent).not.toContain('Local models need at least 32 GB of memory');
+		expect(host.textContent).not.toContain('Add model');
+	});
+
 	it('shows no low-memory refusal on a host that can never run a local model', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
@@ -40,7 +52,7 @@ describe('ProviderLocalModelControls', () => {
 		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
 		await tick(); await tick(); flushSync();
 
-		expect(host.textContent).not.toContain('24 GB');
+		expect(host.textContent).not.toContain('Local models need at least 32 GB of memory');
 		expect(host.textContent).not.toContain('Add model');
 	});
 

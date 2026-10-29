@@ -31,7 +31,7 @@ const recommendations = {
 
 function sourceFor(state: RenderState) {
 	return {
-		source: 'omlx', name: 'Local model', state: 'ready',
+		source: 'omlx', name: 'Local model', state: state === 'under-24gb' ? 'needs_setup' : 'ready',
 		eligible: state !== 'under-24gb' && state !== '24gb-installed',
 		corsia_omlx: true, corsia_omlx_online: true,
 		settings_download: state === 'downloading'
@@ -220,7 +220,7 @@ test('renders the approved local-model evidence states from intercepted fixtures
 	}
 });
 
-test('shows an installed model and low-memory guidance on a 24 GB Mac', async ({ page }, testInfo) => {
+test('shows an installed model without low-memory guidance on a 24 GB Mac', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Desktop evidence only.');
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.emulateMedia({ colorScheme: 'light' });
@@ -228,7 +228,7 @@ test('shows an installed model and low-memory guidance on a 24 GB Mac', async ({
 	const card = await openLocalProvider(page);
 	await expect(page.getByText('24 GB memory', { exact: false })).toBeVisible();
 	await expect(card).toContainText('Existing model');
-	await expect(card).toContainText('Local models need at least 32 GB of memory');
+	await expect(card).not.toContainText('Local models need at least 32 GB of memory');
 	await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 	await capture(page, '24gb-installed-1440-light');
 });
