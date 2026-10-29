@@ -14,22 +14,11 @@ import app_startup_runtime
 from core import checkpoint_runtime, fork_runtime
 from infra import state
 from infra.config import RUNTIME_DIR
+from tests.browser_startup_fixture import ProcessOwnerTestContract as _ProcessOwnerTestContract
 
 # A hang guard, not a latency budget: several waits span a cold lifespan startup
 # (about 0.75s unloaded), which a 1s bound fails whenever the host is busy.
 _HANG_GUARD_SECONDS = 20
-
-
-class _ProcessOwnerTestContract:
-    """Minimal managed-process owner surface required by lifespan startup."""
-
-    process_dir = RUNTIME_DIR / "managed-processes"
-
-    def configure_transition_callback(self, _callback) -> None:
-        return None
-
-    def configure_long_running_capacity_callback(self, _callback) -> None:
-        return None
 
 
 async def _noop(*_args, **_kwargs) -> None:

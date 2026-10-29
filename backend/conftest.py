@@ -77,6 +77,21 @@ def pytest_runtest_call(item):
     return result
 
 
+@pytest.fixture(scope="session")
+def _browser_sweep_test_root(tmp_path_factory):
+    """Keep startup recovery away from every real browser socket directory."""
+    return tmp_path_factory.mktemp("browser-sweep")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_browser_startup_sweep(monkeypatch, _browser_sweep_test_root):
+    from functools import partial
+    from host_access import browser_orphan
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions",
+                        partial(browser_orphan.close_dead_sessions, root=_browser_sweep_test_root))
+
+
 @pytest.fixture
 def local_model_host(monkeypatch):
     """Pin the local-model host gate, including its imported alias."""
