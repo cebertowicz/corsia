@@ -25,7 +25,7 @@ from plans import service
 from plans.boundary import PlanActor, mutate
 from registry import service as registry_service
 from registry.chat_cards import ask_cards
-from registry.path_cards import MAX_CARDS, reference_cards, targets, workspace_path
+from registry.path_cards import reference_cards, targets, workspace_path
 from tests.plan_ask_helpers import document_ask
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -482,6 +482,42 @@ def test_the_ask_reads_seek_an_index_instead_of_scanning(db):
         assert plan and not [line for line in plan if line.startswith("SCAN")], plan
 
 
+def test_relative_file_cards_resolve_workspace_without_registration(db, ws, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (ws / "notes").mkdir()
+    (repo / "notes").mkdir()
+    (ws / "notes" / "plan.md").write_text("workspace unique")
+    (repo / "notes" / "plan.md").write_text("repository unique")
+    for i in range(10):
+        (ws / f"file{i}.md").write_text(str(i))
+    before = db.total_changes
+    text = "See notes/plan.md and `notes/plan.md` " + " ".join(f"file{i}.md" for i in range(10))
+    cards, more = reference_cards(db, text, [repo.resolve(), ws.resolve()], "user", origin=ws.resolve())
+    assert len(cards) == 11 and more == 0
+    assert cards[0]["artifact_id"] is None and cards[0]["path"] == str((ws / "notes/plan.md").resolve())
+    assert all(c["artifact_id"] is None and c["opens"] for c in cards)
+    assert db.total_changes == before
+
+
+def test_thread_cards_choose_workspace_origin_over_repository(db, ws, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "plan.md").write_text("repository")
+    (ws / "plan.md").write_text("workspace")
+    _message(db, 1, text="Open `plan.md`.")
+    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a: [repo.resolve(), ws.resolve()])
+    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a: (ws.resolve(), [("repo", repo.resolve())]))
+    card = _page(db)["m1"]["cards"][0]
+    assert card["path"] == str((ws / "plan.md").resolve())
+    assert Path(card["path"]).read_text() == "workspace"
+
+
+def test_relative_candidates_exclude_url_and_fenced_text():
+    assert targets("read notes/one.md and `notes/two.md` https://example.com/notes/no.md\n```\nnotes/hidden.md\n```") == ["notes/one.md", "notes/two.md"]
+    assert targets("[notes/label.md](notes/actual.md) [site](https://example.com/file.md)") == ["notes/actual.md"]
+
+
 # Reference cards: the registered files a message names.
 
 @pytest.fixture
@@ -516,16 +552,22 @@ def test_only_links_and_bare_paths_outside_code_are_candidates():
     assert targets(text) == ["shared/plan.md", "/workspace/notes/a.md"]
 
 
-def test_a_message_gets_a_card_per_registered_file_it_names_and_none_for_others(db, ws):
+def test_a_message_gets_cards_for_accessible_named_files_without_registering(db, ws):
     kept = _registered(db, ws, "plan.md")
     (ws / "unregistered.md").write_text("x")
     strangers = _registered(db, ws, "theirs.md", thread="stranger")
     text = f"[plan](plan.md) [no](unregistered.md) [theirs](theirs.md) [gone](missing.md) {ws}/plan.md"
 
+    before = db.total_changes
     cards, more = reference_cards(db, text, [ws.resolve()], "user")
 
-    assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [("artifact", kept, "plan.md")]
+    assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [
+        ("artifact", kept, "plan.md"), ("artifact", None, "unregistered.md"),
+    ]
+    assert cards[1]["path"] == str((ws / "unregistered.md").resolve())
     assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
+    assert db.total_changes == before
+    assert registry_service.resolve_file_identity(str(ws / "unregistered.md"), db=db) is None
 
 
 def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
@@ -553,14 +595,30 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
     assert [card["title"] for card in page["m3"]["cards"]] == ["plan.md"]
 
 
-def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, ws):
-    names = [f"f{i}.md" for i in range(MAX_CARDS + 3)]
+def test_file_identity_lookup_uses_index(db):
+    plan = db.execute(
+        "EXPLAIN QUERY PLAN SELECT * FROM artifact_identities WHERE integration=? AND type=? AND external_id=?",
+        ("workspace", "document", "workspace://test/file.md"),
+    ).fetchall()
+    assert all("SEARCH" in row["detail"] for row in plan)
+
+
+def test_a_retired_named_file_does_not_return_as_unregistered(db, ws):
+    artifact_id = _registered(db, ws, "retired.md")
+    db.execute("UPDATE artifact_identities SET state='retired' WHERE id=?", (artifact_id,))
+    cards, _ = reference_cards(db, "retired.md", [ws.resolve()], "user")
+    assert cards == []
+
+
+def test_a_message_shows_all_matched_cards(db, ws):
+    names = [f"f{i}.md" for i in range(11)]
     for name in names:
         _registered(db, ws, name)
 
     cards, more = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
 
-    assert (len(cards), more) == (MAX_CARDS, 3)
+    assert more == 0
+    assert [(c["name"], c["path"]) for c in cards] == [(name, str(ws / name)) for name in names]
 
 
 def _marked(cards) -> list[tuple[str, str, list[str]]]:

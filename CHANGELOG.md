@@ -7,6 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Open workspace files named in chat from their document chips, even before they are registered.
+
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
 - Sign an added Claude Code or Codex account in again from its row in Provider settings.
 - Setup shows when it is retrying a failed model source check.

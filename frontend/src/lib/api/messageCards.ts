@@ -2,7 +2,7 @@
 export interface MessageCard {
 	/** An ask is a user ask the agent raised (it has a round state); an artifact is a file the message names. */
 	kind: 'ask' | 'artifact';
-	artifact_id: string;
+	artifact_id: string | null;
 	title: string;
 	type: string | null;
 	icon: string;

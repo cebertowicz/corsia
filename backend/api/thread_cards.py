@@ -28,7 +28,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from api.files_roots import scope_bases
+from api.files_roots import resolve_project, scope_bases
+from infra import config
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
 from registry.path_access import FileLookup
@@ -151,6 +152,7 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
     asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
     bases: list[Path] | None = None
     lookup_memo: dict[str, FileLookup] = {}
+    origin: Path | None = None
     for row in messages:
         if row.get("role") != "assistant":
             continue
@@ -159,14 +161,16 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         more = 0
         if isinstance(text, str) and text:
             if bases is None:
-                bases = scope_bases(thread_row["project_id"], db)
+                project_id = thread_row["project_id"]
+                bases = scope_bases(project_id, db)
+                origin = resolve_project(project_id, db)[0] if project_id else config.WORKSPACE.resolve()
             # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
             turn_id = _loads(row.get("metadata")).get("turn_id")
             asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
             covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
             for card in cards:
                 covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
-            refs, more = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo)
+            refs, more = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo, origin=origin)
             cards.extend(refs)
         if cards:
             row["cards"] = cards

@@ -62,7 +62,7 @@ def _counts(raw: object) -> dict[str, int] | None:
 
 
 def card_for(
-    artifact: Mapping[str, Any] | None, artifact_id: str, *, kind: str,
+    artifact: Mapping[str, Any] | None, artifact_id: str | None, *, kind: str,
     hold_id: str | None = None, state: str | None = None,
     feedback: dict[str, int] | None = None,
 ) -> dict[str, Any]:

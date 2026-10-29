@@ -109,7 +109,7 @@
 		{/if}
 		{#if files.length > 0 || more > 0 || browserChip}
 			<ul class="chips" aria-label={stripLabel} use:peek={files.length + more + (browserChip ? 1 : 0)}>
-				{#each files as card (card.hold_id ?? card.artifact_id)}
+				{#each files as card (card.artifact_id ?? card.path)}
 					<li><AttachmentRow {card} {threadId} variant="chip" /></li>
 				{/each}
 				{#if browserChip}

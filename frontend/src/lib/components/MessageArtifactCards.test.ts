@@ -44,6 +44,19 @@ afterEach(() => {
 });
 
 describe('MessageArtifactCards', () => {
+	it('renders distinct unregistered files and opens the selected path', () => {
+		const cards = Array.from({ length: 11 }, (_, i) => ask({
+			kind: 'artifact', artifact_id: null, hold_id: undefined, state: undefined,
+			title: `file${i}.md`, name: `file${i}.md`, path: `/workspace/file${i}.md`,
+		}));
+		render({ cards });
+		expect(tiles()).toHaveLength(11);
+		tiles()[10].click();
+		const tab = get(threadWorkspaces).t1.tabs[0];
+		expect(tab.path).toBe('/workspace/file10.md');
+		expect(tab.artifactId).toBeNull();
+	});
+
 	it('names each tile by title, type and round state, and opens the artifact on click', () => {
 		render({ cards: [ask()] });
 
