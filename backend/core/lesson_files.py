@@ -55,11 +55,16 @@ HOLD_REASONS = {
 }
 
 
+def section_key(section: str) -> str:
+    """Key a section name the same way as a Markdown heading."""
+    return section.lstrip("#").strip().casefold()
+
+
 def has_section(text: str, section: str) -> bool:
     """Whether Markdown text already has a heading named section."""
-    wanted = section.lstrip("#").strip().casefold()
+    wanted = section_key(section)
     return any(
-        line.lstrip("#").strip().casefold() == wanted
+        section_key(line) == wanted
         for line in text.splitlines() if line.startswith("#")
     )
 

@@ -1088,6 +1088,7 @@ async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> Non
 
 @pytest.mark.parametrize(("existing_section", "requested_section", "target", "held"), [
     ("Part A", "Part A", "context/shared.md", True),
+    ("Usage", "## usage", "context/shared.md", True),
     ("Part A", "Part B", "context/shared.md", False),
     (None, "Part B", "context/shared.md", True),
     ("Part A", None, "context/shared.md", True),
@@ -1100,7 +1101,8 @@ async def test_trial_section_conflicts(env: Env, existing_section, requested_sec
     await _drain(env.worker)
     if held:
         assert "wait for a trial on the target file to finish and call place again" in reply
-        assert "when the only other trial changes a different named section" in reply
+        assert "if the only other trial changes a named section, set target_section to a different section" in reply
+        assert "A trial with no section conflicts with every trial on the file" in reply
         assert not _skill(env).exists()
         assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
     else:
@@ -1129,6 +1131,18 @@ def test_inherited_offered_trial_counts(env: Env) -> None:
     _activate_cap_trial(env, 1, "Part A", owner="ancestor")
     reply = _place(env, _entry(env), _answer(new_target_path="context/shared.md", target_section="Part A"))
     assert "captured hypothesis" in reply
+
+
+async def test_same_case_merge_uses_heading_key(env: Env) -> None:
+    existing = _activate_cap_trial(env, 1, "Usage")
+    entry = _entry(env)
+    reply = _place(env, entry, _answer(
+        case=CASE, cause="rule_gap", new_target_path="context/shared.md", target_section="## usage",
+    ))
+    assert "queued" in reply
+    await _drain(env.worker)
+    assert existing.exists() and not _skill(env).exists()
+    assert _state(env, entry) == ("retired", "written")
 
 
 async def test_capture_retry_keeps_target_for_same_case_merge(env: Env) -> None:
