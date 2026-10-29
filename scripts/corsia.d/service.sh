@@ -77,20 +77,49 @@ require_loaded_service_owns_port() {
     fi
 }
 
+# macOS 15 rejects `bootout --wait` as an unrecognized target, so plain bootout
+# runs and the job's process exit is awaited here, inside the one deadline.
 launchctl_bootout_wait() {
     "$PYTHON" -c '
+import os
+import re
 import subprocess
 import sys
+import time
+
+target = sys.argv[1]
+deadline = time.monotonic() + int(sys.argv[2])
+
+
+def launchctl(*args):
+    return subprocess.run(
+        ["launchctl", *args], check=False, capture_output=True, text=True,
+        timeout=max(deadline - time.monotonic(), 0.1),
+    )
+
+
+def running(pid):
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
 
 try:
-    completed = subprocess.run(
-        ["launchctl", "bootout", "--wait", sys.argv[1]],
-        check=False,
-        timeout=int(sys.argv[2]),
-    )
+    loaded = launchctl("print", target)
+    match = re.search(r"^\s*pid = (\d+)$", loaded.stdout, re.MULTILINE)
+    pid = int(match.group(1)) if loaded.returncode == 0 and match else None
+    completed = launchctl("bootout", target)
 except subprocess.TimeoutExpired:
     raise SystemExit(124)
-raise SystemExit(completed.returncode)
+sys.stderr.write(completed.stderr)
+if completed.returncode != 0:
+    raise SystemExit(completed.returncode)
+while pid is not None and running(pid):
+    if time.monotonic() >= deadline:
+        raise SystemExit(124)
+    time.sleep(0.2)
 ' "$1" "$SERVICE_PID_EXIT_WAIT_SECONDS"
 }
 

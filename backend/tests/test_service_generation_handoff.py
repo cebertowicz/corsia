@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,7 +19,7 @@ BACKEND_PORT=9999
 CORSIA_TOKEN=[REDACTED]
 FORCE=false
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 SERVICE_PLIST="${LAUNCHCTL_TRACE}.plist"
 printf 'old plist\\n' > "$SERVICE_PLIST"
 service_installed() { return 0; }
@@ -106,6 +108,82 @@ launchctl_bootout_wait gui/501/com.corsia.prod
     assert result.returncode == 124
 
 
+def _orphan_sleeper() -> int:
+    """A live process launchd (PID 1) reaps once it is killed, like a service."""
+    return int(subprocess.run(
+        ["/bin/sh", "-c", f'"{sys.executable}" -c "import time; time.sleep(60)" '
+         "</dev/null >/dev/null 2>&1 & echo $!"],
+        check=True, capture_output=True, text=True,
+    ).stdout)
+
+
+def _run_bootout_wait(tmp_path: Path, pid: int, bootout: str) -> subprocess.CompletedProcess:
+    trace = tmp_path / "launchctl.log"
+    fake_launchctl = tmp_path / "launchctl"
+    fake_launchctl.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        f"open({str(trace)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1] == 'print':\n"
+        f"    print('gui/501/com.corsia.prod = {{\\n\\tpid = {pid}\\n}}')\n"
+        "    sys.exit(0)\n"
+        "if sys.argv[1:] != ['bootout', 'gui/501/com.corsia.prod']:\n"
+        "    sys.exit(64)\n"
+        f"{bootout}\n"
+    )
+    fake_launchctl.chmod(0o755)
+    return _run_bash(
+        """
+warn() { :; }
+ok() { :; }
+fail() { :; }
+source scripts/corsia.d/service.sh
+SERVICE_PID_EXIT_WAIT_SECONDS=2
+launchctl_bootout_wait gui/501/com.corsia.prod
+""",
+        env={"PATH": f"{tmp_path}:/usr/bin:/bin", "PYTHON": sys.executable},
+    )
+
+
+def test_launchctl_bootout_wait_returns_once_the_job_process_exits(tmp_path: Path) -> None:
+    pid = _orphan_sleeper()
+    try:
+        result = _run_bootout_wait(tmp_path, pid, f"os.kill({pid}, 9)")
+    finally:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+
+    assert result.returncode == 0, result.stderr
+    # No `--wait`: macOS 15 rejects it as an unrecognized target specifier.
+    assert (tmp_path / "launchctl.log").read_text().splitlines() == [
+        "print gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
+    ]
+
+
+def test_launchctl_bootout_wait_times_out_while_the_job_process_lives(tmp_path: Path) -> None:
+    pid = _orphan_sleeper()
+    try:
+        result = _run_bootout_wait(tmp_path, pid, "sys.exit(0)")
+    finally:
+        os.kill(pid, 9)
+
+    assert result.returncode == 124
+
+
+def test_launchctl_bootout_wait_returns_launchctl_failure(tmp_path: Path) -> None:
+    pid = _orphan_sleeper()
+    try:
+        result = _run_bootout_wait(tmp_path, pid, "sys.stderr.write('Boot-out failed: 5\\n'); sys.exit(5)")
+    finally:
+        os.kill(pid, 9)
+
+    assert result.returncode == 5
+    assert "Boot-out failed: 5" in result.stderr
+
+
 def test_bootout_waits_through_launchd_when_the_job_has_no_pid(
     tmp_path: Path,
 ) -> None:
@@ -116,7 +194,7 @@ warn() { :; }
 ok() { :; }
 fail() { :; }
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 service_loaded_pid() { printf 'PID snapshot must not be used' >&2; return 1; }
 launchctl() { printf '%s\\n' "$*" >> "$TRACE"; }
 bootout_service_and_wait gui/501 com.corsia.prod
@@ -126,7 +204,7 @@ bootout_service_and_wait gui/501 com.corsia.prod
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
     ]
 
 
@@ -190,7 +268,7 @@ def test_service_restart_never_bootstraps_without_confirmed_teardown(
         + """
 cancel_failed_drain() { printf 'cancel-drain\\n' >> "$LAUNCHCTL_TRACE"; }
 launchctl_bootout_wait() {
-    printf 'bootout --wait %s\\n' "$1" >> "$LAUNCHCTL_TRACE"
+    printf 'bootout %s\\n' "$1" >> "$LAUNCHCTL_TRACE"
     return 124
 }
 launchctl() { printf '%s\\n' "$*" >> "$LAUNCHCTL_TRACE"; }
@@ -201,7 +279,7 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
     ]
     assert Path(f"{trace}.plist").read_text() == "old plist\n"
     assert "did not complete after 125s" in result.stderr
@@ -239,9 +317,9 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
     ]
     assert Path(f"{trace}.plist").read_text() == "old plist\n"
     assert "did not confirm teardown completed" in result.stderr
@@ -282,10 +360,10 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "restore-plist",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
     ]
     assert Path(f"{trace}.plist").read_text() == "old plist\n"
     assert "did not confirm teardown completed" in result.stderr
