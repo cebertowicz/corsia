@@ -163,6 +163,19 @@ describe('rendering and actions', () => {
 				unmount(component);
 			});
 
+			it('keeps the switch on the one visible account while it is turned off, so it can be turned back on', async () => {
+				token.set('test-token');
+				const policy = { ...entry(['default', 'a']), disabled: ['a'], units: [{ id: 'default', label: 'default', enabled: true }, { id: 'a', label: 'a', enabled: false }] };
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [policy] }))
+					: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }, signedIn('a', 'Alpha')] }))));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
+				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
+				expect(numbers()).toEqual([]);
+				unmount(component);
+			});
+
 			it('moves between visible accounts when the hidden Default is in the saved order', async () => {
 				token.set('test-token');
 				let units = ['a', 'default', 'b'];
@@ -700,6 +713,23 @@ describe('sign-in submit', () => {
 	 await settle(); await settle();
 	 expect(document.body.textContent).toContain('Signed in, but the account list could not be reloaded.');
 	 expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
+	 unmount(component);
+	});
+	it('offers Retry when the list cannot be reloaded after a cancelled sign-in', async () => {
+	 const lists = [response({ accounts: [ambient, work] }), response({ detail: 'offline' }, 503), response({ accounts: [ambient] })];
+	 vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+		const path = input instanceof Request ? input.url : String(input);
+		if (path.includes('/api/provider-policy')) return Promise.resolve(response({ providers: [] }));
+		if (path.includes('/signin')) return Promise.resolve(response({ account_id: 'work', status: 'cancelled', cause: null, route: 'browser' }));
+		return Promise.resolve(lists.shift()!);
+	 }));
+	 const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+	 await settle(); await settle();
+	 expect(document.body.textContent).toContain('Couldn’t load your accounts.');
+	 // This suite signs no token in, so the policy's own Retry comes first.
+	 [...document.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.trim() === 'Retry').at(-1)!.click(); await settle(); await settle();
+	 expect(document.body.textContent).not.toContain('Couldn’t load your accounts.');
+	 expect(document.querySelector('#vendor-account-work')).toBeNull();
 	 unmount(component);
 	});
 	it('submits Add only once while the first keyboard request is pending', async () => {

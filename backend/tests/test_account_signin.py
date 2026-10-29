@@ -2214,6 +2214,27 @@ async def test_startup_removes_only_unreferenced_never_signed_in_accounts(script
 
 @pytest.mark.asyncio
 @both
+async def test_startup_sweep_survives_one_accounts_failure(scripted_vendor_clis, provider, monkeypatch):
+    from connections import account_leftovers
+    from connections.vendor_accounts import add_account
+
+    failing = scripted_vendor_clis[provider]
+    other = add_account(provider, 'Other')
+    real = account_leftovers.commit_if_leftover
+
+    def commit(account_id, *, db=None):
+        if account_id == failing['id']:
+            raise RuntimeError('unexpected row')
+        return real(account_id, db=db)
+
+    monkeypatch.setattr(account_leftovers, 'commit_if_leftover', commit)
+    await account_leftovers.remove_startup_leftovers()
+    assert _account(failing['id'])['state'] == 'signed_out'
+    assert _account(other['id'])['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+@both
 async def test_startup_keeps_account_with_failed_cleanup(scripted_vendor_clis, provider):
     from connections.account_leftovers import remove_startup_leftovers
     from connections.vendor_accounts import record_auth_cleanup

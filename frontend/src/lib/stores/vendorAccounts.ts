@@ -234,7 +234,7 @@ async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; sig
 	const refreshed = await loadVendorAccounts();
 	return refreshed.ok
 		? { ok: true, signin }
-		: { ok: true, signin, error: signedIn ? 'Signed in, but the account list could not be reloaded.' : 'The account list could not be reloaded.' };
+		: { ok: true, signin, error: signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.' };
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {

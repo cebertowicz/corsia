@@ -1,9 +1,13 @@
 """Identify unreferenced added accounts that have never completed a login."""
+import logging
+
 from connections.account_evidence import discovery_record
 from connections.account_lifecycle import change_state
 from connections.vendor_accounts import VENDORS, get_account, list_accounts
 from infra.database import write_transaction
 from infra.db_async import run_in_db
+
+log = logging.getLogger(__name__)
 
 
 def _referenced(account_id: str, *, db) -> bool:
@@ -62,7 +66,13 @@ async def record_failed_stop(operation) -> None:
 
 
 async def remove_startup_leftovers() -> None:
-    """Sign-ins do not survive restart; an added row created by API alone is treated alike."""
+    """Sign-ins do not survive restart; an added row created by API alone is treated alike.
+
+    One account's failure keeps that row and never stops startup.
+    """
     for account in await run_in_db(list_accounts):
         if account["provider"] in VENDORS:
-            await remove_if_leftover(account["id"])
+            try:
+                await remove_if_leftover(account["id"])
+            except Exception as exc:  # noqa: BLE001 - a leftover row must not keep the backend from starting
+                log.warning("startup leftover check for %s failed: %s", account["id"], type(exc).__name__)

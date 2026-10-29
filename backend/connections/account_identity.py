@@ -115,7 +115,8 @@ def observe_discovered_identity(provider: str, identity: dict, *, token, db=None
     """Commit a discovery's fenced Default observation; False only when a newer one superseded it.
 
     Unreadable or incomplete facts are not evidence that the login changed, so
-    they record nothing: the last known identity, receipt and usage stand.
+    they update only the Default's visibility: the last known identity, receipt
+    and usage stand. A definite signed-out read commits as a full observation.
     """
     from connections.account_observation import commit_default_visibility, has_comparison_facts
 

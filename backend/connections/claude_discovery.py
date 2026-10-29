@@ -127,7 +127,7 @@ async def discover_claude_models(binary: str, *, context=None):
         usage = responses.get("corsia-usage")
         # A signed-out CLI still lists its static models, so a listed catalog
         # proves nothing about the login: ask the CLI before calling it ready.
-        if await auth_status_state(binary) == source_state.NEEDS_AUTH:
+        if (await auth_status(binary))[0] == source_state.NEEDS_AUTH:
             await _record_failed_sign_in(binary, str((usage or {}).get("error") or "Claude Code is not signed in"))
         await _record_catalog_success(usage, observation)
     payload = response.get("response") or {}
@@ -169,16 +169,16 @@ async def discover_claude_models(binary: str, *, context=None):
     return payload
 
 
-async def auth_status_state(binary: str) -> str:
-    """needs_auth only when ``claude auth status`` exits 1; anything else is unverified.
+async def auth_status(binary: str) -> tuple[str, str]:
+    """The source state and login status from ``claude auth status``; it writes nothing.
 
-    A failed session says something went wrong, not that the user is signed
-    out, so ask the CLI's own answer once, bounded. The JSON login flag is read
-    without retaining the account details the output can contain.
+    The state is needs_auth only when the command exits 1; anything else is
+    unverified. A failed session says something went wrong, not that the user
+    is signed out, so ask the CLI's own answer once, bounded. The JSON login
+    flag is read without retaining the account details the output can contain.
     """
-    from connections.account_identity import capture_default_observation, claude_login_status, observe_discovered_identity
+    from connections.account_identity import claude_login_status
 
-    observation = await run_in_db(capture_default_observation, "claude-code")
     try:
         process = await asyncio.create_subprocess_exec(
             binary, "auth", "status", stdin=asyncio.subprocess.DEVNULL,
@@ -192,20 +192,25 @@ async def auth_status_state(binary: str) -> str:
             report = json.loads(stdout)
         except ValueError:
             report = None
-        status = claude_login_status(report, code)
-        await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": status}, token=observation)
     except (OSError, asyncio.TimeoutError) as exc:
         log.warning("claude auth status did not answer: %s", type(exc).__name__)
-        await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": "unknown"}, token=observation)
-        return source_state.UNVERIFIED
-    return source_state.NEEDS_AUTH if code == 1 else source_state.UNVERIFIED
+        return source_state.UNVERIFIED, "unknown"
+    state = source_state.NEEDS_AUTH if code == 1 else source_state.UNVERIFIED
+    return state, claude_login_status(report, code)
 
 
 async def _record_failed_sign_in(binary: str, detail: str) -> NoReturn:
-    """Fail discovery with an explicit receipt only after the source write succeeded."""
-    state = await auth_status_state(binary)
+    """Fail discovery with an explicit receipt only after the source write succeeded.
+
+    A successful catalog records the Default's visibility with its own fenced
+    identity read, so only this failed path records the status read here.
+    """
+    from connections.account_identity import capture_default_observation, observe_discovered_identity
     from connections.auth_failure import auth_failure_kind
 
+    observation = await run_in_db(capture_default_observation, "claude-code")
+    state, login = await auth_status(binary)
+    await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": login}, token=observation)
     # A stale credential file can make ``claude auth status`` exit successfully
     # after the CLI has already reported that its refresh is impossible. This
     # exact provider error overrides only that stale success, never a generic

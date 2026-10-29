@@ -98,7 +98,7 @@
 			const current = await checkVendorSignin(account.id);
 			if (current.ok && current.signin) {
 				rememberSignin(current.signin);
-				if (current.error) actionError = current.error;
+				if (current.error) refreshError = current.error;
 			} else if (!current.absent) actionError = current.error ?? 'Could not check sign-in.';
 		}
 	});
@@ -164,7 +164,7 @@
 		}
 		if (result.signin.status === 'superseded' && result.signin.cause === 'account_refresh_superseded') clearSignin(accountId);
 		else rememberSignin(result.signin);
-		if (result.error) actionError = result.error;
+		if (result.error) refreshError = result.error;
 	}
 
 	async function checkSignin(accountId: string) {
@@ -177,7 +177,7 @@
 			return;
 		}
 		rememberSignin(result.signin);
-		if (result.error) actionError = result.error;
+		if (result.error) refreshError = result.error;
 	}
 
 	async function cancelSignin(accountId: string) {
@@ -190,7 +190,7 @@
 			return;
 		}
 		rememberSignin(result.signin);
-		if (result.error) actionError = result.error;
+		if (result.error) refreshError = result.error;
 	}
 
 
@@ -313,7 +313,7 @@
 								{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
 									<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
 								{/if}
-								{#if unit && visibleUnitCount >= 2}
+								{#if unit && (visibleUnitCount >= 2 || !unit.enabled)}
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
 										enabled={unit.enabled}

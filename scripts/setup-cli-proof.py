@@ -100,7 +100,7 @@ def _binary(provider: str, candidate_roots: tuple[Path, ...] | None = None) -> s
 async def _auth_checks(candidate_roots: tuple[Path, ...] | None = None) -> tuple[dict[str, str], list[str]]:
     """Run each actual vendor auth check without keeping its output."""
     from connections import _codex_sign_in_state
-    from connections.claude_discovery import auth_status_state
+    from connections.claude_discovery import auth_status
 
     checks: dict[str, str] = {}
     limits: list[str] = []
@@ -112,7 +112,7 @@ async def _auth_checks(candidate_roots: tuple[Path, ...] | None = None) -> tuple
         if provider == "codex":
             checks[provider] = _codex_sign_in_state(binary)
         else:
-            checks[provider] = await auth_status_state(binary)
+            checks[provider] = (await auth_status(binary))[0]
     if checks.get("claude-code", "").startswith("not_proven_here"):
         limits.append("Claude Code auth state is not proven here because no Claude binary resolved.")
     return checks, limits

@@ -449,6 +449,25 @@ class TestClaudeSignIn:
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["prior_state"]) == ("unverified", "ready")
 
+    def test_signing_back_in_shows_the_hidden_default_and_is_ready_on_the_first_refresh(
+        self, isolated_db, client, claude_session,
+    ):
+        from connections.claude_discovery import ClaudeCatalogCheckFailed, _record_failed_sign_in
+        from connections.vendor_accounts import default_account
+
+        _put("claude-code", "needs_auth")
+        claude_session.auth_status(1)
+        claude_session.auth_stdout[0] = b'{"loggedIn":false}'
+        with pytest.raises(ClaudeCatalogCheckFailed):
+            asyncio.run(_record_failed_sign_in("/bin/claude-code", "failed"))
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is True
+        claude_session(_listed())
+        claude_session.auth_status(0)
+        claude_session.auth_stdout[0] = b'{"loggedIn":true}'
+        self._recheck()
+        assert _sources(client)["claude-code"]["state"] == "ready"
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is False
+
     def test_a_listed_catalog_asks_auth_status_once_before_ready(
         self, isolated_db, client, claude_session,
     ):
