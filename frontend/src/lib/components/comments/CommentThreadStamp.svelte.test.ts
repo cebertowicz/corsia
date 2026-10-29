@@ -52,6 +52,7 @@ async function settle() { await Promise.resolve(); flushSync(); await Promise.re
 const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
 
 afterEach(() => {
+	vi.useRealTimers();
 	if (component) unmount(component);
 	component = null; host?.remove();
 	FakeObserver.all = []; FakeObserver.visibleOnObserve = false; surface.active = true;
@@ -256,6 +257,9 @@ describe('CommentThread stamping', () => {
 	});
 
 	it('stamps both visible unread replies together and keeps the collapse point stable', async () => {
+		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
+		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
+		vi.useFakeTimers();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
 		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
@@ -264,7 +268,11 @@ describe('CommentThread stamping', () => {
 		expect(host.textContent).toContain('Show 4 earlier replies');
 
 		for (const observer of FakeObserver.live()) observer.report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r5']]), { timeout: 3000 });
+		await vi.advanceTimersByTimeAsync(1_499);
+		expect(onViewed).not.toHaveBeenCalled();
+		// The dwells end at 1500 ms and their shared stamp timer runs on the next tick.
+		await vi.advanceTimersByTimeAsync(2);
+		expect(onViewed.mock.calls).toEqual([['c1', 'r5']]);
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(0);
 		expect(host.textContent).toContain('Show 4 earlier replies');
