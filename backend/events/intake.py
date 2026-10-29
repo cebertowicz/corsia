@@ -15,7 +15,6 @@ from events import rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
-
 from events.platform import deliver_envelope_sync
 from events.resolve import Target, resolve_targets
 from infra.database import get_db, write_transaction

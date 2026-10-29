@@ -78,7 +78,7 @@ def test_validator_defect_does_not_recover_invalid(monkeypatch):
     text = answer({"verdict": "flagged", "categories": ["credential reach"], "findings": []})
     outcome, facts = verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)
     assert outcome == "no_result" and "Couldn’t" in facts["reason"]
-    assert "Check the backend log" in facts["reason"]
+    assert "The run ends without a result; a later event starts a new one" in facts["reason"]
     assert verdict({"status": "completed"}, "not a result", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
 
 

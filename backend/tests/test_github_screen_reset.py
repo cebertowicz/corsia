@@ -100,7 +100,7 @@ async def test_floor_capture_failure_does_not_start_worker(screen, monkeypatch):
     spawn.assert_not_awaited()
     row = starts(screen["key"] + "_start")[0]
     assert row[0] == "refused" and "Couldn’t read" in row[1]
-    assert "Check the backend log" in row[1]
+    assert "The run ends without a result; a later event starts a new one" in row[1]
     event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.no_result")
     assert event["facts"]["source"] == "outside" and event["facts"]["injection_signs"] is None
     assert not list((screen["folder"] / "staging").glob("screen-*"))
@@ -229,7 +229,7 @@ async def test_remote_change_refuses_queued_screen_before_opening_channel(screen
                     "origin", "https://github.com/other/current.git"], check=True)
     await run_scripts()
     [(outcome, reason, _, _)] = starts(screen["key"] + "_opened")
-    assert outcome == "failed" and "no longer registered" in reason
+    assert outcome == "failed" and "event repository does not match the tracked repository" in reason
     assert screen["state"]["calls"] == []
     assert starts(screen["key"] + "_start") == []
     row = get_db().execute('SELECT "match" FROM event_rules WHERE id=?',

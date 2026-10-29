@@ -156,7 +156,6 @@ def registered_connectors() -> tuple[str, ...]:
     return tuple(sorted(_REGISTRY))
 
 
-
 def artifact_extractor(
     connector: str, item_type: str,
 ) -> Callable[[str], ObservedArtifactDecl | None] | None:
