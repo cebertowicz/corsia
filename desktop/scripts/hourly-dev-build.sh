@@ -16,7 +16,7 @@ version="$(jq -er '.version | select(type == "string" and test("^[0-9]+\\.[0-9]+
 published_sha="$(git ls-remote "$remote" "refs/tags/v$version" | cut -f1)"
 if [ -z "$published_sha" ]; then
   echo "published dev tag v$version is missing; skipping build" >&2
-  exit 0
+  exit 1
 fi
 [[ "$published_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid published dev tag' >&2; exit 1; }
 if [ "$head_sha" = "$published_sha" ]; then

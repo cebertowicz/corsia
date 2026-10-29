@@ -30,13 +30,14 @@ export TEST_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 export TEST_PUBLISHED=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 export TEST_STATUSES='[]' TEST_QUEUED='[]' TEST_RUNNING='[]' HOURLY_DEV_BUILD=true
 check() {
-  local label="$1" expected="$2" output
-  output="$(bash "$here/hourly-dev-build.sh" 2>&1)"
+  local label="$1" expected="$2" expected_code="${3:-0}" output code=0
+  output="$(bash "$here/hourly-dev-build.sh" 2>&1)" || code=$?
+  [ "$code" = "$expected_code" ] || { printf '%s: expected exit %s, got %s\n' "$label" "$expected_code" "$code" >&2; exit 1; }
   [ "$output" = "$expected" ] || { printf '%s: expected %s, got %s\n' "$label" "$expected" "$output" >&2; exit 1; }
   echo "ok: $label"
 }
 HOURLY_DEV_BUILD=false check off 'hourly dev build off'
-TEST_PUBLISHED='' check 'missing published tag' 'published dev tag v0.4.1-dev.1 is missing; skipping build'
+TEST_PUBLISHED='' check 'missing published tag' 'published dev tag v0.4.1-dev.1 is missing; skipping build' 1
 TEST_PUBLISHED="$TEST_HEAD" check same 'no new commits'
 check 'no status' "would build $TEST_HEAD"
 TEST_STATUSES='[{"context":"dev-build","state":"success"}]' check success "already attempted $TEST_HEAD (success)"
