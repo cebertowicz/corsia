@@ -133,13 +133,17 @@ async def _restart_installed(server_id: str) -> dict:
         result = await lifecycle_action(server_id, "start")
         if result.get("ok"):
             result = {"ok": True, "existing": True, "server_id": server_id}
+        elif result.get("reason") == "mac_cannot_run":
+            result = {"ok": False, "reason": "mac_cannot_run", "message": prepare.NO_LOCAL_MODEL}
+        else:
+            result = {**local_setup_error("CORSIA couldn’t start the local model."), "ref": result.get("ref")}
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
-    except Exception as exc:
+    except Exception:
         ref = new_reference("local")
         ls.log.exception("Local model restart failed reference=%s", ref)
-        result = {**local_setup_error(failure_message(exc)), "ref": ref}
+        result = {**local_setup_error("CORSIA couldn’t start the local model."), "ref": ref}
     return ls.finish_flight({**result, "restart": True})
 
 

@@ -53,7 +53,10 @@ async def test_restart_failure_and_refusal_reach_the_source_projection(flight, m
     monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", lifecycle)
     from llm.local_setup_prepare import NO_LOCAL_MODEL
 
-    await _restart_installed("server")
+    result = await _restart_installed("server")
+    assert result["ref"] == "local-123"
+    assert result["fix"] == "CORSIA couldn’t set up the local model."
+    assert "Port is busy" not in str(result) and "Free the port" not in str(result)
     row = {}
     local_sources._project_local_flight(row, current())
     assert row["setup_error_message"] is None
