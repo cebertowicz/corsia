@@ -1,5 +1,5 @@
 import { derived, get } from 'svelte/store';
-import { allThreads, threads } from './threads';
+import { threads } from './threads';
 import { token } from './auth';
 
 export const pinnedConversations = derived(threads, ($s) => {
@@ -13,7 +13,7 @@ export const pinnedConversations = derived(threads, ($s) => {
 export async function togglePin(id: string): Promise<void> {
 	const t = get(token);
 	if (!t) return;
-	const current = get(allThreads).find((s) => s.id === id);
+	const current = get(threads).find((s) => s.id === id);
 	if (!current) return;
 	const next = current.pinned ? 0 : 1;
 

@@ -1,4 +1,4 @@
-import { threads, type Thread } from '../stores/threads';
+import { threads, coordinationThreads, type Thread } from '../stores/threads';
 import { acceptThreadModelTruth, seedThreadModelTruth } from '../stores/models';
 import { patchHeldSwitch } from '../stores/threadModelTruth';
 import { patchSubagentThread, registerSubagent } from '../stores/subagents';
@@ -54,6 +54,7 @@ export function handleSessionUpdated(data: any) {
 		return updated;
 	};
 	threads.update(updateRows);
+	coordinationThreads.update(updateRows);
 }
 
 /**

@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { token } from './auth';
-import { allThreads } from './threads';
+import { threads } from './threads';
 import type { VendorAccount } from './vendorAccounts';
 import { plainErrorText, SERVER_UNREACHABLE } from '$lib/plainError';
 
@@ -51,7 +51,7 @@ export function acceptsThreadAccountFrame(data: Record<string, unknown>): boolea
 	if (typeof data.account_id !== 'string' || !data.account_id
 		|| typeof data.runtime_context_epoch !== 'number' || !Number.isInteger(data.runtime_context_epoch)
 		|| data.runtime_context_epoch < 0) return false;
-	const thread = get(allThreads).find((row) => row.id === data.thread_id);
+	const thread = get(threads).find((row) => row.id === data.thread_id);
 	const epoch = thread?.runtime_context_epoch;
 	if (typeof epoch !== 'number') return true;
 	return data.runtime_context_epoch > epoch || (data.runtime_context_epoch === epoch

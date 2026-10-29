@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { get } from 'svelte/store';
-import { activeThreadId, allThreads, threads } from '$lib/stores/threads';
+import { activeThreadId, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
 import { threadPlanStates } from '$lib/stores/threadPlanStates';
@@ -83,24 +82,6 @@ function renderRail(
 	onSelectThread: (id: string) => void = () => {},
 	overrides: Record<string, unknown> = {},
 ) {
-	// The entry label is the stored name of the designated coordination row.
-	const designatedId = (overrides.conductorThreadId ?? 'conductor-1') as string | null;
-	if (designatedId) {
-		const project = get(uiScope) !== null;
-		allThreads.update((rows) => [
-			...rows.filter((row) => row.id !== designatedId),
-			{
-				id: designatedId,
-				user_id: 'u-test',
-				profile: 'personal',
-				title: project ? 'Conductor' : 'CORSIA',
-				coordination: project ? 'conductor' : 'corsia',
-				model: 'mock/model',
-				created_at: '2026-06-18T00:00:00',
-				updated_at: '2026-06-18T00:00:00',
-			},
-		]);
-	}
 	component = mount(RailScopedSection, {
 		target: host,
 		props: {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import CommandPalette from './CommandPalette.svelte';
 import { paletteOpen } from '$lib/stores/palette';
-import { threads, allThreads } from '$lib/stores/threads';
+import { threads, coordinationThreads } from '$lib/stores/threads';
 import { _setProjectsForTests } from '$lib/stores/projects';
 
 let host: HTMLElement;
@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
 	paletteOpen.set(false);
 	threads.set([]);
+	coordinationThreads.set([]);
 	_setProjectsForTests([]);
 	if (component) unmount(component);
 	component = null;
@@ -61,7 +62,7 @@ afterEach(() => {
 
 describe('CommandPalette query results', () => {
 	it('finds coordination threads by their stored names', () => {
-		allThreads.update(rows => [...rows,
+		coordinationThreads.set([
 			{ id: 'corsia', user_id: 'user-1', profile: 'personal', title: 'CORSIA', model: null, coordination: 'corsia', created_at: '2026-10-02', updated_at: '2026-10-02' },
 			{ id: 'alpha', user_id: 'user-1', profile: 'personal', title: 'Alpha Conductor', model: null, coordination: 'conductor', project_id: 'project-alpha', created_at: '2026-10-03', updated_at: '2026-10-03' },
 		]);

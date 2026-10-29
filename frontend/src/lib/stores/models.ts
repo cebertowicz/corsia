@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { activeModelId, getModelDispatchId, models, workspaceModels } from './modelsState';
 import { plainErrorText } from '../plainError';
-import { activeThreadId, threads, type Thread } from './threads';
+import { activeThreadId, threads } from './threads';
 import { setContextUsage } from './contextUsageByThread';
 import {
 	applyPendingThreadModelSwitch,
@@ -172,7 +172,7 @@ export function acceptThreadModelTruth(
 	const current = heldThreadModel(threadId);
 	if (current && !outranksHeld(updatedAt, current, model)) return false;
 	holdThreadModel(threadId, model, updatedAt);
-	const updateRows = (rows: Thread[]) => {
+	threads.update((rows) => {
 		const updated = rows.map((thread) => (
 			thread.id === threadId
 				? {
@@ -184,8 +184,7 @@ export function acceptThreadModelTruth(
 		));
 		updated.sort((a, b) => compareServerTimes(b.updated_at, a.updated_at));
 		return updated;
-	};
-	threads.update(updateRows);
+	});
 	if (get(activeThreadId) === threadId) {
 		setActiveModel(model);
 		if (activeModelBefore !== model) setContextUsage(threadId, null);

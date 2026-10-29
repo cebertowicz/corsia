@@ -161,7 +161,6 @@ describe('syncCanvasHeader — no doc', () => {
 			uiScopeName: null,
 			activeThreadId: 'agent-1',
 			conductorThreadId: 'agent-1',
-			threads: [{ id: 'agent-1', title: 'CORSIA', coordination: 'corsia', user_id: 'u', profile: 'personal', model: null, created_at: '2026-01-01', updated_at: '2026-01-01' }],
 		}));
 		expect(get(canvasHeader)?.title).toBe('CORSIA settings');
 		expect(get(canvasHeader)?.backLabel).toBe('CORSIA');
@@ -173,7 +172,6 @@ describe('syncCanvasHeader — no doc', () => {
 			uiScopeName: 'Alpha',
 			activeThreadId: 'conductor-1',
 			conductorThreadId: 'conductor-1',
-			threads: [{ id: 'conductor-1', title: 'Conductor', coordination: 'conductor', user_id: 'u', profile: 'personal', model: null, created_at: '2026-01-01', updated_at: '2026-01-01' }],
 		}));
 		expect(get(canvasHeader)?.title).toBe('Conductor settings');
 		expect(get(canvasHeader)?.backLabel).toBe('Conductor');

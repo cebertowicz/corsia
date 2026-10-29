@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { allThreads } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/threads';
 	import { threadActivity } from '$lib/stores/activity';
 	import {
 		projects,
@@ -72,14 +72,14 @@
 	const hasPayload = $derived(query.payload != null);
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const resumeThreads = $derived(buildResumeThreads(
-		$allThreads,
+		$everyThread,
 		$threadActivity,
 		projectId ? { projectId, projects: $projects } : { projects: $projects },
 	));
 	let orderingNow = $state(Date.now());
 	const groups = $derived(buildActivityGroups(
 		query.payload?.plans ?? [],
-		$allThreads,
+		$everyThread,
 		$projects,
 		projectId ? { projectId, now: orderingNow } : { now: orderingNow },
 	));

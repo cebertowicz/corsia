@@ -216,11 +216,6 @@ export async function updateProject(
 				: p,
 		),
 	);
-	if (patch.name !== undefined) {
-		const { loadThreads } = await import('./threadsLoad');
-		// The rename is already saved; a failed refresh must not report it as failed.
-		await loadThreads(currentToken).catch((error) => console.error('Could not refresh threads after project update', error));
-	}
 }
 
 export async function archiveProject(id: string): Promise<void> {
