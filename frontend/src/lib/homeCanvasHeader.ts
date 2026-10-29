@@ -36,7 +36,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 			? input.threads.find((thread) => thread.id === input.activeThreadId)?.title
 			: null;
 		// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
-		const designatedName = input.uiScopeName === null ? 'CORSIA' : 'Conductor';
+		const designatedName = threadTitle || (input.uiScopeName === null ? 'CORSIA' : 'Conductor');
 		canvasHeader.set({
 			title: conductor ? `${designatedName} settings` : 'Chat settings',
 			backLabel: threadTitle ?? (conductor ? designatedName : 'Thread'),

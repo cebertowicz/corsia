@@ -36,7 +36,10 @@ def project(isolated_db, tmp_path, monkeypatch):
 
 
 def _installed(db):
-    return [dict(row) for row in db.execute("SELECT * FROM event_rules WHERE scope='project:screen-project' ORDER BY id")]
+    key = install._key("screen-project")
+    return [dict(row) for row in db.execute("SELECT * FROM event_rules WHERE scope='project:screen-project' "
+                                          "AND id IN (?,?,?) ORDER BY id",
+                                          (key + '_opened', key + '_synchronize', key + '_start'))]
 
 
 def test_boot_installs_existing_projects_and_rebinds_package_updates(project, tmp_path, monkeypatch):
@@ -129,7 +132,7 @@ def test_repo_sync_waits_for_commit_and_drops_rollback(project, monkeypatch, tmp
 def test_execution_input_uses_live_scope_not_installed_repo_match(project, monkeypatch):
     from automation.script_rule_runs import RuleRun, execution_input
     from automation.schedules import get
-    from automation.script_sandbox import ScriptSandboxError
+    from events.connectors.github_notifications_feed import FeedError
 
     db, _, _ = project
     install.sync(db)
@@ -138,13 +141,24 @@ def test_execution_input_uses_live_scope_not_installed_repo_match(project, monke
     repos = {"o/r"}
     monkeypatch.setitem(connectors._REGISTRY, "github", replace(manifest, project_repositories=lambda _: repos))
     run = RuleRun(1, "rule", json.dumps({"facts": {"repo": "o/r"}}).encode(), (), "o/r")
-    event = json.loads(execution_input(schedule, run))
+    stdin, bound = execution_input(schedule, run)
+    event = json.loads(stdin)
+    assert bound == "o/r"
     assert event["context"] == {"project_id": "screen-project", "staging_root": str(project[2].parents[1] / "staging"),
                                 "event_type": install._namespace("screen-project") + ".pr_staged", "github_repo": "o/r"}
     repos.clear()
-    with pytest.raises(ScriptSandboxError, match="no longer registered"):
-        execution_input(schedule, run)
+    stdin, bound = execution_input(schedule, run)
+    assert bound is None and json.loads(stdin)["context"]["github_repo"] is None
     assert json.loads(_installed(db)[0]["match"])[0]["value"] == ["o/r"]
     monkeypatch.setitem(connectors._REGISTRY, "github", replace(manifest, project_repositories=lambda _: None))
-    with pytest.raises(ScriptSandboxError, match="Couldn’t read"):
-        execution_input(schedule, run)
+    stdin, bound = execution_input(schedule, run)
+    assert bound is None and json.loads(stdin)["context"]["github_repo"] is None
+
+    def fail(_project):
+        raise FeedError("unreadable")
+
+    from events.connectors import github, github_notifications_feed
+    monkeypatch.setattr(github_notifications_feed, "tracked_github_repositories", fail)
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(manifest, project_repositories=github._project_repositories))
+    stdin, bound = execution_input(schedule, run)
+    assert bound is None and json.loads(stdin)["context"]["github_repo"] is None

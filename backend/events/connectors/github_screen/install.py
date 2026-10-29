@@ -16,6 +16,9 @@ from infra.measure_registry import REGISTRY, persist_declaration
 
 ORIGIN_PREFIX = "rule_set:github@"
 WORKFLOW = "github-pr-screen"
+TRIAGE_WORKFLOW = "github-outside-triage"
+TRIAGE_EVENTS = ("issue.opened", "issue_comment.created", "issue_comment.edited", "pr_comment.created",
+                 "pr_comment.edited", "review.submitted", "review.edited")
 PACKAGE = Path(__file__).parent
 log = logging.getLogger(__name__)
 
@@ -51,11 +54,11 @@ def _retire_declaration(db, project: str, owner: str, path: str) -> None:
     persist_declaration(db, owner, path, _namespace(project), [], "")
 
 
-def _schedule(db, project: str, owner: str, script: Path, now: str) -> str:
-    schedule_id = _key(project) + "_script"
+def _schedule(db, project: str, owner: str, script: Path, now: str, *, triage: bool = False) -> str:
+    schedule_id = _key(project) + ("_triage_script" if triage else "_script")
     digest = file_sha256(script)
     payload = json.dumps({"series": [], "workflow": None,
-                          "event_type": _namespace(project) + ".pr_staged"}, sort_keys=True)
+                          "event_type": _namespace(project) + (".item_staged" if triage else ".pr_staged")}, sort_keys=True)
     db.execute(
         "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,"
         "payload_json,created_by_actor,created_at,updated_at,script_path,script_sha256,timeout_seconds) "
@@ -77,10 +80,11 @@ def _schedule(db, project: str, owner: str, script: Path, now: str) -> str:
 
 
 def _rule(db, *, rule_id: str, project: str, owner: str, connector: str, event_type: str,
-          tests: list[dict], action: str, script_id: str | None, now: str) -> None:
+          tests: list[dict], action: str, script_id: str | None, now: str,
+          workflow: str = WORKFLOW) -> None:
     values = (rule_id, now, now, "project:" + project, connector, event_type,
               json.dumps(tests, separators=(",", ":")), action, "thread:" + owner, origin(), owner,
-              script_id, WORKFLOW if action == "start_worker" else None,
+              script_id, workflow if action == "start_worker" else None,
               "request_identity" if action == "start_worker" else None)
     db.execute(
         'INSERT INTO event_rules (id,created_at,updated_at,enabled,kind,scope,connector,event_type,"match",'
@@ -133,13 +137,20 @@ def sync(db, project: str | None = None) -> None:
                 _retire_declaration(conn, project_id, previous, str(root / "github-screen" / key / "measures.yaml"))
                 refresh_registry = True
             if not owner or folder is None:
-                conn.execute("DELETE FROM event_rules WHERE id IN (?,?,?) AND origin LIKE ?",
-                             (key + "_opened", key + "_synchronize", key + "_start", ORIGIN_PREFIX + "%"))
-                conn.execute("DELETE FROM automation_schedules WHERE id=?", (key + "_script",))
+                ids = [key + suffix for suffix in ("_opened", "_synchronize", "_start", "_triage_start")]
+                ids.extend(key + "_triage_" + event.replace(".", "_") for event in TRIAGE_EVENTS)
+                placeholders = ",".join("?" for _ in ids)
+                conn.execute(f"DELETE FROM event_rules WHERE id IN ({placeholders}) AND origin LIKE ?",
+                             (*ids, ORIGIN_PREFIX + "%"))
+                conn.execute("DELETE FROM automation_schedules WHERE id IN (?,?)", (key + "_script", key + "_triage_script"))
                 continue
             namespace, spec = _declaration(project_id)
             path = str(folder / "measures.yaml")
-            persist_declaration(conn, owner, path, namespace, [("event", namespace + ".pr_staged", spec)], "shipped")
+            triage_spec = json.dumps({"attributes": {"repo": "id", "number": "count", "item_version": "id",
+                                  "request_identity": "id", "staging_path": "id", "source": {"enum": ["outside"]}},
+                                      "dedupe": ["request_identity"], "use": "route"}, sort_keys=True, separators=(",", ":"))
+            persist_declaration(conn, owner, path, namespace, [("event", namespace + ".pr_staged", spec),
+                                ("event", namespace + ".item_staged", triage_spec)], "shipped")
             refresh_registry = True
             now = datetime.now(timezone.utc).isoformat()
             schedule = _schedule(conn, project_id, owner, folder / "stage.py", now)
@@ -152,5 +163,13 @@ def sync(db, project: str | None = None) -> None:
             _rule(conn, rule_id=key + "_start", project=project_id, owner=owner,
                   connector=namespace, event_type="pr_staged", tests=[tests[0]], action="start_worker",
                   script_id=None, now=now)
+            triage_schedule = _schedule(conn, project_id, owner, folder / "stage.py", now, triage=True)
+            for event_type in TRIAGE_EVENTS:
+                _rule(conn, rule_id=key + "_triage_" + event_type.replace(".", "_"), project=project_id,
+                      owner=owner, connector="github", event_type=event_type, tests=tests,
+                      action="run_script", script_id=triage_schedule, now=now)
+            _rule(conn, rule_id=key + "_triage_start", project=project_id, owner=owner,
+                  connector=namespace, event_type="item_staged", tests=[tests[0]], action="start_worker",
+                  script_id=None, now=now, workflow=TRIAGE_WORKFLOW)
     if refresh_registry:
         REGISTRY.rebuild(db)

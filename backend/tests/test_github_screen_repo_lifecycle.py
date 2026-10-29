@@ -45,9 +45,14 @@ def test_real_repository_api_changes_reconcile_automatically(isolated_db, tmp_pa
         mode="link", path=str(repo), pinned_branch=None, protect_base_checkout=False)))
     assert added["repo"]["registered"]
     assert db.execute("SELECT id FROM automation_schedules WHERE id=?", (key + "_script",)).fetchone()
-    rows = db.execute("SELECT action, \"match\" FROM event_rules WHERE scope=? AND origin=?",
+    rows = db.execute("SELECT id, action, \"match\" FROM event_rules WHERE scope=? AND origin=?",
                       ("project:api-project", install.origin())).fetchall()
-    assert len(rows) == 3
+    ids = {row['id'] for row in rows}
+    assert {key + suffix for suffix in ('_opened', '_synchronize', '_start')} <= ids
+    assert {key + '_triage_' + suffix for suffix in ('issue_opened', 'issue_comment_created',
+            'issue_comment_edited', 'pr_comment_created', 'pr_comment_edited', 'review_submitted',
+            'review_edited', 'start')} <= ids
+    assert len(ids) == 11
     assert all(json.loads(row["match"])[0] == {"field": "repo", "op": "in", "value": ["example/repo"]}
                for row in rows)
     assert db.execute("SELECT id FROM automation_schedules WHERE id=?", (key + "_script",)).fetchone()

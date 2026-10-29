@@ -151,6 +151,7 @@ describe('createCommentSheet', () => {
 		// A wide canvas below 900 px lists in a sheet, but its cards are popovers.
 		const t = setup({ narrow: false });
 		t.set({ state: { kind: 'thread', id: 'c1' } });
+		expect(t.sheet.modalOpen).toBe(false);
 		t.set({ state: null });
 		expect(t.sheet.open).toBe(false);
 		expect(t.sheet.closing).toBe(false);

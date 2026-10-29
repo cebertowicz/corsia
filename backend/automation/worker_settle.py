@@ -39,6 +39,7 @@ from infra.product_events import emit_product_event
 MAX_RESULT = 48 * 1024
 #: How a refusal reads in the owner's ``worker.no_result`` reason.
 REFUSAL_PREFIX = "refused: "
+NO_RESULT_NEXT = "The run ends without a result; a later event starts a new one."
 _ENDED = ("completed", "cancelled", "error")
 #: A turn error the owner may read as is: a short code, never free text.
 _ERROR_CODE = re.compile(r"[A-Za-z][\w.:-]{0,63}\Z")
@@ -106,7 +107,7 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
         return INVALID, {"reason": "invalid", "detail": str(exc)[:500]}
     except Exception:  # noqa: BLE001 - a CORSIA defect must release, not consume, the identity
         logger.exception("CORSIA could not validate the worker result")
-        return NO_RESULT, {"reason": "Couldn’t validate the workflow result. Check the backend log, then send the event again."}
+        return NO_RESULT, {"reason": f"Couldn’t validate the workflow result. {NO_RESULT_NEXT}"}
     if len(payload.encode()) > MAX_RESULT:
         return INVALID, {"reason": "invalid", "detail": f"the result is over {MAX_RESULT} bytes"}
     return RETURNED, {"result": payload, **({"injection_signs": signs} if signs is not None else {})}

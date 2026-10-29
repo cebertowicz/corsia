@@ -410,6 +410,31 @@ def test_a_rule_run_reads_github_only_for_the_repository_its_stored_event_names(
     assert bool(spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")) is (repo is not None)
 
 
+@pytest.mark.parametrize("repositories", [None, frozenset({"other/repo"})])
+def test_unregistered_event_repository_starts_without_channel(world, spawned, monkeypatch, repositories):
+    from dataclasses import replace
+    from events import connectors, rule_runs
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda _project: repositories))
+    rule = _rule(_script(world, "unbound.sh"))
+    _emit()
+    real = rule_runs.start
+
+    def start(db, decision_id):
+        run_input = real(db, decision_id)
+        run_input["event"].update({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r"}})
+        return run_input
+
+    monkeypatch.setattr(rule_runs, "start", start)
+    _sweep()
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert spawned["channels"] == []
+    assert len(spawned["commands"]) == 1
+    assert not spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
+
+
 def test_a_script_cannot_open_a_channel_for_a_repository_its_own_event_names(world, monkeypatch):
     """Script A emits an event naming another repository; rule B runs a script on it. Neither
     run gets a channel: B's stored event is A's, an emitter's, whatever its facts say."""

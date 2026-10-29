@@ -16,6 +16,7 @@ from datetime import datetime
 import logging
 from typing import Any
 
+from connections import fact_memo
 from connections.account_policy import AccountAdmissionError, admit_account, thread_project_scopes
 from connections.account_receipts import ReceiptFence, account_receipt
 from connections.vendor_accounts import VENDORS, AccountError, get_account
@@ -61,13 +62,21 @@ class FirstRunBind:
         return {"outcome": self.outcome, "bind_reason": self.bind_reason}
 
 
-def _vendor_rows(provider: str, *, db) -> list[dict]:
+def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> list[dict]:
     """The vendor's catalog models the picker lists, each as its account-independent row."""
+    from llm.harness_catalog import added_rows, added_rows_from_accounts, harness_base_from_row
     from llm.model_status import harness_base_row
 
-    models = [row[0] for row in db.execute(
-        "SELECT litellm_model FROM models WHERE harness=? AND enabled=1 ORDER BY litellm_model", (provider,))]
-    return [row for row in (harness_base_row(model, db=db) for model in models) if row is not None]
+    catalog = db.execute(
+        "SELECT id,litellm_model,enabled FROM models WHERE harness=? ORDER BY litellm_model", (provider,)
+    ).fetchall()
+    models = [row['litellm_model'] for row in catalog if row['enabled']]
+    stored = {row['id'] for row in catalog}
+    projected = (added_rows(db=db, provider=provider) if accounts is None else
+                 added_rows_from_accounts([account for account in accounts if account['provider'] == provider]))
+    result = [row for row in (harness_base_row(model, db=db) for model in models) if row is not None]
+    result.extend(harness_base_from_row(row, db=db) for model, row in projected.items() if model not in stored)
+    return result
 
 
 def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None) -> tuple[str, str | None]:
@@ -202,7 +211,8 @@ def bind_corsia_agent_account(thread_id: str, account_id: str, *, user_id: str,
         return {"bound": True, "reason": None}
 
 
-async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: str) -> None:
+async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: str, *,
+                        target_account_id: str | None = None) -> None:
     """Read a completed sign-in's models once, then record its first-run outcome.
 
     ``operation`` is the sign-in record. Only a new inference-vendor login with a
@@ -213,12 +223,13 @@ async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: st
     from infra.db_async import run_in_db
     from infra.state.ws import notify_models_changed
 
-    reads = operation.provider in VENDORS and operation.duplicate_of is None and receipt is not None
-    refresh, observed = await _refresh(operation, receipt, binary) if reads else ("skipped", None)
+    target = target_account_id or operation.account_id
+    reads = operation.provider in VENDORS and (operation.duplicate_of is None or target_account_id is not None) and receipt is not None
+    refresh, observed = await _refresh(operation, receipt, binary, account_id=target) if reads else ("skipped", None)
     bind = operation.bind
     if bind is not None:
         try:
-            bind.outcome, bind.bind_reason = await run_in_db(signin_outcome, operation.account_id, refresh,
+            bind.outcome, bind.bind_reason = await run_in_db(signin_outcome, target, refresh,
                                                              observed, bind=bind)
         except Exception as exc:  # noqa: BLE001 - a poller waits on this outcome, so it must always land
             log.warning("account %s sign-in outcome failed: %s", operation.account_id, type(exc).__name__)
@@ -227,14 +238,14 @@ async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: st
         notify_models_changed()
 
 
-async def _refresh(operation: Any, receipt: ReceiptFence, binary: str) -> tuple[str, RefreshObservation | None]:
+async def _refresh(operation: Any, receipt: ReceiptFence, binary: str, *, account_id: str) -> tuple[str, RefreshObservation | None]:
     """Read the new login's models once; how that ended, and what a ready read left."""
     from connections import harness_models
     from infra.time import utc_now_iso
 
     try:
         result = await harness_models.refresh_provider(operation.provider, reason="account-signin",
-            account_id=operation.account_id, expected_receipt=receipt, binary=binary)
+            account_id=account_id, expected_receipt=receipt, binary=binary)
     except Exception as exc:  # noqa: BLE001 - a failed read leaves the sign-in completed and unchecked
         log.warning("account %s discovery failed: %s", operation.account_id, type(exc).__name__)
         return "failed", None
@@ -296,16 +307,19 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
     return {"label": account_label(account, rows=labels)["text"], "reason": reason}
 
 
-def _scoped_states(provider: str, project, *, rows: list[dict], db) -> list[tuple[dict, str, str | None]]:
+def _scoped_states(provider: str, project, *, rows: list[dict], db,
+                   accounts: list[dict] | None = None) -> list[tuple[dict, str, str | None]]:
     """Each account the scope permits (never a removed one) with its first-run state; none when the vendor lists no model."""
     from connections.account_policy import permitted_accounts
 
     if not rows:
         return []
     return [(account, *account_state(account, project_ids=[project], db=db, rows=rows))
-            for account in permitted_accounts(provider, project_ids=[project], db=db) if account["state"] != "removed"]
+            for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
+            if account["state"] != "removed"]
 
 
+@fact_memo.fact_reads()
 def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
@@ -345,7 +359,8 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
         db.close()
 
 
-def accounts_without_usable_model(providers) -> set[str]:
+@fact_memo.fact_reads()
+def accounts_without_usable_model(providers, accounts: list[dict] | None = None) -> set[str]:
     """The ids of these vendors' accounts whose first-run line reads ``no_usable_model``.
 
     The states ``source_account_view`` shows, without its labels or binding reads: the account
@@ -360,7 +375,8 @@ def accounts_without_usable_model(providers) -> set[str]:
         conductor = get_corsia_agent(db=db)
         project = thread_scope(conductor, db=db)["project_id"] if conductor else None
         return {account["id"] for provider in sorted(set(providers))
-                for account, state, _ in _scoped_states(provider, project, rows=_vendor_rows(provider, db=db), db=db)
+                for account, state, _ in _scoped_states(
+                    provider, project, rows=_vendor_rows(provider, db=db, accounts=accounts), db=db, accounts=accounts)
                 if state == NO_USABLE_MODEL}
     finally:
         db.close()
