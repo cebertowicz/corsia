@@ -7,7 +7,7 @@ const BASE = '';
 const auth = () => get(token) || '';
 
 export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
-export type SigninStatus = 'waiting' | 'completed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
+export type SigninStatus = 'waiting' | 'completed' | 'already_signed_in' | 'model_refresh_failed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
 
 export interface VendorAccountLabel {
 	name: string;
@@ -60,6 +60,8 @@ export interface SigninResult {
 	cause: string | null;
 	duplicate_of?: string | null;
 	held_by?: string | null;
+	/** Support reference for a failure the person may report. */
+	ref?: string | null;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
@@ -196,13 +198,22 @@ export async function setVendorAccountOverage(account: VendorAccount, allow: boo
 }
 
 export async function startVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
+	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
+	if (wasSignedIn && result.data.status === 'waiting') {
+		const refreshed = await loadVendorAccounts();
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+	}
 	return reconcileSignin(result.data);
 }
 
 async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; signin: SigninResult; error?: string }> {
-	if (signin.status !== 'completed') return { ok: true, signin };
+	if (signin.status === 'superseded' && signin.cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, signin };
+	}
+	if (signin.status !== 'completed' && signin.status !== 'already_signed_in') return { ok: true, signin };
 	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
 		? { ...account, state: 'signed_in', details_stale: true } : account));
 	const refreshed = await loadVendorAccounts();

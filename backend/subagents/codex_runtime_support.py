@@ -20,6 +20,12 @@ from subagents.codex_runtime_state import (
 log = logging.getLogger(__name__)
 
 
+
+def require_owned_accept_db(db) -> None:
+    if db is not None:
+        raise RuntimeError("Codex async acceptance requires an owned DB connection")
+
+
 @dataclass(frozen=True)
 class CodexOnEventContext:
     """Values the lifted Codex event handlers close over."""
