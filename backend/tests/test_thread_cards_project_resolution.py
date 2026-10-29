@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from api import thread_cards
+from infra import config
 from infra.schema import SCHEMA_SQL
 
 
@@ -24,13 +25,13 @@ def test_project_scope_is_resolved_once_and_keeps_repo_order(tmp_path, monkeypat
             repo = planning / "source" / name
             repo.mkdir(parents=True)
             db.execute("INSERT INTO project_repo_policies VALUES ('p', ?, ?, NULL, 1)", (name, str(repo)))
-    monkeypatch.setattr(thread_cards.config, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
     monkeypatch.setattr(thread_cards, "_ask_cards_by_message", lambda *args: ({}, {}))
     calls = []
 
     def references(db, text, bases, user_id, **kwargs):
         calls.append((bases, kwargs["origin"]))
-        return [], 0
+        return []
 
     monkeypatch.setattr(thread_cards, "reference_cards", references)
     queries = []
@@ -55,13 +56,13 @@ def test_workspace_fallback_and_missing_project(tmp_path, monkeypatch):
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
-    monkeypatch.setattr(thread_cards.config, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
     monkeypatch.setattr(thread_cards, "_ask_cards_by_message", lambda *args: ({}, {}))
     calls = []
 
     def references(db, text, bases, user_id, **kwargs):
         calls.append((bases, kwargs["origin"]))
-        return [], 0
+        return []
 
     monkeypatch.setattr(thread_cards, "reference_cards", references)
     rows = [{"id": "1", "role": "assistant", "content": "first"}]

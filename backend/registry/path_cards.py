@@ -7,8 +7,7 @@ rules (``link_target_path``, ``normalize_path``, ``workspace_path``) are ports o
 the client's, held to each other by ``testdata/link-target-vectors.json``, which
 both test suites read.
 
-An accessible registered artifact or existing scoped file becomes a card. At most
-``MAX_CANDIDATES`` targets are looked at, bounding the cost of a long message.
+An accessible registered artifact or existing scoped file becomes a card.
 """
 
 from __future__ import annotations
@@ -21,8 +20,6 @@ from urllib.parse import unquote
 from registry.chat_cards import card_for, reference_card
 from registry import service as registry_service
 from registry.path_access import FileLookup, lookup_file
-
-MAX_CANDIDATES = 40
 
 _FENCE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 _MARKDOWN_LINK = re.compile(r"\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
@@ -80,17 +77,19 @@ def targets(text: str) -> list[str]:
     bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
     found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(bare_body)]
     ordered: list[str] = []
+    seen: set[str] = set()
     for _pos, target in sorted(found):
-        if not _SCHEME.match(target) and target not in ordered:
+        if not _SCHEME.match(target) and target not in seen:
+            seen.add(target)
             ordered.append(target)
-    return ordered[:MAX_CANDIDATES]
+    return ordered
 
 
 def reference_cards(
     db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
     lookup_memo: dict[str, FileLookup] | None = None, origin: Path | None = None,
-) -> tuple[list[dict], int]:
-    """Cards for accessible files ``text`` names, and zero additional cards.
+) -> list[dict]:
+    """Cards for accessible files ``text`` names.
 
     ``covered`` maps an artifact id to the holds whose ask card covers it: the card is
     kept and marked ``covered_by_ask``, so the client shows it only when none of those
@@ -120,7 +119,7 @@ def reference_cards(
         else:
             # An identity without a live owner is not an unregistered file. In particular,
             # a retired file must not reappear as an openable file-only card.
-            if registry_service.find_file_identity(canonical, db=db) is not None:
+            if found.has_identity:
                 continue
             card = card_for({"state": "active", "path": canonical, "type": registry_service.classify(found.path),
                              "integration": "workspace"}, None, kind="artifact")
@@ -131,4 +130,4 @@ def reference_cards(
             if covered and artifact_id and covered.get(artifact_id):
                 card["covered_by_ask"] = sorted(covered[artifact_id])
             cards.append(card)
-    return cards, 0
+    return cards

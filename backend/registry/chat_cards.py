@@ -5,12 +5,12 @@ Two sources feed a card (``api/thread_cards.py`` chooses the message):
 - an **ask card** for one user ask, identified by its hold. The hold is the only
   lifecycle owner: whether the round is open or how it ended is read from the
   hold and its clearance event each time, so nothing here is stored or copied.
-- a **reference card** for a registered artifact a message's text names
-  (``registry/path_cards.py``).
+- a **reference card** for an accessible registered artifact or scoped file named
+  in a message (``registry/path_cards.py``).
 
 A card carries what the tile shows (title, type, file name, state) and what
-opening it needs (artifact id). Titles and states are the registry's current
-truth, so a renamed or retired artifact reads as it is now.
+opening it needs (an artifact id or, for an unregistered file, its path).
+Registered titles and states reflect the registry's current truth.
 """
 
 from __future__ import annotations

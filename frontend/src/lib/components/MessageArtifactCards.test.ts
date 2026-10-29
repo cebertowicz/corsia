@@ -8,7 +8,7 @@ import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
-import { paneOpen } from '$lib/stores/paneOpen';
+
 import { answerSubmissionFailed, answerSubmitted, submittedAnswers } from '$lib/stores/cardAnswers';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
@@ -32,7 +32,7 @@ const tiles = () => [...host.querySelectorAll<HTMLElement>('.tile')];
 beforeEach(() => {
 	host = document.createElement('div');
 	document.body.appendChild(host);
-	paneOpen.set(false);
+
 	threadWorkspaces.set({});
 	submittedAnswers.set({});
 });
@@ -183,13 +183,11 @@ describe('MessageArtifactCards', () => {
 		expect(host.querySelector('ul')).toBeNull();
 	});
 
-	it('ends the row with a "+N more" tile that opens the artifact pane', () => {
-		render({ cards: [ask({ state: undefined, kind: 'artifact', hold_id: undefined })], more: 3 });
 
-		const last = tiles().at(-1)!;
-		expect(last.textContent).toBe('+3 more');
-		last.click();
-		expect(get(paneOpen)).toBe(true);
+	it('renders every supplied file card in the strip', () => {
+		const cards = Array.from({ length: 9 }, (_, i) => ask({ state: undefined, kind: 'artifact', hold_id: undefined, artifact_id: `a${i}`, title: `file${i}.md` }));
+		render({ cards });
+		expect(tiles().map((tile) => tile.querySelector('.title')?.textContent)).toEqual(cards.map((card) => card.title));
 	});
 
 	it('uses no selected style on a tile', () => {

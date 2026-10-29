@@ -6,21 +6,17 @@
 	// artifact and takes no part in the cards.
 	import { visibleCards, type MessageCard } from '$lib/api/messageCards';
 	import type { BrowserChip as BrowserChipData } from '$lib/browserChip';
-	import { paneOpen } from '$lib/stores/paneOpen';
 	import AttachmentRow from './AttachmentRow.svelte';
 	import BrowserChip from './BrowserChip.svelte';
 
 	let {
 		cards,
-		more = 0,
 		browser = null,
 		threadId,
 		hiddenHolds,
 		renderedAsks,
 	}: {
 		cards: MessageCard[];
-		/** Cards past the cap; the last chip opens the artifact pane. */
-		more?: number;
 		/** The message's shared-browser chip, if it opened one in front of the person. */
 		browser?: BrowserChipData | null;
 		threadId: string | null | undefined;
@@ -36,7 +32,7 @@
 	const browserChip = $derived(browser && threadId ? { chip: browser, threadId } : null);
 	const stripLabel = $derived(
 		browserChip
-			? (files.length > 0 || more > 0 ? 'Files and shared browser' : 'Shared browser')
+			? (files.length > 0 ? 'Files and shared browser' : 'Shared browser')
 			: 'Files',
 	);
 
@@ -98,7 +94,7 @@
 	}
 </script>
 
-{#if shown.length > 0 || more > 0 || browserChip}
+{#if shown.length > 0 || browserChip}
 	<div class="cards">
 		{#if asks.length > 0}
 			<ul class="asks" aria-label="Files to review">
@@ -107,16 +103,13 @@
 				{/each}
 			</ul>
 		{/if}
-		{#if files.length > 0 || more > 0 || browserChip}
-			<ul class="chips" aria-label={stripLabel} use:peek={files.length + more + (browserChip ? 1 : 0)}>
+		{#if files.length > 0 || browserChip}
+			<ul class="chips" aria-label={stripLabel} use:peek={files.length + (browserChip ? 1 : 0)}>
 				{#each files as card (card.artifact_id ?? card.path)}
 					<li><AttachmentRow {card} {threadId} variant="chip" /></li>
 				{/each}
 				{#if browserChip}
 					<li><BrowserChip {...browserChip} /></li>
-				{/if}
-				{#if more > 0}
-					<li><button type="button" class="tile more press-tint" onclick={() => paneOpen.set(true)}>+{more} more</button></li>
 				{/if}
 			</ul>
 		{/if}
@@ -130,21 +123,6 @@
 	li { display: flex; min-width: 0; }
 	.asks { max-width: var(--needs-you-tile-max-width); }
 	.asks li { display: block; }
-	.more {
-		display: inline-flex;
-		align-items: center;
-		min-height: 32px;
-		padding: 0 var(--space-3);
-		border: 0;
-		border-radius: var(--radius-pill);
-		background: transparent;
-		color: var(--text-secondary);
-		font: inherit;
-		font-size: var(--text-subhead);
-		cursor: pointer;
-	}
-	.more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .more { min-height: 36px; } }
 	/* A phone scrolls the strip instead of wrapping it; while more lies to the right, the next chip peeks under the
 	   edge fade as the cue, and once scrolled the leading edge fades the same way. A chip's focus ring is inset, so the scroller has nothing to clip. */
 	@media (max-width: 480px) {

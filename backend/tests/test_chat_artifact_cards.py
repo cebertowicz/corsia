@@ -493,8 +493,8 @@ def test_relative_file_cards_resolve_workspace_without_registration(db, ws, tmp_
         (ws / f"file{i}.md").write_text(str(i))
     before = db.total_changes
     text = "See notes/plan.md and `notes/plan.md` " + " ".join(f"file{i}.md" for i in range(10))
-    cards, more = reference_cards(db, text, [repo.resolve(), ws.resolve()], "user", origin=ws.resolve())
-    assert len(cards) == 11 and more == 0
+    cards = reference_cards(db, text, [repo.resolve(), ws.resolve()], "user", origin=ws.resolve())
+    assert len(cards) == 11
     assert cards[0]["artifact_id"] is None and cards[0]["path"] == str((ws / "notes/plan.md").resolve())
     assert all(c["artifact_id"] is None and c["opens"] for c in cards)
     assert db.total_changes == before
@@ -506,10 +506,30 @@ def test_thread_cards_choose_workspace_origin_over_repository(db, ws, tmp_path, 
     (repo / "plan.md").write_text("repository")
     (ws / "plan.md").write_text("workspace")
     _message(db, 1, text="Open `plan.md`.")
-    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a: (ws.resolve(), [("repo", repo.resolve())]))
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (ws.resolve(), [("repo", repo.resolve())]))
     card = _page(db)["m1"]["cards"][0]
     assert card["path"] == str((ws / "plan.md").resolve())
     assert Path(card["path"]).read_text() == "workspace"
+
+
+def test_candidates_after_versions_and_numeric_filenames_make_cards(db, ws):
+    (ws / "real.md").write_text("real")
+    (ws / "3.42").write_text("numeric filename")
+    text = " ".join(f"3.{i}" for i in range(50)) + " real.md"
+
+    cards = reference_cards(db, text, [ws.resolve()], "user")
+
+    assert [card["name"] for card in cards] == ["3.42", "real.md"]
+
+
+def test_more_than_forty_existing_files_make_cards(db, ws):
+    names = [f"file{i}.md" for i in range(50)]
+    for name in names:
+        (ws / name).write_text(name)
+
+    cards = reference_cards(db, " ".join(names), [ws.resolve()], "user")
+
+    assert [card["name"] for card in cards] == names
 
 
 def test_relative_candidates_exclude_url_and_fenced_text():
@@ -558,13 +578,13 @@ def test_a_message_gets_cards_for_accessible_named_files_without_registering(db,
     text = f"[plan](plan.md) [no](unregistered.md) [theirs](theirs.md) [gone](missing.md) {ws}/plan.md"
 
     before = db.total_changes
-    cards, more = reference_cards(db, text, [ws.resolve()], "user")
+    cards = reference_cards(db, text, [ws.resolve()], "user")
 
     assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [
         ("artifact", kept, "plan.md"), ("artifact", None, "unregistered.md"),
     ]
     assert cards[1]["path"] == str((ws / "unregistered.md").resolve())
-    assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
+    assert strangers not in {c["artifact_id"] for c in cards}
     assert db.total_changes == before
     assert registry_service.resolve_file_identity(str(ws / "unregistered.md"), db=db) is None
 
@@ -583,7 +603,7 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
         calls += 1
         return lookup_file(*args, **kwargs)
 
-    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     monkeypatch.setattr("registry.path_cards.lookup_file", counted)
 
     page = _page(db)
@@ -592,6 +612,38 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
     assert [card["title"] for card in page["m1"]["cards"]] == ["plan.md"]
     assert [card["title"] for card in page["m2"]["cards"]] == ["plan.md"]
     assert [card["title"] for card in page["m3"]["cards"]] == ["plan.md"]
+
+
+def test_page_memoizes_unregistered_and_retired_classification(db, ws, monkeypatch):
+    from registry import service
+
+    (ws / "plain.md").write_text("plain")
+    retired = _registered(db, ws, "retired.md")
+    db.execute("UPDATE artifact_identities SET state='retired' WHERE id=?", (retired,))
+    for index in range(1, 4):
+        _message(db, index, text="plain.md retired.md")
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (ws.resolve(), []))
+    original = service.find_file_identity
+    calls = []
+
+    def counted(path, **kwargs):
+        calls.append(path)
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(service, "find_file_identity", counted)
+    page = _page(db)
+    assert sorted(Path(path).name for path in calls) == ["plain.md", "retired.md"]
+    assert all([card["title"] for card in page[f"m{i}"]["cards"]] == ["plain.md"] for i in range(1, 4))
+
+
+def test_scope_roots_matches_document_opener(db, ws, tmp_path, monkeypatch):
+    from doceditor import document_scope
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(document_scope, "resolve_project", lambda *_a: (ws, [("repo", repo)]))
+    origin, bases = document_scope.scope_roots("project", db)
+    assert origin == ws.resolve()
+    assert bases == document_scope.scope_bases("project", db) == [repo, ws.resolve()]
 
 
 def test_file_identity_lookup_uses_index(db):
@@ -605,7 +657,7 @@ def test_file_identity_lookup_uses_index(db):
 def test_a_retired_named_file_does_not_return_as_unregistered(db, ws):
     artifact_id = _registered(db, ws, "retired.md")
     db.execute("UPDATE artifact_identities SET state='retired' WHERE id=?", (artifact_id,))
-    cards, _ = reference_cards(db, "retired.md", [ws.resolve()], "user")
+    cards = reference_cards(db, "retired.md", [ws.resolve()], "user")
     assert cards == []
 
 
@@ -614,9 +666,8 @@ def test_a_message_shows_all_matched_cards(db, ws):
     for name in names:
         _registered(db, ws, name)
 
-    cards, more = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
+    cards = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
 
-    assert more == 0
     assert [(c["name"], c["path"]) for c in cards] == [(name, str(ws / name)) for name in names]
 
 
@@ -635,7 +686,7 @@ def test_an_asked_artifact_is_covered_by_its_ask_in_its_turn_and_never_dropped(d
     _message(db, 4, "user", text="thanks")
     _message(db, 5, turn="turn-2", text="Still on [design](design.md).")
     _ask(db, plan_id, node_id, ask)
-    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -655,7 +706,7 @@ def test_the_cover_holds_for_a_cleared_ask(db, ws, monkeypatch):
     _message(db, 101, turn="turn-1", text="See [design](design.md).", at="2026-10-01T10:00:05+00:00")
     _ask(db, plan_id, node_id, ask)
     clear_attention(ask, outcome="answer", db=db)
-    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -673,7 +724,7 @@ def test_a_reference_on_the_asks_own_message_is_marked_covered_by_it(db, ws, mon
     thread = db.execute("SELECT * FROM threads WHERE id='owner'").fetchone()
     display, _m, _o = page_messages(db, "owner", 50, None)
 
-    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     attach_cards(db, "owner", "user", thread, display)
 
     hold = display[0]["cards"][0]["hold_id"]
@@ -687,7 +738,7 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
     png = str(registry_service.register_write_strict("owner", str(ws / "shot.png"), title="Shot", db=db)["id"])
     doc = _registered(db, ws, "plan.md")
 
-    cards, _ = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
+    cards = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
 
     by_id = {c["artifact_id"]: c for c in cards}
     assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)
