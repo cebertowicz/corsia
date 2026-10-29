@@ -25,6 +25,9 @@ _BASH_STARTUP_ENV = frozenset({
 })
 LIFECYCLE_SHELL_COMMAND = r"""
 set +x
+_corsia_lifecycle_is_update=false
+[ "${2:-}" != restart-prepared ] || _corsia_lifecycle_is_update=true
+readonly _corsia_lifecycle_is_update
 _corsia_lifecycle_done=false
 _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
@@ -37,17 +40,27 @@ _corsia_lifecycle_cleanup() {
     _corsia_cleanup_curl="${_corsia_lifecycle_curl:-${CORSIA_RESTART_CURL:-}}"
     if [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
+        && [ "$_corsia_lifecycle_is_update" = true ] \
+        && [ -n "$_corsia_cleanup_port" ] \
+        && [ -n "$_corsia_cleanup_curl" ]; then
+        "$_corsia_cleanup_curl" --silent --show-error --fail --max-time 5 \
+            --output /dev/null --write-out 'Lifecycle backend health HTTP %{http_code}\n' \
+            "http://127.0.0.1:${_corsia_cleanup_port}/api/health" \
+            || printf 'Lifecycle backend health curl exit %s\n' "$?"
+    elif [ "$_corsia_lifecycle_done" != true ] \
+        && [ "$_corsia_lifecycle_status" -ne 0 ] \
         && [ -n "$_corsia_cleanup_token" ] \
         && [ -n "$_corsia_cleanup_port" ] \
         && [ -n "$_corsia_cleanup_operation" ] \
         && [ -n "$_corsia_cleanup_curl" ]
     then
-        "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
+        "$_corsia_cleanup_curl" --silent --show-error --fail --max-time 5 \
+            --output /dev/null --write-out 'Lifecycle drain cleanup HTTP %{http_code}\n' \
             --request DELETE --get \
             --data-urlencode "token=$_corsia_cleanup_token" \
             --data-urlencode "operation_id=$_corsia_cleanup_operation" \
             "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" \
-            > /dev/null 2>&1 || :
+            || printf 'Lifecycle drain cleanup curl exit %s\n' "$?"
     fi
     exit "$_corsia_lifecycle_status"
 }

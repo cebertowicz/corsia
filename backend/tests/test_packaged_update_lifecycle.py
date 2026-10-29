@@ -148,6 +148,27 @@ def test_interrupted_confirmation_settles_without_holding(
     assert self_restart.previous_version(row) == previous
 
 
+def test_staged_target_is_not_reported_as_rolled_back(isolated_db, monkeypatch, tmp_path):
+    import plistlib
+
+    operation_id = operation_in(previous="0.4.1")
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    bundle.with_name("CORSIA.app.previous").mkdir()
+    plist = bundle.with_name("CORSIA.app.staged") / "Contents" / "Info.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_bytes(plistlib.dumps({"CORSIAVersion": "0.4.2"}))
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    restart_startup.close_out_prior_self_restart()
+    assert restart_startup._complete_restart_operation() == operation_id
+    row = self_restart.operation_by_id(operation_id)
+    assert row["failure_code"] == "wrong_version_running"
+    from infra.config import LOGS_DIR
+    assert json.loads(row["failure_detail"])["log_path"] == str(LOGS_DIR / f"restart-{operation_id}.log")
+    assert not self_restart.restart_holds_new_work()
+
+
 async def test_failure_report_releases_before_bundle_rollback(isolated_db, monkeypatch):
     from automation.update_verification import confirm_packaged_update
 

@@ -19,6 +19,7 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
     from api import settings_restart
     from infra.database import get_db
     from infra.database_migrations import BackupRoomError
+    from infra.config import LOGS_DIR
 
     prepare = AsyncMock()
     monkeypatch.setattr(settings_restart, "_prepare_owned_release", prepare)
@@ -46,12 +47,14 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
             "SELECT status,phase,kind,trigger,failure_code,failure_detail "
             "FROM self_restart_requests"
         ).fetchone())
+        operation_id = connection.execute("SELECT id FROM self_restart_requests").fetchone()[0]
     finally:
         connection.close()
     assert row == {
         "status": "failed", "phase": None, "kind": "update", "trigger": "manual",
         "failure_code": "disk_space",
-        "failure_detail": '{"needed_bytes": 13, "free_bytes": 8}',
+        "failure_detail": json.dumps({"needed_bytes": 13, "free_bytes": 8,
+                                      "log_path": str(LOGS_DIR / f"restart-{operation_id}.log")}),
     }
     prepare.assert_not_awaited()
     drain.assert_not_awaited()

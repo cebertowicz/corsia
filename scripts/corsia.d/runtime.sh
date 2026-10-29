@@ -255,7 +255,8 @@ cancel_failed_drain() {
     # Releasing the hold for it would readmit work into the gap before teardown
     # and then kill that work without a recovery registration. The surviving
     # hold is safe: startup adopts any pre-bounce phase and settles it.
-    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ]; then
+    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ] \
+        || [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-}" = true ]; then
         return 0
     fi
     if [ -z "$operation_id" ]; then

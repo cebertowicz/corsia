@@ -14,6 +14,7 @@ from api.restart_shell import spawn_restart_lifecycle
 from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
 from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
+from api.update_exit_watcher import watch_update_process as _watch_update_process
 from infra.auth import authenticate, require_human_user, require_user
 
 router = APIRouter(tags=["system"])
@@ -85,7 +86,7 @@ async def launch_update(
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
-    await _monitor_restart_process(process, operation_id)
+    _watch_update_process(process, operation_id)
     return operation_id, process
 
 

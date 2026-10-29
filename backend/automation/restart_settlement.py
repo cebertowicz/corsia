@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from automation.restart_resumption import idle_threads_with_held_input, resume_threads_detached
 from infra.database import write_transaction
@@ -44,6 +45,26 @@ async def settle_restart_control(
     return released
 
 
+def _update_failure_log(operation_id: str, error: str, failure_detail: str | None) -> str:
+    """Keep the preparation log or name this operation's lifecycle log."""
+    from automation.self_restart import operation_detail
+    from infra.config import LOGS_DIR
+
+    detail = operation_detail({"failure_detail": failure_detail})
+    if not detail.get("log_path"):
+        path = LOGS_DIR / f"restart-{operation_id}.log"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text(error + "\n")
+        except OSError:
+            from loguru import logger
+
+            logger.exception("Could not write update failure log {}", path)
+        detail["log_path"] = str(path)
+    return json.dumps(detail)
+
+
 async def _release_and_resume(operation_id, error, target, failure_code, failure_detail) -> bool:
     from automation import restart
     from automation.update_failure_notice import tell_conductor_detached
@@ -80,6 +101,10 @@ def release_restart_control(
     from automation.restart_wakes import cancel_operation_registrations
     from infra.restart_authorization import serving_head_sha
 
+    if target not in {"complete", "verifying"} and not cancelled:
+        operation = self_restart.operation_by_id(operation_id)
+        if operation and operation.get("kind") == "update":
+            failure_detail = _update_failure_log(operation_id, error, failure_detail)
     with write_transaction(None, scope="settle_restart_control") as connection:
         if target == "verifying":
             released = self_restart.transition_operation(
