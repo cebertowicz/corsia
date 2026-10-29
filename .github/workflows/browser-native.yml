@@ -63,7 +63,7 @@ jobs:
       - name: Verify actual native owner and Unix peer contract
         run: |
           .venv/bin/python -m pytest -c backend/pytest.ini \
-            backend/tests/test_browser_native.py backend/tests/test_browser_real_socket.py \
+            backend/tests/test_browser_native.py backend/tests/test_browser_native_recovery.py backend/tests/test_browser_real_socket.py \
             backend/tests/test_browser_restricted_ports.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60
       - name: Verify setup steps run in the native browser

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import psutil
 import pytest
 
-from host_access import browser_chrome, browser_download, browser_orphan, browser_session_launch, group_probe, processes
+from host_access import browser_chrome, browser_download, browser_orphan, browser_owner_lock, browser_session_launch, group_probe, processes
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionRecord, BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -34,7 +34,7 @@ class Process:
         return True
 
 
-async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monkeypatch, caplog):
+async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monkeypatch, caplog, tmp_path):
     profile = '/saved/profile'
     candidates = [Process(11, profile), Process(13, '/saved/profile-other')]
     events = []
@@ -57,13 +57,17 @@ async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monke
     monkeypatch.setattr(browser_chrome.ChromeProcess, 'launch', launch)
     monkeypatch.setattr(browser_session_launch, 'apply_kept_signins', AsyncMock())
     monkeypatch.setattr(browser_session_launch, 'verify_stream', AsyncMock())
+    record = Mock()
+    monkeypatch.setattr(browser_owner_lock, 'record_launched_chrome', record)
     runtime = BrowserRuntime(BrowserSessionRecord('new', 'session', profile=profile))
     owned = SimpleNamespace(chrome=SimpleNamespace(process=SimpleNamespace(pid=12), closed=False))
-    owner = SimpleNamespace(_chrome='chrome', _user_agent=None, _sessions={'new': runtime, 'owned': owned},
+    owner = SimpleNamespace(_chrome='chrome', _user_agent=None, socket_dir=tmp_path,
+                            _sessions={'new': runtime, 'owned': owned},
                             _invoke=AsyncMock(), _session_argv=lambda *_: (), _observe_attempt=AsyncMock())
     with caplog.at_level('INFO'):
         await browser_session_launch.start_chrome(owner, runtime)
     assert events == [('closed', 11), ('launched', profile)]
+    record.assert_called_once_with(tmp_path, 'session', chrome, profile)
     assert 'pid=11 profile=profile' in caplog.text and profile not in caplog.text
 
 
