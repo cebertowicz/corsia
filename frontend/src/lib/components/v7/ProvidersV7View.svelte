@@ -198,6 +198,16 @@
 		openProvider = provider;
 		void tick().then(tick).then(() => document.querySelector<HTMLElement>(`[data-billing-account="${target.id}"] [data-settings-anchor]`)?.focus());
 	});
+
+	// A link to one account (`#account-<id>`, as an error in chat writes it) opens the settings of the provider
+	// that holds it; that provider's account list lands on the row and clears the request.
+	$effect(() => {
+		const anchor = $settingsNavigation.anchor;
+		if (!anchor?.startsWith('account-')) return;
+		const account = $vendorAccounts.find((entry) => `account-${entry.id}` === anchor && entry.state !== 'removed');
+		const provider = account && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === account.provider);
+		if (provider && openProvider?.name !== provider.name) openProvider = provider;
+	});
 </script>
 
 <header class="page-head">
