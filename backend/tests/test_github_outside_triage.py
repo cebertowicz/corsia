@@ -178,19 +178,19 @@ async def test_failed_start_cleans_staging(triage, local_model):
     assert not list((triage['folder'] / 'staging').glob('triage-*'))
 
 
-def test_pr_comment_ref_does_not_change_legacy_route(triage, monkeypatch):
-    from dataclasses import replace
+@pytest.mark.asyncio
+async def test_pr_comment_owner_gets_one_result_and_no_raw_event(triage):
     from events.connectors import github
-    from events.identity import resolve_identity
-    from events.router import _select_route
+    from infra.database import get_db
 
     raw = payload('pr_comment', 'created')
     facts = github.MANIFEST.extract_facts(raw, None)
     assert github.MANIFEST.build_artifact_ref('pr_comment.created', facts, raw) == {
         'integration': 'github', 'type': 'pull-request', 'external_id': 'o/r#1'}
-    identity = resolve_identity('webhook.github.pr_comment', raw)
-    args = ('webhook.github.pr_comment', raw, identity, identity.external_id, None, None)
-    current = _select_route(*args)
-    old = replace(github.MANIFEST, build_artifact_ref=lambda _type, _facts, _raw: None)
-    monkeypatch.setattr(github, 'MANIFEST', old)
-    assert _select_route(*args) == current
+    result = await route('pr_comment', 'created')
+    assert (result.outcome.value, result.thread_id) == ('accepted', 'pr-owner')
+    await run_scripts()
+    await settle_all()
+    contents = [row[0] for row in get_db().execute('SELECT content FROM messages WHERE thread_id=?', ('pr-owner',))]
+    assert sum('[EVENT: result]' in content for content in contents) == 1
+    assert not any('safe item' in content for content in contents)
