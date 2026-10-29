@@ -92,6 +92,8 @@ async def lifecycle_action(server_id: str, action: str):
         result = await provider_module.stop_server(cfg)
 
     if result.get("ok") and action == "start":
+        # Discovery reads the persisted status and refuses an offline server.
+        await run_in_db(nd.update_server_status, server_id, status="online")
         from llm.local_setup_gates import local_setup_memory_ok
         from llm.managed_omlx_binary import is_corsia_managed_server
 
@@ -101,9 +103,7 @@ async def lifecycle_action(server_id: str, action: str):
                 return failure
 
     if result.get("ok"):
-        if action == "start":
-            await run_in_db(nd.update_server_status, server_id, status="online")
-        elif action == "stop":
+        if action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
         await run_in_db(_remember_managed_choice, server, action == "start")
     else:

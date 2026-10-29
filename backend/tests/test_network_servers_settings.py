@@ -127,7 +127,7 @@ def test_settings_start_confirms_managed_models_only_below_floor(client, monkeyp
         assert body["ok"] is False and body["reason"] == "mac_cannot_run"
         assert "Local models need at least 32 GB" in body["message"]
         stop.assert_awaited_once_with({"server_id": "ns-test"})
-        assert states == ["offline"]
+        assert states == ["online", "offline"]
         monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: False)
         monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [server])
         monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **_kwargs: server)
