@@ -99,7 +99,7 @@ def _blocked_payload(db, node_id: str) -> dict:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 162
+    assert SCHEMA_VERSION == 161
 
 
 def test_only_open_blockers_on_anyone_but_the_user_become_waits(tmp_path):

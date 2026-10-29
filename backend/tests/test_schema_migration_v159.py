@@ -29,9 +29,9 @@ def test_upgrade_repairs_roots_and_parents_but_preserves_review_leaf():
                 "VALUES (?,'u',?,?,?,'t','t')", (thread, parent, mode, dirs)
             )
         db.commit()
-        assert SCHEMA_VERSION == 162
+        assert SCHEMA_VERSION == 161
         assert MIGRATIONS[158] is migrate_158_to_159
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 162
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 161
         rows = {row[0]: tuple(row[1:]) for row in db.execute(
             "SELECT id,confinement,confined_read_dirs FROM threads")}
         assert rows == {"root": (None, None), "parent": (None, None),
