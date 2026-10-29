@@ -5,7 +5,7 @@
 </script>
 
 {#if error}
-	{#if retrying}<SetupAiRows rows={[{ key: 'source-error', name: error, meta: '', busy: true }]} />
+	{#if retrying}<SetupAiRows rows={[{ key: 'source-error', name: 'Checking which models are ready…', meta: '', busy: true }]} />
 	{:else}<p class="error-text" role="alert">{error}</p>{/if}
 	<Button variant="chip" disabled={retrying} onclick={retry}>Retry</Button>
 {/if}
