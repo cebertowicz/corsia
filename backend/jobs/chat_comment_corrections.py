@@ -13,8 +13,6 @@ from core.measurement_scope import scope_cte
 from jobs.corrections_cursor import PendingCandidateKey, before_clause, before_params
 
 
-# Source identity is owned by core.corrections_recording.
-
 def pending_chat_comment_keys(version, batch_size, owner_user_id, before=None, since=None):
     """Select one owner's unrecorded indexed notes in the shared scan order."""
     from infra.database import get_db
@@ -47,8 +45,6 @@ def pending_chat_comment_keys(version, batch_size, owner_user_id, before=None, s
     finally:
         db.close()
 
-
-# The send hook queues identities without reading the database.
 
 def chat_comment_candidate(db, source_id: str) -> CorrectionCandidate | None:
     """Build a source from its committed index entry and sending message."""

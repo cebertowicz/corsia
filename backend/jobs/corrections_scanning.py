@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from jobs.corrections_cursor import PendingCandidateKey, ScanCursor, before_clause, before_params
-from jobs.chat_comment_corrections import chat_comment_candidate
 
 from core.corrections_input import (
     CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, agent_context, owner_text, shape_context,
@@ -13,6 +11,7 @@ from core.corrections_recording import (
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     MESSAGE_SUBJECT_PREFIX,
+    SOURCE_KIND_CHAT_COMMENT,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
@@ -26,9 +25,8 @@ from core.corrections_recording import (
     version_match_sql,
 )
 from core.measurement_scope import scope_cte
-
-
-# Cursor and key definitions are shared by both scan modules.
+from jobs.chat_comment_corrections import chat_comment_candidate
+from jobs.corrections_cursor import PendingCandidateKey, ScanCursor, before_clause, before_params
 
 def pending_candidate_keys(
     version: ClassifierVersion, batch_size: int, owner_user_id: str,
@@ -205,8 +203,6 @@ def source_candidate(db, source_kind: str, source_id: str) -> CorrectionCandidat
     (the commented excerpt, or the decision's question and options) is one
     ``Agent`` context row before it, the shape the classifier was trained on.
     """
-    from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT
-
     if source_kind == SOURCE_KIND_CHAT_COMMENT:
         return chat_comment_candidate(db, source_id)
     if source_kind == SOURCE_KIND_DOC_COMMENT:

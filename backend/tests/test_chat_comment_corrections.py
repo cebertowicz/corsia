@@ -7,6 +7,35 @@ from tests.test_corrections_recording import _db, _seed, _version
 
 
 @pytest.mark.asyncio
+async def test_real_admission_queues_committed_comment_identity(isolated_db, monkeypatch):
+    from infra import send_service
+    from jobs.corrections_recording import candidate_for_source
+    from test_reply_context import _comment
+
+    db = _db()
+    _seed(db)
+    db.execute("UPDATE messages SET seq=5 WHERE id='prior'")
+    db.commit()
+    row = dict(db.execute("SELECT * FROM threads WHERE id='thread'").fetchone())
+    async def deliver(*args, **kwargs):
+        return None
+    monkeypatch.setattr(send_service, '_deliver_admission', deliver)
+    monkeypatch.setattr('jobs.corrections_recording._plans_hear', lambda *args: None)
+    seen = []
+    monkeypatch.setattr('jobs.corrections_realtime.notify', lambda *args: seen.append(args))
+    await send_service.send_thread_input('thread', row, 'plain', input_id='plain', native_mode='ws', ws=object())
+    seen.clear()
+    comments = [_comment(note=' '), _comment(id='key-2', note='Fix it')]
+    await send_service.send_thread_input('thread', row, '', input_id='comment-send', native_mode='ws', ws=object(), metadata={'reply_context': {'comments': comments}})
+    stored = db.execute("SELECT cid,user_message_id FROM chat_comments WHERE user_message_id='comment-send' ORDER BY cid").fetchall()
+    assert len(stored) == 2 and not stored[1]['cid'].startswith('c1.')
+    assert seen == [('chat_comment', f"{stored[1]['cid']}:{stored[1]['user_message_id']}")]
+    candidate = candidate_for_source(*seen[0])
+    assert candidate and candidate.content == 'Fix it' and candidate.arrived
+    db.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("typed", ["", "Typed correction."])
 async def test_chat_comment_candidates(isolated_db, typed):
     from jobs.corrections_recording import next_pending_batch
