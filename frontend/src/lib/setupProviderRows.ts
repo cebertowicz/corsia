@@ -37,13 +37,13 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
-	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (ready) {
 		const failed = cloudReady && turnOffFailed;
 		return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' },
 			detail: failed ? localTurnOffFailed(turnOffFailed.reference) : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
+	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (downloading) {
 		if (source?.local_state === 'starting') return { ...row, meta: 'Starting the local model…', busy: true };
 		const meta = source?.download_stalled ? 'Download paused. It continues when the connection returns.'

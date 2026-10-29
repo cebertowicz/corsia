@@ -286,7 +286,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.local) {
 		const row = page.getByRole('region', { name: 'Local model' });
 		const expected = fixture.local === 'ready' ? 'Ready'
-			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.'
+			: fixture.local === 'memory' ? 'Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.'
 			: fixture.local === 'downloading' ? 'Downloading 42%'
 			: fixture.local === 'paused' ? 'Download paused. It continues when the connection returns.'
 			: fixture.local === 'starting' ? 'Starting the local model…'
