@@ -51,7 +51,7 @@
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
 	let accountKnown = $state(false), savedName = '', savedEmail = '';
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	let localStartError = $state(''), localStartReference = $state(''), startMessage = $state<string | undefined>(), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
 	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
@@ -93,12 +93,12 @@
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
 			key: row.key as SetupReportRow['key'], name: row.name, reference: row.reference,
-			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
+			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : (localStartError || local?.setup_error_code)) : connectFlow.attempts[row.key]?.cause,
 		}));
 	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
-			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
+			meta: localFailed ? [localStartError ? startMessage : local?.setup_error_message, localStartError ? startFix : local?.fix].filter(Boolean).join(' ') : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
 	const aiRows = $derived.by((): AiRow[] => {
@@ -113,7 +113,7 @@
 			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
-		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startMessage, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
@@ -217,17 +217,17 @@
 			const live = await response.json();
 			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
+				setup_error_code: live.cause, setup_error_message: live.message, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
 	async function startLocal() {
-		if ((!eligible && !canRestartStoppedLocal(local)) || localBusy) return;
-		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
+		if ((!eligible && !canRestartStoppedLocal(local) && !(localFailed && localStartError !== 'mac_cannot_run' && local?.setup_error_code !== 'mac_cannot_run')) || localBusy) return;
+		localBusy = true; localStartError = ''; localStartReference = ''; startMessage = undefined; startFix = undefined;
 		try {
 			const current = get(token);
-			const { result, reference, fix } = await requestLocalStart(current);
+			const { result, reference, fix, message, reason } = await requestLocalStart(current);
 			localStartReference = reference ?? '';
-			if (result === 'failed') { localStartError = 'other'; startFix = fix; }
+			if (result === 'failed') { localStartError = reason ?? 'other'; startMessage = message; startFix = fix; }
 			if (current) await refreshSources();
 		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
 		finally { localBusy = false; }

@@ -57,6 +57,7 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
     result.update(
         local_state=flight["state"],
         setup_error_code=flight.get("cause"),
+        setup_error_message=flight.get("message"),
         setup_error_reference=flight.get("ref"),
         bytes_to_free=flight.get("bytes_to_free"),
         download_percent=flight.get("percent"),

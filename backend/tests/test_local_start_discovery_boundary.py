@@ -65,5 +65,6 @@ def test_stopped_managed_start_uses_real_discovery_and_truthful_status(monkeypat
         assert nd.get_server(sid)["status"] == "online"
     else:
         assert result["ok"] is False and result["message"] == "stop failed"
+        assert result["ref"].startswith("local-")
         stop.assert_awaited_once_with({"server_id": sid})
         assert nd.get_server(sid)["status"] == "online"

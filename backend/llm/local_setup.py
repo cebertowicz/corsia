@@ -278,11 +278,12 @@ def setup_status() -> dict[str, Any]:
         "eta_seconds": _flight.download_eta_seconds,
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
-        "cause": result.get("cause") if result else None,
+        "cause": (result.get("cause") or result.get("reason")) if result else None,
         "message": result.get("message") if result else None,
+        "restart": result.get("restart") is True if result else False,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        "fix": failed.get("fix") or setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 

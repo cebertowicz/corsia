@@ -137,9 +137,10 @@ async def _restart_installed(server_id: str) -> dict:
         ls._release_operation_lock()
         raise
     except Exception as exc:
-        ls.log.exception("Local model restart failed")
-        result = local_setup_error(failure_message(exc))
-    return ls.finish_flight(result)
+        ref = new_reference("local")
+        ls.log.exception("Local model restart failed reference=%s", ref)
+        result = {**local_setup_error(failure_message(exc)), "ref": ref}
+    return ls.finish_flight({**result, "restart": True})
 
 
 async def begin_local_setup(*, no_subscription_only: bool = False,

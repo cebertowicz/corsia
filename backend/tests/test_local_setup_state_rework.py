@@ -34,10 +34,29 @@ def test_signed_in_row_projection_uses_the_normalized_flight_shape(flight):
 
     assert row == {
         "state": "needs_setup", "reason": None, "fix": "The local model needs 4.0 GB more free space. Free it up, then try again.",
-        "local_state": "failed", "setup_error_code": "disk_full", "setup_error_reference": "local-42",
+        "local_state": "failed", "setup_error_code": "disk_full", "setup_error_message": None, "setup_error_reference": "local-42",
         "bytes_to_free": 4_000_000_000, "download_percent": 41, "download_eta_seconds": 80,
         "download_stalled": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_restart_failure_and_refusal_reach_the_source_projection(flight, monkeypatch):
+    from llm import local_sources
+    from llm.local_setup_flow import _restart_installed
+    from onboarding.local_download_state import current
+
+    lifecycle = AsyncMock(side_effect=[
+        {"ok": False, "message": "Port is busy.", "ref": "local-123", "fix": "Free the port, then try again."},
+        {"ok": False, "reason": "mac_cannot_run", "message": "No model fits. Connect a provider."},
+    ])
+    monkeypatch.setattr("api.network_server_lifecycle.lifecycle_action", lifecycle)
+    for expected in ("Port is busy.", "No model fits. Connect a provider."):
+        await _restart_installed("server")
+        row = {}
+        local_sources._project_local_flight(row, current())
+        assert row["setup_error_message"] == expected
+    assert row["setup_error_code"] == "mac_cannot_run"
 
 
 @pytest.mark.asyncio

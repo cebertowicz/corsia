@@ -9,7 +9,7 @@ export type LocalRowState = ModelSource;
 export type LocalRowInput = {
 	source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean;
 	/** The pre-start is under way (oMLX installing, starting, picking, then starting the download): progress, never a Download button. */
-	preparing?: boolean; startError: string; startFix?: string; startReference?: string; freeDisk?: number;
+	preparing?: boolean; startError: string; startMessage?: string; startFix?: string; startReference?: string; freeDisk?: number;
 	/** A cloud model works, so the local one is no longer the only way through setup and may be turned off. */
 	cloudReady?: boolean;
 	/** The person turned the switch off mid-download and is being asked to confirm. */
@@ -37,7 +37,7 @@ function downloadedGb(sizeGb: number | null, percent?: number | null): number | 
 
 /** Present one local lifecycle and one cause-specific recovery action. */
 export function setupLocalRow(input: LocalRowInput): AiRow {
-	const { source, pick, eligible, downloading, preparing = false, ready, startError, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, turnOffFailed, start, stop, check, confirmStop, turnOff } = input;
+	const { source, pick, eligible, downloading, preparing = false, ready, startError, startMessage, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, turnOffFailed, start, stop, check, confirmStop, turnOff } = input;
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
@@ -49,6 +49,15 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	}
 	if (source?.local_state === 'starting' || (canRestartStoppedLocal(source) && preparing)) {
 		return { ...row, meta: 'Starting the local model…', busy: true };
+	}
+	if (startError || LOCAL_FAILURE_STATES.has(source?.local_state ?? '')) {
+		const cause = startError || source?.setup_error_code;
+		const reference = startError ? startReference : source?.setup_error_reference;
+		const message = startError ? startMessage : source?.setup_error_message;
+		const fix = startError ? startFix : source?.fix;
+		if (cause === 'mac_cannot_run') return { ...row, meta: message ?? LOW_MEMORY_LOCAL_MODEL_MESSAGE };
+		const meta = [message, fix].filter((part, index, parts) => part && parts.indexOf(part) === index).join(' ');
+		return { ...row, meta, reference, error: true, reportable: true, action: { label: 'Retry', run: start } };
 	}
 	if (canRestartStoppedLocal(source)) {
 		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
@@ -70,12 +79,6 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	// Check again asks the service now rather than waiting on the next refresh.
 	if (source?.local_state === 'ready') return { ...row, meta: `${model} · Loading…`, busy: true, spinning: true, action: { label: 'Check again', run: check } };
 	if (pick?.model && freeDisk !== undefined && freeDisk < pick.model.download_size_gb) return { ...row, meta: `Needs ${size} free, and this computer has ${freeDisk} GB. Free up space, then check again.`, action: { label: 'Check again', run: check } };
-	if (LOCAL_FAILURE_STATES.has(source?.local_state ?? '') || startError) {
-		const cause = source?.setup_error_code ?? startError;
-		const reference = source?.setup_error_reference ?? startReference;
-		const meta = startError ? startFix ?? '' : source?.fix ?? '';
-		return { ...row, meta, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
-	}
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'never_local_host' && pick.message ? pick.message
 			: pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
