@@ -7,6 +7,10 @@ import { test } from '../support/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 
+test.afterEach(async ({ request }) => {
+ await setFocusMode(request, true);
+});
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const example = 'shared/research/reviews/APPROVE.md';
 

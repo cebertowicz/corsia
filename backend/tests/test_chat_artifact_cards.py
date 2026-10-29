@@ -506,7 +506,6 @@ def test_thread_cards_choose_workspace_origin_over_repository(db, ws, tmp_path, 
     (repo / "plan.md").write_text("repository")
     (ws / "plan.md").write_text("workspace")
     _message(db, 1, text="Open `plan.md`.")
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a: [repo.resolve(), ws.resolve()])
     monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a: (ws.resolve(), [("repo", repo.resolve())]))
     card = _page(db)["m1"]["cards"][0]
     assert card["path"] == str((ws / "plan.md").resolve())
@@ -584,7 +583,7 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
         calls += 1
         return lookup_file(*args, **kwargs)
 
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     monkeypatch.setattr("registry.path_cards.lookup_file", counted)
 
     page = _page(db)
@@ -636,7 +635,7 @@ def test_an_asked_artifact_is_covered_by_its_ask_in_its_turn_and_never_dropped(d
     _message(db, 4, "user", text="thanks")
     _message(db, 5, turn="turn-2", text="Still on [design](design.md).")
     _ask(db, plan_id, node_id, ask)
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -656,7 +655,7 @@ def test_the_cover_holds_for_a_cleared_ask(db, ws, monkeypatch):
     _message(db, 101, turn="turn-1", text="See [design](design.md).", at="2026-10-01T10:00:05+00:00")
     _ask(db, plan_id, node_id, ask)
     clear_attention(ask, outcome="answer", db=db)
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -674,7 +673,7 @@ def test_a_reference_on_the_asks_own_message_is_marked_covered_by_it(db, ws, mon
     thread = db.execute("SELECT * FROM threads WHERE id='owner'").fetchone()
     display, _m, _o = page_messages(db, "owner", 50, None)
 
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("api.thread_cards.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     attach_cards(db, "owner", "user", thread, display)
 
     hold = display[0]["cards"][0]["hold_id"]

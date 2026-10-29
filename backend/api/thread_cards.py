@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from api.files_roots import resolve_project, scope_bases
+from api.files_roots import resolve_project
 from infra import config
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
@@ -162,8 +162,14 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         if isinstance(text, str) and text:
             if bases is None:
                 project_id = thread_row["project_id"]
-                bases = scope_bases(project_id, db)
-                origin = resolve_project(project_id, db)[0] if project_id else config.WORKSPACE.resolve()
+                if project_id:
+                    origin, repos = resolve_project(project_id, db)
+                    bases = [path for _, path in repos]
+                    if origin:
+                        bases.append(origin.resolve())
+                else:
+                    origin = config.WORKSPACE.resolve()
+                    bases = [origin]
             # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
             turn_id = _loads(row.get("metadata")).get("turn_id")
             asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
