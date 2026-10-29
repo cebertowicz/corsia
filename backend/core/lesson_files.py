@@ -51,14 +51,20 @@ HOLD_REASONS = {
         "it has no trigger and boundary that say when it applies and when it does not"
     ),
     "over-budget": "the trial exceeds the task-start guidance budget",
+    "target-full": "another trial on the target file changes the same section or the whole file",
 }
+
+
+def section_key(section: str) -> str:
+    """Key a section name the same way as a Markdown heading."""
+    return section.lstrip("#").strip().casefold()
 
 
 def has_section(text: str, section: str) -> bool:
     """Whether Markdown text already has a heading named section."""
-    wanted = section.lstrip("#").strip().casefold()
+    wanted = section_key(section)
     return any(
-        line.lstrip("#").strip().casefold() == wanted
+        section_key(line) == wanted
         for line in text.splitlines() if line.startswith("#")
     )
 

@@ -44,6 +44,12 @@ class Target:
     health_owner: str | None = None       # live health sink for failure/dead-letter
     health_sink_is_live: bool | None = None
 
+    @property
+    def no_owner(self) -> bool:
+        """Routing found no owner; an owner that went inactive is a fault, not this."""
+        return (self.thread is None and self.resolution in ("dead_letter", "triage")
+                and self.reason != "owner_inactive")
+
 
 def _routing(ref: dict, db=None) -> dict:
     return registry_models.routing_registrations(

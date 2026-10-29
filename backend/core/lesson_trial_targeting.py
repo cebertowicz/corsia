@@ -85,7 +85,8 @@ def target_trials(
 def same_case(current: Any, decision: Decision) -> bool:
     """Whether an existing trial has the same section and correction cause."""
     current_meta, requested = current.lesson.case_metadata, decision.case_metadata
-    return (current_meta.get("target_section") == requested.get("target_section")
+    return (lesson_files.section_key(str(current_meta.get("target_section") or ""))
+            == lesson_files.section_key(str(requested.get("target_section") or ""))
             and current_meta.get("cause") == requested.get("cause"))
 
 

@@ -144,7 +144,7 @@ class Delivery:
 
 @dataclass
 class RulePlan:
-    """Everything rules decided for one event, before delivery."""
+    """Everything rules decided for one event, plus how the recipients they added fared."""
 
     event: RuleEvent
     lifecycle: str = "active"  # the artifact's, as routing resolved it
@@ -152,7 +152,12 @@ class RulePlan:
     rides: dict[str, Delivery] = field(default_factory=dict)  # routed thread -> what rides it
     adds: dict[str, Delivery] = field(default_factory=dict)   # new thread -> its delivery
     settled: list[Outcome] = field(default_factory=list)      # outcomes with no delivery
+    added: list[Outcome] = field(default_factory=list)        # set by platform.deliver_rule_adds
 
     def handled_by(self) -> str | None:
-        """A rule that queued a run of its writer's script, or a worker start, with this event."""
-        return next((item.rule_id for item in self.settled if item.outcome == QUEUED), None)
+        """A rule that queued work for this event or delivered it to a recipient it added.
+
+        Read it only after ``deliver_rule_adds``; both event paths do.
+        """
+        return next((item.rule_id for item in [*self.settled, *self.added]
+                     if item.outcome in (QUEUED, WOKE, DIGESTED, DUPLICATE)), None)

@@ -6,10 +6,10 @@ import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_pane_state, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_clipboard, browser_control, browser_pane_state, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "clipboard_undo", "clipboard_paste", "clipboard_selection", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 _page_endpoints: dict[tuple[str, str], str] = {}
@@ -138,6 +138,21 @@ async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
     await browser_cdp.dispatch_key_event(endpoint, event)
 
 
+async def clipboard_selection(thread_id: str, connection_token: str, cut: bool) -> str:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn’t be copied")
+    return await browser_clipboard.clipboard_selection(endpoint, cut)
+
+
+async def clipboard_paste(thread_id: str, connection_token: str, text: str) -> None:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn’t receive pasted text")
+    await browser_clipboard.clipboard_paste(endpoint, text)
+
+
+async def clipboard_undo(thread_id: str, connection_token: str) -> None:
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn’t undo the cut")
+    await browser_clipboard.clipboard_undo(endpoint)
+
+
 async def open_url(thread_id: str, url: str, connection_token: str | None = None) -> str:
     """Open a pane URL: a connected pane navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(
@@ -170,4 +185,6 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):
-        await owner.run(thread_id, args, session="existing", pane=True)
+        result = await owner.run(thread_id, args, session="existing", pane=True)
+        if result.startswith("Error:"):
+            raise browser_cdp.BrowserSessionError(result)

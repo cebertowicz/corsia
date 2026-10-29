@@ -49,9 +49,56 @@ def test_conductor_designation_installs_screen_without_manual_sync(world):
     assert set_project_conductor(world["project"], OWNER, db=db)
     key = install._key(world["project"])
     rules = db.execute("SELECT id FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchall()
-    assert {row[0] for row in rules} == {key + "_opened", key + "_synchronize", key + "_start"}
+    ids = {row[0] for row in rules}
+    assert {key + "_opened", key + "_synchronize", key + "_start"} <= ids
+    assert {key + '_triage_' + suffix for suffix in ('issue_opened', 'issue_comment_created',
+            'issue_comment_edited', 'pr_comment_created', 'pr_comment_edited', 'review_submitted',
+            'review_edited', 'start')} <= ids
+    assert len(ids) == 11
     assert set_project_conductor(world["project"], None, db=db)
     assert not db.execute("SELECT 1 FROM event_rules WHERE id LIKE ?", (key + "%",)).fetchone()
+
+
+@pytest.mark.asyncio
+async def test_result_delivery_renders_sign_text_without_changing_facts(screen):
+    from core.injection_rules import INJECTION_RULES
+    from infra.database import get_db
+
+    screen["reply"].write_text(fenced({"payload": {"verdict": "safe", "categories": [], "findings": []},
+                                       "injection_signs": ["R3", "R4"]}))
+    await _route(screen["state"]["sha"])
+    await run_scripts()
+    await settle_all()
+    event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.result")
+    assert event["facts"]["injection_signs"] == ["R3", "R4"]
+    messages = [row[0] for row in get_db().execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
+    text = next(message for message in messages if "[EVENT: result]" in message)
+    for sign, rule in INJECTION_RULES:
+        if sign in ("R3", "R4"):
+            assert f"{sign} ({rule})" in text
+
+
+@pytest.mark.parametrize("event_type", ["worker.result", "worker.no_result"])
+def test_worker_signs_render_in_wake_and_digest_without_mutating_facts(event_type, world, monkeypatch):
+    from core.injection_rules import INJECTION_RULES
+    from events.connectors.worker import MANIFEST
+    from events.envelope import normalize
+    from events import platform
+    from events.resolve import Target
+    from infra.database import get_db
+
+    facts = {"source": "outside", "injection_signs": ["R3", "R4"]}
+    event = normalize("worker", {"run_id": "run-1", **facts}, event_type.removeprefix("worker."))
+    delivered = []
+    monkeypatch.setattr(platform, "enqueue_event_wake", lambda *args, **kwargs: delivered.append(args[3]))
+    target = Target(OWNER, "path_a_resolve", "owner", disposition="owner_wake")
+    platform._deliver_target(get_db(), event, target, MANIFEST.decl(event_type.removeprefix("worker.")))
+    wake = delivered[0]["injection_signs_text"]
+    note = platform._note_line(event, ())
+    for sign, rule in INJECTION_RULES:
+        if sign in facts["injection_signs"]:
+            assert f"{sign} ({rule})" in wake and f"{sign} ({rule})" in note
+    assert facts["injection_signs"] == event.facts["injection_signs"] == delivered[0]["injection_signs"] == ["R3", "R4"]
 
 
 @pytest.mark.asyncio
@@ -65,11 +112,7 @@ async def test_result_and_no_result_keep_label_in_agent_delivery(screen, valid):
     await run_scripts()
     await settle_all()
     db = get_db()
-    if valid:
-        delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
-    else:
-        delivered = [row[0] for row in db.execute("SELECT summary FROM context_change_journal "
-                     "WHERE object_id='pr-owner' AND object_kind='thread_context'")]
+    delivered = [row[0] for row in db.execute("SELECT content FROM messages WHERE thread_id='pr-owner'")]
     assert delivered and any(LABEL in text for text in delivered), delivered
     event = next(item for item in screen["state"]["admitted"] if item["event_type"].startswith("worker."))
     assert event["facts"]["source"] == "outside"
@@ -100,7 +143,7 @@ async def test_floor_capture_failure_does_not_start_worker(screen, monkeypatch):
     spawn.assert_not_awaited()
     row = starts(screen["key"] + "_start")[0]
     assert row[0] == "refused" and "Couldn’t read" in row[1]
-    assert "Check the backend log" in row[1]
+    assert "The run ends without a result; a later event starts a new one" in row[1]
     event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.no_result")
     assert event["facts"]["source"] == "outside" and event["facts"]["injection_signs"] is None
     assert not list((screen["folder"] / "staging").glob("screen-*"))
@@ -229,7 +272,7 @@ async def test_remote_change_refuses_queued_screen_before_opening_channel(screen
                     "origin", "https://github.com/other/current.git"], check=True)
     await run_scripts()
     [(outcome, reason, _, _)] = starts(screen["key"] + "_opened")
-    assert outcome == "failed" and "no longer registered" in reason
+    assert outcome == "failed" and "event repository does not match the tracked repository" in reason
     assert screen["state"]["calls"] == []
     assert starts(screen["key"] + "_start") == []
     row = get_db().execute('SELECT "match" FROM event_rules WHERE id=?',

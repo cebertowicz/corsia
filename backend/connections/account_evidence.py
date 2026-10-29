@@ -38,6 +38,21 @@ def discovery_view(account: dict) -> dict:
     return _with_defaults(dict(raw) if isinstance(raw, dict) else {}, account)
 
 
+def current_ready_discovery(account: dict) -> dict | None:
+    """Return an added account's ready discovery only for its current login."""
+    from connections.account_receipts import account_receipt
+
+    if account['is_default'] or account['state'] != 'signed_in':
+        return None
+    receipt = account_receipt(account)
+    discovery = discovery_view(account)['discovery']
+    if receipt is None or discovery.get('status') != 'ready' or discovery.get('receipt') != {
+        'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq,
+    }:
+        return None
+    return discovery
+
+
 def store_record(account_id: str, record: dict, *, db) -> None:
     """Only the canonical account transaction may publish this private record."""
     db.execute('UPDATE vendor_accounts SET discovery_json=? WHERE id=?',

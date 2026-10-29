@@ -138,8 +138,10 @@ class TestSessionList:
             return packed(db, sql, params)
 
         monkeypatch.setattr(threads_api, "fetch_all", recording)
+        monkeypatch.setattr(threads_api, "get_all_coordination_ids", lambda db: ['absent-owner'])
         listed = integration_client.get(f"/api/threads?token={_TOKEN}&archived=1").json()["threads"]
 
+        # All visible rows, including coordination, share one list read.
         assert len(reads) == 1
         db = get_db()
         try:

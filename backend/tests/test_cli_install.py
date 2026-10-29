@@ -155,6 +155,50 @@ def test_installer_failures_have_safe_reasons(monkeypatch, tmp_path, vendor, res
     assert not script.exists()
 
 
+def test_a_failed_installer_logs_its_output_tail_at_warning(monkeypatch, tmp_path, caplog):
+    """The packaged service logs at WARNING, so the tail that explains a failure must be at that level."""
+    from api import cli_install
+
+    script = tmp_path / "installer.sh"
+    script.write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
+    output = (b"Downloading...", b"curl: (56) Recv failure: Connection reset by peer")
+    monkeypatch.setattr(cli_install.subprocess, "Popen", lambda command, **_kwargs: _FakePopen(command, {}, returncode=56, output=output))
+    with caplog.at_level("WARNING", logger=cli_install.log.name):
+        assert cli_install._run_installer("claude-code", cli_install.InstallJob()) == "the installer stopped"
+    assert "CLI installer for claude-code ended with return code 56" in caplog.text
+    assert "Connection reset by peer" in caplog.text
+
+
+def test_a_failed_download_logs_its_underlying_error_at_warning(monkeypatch, caplog):
+    from api import cli_install
+
+    def fail(*_args, **_kwargs):
+        raise urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None)
+
+    monkeypatch.setattr(cli_install.urllib.request, "urlopen", fail)
+    with caplog.at_level("WARNING", logger=cli_install.log.name):
+        assert cli_install._run_installer("claude-code", cli_install.InstallJob()) == "the download service cannot answer"
+    assert "CLI installer download for claude-code failed" in caplog.text and "503" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_failure_line_carries_the_reason_into_the_setup_report(monkeypatch, tmp_path, caplog):
+    from api import cli_install
+    from onboarding.setup_report import relevant_lines
+
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: "the installer stopped")
+    _nothing_installed(monkeypatch)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+    with caplog.at_level("WARNING", logger=cli_install.log.name):
+        await cli_install.start_install("claude-code", {})
+        await cli_install._jobs["claude-code"].task
+    ref = cli_install._jobs["claude-code"].ref
+    picked = relevant_lines(caplog.text.splitlines(), [{"key": "claude-code", "reference": ref}])
+    assert len(picked) == 1 and "reason='the installer stopped'" in picked[0]
+
+
 @pytest.mark.asyncio
 async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
     from api import cli_install

@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
@@ -11,6 +11,7 @@ export interface Thread extends ThreadModelSwitchState {
 	account_id?: string;
 	runtime_context_epoch?: number;
 	project_id?: string | null;
+	coordination?: 'corsia' | 'conductor';
 	agent_enabled?: number | boolean | null;
 	agent_responsibility?: string | null;
 	agent_paths?: string[] | string | null;
@@ -116,6 +117,7 @@ export function mergeMessageDelivery(existing: Message, incoming: Message): Mess
 }
 
 export const threads = writable<Thread[]>([]);
+export const coordinationThreads = writable<Thread[]>([]);
 
 /** Demote locally but keep responsibility, paths, domains and notes so re-promoting prefills them. */
 export function demoteAgentLocally(threadId: string): void {
@@ -249,8 +251,9 @@ export const reasoningEffort = writable<string | null>(null);
 
 /** Optimistically rename a thread and restore its prior title if persistence fails. */
 export async function saveThreadTitle(threadId: string, title: string, token: string): Promise<void> {
+	const target = get(coordinationThreads).some((thread) => thread.id === threadId) ? coordinationThreads : threads;
 	let previousTitle = '';
-	threads.update((rows) => rows.map((thread) => {
+	target.update((rows) => rows.map((thread) => {
 		if (thread.id !== threadId) return thread;
 		previousTitle = thread.title;
 		return { ...thread, title };
@@ -263,7 +266,7 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		});
 		if (!response.ok) throw new Error(`Rename failed (${response.status})`);
 	} catch (error) {
-		threads.update((rows) => rows.map((thread) => (
+		target.update((rows) => rows.map((thread) => (
 			thread.id === threadId ? { ...thread, title: previousTitle } : thread
 		)));
 		throw error;

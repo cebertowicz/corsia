@@ -20,6 +20,17 @@ finally:
     sys.path.remove(str(PACKAGE))
 
 
+def test_github_read_reports_bounded_stderr(monkeypatch):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(stage_module.subprocess, "run", lambda *args, **kwargs:
+                        CompletedProcess(args, 1, "", "  rate limit: " + "x" * 1200 + "  "))
+    with pytest.raises(RuntimeError) as error:
+        stage_module.github_read("repos/o/r")
+    assert str(error.value).startswith("GitHub read failed: rate limit:")
+    assert len(str(error.value)) == len("GitHub read failed: ") + 1000
+
+
 def test_stage_fetches_and_keeps_raw_pr_text_out_of_event(tmp_path):
     calls = []
     sha = "a" * 40

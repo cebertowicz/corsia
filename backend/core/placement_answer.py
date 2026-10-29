@@ -93,10 +93,11 @@ def thread_place(db: sqlite3.Connection, thread_id: str) -> ThreadPlace:
 def history(db: sqlite3.Connection, thread_id: str, entry: dict[str, Any]) -> list[dict]:
     """Earlier decisions on the same subject, for the duplicate check (P5)."""
     from memory.checkpoint_search import search_checkpoints
+    from infra.thread_confinement import Reader
 
     query = str(entry.get("statement") or entry.get("result") or "")[:300]
     hits = search_checkpoints(
-        db, query, caller_thread_id=thread_id, limit=_HISTORY_HITS + 1,
+        db, query, reader=Reader.agent(thread_id), limit=_HISTORY_HITS + 1,
     )
     return [
         {

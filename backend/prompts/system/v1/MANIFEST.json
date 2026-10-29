@@ -1,28 +1,16 @@
 {
   "files": [
     {
-      "bytes": 3183,
+      "bytes": 627,
       "kind": "context",
-      "path": "context/10-INTENT-AUTHORITY.md",
-      "sha256": "e1d52b70f60d9fada0fea9c23992e85fd1f2b64cdb1c925c6c7799de2834992c"
+      "path": "context/00-REPUTATION.md",
+      "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 6251,
+      "bytes": 7382,
       "kind": "context",
-      "path": "context/20-CONTEXT-WORK-STATE.md",
-      "sha256": "91fe42c754330377d4a09051ef2faf8427ca056c066147ef3bf65a5d568b5cd0"
-    },
-    {
-      "bytes": 3410,
-      "kind": "context",
-      "path": "context/30-VERIFICATION-COMPLETION.md",
-      "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
-    },
-    {
-      "bytes": 3026,
-      "kind": "context",
-      "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "8ac7fd79f3ed006fd5d32f247a03ea02d9f504405a16c8142d97f06b1ec9e2ae"
+      "path": "context/10-HOW-TO-WORK.md",
+      "sha256": "3c05032c461f4b120dd2a8c7372c299e39e42b84393f9757be85443ddcf8a1e8"
     },
     {
       "bytes": 830,
@@ -35,12 +23,6 @@
       "kind": "context",
       "path": "context/HOST-ACCESS-BOUNDARY.md",
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
-    },
-    {
-      "bytes": 2118,
-      "kind": "context",
-      "path": "context/SPAWN-POLICY.md",
-      "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
     },
     {
       "bytes": 3204,
@@ -100,10 +82,10 @@
       "sha256": "11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf"
     },
     {
-      "bytes": 4534,
+      "bytes": 4584,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/SPAWN-POLICY.md",
-      "sha256": "9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192"
+      "sha256": "69758642a956d48b405ea60080825baa755bc7af31fc8a5c7b98953bb609551d"
     },
     {
       "bytes": 730,
@@ -121,7 +103,7 @@
       "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "cd08dc6eb35db976ea2f3916ebd45b113f9b7f6abdeea371fd15f3f941124edc"
+      "sha256": "384a4d66e6977b41ad725e163981037f87458050fa3b7537500fb672380584d5"
     },
     {
       "bytes": 3492,
@@ -142,16 +124,22 @@
       "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
     },
     {
-      "bytes": 5283,
+      "bytes": 5284,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
-      "sha256": "36704c8482561c6ae8e4859b192de203d44b1b885ab79ecb87e3666ab6abda00"
+      "sha256": "312c94365e7236730e095411b26c7b1ead15bcc9afb91b7b55884c4233c8fd36"
     },
     {
       "bytes": 3370,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
       "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
+    },
+    {
+      "bytes": 3251,
+      "kind": "skill",
+      "path": "skills/asking-the-person/SKILL.md",
+      "sha256": "8932d1298c385e563b165ac15bf4ed02eba32110616339422c4dfc5b5bc96921"
     },
     {
       "bytes": 18740,
@@ -190,10 +178,10 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 26865,
+      "bytes": 27693,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "4ac4f13060e7c035e0a482bf611d7193d11cc42bd6520ea44f5f16beb9e484ab"
+      "sha256": "3c94e6dbff0914bada7717c23daf36f59b1dff7779fff7d52f62f1a56f3fa049"
     },
     {
       "bytes": 1259,
@@ -280,16 +268,16 @@
       "sha256": "9b20693c953f26ffdb7a9dd492ea8d023514317b24988d98f370cf0eee395c8d"
     },
     {
-      "bytes": 4120,
+      "bytes": 4151,
       "kind": "skill",
       "path": "skills/decide-or-raise/SKILL.md",
-      "sha256": "09150443b712dcccd43cb76a8786629d9f80f36d0d14b48d773fb86834bc4d46"
+      "sha256": "a6718ac8f889a40c8e35681fb6d8ff6e5e6827dc5969db97b482ec4cf3ee7fa2"
     },
     {
-      "bytes": 3266,
+      "bytes": 3279,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "22965355e58b4c34ca81d1234874563b6a5609d18163ba501bf7112e47f61fb1"
+      "sha256": "f8a6634d2ac89f2d2f5d98306fa615410a219581d31c767fc4a8d70a597228a7"
     },
     {
       "bytes": 1529,
@@ -316,10 +304,10 @@
       "sha256": "96da6ee3de221748d683927e5cbf4947dc405479f72f38f8abc8ef044060cced"
     },
     {
-      "bytes": 3606,
+      "bytes": 3796,
       "kind": "skill",
       "path": "skills/github/SKILL.md",
-      "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
+      "sha256": "e50eb57e2a986686c1ded7a662ae14b9baf0cbbf4f1495888cc5c673aace9497"
     },
     {
       "bytes": 6558,
@@ -358,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8898,
+      "bytes": 8928,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "50916d7a28e9a86a8512bafd9a2b331e122a8fbc43c6bd051c56bb1d81fd1b0b"
+      "sha256": "a7f7490bac983cc3319db9016c32094d7d0b8deb61ace2d09b1ac1822950682d"
     },
     {
       "bytes": 5914,
@@ -382,6 +370,12 @@
       "sha256": "0516ad6edb96e5cc37045912d13953c8b6c28aac04f66c86c0cc479b4eebdd47"
     },
     {
+      "bytes": 6249,
+      "kind": "skill",
+      "path": "skills/plans-and-workers/SKILL.md",
+      "sha256": "bc280ef8265d98793fd91a44af17d5d5040cc7b2ef1eb2852fe98215a4b3c1d8"
+    },
+    {
       "bytes": 3132,
       "kind": "skill",
       "path": "skills/prioritization/SKILL.md",
@@ -400,16 +394,16 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7681,
+      "bytes": 7839,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "8ed6a99da9ea1b6a5a4629cd44f14299accda53bdfe85f84b9e40d673cd14248"
+      "sha256": "025def871783119ef99a1a0160d4422ae9fa72015c1107d847a495f750dbe736"
     },
     {
-      "bytes": 10640,
+      "bytes": 10651,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "c0652805b3f4b3443b06b0177bd41cf7a04ade4350eb4e2360cb3c9fd63f28d6"
+      "sha256": "b5225bc152ffc68f41b13c41f7790acd429872aa8363e08d130a40a258d90971"
     },
     {
       "bytes": 4428,

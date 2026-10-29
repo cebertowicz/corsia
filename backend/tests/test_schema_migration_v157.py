@@ -312,5 +312,5 @@ def test_absent_or_partial_registry_is_a_noop():
 
 
 def test_migration_registered():
-    assert SCHEMA_VERSION == 163
+    assert SCHEMA_VERSION == 164
     assert MIGRATIONS[156] is migrate_156_to_157

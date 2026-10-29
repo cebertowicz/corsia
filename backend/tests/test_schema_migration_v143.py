@@ -19,7 +19,7 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 163 and MIGRATIONS[142] is migrate_142_to_143
+    assert SCHEMA_VERSION == 164 and MIGRATIONS[142] is migrate_142_to_143
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     db = sqlite3.connect(":memory:")
@@ -41,7 +41,7 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 163)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 164)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
     assert _index_sql(db) is not None

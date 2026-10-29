@@ -131,7 +131,7 @@ def _parent_heard(db) -> tuple[int, int]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 163
+    assert SCHEMA_VERSION == 164
 
 
 def test_open_event_waits_get_a_deadline_and_keep_their_event(tmp_path):

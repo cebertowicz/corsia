@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shlex
 from pathlib import PurePosixPath
@@ -13,6 +14,19 @@ LOCKFILES = frozenset({"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", 
                        "Cargo.lock", "Pipfile.lock", "poetry.lock", "uv.lock", "Gemfile.lock",
                        "composer.lock", "go.sum"})
 BUILD_FILES = frozenset({"package.json", "setup.py", "setup.cfg", "pyproject.toml", "Makefile"})
+
+
+def edited_item_version(item: dict, *, review: bool) -> str | None:
+    """Version an edited GitHub item consistently at intake and staging."""
+    item_id = item.get("id")
+    if item_id is None:
+        return None
+    if review:
+        body = item.get("body")
+        suffix = hashlib.sha256(body.encode("utf-8", "surrogatepass")).hexdigest()[:12] if isinstance(body, str) else None
+    else:
+        suffix = item.get("updated_at")
+    return f"{item_id}:{suffix}" if suffix else None
 
 
 def _path_rules(path: str, ci_paths: set[str]) -> set[str]:

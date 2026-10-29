@@ -369,7 +369,7 @@ def test_scripted_google_safe_miss_retains_and_moves_the_seeded_email_task(
             row["workflow_step"]: dict(row)
             for row in db.execute(
                 "SELECT id, workflow_step, state, description, revision, order_key "
-                "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
+                "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app' AND parent_id IS NULL",
                 (listing["plan"]["id"],),
             )
         }
@@ -666,7 +666,7 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
             )
         final = public.read_current_plan(actor=actor, include_folded=True, db=db)
     children = [node for node in final["nodes"] if node["parent_id"] == connect["id"]]
-    assert {node["title"] for node in children} == {"Connect Slack", "Connect Notes"}
+    assert {node["title"] for node in children} == {"Name the apps you work in", "Connect Slack", "Connect Notes"}
     top_level = {node["title"] for node in final["nodes"] if node["parent_id"] is None}
     assert top_level == {step["title"] for step in applicable_steps(facts)}
     assert "Hand over to your agents" in top_level

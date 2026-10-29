@@ -214,15 +214,31 @@ async def test_a_settled_workers_later_turn_wakes_its_owner_as_an_ordinary_child
         await asyncio.sleep(0.02)
     assert turn is not None, "the worker's turn never completed"
     assert starts(rule)[0][0] == "started"
-    assert completion(turn[0]) is None and completions() == []
+    assert await asyncio.to_thread(completion, turn[0]) is None and completions() == []
 
     monkeypatch.setattr(worker_runner, "poke", poke)
     await settle_all()
     assert starts(rule)[0][0] == "returned" and completions() == []
 
-    insert_message(worker, "assistant", "Answered the owner.", metadata={"turn_id": "owner-asked"})
-    assert completion("owner-asked") == OWNER
-    assert completions() == [f"{PARENT_COMPLETION_HEADING}\n\nAnswered the owner."]
+    def start_later_turn() -> None:
+        with write_transaction(None, scope="test_later_turn") as db:
+            db.execute(
+                "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+                "VALUES ('owner-asked',?,0,'claude-code/sonnet','running','2099-01-01','boot')", (worker,),
+            )
+            insert_message(worker, "assistant", "Answered the owner.", metadata={"turn_id": "owner-asked"}, db=db)
+
+    def finish_later_turn() -> None:
+        with write_transaction(None, scope="test_finish_turn") as db:
+            db.execute("UPDATE active_turns SET status='completed' WHERE id='owner-asked'")
+
+    await asyncio.to_thread(start_later_turn)
+    assert await asyncio.to_thread(completion, "owner-asked") is None and completions() == []
+    await asyncio.to_thread(finish_later_turn)
+    assert await asyncio.to_thread(completion, "owner-asked") == OWNER
+    assert completions() == [
+        f"{PARENT_COMPLETION_HEADING}\n\nfrom an untrusted agent; contains outside content\n\nAnswered the owner."
+    ]
 
 
 # 4 -- schema-invalid output: no_result {reason: invalid}; the same request starts nothing, a bumped attempt starts one.
@@ -297,6 +313,27 @@ async def test_an_owner_without_such_a_script_is_woken_once(world):
     assert starts(rule)[0][:2] == ("invalid", "invalid")
     [wake] = owner_wakes()
     assert "worker-flow" in wake and "invalid" in wake and world["driven"] == [OWNER]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["result", "no_result"])
+async def test_script_consumes_worker_event_on_unowned_artifact(world, monkeypatch, kind):
+    from infra.database import get_db
+    from infra.database import write_transaction
+
+    world["reply"].write_text(fenced({"findings": []}) if kind == "result" else "no json here")
+    await _script_rule(owner_script(world, monkeypatch, "consume.sh"), kind)
+    rule = await make_rule()
+    await request()
+    with write_transaction(None, scope="test_unowned_artifact") as db:
+        db.execute("UPDATE event_route_decisions SET artifact_integration='github', artifact_type='pull-request', "
+                   "artifact_external_id='o/r#7' WHERE rule_id=?", (rule,))
+    await settle_all()
+    await run_scripts()
+    assert len(world["script_inputs"]) == 1
+    assert owner_wakes() == [] and world["driven"] == []
+    assert get_db().execute("SELECT count(*) FROM dead_letter_events WHERE internal_event=?",
+                            (kind,)).fetchone()[0] == 0
 
 
 # 6 -- a valid result on a request's artifact reaches that artifact's owner through rule 0.

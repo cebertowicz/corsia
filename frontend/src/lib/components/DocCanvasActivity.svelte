@@ -24,7 +24,7 @@
 		return element ? EditorView.findFromDOM(element) : null;
 	}
 	function locate(from: number, to: number) {
-		const view = editor(), clip = root?.querySelector('.doc-main')?.getBoundingClientRect();
+		const view = editor(), clip = root?.querySelector('.ed-wrap')?.getBoundingClientRect();
 		return view && clip ? locateDocumentActivity(view, clip, from, to) : null;
 	}
 	function measure() {

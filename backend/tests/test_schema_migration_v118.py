@@ -47,7 +47,7 @@ def _keys(db: sqlite3.Connection) -> dict[str, str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 163
+    assert SCHEMA_VERSION == 164
     assert MIGRATIONS[117] is migrate_117_to_118
 
 
@@ -163,7 +163,7 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
         title = connection.execute("SELECT title FROM threads").fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert result.migrated is True
-    assert (result.from_version, result.to_version) == (117, 163)
-    assert version == 163
+    assert (result.from_version, result.to_version) == (117, 164)
+    assert version == 164
     assert [(k, json.loads(v)["session_id"]) for k, v in rows] == [(NEW_KEY, "ws")]
     assert title == "CORSIA"

@@ -11,14 +11,14 @@ from loguru import logger
 
 from events import dead_letter, delivery, guard
 from events.identity import (
-    CHECK_SUITE_COMPLETED_EVENTS,
-    PrResolutionError,
-    check_suite_pr_metadata_from_event,
-    resolve_identity,
+    CHECK_SUITE_COMPLETED_EVENTS, PrResolutionError,
+    check_suite_pr_metadata_from_event, resolve_identity,
 )
 from events.resolve import resolve_targets
 from events.connectors import github_pr_notice
+from events.connectors.github_content_facts import content_facts
 from events.connectors.github import (
+    GITHUB_ROUTED_EVENTS,
     github_event_class as _github_event_class,
     github_routing_envelope,
     identity_from_check_pr_metadata,
@@ -74,9 +74,7 @@ def _dead_letter_result(
             "dead_letter_id": dl_id,
         },
     )
-    return RouteResult(
-        RouteOutcome.DEAD_LETTERED, external_id=external_id, reason=reason
-    )
+    return RouteResult(RouteOutcome.DEAD_LETTERED, external_id=external_id, reason=reason)
 
 
 def _record_passive_change(
@@ -214,6 +212,11 @@ def _select_route(
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
+    if (internal_event in {GITHUB_ROUTED_EVENTS[k] for k in ("issue_comment.edited", "pr_comment.edited",
+                                                              "review.submitted", "review.edited")}
+        or (internal_event in {GITHUB_ROUTED_EVENTS[k] for k in ("issue_comment.created", "pr_comment.created")}
+            and content_facts(payload)["author_origin"] == "outside")):
+        return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason="rule_only"), routing_state
     if tag is not None and identity is not None:
         routing_state = registry_models.routing_registrations(*identity)
         thread_id = tag["thread_id"]

@@ -1,8 +1,8 @@
-"""Schema 162 -> 163: retain synced measure-file metadata."""
+"""Schema 163 -> 164: retain synced measure-file metadata."""
 import sqlite3
 
 
-def migrate_162_to_163(conn: sqlite3.Connection) -> None:
+def migrate_163_to_164(conn: sqlite3.Connection) -> None:
     """Add metadata without changing existing declaration versions."""
     conn.execute("""CREATE TABLE measure_files (
         owner_thread_id TEXT NOT NULL,

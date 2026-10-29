@@ -1,10 +1,11 @@
+import asyncio
 import io
 import json
 import logging
 
 import pytest
 
-from host_access import browser_cdp, browser_dom_write
+from host_access import browser_cdp, browser_clipboard, browser_dom_write
 from host_access.browser_cli import CommandResult
 
 
@@ -182,6 +183,122 @@ async def test_dispatch_mouse_event_sets_the_pressed_button_mask(monkeypatch):
         ("Input.dispatchMouseEvent", {"type": "mousePressed", "x": 10, "y": 20, "button": "left", "buttons": 1, "clickCount": 1}),
         ("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": 10, "y": 20, "button": "left", "buttons": 0, "clickCount": 1}),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('button', 'mask'), [('right', 2), ('middle', 4)])
+async def test_dispatch_mouse_event_uses_the_pressed_button_mask(monkeypatch, button, mask):
+    calls = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            calls.append(params)
+            return {}
+    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
+    await browser_cdp.dispatch_mouse_event('endpoint', {
+        'eventType': 'mousePressed', 'x': 10, 'y': 20, 'button': button, 'clickCount': 1,
+    })
+    assert calls[0]['buttons'] == mask
+    await browser_cdp.dispatch_mouse_event('endpoint', {
+        'eventType': 'mouseMoved', 'x': 15, 'y': 20, 'button': button, 'clickCount': 0,
+    })
+    assert calls[1]['buttons'] == mask
+
+
+@pytest.mark.asyncio
+async def test_clipboard_selection_and_paste_use_native_commands(monkeypatch):
+    calls = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            calls.append((method, params))
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate':
+                value = 0 if '|| 0' in params['expression'] else {'kind': 'copy', 'prevented': False, 'selection': 'selected'}
+                return {'result': {'value': value}}
+            return {}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
+    assert await browser_clipboard.clipboard_selection('endpoint', False) == 'selected'
+    await browser_clipboard.clipboard_paste('endpoint', 'paste text')
+    commands = [params['commands'][0] for method, params in calls if method == 'Input.dispatchKeyEvent' and 'commands' in params]
+    assert commands == ['copy']
+    assert ('Input.insertText', {'text': 'paste text'}) in calls
+    assert not any(method in {'Browser.grantPermissions', 'Browser.resetPermissions'} for method, _ in calls)
+    assert sum(method == 'Emulation.setFocusEmulationEnabled' and params == {'enabled': True} for method, params in calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('method', 'step'), [
+    ('Emulation.setFocusEmulationEnabled', 'focus emulation'),
+    ('Input.insertText', 'insert text'),
+])
+async def test_clipboard_paste_names_timed_out_step(monkeypatch, method, step):
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, called, **_params):
+            if called == method:
+                await asyncio.Event().wait()
+            if called == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if called == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            return {}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    monkeypatch.setattr(browser_clipboard, 'CDP_TIMEOUT', 0.01)
+    with pytest.raises(browser_clipboard.BrowserSessionError, match=f"Clipboard {step} didn't finish"):
+        await browser_clipboard.clipboard_paste('endpoint', 'text')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('platform', 'modifier'), [('darwin', 4), ('linux', 2)])
+async def test_clipboard_commands_use_native_platform_modifier(monkeypatch, platform, modifier):
+    calls = []
+    class Client:
+        async def call(self, method, **params): calls.append((method, params))
+    monkeypatch.setattr(browser_clipboard.sys, 'platform', platform)
+    await browser_clipboard._command(Client(), 'cut')
+    assert [params['type'] for _, params in calls] == ['keyDown', 'keyUp']
+    assert all(params['modifiers'] == modifier for _, params in calls)
+    assert calls[0][1]['commands'] == ['cut']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('custom', ['', 'page text'])
+async def test_page_handled_cut_uses_custom_data_or_fails(monkeypatch, custom):
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate':
+                value = 0 if '|| 0' in params['expression'] else {'kind': 'cut', 'prevented': True, 'data': custom, 'selection': 'wrong'}
+                return {'result': {'value': value}}
+            return {}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
+    if custom:
+        assert await browser_clipboard.clipboard_selection('endpoint', True) == custom
+    else:
+        with pytest.raises(browser_clipboard.PageHandledError):
+            await browser_clipboard.clipboard_selection('endpoint', True)
+
+
+@pytest.mark.asyncio
+async def test_clipboard_missing_capture_returns_empty(monkeypatch):
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate': return {'result': {'value': 0 if '|| 0' in params['expression'] else None}}
+            return {}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
+    assert await browser_clipboard.clipboard_selection('endpoint', False) == ''
+    with pytest.raises(browser_clipboard.BrowserSessionError, match="couldn't be cut"):
+        await browser_clipboard.clipboard_selection('endpoint', True)
 
 
 @pytest.mark.asyncio

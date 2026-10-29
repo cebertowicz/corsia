@@ -95,6 +95,8 @@ export function sendMessage(
 
 	const metaObj: Record<string, any> = { input_id: inputId };
 	if (attachments && attachments.length > 0) metaObj.attachments = attachments;
+	// The sending socket gets no message_added for its own input, so the echo shows what was sent.
+	if (comments.length) metaObj.reply_context = { comments };
 	if (extraMeta) {
 		const { delivery_intent: _ignoredDeliveryIntent, ...safeExtraMeta } = extraMeta;
 		Object.assign(metaObj, safeExtraMeta);
