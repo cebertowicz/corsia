@@ -19,7 +19,7 @@ import subprocess
 
 from packaging.version import InvalidVersion, Version
 
-from llm.managed_omlx_binary import managed_omlx_executable
+from llm.managed_omlx_binary import managed_omlx_executable, omlx_command
 from llm.providers.omlx_endpoints import OmlxAdminError, admin_request, setup_admin_key
 
 SKIP_AUTH_SETTING = "skip_api_key_verification"
@@ -40,7 +40,7 @@ def _omlx_version(executable: str | None) -> str | None:
         return None
     try:
         result = subprocess.run(
-            [executable, "--version"], capture_output=True, text=True, timeout=15, check=False,
+            [*omlx_command(executable), "--version"], capture_output=True, text=True, timeout=15, check=False,
         )
         version = result.stdout.strip()
         if result.returncode != 0:

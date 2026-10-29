@@ -9,7 +9,10 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
 - Installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
+- Source installs use the same local model server release as the app and show the cause if installation fails.
+- The update screen shows how many agents have paused while it waits for them.
 - The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
+- On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
 - Sign an added Claude Code or Codex account in again from its row in Provider settings.

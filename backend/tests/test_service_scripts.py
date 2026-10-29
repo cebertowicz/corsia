@@ -954,7 +954,7 @@ BACKEND_PORT=9999
 CORSIA_TOKEN=test-token
 FORCE=false
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 SERVICE_PLIST="${LAUNCHCTL_TRACE}.plist"
 printf 'old plist\\n' > "$SERVICE_PLIST"
 service_installed() { return 0; }
@@ -997,7 +997,7 @@ service_restart
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
         "install-mode=restart",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -1987,7 +1987,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -2008,7 +2008,7 @@ service_restart activate_release
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "activate release",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -2197,7 +2197,7 @@ service_restart
     assert trace.read_text().splitlines() == [
         "install",
         "drain",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -2341,7 +2341,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2405,7 +2405,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -2435,9 +2435,9 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -2468,7 +2468,7 @@ service_restart
     assert Path(f"{trace}.plist").read_text() == "old plist\n"
     assert not list(tmp_path.glob("launchctl.log.plist.previous.*"))
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2502,7 +2502,7 @@ service_restart activate_release
     assert "prior service definition was restored" in result.stderr
     assert "update did not complete" in result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "activate release",
         f"bootstrap gui/501 {trace}.plist",
         f"bootstrap gui/501 {trace}.plist",
@@ -2533,7 +2533,7 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2582,7 +2582,7 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -2610,7 +2610,7 @@ ENV_FILE=/tmp/corsia-no-such-env
 CORSIA_TOKEN=test-token
 FORCE=false
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 require_owned_service_definition() { return 0; }
 service_installed() { return 0; }
 service_install() { return 0; }
@@ -2650,7 +2650,7 @@ launchctl() {
     assert result.returncode != 0
     assert url_trace.exists()
     assert trace.read_text().splitlines() == [
-        "launchctl bootout --wait gui/501/com.corsia.prod",
+        "launchctl bootout gui/501/com.corsia.prod",
         "cancel http://127.0.0.1:9999/api/system/drain?token=test-token",
     ]
 

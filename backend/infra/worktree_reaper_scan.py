@@ -65,7 +65,7 @@ def _mtime(path: Path) -> float | None:
         return None
 
 
-def idle_since(repo: Path, worktree: Path, admin: Path) -> float:
+def idle_since(worktree: Path, admin: Path) -> float:
     """Return the newest activity mtime for one worktree, without Git."""
     paths = [*(admin / name for name in _ADMIN_FILES), worktree]
     times = [value for value in map(_mtime, paths) if value is not None]
@@ -110,7 +110,7 @@ def scan_repo(repo: Path) -> tuple[list[Candidate], list[Orphan], list[WorktreeE
         admin = admin_dir(path)
         if repo_worktree_root(path, repo) == path and admin is not None:
             # The idle clock is read before the first Git call below.
-            verified.append((entry.name, path, admin, idle_since(repo, path, admin)))
+            verified.append((entry.name, path, admin, idle_since(path, admin)))
         else:
             unverified.append(entry)
     registrations = list_worktrees(repo)

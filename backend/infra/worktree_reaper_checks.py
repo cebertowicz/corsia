@@ -8,6 +8,7 @@ a pass.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 import os
 from pathlib import Path
 
@@ -45,9 +46,12 @@ class CheckContext:
     _open_prs: set[str] | None = field(default=None, init=False)
     _prs_loaded: bool = field(default=False, init=False)
 
-    def open_pr_branches(self) -> set[str] | None:
-        """Open-PR head branches, read once per pass; None when unknown."""
-        if not self._prs_loaded:
+    def open_pr_branches(self, *, fresh: bool = False) -> set[str] | None:
+        """Open-PR head branches, read once per pass; None when unknown.
+
+        ``fresh`` re-reads them, as the pre-removal recheck must.
+        """
+        if fresh or not self._prs_loaded:
             self._prs_loaded = True
             self._open_prs = open_pr_branches(self.repo)
         return self._open_prs
@@ -114,15 +118,39 @@ def _entry_reason(entry: WorktreeEntry | None) -> str | None:
     return None
 
 
-def candidate_skip_reason(
+class RemovalVerdict(Enum):
+    SALVAGE = "salvage"
+
+
+def _status_verdict(
+    ctx: CheckContext, entry: WorktreeEntry | None, path: Path, status: str | None,
+    idle: float, threshold: float,
+) -> str | RemovalVerdict | None:
+    if status is None or status == "status_error":
+        return status
+    if ctx.now - idle < threshold:
+        return status
+    # Git's admin files move only on Git commands; an editor writes the tree.
+    # Uncommitted work leaves only when nothing anywhere in it changed either.
+    newest = newest_tree_mtime(path)
+    if newest is None or ctx.now - newest < threshold:
+        return status
+    prs = ctx.open_pr_branches()
+    if prs is None:
+        return "pr_state_unknown"
+    if entry and (entry.branch or "").removeprefix("refs/heads/") in prs:
+        return "open_pr"
+    return RemovalVerdict.SALVAGE
+
+
+def candidate_verdict(
     ctx: CheckContext, candidate: Candidate, threshold_seconds: float,
     *, merged: bool = False, short_threshold_seconds: float | None = None,
-) -> str | None:
-    """Run every check in order; return the first skip reason or None.
+) -> str | RemovalVerdict | None:
+    """Return a skip reason, salvage verdict, or clean removal verdict.
 
-    A ``merged`` worktree's commits are already in its merged PR, so it skips
-    the idle clock, scratch files and the owner's running turn: only a Git
-    lock, uncommitted tracked edits or a live process inside it keep it.
+    Merged clean worktrees retain their immediate removal path. Tracked edits
+    require the long idle clock and salvage even for merged worktrees.
     """
     reason = _entry_reason(candidate.entry)
     if reason:
@@ -133,11 +161,15 @@ def candidate_skip_reason(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
         return "recent"
-    return (
-        _status_reason(candidate.path, merged)
-        or ctx.probe.skip_reason(candidate.path)
-        or (None if merged else ctx.thread_skip_reason(candidate.owner_thread))
+    verdict = _status_verdict(
+        ctx, candidate.entry, candidate.path, _status_reason(candidate.path, merged),
+        candidate.idle_since, threshold_seconds,
     )
+    if isinstance(verdict, str):
+        return verdict
+    return (ctx.probe.skip_reason(candidate.path)
+            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread))
+            or verdict)
 
 
 def recheck_before_removal(
@@ -146,13 +178,15 @@ def recheck_before_removal(
     threshold_seconds: float,
     expected_head: str | None = None,
     *, merged: bool = False, short_threshold_seconds: float | None = None,
-) -> str | None:
+) -> str | RemovalVerdict | None:
     """Repeat every check against live state just before acting.
 
     A pass can run for minutes after the first check, so nothing cached is
     trusted here: registration, locks, the idle clock, the worktree status,
     live processes and running turns are all read again, under the same
-    ``merged`` rules as the first check. ``expected_head`` (the merged PR's
+    ``merged`` rules as the first check. The open-PR set is the exception:
+    the caller re-reads it just before taking the repo lock, so a slow ``gh``
+    call never holds that lock. ``expected_head`` (the merged PR's
     head, or the head recorded at merge time) must still contain the
     worktree's current HEAD.
     """
@@ -168,10 +202,8 @@ def recheck_before_removal(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
-    if not merged and ctx.is_recent(
-        entry, idle_since(ctx.repo, candidate.path, candidate.admin),
-        threshold_seconds, short_threshold_seconds,
-    ):
+    idle = idle_since(candidate.path, candidate.admin)
+    if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
         return "recent"
     if expected_head is not None:
         head = entry.head if entry else None
@@ -180,13 +212,16 @@ def recheck_before_removal(
                 return "ahead_of_pr"
         except ReaperGitError:
             return "status_error"
-    status = _status_reason(candidate.path, merged)
-    if status:
-        return status
-    ctx.probe.refresh()
-    return ctx.probe.skip_reason(candidate.path) or (
-        None if merged else ctx.thread_skip_reason(candidate.owner_thread, fresh=True)
+    verdict = _status_verdict(
+        ctx, entry, candidate.path, _status_reason(candidate.path, merged), idle,
+        threshold_seconds,
     )
+    if isinstance(verdict, str):
+        return verdict
+    ctx.probe.refresh()
+    return (ctx.probe.skip_reason(candidate.path)
+            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread, fresh=True))
+            or verdict)
 
 
 def orphan_skip_reason(

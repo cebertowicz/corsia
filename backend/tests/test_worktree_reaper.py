@@ -142,6 +142,12 @@ def _age_tree(root: Path, seconds: float) -> None:
     os.utime(root, (stamp, stamp))
 
 
+def _age_all(repo: Path, worktree: Path, seconds: float) -> None:
+    """Age the files in the tree as well as Git's own, as a truly idle worktree is."""
+    _age_tree(worktree, seconds)
+    _age(repo, worktree, seconds)
+
+
 def _run(repo: Path, probe: ProcessProbe | None = None, **kwargs) -> RepoReport:
     return reap(_policy(repo), mode="idle", probe=probe or FakeProbe(), **kwargs)
 
@@ -393,13 +399,13 @@ def test_the_reapers_own_probes_do_not_move_the_idle_clock(repo, monkeypatch):
     wt = _add(repo, f"{UUID}-idle")
     (wt / "README").touch()  # stale index stat info invites a refresh
     _age(repo, wt, 8 * DAY)
-    before = worktree_reaper_scan.idle_since(repo, wt, _admin(wt))
+    before = worktree_reaper_scan.idle_since(wt, _admin(wt))
     monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: {UUID})
 
     report = _run(repo)
 
     assert _reasons(report) == {f"{UUID}-idle": "thread_active"}  # status ran
-    assert worktree_reaper_scan.idle_since(repo, wt, _admin(wt)) == before
+    assert worktree_reaper_scan.idle_since(wt, _admin(wt)) == before
 
 
 def test_gc_rewriting_every_reflog_does_not_restart_the_idle_clock(repo):
@@ -409,7 +415,7 @@ def test_gc_rewriting_every_reflog_does_not_restart_the_idle_clock(repo):
     _git(repo, "reflog", "expire", "--all", "--expire=never")  # what `git gc` runs
 
     assert time.time() - (_admin(wt) / "logs" / "HEAD").stat().st_mtime < DAY  # rewritten
-    assert time.time() - worktree_reaper_scan.idle_since(repo, wt, _admin(wt)) > 7 * DAY
+    assert time.time() - worktree_reaper_scan.idle_since(wt, _admin(wt)) > 7 * DAY
     report = _run(repo)
     assert report.removed == 1 and report.skips == []
     assert not wt.exists()
@@ -714,7 +720,7 @@ def test_reap_all_idle_covers_only_enforceable_policies(repo, monkeypatch, isola
 def test_run_metric_payload_shape(repo, isolated):
     wt = _add(repo, f"{UUID}-dirty")
     (wt / "README").write_text("changed\n")
-    _age(repo, wt, 8 * DAY)
+    _age_all(repo, wt, 8 * DAY)
 
     emit_report(_run(repo))
 
@@ -722,10 +728,10 @@ def test_run_metric_payload_shape(repo, isolated):
     assert event["event"] == "worktree_reaper.run_completed"
     assert event["repo"] == str(repo) and event["trigger"] == "idle"
     assert (event["scanned"], event["removed"], event["remaining_count"]) == (1, 0, 1)
-    assert event["skip_counts"] == {"dirty": 1}
+    assert event["skip_counts"] == {"pr_state_unknown": 1}
     assert event["oldest_skipped_idle_days"] >= 7.9
     assert event["skipped"] == [{
-        "name": f"{UUID}-dirty", "owner_thread": UUID, "reason": "dirty",
+        "name": f"{UUID}-dirty", "owner_thread": UUID, "reason": "pr_state_unknown",
         "idle_days": event["oldest_skipped_idle_days"],
     }]
 
@@ -909,3 +915,210 @@ async def test_nightly_pass_failure_still_emits_the_metric(run_db, monkeypatch, 
     with sqlite3.connect(run_db) as db:
         status = db.execute("SELECT status FROM fact_extraction_runs").fetchone()[0]
     assert status == "ok"
+
+
+def test_salvage_copies_edits_and_non_cache_files(repo, monkeypatch, isolated):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    _exclude(repo, ".qa/\nnode_modules/\nresults_cache/\n")
+    _git(repo, "config", "diff.external", "false")
+    _git(repo, "config", "color.ui", "always")
+    wt = _add(repo, "salvage")
+    (wt / "README").write_text("edited\n")
+    (wt / "scratch").mkdir()
+    (wt / "scratch" / "notes.md").write_text("notes\n")
+    (wt / "scratch" / "odd\nname").write_text("odd\n")
+    (wt / ".qa").mkdir()
+    (wt / ".qa" / "report.json").write_text("{}")
+    # Untracked work under cache-like names is still work.
+    for path in ("build/gen.py", "llm/prompt_cache/new.py", "target/notes.md"):
+        (wt / path).parent.mkdir(parents=True, exist_ok=True)
+        (wt / path).write_text("work\n")
+    (wt / "results_cache").mkdir()
+    (wt / "results_cache" / "data.csv").write_text("data\n")
+    (wt / "node_modules").mkdir()
+    (wt / "node_modules" / "x.js").write_text("cache")
+    (wt / ".review-venv.x" / "lib").mkdir(parents=True)
+    (wt / ".review-venv.x" / "pyvenv.cfg").write_text("home = /usr\n")
+    (wt / ".review-venv.x" / "lib" / "site.py").write_text("cache")
+    (wt / "scratch" / "tool-cache").mkdir()
+    (wt / "scratch" / "tool-cache" / "CACHEDIR.TAG").write_text("Signature\n")
+    (wt / "scratch" / "tool-cache" / "blob").write_text("cache")
+    (wt / "scratch" / "link").symlink_to("notes.md")
+    _age_all(repo, wt, 8 * DAY)
+    head = _git(wt, "rev-parse", "HEAD")
+
+    report = _run(repo)
+    saved = next((repo.parent / "repo-salvage").glob("*/salvage"))
+    assert report.removed == len(report.salvaged) == 1 and not wt.exists()
+    assert report.salvaged[0].destination == str(saved)
+    patch = (saved / "changes.patch").read_text()
+    assert patch.startswith("diff --git") and "+edited" in patch and "\x1b[" not in patch
+    assert (saved / "files/scratch/notes.md").read_text() == "notes\n"
+    assert (saved / "files/scratch" / "odd\nname").read_text() == "odd\n"
+    assert (saved / "files/.qa/report.json").read_text() == "{}"
+    for path in ("build/gen.py", "llm/prompt_cache/new.py", "target/notes.md"):
+        assert (saved / "files" / path).read_text() == "work\n"
+    assert (saved / "files/results_cache/data.csv").read_text() == "data\n"
+    assert (saved / "files/scratch/link").is_symlink()
+    assert not (saved / "files/node_modules").exists()
+    assert not (saved / "files/.review-venv.x").exists()
+    assert not (saved / "files/scratch/tool-cache").exists()
+    _git(repo, "config", "--unset", "color.ui")
+    assert _git(repo, "branch", "--list", "b-salvage") == "b-salvage"
+    # The base commit stays reachable even if its branch is later deleted.
+    pin = f"refs/corsia-salvage/{saved.parent.name}/salvage"
+    assert _git(repo, "rev-parse", pin) == head
+    meta = (saved / "meta.txt").read_text()
+    assert f"worktree: {wt}\n" in meta and f"pinned: {pin}\n" in meta
+    emit_report(report)
+    assert isolated[-1]["salvaged"] == 1
+    assert isolated[-1]["salvaged_to"] == [
+        {"name": "salvage", "owner_thread": None, "destination": str(saved)},
+    ]
+
+
+@pytest.mark.parametrize("prs,reason", [({"b-blocked"}, "open_pr"), (None, "pr_state_unknown")])
+def test_salvage_requires_known_no_open_pr(repo, monkeypatch, prs, reason):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: prs)
+    wt = _add(repo, "blocked")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+    assert _reasons(_run(repo)) == {"blocked": reason} and wt.is_dir()
+
+
+@pytest.mark.parametrize("condition,reason", [
+    ("locked", "locked"), ("git_lock", "git_lock"),
+    ("process", "in_use"), ("turn", "thread_active"),
+])
+def test_salvage_respects_existing_exclusions(repo, monkeypatch, condition, reason):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    name = f"{UUID}-salvage" if condition == "turn" else "salvage"
+    wt = _add(repo, name)
+    (wt / "notes").write_text("keep")
+    if condition == "locked":
+        _git(repo, "worktree", "lock", str(wt))
+    elif condition == "git_lock":
+        (_admin(wt) / "index.lock").write_text("")
+    elif condition == "turn":
+        monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: {UUID})
+    _age_all(repo, wt, 8 * DAY)
+    probe = FakeProbe({name: "in_use"} if condition == "process" else {})
+    assert _reasons(_run(repo, probe)) == {name: reason} and wt.is_dir()
+
+
+def test_failed_copy_keeps_worktree_and_removes_partial_salvage(repo, monkeypatch):
+    from infra import worktree_reaper_salvage
+
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "failed")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+
+    def fail(*args, **kwargs):
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(worktree_reaper_salvage.shutil, "copy2", fail)
+    report = _run(repo)
+    assert _reasons(report) == {"failed": "salvage_failed"} and wt.is_dir()
+    assert (wt / "notes").read_text() == "keep" and not report.salvaged
+    assert not list((repo.parent / "repo-salvage").glob("*/failed"))
+    # Moved back out of the quarantine, still registered where it was.
+    assert str(wt) in _git(repo, "worktree", "list", "--porcelain")
+    assert _quarantine(repo) == []
+
+
+def test_salvage_reads_the_quarantined_tree(repo, monkeypatch):
+    from infra import worktree_reaper_salvage
+
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "moved")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+    original = worktree_reaper_salvage.salvage_worktree
+    read_from: list[Path] = []
+
+    def spy(repo_path, worktree, name, now, origin):
+        read_from.append(worktree)
+        # A late write to the old path no longer lands in the tree being copied.
+        assert not wt.exists() and worktree.is_dir()
+        return original(repo_path, worktree, name, now, origin)
+
+    monkeypatch.setattr(worktree_reaper, "salvage_worktree", spy)
+    report = _run(repo)
+    assert report.removed == 1 and read_from and read_from[0] != wt
+
+
+def test_detached_head_commit_stays_reachable_after_salvage(repo, monkeypatch):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "detached")
+    _git(wt, "checkout", "-q", "--detach")
+    (wt / "README").write_text("committed\n")
+    _git(wt, "commit", "-qam", "local only")
+    head = _git(wt, "rev-parse", "HEAD")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+    report = _run(repo)
+    assert report.removed == len(report.salvaged) == 1 and not wt.exists()
+    saved = Path(report.salvaged[0].destination)
+    _git(repo, "gc", "-q", "--prune=now")
+    pin = f"refs/corsia-salvage/{saved.parent.name}/detached"
+    assert _git(repo, "rev-parse", pin) == head
+    assert _git(repo, "cat-file", "-t", head) == "commit"
+
+
+def test_salvage_is_reported_when_removal_then_fails(repo, monkeypatch):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "stuck")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+
+    def salvage_then_fail(repo_path, worktree, name, *, force=False, salvage=None):
+        assert salvage is not None
+        salvage(worktree)
+        raise OSError("remove failed")
+
+    monkeypatch.setattr(worktree_reaper, "remove_worktree", salvage_then_fail)
+    report = _run(repo)
+    assert _reasons(report) == {"stuck": "remove_error"}
+    assert [item.name for item in report.salvaged] == ["stuck"]
+
+
+def test_recent_edit_inside_the_tree_blocks_salvage(repo, monkeypatch):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "editing")
+    (wt / "scratch").mkdir()
+    (wt / "scratch" / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+    # An editor saving a file touches neither Git's admin files nor the root.
+    os.utime(wt / "scratch" / "notes")
+    assert _reasons(_run(repo)) == {"editing": "untracked"} and wt.is_dir()
+
+
+def test_special_files_are_listed_not_copied(repo, monkeypatch):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    _exclude(repo, "data/\n")
+    wt = _add(repo, "fifo")
+    # Git lists an ignored directory whole; the walk under it meets the FIFO.
+    (wt / "data").mkdir()
+    (wt / "data" / "notes").write_text("keep")
+    os.mkfifo(wt / "data" / "pipe")
+    _age_all(repo, wt, 8 * DAY)
+    report = _run(repo)
+    saved = next((repo.parent / "repo-salvage").glob("*/fifo"))
+    assert report.removed == 1 and (saved / "files/data/notes").read_text() == "keep"
+    assert not (saved / "files/data/pipe").exists()
+    assert "not copied (special file): data/pipe\n" in (saved / "meta.txt").read_text()
+
+
+@pytest.mark.parametrize("days,removed", [(3, False), (8, True)])
+def test_merged_dirty_requires_long_idle_and_salvage(repo, monkeypatch, days, removed):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "merged")
+    (wt / "README").write_text("edited\n")
+    _age_all(repo, wt, days * DAY)
+    report = reap(_policy(repo), mode="pr_terminal", probe=FakeProbe())
+    assert bool(report.removed) is removed
+    if removed:
+        assert len(report.salvaged) == 1 and not wt.exists()
+    else:
+        assert _reasons(report) == {"merged": "dirty"} and wt.is_dir()
