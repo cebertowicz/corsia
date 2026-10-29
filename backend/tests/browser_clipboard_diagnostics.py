@@ -18,6 +18,8 @@ class _ClipboardTrace(logging.Handler):
         super().__init__()
         self.events = []
         self.endpoints = set()
+        self.pointer_endpoints = set()
+        self.pointer_calls = []
         self.original_call = clipboard._call
         self.original_selection = clipboard.clipboard_selection
         self.original_paste = clipboard.clipboard_paste
@@ -58,6 +60,15 @@ class _ClipboardTrace(logging.Handler):
         return await self.action("paste", self.original_paste, endpoint, text)
 
     async def report(self):
+        pointers = []
+        for endpoint in sorted(self.pointer_endpoints):
+            try:
+                async with asyncio.timeout(1):
+                    async with clipboard.CdpClient(endpoint) as cdp:
+                        pointers.append({'endpoint': endpoint, 'state': await cdp.call(
+                            'Runtime.evaluate', expression=_POINTER_REPORT, awaitPromise=True, returnByValue=True)})
+            except Exception as exc:
+                pointers.append({'endpoint': endpoint, 'diagnostic_error': repr(exc)})
         pages = []
         for endpoint in sorted(self.endpoints):
             try:
@@ -65,8 +76,55 @@ class _ClipboardTrace(logging.Handler):
             except Exception as exc:
                 pages.append({"endpoint": endpoint, "diagnostic_error": repr(exc)})
         print("Native clipboard failure diagnostics:", json.dumps({
-            "trace": self.events, "after_failure": pages,
+            "trace": self.events, "pointer": pointers, "pointer_calls": self.pointer_calls, "after_failure": pages,
         }, indent=2))
+
+
+_POINTER_INSTALL = """(() => {
+  const points = POINTS;
+  let state = window.__corsiaPointerDiagnostic;
+  if (!state) {
+    state = window.__corsiaPointerDiagnostic = {drags: [], current: null};
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+                        'mousedown', 'mousemove', 'mouseup', 'click']) {
+      document.addEventListener(type, event => {
+        const drag = state.current;
+        if (drag && drag.events.length < 100)
+          drag.events.push({type: event.type, clientX: event.clientX, clientY: event.clientY});
+      }, {capture: true, passive: true});
+    }
+  }
+  const hit = point => {
+    const element = document.elementFromPoint(point[0], point[1]);
+    return element ? {tag: element.tagName, id: element.id || null} : null;
+  };
+  const drag = {start: points.start, end: points.end,
+    startHit: hit(points.start), endHit: hit(points.end),
+    innerWidth, innerHeight, visibilityState: document.visibilityState,
+    hasFocus: document.hasFocus(), events: [], rafWithin200ms: null};
+  state.drags.push(drag);
+  if (state.drags.length > 20) state.drags.shift();
+  state.current = drag;
+})()"""
+
+_POINTER_RAF = """(() => {
+  const drag = window.__corsiaPointerDiagnostic?.current;
+  if (!drag) return;
+  const started = performance.now();
+  const timer = setTimeout(() => { if (drag.rafWithin200ms === null) drag.rafWithin200ms = false; }, 200);
+  requestAnimationFrame(() => {
+    if (drag.rafWithin200ms === null) {
+      drag.rafWithin200ms = performance.now() - started <= 200;
+      clearTimeout(timer);
+    }
+  });
+})()"""
+
+_POINTER_REPORT = """new Promise(resolve => {
+  const state = window.__corsiaPointerDiagnostic;
+  if (!state || !state.drags.some(drag => drag.rafWithin200ms === null)) { resolve(state || null); return; }
+  setTimeout(() => resolve(state), 210);
+})"""
 
 
 _FOCUS_STATE = """(() => {
@@ -236,6 +294,31 @@ async def _page_state(endpoint):
         return {"endpoint": endpoint, "url": url, "isolated": isolated, "page": page}
 
 
+async def _install_pointer(trace, native_owner, thread, start, end):
+    try:
+        async with asyncio.timeout(1):
+            endpoint = await native_owner.page_endpoint(thread)
+            trace.pointer_endpoints.add(endpoint)
+            async with clipboard.CdpClient(endpoint) as cdp:
+                expression = _POINTER_INSTALL.replace('POINTS', json.dumps({'start': start, 'end': end}))
+                await cdp.call('Runtime.evaluate', expression=expression, returnByValue=True)
+            return endpoint
+    except Exception as exc:
+        trace.events.append({'pointer_diagnostic_error': repr(exc)})
+        return None
+
+
+async def _start_pointer_raf(trace, endpoint):
+    if not endpoint:
+        return
+    try:
+        async with asyncio.timeout(1):
+            async with clipboard.CdpClient(endpoint) as cdp:
+                await cdp.call('Runtime.evaluate', expression=_POINTER_RAF, returnByValue=True)
+    except Exception as exc:
+        trace.events.append({'pointer_raf_error': repr(exc)})
+
+
 @pytest.fixture
 async def native_clipboard_diagnostics(native_owner, monkeypatch, request):
     """Expose hidden helper errors only when a synthetic clipboard test fails."""
@@ -249,6 +332,31 @@ async def native_clipboard_diagnostics(native_owner, monkeypatch, request):
         return await original_run(*args, **kwargs)
 
     monkeypatch.setattr(native_owner, 'run', run_with_launch_time)
+    original_drag = request.module._drag_selection
+    original_mouse = request.module.browser_pane.mouse_event
+
+    async def mouse_with_diagnostics(thread, event, connection):
+        entry = {'event': dict(event)}
+        trace.pointer_calls.append(entry)
+        if len(trace.pointer_calls) > 60:
+            trace.pointer_calls.pop(0)
+        try:
+            result = await original_mouse(thread, event, connection)
+            entry['result'] = repr(result)
+            return result
+        except Exception as exc:
+            entry['error'] = repr(exc)
+            raise
+
+    async def drag_with_diagnostics(thread, connection, start, end):
+        endpoint = await _install_pointer(trace, native_owner, thread, start, end)
+        try:
+            return await original_drag(thread, connection, start, end)
+        finally:
+            await _start_pointer_raf(trace, endpoint)
+
+    monkeypatch.setattr(request.module.browser_pane, 'mouse_event', mouse_with_diagnostics)
+    monkeypatch.setattr(request.module, '_drag_selection', drag_with_diagnostics)
     failed_before = request.session.testsfailed
     logger = logging.getLogger("host_access.browser_cdp")
     previous_level = logger.level

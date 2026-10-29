@@ -1,9 +1,63 @@
 """Unit coverage for the native test's best-effort clipboard trace."""
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from tests import browser_clipboard_diagnostics as diagnostics
+
+
+@pytest.mark.asyncio
+async def test_failed_first_drag_reports_pointer_state_before_any_clipboard_call(monkeypatch, capsys):
+    calls = []
+
+    class Owner:
+        async def run(self, *args, **kwargs):
+            pass
+
+        async def page_endpoint(self, thread):
+            return 'owned-page'
+
+    class Client:
+        def __init__(self, endpoint):
+            self.endpoint = endpoint
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def call(self, method, **params):
+            calls.append(params['expression'])
+            return {'result': {'value': {'drags': [{'events': []}]}}}
+
+    async def mouse(thread, event, connection):
+        calls.append('mouse')
+        return None
+
+    async def drag(thread, connection, start, end):
+        await module.browser_pane.mouse_event(thread, {'eventType': 'mousePressed'}, connection)
+        raise AssertionError('selection failed')
+
+    monkeypatch.setattr(diagnostics.clipboard, 'CdpClient', Client)
+    module = SimpleNamespace(_drag_selection=drag, browser_pane=SimpleNamespace(mouse_event=mouse))
+    request = SimpleNamespace(module=module, session=SimpleNamespace(testsfailed=0))
+    fixture = diagnostics.native_clipboard_diagnostics.__wrapped__(Owner(), monkeypatch, request)
+    await fixture.__anext__()
+    with pytest.raises(AssertionError):
+        await module._drag_selection('thread', 'pane', [1, 2], [3, 2])
+    request.session.testsfailed = 1
+    with pytest.raises(StopAsyncIteration):
+        await fixture.__anext__()
+    assert '"start": [1, 2], "end": [3, 2]' in calls[0]
+    assert calls[1] == 'mouse'
+    assert calls[2] == diagnostics._POINTER_RAF
+    assert calls[3] == diagnostics._POINTER_REPORT
+    output = capsys.readouterr().out
+    assert '"pointer"' in output
+    assert '"eventType": "mousePressed"' in output
+    assert '"result": "None"' in output
 
 
 @pytest.mark.asyncio
