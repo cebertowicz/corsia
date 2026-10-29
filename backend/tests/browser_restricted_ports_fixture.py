@@ -113,13 +113,62 @@ async def _close_popup(browser, target):
     pytest.fail('closed popup remained in Chrome target list')
 
 
+async def _loaded_context(cdp):
+    """Wait for the top document's load and default world, including new popups."""
+    await cdp.call('Page.enable')
+    frame = (await cdp.call('Page.getFrameTree'))['frameTree']['frame']
+    # Runtime.enable replays existing contexts; lifecycle enable replays current
+    # load state. Read both events and responses ourselves: call() discards events.
+    pending = {await cdp.send('Runtime.enable'),
+               await cdp.send('Page.setLifecycleEventsEnabled', enabled=True)}
+    context = None
+    loaded = None
+    while True:
+        event = json.loads(await cdp.socket.recv())
+        if event.get('id') in pending:
+            assert 'error' not in event, event
+            pending.remove(event['id'])
+        method, params = event.get('method'), event.get('params', {})
+        if method == 'Page.frameNavigated' and not params['frame'].get('parentId'):
+            frame = params['frame']
+            loaded = None
+        elif method == 'Runtime.executionContextsCleared':
+            context = None
+            loaded = None
+        elif method == 'Runtime.executionContextDestroyed' and context == params.get('executionContextId'):
+            context = None
+            loaded = None
+        elif method == 'Runtime.executionContextCreated':
+            world = params['context']
+            aux = world.get('auxData', {})
+            if aux.get('isDefault') and aux.get('frameId') == frame['id']:
+                context = world['id']
+        elif method == 'Page.lifecycleEvent' and params.get('frameId') == frame['id'] and params.get('name') == 'load':
+            loaded = params.get('loaderId')
+        # A refused popup can commit Chrome's error document without a
+        # frameNavigated event. Its load event carries the new loader instead.
+        initial_blank = (frame.get('url') in {'', 'about:blank'}
+                         and loaded == frame.get('loaderId'))
+        if not pending and context is not None and loaded is not None and not initial_blank:
+            return context
+
+
 async def _title(cdp):
-    for _ in range(60):
-        value = await _evaluate(cdp, '({title:document.title,ready:document.readyState,url:document.URL})')
-        if value['ready'] == 'complete' and value['url'] != 'about:blank':
+    try:
+        async with asyncio.timeout(3):
+            context = await _loaded_context(cdp)
+            result = await cdp.call('Runtime.evaluate', contextId=context,
+                expression='({title:document.title,ready:document.readyState,url:document.URL})',
+                returnByValue=True)
+            assert 'exceptionDetails' not in result, result.get('exceptionDetails')
+            value = result['result'].get('value')
+            assert value['ready'] == 'complete' and value['url'] != 'about:blank', value
             return value['title']
-        await asyncio.sleep(.05)
-    pytest.fail('fixture document did not finish loading')
+    except TimeoutError:
+        pytest.fail('fixture document did not finish loading')
+    finally:
+        await cdp.call('Runtime.disable')
+        await cdp.call('Page.setLifecycleEventsEnabled', enabled=False)
 
 
 async def _matrix(owner, cdp, phase, allowed, restricted):
