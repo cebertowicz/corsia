@@ -47,9 +47,9 @@ describe('Setup local model below the setup floor', () => {
 	});
 
 	it('hides unknown immediate failure details, shows the reference and offers retry', async () => {
-		await openSetup('not_running', { ok: false, message: 'The server could not bind its port.', fix: 'CORSIA couldn’t set up the local model.', ref: 'local-123' });
+		await openSetup('not_running', { ok: false, message: 'The server could not bind its port.', ref: 'local-123' });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t set up the local model.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		const row = host.querySelector('section[aria-label="Local model"]')!;
 		expect(row.textContent).not.toContain('The server could not bind its port.');
 		expect(row.textContent).not.toContain('Free the port, then try again.');
