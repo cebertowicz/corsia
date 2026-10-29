@@ -34,11 +34,8 @@ async def test_recommendations_use_total_room_and_include_loaded_build(monkeypat
     async def server():
         return {'id': 'local'}
 
-    async def disk(_cfg):
-        return []
-
-    async def running(_cfg):
-        return [{'identifier': loaded.model, 'size_bytes': 40 * GIB}]
+    async def status(_cfg):
+        return [{'identifier': loaded.model, 'loaded': True, 'size_bytes': 40 * GIB}]
 
     async def recommendations(_server_id):
         return {'best': [loaded, other, too_large]}
@@ -56,8 +53,7 @@ async def test_recommendations_use_total_room_and_include_loaded_build(monkeypat
     monkeypatch.setattr(route, 'ask_recommendations', recommendations)
     monkeypatch.setattr(route, 'download_dir', model_dir)
     monkeypatch.setattr(route, 'download_disk_space', lambda *_: {'state': 'ready', 'free_bytes': 100 * GIB})
-    monkeypatch.setattr('llm.providers.omlx_lifecycle.list_disk_models', disk)
-    monkeypatch.setattr('llm.providers.omlx_lifecycle.list_loaded', running)
+    monkeypatch.setattr('llm.providers.omlx_lifecycle.read_models_status', status)
     monkeypatch.setattr(route.local_downloads, 'all', lambda: [])
     monkeypatch.setattr(route.local_downloads, 'reconcile', lambda _: None)
 
@@ -65,7 +61,7 @@ async def test_recommendations_use_total_room_and_include_loaded_build(monkeypat
     views = {model['repository']: model for model in result['models']}
     assert views[loaded.repository]['on_disk'] is True
     assert views[other.repository]['on_disk'] is False
-    assert views[other.repository]['fits_now'] is True
-    assert views[too_large.repository]['fits_now'] is False
+    assert too_large.repository not in views
+    assert 'fits_now' not in views[other.repository]
     assert result['memory_in_use_gb'] == 40
     assert result['recommended_repository'] == loaded.repository

@@ -7,9 +7,9 @@ const shots = process.env.ADD_MODEL_BUILD_SHOTS_DIR;
 const server = { id: 'omlx-local', provider: 'omlx', instance_id: 'this-mac', machine_id: 'this-mac', instance_name: 'This Mac', kind: 'managed', port: 11434, status: 'online', source: 'manual', latency_ms: 1, memory_total_mb: 262144, memory_used_mb: 0, gpu_info: null, endpoints: [{ id: 'endpoint', server_id: 'omlx-local', host: '127.0.0.1', kind: 'local', last_ok_at: null, last_latency_ms: 1 }], active_host: '127.0.0.1', api_base: null, mgmt_base: null, corsia_omlx: true };
 const provider = { name: 'omlx', label: 'oMLX', type: 'network', has_key: false, masked_key: null, api_base: null, docs_url: null, models: [], enabled: true };
 const builds = [
-  { name: 'Qwen3.8 Flash Next', repository: 'org/Qwen3.8-Flash-Next-oQ4e-mtp', download_size_bytes: 104e9, download_size_gb: 104, context_window: 262144, quantization_bits: 4, smarts_level: 5, tokens_per_second: 63, fits_now: true, disk: { state: 'ready' }, section: 'best' },
-  { name: 'Qwen3.8 Flash Next', repository: 'org/Qwen3.8-Flash-Next-oQ6e', download_size_bytes: 156e9, download_size_gb: 156, context_window: 262144, quantization_bits: 6, smarts_level: 5, tokens_per_second: 42, fits_now: true, disk: { state: 'ready' }, section: 'best' },
-  { name: 'Gemma', repository: 'org/Gemma-oQ4e', download_size_bytes: 20e9, download_size_gb: 20, context_window: 131072, quantization_bits: 4, smarts_level: 4, tokens_per_second: 90, fits_now: true, disk: { state: 'ready' }, section: 'faster' },
+  { name: 'Qwen3.8 Flash Next', repository: 'org/Qwen3.8-Flash-Next-oQ4e-mtp', download_size_bytes: 104e9, download_size_gb: 104, context_window: 262144, quantization_bits: 4, smarts_level: 5, tokens_per_second: 63, disk: { state: 'ready' }, section: 'best' },
+  { name: 'Qwen3.8 Flash Next', repository: 'org/Qwen3.8-Flash-Next-oQ6e', download_size_bytes: 156e9, download_size_gb: 156, context_window: 262144, quantization_bits: 6, smarts_level: 5, tokens_per_second: 42, disk: { state: 'ready' }, section: 'best' },
+  { name: 'Gemma', repository: 'org/Gemma-oQ4e', download_size_bytes: 20e9, download_size_gb: 20, context_window: 131072, quantization_bits: 4, smarts_level: 4, tokens_per_second: 90, disk: { state: 'ready' }, section: 'faster' },
 ];
 type Scenario = 'loaded' | 'owned' | 'available' | 'downloading' | 'failed' | 'small';
 type Download = { repository: string; name: string; percent: number; failed: boolean; downloaded: boolean } | null;
@@ -17,7 +17,7 @@ async function fixture(page: Page, state: Scenario) {
   const running = state === 'downloading' || state === 'failed';
   let download: Download = running ? { repository: builds[0].repository, name: builds[0].name, percent: 40, failed: state === 'failed', downloaded: false } : null;
   const calls: string[] = [];
-  const models = builds.map((build, i) => ({ ...build, fits_now: state === 'small' ? i === 2 : build.fits_now, on_disk: state === 'owned' ? i < 2 : state === 'loaded' && i === 0 }));
+  const models = builds.map((build, i) => ({ ...build, on_disk: state === 'owned' ? i < 2 : state === 'loaded' && i === 0 })).filter((_, i) => state !== 'small' || i === 2);
   await page.route('**/api/settings/providers?**', route => route.fulfill({ json: { providers: [provider] } }));
   await page.route('**/api/settings/network-servers?**', route => route.fulfill({ json: { servers: [server] } }));
   await page.route('**/api/settings/network-servers/omlx-local/models?**', route => route.fulfill({ json: { loaded: state === 'loaded' ? [{ id: 'Qwen3.8-Flash-Next-oQ4e-mtp', model_id: 'Qwen3.8-Flash-Next-oQ4e-mtp', repo_id: builds[0].repository, display_name: builds[0].name, context_length: 262144, size_bytes: 104 * 1024 ** 3 }] : [], available: [] } }));
@@ -341,6 +341,8 @@ test('Add model failure, retry, delete and complete journey', async ({ page }, i
   await sheet.getByRole('button', { name: /Delete download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
   const confirm = page.locator('.modal').filter({ hasText: 'from this computer?' });
   await expect(confirm).toContainText('Qwen3.8 Flash Next');
+  await expect(confirm).toContainText('104 GB download');
+  if (shots) await page.screenshot({ path: `${shots}/delete-confirmation-1440-light.png`, fullPage: true, animations: 'disabled', scale: 'css' });
   await confirm.getByRole('button', { name: 'Delete download', exact: true }).click();
   await expect(confirm).toHaveCount(0);
   await expect(qwenDownload).toBeEnabled();
@@ -357,6 +359,26 @@ test('Add model failure, retry, delete and complete journey', async ({ page }, i
 
   const deleteRoute = `DELETE /api/providers/local/downloads/${encodeURIComponent(qwen.repository)}`;
   expect(state.calls).toEqual([deleteRoute, 'POST /api/providers/local/downloads', 'POST /api/providers/local/downloads', deleteRoute, 'POST /api/providers/local/downloads']);
+});
+
+test('Add model unknown disk retry', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  await fixture(page, 'available');
+  await page.route('**/api/providers/local/recommendations', route => route.fulfill({ json: {
+    state: 'ready', models: [{ ...builds[0], disk: { state: 'unknown' }, on_disk: false }],
+    recommended_repository: builds[0].repository, downloads: [],
+  } }));
+  await page.route('**/api/providers/local/downloads', route => route.fulfill({ status: 409, json: { detail: "Couldn't check free disk space. Try again." } }));
+  await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
+  const card = page.locator('[data-server-card="omlx-local"]');
+  await card.locator('.pr-expand').click();
+  await card.getByRole('button', { name: 'Add model', exact: true }).click();
+  const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+  const download = sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ });
+  await expect(download).toBeEnabled();
+  if (shots) await page.screenshot({ path: `${shots}/unknown-disk-1440-light.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+  await download.click();
+  await expect(sheet.locator('.model [role="alert"]')).toHaveText("Couldn't check free disk space. Try again.");
 });
 
 test('Add model small Mac list', async ({ page }, info) => {

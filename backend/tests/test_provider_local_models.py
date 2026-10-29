@@ -278,7 +278,7 @@ async def test_recommendations_remove_available_records_missing_from_disk(monkey
     monkeypatch.setattr(provider_local_models, "_server", server)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", missing_from_disk)
 
     result, _sections = await provider_local_models._recommendations()
 
@@ -328,8 +328,7 @@ def _ready_recommender(monkeypatch, tmp_path, sections: dict[str, list[LocalMode
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.1")
     monkeypatch.setattr(provider_local_models, "_server", server)
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", no_disk_models)
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_loaded", no_disk_models)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", no_disk_models)
     monkeypatch.setattr(provider_local_models, "ask_recommendations", recommended)
     monkeypatch.setattr(provider_local_models, "download_dir", model_dir)
     monkeypatch.setattr(
@@ -350,7 +349,7 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     assert result["disk_free_gb"] == 20
     assert result["recommended_repository"] == MODEL.repository
     assert result["models"] == [{
-        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3}, "fits_now": True,
+        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3},
         "on_disk": False, "section": "best",
     }]
 
@@ -374,9 +373,9 @@ async def test_recommended_skips_unavailable_build_but_keeps_owned_build(monkeyp
     monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "insufficient"})
 
     async def owned(_config):
-        return [{"identifier": second.model}]
+        return [{"identifier": second.model, "loaded": False, "size_bytes": 0}]
 
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", owned)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", owned)
     result, _sections = await provider_local_models._recommendations()
     assert result["recommended_repository"] == second.repository
     assert next(row for row in result["models"] if row["repository"] == second.repository)["on_disk"] is True
@@ -389,11 +388,33 @@ async def test_owning_another_build_does_not_change_recommendation(monkeypatch, 
     _ready_recommender(monkeypatch, tmp_path, {"best": [first, second]}, room_gib=22)
 
     async def owned(_config):
-        return [{"identifier": second.model}]
+        return [{"identifier": second.model, "loaded": False, "size_bytes": 0}]
 
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", owned)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", owned)
     result, _sections = await provider_local_models._recommendations()
     assert result["recommended_repository"] == first.repository
+
+
+@pytest.mark.asyncio
+async def test_unknown_disk_remains_eligible(monkeypatch, tmp_path) -> None:
+    _ready_recommender(monkeypatch, tmp_path, {"best": [MODEL]}, room_gib=22)
+    monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "unknown"})
+    result, _ = await provider_local_models._recommendations()
+    assert result["recommended_repository"] == MODEL.repository
+
+
+@pytest.mark.asyncio
+async def test_status_failure_is_visible(monkeypatch, tmp_path) -> None:
+    _ready_recommender(monkeypatch, tmp_path, {"best": [MODEL]}, room_gib=22)
+
+    async def unavailable(_config):
+        return None
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", unavailable)
+    with pytest.raises(HTTPException) as raised:
+        await provider_local_models._recommendations()
+    assert raised.value.status_code == 503
+    assert raised.value.detail == "Couldn’t check which models are on this computer."
 
 
 @pytest.mark.asyncio
@@ -404,7 +425,7 @@ async def test_no_recommended_row_when_nothing_fits(monkeypatch, tmp_path) -> No
 
     result, _sections = await provider_local_models._recommendations()
 
-    assert [m["fits_now"] for m in result["models"]] == [False, False]
+    assert result["models"] == []
     assert result["recommended_repository"] is None
 
 
@@ -550,7 +571,7 @@ async def test_an_in_flight_operation_still_blocks_another_download_and_its_own_
 
 
 @pytest.mark.asyncio
-async def test_models_are_one_list_setup_pick_first_then_fitting_by_quality_then_speed(monkeypatch, tmp_path) -> None:
+async def test_models_are_unique_fitting_rows_in_omlx_order(monkeypatch, tmp_path) -> None:
     def row(name, smarts, speed, gib):
         return LocalModel(f"Jundot/{name}", 1_000_000, 32_768, resident_bytes=gib * 1024**3,
                           smarts_level=smarts, tokens_per_second=speed)
@@ -560,14 +581,14 @@ async def test_models_are_one_list_setup_pick_first_then_fitting_by_quality_then
     plain = row("plain", 2.0, 90.0, 10)
     too_big = row("too-big", 5.0, 30.0, 50)
     # A model oMLX lists in two sections appears once; ``unlock`` rows are not offered.
-    # oMLX's own first fitting row (slow-smart) is setup's pick and leads; the rest sort.
+    # oMLX's own first fitting row leads; the remaining fitting rows retain its order.
     sections = {"best": [too_big, slow_smart], "faster": [plain, fast_smart, slow_smart], "unlock": [row("unlock", 5.0, 9.0, 200)]}
     _ready_recommender(monkeypatch, tmp_path, sections, room_gib=22)
 
     result, _sections = await provider_local_models._recommendations()
 
     assert [m["repository"] for m in result["models"]] == [
-        "Jundot/slow-smart", "Jundot/fast-smart", "Jundot/plain", "Jundot/too-big",
+        "Jundot/slow-smart", "Jundot/plain", "Jundot/fast-smart",
     ]
-    assert [m["fits_now"] for m in result["models"]] == [True, True, True, False]
+    assert all("fits_now" not in model for model in result["models"])
     assert result["recommended_repository"] == "Jundot/slow-smart"

@@ -22,10 +22,9 @@ const recommendations = {
 	recommended_repository: 'google/gemma-4-31b-it',
 	memory_room_gb: 40,
 	models: [
-		{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_bytes: 20 * 1000 ** 3, download_size_gb: 20, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, smarts_level: 4, tokens_per_second: 24, resident_bytes: 22 * 1024 ** 3, fits_now: true, disk: { state: 'ready' } },
-		{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144, quantization_bits: 4, relative_speed: 1.0, smarts_level: 3, tokens_per_second: 60, resident_bytes: 18 * 1024 ** 3, fits_now: true, disk: { state: 'ready' } },
-		{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, smarts_level: 2, tokens_per_second: 90, resident_bytes: 12 * 1024 ** 3, fits_now: true, disk: { state: 'ready' } },
-		{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_bytes: 31 * 1000 ** 3, download_size_gb: 31, context_window: 262144, smarts_level: 4.5, tokens_per_second: 18, resident_bytes: 48 * 1024 ** 3, fits_now: false, disk: { state: 'insufficient', required_bytes: 31 * 1000 ** 3 } },
+		{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_bytes: 20 * 1000 ** 3, download_size_gb: 20, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, smarts_level: 4, tokens_per_second: 24, resident_bytes: 22 * 1024 ** 3, disk: { state: 'ready' } },
+		{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144, quantization_bits: 4, relative_speed: 1.0, smarts_level: 3, tokens_per_second: 60, resident_bytes: 18 * 1024 ** 3, disk: { state: 'ready' } },
+		{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, smarts_level: 2, tokens_per_second: 90, resident_bytes: 12 * 1024 ** 3, disk: { state: 'ready' } },
 	],
 };type RenderState = 'recommendations' | 'downloading' | 'complete' | '24gb';
 

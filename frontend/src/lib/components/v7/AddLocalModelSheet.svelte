@@ -28,7 +28,7 @@
 	let pending = $state<{ repository: string; action: 'start' | 'cancel' | 'delete' } | null>(null);
 	const busy = $derived(Boolean(pending));
 	let rowError = $state<{ repository: string; message: string } | null>(null);
-	let confirmDelete = $state<ProviderModel | null>(null);
+	let confirmDelete = $state<{ model: ProviderModel; size: string } | null>(null);
 	let stop: (() => void) | null = null;
 	const groups = $derived(modelGroups(data?.models ?? [], sort, data?.recommended_repository ?? null));
 	const running = $derived(Boolean(download && !download.failed && !download.finishing));
@@ -96,7 +96,7 @@
 	}
 	function deleteBuild(build: LocalModelRecommendation) {
 		if (!download?.downloaded) { void deleteFailed(build.repository); return; }
-		confirmDelete = { id: build.repository, name: build.name, state: 'default', meta: '', caps: [], sizeBytes: build.download_size_gb * 1000 ** 3 };
+		confirmDelete = { model: { id: build.repository, name: build.name, state: 'default', meta: '', caps: [], sizeBytes: build.download_size_gb * 1000 ** 3 }, size: `${Math.round(build.download_size_gb)} GB` };
 	}
 	function sortKey(event: KeyboardEvent) {
 		if (!['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) return;
@@ -124,9 +124,9 @@
 		{:else}
 			<div class="summary">Picked for this computer{data?.memory_gb == null ? '' : ` · ${data.memory_gb} GB memory`}{data?.memory_in_use_gb ? `, ${data.memory_in_use_gb} GB in use` : ''}{data?.disk_free_gb == null ? '' : ` · ${data.disk_free_gb} GB disk free`}</div>
 			<div class="sort">
-				<div class="theme-opts" role="radiogroup" aria-label="Sort models">
-					<button class="theme-opt" class:active={sort === 'quality'} role="radio" data-sort="quality" onkeydown={sortKey} tabindex={sort === 'quality' ? 0 : -1} aria-checked={sort === 'quality'} onclick={() => (sort = 'quality')}>Quality</button>
-					<button class="theme-opt" class:active={sort === 'speed'} role="radio" data-sort="speed" onkeydown={sortKey} tabindex={sort === 'speed' ? 0 : -1} aria-checked={sort === 'speed'} onclick={() => (sort = 'speed')}>Speed</button>
+				<div class="segmented" role="radiogroup" aria-label="Sort models">
+					<button class="segment" class:active={sort === 'quality'} role="radio" data-sort="quality" onkeydown={sortKey} tabindex={sort === 'quality' ? 0 : -1} aria-checked={sort === 'quality'} onclick={() => (sort = 'quality')}>Quality</button>
+					<button class="segment" class:active={sort === 'speed'} role="radio" data-sort="speed" onkeydown={sortKey} tabindex={sort === 'speed' ? 0 : -1} aria-checked={sort === 'speed'} onclick={() => (sort = 'speed')}>Speed</button>
 				</div>
 			</div>
 			<div class="sorted">
@@ -151,7 +151,7 @@
 	{/if}
 </Modal>
 {#if confirmDelete}
-	<LocalModelDeleteDownloadModal model={confirmDelete} onClose={() => confirmDelete = null} onDeleted={async () => { await refreshDownload(); await refreshList(); }} />
+	<LocalModelDeleteDownloadModal model={confirmDelete.model} size={confirmDelete.size} onClose={() => confirmDelete = null} onDeleted={async () => { await refreshDownload(); await refreshList(); }} />
 {/if}
 
 <style>
@@ -159,16 +159,10 @@
 	.notice.error { color: var(--red-text); justify-content: space-between; }
 	.summary { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.sort { margin: var(--space-3) 0; }
-	/* Copied from SettingsSystem's Theme radiogroup: Sort uses that existing system treatment unchanged. */
-	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--segment-inset); gap: var(--segment-inset); }
-	.theme-opt { position: relative; padding: var(--space-1) var(--space-4); border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
-	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
-	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (max-width: 48rem) { .theme-opt::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--touch-target); transform: translateY(-50%); } }
+	/* Sort's touch targets extend beyond its visible segments on phones. */
 	/* Under reduced motion the list before and after a re-sort share one cell and crossfade. */
 	.sorted { display: grid; }
 	.sorted-list { grid-area: 1 / 1; min-width: 0; }
-	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); background: var(--bg-secondary); }
 	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>

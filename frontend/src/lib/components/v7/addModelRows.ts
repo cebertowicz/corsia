@@ -6,12 +6,13 @@ export type ModelGroup = { name: string; builds: LocalModelRecommendation[] };
 export function modelGroups(models: LocalModelRecommendation[], sort: 'quality' | 'speed', recommended: string | null): ModelGroup[] {
 	const groups = new Map<string, ModelGroup>();
 	for (const model of models) {
-		if (model.fits_now === false) continue;
 		const group = groups.get(model.name) ?? { name: model.name, builds: [] };
 		group.builds.push(model);
 		groups.set(model.name, group);
 	}
-	const score = (build: LocalModelRecommendation) => sort === 'quality' ? build.smarts ?? build.smarts_level ?? 0 : build.tokens_per_second ?? 0;
+	const level = (group: ModelGroup) => Math.max(...group.builds.map((build) => build.smarts_level ?? 0));
+	const smarts = (group: ModelGroup) => Math.max(...group.builds.filter((build) => (build.smarts_level ?? 0) === level(group)).map((build) => build.smarts ?? 0));
+	const speed = (group: ModelGroup) => Math.max(...group.builds.map((build) => build.tokens_per_second ?? 0));
 	return [...groups.values()].map((group) => ({
 		...group,
 		builds: group.builds.sort((a, b) => (a.quantization_bits ?? 0) - (b.quantization_bits ?? 0)),
@@ -19,7 +20,7 @@ export function modelGroups(models: LocalModelRecommendation[], sort: 'quality' 
 		const recommendedFirst = sort === 'quality'
 			? Number(b.builds.some((build) => build.repository === recommended)) - Number(a.builds.some((build) => build.repository === recommended))
 			: 0;
-		return recommendedFirst || Math.max(...b.builds.map(score)) - Math.max(...a.builds.map(score));
+		return recommendedFirst || (sort === 'quality' ? level(b) - level(a) || smarts(b) - smarts(a) : speed(b) - speed(a));
 	});
 }
 

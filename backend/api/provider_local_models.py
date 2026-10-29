@@ -13,7 +13,7 @@ from infra.db_async import run_in_db
 from infra.host_resources import pin_room_bytes
 from llm import local_downloads, local_setup_operation
 from llm.local_model import (
-    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fits_now, omlx_has_recommender, order_models,
+    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fitting_models, omlx_has_recommender, recommend,
 )
 from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
@@ -40,19 +40,11 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         downloads = [item.view() for item in local_downloads.all()]
         return {"state": "low_memory", "message": NO_LOCAL_MODEL, "models": [], "downloads": downloads}, {}
     server = await _server()
-    from llm.providers.omlx_lifecycle import list_disk_models, list_loaded
+    from llm.providers.omlx_lifecycle import read_models_status
 
-    try:
-        disk_models = await list_disk_models({"server_id": server["id"]})
-    except Exception:
-        disk_models = None
-    try:
-        loaded_models = await list_loaded({"server_id": server["id"]})
-    except Exception:
-        loaded_models = []
-    on_disk = {row["identifier"] for row in (disk_models or []) + loaded_models
-               if isinstance(row, dict) and isinstance(row.get("identifier"), str)}
-    if isinstance(disk_models, list):
+    status = await read_models_status({"server_id": server["id"]})
+    on_disk = {row["identifier"] for row in status or []}
+    if status is not None:
         local_downloads.reconcile(on_disk)
     downloads = [item.view() for item in local_downloads.all()]
     if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
@@ -61,6 +53,8 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
             "message": f"Update oMLX to {OMLX_PIN} or later to add a local model.",
             "models": [], "downloads": downloads,
         }, {}
+    if status is None:
+        raise HTTPException(503, "Couldn’t check which models are on this computer.")
     try:
         sections = await ask_recommendations(str(server["id"]))
     except PickUnavailable as exc:
@@ -69,12 +63,11 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
 
     # The Add model sheet judges the Mac's total room, independent of models loaded now.
     room_bytes = pin_room_bytes()
-    ordered = order_models(sections, room_bytes)
+    ordered = fitting_models(sections, room_bytes)
 
     def model_view(model: LocalModel) -> dict[str, Any]:
         space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
-        return {**model.view(), "disk": space, "fits_now": fits_now(model, room_bytes),
-                "on_disk": model.model in on_disk}
+        return {**model.view(), "disk": space, "on_disk": model.model in on_disk}
 
     views = [model_view(model) for model in ordered]
     section_by_repo: dict[str, str] = {}
@@ -87,20 +80,17 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         (item["disk"].get("free_bytes") for item in views if isinstance(item["disk"].get("free_bytes"), int)),
         None,
     )
-    # oMLX's best list owns the recommendation; an owned build remains eligible.
     by_repository = {view["repository"]: view for view in views}
-    recommended = next((model for model in sections.get("best", [])
-                        if model.repository in by_repository
-                        and by_repository[model.repository]["fits_now"]
-                        and (by_repository[model.repository]["on_disk"]
-                             or by_repository[model.repository]["disk"]["state"] == "ready")), None)
+    recommended = recommend(sections, room_bytes, obtainable=lambda model:
+                            by_repository[model.repository]["on_disk"]
+                            or by_repository[model.repository]["disk"]["state"] != "insufficient")
     return {
         "state": "ready",
         "models": views,
         "downloads": downloads,
         "recommended_repository": recommended.repository if recommended is not None else None,
         "memory_gb": round(host_ram_bytes() / 1024**3),
-        "memory_in_use_gb": round(sum(row.get("size_bytes", 0) or 0 for row in loaded_models) / 1024**3),
+        "memory_in_use_gb": round(sum(row.get("size_bytes", 0) or 0 for row in status if row["loaded"]) / 1024**3),
         "memory_room_gb": round(room_bytes / 1024**3, 2),
         "disk_free_gb": round(disk_free_bytes / 1000**3) if isinstance(disk_free_bytes, int) else None,
     }, sections

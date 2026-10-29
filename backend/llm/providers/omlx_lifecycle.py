@@ -163,6 +163,32 @@ async def list_loaded(cfg: dict) -> list[dict]:
     return rows
 
 
+async def read_models_status(cfg: dict) -> list[dict] | None:
+    """Read the complete model status once, or report an unavailable snapshot."""
+    api_base = _api_base(cfg)
+    if not api_base:
+        log.warning("oMLX model status failed: missing endpoint")
+        return None
+    try:
+        headers = await public_headers(cfg, url=f"{api_base}/models/status")
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{api_base}/models/status", headers=headers)
+        if resp.status_code != 200:
+            log.warning("oMLX model status failed: HTTP %s", resp.status_code)
+            return None
+        payload = resp.json()
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            log.warning("oMLX model status failed: invalid model list")
+            return None
+        return [{"identifier": m.get("id", ""), "loaded": m.get("loaded") is True,
+                 "size_bytes": int(m.get("estimated_size") or 0)}
+                for m in models if isinstance(m, dict) and m.get("id")]
+    except (httpx.HTTPError, OmlxPublicAuthError, ValueError, TypeError) as e:
+        log.warning("oMLX model status failed: %s", e)
+        return None
+
+
 async def list_disk_models(cfg: dict) -> list[dict]:
     """Return discovered-but-not-loaded models from ``GET /v1/models/status``."""
     api_base = _api_base(cfg)

@@ -137,9 +137,9 @@
 <SettingsGroup label="Display">
 	<SettingsRow name="Theme">
 		{#snippet actions()}
-			<div class="theme-opts" role="radiogroup" aria-label="Theme">
+			<div class="segmented" role="radiogroup" aria-label="Theme">
 				{#each themeOpts as o}
-					<button class="theme-opt" class:active={$themeSetting === o.v} role="radio" aria-checked={$themeSetting === o.v} onclick={() => themeSetting.set(o.v)}>{o.l}</button>
+					<button class="segment" class:active={$themeSetting === o.v} role="radio" aria-checked={$themeSetting === o.v} onclick={() => themeSetting.set(o.v)}>{o.l}</button>
 				{/each}
 			</div>
 		{/snippet}
@@ -231,11 +231,5 @@
 	.confirm-text { font-size: var(--text-caption); color: var(--text-secondary); }
 	.confirm-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
 	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
-	/* Theme stays the inline three-way control until the SegmentedControl primitive lands (DESIGN-SYSTEM §4.1);
-	   the chosen option takes the selected-row wash (§0.1), not a solid accent fill. */
-	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--segment-inset); gap: var(--segment-inset); }
-	.theme-opt { padding: var(--space-1) var(--space-4); border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
-	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
-	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	/* Theme uses the shared segmented-control treatment. */
 </style>

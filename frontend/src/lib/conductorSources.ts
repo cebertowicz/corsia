@@ -146,8 +146,6 @@ export type LocalModelRecommendation = {
 	/** oMLX's quality estimate, 0.5 to 5 dots, and its estimated decode speed. */
 	smarts_level?: number;
 	tokens_per_second?: number;
-	/** Whether the model fits this computer's total room for models. */
-	fits_now?: boolean;
 	/** Whether this exact build is already on this computer. */
 	on_disk?: boolean;
 	/** oMLX's raw quality estimate and section for ordering and attribution. */

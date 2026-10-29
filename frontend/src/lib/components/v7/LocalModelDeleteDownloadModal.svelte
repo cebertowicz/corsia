@@ -8,14 +8,15 @@
 
 	interface Props {
 		model: ProviderModel;
+		size?: string;
 		onClose: () => void;
 		onDeleted: () => Promise<void>;
 	}
 
-	const { model, onClose, onDeleted }: Props = $props();
+	const { model, size: sizeOverride, onClose, onDeleted }: Props = $props();
 	let deleting = $state(false);
 	let error = $state('');
-	const size = $derived(model.sizeBytes ? humanBytes(model.sizeBytes) : null);
+	const size = $derived(sizeOverride ?? (model.sizeBytes ? humanBytes(model.sizeBytes) : null));
 
 	async function deleteDownload() {
 		const t = get(token);

@@ -27,7 +27,7 @@
 	const quality = $derived(buildQuality(group, build));
 	const need = $derived(build.disk?.state === 'insufficient'
 		? `${build.disk.required_bytes ? `Needs ${Math.ceil(build.disk.required_bytes / 1000 ** 3)} GB of disk` : 'Needs more disk space'}${build.disk.free_bytes == null ? '' : ` · ${Math.floor(build.disk.free_bytes / 1000 ** 3)} GB free`}`
-		: build.disk?.state === 'unknown' ? 'Couldn’t check free disk space' : '');
+		: '');
 </script>
 
 <div class="build" class:stack={failed}>
