@@ -147,14 +147,14 @@ find_brew() {
     [ -n "${CORSIA_INSTALL_BREW:-}" ] && [ -x "$CORSIA_INSTALL_BREW" ] \
         && { echo "$CORSIA_INSTALL_BREW"; return 0; }
     command -v brew 2> /dev/null && return 0
-    [ -x /opt/homebrew/bin/brew ] && echo /opt/homebrew/bin/brew
+    [ -x /opt/homebrew/bin/brew ] && { echo /opt/homebrew/bin/brew; return 0; }
     [ -x /usr/local/bin/brew ] && echo /usr/local/bin/brew
 }
 
 find_installed_brew() {
     [ -n "${CORSIA_INSTALL_BREW:-}" ] && [ -x "$CORSIA_INSTALL_BREW" ] \
         && { echo "$CORSIA_INSTALL_BREW"; return 0; }
-    [ -x /opt/homebrew/bin/brew ] && echo /opt/homebrew/bin/brew
+    [ -x /opt/homebrew/bin/brew ] && { echo /opt/homebrew/bin/brew; return 0; }
     [ -x /usr/local/bin/brew ] && echo /usr/local/bin/brew
 }
 

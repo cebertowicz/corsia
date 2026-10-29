@@ -107,7 +107,9 @@ def env(tmp_path: Path) -> dict[str, str]:
     checkout = home / ".corsia"
     (checkout / "scripts").mkdir(parents=True)
     (checkout / "backend").mkdir()
-    shutil.copy2(INSTALL, checkout / "scripts" / "install.sh")
+    installer = INSTALL.read_text().replace("/opt/homebrew/bin/brew", str(tmp_path / "arm-brew"))
+    installer = installer.replace("/usr/local/bin/brew", str(tmp_path / "intel-brew"))
+    (checkout / "scripts" / "install.sh").write_text(installer)
     (checkout / "backend" / "requirements.lock").write_text("")
     corsia = checkout / "scripts" / "corsia"
     corsia.write_text(
@@ -373,6 +375,29 @@ def test_a_failed_browser_setup_stops_the_install(env):
     assert result.returncode == 1
     assert "Run: agent-browser install" in result.stderr
     assert not any(call.startswith("corsia") for call in _calls(env))
+
+
+@pytest.mark.parametrize("finder", ["find_brew", "find_installed_brew"])
+@pytest.mark.parametrize("available", ["arm", "intel", "both", "none"])
+def test_brew_finders_return_the_first_installed_path(env, tmp_path, finder, available):
+    arm = tmp_path / "arm-brew"
+    intel = tmp_path / "intel-brew"
+    for path, kind in ((arm, "arm"), (intel, "intel")):
+        if available in (kind, "both"):
+            path.write_text("#!/bin/bash\nexit 0\n")
+            path.chmod(0o755)
+    script = _script(env)
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", 'source "$1"; ' + finder, "test", str(script)],
+        env={**env, "CORSIA_INSTALL_SOURCE_ONLY": "1", "CORSIA_INSTALL_BREW": ""},
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+
+    assert result.returncode == (1 if available == "none" else 0), result.stderr
+    expected = "" if available == "none" else str(intel if available == "intel" else arm) + "\n"
+    assert result.stdout == expected
+    assert all(Path(found).resolve().is_relative_to(tmp_path.resolve()) for found in result.stdout.splitlines())
 
 
 def test_homebrew_uses_the_documented_installer_url():
