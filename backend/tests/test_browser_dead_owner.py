@@ -17,12 +17,13 @@ SESSION = "session123456"
 
 
 class FakeProcess:
-    def __init__(self, pid, directory, *, birth=123.0, chrome=False, profile="/tmp/profile"):
+    def __init__(self, pid, directory, *, birth=123.0, chrome=False, profile="/tmp/profile", headless=True):
         self.pid = pid
         self.directory = directory
         self.birth = birth
         self.chrome = chrome
         self.profile = profile
+        self.headless = headless
 
     def is_running(self):
         return True
@@ -41,7 +42,7 @@ class FakeProcess:
                 "AGENT_BROWSER_SOCKET_DIR": str(self.directory)}
 
     def cmdline(self):
-        return ["/usr/bin/chrome", f"--user-data-dir={self.profile}"]
+        return ["/usr/bin/chrome", f"--user-data-dir={self.profile}", *(["--headless=new"] if self.headless else [])]
 
 
 @pytest.fixture
@@ -88,6 +89,15 @@ def test_free_lock_stops_daemon_and_recorded_chrome(recovery, tmp_path):
     browser_orphan.close_dead_sessions(root / "own", root=root)
     assert signalled == [101, 102]
     assert marker.read_text() == "kept"
+
+
+def test_dead_owner_visible_window_is_left_for_the_person(recovery):
+    root, fake, signalled = recovery
+    directory = make_dir(root, "dead")
+    browser_owner_lock.record_chrome(directory, SESSION, 102, 123.0, "/tmp/profile")
+    fake[102] = FakeProcess(102, directory, chrome=True, headless=False)
+    browser_orphan.close_dead_sessions(root / "own", root=root)
+    assert not signalled
 
 
 def test_reused_chrome_pid_is_kept(recovery):
@@ -209,3 +219,17 @@ def test_outside_and_unreadable_daemons_are_kept(recovery, tmp_path, monkeypatch
     browser_orphan.close_dead_sessions(root / "own", root=root)
     assert not signalled
     assert "browser orphan could not be verified" not in caplog.text
+
+
+def test_sweep_logs_what_it_left_unchecked(recovery, monkeypatch, caplog):
+    root, fake, signalled = recovery
+    make_dir(root, "dead")
+    (root / "dead" / "owner.lock").chmod(0o000)
+    browser_orphan.close_dead_sessions(root / "own", root=root)
+    assert "browser orphan sweep skipped dead: PermissionError" in caplog.text
+    caplog.clear()
+    clock = iter((0.0, 11.0))
+    monkeypatch.setattr(browser_orphan.time, "monotonic", lambda: next(clock))
+    browser_orphan.close_dead_sessions(root / "own", root=root)
+    assert "time limit; 1 directories not checked" in caplog.text
+    assert not signalled

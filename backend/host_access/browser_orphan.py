@@ -95,9 +95,15 @@ def _record_process_matches(pid: int, birth: float, directory: Path, session: st
             return None
         if profile is not None:
             argv = process.cmdline()
-            return True if (argv and "chrome" in os.path.basename(argv[0]).lower()
-                            and f"--user-data-dir={profile}" in argv
-                            and not any(arg.startswith("--type=") for arg in argv)) else None
+            if not (argv and "chrome" in os.path.basename(argv[0]).lower()
+                    and f"--user-data-dir={profile}" in argv
+                    and not any(arg.startswith("--type=") for arg in argv)):
+                return None
+            if "--headless=new" not in argv:
+                # A visible window stays for the person to close, as in close_orphans.
+                logger.info("left orphaned browser window pid=%s for the person", pid)
+                return False
+            return True
         executable = process.exe()
         if not executable or "agent-browser" not in os.path.basename(executable):
             return None
@@ -121,7 +127,7 @@ def _stop_daemon(path: Path, directory: Path) -> None:
         return
     pid = None
     try:
-        raw, _ = identity._read_regular_sidecar(path, 64)
+        raw, _ = identity.read_regular_sidecar(path, 64)
         pid = identity.parse_pid_sidecar(raw)
         process = identity.process_for_identity(pid)
         birth = identity.process_create_time(process)
@@ -139,7 +145,7 @@ def _stop_chrome(path: Path, directory: Path) -> None:
         return
     pid = None
     try:
-        raw, _ = identity._read_regular_sidecar(path, 4096)
+        raw, _ = identity.read_regular_sidecar(path, 4096)
         record = json.loads(raw)
         pid, birth, profile = record["pid"], record["birth"], record["profile"]
         if (not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1
@@ -160,10 +166,15 @@ def close_dead_sessions(own_directory: Path, *, root: Path | None = None) -> Non
     try:
         own_directory = own_directory.resolve()
         directories = tuple((root or SOCKET_ROOT).resolve(strict=True).iterdir())
-    except OSError:
+    except FileNotFoundError:
         return
-    for directory in directories:
+    except OSError as error:
+        logger.warning("browser orphan sweep could not read the socket root: %s", type(error).__name__)
+        return
+    for index, directory in enumerate(directories):
         if time.monotonic() >= deadline:
+            logger.warning("browser orphan sweep hit its time limit; %d directories not checked",
+                           len(directories) - index)
             return
         if directory == own_directory:
             continue
@@ -186,5 +197,6 @@ def close_dead_sessions(own_directory: Path, *, root: Path | None = None) -> Non
                     _stop_chrome(path, directory)
             finally:
                 browser_owner_lock.release(fd)
-        except (OSError, identity.BrowserIdentityError):
+        except (OSError, identity.BrowserIdentityError) as error:
+            logger.warning("browser orphan sweep skipped %s: %s", directory.name, type(error).__name__)
             continue
