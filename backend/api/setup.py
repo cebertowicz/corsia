@@ -147,7 +147,7 @@ def _setup_status() -> dict:
 
     apple_silicon = not host_never_runs_local() and platform.machine().lower() in {"arm64", "aarch64"}
     macos_supported = _macos_supported()
-    # Only the 24 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
+    # Only the 32 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
     memory_ok = local_memory_ok()
     try:
         free_disk_gb = round(shutil.disk_usage(config.STATE_ROOT).free / 1000**3, 1)

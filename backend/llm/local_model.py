@@ -5,7 +5,7 @@ There is no hand-kept model list. CORSIA's managed oMLX answers
 CORSIA orders its rows itself: what fits the memory free now first, by quality
 then speed, then what needs more. Setup's pick and the Add model sheet's
 Recommended row are that list's first row, with at least CORSIA's agent minimum
-of context. Under 24 GiB of memory there is no local model at all. This module
+of context. Under 32 GiB of memory setup does not pick a local model. This module
 is the one owner of that rule; every other reader goes through it.
 """
 
@@ -27,9 +27,9 @@ OMLX_PIN = "0.7.1rc1"
 
 GIB = 1024**3
 # RAM is compared in GiB because Apple sells memory in binary units: a Mac sold
-# as "24 GB" reports 24 GiB. Below it there is no local model (agent work runs
-# on the cloud; the corrections classifier still runs locally).
-MIN_RAM_GIB = 24
+# as "32 GB" reports 32 GiB. Below it setup does not pick a local model.
+# Exclude 24 GB until a model passes the first-run check there.
+MIN_RAM_GIB = 32
 #: CORSIA's agent minimum, and oMLX's own "comfortable" bar.
 MIN_CONTEXT = 32_768
 MAX_CONTEXT = 262_144

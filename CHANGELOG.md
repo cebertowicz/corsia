@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No local model we tested handles CORSIA's first-run work reliably on 24 GB.
 - The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
 - An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - Find the CORSIA agent and project conductors in search and Activity, with each conductor named for its project.

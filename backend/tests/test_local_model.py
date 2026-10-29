@@ -24,10 +24,10 @@ _REPO = Path(__file__).resolve().parents[2]
 SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty", "chat_template_kwargs"}
 
 # What setup picks at each memory size (GiB) from the recorded recommender: oMLX's own
-# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 24 GiB there is no local model.
+# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 32 GiB setup picks no local model.
 PICKS = {
     16: None,
-    24: ("Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp", 90_890, "Gemma 4 26B A4B"),
+    24: None,
     32: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 81_651, "Qwen3.8 27B"),
     48: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 262_144, "Qwen3.8 27B"),
     64: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 262_144, "Qwen3.8 27B"),
@@ -368,8 +368,8 @@ def test_the_local_row_says_a_host_that_is_not_macos_never_runs_a_local_model(mo
         assert "settings_download" not in source
 
 
-@pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
-def test_the_24_gib_gate_decides_whether_there_is_a_local_model(monkeypatch, gib, allowed):
+@pytest.mark.parametrize("gib, allowed", [(16, False), (24, False), (31.9, False), (32, True)])
+def test_the_32_gib_gate_decides_whether_setup_picks_a_local_model(monkeypatch, gib, allowed):
     mac = _mac(monkeypatch, gib)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
 
