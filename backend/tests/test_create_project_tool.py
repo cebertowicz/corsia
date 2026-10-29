@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.github_screen_schema import SCREEN_INSTALL_SCHEMA_SQL
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 
@@ -80,6 +82,7 @@ def test_status_enum_in_sync_with_valid_project_statuses():
 def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "CREATE TABLE projects ("
         "  id TEXT PRIMARY KEY,"
@@ -305,6 +308,7 @@ def test_project_create_tool_designates_project_conductor_for_calling_thread(
 def test_execute_returns_loud_collision_error(monkeypatch, tmp_path):
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "CREATE TABLE projects ("
         "  id TEXT PRIMARY KEY,"
@@ -382,6 +386,7 @@ def test_execute_returns_loud_collision_error(monkeypatch, tmp_path):
 def test_initialize_project_rolls_back_on_scaffold_failure(monkeypatch):
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "CREATE TABLE projects ("
         "  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, path TEXT, description TEXT,"
@@ -429,6 +434,7 @@ def test_initialize_project_rejects_non_leaf_name_without_residue(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "CREATE TABLE projects ("
         "id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, path TEXT, description TEXT, "
@@ -479,6 +485,7 @@ def test_initialize_project_stores_logical_truth_and_seeds_only_project_context(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.execute(
         "CREATE TABLE projects ("
         "id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, path TEXT, description TEXT, "
@@ -560,6 +567,7 @@ def test_initialize_project_registers_default_repo_policy(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.executescript(
         """
         CREATE TABLE projects (
@@ -594,7 +602,7 @@ def test_initialize_project_registers_default_repo_policy(
             updated_at TEXT
         );
         CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY);
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,
@@ -651,6 +659,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.executescript(
         """
         CREATE TABLE projects (
@@ -685,7 +694,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
             updated_at TEXT
         );
         CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY);
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,
@@ -742,6 +751,7 @@ def test_initialize_project_removes_only_its_link_when_policy_write_fails(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.executescript(
         """
         CREATE TABLE projects (
@@ -776,7 +786,7 @@ def test_initialize_project_removes_only_its_link_when_policy_write_fails(
             updated_at TEXT
         );
         CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY);
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,
@@ -831,6 +841,7 @@ def test_initialize_project_replacement_before_ownership_capture_is_not_removed(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.executescript(
         """
         CREATE TABLE projects (
@@ -865,7 +876,7 @@ def test_initialize_project_replacement_before_ownership_capture_is_not_removed(
             updated_at TEXT
         );
         CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY);
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,
@@ -920,6 +931,7 @@ def test_initialize_project_rechecks_source_ownership_before_commit(
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.executescript(SCREEN_INSTALL_SCHEMA_SQL)
     conn.executescript(
         """
         CREATE TABLE projects (
@@ -954,7 +966,7 @@ def test_initialize_project_rechecks_source_ownership_before_commit(
             updated_at TEXT
         );
         CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY);
-        CREATE TABLE project_repo_policies (
+        CREATE TABLE IF NOT EXISTS project_repo_policies (
             project_id TEXT NOT NULL,
             repo_name TEXT NOT NULL,
             repo_path TEXT NOT NULL,

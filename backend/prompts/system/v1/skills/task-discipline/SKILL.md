@@ -1,15 +1,15 @@
 ---
 name: task-discipline
-description: Use when accepting, performing, re-scoping, delegating, waiting on, or closing work with more than one step, whenever a thread holds multiple tasks, and before substantive research, analysis, design, recommendations, artifacts, or mutations—procedures for the alignment, groundwork, and verification gates, the plan, and work with no established workflow.
+description: Use when accepting, performing, re-scoping, delegating, waiting on, or closing work with more than one step, whenever a thread holds multiple tasks, and before substantive research, analysis, design, recommendations, artifacts, or mutations—procedures for aligning on the request, groundwork, verification, the plan, and work with no established workflow.
 ---
 
 # Task discipline
 
-Core context defines the alignment, groundwork, and verification gates and their exits. This skill is how to meet them, and it applies to every agent, subagent, and task size.
+This skill is how to align on a request, ground your work in what exists, and verify it before calling it done. It applies to every agent, subagent, and task size.
 
 ## Alignment
 
-Core context's Alignment gate is the procedure. Mark an inferred part of `intent` `ASSUMED:` with its source.
+Before substantive work, record your reading on the task: `intent` holds the outcome, for whom, what done means, what is out, and how you settled what the request left open; `intent_words` quotes the request verbatim. Mark an inferred part of `intent` `ASSUMED:` with its source.
 
 ## Groundwork by work type
 
@@ -22,7 +22,7 @@ Inspect the primary target where it is actually used, then the owners and prior 
 
 Search the user's words and the underlying concept. Retrieve the applicable domain requirements, decisions and failure cases from the owner's canonical reference; citing its index alone is insufficient. Name what you reuse or amend, and why existing candidates fail before creating another.
 
-Apply the core groundwork gate to factual premises needed to proceed. Probe the intended combination and composed experience, not just each capability separately; record the actual result and revise the approach when it fails. A limit or target needs a source, measurement or explicitly confirmed assumption.
+Check each factual premise you need to proceed before building on it. Probe the intended combination and composed experience, not just each capability separately; record the actual result and revise the approach when it fails. A limit or target needs a source, measurement or explicitly confirmed assumption.
 
 ## Verification methods
 

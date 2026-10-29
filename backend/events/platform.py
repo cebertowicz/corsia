@@ -31,6 +31,7 @@ from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
+from events.worker_labels import labelled_summary
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -91,7 +92,7 @@ def _digest_details(envelope: EventEnvelope, collapse_fact: str | None) -> dict[
 
 
 def _summary(envelope: EventEnvelope) -> str:
-    return f"{envelope.type} from {envelope.provenance.get('source', 'platform')}"
+    return labelled_summary(f"{envelope.type} from {envelope.provenance.get('source', 'platform')}", envelope.facts)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -109,9 +110,10 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
     whole; only a line past the cap is cut, and it says how much is missing.
     """
     facts = []
-    for key in line_facts:
+    for key in dict.fromkeys((*line_facts, *(('source', 'item', 'item_version', 'kind', 'injection_signs')
+                                           if envelope.facts.get('source') == 'outside' else ()))):
         value = envelope.facts.get(key)
-        if value is None:
+        if value is None and not (key == "injection_signs" and key in envelope.facts):
             continue
         rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
@@ -175,6 +177,7 @@ def rule_event(
         envelope.event_id, envelope.connector or "", envelope.type,
         watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
         trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
+        origin=envelope.origin,
     )
 
 

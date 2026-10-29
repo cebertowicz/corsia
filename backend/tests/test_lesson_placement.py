@@ -55,6 +55,7 @@ def env(tmp_path, monkeypatch) -> Env:
 
     workspace = _repo(tmp_path)
     select_workspace(monkeypatch, workspace)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve()])
     path = tmp_path / "lessons.db"
     db = _db(str(path))
     _seed_thread(db, THREAD)
@@ -107,6 +108,18 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     )
 
 
+def test_trial_with_existing_target_section_is_refused_at_admission(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n\n## Lessons\nExisting.\n")
+    result = _place(env, _entry(env), _answer(
+        case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
+    ))
+    assert "already in context" in result
+    assert "may only add a new section" in result
+    assert not _skill(env).exists()
+
+
 def test_flagged_new_checkpoint_entry_records_an_overridden_trial_check(env: Env) -> None:
     """A checkpoint-local entry has no revision yet, but the check remains non-blocking."""
     from types import SimpleNamespace
@@ -142,12 +155,25 @@ def _skill(env: Env, name: str = "cite-the-head") -> Path:
 
 
 def _offered(env: Env) -> list[dict]:
-    """The lessons the next installed skills index would carry."""
-    sources = skill_context_sources(
-        thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
-    )
-    index = [source for source in sources if source.source_id == "dynamic:skills-index"]
-    return index[0].metadata["lessons"] if index else []
+    """Eligible lessons leave cached context and can reach a task's with arm."""
+    from core.lesson_delivery import draw, start_trials
+    from core.lesson_index import partition
+    from core.skill_resolution import resolve_effective_skills
+
+    sources = skill_context_sources(thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db)
+    index = next(source for source in sources if source.source_id == "dynamic:skills-index")
+    assert index.metadata["lessons"] == []
+    resolved = resolve_effective_skills(thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db)
+    split = partition(resolved.included, resolved.omitted, thread_id=THREAD, db=env.db)
+    records = []
+    for record in split.lessons:
+        assert record["index_line"] not in index.prompt_content
+        node = next(f"verify-{record['id']}-{n}" for n in range(1000)
+                    if draw(record["id"], record["behavioral_sha256"], f"verify-{record['id']}-{n}") == "with")
+        delivered = start_trials(env.db, thread_id=THREAD, node_id=node)
+        if any(item["lesson_id"] == record["id"] for item in delivered):
+            records.append(record)
+    return records
 
 
 def _reviews(env: Env, prefix: str = "") -> list[sqlite3.Row]:
@@ -363,6 +389,9 @@ CASE = {
 
 
 async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_supplies(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     first = _entry(env)
     _place(env, first, _answer(
         case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
@@ -391,6 +420,9 @@ async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_suppl
 
 
 async def test_a_revision_never_keeps_stale_evidence_or_an_old_target(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     _place(env, _entry(env), _answer(case=CASE, target_file="context/rule.md", target_section="Lessons"))
     await _drain(env.worker)
     _place(env, _entry(env, [{"kind": "turn", "reference": "turn-19"}], "a new file"), _answer(
@@ -436,6 +468,9 @@ async def test_a_held_revision_offered_later_keeps_only_the_new_evidence_it_stat
 
 
 async def test_a_held_capture_keeps_its_case_and_its_offer_carries_it(env: Env) -> None:
+    target = env.workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Rules\n")
     literal = _entry(env, SAID, "the user said: that answer was wrong")
     entry = _entry(env, SAID, "always search the history first")
     case: dict[str, Any] = {"case": CASE, "cause": "rule_gap", "target_file": "context/rule.md"}
@@ -1015,14 +1050,14 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
 async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     from plans import public as plans
 
-    env.monkeypatch.setattr("core.lesson_index.INDEX_TOKEN_BUDGET", 1)
+    env.monkeypatch.setattr("core.lesson_delivery.START_TOKEN_CAP", 1)
     entry = _entry(env)
 
     reply = _place(env, entry)
     await _drain(env.worker)
 
-    assert "the trial lessons already offered fill the lesson index budget" in reply
-    assert "retire or promote a trial lesson you no longer need" in reply
+    assert "the trial exceeds the task-start guidance budget" in reply
+    assert "shorten the trial guidance so it fits at task start" in reply
     assert not _skill(env).exists() and _offered(env) == []
     assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
 

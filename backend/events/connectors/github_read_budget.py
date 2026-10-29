@@ -1,11 +1,11 @@
 """One process-wide GitHub read budget, rebuilt from response headers.
 
-The two event pollers (notifications and the quiet-PR sweep) read through
-``github_notifications_feed.gh_get``, which feeds each response here, asks
-before each call and takes this budget's verdict on whether a response was a
-rate limit. A limit one of them sees backs off both. Other GitHub callers (the
-reviewer's ``gh_api``, for example) do not consult it. Nothing is stored: a
-restart relearns the budget from the next response.
+The event pollers read through ``github_notifications_feed.gh_get``; script
+reads use ``automation.script_github_channel``. Both ask before each call and
+feed response headers here. A limit either sees backs off both. Script reads
+and the quiet-PR sweep preserve the notifications reserve. Other GitHub callers
+(the reviewer's ``gh_api``, for example) do not consult it. Nothing is stored:
+a restart relearns the budget from the next response.
 """
 
 from __future__ import annotations

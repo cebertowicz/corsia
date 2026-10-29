@@ -50,11 +50,14 @@ def test_default_wake_omits_outside_author_text(monkeypatch, kind, origin):
     assert details["author_origin"] == origin and details["author"] == origin
     assert details["repo"] == "o/r" and details["external_id"] == "o/r#7"
     assert details["url"] == "https://example.test/item" and details["action"] == payload["action"]
+    # No comment's wake carries its body, whoever wrote it; the owner reads it
+    # through the tool (outside-content O2).
+    assert "BODY_CANARY" not in combined
+    if kind == "comment":
+        assert "comment" in summary.lower()
     if origin == "outside" or kind == "issue":
-        assert "BODY_CANARY" not in combined and "TITLE_CANARY" not in combined
-    elif kind == "comment":
-        assert "BODY_CANARY" in combined
-    else:
+        assert "TITLE_CANARY" not in combined
+    elif kind == "pr":
         assert "TITLE_CANARY" in combined
 
 

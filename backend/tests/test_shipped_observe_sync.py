@@ -10,6 +10,7 @@ def test_sync_reconciles_manifest_declarations_and_preserves_agent_rows(monkeypa
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(EVENT_RULE_SCHEMA_SQL)
+
     observe_rules.sync_shipped_rules(db)
     declared = {r.id: (m.connector, r.tool,
                        list(r.argv_prefix) if r.tool == "bash" else None, r.item_type)

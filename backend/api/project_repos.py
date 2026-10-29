@@ -39,12 +39,11 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
+from api.project_repo_sync import sync_sources
 from api.project_scaffolding import (
     SourceEntryChangedError,
     SourceEntryIdentity,
-    _write_doc_roots,
     capture_source_entry,
-    compute_doc_roots,
     create_repo_in_source,
     link_repo_into_source,
     list_source_repos,
@@ -95,11 +94,6 @@ def _workspace_dir_for(project_id: str) -> Path:
     return ws_dir
 
 
-def _sync(project_id: str, ws_dir: Path, db) -> None:
-    """Update doc roots inside the caller's compensation transaction."""
-    _write_doc_roots(db, project_id, compute_doc_roots(ws_dir))
-
-
 def _under_project_repo_lock(project_id: str, operation: Callable[[], _T]) -> _T:
     """Serialize one project's filesystem, Git, and row compensation unit."""
     with _PROJECT_REPO_LOCKS_GUARD:
@@ -120,9 +114,7 @@ def _with_policy(repo: dict, policies: dict[str, RepoPolicy]) -> dict:
     )
     row["registered"] = bound
     row["pinned_branch"] = policy.pinned_branch if bound else None
-    row["protect_base_checkout"] = (
-        policy.protect_base_checkout if bound else False
-    )
+    row["protect_base_checkout"] = policy.protect_base_checkout if bound else False
     # Current clients still render this derived response field. Mutations use
     # only the two canonical controls above.
     row["branch_pinned"] = bool(bound and policy.branch_pinned)
@@ -453,7 +445,7 @@ def _commit_add_policy(
             protect_base_checkout=protected,
             db=connection,
         )
-        _sync(project_id, ws_dir, connection)
+        sync_sources(project_id, ws_dir, connection)
         current_row = _require_source_binding(ws_dir, name, repo_path)
         response = _with_policy(current_row, {name: policy})
         _require_policy_snapshot(project_id, name, policy, db=connection)
@@ -693,7 +685,7 @@ def _commit_detach_policy(
     with write_transaction(connection, scope="repo_policy_detach"):
         _require_policy_snapshot(project_id, name, existing, db=connection)
         clear_repo_policy(project_id, name, db=connection)
-        _sync(project_id, ws_dir, connection)
+        sync_sources(project_id, ws_dir, connection)
         _require_policy_snapshot(project_id, name, None, db=connection)
         if entry.exists() or entry.is_symlink():
             raise HTTPException(

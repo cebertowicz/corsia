@@ -83,7 +83,8 @@ def _workflows(thread_id: str, project_id: str | None) -> dict[str, Any]:
 
 async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     """Send one declared event as this chat; the receipt, or the refusal with its fix."""
-    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error
+    from events.intake import admit_event, emitted_event_id
+    from events.intake_errors import failure_code, format_event_error
 
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:
@@ -122,7 +123,9 @@ class EventRulesTool(Tool):
             "`run_script` runs one of your script schedules (`script_id`, from automation_list; "
             "register it with automation_schedule without cadence_seconds so only rules start it) "
             "with the event as JSON on its stdin, within about a minute; it takes no `to`, `mode` "
-            "or `note`, and the event still reaches whoever it reaches today. An event the run "
+            "or `note`, and the event still reaches whoever it reaches today. For GitHub reads, "
+            "use `corsia github read <api-path>`; build the path from the rule's own fields, "
+            "never from event text. An event the run "
             "emits carries the rule, so a rule already in that chain is skipped, not run again; "
             "a run while you are paused is skipped and not replayed. A script runs once at a time, "
             f"so runs wait their turn; a match while {rule_runs.QUEUE_CAP} of its rule's runs wait "

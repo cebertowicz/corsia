@@ -36,6 +36,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -148,6 +149,7 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
     """Claim up to one queued start per free slot, oldest first. With no slot free nothing
     is written: the starts wait, and the newest of them is remembered as having waited."""
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
+    cleanup: list[tuple[str, int, str | None]] = []
     with write_transaction(db, scope="worker_starts_claim") as conn:
         free = _free(conn)
         if free <= 0:
@@ -159,15 +161,21 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
                 break
             skipped = _skip(conn, row)
             if skipped is not None:
+                if row["origin"] and row["origin"].startswith("rule_set:"):
+                    data = json.loads(row["run_input"] or "{}")
+                    facts = (data.get("event") or {}).get("facts") or {}
+                    cleanup.append((row["thread_id"], row["id"], facts.get(inputs.STAGING_FACT)))
                 worker_starts.end(conn, row["id"], SKIPPED, skipped)
                 continue
             run_input = worker_starts.claim(conn, row["id"])
             if run_input is not None:
                 claimed.append((row, run_input))
+    for owner, decision, staging in cleanup:
+        _remove_inputs(owner, decision, staging)
     return claimed
 
 
-def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, Any]:
+def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None) -> dict[str, Any]:
     """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
@@ -208,7 +216,12 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
         raise inputs.StartRefused(f"refused: your model {name} can't run now. "
                                   "Choose a model that is ready for this chat.")
     # A skill whose declared result fails validation is not included, so one found here is valid.
-    skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
+    if shipped is not None:
+        if shipped.error or project is None:
+            raise inputs.StartRefused("refused: " + (shipped.error or "the shipped workflow needs a project"))
+        skill = shipped.declaration.load(project)
+    else:
+        skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
     if skill is None or schema is None:
         raise inputs.StartRefused(f"refused: {row['workflow_id']} is no longer a workflow you can "
@@ -232,7 +245,10 @@ def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, A
     if found["head"] is not None:
         inputs.write_head(found["head"], dest)
     read_paths = [path for path in (found["staging"], str(dest)) if path]
-    task = inputs.brief(found["workflow"], inputs.skill_body(found["skill"].body_path),
+    body = inputs.skill_body(found["skill"].body_path)
+    if found.get("result_instructions"):
+        body += "\n\n" + found["result_instructions"]
+    task = inputs.brief(found["workflow"], body,
                         found["schema"], read_paths, run_input.get("event") or {})
     return read_paths, task
 
@@ -243,9 +259,18 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
     from tools.delegate_task import _spawn
 
+    from events.connector_workflows import resolve_shipped_workflow
+
     waited = row["id"] <= _state["waited"]
     try:
-        found = await run_in_db(_prepare, row, run_input)
+        origin = dict(row).get("origin")
+        shipped = resolve_shipped_workflow(origin, row["workflow_id"])
+        contract = shipped.declaration.result if shipped and shipped.declaration else None
+        if contract:
+            event_facts = run_input["event"]["facts"]
+            run_input["result_context"] = contract.context(origin, row["workflow_id"], event_facts)
+            run_input["workflow"] = f"{row['workflow_id']}@{contract.version()}"
+        found = await run_in_db(_prepare, row, run_input, shipped)
         if found["harness"] == "codex":
             from subagents.cc_confinement import ConfinementRefused
             from subagents.codex_confinement import verify_version
@@ -254,10 +279,21 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                 await verify_version()
             except ConfinementRefused as exc:
                 raise inputs.StartRefused(str(exc)) from exc
+        if contract:
+            found["result_instructions"] = contract.instructions()
+            found["workflow"] = run_input["workflow"]
+            try:
+                run_input["result_context"]["record"] = await asyncio.to_thread(
+                    contract.capture, Path(found["staging"]),
+                )
+            except Exception as exc:  # CORSIA input failure, before any worker turn.
+                logger.exception("worker start {} could not capture its result record", row["id"])
+                raise inputs.StartRefused(f"Couldn’t read the workflow result inputs. {worker_settle.NO_RESULT_NEXT}") from exc
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "trace": run_input.get("trace") or [], "waited": waited,
-                            "item_version": found["facts"].get(inputs.HEAD_SHA_FACT)})
+                            "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
+                            "result_context": run_input.get("result_context")})
 
         async def record(worker: str) -> None:
             await run_in_db(_made, row["id"], worker, check)
@@ -309,14 +345,16 @@ async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, re
 async def _settle(item: worker_settle.Settle) -> None:
     """Settle one start and remove its inputs: the one way every start ends."""
     await worker_settle.settle(item)
-    await run_in_db(_remove_inputs, item.owner, item.decision_id)
+    await run_in_db(_remove_inputs, item.owner, item.decision_id, item.staging_path)
 
 
-def _remove_inputs(owner: str, decision_id: int) -> None:
+def _remove_inputs(owner: str, decision_id: int, staging_path: str | None = None) -> None:
     from infra.database import get_db
     from infra.queries import get_thread
 
     db = get_db()
     thread = get_thread(owner, db=db)
     if thread is not None:
-        inputs.remove_start_dir(inputs.owner_root(owner, thread["project_id"], db), decision_id)
+        root = inputs.owner_root(owner, thread["project_id"], db)
+        inputs.remove_start_dir(root, decision_id)
+        inputs.remove_staging_dir(root, staging_path)

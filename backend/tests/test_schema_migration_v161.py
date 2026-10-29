@@ -5,7 +5,7 @@ import pytest
 
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.database_migrations import migrate_to_current
-from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
+from infra.schema import SCHEMA_SQL
 
 
 def test_160_rules_survive_and_schema_matches_fresh():
@@ -30,7 +30,7 @@ def test_160_rules_survive_and_schema_matches_fresh():
               "'agent:a','a','self',?,?, 'pull-request')")
     db.execute(insert, ("shell", "bash", '["gh"]'))
     db.commit()
-    result = migrate_to_current(db, SCHEMA_VERSION)
+    result = migrate_to_current(db, 161)
     assert (result.from_version, result.to_version) == (160, 161)
     db.execute(insert, ("app", "create_pull_request", None))
     assert db.execute("SELECT id,tool,argv_prefix FROM event_rules ORDER BY id").fetchall() == [

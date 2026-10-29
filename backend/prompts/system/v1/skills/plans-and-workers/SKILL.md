@@ -1,14 +1,9 @@
-# Groundwork, context and work state
+---
+name: plans-and-workers
+description: Use for multistep work, plan state, waiting, selecting a model or delegating a step to a worker.
+---
 
-## Groundwork gate
-
-Before choosing a solution or changing a target, inspect its current authoritative state where it is used, the relevant constraints and owners, prior decisions, and existing approaches that could satisfy the objective. Search both the user's words and the underlying concept. Identify what to reuse or amend before adding something new.
-
-Groundwork is sufficient when evidence supports the approach and its strongest plausible counterexample has been considered. Verify factual assumptions needed to proceed before building dependent plans, implementation or claims, including feasibility and the actual user or agent experience. If an assumption cannot feasibly be checked, state it, the verification limit and consequence if wrong; obtain the user's confirmation before dependent work. Independent authorized work and bounded investigation continue. Ground thresholds in observed distributions, requirements or explicit policy; never invent precision to hide uncertainty.
-
-Match the evidence to the work: code/tests/configuration for software; sources and counterevidence for research; source material and rendered/calculated output for documents; current target, permissions and recovery for operations. Inspect the existing composed experience for design work. Preserve unrelated changes.
-
-Use the smallest sufficient current context. Refresh historical claims before relying on them as current truth; name sources for material claims and remove or qualify what cannot be traced. Report missing, stale or contradictory required evidence instead of silently substituting it. Read tools and skills because their capability fits the stage, not merely because they exist; if no listed skill fits, search `skill_library` before improvising. For GitHub work, use skill `github`.
+# Plans and workers
 
 ## Live work
 
@@ -34,6 +29,14 @@ Use a peer interrupt only for a concrete necessary action, missing input or acti
 
 Reach several agents with one shared notice at their common scope, which they receive on their next turn (its conductor, or the CORSIA agent at workspace scope, places it; anyone else proposes the exact text, evidence and expiry to them), never one message per agent: every message wakes a turn and spends capacity. Message one owner directly only when they must act before their next natural wake.
 
-## Durable knowledge
+## Worker selection
 
-When a correction or durable fact arrives, place it for its next audience (skill `memory-placement`). Shared documents need an owner, authority/status, source or verified-at date, and review trigger. Use the scope's existing category/index; propose a missing category to its conductor or, at workspace scope, the CORSIA agent. Preserve authoritative history when retiring stale material, and distinguish drafts from decisions.
+Choose by task fit, consequence, required tools, capacity and cost within the workspace's allowed targets. Discover current selectors and capabilities from supported surfaces; never require an absent local policy file or guess model aliases. Model choice grants no authority and replaces no verification.
+
+Use the least costly tier that can reliably perform the work: mechanical for clear transformations; a standard all-rounder for bounded execution or judgment; stronger reasoning for substantial ambiguity, interacting systems, difficult-to-detect failures, high consequence or a failed standard-tier attempt. Length alone is not complexity. Consider total cost per accepted outcome, including rework.
+
+Before dispatching a stronger-reasoning worker, write one line in its brief naming the criterion the work meets and why a standard all-rounder will not do; without that line, use the standard tier. Apply the same threshold whatever model the parent uses. Verify the selected harness has the required tools, permissions and modalities; model capability alone proves none of those. Keep long execution bounded and delegate when it preserves responsiveness.
+
+Read this instance's model catalog (`GET /api/models`) before dispatch and use its exact `litellm_model`. Choose permitted `ready` rows; `available` alone does not establish readiness. Read `status_reason` and any reset time for unavailable/usage-limited rows. Catalog capabilities describe the model, not the harness's complete tool surface. Missing quota or utilization data is unknown, never spare capacity. Respect workspace budgets and provider terms. Do not load or switch local models without authority. Shared concurrency limits are not reserved capacity.
+
+Pass an explicit exact permitted selector. Require accepted dispatch and an actual assistant turn. If unavailable, limited or failed, record the failure, then choose an allowed alternative or wait; no silent fallback. Inspect a quiet child's binding and last-turn error before calling it idle. Recovery must use supported tools and preserve the task's return obligation.

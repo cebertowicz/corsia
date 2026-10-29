@@ -389,6 +389,3 @@ async def test_a_message_id_that_is_not_gmails_is_refused(mail, conductor):
     out = await EmailReadTool().execute(_thread_id=conductor, account_id=mail.account, message_id="../../settings/sendAs")
     assert out == "Error: That message can't be found."
     assert not any("settings" in str(r.url) for r in mail.gmail.requests)
-
-
-# Search, access, retention and evaluation tests are in test_email_search_access.py.
