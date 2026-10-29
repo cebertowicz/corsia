@@ -12,7 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from floor import diff_paths, floor_hits, workflow_paths
+from floor import diff_paths, edited_item_version, floor_hits, workflow_paths
 
 
 def github_read(path: str, *, accept: str | None = None) -> str:
@@ -121,11 +121,7 @@ def stage_item(event: dict, project: str, root: Path, tracked_repo: str | None, 
     text = read(endpoint)
     item = json.loads(text)
     if kind.endswith(".edited"):
-        if kind.startswith("review."):
-            body = item.get("body")
-            current = f"{item_id}:{hashlib.sha256(body.encode('utf-8', 'surrogatepass')).hexdigest()[:12]}" if isinstance(body, str) else None
-        else:
-            current = f"{item_id}:{item.get('updated_at')}" if item.get("updated_at") else None
+        current = edited_item_version({**item, "id": item_id}, review=kind.startswith("review."))
         if current != str(version):
             raise RuntimeError("the item changed before staging")
     root.mkdir(parents=True, exist_ok=True)

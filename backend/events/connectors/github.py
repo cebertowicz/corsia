@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from events.envelope import EventEnvelope
 from events.identity import (
     GITHUB_INTEGRATION,
+    ISSUE_TYPE,
     PR_TYPE,
     RoutingIdentity,
     check_suite_pr_metadata_from_event,
@@ -184,7 +185,7 @@ def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
     if number is None:
         issue = _json_object(raw, "issue")
         number = issue.get("number")
-        artifact_type = PR_TYPE if issue.get("pull_request") else "issue"
+        artifact_type = PR_TYPE if issue.get("pull_request") else ISSUE_TYPE
     if number is None:
         return None
     return {"integration": GITHUB_INTEGRATION, "type": artifact_type,
