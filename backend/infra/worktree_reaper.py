@@ -23,7 +23,7 @@ from infra.repo_flock import RepoBusyError, repo_lock
 from infra.worktree_reaper_checks import (
     CheckContext,
     RemovalVerdict,
-    candidate_skip_reason,
+    candidate_verdict,
     orphan_skip_reason,
     recheck_before_removal,
 )
@@ -156,20 +156,20 @@ def _remove_candidate(
     copies: list[Path] = []
     try:
         with repo_lock(repo):
-            reason = recheck_before_removal(
+            verdict = recheck_before_removal(
                 ctx, candidate, IDLE_THRESHOLD_SECONDS, expected_head, merged=merged,
                 short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
             )
-            salvaged = reason is RemovalVerdict.SALVAGE
+            salvage = verdict is RemovalVerdict.SALVAGE
 
             def copy_out(quarantined: Path) -> None:
                 copies.append(salvage_worktree(
                     repo, quarantined, candidate.name, ctx.now, candidate.path,
                 ))
 
-            outcome = reason if isinstance(reason, str) else remove_worktree(
-                repo, candidate.path, candidate.name, force=merged or salvaged,
-                salvage=copy_out if salvaged else None,
+            outcome = verdict if isinstance(verdict, str) else remove_worktree(
+                repo, candidate.path, candidate.name, force=merged or salvage,
+                salvage=copy_out if salvage else None,
             )
     except RepoBusyError:
         report.skip(candidate.name, owner, "repo_busy", idle_days)
@@ -268,17 +268,20 @@ def reap(
             deferred.pop(str(candidate.path))
         merged = mode == "pr_terminal" or (head is not None and recorded_head == head)
         expected_head = pr_sha if mode == "pr_terminal" else deferred.get(str(candidate.path))
-        reason = candidate_skip_reason(
+        verdict = candidate_verdict(
             ctx, candidate, IDLE_THRESHOLD_SECONDS, merged=merged,
             short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
         )
-        if isinstance(reason, str) and mode == "pr_terminal" and head is not None:
+        if isinstance(verdict, str) and mode == "pr_terminal" and head is not None:
             # Blocked at merge time (a live process, a Git lock, uncommitted
             # edits): the nightly pass retries it under the same merged rules.
             remember_pr_terminal(candidate.path, head)
-        if isinstance(reason, str):
-            report.skip(candidate.name, candidate.owner_thread, reason, idle_days)
+        if isinstance(verdict, str):
+            report.skip(candidate.name, candidate.owner_thread, verdict, idle_days)
             continue
+        if verdict is RemovalVerdict.SALVAGE:
+            # Re-read open PRs here, not under the repo lock the recheck holds.
+            ctx.open_pr_branches(fresh=True)
         removed_before = report.removed
         if not _remove_candidate(
             repo, report, ctx, candidate, idle_days, expected_head, merged,

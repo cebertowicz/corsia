@@ -124,7 +124,7 @@ class RemovalVerdict(Enum):
 
 def _status_verdict(
     ctx: CheckContext, entry: WorktreeEntry | None, path: Path, status: str | None,
-    idle: float, threshold: float, *, fresh: bool = False,
+    idle: float, threshold: float,
 ) -> str | RemovalVerdict | None:
     if status is None or status == "status_error":
         return status
@@ -135,7 +135,7 @@ def _status_verdict(
     newest = newest_tree_mtime(path)
     if newest is None or ctx.now - newest < threshold:
         return status
-    prs = ctx.open_pr_branches(fresh=fresh)
+    prs = ctx.open_pr_branches()
     if prs is None:
         return "pr_state_unknown"
     if entry and (entry.branch or "").removeprefix("refs/heads/") in prs:
@@ -143,7 +143,7 @@ def _status_verdict(
     return RemovalVerdict.SALVAGE
 
 
-def candidate_skip_reason(
+def candidate_verdict(
     ctx: CheckContext, candidate: Candidate, threshold_seconds: float,
     *, merged: bool = False, short_threshold_seconds: float | None = None,
 ) -> str | RemovalVerdict | None:
@@ -157,13 +157,13 @@ def candidate_skip_reason(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
-    status = _status_reason(candidate.path, merged)
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
-        return status or "recent"
+        return "recent"
     verdict = _status_verdict(
-        ctx, candidate.entry, candidate.path, status, candidate.idle_since, threshold_seconds,
+        ctx, candidate.entry, candidate.path, _status_reason(candidate.path, merged),
+        candidate.idle_since, threshold_seconds,
     )
     if isinstance(verdict, str):
         return verdict
@@ -184,7 +184,9 @@ def recheck_before_removal(
     A pass can run for minutes after the first check, so nothing cached is
     trusted here: registration, locks, the idle clock, the worktree status,
     live processes and running turns are all read again, under the same
-    ``merged`` rules as the first check. ``expected_head`` (the merged PR's
+    ``merged`` rules as the first check. The open-PR set is the exception:
+    the caller re-reads it just before taking the repo lock, so a slow ``gh``
+    call never holds that lock. ``expected_head`` (the merged PR's
     head, or the head recorded at merge time) must still contain the
     worktree's current HEAD.
     """
@@ -202,7 +204,7 @@ def recheck_before_removal(
         return "git_lock"
     idle = idle_since(candidate.path, candidate.admin)
     if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
-        return _status_reason(candidate.path, merged) or "recent"
+        return "recent"
     if expected_head is not None:
         head = entry.head if entry else None
         try:
@@ -212,7 +214,7 @@ def recheck_before_removal(
             return "status_error"
     verdict = _status_verdict(
         ctx, entry, candidate.path, _status_reason(candidate.path, merged), idle,
-        threshold_seconds, fresh=True,
+        threshold_seconds,
     )
     if isinstance(verdict, str):
         return verdict

@@ -266,7 +266,7 @@ def _prepare(repo: Path, kind: str) -> Path:
     elif kind == "ignored_data":
         (wt / ".env").write_text("SECRET=1\n")
     if kind != "recent":
-        _age(repo, wt, (3 if kind in {"dirty", "untracked", "ignored_data"} else 8) * DAY)
+        _age(repo, wt, 8 * DAY)
     return wt
 
 
