@@ -159,7 +159,7 @@ bash scripts/install.sh
 The installer adds any missing prerequisites, builds the environment and opens CORSIA at `http://localhost:1956`. The rest happens in the browser:
 
 1. Choose where your work lives and create a local account.
-2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing. Installing oMLX from scratch currently fails because of an upstream Homebrew problem; until it is fixed, use Claude Code, Codex, an API key or an oMLX server you already run.
+2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
 Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out, and changes nothing while the checkout has local edits or has diverged from that upstream.
