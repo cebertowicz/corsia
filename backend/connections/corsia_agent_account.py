@@ -318,7 +318,7 @@ def _scoped_states(provider: str, project, *, rows: list[dict], has_catalog: boo
         return []  # The vendor's stored models were deliberately disabled.
     return [(account, *account_state(account, project_ids=[project], db=db, rows=rows, source_state=source_state))
             for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
-            if account["state"] != "removed"]
+            if account["state"] != "removed" and (rows or not account["is_default"])]
 
 
 @fact_memo.fact_reads()

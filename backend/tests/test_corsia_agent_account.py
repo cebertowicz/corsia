@@ -525,6 +525,21 @@ def test_source_accounts_read_the_vendors_models_once_whatever_the_account_count
     assert both > 0 and model_reads() == both
 
 
+@pytest.mark.parametrize("state", ["not_installed", "unverified"])
+def test_empty_catalog_keeps_fresh_default_out_of_source_accounts(conductor, monkeypatch, state):
+    from api import provider_sources
+    from connections.source_state import apply_check
+
+    db, _work, _personal = conductor
+    monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
+    db.execute("DELETE FROM models WHERE harness='claude-code'")
+    apply_check("claude-code", state, "check failed", db=db)
+    db.commit()
+    source = provider_sources._harness_source("claude-code")
+    assert source["state"] == state
+    assert source["accounts"] == []
+
+
 def test_a_vendor_listing_no_model_has_no_account_lines(conductor):
     db, _work, personal = conductor
     _discover(db, personal)
