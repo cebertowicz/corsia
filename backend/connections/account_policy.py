@@ -84,11 +84,12 @@ def _policies(provider: str, project_ids: list, *, db) -> list[dict]:
     return [effective_policy(project, provider, db=db) for project in (project_ids or [None])]
 
 
-def permitted_accounts(provider: str, *, project_ids: list, selection_only: bool = False, db) -> list[dict]:
+def permitted_accounts(provider: str, *, project_ids: list, selection_only: bool = False, db,
+                       accounts: list[dict] | None = None) -> list[dict]:
     """Intersect effective scope policies while preserving destination order."""
     policies = _policies(provider, project_ids, db=db)
-    accounts = ordered_accounts(provider, policies[0], selection_only=selection_only, db=db)
-    return [account for account in accounts if all(account["id"] not in policy["disabled"] for policy in policies)]
+    ordered = ordered_accounts(provider, policies[0], selection_only=selection_only, db=db, accounts=accounts)
+    return [account for account in ordered if all(account["id"] not in policy["disabled"] for policy in policies)]
 
 
 def account_fact_reason(account: dict | None, *, provider: str, policies: list,

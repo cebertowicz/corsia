@@ -60,9 +60,9 @@ def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
     if exact:
         if exact['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import harness_row
+            from llm.harness_catalog import project_stored_row
 
-            return harness_row(model, db=db)
+            return project_stored_row(exact, db=db)
         return dict(exact)
     matches = db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (model,)
@@ -79,14 +79,14 @@ def _target_row(model: str, *, db) -> dict | None:
         raise ValueError(f"ambiguous model transport identity: {model}")
     if matches:
         if matches[0]['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import harness_row
+            from llm.harness_catalog import project_stored_row
 
-            return harness_row(model, db=db)
+            return project_stored_row(matches[0], db=db)
         return dict(matches[0])
     if model.startswith(('claude-code/', 'codex/')):
-        from llm.harness_catalog import harness_row
+        from llm.harness_catalog import added_rows
 
-        return harness_row(model, db=db)
+        return added_rows(db=db).get(model)
     return None
 
 

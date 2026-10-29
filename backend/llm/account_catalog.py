@@ -1,6 +1,7 @@
 """Scoped subscription projection with a display-only capability fallback."""
 from __future__ import annotations
 
+from connections import fact_memo
 from connections.account_policy import account_reason, pending_account, permitted_accounts, thread_scope, turn_account
 from connections.harness_usage import project_for_model, stored_usage
 from connections.vendor_accounts import get_account
@@ -47,6 +48,7 @@ def account_model_status(account: dict, row: dict, *, project_ids: list, db, mov
     return {"status": status, "status_reason": reason if status != "ready" else None, "usage": usage}
 
 
+@fact_memo.fact_reads()
 def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, db=None):
     """Add ``runs_on`` to each harness row: whether its model runs on each permitted account.
 

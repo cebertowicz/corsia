@@ -7,38 +7,48 @@ from connections import fact_memo
 
 
 @fact_memo.memoized_reader
-def added_rows(*, db) -> dict[str, dict]:
-    """Project each added-only model once from current signed-in account evidence."""
-    from connections.account_evidence import current_ready_discovery
+def added_rows(*, db, provider: str | None = None) -> dict[str, dict]:
+    """Project added-only models from current signed-in account evidence."""
     from connections.vendor_accounts import list_accounts
 
+    accounts = [account for vendor in ((provider,) if provider else ('claude-code', 'codex'))
+                for account in list_accounts(provider=vendor, db=db)]
+    return added_rows_from_accounts(accounts)
+
+
+def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
+    """Project discovery from account rows a caller already read."""
+    from connections.account_evidence import current_ready_discovery
+
     rows: dict[str, dict] = {}
-    for provider in ('claude-code', 'codex'):
-        for account in list_accounts(provider=provider, db=db):
-            discovery = current_ready_discovery(account)
-            if discovery is None:
+    for account in accounts:
+        vendor = account['provider']
+        if vendor not in ('claude-code', 'codex'):
+            continue
+        discovery = current_ready_discovery(account)
+        if discovery is None:
+            continue
+        for model, evidence in discovery.get('models', {}).items():
+            if not model.startswith(vendor + '/') or not isinstance(evidence, dict):
                 continue
-            for model, evidence in discovery.get('models', {}).items():
-                if not model.startswith(provider + '/') or not isinstance(evidence, dict):
-                    continue
-                previous = rows.get(model)
-                available = evidence.get('available') is True
-                if previous is not None and (previous['available'] or not available):
-                    continue
-                capabilities = evidence.get('capabilities') or {}
-                metadata = {'resolved_identity': evidence.get('resolved_identity'),
-                            'discovered_capabilities': capabilities, 'is_default': False,
-                            'availability_reason': evidence.get('availability_reason')}
-                rows[model] = {
-                    'id': model, 'litellm_model': model, 'provider': provider, 'harness': provider,
-                    'provider_model_id': model[len(provider) + 1:], 'backend': 'cc' if provider == 'claude-code' else 'codex',
-                    'display_name': evidence.get('display_name') or model[len(provider) + 1:],
-                    'description': evidence.get('description') or '', 'source': 'account_discovery',
-                    'enabled': 1, 'available': available, 'context_window': evidence.get('context_window'),
-                    'supports_vision': 'image' in (capabilities.get('input_modalities') or []),
-                    'supports_tools': 1, 'supports_reasoning': bool(capabilities.get('effort_levels') or capabilities.get('reasoning_efforts')),
-                    'metadata_json': json.dumps(metadata), 'last_error': None, 'default_listed': False,
-                }
+            previous = rows.get(model)
+            available = evidence.get('available') is True
+            if previous is not None and (previous['available'] or not available):
+                continue
+            capabilities = evidence.get('capabilities') or {}
+            metadata = {'resolved_identity': evidence.get('resolved_identity'),
+                        'discovered_capabilities': capabilities, 'is_default': False,
+                        'availability_reason': evidence.get('availability_reason')}
+            rows[model] = {
+                'id': model, 'litellm_model': model, 'provider': vendor, 'harness': vendor,
+                'provider_model_id': model[len(vendor) + 1:], 'backend': 'cc' if vendor == 'claude-code' else 'codex',
+                'display_name': evidence.get('display_name') or model[len(vendor) + 1:],
+                'description': evidence.get('description') or '', 'source': 'account_discovery',
+                'enabled': 1, 'available': available, 'context_window': evidence.get('context_window'),
+                'supports_vision': 'image' in (capabilities.get('input_modalities') or []),
+                'supports_tools': 1, 'supports_reasoning': bool(capabilities.get('effort_levels') or capabilities.get('reasoning_efforts')),
+                'metadata_json': json.dumps(metadata), 'last_error': None, 'default_listed': False,
+            }
     return rows
 
 
@@ -56,6 +66,29 @@ def catalog_rows(stored: list[dict]) -> list[dict]:
         db.close()
 
 
+def harness_base_from_row(row: dict, *, db) -> dict:
+    """Project an already-read harness catalog row for an account decision."""
+    from connections.models import provider_may_run
+    from llm.context_window import resolve_window_for_row
+    from llm.model_status import _harness_status
+
+    row = dict(row)
+    status, reason = _harness_status(row['harness'], row, json.loads(row.get('metadata_json') or '{}'),
+                                     resolve_window_for_row(row, db=db), provider_may_run(row['harness'], db=db))
+    return {'litellm_model': row['litellm_model'], 'status': status, 'status_reason': reason,
+            'default_listed': row.get('default_listed', True)}
+
+
+def project_stored_row(row, *, db) -> dict:
+    """Add account availability to a stored Default row without rereading it."""
+    result = dict(row)
+    if not result['available']:
+        added = added_rows(db=db).get(result['litellm_model'])
+        result['added_available'] = bool(added and added['available'])
+    return result
+
+
+@fact_memo.memoized_reader
 def harness_row(model: str, *, db) -> dict | None:
     """Return Default's stored row, or an added-account-only projected row."""
     row = db.execute(
@@ -67,9 +100,5 @@ def harness_row(model: str, *, db) -> dict | None:
         "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)
     ).fetchone()
     if row is not None:
-        result = dict(row)
-        if not result['available']:
-            added = added_rows(db=db).get(result['litellm_model'])
-            result['added_available'] = bool(added and added['available'])
-        return result
+        return project_stored_row(row, db=db)
     return added_rows(db=db).get(model)

@@ -317,19 +317,10 @@ def scoped_status_rows(*, thread_id: str | None = None, project_id: str | None =
 @fact_memo.memoized_reader
 def harness_base_row(model: str, *, db) -> dict | None:
     """One harness model's account-independent row, hidden or not, for a single-account decision."""
-    from llm.harness_catalog import harness_row
+    from llm.harness_catalog import harness_base_from_row, harness_row
 
     row = harness_row(model, db=db)
-    if row is None:
-        return None
-    from connections.models import provider_may_run
-    from llm.context_window import resolve_window_for_row
-
-    row = dict(row)
-    status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
-                                     resolve_window_for_row(row, db=db), provider_may_run(row["harness"], db=db))
-    return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason,
-            "default_listed": row.get("default_listed", True)}
+    return harness_base_from_row(row, db=db) if row is not None else None
 
 
 def catalog_base_rows() -> list[dict]:
