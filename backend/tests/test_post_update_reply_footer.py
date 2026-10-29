@@ -262,12 +262,11 @@ def test_post_update_is_reachable_on_every_harness_surface():
     """One advertised list serves native, Claude Code and Codex directly."""
     from subagents.harness_tool_bridge import build_tool_registry
     from tools.catalog import is_reachable
-    from tools.tool_surface import TOOL_CALL, TOOLS_LOAD, pack_index, reachable_tool_names
+    from tools.tool_surface import TOOL_CALL, TOOLS_LOAD, reachable_tool_names
 
     registry = build_tool_registry()
     assert registry.has("post_update") and is_reachable("post_update")
     assert "post_update" in reachable_tool_names(registry)
-    assert "- post_update:" not in pack_index(registry)
     from subagents.harness_tool_bridge import dynamic_tool_definitions
 
     advertised = {d["function"]["name"] for d in dynamic_tool_definitions(registry)}

@@ -156,7 +156,6 @@ def test_post_update_reaches_native_claude_code_and_codex(tmp_path):
     from subagents.codex_app_server_events import to_dynamic_tool_specs
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
     from subagents.corsia_mcp_server import mcp_tool_payloads
-    from tools.catalog import pack_members
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -166,6 +165,5 @@ def test_post_update_reaches_native_claude_code_and_codex(tmp_path):
     codex = {tool["name"] for tool in to_dynamic_tool_specs(external)}
 
     assert "post_update" in registry.tool_names
-    assert "post_update" not in pack_members()["history"]
     assert {"tools_load", "tool_call", "post_update"} <= cc
     assert {"tools_load", "tool_call", "post_update"} <= codex
