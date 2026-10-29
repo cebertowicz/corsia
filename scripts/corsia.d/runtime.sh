@@ -1120,9 +1120,10 @@ prepare_redeploy() {
 }
 
 activate_prepared_frontend() {
-    local checkout expected_sha fe stage prepared backup absent recovering=false
+    local checkout expected_sha release_mode fe stage prepared backup absent recovering=false
     checkout="${1:-$(serving_checkout_root)}"
     expected_sha="${2:-}"
+    release_mode="${3:-}"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || { REDEPLOY_FRONTEND_STATE=activated; return 0; }
@@ -1132,14 +1133,14 @@ activate_prepared_frontend() {
         recovering=true
         if [ -e "$fe/dist" ] || [ -z "$expected_sha" ] \
             || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$expected_sha"
+            || ! frontend_release_matches_sha "$stage" "$expected_sha" "$release_mode"
         then
             fail "Frontend activation recovery refused: incomplete state was preserved"
             return 1
         fi
         if [ -d "$backup" ] && [ ! -e "$absent" ] \
             && [ -s "$backup/index.html" ] \
-            && frontend_release_sha "$backup" > /dev/null
+            && frontend_release_sha "$backup" source > /dev/null
         then
             :
         elif [ ! -e "$backup" ] && [ -f "$absent" ]; then
@@ -1188,7 +1189,7 @@ print(value)
 frontend_release_matches_sha() {
     local release_dir="$1" expected_sha="$2" actual_sha
     [ -d "$release_dir" ] && [ -s "$release_dir/index.html" ] || return 1
-    actual_sha="$(frontend_release_sha "$release_dir")" || return 1
+    actual_sha="$(frontend_release_sha "$release_dir" "${3:-}")" || return 1
     [ "$actual_sha" = "$expected_sha" ]
 }
 
@@ -1212,7 +1213,7 @@ clear_frontend_release_state() {
 }
 
 ensure_current_frontend_release_locked() {
-    local checkout="$1" fe stage prepared backup absent head_sha worktree_status fresh_source_build=false
+    local checkout="$1" fe stage prepared backup absent head_sha worktree_status fresh_source_build=false recovered_source_build=false
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || return 0
@@ -1238,27 +1239,32 @@ ensure_current_frontend_release_locked() {
     fi
 
     if [ ! -d "$stage" ] &&
-        frontend_release_matches_sha "$fe/dist" "$head_sha" &&
+        frontend_release_matches_sha "$fe/dist" "$head_sha" source &&
         { [ -e "$prepared" ] || [ -e "$backup" ] || [ -e "$absent" ]; }
     then
         if ! clear_frontend_release_state "$checkout"; then
             fail "Frontend startup refused: completed activation cleanup did not finish"
             return 1
         fi
-        [ -n "$worktree_status" ] || return 0
+        if [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+            return 0
+        fi
     fi
     if { [ -e "$backup" ] || [ -e "$absent" ]; } \
         && { [ -e "$fe/dist" ] || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"; }
+            || ! frontend_release_matches_sha "$stage" "$head_sha" source; }
     then
         fail "Frontend startup refused: incomplete activation state remains in $fe/node_modules"
         return 1
     fi
 
     if [ -e "$prepared" ]; then
-        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha"; then
+        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha" source; then
             fail "Frontend startup refused: prepared build does not match checkout $head_sha; retained at $stage"
             return 1
+        fi
+        if ! frontend_release_matches_sha "$stage" "$head_sha"; then
+            recovered_source_build=true
         fi
     elif [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         return 0
@@ -1273,12 +1279,15 @@ ensure_current_frontend_release_locked() {
         fi
     fi
 
-    activate_prepared_frontend "$checkout" "$head_sha" || return 1
+    activate_prepared_frontend "$checkout" "$head_sha" source || return 1
     if ! clear_frontend_release_state "$checkout"; then
         fail "Frontend startup refused: activated release cleanup did not complete"
         return 1
     fi
-    if [ "$fresh_source_build" = true ]; then
+    if [ "$recovered_source_build" = true ]; then
+        # The working tree may have changed since the interrupted build.
+        ensure_current_frontend_release_locked "$checkout" || return 1
+    elif [ "$fresh_source_build" = true ]; then
         [ -s "$fe/dist/index.html" ] && [ "$(frontend_release_sha "$fe/dist" source)" = "$head_sha" ] || {
             fail "Frontend startup refused: activated assets do not match checkout $head_sha"
             return 1

@@ -169,7 +169,9 @@ impl SourceLifecycle {
     fn released(&self, pid: Option<u32>) -> Result<(), String> {
         let database = self.source.state.join("corsia.db");
         let let_go = || -> Result<(), String> {
-            self.is_down()?;
+            if self.source.plist.is_some() {
+                self.is_down()?;
+            }
             if let Some(pid) = pid.filter(|pid| !release_proof::pid_is_gone(*pid)) {
                 return Err(format!("process {pid} is still running"));
             }
@@ -548,7 +550,7 @@ impl adoption::Lifecycle for SourceLifecycle {
             if let Some(why) = unrecorded {
                 return Err(format!("the stop could not be recorded ({why}), so the switch is being undone"));
             }
-            return Ok(());
+            return self.released(None);
         }
         let let_go = self.released(source_pid);
         if !status.success() {
@@ -781,6 +783,31 @@ mod tests {
             assert!(home.lifecycle.check_ready(&state, &BTreeSet::new()).is_ok());
             assert_eq!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok(), expected);
         }
+    }
+
+    #[test]
+    fn unmanaged_stop_refuses_a_locked_database() {
+        use std::io::BufRead;
+        let mut home = home("exit 0", "exit 0", "exec /usr/bin/python3 \"$@\"");
+        home.lifecycle.source.plist = None;
+        home.lifecycle.source.port = None;
+        home.lifecycle.source.generation = None;
+        home.lifecycle.stop_clock = |_| Some("test-start".into());
+        let state = home.lifecycle.source.state.clone();
+        fs::create_dir_all(&state).unwrap();
+        let mut holder = Command::new("/usr/bin/python3")
+            .args(["-u", "-c", "import sqlite3,sys,time; c=sqlite3.connect(sys.argv[1]); c.execute('BEGIN EXCLUSIVE'); print('locked', flush=True); time.sleep(30)"])
+            .arg(state.join("corsia.db"))
+            .stdout(Stdio::piped())
+            .spawn().unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(holder.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        assert_eq!(line.trim(), "locked");
+        let result = home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(()));
+        holder.kill().unwrap();
+        holder.wait().unwrap();
+        assert!(result.unwrap_err().contains("database"));
+        assert!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok());
     }
 
     #[test]

@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
 - Installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
 - The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
