@@ -52,4 +52,22 @@ describe('CommentThread reply field', () => {
 		press(input, { metaKey: true });
 		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right');
 	});
+
+	it('shrinks back to one line once a multi-line reply is sent', async () => {
+		// jsdom has no layout: read a line count off the value, as a browser would for a collapsed field.
+		const real = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
+		Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get(this: HTMLTextAreaElement) { return 20 * Math.max(1, this.value.split('\n').length); } });
+		try {
+			render();
+			const input = openReply();
+			type(input, 'one\ntwo\nthree\nfour');
+			expect(input.style.height).toBe('80px');
+			press(input, {});
+			await vi.waitFor(() => expect(input.value).toBe(''));
+			expect(input.style.height).toBe('20px');
+		} finally {
+			if (real) Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', real);
+			else delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+		}
+	});
 });
