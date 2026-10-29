@@ -30,7 +30,7 @@ function sourceFromFlight(flight: typeof flightShapes[number]) {
 }
 
 describe('setup provider rows', () => {
-	it('tells a computer under 24 GB why and what to do instead', () => {
+	it('tells a computer below the memory floor why and what to do instead', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: false, startError: '' });
 
 		expect(row.meta).toBe('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.');
@@ -51,6 +51,13 @@ describe('setup provider rows', () => {
 			meta: 'Qwen 3.8 · runs on this computer',
 			pill: { state: 'success', label: 'Ready' },
 		});
+	});
+
+	it('shows an existing ready model without a memory refusal below the floor', () => {
+		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: true, startError: '' });
+
+		expect(row).toMatchObject({ meta: 'Local model · runs on this computer', pill: { state: 'success', label: 'Ready' } });
+		expect(row.meta).not.toContain('Local models need at least 32 GB of memory');
 	});
 
 	it.each(flightShapes)('gives $state/$cause its matching local setup recovery', (flight) => {
