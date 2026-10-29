@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - Find the CORSIA agent and project conductors in search and Activity, with each conductor named for its project.
 - Signing in to an added Claude Code or Codex account makes its discovered models available during setup and in the model picker.
 - Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
