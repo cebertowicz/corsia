@@ -12,7 +12,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
-from registry.path_access import ReadRefused, checked_read
+from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -71,6 +71,8 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             raise HTTPException(404, "Thread not found")
         p, bases = checked_read_path(path, project_id, db)
         writable = _writable(p, bases, db=db)
+        # A context file every scope reads but this viewer cannot save takes no write here.
+        needs_setup = writable or not shared_context_path(p, db=db)
     finally:
         db.close()
     if image_media_type(p):
@@ -85,7 +87,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     text = raw.decode("utf-8", errors="replace")
     db = get_db()
     try:
-        if live_open and writable:
+        if live_open and needs_setup:
             _live_open_setup(p, project_id, thread_id, db)
         artifact_type = registry_service.classify(p)
         if thread_id:

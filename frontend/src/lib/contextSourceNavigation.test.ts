@@ -30,6 +30,12 @@ describe('context source navigation', () => {
 			expect(contextSourceOwnerLabel(source)).toBe(owner);
 		}
 	});
+	it('opens a file path when no settings surface owns the row', () => {
+		const source = { layer: 'thread', ownerSurface: 'thread-bootloader', stableReference: '/workspace/project/.threads/t/RESPONSIBILITY.md' };
+		expect(contextSourceOwnerTarget(source)).toBe('document');
+		expect(contextSourceActionLabel(source)).toBe('Open Document');
+		expect(contextSourceOwnerTarget({ ...source, stableReference: 'thread://t/bootloader' })).toBeNull();
+	});
 	it('has no action for the earlier-chat summary', () => {
 		const source = { layer: 'summary', ownerSurface: 'summary-details', stableReference: 'summary://s-1' };
 		expect(contextSourceOwnerTarget(source)).toBeNull();

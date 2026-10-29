@@ -73,6 +73,29 @@ def test_a_workspace_skill_opens_from_a_project_and_saves_only_from_the_workspac
         checked_read(str(beside), [project])
 
 
+def test_a_workspace_role_file_opens_from_a_project_and_saves_only_from_the_workspace(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    role = workspace / 'context' / 'roles' / 'agent'
+    role_skill = role / 'skills' / 'alpha' / 'SKILL.md'
+    role_skill.parent.mkdir(parents=True)
+    role_skill.write_text('role skill content')
+    role_context = role / '10-role.md'
+    role_context.write_text('role context')
+    beside = workspace / 'context' / 'rolesets' / 'agent.md'
+    beside.parent.mkdir(parents=True)
+    beside.write_text('not a role file')
+    project = workspace / 'projects' / 'example'
+    project.mkdir(parents=True)
+    monkeypatch.setattr(config, 'WORKSPACE', workspace)
+
+    for role_file in (role_skill, role_context):
+        assert checked_read(str(role_file), [project]) == role_file
+        assert not _writable(role_file, [project])
+        assert _writable(role_file, [workspace])
+    with pytest.raises(ReadRefused):
+        checked_read(str(beside), [project])
+
+
 def test_a_file_no_verified_projection_generated_is_not_the_projection(tmp_path, monkeypatch):
     workspace = tmp_path / 'workspace'
     by_hand = workspace / '.corsia' / 'context' / 'example.md'

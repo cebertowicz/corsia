@@ -1,8 +1,9 @@
 """One answer to "which registered file does this path name, inside this scope?".
 
 ``GET /api/files/revision`` and the chat's reference cards both ask it, so the
-rule that a path must sit under a scope root (or be a read-only context file
-or a workspace skill), be a real file, and resolve to its registered identity has a single home.
+rule that a path must sit under a scope root (or be a read-only context file,
+a workspace skill or a workspace role file), be a real file, and resolve to its
+registered identity has a single home.
 """
 
 from __future__ import annotations
@@ -25,18 +26,26 @@ class FileLookup(NamedTuple):
     artifact: dict[str, Any] | None
 
 
-def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    """Whether ``path`` is under a scope root, a read-only context file, or a workspace skill.
+def shared_context_path(path: Path, *, db=None) -> bool:
+    """Whether every scope reads ``path``: a read-only context file, or a workspace skill or role file.
 
-    Workspace skills reach every scope's agents, so every scope reads them;
-    saving one still needs the workspace scope.
+    Workspace skills and role files (``context/roles/<role>/``, role skills
+    included) reach agents in every scope; saving one still needs the
+    workspace scope.
     """
-    skills = resolve_workspace_root(config.WORKSPACE) / "skills"
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_read_only_context_path(path, config.WORKSPACE, db=db)
-        or path.resolve(strict=False).is_relative_to(skills.resolve(strict=False))
+    if is_read_only_context_path(path, config.WORKSPACE, db=db):
+        return True
+    root = resolve_workspace_root(config.WORKSPACE)
+    resolved = path.resolve(strict=False)
+    return any(
+        resolved.is_relative_to(shared.resolve(strict=False))
+        for shared in (root / "skills", root / "context" / "roles")
     )
+
+
+def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
+    """Whether ``path`` is under a scope root or is a context file every scope reads."""
+    return any(path == b or b in path.parents for b in bases) or shared_context_path(path, db=db)
 
 
 class ReadRefused(Exception):
