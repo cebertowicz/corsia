@@ -12,7 +12,6 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from infra.queued_input_settlement import cancel_queued_input
-from infra.reply_context import has_comment_candidates
 from infra.vendor_login import public_metadata
 
 
@@ -145,8 +144,7 @@ async def retry_thread_delivery_now(
     if state not in {"failed", "ambiguous"}:
         raise HTTPException(409, "This message has no retryable delivery outcome.")
     content, metadata = _retry_content(message)
-    if not content.strip() and not has_comment_candidates(metadata.get("reply_context")):
-        raise HTTPException(409, "This message has no content to retry.")
+    # send_thread_input owns the empty-input rule; a retry adds no second copy.
     from infra.send_service import SendRejected, send_thread_input
 
     try:
