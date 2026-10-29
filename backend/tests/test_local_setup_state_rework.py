@@ -173,8 +173,8 @@ async def test_corsias_own_registered_local_model_is_visible_and_setup_and_prepa
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
     monkeypatch.setattr(prepare, "start_managed_omlx", AsyncMock(side_effect=AssertionError("must not start oMLX")))
     monkeypatch.setattr(flow, "start_managed_omlx", AsyncMock(side_effect=AssertionError("must not start oMLX")))
-    monkeypatch.setattr(prepare, "local_memory_ok", lambda: True)
-    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(prepare, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
     before = discovery.get_server(sid)
     assert local_sources.omlx_source()["state"] == "ready"
     await prepare.begin_prepare()
@@ -236,7 +236,7 @@ async def test_a_running_server_with_no_model_starts_the_download_instead_of_rea
         started.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
     monkeypatch.setattr(flow, "_run_flight", download_flight)
     try:
         result = await flow.begin_local_setup(onboarding=True)
@@ -252,7 +252,7 @@ async def test_a_running_server_with_no_model_starts_the_download_instead_of_rea
 async def test_a_press_that_cannot_claim_the_operation_says_why_instead_of_reporting_progress(isolated_db, flight, monkeypatch):
     from llm import local_setup_flow as flow, local_setup_operation
 
-    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
     held = local_setup_operation.try_lock()
     assert held is not None
     try:
@@ -269,7 +269,7 @@ async def test_a_settings_press_that_cannot_claim_the_operation_says_why_and_log
     from llm import local_setup_flow as flow, local_setup_operation
     from llm.local_model import LocalModel
 
-    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
     warned = []
     monkeypatch.setattr(flight.log, "warning", lambda message, *args: warned.append(message % args))
     held = local_setup_operation.try_lock()

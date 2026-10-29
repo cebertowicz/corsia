@@ -36,6 +36,14 @@ describe('setup provider rows', () => {
 		expect(row.meta).toBe('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.');
 	});
 
+	it('starts an installed stopped model below the setup floor without a pick', () => {
+		const start = vi.fn();
+		const row = setupLocalRow({ ...actions(), start, source: { source: 'omlx', name: 'Local model', state: 'needs_setup', reason_code: 'not_running', local_state: 'stopped' }, pick: null, eligible: false, downloading: false, ready: false, startError: '' });
+		expect(row.meta).toBe('Local model · Off');
+		row.toggle?.run(true);
+		expect(start).toHaveBeenCalledOnce();
+	});
+
 	it('shows a ready local model as a completed provider row', () => {
 		const row = setupLocalRow({
 			...actions(),

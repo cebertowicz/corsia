@@ -43,6 +43,9 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 			detail: failed ? localTurnOffFailed(turnOffFailed.reference) : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
+	if (source?.reason_code === 'not_running' && source.local_state === 'stopped') {
+		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
+	}
 	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (downloading) {
 		if (source?.local_state === 'starting') return { ...row, meta: 'Starting the local model…', busy: true };
@@ -56,10 +59,6 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 				confirm: [{ label: 'Stop download', run: () => { confirmStop?.(false); stop(); } }, { label: 'Keep downloading', run: () => confirmStop?.(false) }] };
 		}
 		return { ...row, meta, toggle };
-	}
-	// Downloaded, and its server was turned off: the switch turns it back on.
-	if (source?.reason_code === 'not_running' && source.local_state === 'stopped') {
-		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
 	}
 	// The download finished: the model is being listed and loaded, never offered for download again;
 	// Check again asks the service now rather than waiting on the next refresh.

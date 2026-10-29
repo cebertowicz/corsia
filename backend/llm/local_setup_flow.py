@@ -12,7 +12,7 @@ from llm.local_model import LocalModel, record_set_up
 from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
-from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
+from llm.local_setup_gates import local_setup_memory_ok, limited_subscription_message, subscription_available
 from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_message, local_setup_error
 from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
 
@@ -106,8 +106,8 @@ async def resume_pending_setup() -> bool:
     if not operation.in_flight:
         ls.restore_terminal_flight(operation)
         return False
-    if operation.kind not in {"setup", "settings"} or not await asyncio.to_thread(local_memory_ok):
-        ls.log.warning("discarding local setup recovery record: invalid kind or insufficient memory")
+    if operation.kind not in {"setup", "settings"} or not await asyncio.to_thread(local_setup_memory_ok):
+        ls.log.warning("discarding local setup recovery record: invalid kind or below the local setup memory floor")
         local_setup_operation.clear()
         return False
     ls.start_flight(_resume(operation), "Waiting to resume local model setup", operation=operation)
@@ -123,6 +123,26 @@ def _in_progress_or_blocked() -> dict:
     ls.log.warning("Local setup could not claim its operation reference=%s", ref)
     return {**local_setup_error("CORSIA couldn't start the download."), "reason": "operation_held", "ref": ref,
             "fix": "Quit CORSIA completely, reopen it, then press Retry."}
+
+
+async def _restart_installed(server_id: str) -> dict:
+    """Restart an installed model through the existing server lifecycle, without a download."""
+    from api.network_server_lifecycle import lifecycle_action
+    from llm.catalog import discover_network_models
+
+    try:
+        result = await lifecycle_action(server_id, "start")
+        if result.get("ok"):
+            refreshed = await discover_network_models(server_id)
+            result = ({"ok": True, "existing": True, "server_id": server_id}
+                      if refreshed.get("ok") else local_setup_error("CORSIA couldn't refresh the local model list. Try again."))
+    except asyncio.CancelledError:
+        ls._release_operation_lock()
+        raise
+    except Exception as exc:
+        ls.log.exception("Local model restart failed")
+        result = local_setup_error(failure_message(exc))
+    return ls.finish_flight(result)
 
 
 async def begin_local_setup(*, no_subscription_only: bool = False,
@@ -144,7 +164,15 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
             return _in_progress_or_blocked()
         return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})
-    memory_ok = await asyncio.to_thread(local_memory_ok)
+    from llm.local_sources import installed_managed_server
+
+    installed = await asyncio.to_thread(installed_managed_server)
+    if installed is not None:
+        if not ls._claim_operation("setup", onboarding=onboarding):
+            return _in_progress_or_blocked()
+        ls.start_flight(_restart_installed(installed["id"]), "Starting")
+        return ls._in_progress_result()
+    memory_ok = await asyncio.to_thread(local_setup_memory_ok)
     ls.clear_result()
     subscription = await subscription_available() if no_subscription_only else None
     if subscription is not None:
@@ -182,7 +210,7 @@ async def begin_settings_download(model: LocalModel) -> dict:
         if await resume_pending_setup():
             return ls._in_progress_result()
         return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
-    if not await asyncio.to_thread(local_memory_ok):
+    if not await asyncio.to_thread(local_setup_memory_ok):
         return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
     if not ls._claim_operation("settings", model):
         await resume_pending_setup()

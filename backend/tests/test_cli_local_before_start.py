@@ -33,7 +33,7 @@ def entry(monkeypatch, tmp_path):
     monkeypatch.setattr(before_start, "_discover", discover)
     monkeypatch.setattr(before_start, "_quiet_logs", lambda: tmp_path / "install.log")
     monkeypatch.setattr("llm.local_setup_gates.limited_subscription_message", no_limit)
-    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr("llm.local_setup_gates.local_setup_memory_ok", lambda *_args: True)
     for name in ("STREAM_COMMAND_OUTPUT",):
         monkeypatch.setattr(local_setup_executable, name, getattr(local_setup_executable, name))
     for name in ("DOWNLOAD_WAIT_SECONDS", "DOWNLOAD_FOLLOW_SECONDS"):
@@ -128,7 +128,21 @@ SIGN_IN_LINES = [
 
 
 def _ineligible(monkeypatch):
-    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: False)
+    monkeypatch.setattr("llm.local_setup_gates.local_setup_memory_ok", lambda *_args: False)
+
+
+def test_ineligible_mac_with_installed_model_restarts_without_download(monkeypatch, entry):
+    _subscription(monkeypatch, None)
+    _ineligible(monkeypatch)
+    monkeypatch.setattr("llm.local_sources.installed_managed_server", lambda: {"id": "managed"})
+
+    async def restart():
+        entry.append("restart")
+        return {"ok": True, "existing": True}
+
+    monkeypatch.setattr(flow, "begin_local_setup", restart)
+    assert before_start.run_before_start(force_local=False) == 0
+    assert entry == ["discover", "restart"]
 
 
 def test_an_ineligible_mac_without_a_sign_in_says_how_to_get_one(monkeypatch, entry, capsys):

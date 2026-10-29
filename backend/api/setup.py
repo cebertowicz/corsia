@@ -143,12 +143,12 @@ def _ai_check_pending() -> bool:
 
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
-    from llm.local_setup_gates import host_never_runs_local, local_memory_ok
+    from llm.local_setup_gates import host_never_runs_local, local_setup_memory_ok
 
     apple_silicon = not host_never_runs_local() and platform.machine().lower() in {"arm64", "aarch64"}
     macos_supported = _macos_supported()
     # Only the 32 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
-    memory_ok = local_memory_ok()
+    memory_ok = local_setup_memory_ok()
     try:
         free_disk_gb = round(shutil.disk_usage(config.STATE_ROOT).free / 1000**3, 1)
     except OSError:

@@ -17,7 +17,7 @@ def test_setup_poll_and_source_read_budget(isolated_db, monkeypatch, tmp_path, c
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
-    monkeypatch.setattr(local_setup_prepare, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(local_setup_prepare, "local_setup_memory_ok", lambda: True)
     monkeypatch.setattr(local_setup_prepare, "_prepare", local_setup_prepare._Prepare())
     with database.get_db() as db:
         db.execute("DELETE FROM users")

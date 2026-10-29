@@ -103,7 +103,7 @@ class LocalModel:
         return result
 
 
-def memory_allows_local(ram_bytes: int) -> bool:
+def memory_allows_local_setup(ram_bytes: int) -> bool:
     """Whether this Mac meets the memory floor for local model setup and downloads."""
     return ram_bytes >= MIN_RAM_GIB * GIB
 

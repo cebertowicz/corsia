@@ -35,7 +35,7 @@
 	onDestroy(() => stop?.());
 </script>
 
-{#if corsiaManaged && lowMemory && source?.state !== 'ready'}
+{#if corsiaManaged && lowMemory && source?.state !== 'ready' && source?.reason_code !== 'not_running'}
 	<div class="local-refusal">
 		<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>
 		<Button size="sm" variant="ghost" onclick={onAddProvider}>Add provider</Button>

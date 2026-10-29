@@ -13,7 +13,7 @@ from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_execu
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
-from llm.local_setup_gates import host_never_runs_local, local_memory_ok
+from llm.local_setup_gates import host_never_runs_local, local_setup_memory_ok
 from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
@@ -117,6 +117,16 @@ def local_omlx_servers(servers: list[dict] | None = None) -> list[dict]:
                 )) for ep in get_endpoints(server["id"]))]
 
 
+def installed_managed_server() -> dict | None:
+    """Return CORSIA's managed server when its catalog has an installed model."""
+    server = corsia_omlx_server(include_disabled=True)
+    if server is None:
+        return None
+    prefix = f"omlx@{server['id']}/"
+    return server if any(row["litellm_model"].startswith(prefix)
+                         for row in list_models(provider="omlx", include_unavailable=True)) else None
+
+
 def connected_local_server() -> dict | None:
     """CORSIA's own oMLX when it is online and has a usable catalog model.
 
@@ -137,7 +147,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     from onboarding.local_download_state import current as local_download_state
 
     never_local = host_never_runs_local()
-    eligible = local_memory_ok() and not never_local
+    eligible = local_setup_memory_ok() and not never_local
     model = known_model() if eligible else None
     settings_flight = setup_kind() == "settings"
     flight = None if settings_flight else local_download_state()
@@ -146,6 +156,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
                        checked_at: str | None = None) -> dict[str, Any]:
         result = _source("omlx", "Local model", state, reason, fix, checked_at)
         result.update(
+            # Permission to set up or add a model, not permission to run an installed one.
             eligible=eligible,
             never_local=never_local,
             context_window=model.context_window if model else None,
@@ -160,6 +171,9 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
 
     name = "Local model"
     servers = local_omlx_servers(omlx_rows)
+    installed = installed_managed_server() if not eligible else None
+    if installed is not None and all(server["id"] != installed["id"] for server in servers):
+        servers.append(installed)
     if not servers:
         install_error = managed_omlx_install_error()
         if install_error:
@@ -175,7 +189,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         if not online:
             result = starter_source("needs_setup", "The local model server is not answering",
                                    OMLX_FIX, servers[0].get("updated_at"))
-            result["reason_code"] = "not_running"
+            result["reason_code"] = "not_running" if eligible or installed else "no_models"
         else:
             available, _enabled = membership if membership is not None else catalog_membership()
             if not any(f"omlx@{s['id']}" in available for s in online):

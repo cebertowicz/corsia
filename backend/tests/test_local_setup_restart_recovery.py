@@ -43,7 +43,7 @@ def test_recovery_follows_the_recorded_task_without_posting_another_download(mon
 def test_restart_resumes_the_recorded_setup_model_under_the_operation_lock(monkeypatch):
     local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "setup", "task-1"))
     observed: dict[str, object] = {}
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda *_args: True)
 
     async def run_flight(*, model=None, on_stage=None):
         observed.update({"model": model, "locked": local_setup._flight.operation_lock})
@@ -67,7 +67,7 @@ def test_restart_resumes_the_recorded_setup_model_under_the_operation_lock(monke
 
 def test_restart_dispatches_a_settings_record_to_its_own_completion_path(monkeypatch):
     local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "settings", "task-1"))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda *_args: True)
     observed: list[LocalModel] = []
 
     async def resume_settings(model):
@@ -86,7 +86,7 @@ def test_restart_dispatches_a_settings_record_to_its_own_completion_path(monkeyp
 
 def test_setup_during_a_settings_recovery_stays_in_progress_and_never_adopts_the_model(monkeypatch):
     local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "settings", "task-1"))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda *_args: True)
     recorded: list[LocalModel] = []
 
     async def resume_settings(_model):
@@ -112,7 +112,7 @@ def test_setup_during_a_settings_recovery_stays_in_progress_and_never_adopts_the
 
 def test_a_record_on_a_mac_now_below_24_gib_is_discarded(monkeypatch):
     local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "setup", "task-1"))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda *_args: False)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda *_args: False)
 
     assert asyncio.run(local_setup_flow.resume_pending_setup()) is False
     assert local_setup_operation.read() is None and not local_setup_operation.record_path().exists()
@@ -122,7 +122,7 @@ def test_a_record_from_before_the_recommender_is_ignored_and_a_fresh_setup_start
     # A record naming a profile id has no model to resume, so setup starts over and picks.
     local_setup_operation.record_path().write_text(
         json.dumps({"profile_id": "qwen-27b-oq4e", "kind": "setup", "task_id": "task-1"}))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda *_args: True)
 
     started: list[object] = []
 
@@ -149,7 +149,7 @@ def test_restart_preserves_the_download_origin(monkeypatch, onboarding):
     local_setup_operation.write(local_setup_operation.Operation.for_model(
         MODEL, "setup", "task-origin", onboarding=onboarding,
     ))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda: True)
     observed = []
 
     async def resumed(*, model):
@@ -173,7 +173,7 @@ def test_retired_starter_record_is_cleared_without_starting_a_managed_flight(mon
                   "context_window": MODEL.context_window},
         "kind": "starter", "task_id": "task-1",
     }))
-    monkeypatch.setattr(local_setup_flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(local_setup_flow, "local_setup_memory_ok", lambda: True)
     monkeypatch.setattr(local_setup_flow, "_run_flight", lambda **_kwargs: pytest.fail("must not start managed setup"))
 
     assert asyncio.run(local_setup_flow.resume_pending_setup()) is False

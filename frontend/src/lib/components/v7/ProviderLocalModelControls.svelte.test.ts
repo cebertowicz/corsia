@@ -44,6 +44,17 @@ describe('ProviderLocalModelControls', () => {
 		expect(host.textContent).not.toContain('Add model');
 	});
 
+	it('hides the refusal for an installed stopped model below the floor', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		token.set('tok');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: false, reason_code: 'not_running', local_state: 'stopped' }] }) })));
+		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
+		await tick(); await tick(); flushSync();
+		expect(host.textContent).not.toContain('Local models need at least 32 GB of memory');
+		expect(host.textContent).not.toContain('Add model');
+	});
+
 	it('shows no low-memory refusal on a host that can never run a local model', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
