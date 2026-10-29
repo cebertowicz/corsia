@@ -1,8 +1,6 @@
 """Native clipboard commands for the shared browser page."""
 import asyncio
-import json
 import sys
-from urllib.parse import urlsplit
 
 from host_access.browser_cdp import CdpClient
 from host_access.browser_session_state import BrowserSessionError
@@ -77,7 +75,7 @@ async def _evaluate(cdp: CdpClient, context: int, expression: str, step: str = "
 
 
 async def _command(cdp: CdpClient, command: str) -> None:
-    key = {"copy": "c", "cut": "x", "paste": "v", "undo": "z"}[command]
+    key = {"copy": "c", "cut": "x", "undo": "z"}[command]
     args = {"key": key, "code": f"Key{key.upper()}", "windowsVirtualKeyCode": ord(key.upper()), "modifiers": 4 if sys.platform == "darwin" else 2}
     await _call(cdp, "Input.dispatchKeyEvent", f"{command} key down", type="keyDown", commands=[command], **args)
     await _call(cdp, "Input.dispatchKeyEvent", f"{command} key up", type="keyUp", **args)
@@ -104,26 +102,18 @@ async def clipboard_selection(endpoint: str, cut: bool) -> str:
                     text = record.get("selection")
                 if isinstance(text, str):
                     return text
-                break
+                raise BrowserSessionError("This page couldn't be copied")
             await asyncio.sleep(0.025)
-        raise BrowserSessionError("This page couldn't be copied")
+        if cut:
+            raise BrowserSessionError("This page couldn't be cut")
+        return ''
 
 
 async def clipboard_paste(endpoint: str, text: str) -> None:
-    """Write the person's text with a temporary write-only grant and paste natively."""
+    """Insert the person's text without changing the host clipboard."""
     async with CdpClient(endpoint) as cdp:
         await _call(cdp, "Emulation.setFocusEmulationEnabled", "focus emulation", enabled=True)
-        context, url = await _world(cdp)
-        parsed = urlsplit(url)
-        if not parsed.scheme or not parsed.netloc:
-            raise BrowserSessionError("This page couldn't receive pasted text")
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        try:
-            await _call(cdp, "Browser.grantPermissions", "write permission grant", origin=origin, permissions=["clipboardSanitizedWrite"])
-            await _evaluate(cdp, context, f"navigator.clipboard.writeText({json.dumps(text)})", "write")
-        finally:
-            await _call(cdp, "Browser.resetPermissions", "permission reset")
-        await _command(cdp, "paste")
+        await _call(cdp, "Input.insertText", "insert text", text=text)
 
 
 async def clipboard_undo(endpoint: str) -> None:

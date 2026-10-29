@@ -27,8 +27,8 @@ describe('browser pane clipboard', () => {
   clipboardKey(keydown, () => broken, fail);
   await vi.waitFor(() => expect(fail).toHaveBeenCalledTimes(2));
   expect(fail.mock.calls.map(call => call[0]).sort()).toEqual([
-   'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.',
    'CORSIA couldn’t copy. Try again.',
+   'CORSIA needs clipboard access to copy. Allow clipboard access in the site settings and try again.',
   ]);
  });
  it('stays quiet when the stream ends during a copy', async () => {
@@ -77,6 +77,23 @@ describe('browser pane clipboard', () => {
   await clipboard.paste();
   expect(readText).toHaveBeenCalledOnce();
   expect(send).toHaveBeenCalledWith({ type: 'clipboard_paste', text: 'pasted' });
+ });
+ it('does nothing when the clipboard has no text', async () => {
+  const send = vi.fn();
+  const clipboard = new BrowserPaneClipboard(send, { write: vi.fn(), readText: vi.fn().mockResolvedValue('') }, data => data);
+  await clipboard.paste();
+  expect(send).not.toHaveBeenCalled();
+ });
+ it('uses cut in selection and fallback errors', async () => {
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
+  const fail = vi.fn();
+  const event = { type: 'keydown', key: 'x', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent;
+  clipboardKey(event, () => clipboard, fail);
+  clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard);
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith('CORSIA couldn’t cut from the page. Select the text again and cut.', true));
+  clipboardKey(event, () => clipboard, fail);
+  clipboardReply({ type: 'clipboard_selection', id: 2, text: '' }, clipboard);
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith('Select text in the page to cut.', false));
  });
  it('does not replace the clipboard when the page has no selection', async () => {
   const send = vi.fn();

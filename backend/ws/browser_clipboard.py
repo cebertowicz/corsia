@@ -22,9 +22,9 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
             report({"type": kind, "id": data["id"], "text": text})
         except PageHandledError:
             outcome = "page_handled"
-            report({"type": kind, "id": data["id"], "error": "This page handles copying itself, so CORSIA couldn’t copy the text."})
+            report({"type": kind, "id": data["id"], "error": f"This page handles {'cutting' if cut else 'copying'} itself. Try the page’s own {action} button, if it has one."})
         except (BrowserSessionError, OSError, WebSocketException, TimeoutError):
-            report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy from this page. Try copying again."})
+            report({"type": kind, "id": data["id"], "error": f"CORSIA couldn’t {action} from this page. Try {('cutting' if cut else 'copying')} again."})
         await asyncio.to_thread(emit_product_event, "browser_pane", "clipboard", thread_id=thread_id,
                                 properties={"action": action, "outcome": outcome})
     elif kind == "clipboard_paste" and isinstance(data.get("text"), str):

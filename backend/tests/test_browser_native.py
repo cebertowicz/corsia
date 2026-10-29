@@ -21,7 +21,6 @@ from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_clipboard, browser_stream
 from ws.browser_frames import PaneFrames
-from tests.browser_clipboard_diagnostics import native_clipboard_diagnostics  # noqa: F401
 from tests.browser_native_window import wait_for_headed_window
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
@@ -221,7 +220,7 @@ async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatc
 
 
 @pytest.mark.parametrize('headed', [False, True])
-async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch, headed, native_clipboard_diagnostics):
+async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch, headed):
     thread, connection = 'native-clipboard', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     with popup_fixture() as base:
@@ -234,6 +233,23 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             if headed:
                 await wait_for_headed_window(endpoint, native_owner.socket_dir)
             await _exercise_clipboard(thread, connection, endpoint)
+
+
+@pytest.mark.parametrize('headed', [False, True])
+async def test_native_copy_without_selection(native_owner, monkeypatch, headed):
+    thread, connection = 'native-empty-copy', 'pane'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    with popup_fixture() as base:
+        assert not (await native_owner.run(thread, ('open', base), show_window=headed)).startswith('Error:')
+        endpoint = await native_owner.page_endpoint(thread)
+        try:
+            if headed:
+                await wait_for_headed_window(endpoint, native_owner.socket_dir)
+            replies = []
+            await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
+            assert replies == [{'type': 'clipboard_selection', 'id': 1, 'text': ''}]
+        finally:
+            browser_pane.clear_page_endpoint(thread, connection)
 
 
 async def _drag_selection(thread, connection, start, end):
@@ -312,7 +328,7 @@ async def _exercise_clipboard(thread, connection, endpoint):
         assert result['result']['value'] == 'Pasted text'
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression='clipboardEvents', returnByValue=True)
-        assert result['result']['value'] == ['copy', 'paste']
+        assert result['result']['value'] == ['copy']
         # A successful paste reports no error: it clears any the pane is showing.
         assert replies[1:] == [{'type': 'pane_error', 'source': 'clipboard', 'error': None}]
         await _check_page_handled_clipboard(thread, connection, endpoint)
@@ -335,7 +351,10 @@ async def _exercise_clipboard(thread, connection, endpoint):
         assert replies[-1] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}, f'frame paste replies: {replies!r}'
         async with browser_cdp.CdpClient(endpoint) as cdp:
             result = await cdp.call('Runtime.evaluate', expression='clipboardEvents.filter(x => x.startsWith("frame-"))', returnByValue=True)
-        assert result['result']['value'] == ['frame-copy', 'frame-cut', 'frame-paste']
+        assert result['result']['value'] == ['frame-copy', 'frame-cut']
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            result = await cdp.call('Runtime.evaluate', expression="document.querySelector('iframe').contentDocument.querySelector('input').value", returnByValue=True)
+        assert result['result']['value'] == 'frame pastehere'
         # Cross-origin copy and paste are exercised by the separate OOPIF test.
         # Cut deletes only the copied selection, in a text field and in an editable region.
         for request, setup, read, selector in (
@@ -387,27 +406,10 @@ def popup_fixture():
             padding: 2px; border: 2px solid black; width: 220px; }</style><input id="field" value="Cross origin">
             <script>const field = document.querySelector('#field');
             window.addEventListener('message', event => {
-              if (event.data === 'focus') { parent.postMessage('ready', '*'); return; }
-              if (event.data?.type !== 'clipboard-diagnostic-request') return;
-              let node = document.activeElement;
-              const active = [];
-              while (node) {
-                active.push({tag: node.tagName, id: node.id || null});
-                if (!node.shadowRoot?.activeElement) break;
-                node = node.shadowRoot.activeElement;
-              }
-              let selected = document.getSelection()?.toString() || '';
-              if (node && ['INPUT', 'TEXTAREA'].includes(node.tagName)) {
-                selected = node.type === 'password' ? '[password omitted]' :
-                  (node.selectionStart == null ? '' : node.value.slice(node.selectionStart, node.selectionEnd));
-              }
-              event.source.postMessage({type: 'clipboard-diagnostic-response', nonce: event.data.nonce,
-                active, selected,
-                hasFocus: document.hasFocus(), visibilityState: document.visibilityState,
-                copyEnabled: document.queryCommandEnabled('copy')}, '*');
+              if (event.data === 'focus') parent.postMessage('ready', '*');
             });
             field.addEventListener('mouseup', () => parent.postMessage('selection:' + field.value.slice(field.selectionStart, field.selectionEnd), '*'));
-            field.addEventListener('paste', e => parent.postMessage('paste:' + e.clipboardData.getData('text/plain'), '*'));
+            field.addEventListener('input', () => parent.postMessage('input:' + field.value, '*'));
             </script>''',
         '/popup': b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
                        <button id="finish" onclick="window.opener.postMessage(document.querySelector('#account').value, '*');
@@ -438,7 +440,7 @@ def popup_fixture():
 
 
 @pytest.mark.parametrize('headed', [False, True])
-async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, headed, native_clipboard_diagnostics):
+async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, headed):
     thread, connection = 'native-clipboard-oopif', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     with popup_fixture() as base:
@@ -464,12 +466,6 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                         pytest.fail('clipboard read-denial probe did not finish')
                     return result['result']['value']
                 assert await read_probe() in not_read
-                await cdp.call('Browser.grantPermissions', origin=base, permissions=['clipboardSanitizedWrite'])
-                try:
-                    assert await read_probe() in not_read
-                finally:
-                    await cdp.call('Browser.resetPermissions')
-                assert await read_probe() in not_read
                 child = base.replace('127.0.0.1', 'localhost') + '/clipboard-child'
                 setup = """new Promise((resolve, reject) => {
                     window.clipboardEvents = [];
@@ -485,14 +481,14 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 await _select_cross_origin_field(thread, connection, cdp)
                 replies = []
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
-                assert replies[0].get('error'), f'cross-origin copy replies: {replies!r}'
+                assert replies[0].get('text') == '', f'cross-origin copy replies: {replies!r}'
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2, 'cut': True}, replies.append)
                 assert replies[1].get('error'), f'cross-origin cut replies: {replies!r}'
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_undo'}, replies.append)
                 assert replies[2] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_paste', 'text': 'cross paste'}, replies.append)
                 assert replies[-1] == {'type': 'pane_error', 'source': 'clipboard', 'error': None}, f'cross-origin paste replies: {replies!r}'
-                result = await cdp.call('Runtime.evaluate', expression="new Promise(resolve => { const poll = () => clipboardEvents.includes('paste:cross paste') ? resolve(true) : setTimeout(poll, 20); poll(); setTimeout(() => resolve(false), 5000); })", awaitPromise=True, returnByValue=True)
+                result = await cdp.call('Runtime.evaluate', expression="new Promise(resolve => { const poll = () => clipboardEvents.includes('input:cross paste') ? resolve(true) : setTimeout(poll, 20); poll(); setTimeout(() => resolve(false), 5000); })", awaitPromise=True, returnByValue=True)
                 assert result['result']['value'] is True, f'cross-origin paste result: {result!r}; replies: {replies!r}'
         finally:
             browser_pane.clear_page_endpoint(thread, connection)

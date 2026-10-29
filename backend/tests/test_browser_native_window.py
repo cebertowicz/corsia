@@ -6,6 +6,36 @@ import pytest
 from tests import browser_native_window as window
 
 
+def test_display_discovery_uses_chrome_owned_by_socket(monkeypatch):
+    class Process:
+        info = {'cmdline': ['chrome', '--user-data-dir=/actual/profile']}
+        def environ(self):
+            return {'AGENT_BROWSER_SOCKET_DIR': '/owned', 'DISPLAY': ':42', 'XAUTHORITY': '/auth'}
+    monkeypatch.setattr(window.psutil, 'process_iter', lambda _attrs: [Process()])
+    environment, profile = window.x_environment('/owned')
+    assert (environment['DISPLAY'], environment['XAUTHORITY'], profile) == (':42', '/auth', '/actual/profile')
+    assert window.x_environment('/other') is None
+
+
+@pytest.mark.asyncio
+async def test_x_command_kills_probe_on_cancellation(monkeypatch):
+    class Process:
+        returncode = None
+        killed = False
+        async def communicate(self): await asyncio.Event().wait()
+        def kill(self): self.killed = True
+        async def wait(self): pass
+    process = Process()
+    async def create(*_args, **_kwargs): return process
+    monkeypatch.setattr(window.asyncio, 'create_subprocess_exec', create)
+    task = asyncio.create_task(window.x_command('xwininfo'))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert process.killed
+
+
 @pytest.mark.asyncio
 async def test_wait_retries_discovery_and_uses_actual_profile(monkeypatch):
     discoveries = iter([None, ({'DISPLAY': ':owned'}, '/tmp/actual-profile')])
@@ -16,7 +46,7 @@ async def test_wait_retries_discovery_and_uses_actual_profile(monkeypatch):
         seen_sockets.append(socket_dir)
         return next(discoveries)
 
-    monkeypatch.setattr(window, '_x_environment', discover)
+    monkeypatch.setattr(window, 'x_environment', discover)
     monkeypatch.setattr(window.shutil, 'which', lambda name: name)
 
     async def command(executable, *args, environment):
@@ -33,7 +63,7 @@ async def test_wait_retries_discovery_and_uses_actual_profile(monkeypatch):
             self.send('{"data":"frame"}')
             await asyncio.Event().wait()
 
-    monkeypatch.setattr(window, '_x_command', command)
+    monkeypatch.setattr(window, 'x_command', command)
     monkeypatch.setattr(window.browser_screencast, 'PaneScreencast', Cast)
     await window.wait_for_headed_window('endpoint', '/owned/sockets')
     assert seen_sockets == ['/owned/sockets', '/owned/sockets']
@@ -53,7 +83,7 @@ async def test_one_budget_covers_each_readiness_phase(monkeypatch, phase):
 
     monkeypatch.setattr(window.asyncio, 'timeout', short_timeout)
     monkeypatch.setattr(window.shutil, 'which', lambda name: name)
-    monkeypatch.setattr(window, '_x_environment', lambda socket_dir: None if phase == 'discovery'
+    monkeypatch.setattr(window, 'x_environment', lambda socket_dir: None if phase == 'discovery'
                         else ({'DISPLAY': ':owned'}, '/actual'))
 
     async def command(executable, *args, environment):
@@ -70,7 +100,7 @@ async def test_one_budget_covers_each_readiness_phase(monkeypatch, phase):
         async def run(self):
             await asyncio.Event().wait()
 
-    monkeypatch.setattr(window, '_x_command', command)
+    monkeypatch.setattr(window, 'x_command', command)
     monkeypatch.setattr(window.browser_screencast, 'PaneScreencast', Cast)
     message = 'no owned X display' if phase == 'discovery' else 'window or frame did not become ready'
     with pytest.raises(AssertionError, match=message):

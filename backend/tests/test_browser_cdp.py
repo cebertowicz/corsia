@@ -224,22 +224,16 @@ async def test_clipboard_selection_and_paste_use_native_commands(monkeypatch):
     assert await browser_clipboard.clipboard_selection('endpoint', False) == 'selected'
     await browser_clipboard.clipboard_paste('endpoint', 'paste text')
     commands = [params['commands'][0] for method, params in calls if method == 'Input.dispatchKeyEvent' and 'commands' in params]
-    assert commands == ['copy', 'paste']
-    grants = [params['permissions'] for method, params in calls if method == 'Browser.grantPermissions']
-    assert grants == [['clipboardSanitizedWrite']]
-    assert any(method == 'Browser.resetPermissions' for method, _ in calls)
+    assert commands == ['copy']
+    assert ('Input.insertText', {'text': 'paste text'}) in calls
+    assert not any(method in {'Browser.grantPermissions', 'Browser.resetPermissions'} for method, _ in calls)
     assert sum(method == 'Emulation.setFocusEmulationEnabled' and params == {'enabled': True} for method, params in calls) == 2
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(('method', 'step'), [
-    ('Page.getFrameTree', 'frame lookup'),
-    ('Page.createIsolatedWorld', 'world creation'),
     ('Emulation.setFocusEmulationEnabled', 'focus emulation'),
-    ('Browser.grantPermissions', 'write permission grant'),
-    ('Runtime.evaluate', 'write'),
-    ('Browser.resetPermissions', 'permission reset'),
-    ('Input.dispatchKeyEvent', 'paste key down'),
+    ('Input.insertText', 'insert text'),
 ])
 async def test_clipboard_paste_names_timed_out_step(monkeypatch, method, step):
     class Client:
@@ -292,7 +286,7 @@ async def test_page_handled_cut_uses_custom_data_or_fails(monkeypatch, custom):
 
 
 @pytest.mark.asyncio
-async def test_clipboard_missing_capture_fails(monkeypatch):
+async def test_clipboard_missing_capture_returns_empty(monkeypatch):
     class Client:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): pass
@@ -302,8 +296,9 @@ async def test_clipboard_missing_capture_fails(monkeypatch):
             if method == 'Runtime.evaluate': return {'result': {'value': 0 if '|| 0' in params['expression'] else None}}
             return {}
     monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
-    with pytest.raises(browser_clipboard.BrowserSessionError):
-        await browser_clipboard.clipboard_selection('endpoint', False)
+    assert await browser_clipboard.clipboard_selection('endpoint', False) == ''
+    with pytest.raises(browser_clipboard.BrowserSessionError, match="couldn't be cut"):
+        await browser_clipboard.clipboard_selection('endpoint', True)
 
 
 @pytest.mark.asyncio
