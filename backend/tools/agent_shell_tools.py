@@ -12,7 +12,6 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-import re
 import tempfile
 
 from infra.platform_paths import app_bundle_root
@@ -56,9 +55,9 @@ def readable_dirs() -> list[Path]:
     return [directory for directory in candidates if directory is not None and directory.is_dir()]
 
 
-def agent_cache_dir(thread_id: str | None) -> Path:
-    """One thread's package cache: writable by its shells, shared with no other thread, outside the runtime folder and home."""
-    return Path(tempfile.gettempdir()) / "corsia-agent-cache" / re.sub(r"[^\w.-]", "_", thread_id or "none")
+def agent_cache_dir() -> Path:
+    """Package cache root shared by agent shells, outside the runtime folder and home."""
+    return Path(tempfile.gettempdir()) / "corsia-agent-cache"
 
 
 def _path_entries(path: str) -> list[str]:
@@ -68,9 +67,9 @@ def _path_entries(path: str) -> list[str]:
     return [*parts, *(str(directory) for kind in RUNTIME_PINS if (directory := runtime_bin_dir(kind)) is not None)]
 
 
-def shell_environment(path: str, thread_id: str | None) -> dict[str, str]:
-    """The person's PATH with CORSIA's tools around it, and the caches that keep installs in writable places."""
-    cache = agent_cache_dir(thread_id)
+def shell_environment(path: str) -> dict[str, str]:
+    """The person's PATH with CORSIA's tools, and shared writable package caches."""
+    cache = agent_cache_dir()
     return {
         "PATH": os.pathsep.join(dict.fromkeys(_path_entries(path))),
         "npm_config_cache": str(cache / "npm"),

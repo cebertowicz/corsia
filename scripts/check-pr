@@ -304,8 +304,14 @@ print(digest.hexdigest()[:16])' scripts/speed_gate/requirements.txt)" || fail "r
       for stale in "$SG_DIR"/site-*; do [ "$stale" = "$SG_SITE" ] || rm -rf "$stale"; done
     fi
     SG_LOG="$SG_DIR/last-run.log"
+    # The fixture scratch (about 1.3 GiB) lives here rather than in the system temp folder: a run stopped
+    # mid-way (a shell timeout) cannot clean up after itself, so the next run clears it, and removing the
+    # worktree removes it.
+    SG_TMP="$SG_DIR/tmp"
+    rm -rf "$SG_TMP"
+    mkdir -p "$SG_TMP"
     set +e
-    { SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli measure \
+    { TMPDIR="$SG_TMP" SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli measure \
         --backend backend --out "$SG_DIR/measurement.json" --repeats 2 --enforce
       SG_RC=$?
       if [ "$SG_RC" = "0" ]; then

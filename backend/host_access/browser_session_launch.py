@@ -36,6 +36,19 @@ class CopyRestoreError(RuntimeError):
     """The copied sign-in could not be restored before the first action."""
 
 
+async def _acquire_owner_lock(owner: Any) -> None:
+    from host_access.browser_owner_lock import acquire
+
+    task = asyncio.create_task(asyncio.to_thread(acquire, owner.socket_dir, create=True))
+    try:
+        owner._lifetime_lock = await asyncio.shield(task)
+    except asyncio.CancelledError:
+        owner._lifetime_lock = await task
+        raise
+    if owner._lifetime_lock is None:
+        raise identity.BrowserIdentityError("browser owner lock is unavailable")
+
+
 async def pin_native(owner: Any, *, changed_message: str) -> None:
     """Resolve and pin both native executables before session admission."""
     from host_access.browser_session_state import BrowserSetupError
@@ -51,6 +64,8 @@ async def pin_native(owner: Any, *, changed_message: str) -> None:
                 path = await asyncio.to_thread(browser_executables.private_native, path)
             path, fingerprint = await asyncio.to_thread(browser_cli.resolve_native, path)
             owner.socket_dir = await asyncio.to_thread(identity.ensure_private_dir, owner.socket_dir)
+            if owner._lifetime_lock is None:
+                await _acquire_owner_lock(owner)
             from host_access.browser_environment import prepare_config
             await asyncio.to_thread(prepare_config, owner.socket_dir)
             result = await owner._invoke((path, "--version"), timeout=5.0)
@@ -92,6 +107,10 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
         headless=not runtime.record.show_window, ua=owner._user_agent)
+    # A crash between spawn and this record can leak Chrome, but cannot signal an unrelated process.
+    from host_access.browser_owner_lock import record_launched_chrome
+    await asyncio.to_thread(record_launched_chrome, owner.socket_dir, runtime.record.session,
+                            runtime.chrome, runtime.record.profile)
     runtime.chrome.release_stream()
     if runtime.record.profile:
         await apply_kept_signins(runtime)

@@ -107,7 +107,7 @@ def safehouse_subprocess_env(
         env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
     elif sys.platform == "linux":
         env.pop("AGENT_BROWSER_ARGS", None)
-    env.update(agent_shell_tools.shell_environment(env.get("PATH", ""), thread_id))
+    env.update(agent_shell_tools.shell_environment(env.get("PATH", "")))
     return env
 
 

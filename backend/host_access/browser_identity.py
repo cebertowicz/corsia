@@ -254,7 +254,7 @@ def session_sidecar_path(socket_dir: Path, session: str, suffix: str) -> Path:
     return path
 
 
-def _read_regular_sidecar(path: Path, limit: int) -> tuple[str, float]:
+def read_regular_sidecar(path: Path, limit: int) -> tuple[str, float]:
     if path.is_symlink():
         raise BrowserIdentityError("browser session ownership could not be verified")
     flags = (
@@ -286,13 +286,13 @@ def read_sidecars(socket_dir: Path, session: str) -> BrowserSidecars:
     before = tuple(artifact_stamp(session_sidecar_path(socket_dir, session, suffix),
                                   socket_file=suffix == "sock")
                    for suffix in ("pid", "version", "sock"))
-    pid_raw, pid_mtime = _read_regular_sidecar(
+    pid_raw, pid_mtime = read_regular_sidecar(
         session_sidecar_path(socket_dir, session, "pid"),
         64,
     )
     version_path = session_sidecar_path(socket_dir, session, "version")
     try:
-        version_raw, _version_mtime = _read_regular_sidecar(version_path, 64)
+        version_raw, _version_mtime = read_regular_sidecar(version_path, 64)
         version = version_raw.strip() or None
     except BrowserIdentityError:
         version = None
