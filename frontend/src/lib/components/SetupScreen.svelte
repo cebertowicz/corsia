@@ -317,7 +317,7 @@
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
 	}
 	async function retrySources() {
-		sourceRetry = { error: sourceError, vendors: aiRows.filter((row) => CLI_VENDORS.some((vendor) => vendor === row.key) && row.error).map((row) => row.key) };
+		sourceRetry = { error: sourceError, vendors: CLI_VENDORS.filter((vendor) => !sources.some((row) => row.source === vendor) || connectFlow.awaitingSource(vendor)) };
 		try { await refreshSources(true); } finally { sourceRetry = null; }
 	}
 	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */

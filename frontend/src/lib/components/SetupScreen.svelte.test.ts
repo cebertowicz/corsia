@@ -381,6 +381,34 @@ describe('SetupScreen', () => {
 		} finally { vi.useRealTimers(); }
 	});
 
+	it('keeps an unrelated provider error visible during a source retry', async () => {
+		sources = [
+			{ source: 'claude-code', name: 'Claude Code', state: 'unverified' },
+			{ source: 'codex', name: 'Codex', state: 'ready', limited: true } as never,
+		];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			if (++rechecks === 1) return new Response('{}', { status: 500 });
+			return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+		});
+		vi.useFakeTimers();
+		try {
+			(button('Yes') ?? button('Both'))!.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const codex = () => host.querySelector('section[aria-label="Codex"]');
+			expect(codex()?.textContent).toContain('usage limit');
+			button('Retry')!.click(); await tick();
+			expect(codex()?.textContent).toContain('usage limit');
+			expect(codex()?.querySelector('.spinner')).toBeNull();
+			resolveRetry(new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+		} finally { vi.useRealTimers(); }
+	});
+
 	describe('the Local model row by host', () => {
 		const providersStep = async (extra: Array<{ source: string; name: string; state: string }> = []) => {
 			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }, ...extra];
