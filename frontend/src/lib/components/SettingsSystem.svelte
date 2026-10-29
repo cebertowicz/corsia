@@ -233,7 +233,7 @@
 	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* Theme stays the inline three-way control until the SegmentedControl primitive lands (DESIGN-SYSTEM §4.1);
 	   the chosen option takes the selected-row wash (§0.1), not a solid accent fill. */
-	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
+	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--segment-inset); gap: var(--segment-inset); }
 	.theme-opt { padding: var(--space-1) var(--space-4); border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.theme-opt:hover { color: var(--text-primary); }
 	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }

@@ -1,5 +1,5 @@
 import { test } from '../support/test';
-import { expect, webkit, type Page } from '@playwright/test';
+import { expect, webkit, type Page, type WebSocketRoute } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from '../support/corsia';
 
 test.setTimeout(180_000);
@@ -12,9 +12,11 @@ const builds = [
   { name: 'Gemma', repository: 'org/Gemma-oQ4e', download_size_bytes: 20e9, download_size_gb: 20, context_window: 131072, quantization_bits: 4, smarts_level: 4, tokens_per_second: 90, fits_now: true, disk: { state: 'ready' }, section: 'faster' },
 ];
 type Scenario = 'loaded' | 'owned' | 'available' | 'downloading' | 'failed' | 'small';
+type Download = { repository: string; name: string; percent: number; failed: boolean; downloaded: boolean } | null;
 async function fixture(page: Page, state: Scenario) {
   const running = state === 'downloading' || state === 'failed';
-  let download = running ? { repository: builds[0].repository, name: builds[0].name, percent: 40, failed: state === 'failed', downloaded: false } : null;
+  let download: Download = running ? { repository: builds[0].repository, name: builds[0].name, percent: 40, failed: state === 'failed', downloaded: false } : null;
+  const calls: string[] = [];
   const models = builds.map((build, i) => ({ ...build, fits_now: state === 'small' ? i === 2 : build.fits_now, on_disk: state === 'owned' ? i < 2 : state === 'loaded' && i === 0 }));
   await page.route('**/api/settings/providers?**', route => route.fulfill({ json: { providers: [provider] } }));
   await page.route('**/api/settings/network-servers?**', route => route.fulfill({ json: { servers: [server] } }));
@@ -24,6 +26,7 @@ async function fixture(page: Page, state: Scenario) {
   await page.route('**/api/providers/sources', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: true, corsia_omlx_online: true, settings_download: download }] } }));
   await page.route('**/api/providers/local/recommendations', route => route.fulfill({ json: { state: 'ready', memory_gb: state === 'small' ? 36 : 256, memory_in_use_gb: state === 'loaded' ? 104 : 0, memory_room_gb: state === 'small' ? 31.5 : 240, disk_free_gb: 200, models, downloads: [], recommended_repository: state === 'small' ? null : builds[0].repository } }));
   await page.route('**/api/providers/local/downloads**', async route => {
+    if (route.request().method() !== 'GET') calls.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
     if (route.request().method() === 'POST') {
       const repository = route.request().postDataJSON().repository as string;
       const build = builds.find(item => item.repository === repository)!;
@@ -35,11 +38,32 @@ async function fixture(page: Page, state: Scenario) {
     } else await route.fulfill({ json: [] });
   });
   await page.route('**/api/providers/local/cancel', async route => {
+    calls.push('POST /api/providers/local/cancel');
     download = null;
     await route.fulfill({ json: { ok: true, cancelled: true } });
   });
   await page.route('**/api/vendor-accounts**', route => route.fulfill({ json: { accounts: [] } }));
   await page.route('**/api/models**', route => route.fulfill({ json: { models: [], active_local_threads: 0 } }));
+  return {
+    calls,
+    setDownload(next: Download) { download = next; },
+    finish(repository: string) { download = null; models.forEach(model => { if (model.repository === repository) model.on_disk = true; }); },
+  };
+}
+
+/** Pass the live socket through, so a test can announce a download change as the backend does. */
+async function liveSocket(page: Page) {
+  let socket: WebSocketRoute | null = null;
+  await page.routeWebSocket(url => url.pathname === '/ws', client => {
+    const upstream = client.connectToServer();
+    socket = client;
+    client.onMessage(payload => upstream.send(payload));
+    upstream.onMessage(payload => client.send(payload));
+  });
+  return async () => {
+    await expect.poll(() => socket !== null, { timeout: 10_000 }).toBe(true);
+    socket!.send(JSON.stringify({ type: 'models_updated' }));
+  };
 }
 
 test('Add model WebKit keyboard actions', async ({}, info) => {
@@ -88,6 +112,48 @@ test('Add model WebKit keyboard actions', async ({}, info) => {
   }
 });
 
+test('Add model sheet motion and Sort press', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  await fixture(page, 'available');
+  await loginByUrl(page);
+  await openSettings(page);
+  await openSettingsSection(page, 'Providers');
+  const card = page.locator('[data-server-card="omlx-local"]');
+  await card.locator('.pr-expand').click();
+  // Svelte runs the card's rise as a Web Animation: record it as it is created, so a slow run can't miss it.
+  await page.evaluate(() => {
+    const record = window as unknown as { rises: { duration: unknown; first: number }[] };
+    record.rises = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (keyframes, options) {
+      if (this.classList.contains('modal-frame') && Array.isArray(keyframes)) record.rises.push({ duration: typeof options === 'object' ? options.duration : options, first: Math.round(Number.parseFloat(String(keyframes[0]?.transform).replace('translateY(', ''))) });
+      return animate.call(this, keyframes, options);
+    };
+  });
+  const rise = async () => {
+    await card.getByRole('button', { name: 'Add model', exact: true }).click();
+    // Svelte first runs a zero-length animation for the delay, then the rise itself.
+    await expect.poll(() => page.evaluate(() => (window as unknown as { rises: { duration: unknown }[] }).rises.filter(item => item.duration !== 0).length)).toBe(1);
+    return page.evaluate(() => (window as unknown as { rises: { duration: unknown; first: number }[] }).rises.splice(0).filter(item => item.duration !== 0));
+  };
+  // The sheet rises 12px over Modal's shared 380 ms; with reduced motion it only fades (DESIGN-SYSTEM 2.7.5).
+  expect((await rise())[0]).toEqual({ duration: 380, first: 12 });
+  const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect(sheet).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { rises: unknown[] }).rises.splice(0));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await rise())[0]).toEqual({ duration: 380, first: 0 });
+  // Sort is a radiogroup: pressing Speed checks it and puts the fastest build first.
+  const sort = sheet.getByRole('radiogroup', { name: 'Sort models' });
+  await expect(sort.getByRole('radio', { name: 'Quality' })).toHaveAttribute('aria-checked', 'true');
+  await sort.getByRole('radio', { name: 'Speed' }).click();
+  await expect(sort.getByRole('radio', { name: 'Speed' })).toHaveAttribute('aria-checked', 'true');
+  await expect(sort.getByRole('radio', { name: 'Quality' })).toHaveAttribute('aria-checked', 'false');
+  await expect(sheet.locator('h3').first()).toHaveText('Gemma');
+  if (shots) await page.screenshot({ path: `${shots}/sort-speed-1440-light.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+});
+
 test('Add model download and cancel journey', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop');
   await fixture(page, 'available');
@@ -99,13 +165,73 @@ test('Add model download and cancel journey', async ({ page }, info) => {
   await card.getByRole('button', { name: 'Add model', exact: true }).click();
   const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
   await sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ }).click();
-  // The empty Settings state is replaced by the download row, which closes its sheet.
-  await expect(sheet).toBeHidden();
-  await expect(card).toContainText('Downloading 40%');
-  await card.getByRole('button', { name: 'Add model', exact: true }).click();
+  // The empty Settings state is replaced by the download row; the sheet stays open over it.
   await expect(sheet).toContainText('Downloading 40%');
+  await expect(card).toContainText('Downloading 40%');
   await sheet.getByRole('button', { name: /Cancel download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
   await expect(sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ })).toBeEnabled();
+});
+
+test('Add model failure, retry, delete and complete journey', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  const announce = await liveSocket(page);
+  const state = await fixture(page, 'failed');
+  const [qwen] = builds;
+  const failed = { repository: qwen.repository, name: qwen.name, percent: 40, failed: true, downloaded: false };
+  await loginByUrl(page);
+  await openSettings(page);
+  await openSettingsSection(page, 'Providers');
+  const card = page.locator('[data-server-card="omlx-local"]');
+  await card.locator('.pr-expand').click();
+  const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+  const qwenDownload = sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ });
+  const gemmaDownload = sheet.getByRole('button', { name: /^Download Gemma oQ4e$/ });
+  await card.getByRole('button', { name: 'Add model', exact: true }).click();
+  await expect(sheet).toContainText('Recommended');
+
+  // The sheet stays open through every step: the Settings list behind it changes state, the sheet does not.
+  // A failed download keeps Download on the other models, as dev does; deleting a partial one asks nothing.
+  await expect(sheet).toContainText('Couldn’t download this model.');
+  await expect(gemmaDownload).toBeEnabled();
+  await sheet.getByRole('button', { name: /Delete download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+  await expect(page.locator('.modal').filter({ hasText: 'from this computer?' })).toHaveCount(0);
+  await expect(qwenDownload).toBeEnabled();
+
+  // Download again: the build shows progress and the other models wait.
+  await qwenDownload.click();
+  await expect(sheet).toContainText('Downloading 40%');
+  await expect(gemmaDownload).toBeDisabled();
+
+  // It fails; Retry starts it again.
+  state.setDownload(failed);
+  await announce();
+  await expect(sheet).toContainText('Couldn’t download this model.');
+  await sheet.getByRole('button', { name: /Retry download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+  await expect(sheet).toContainText('Downloading 40%');
+
+  // All bytes arrived but adding failed: Delete download asks first, then removes it.
+  state.setDownload({ ...failed, downloaded: true });
+  await announce();
+  await expect(sheet).toContainText('Downloaded, but couldn’t be added. Retry to finish adding it.');
+  await sheet.getByRole('button', { name: /Delete download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+  const confirm = page.locator('.modal').filter({ hasText: 'from this computer?' });
+  await expect(confirm).toContainText('Qwen3.8 Flash Next');
+  await confirm.getByRole('button', { name: 'Delete download', exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(qwenDownload).toBeEnabled();
+
+  // Download once more and let it finish: the build is on this computer and offers no Download.
+  await qwenDownload.click();
+  await expect(sheet).toContainText('Downloading 40%');
+  state.finish(qwen.repository);
+  await announce();
+  await expect(sheet).not.toContainText('Downloading 40%');
+  await expect(sheet).toContainText('on this computer');
+  await expect(qwenDownload).toHaveCount(0);
+  await expect(gemmaDownload).toBeEnabled();
+
+  const deleteRoute = `DELETE /api/providers/local/downloads/${encodeURIComponent(qwen.repository)}`;
+  expect(state.calls).toEqual([deleteRoute, 'POST /api/providers/local/downloads', 'POST /api/providers/local/downloads', deleteRoute, 'POST /api/providers/local/downloads']);
 });
 
 test('Add model small Mac list', async ({ page }, info) => {

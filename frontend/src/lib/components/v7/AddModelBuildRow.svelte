@@ -29,11 +29,11 @@
 		: build.disk?.state === 'unknown' ? 'Couldn’t check free disk space' : '');
 </script>
 
-<div class="build">
+<div class="build" class:stack={failed}>
 	<div class="facts">
 		<div class="line">
 			<span>{[size, speed, buildName].filter(Boolean).join(' · ')}</span>
-			{#if build.on_disk && !failed}<span> · on this computer</span>{/if}
+			{#if build.on_disk && !failed}<span>· on this computer</span>{/if}
 			{#if recommended}<span class="recommended">Recommended</span>{/if}
 		</div>
 		<div class="detail">{quality}{quality && build.context_window ? ' · ' : ''}{build.context_window ? `${Math.round(build.context_window / 1024)}K context` : ''}</div>
@@ -60,11 +60,12 @@
 <style>
 	.build { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
 	.facts { min-width: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
-	.line { color: var(--text-primary); }
+	.line { display: flex; flex-wrap: wrap; column-gap: var(--space-1); color: var(--text-primary); }
 	.detail { color: var(--text-secondary); margin-top: var(--space-1); }
-	.recommended { color: var(--accent-text); font-weight: var(--fw-semibold); margin-left: var(--space-2); }
+	.recommended { color: var(--accent-text); font-weight: var(--fw-semibold); }
 	.progress { display: flex; align-items: center; gap: var(--space-1); color: var(--accent-text); margin-top: var(--space-1); }
 	.error { color: var(--red-text); margin-top: var(--space-1); }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); flex-shrink: 0; }
-	@media (max-width: 30rem) { .build { align-items: flex-start; flex-wrap: wrap; } }
+	/* Only the two failed-state actions drop below the facts on a narrow screen; one Download stays beside them. */
+	@media (max-width: 30rem) { .build.stack { align-items: flex-start; flex-wrap: wrap; } }
 </style>

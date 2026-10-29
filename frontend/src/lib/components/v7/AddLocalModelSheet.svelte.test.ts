@@ -88,6 +88,23 @@ describe('AddLocalModelSheet', () => {
 		expect(downloads[1].classList.contains('secondary')).toBe(true);
 	});
 
+	it('is a solid sheet and sorts with the Settings radiogroup, Quality first', async () => {
+		await render({ state: 'ready', recommended_repository: 'Jundot/Slow', models: [
+			{ name: 'Slow', repository: 'Jundot/Slow', download_size_gb: 12, context_window: 32768, smarts_level: 5, tokens_per_second: 20, fits_now: true, ...ready },
+			{ name: 'Fast', repository: 'Jundot/Fast', download_size_gb: 12, context_window: 32768, smarts_level: 3, tokens_per_second: 90, fits_now: true, ...ready },
+		] });
+		expect(document.body.querySelector('.modal-frame')?.classList.contains('opaque')).toBe(true);
+		expect(document.body.querySelector('select')).toBeNull();
+		const options = [...document.body.querySelectorAll<HTMLButtonElement>('[role="radiogroup"][aria-label="Sort models"] [role="radio"]')];
+		expect(options.map((option) => [option.textContent, option.getAttribute('aria-checked')])).toEqual([['Quality', 'true'], ['Speed', 'false']]);
+		const names = () => [...document.body.querySelectorAll('.model h3')].map((item) => item.textContent);
+		expect(names()).toEqual(['Slow', 'Fast']);
+		options[1].click();
+		flushSync();
+		expect(options[1].getAttribute('aria-checked')).toBe('true');
+		expect(names()).toEqual(['Fast', 'Slow']);
+	});
+
 	it('shows fitting models and hides those that exceed Mac room', async () => {
 		const row = (name: string, resident_gb: number, fits_now: boolean) => ({ name, repository: `Jundot/${name}`, download_size_gb: 12, context_window: 32768, resident_bytes: resident_gb * 1024 ** 3, fits_now, ...ready });
 		await render({ state: 'ready', memory_room_gb: 68, recommended_repository: 'Jundot/Small', models: [row('Small', 40, true), row('Huge', 163, false), row('Giant', 200, false)] });

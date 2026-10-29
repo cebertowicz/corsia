@@ -33,6 +33,8 @@ function sourceFor(state: RenderState) {
 	return {
 		source: 'omlx', name: 'Local model', state: 'ready',
 		eligible: state === '24gb' ? false : true,
+		// As backend/llm/local_sources.py reports CORSIA's own managed oMLX.
+		corsia_omlx: true,
 		corsia_omlx_online: true,
 		settings_download: state === 'downloading'
 			? { repository: 'qwen/qwen3.8-27b', name: 'Qwen3.8-27B', percent: 40, failed: false }
@@ -289,7 +291,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await expect(corsiaCard.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 		const studioEmpty = studioCardInC.locator('.phase-stub');
 		await expect(studioEmpty).toContainText('No models on Studio. Add them in oMLX on that computer.');
-		expect(await studioEmpty.evaluate((element) => getComputedStyle(element).paddingLeft)).not.toBe('0px');
+		expect(await studioEmpty.evaluate((element) => getComputedStyle(element).marginLeft)).not.toBe('0px');
 		await expect(page.locator('[data-server-card="studio"]').getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 		await capture(page, `c-corsia-and-studio-${viewport.name}-${theme}`);
 

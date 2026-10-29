@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import AddLocalModelSheet from './AddLocalModelSheet.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { fetchSources, type ModelSource } from '$lib/conductorSources';
 	import { token } from '$lib/stores/auth';
@@ -9,15 +8,15 @@
 	import { LOW_MEMORY_LOCAL_MODEL_MESSAGE } from '$lib/setupLocalPick.svelte';
 
 	interface Props {
-		onStarted: () => void;
+		/** Opens the Add model sheet, which the caller owns so a change of list state never closes it. */
+		onAdd: () => void;
 		onAddProvider: () => void;
 		empty?: boolean;
 		corsiaManaged?: boolean;
 	}
 
-	const { onStarted, onAddProvider, empty = false, corsiaManaged = false }: Props = $props();
+	const { onAdd, onAddProvider, empty = false, corsiaManaged = false }: Props = $props();
 	let source = $state<ModelSource | undefined>(undefined);
-	let showAddLocal = $state(false);
 	let stop: (() => void) | null = null;
 	const lowMemory = $derived(source?.eligible === false && source.never_local !== true);
 
@@ -42,11 +41,8 @@
 	</div>
 {:else if corsiaManaged && source?.never_local !== true}
 	<div class="add-local">
-		<Button size="sm" variant={empty ? 'primary' : 'ghost'} onclick={() => showAddLocal = true}>Add model</Button>
+		<Button size="sm" variant={empty ? 'primary' : 'ghost'} onclick={onAdd}>Add model</Button>
 	</div>
-	{#if showAddLocal}
-		<AddLocalModelSheet onClose={() => showAddLocal = false} {onStarted} />
-	{/if}
 {/if}
 
 <style>

@@ -94,7 +94,7 @@
 	onDestroy(() => stop?.());
 </script>
 
-<Modal title="Add model" size="md" {onClose}>
+<Modal title="Add model" size="md" opaque {onClose}>
 	{#if loading}
 		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
 	{:else if error}
@@ -105,7 +105,12 @@
 			<div class="notice">No recommended models fit this computer.</div>
 		{:else}
 			<div class="summary">Picked for this computer{data?.memory_gb == null ? '' : ` · ${data.memory_gb} GB memory`}{data?.memory_in_use_gb ? `, ${data.memory_in_use_gb} GB in use` : ''}{data?.disk_free_gb == null ? '' : ` · ${data.disk_free_gb} GB disk free`}</div>
-			<label class="sort">Sort by <select bind:value={sort}><option value="quality">Quality</option><option value="speed">Speed</option></select></label>
+			<div class="sort">
+				<div class="theme-opts" role="radiogroup" aria-label="Sort models">
+					<button class="theme-opt" class:active={sort === 'quality'} role="radio" aria-checked={sort === 'quality'} onclick={() => (sort = 'quality')}>Quality</button>
+					<button class="theme-opt" class:active={sort === 'speed'} role="radio" aria-checked={sort === 'speed'} onclick={() => (sort = 'speed')}>Speed</button>
+				</div>
+			</div>
 			{#each groups as group (group.name)}
 				<section class="model">
 					<h3>{group.name}</h3>
@@ -128,9 +133,14 @@
 <style>
 	.notice { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); padding: var(--space-3) 0; }
 	.notice.error { color: var(--red-text); justify-content: space-between; }
-	.summary, .sort { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.sort { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; }
-	.sort select { color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font: inherit; }
+	.summary { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.sort { margin: var(--space-3) 0; }
+	/* Copied from SettingsSystem's Theme radiogroup: Sort uses that existing system treatment unchanged. */
+	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--segment-inset); gap: var(--segment-inset); }
+	.theme-opt { padding: var(--space-1) var(--space-4); border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
+	.theme-opt:hover { color: var(--text-primary); }
+	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
+	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.model { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
 	.model h3 { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 </style>

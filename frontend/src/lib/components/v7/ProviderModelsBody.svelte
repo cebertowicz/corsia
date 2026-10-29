@@ -26,6 +26,7 @@
 	import ProviderModelsEmpty from './ProviderModelsEmpty.svelte';
 	import LocalSettingsDownloadStatus from './LocalSettingsDownloadStatus.svelte';
 	import ProviderLocalModelControls from './ProviderLocalModelControls.svelte';
+	import AddLocalModelSheet from './AddLocalModelSheet.svelte';
 	import ProviderModelsAvailableControls from './ProviderModelsAvailableControls.svelte';
 	import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
 	import ProviderModelsActionError from './ProviderModelsActionError.svelte';
@@ -41,6 +42,7 @@
 	let preloadInfo = $state<PreloadInfo | null>(null);
 	let detailsFor = $state<ProviderModel | null>(null);
 	let deleteCandidate = $state<ProviderModel | null>(null);
+	let showAddLocal = $state(false);
 
 	let stopLocalUpdates: (() => void) | null = null;
 	let showAllAvailable = $state(false);
@@ -269,6 +271,11 @@
 	/>
 {/if}
 
+<!-- Outside the list states below: a download starting, failing or finishing swaps them, and the sheet stays open. -->
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} />
+{/if}
+
 {#if pmState.loading && models.length === 0}
 	<ProviderModelsPhase message="Loading models…" />
 {:else if pmState.lastError}
@@ -276,7 +283,7 @@
 {:else if models.length === 0 && !hasLocalDownload}
 	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
 	{#if isCorsiaOmlx}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} corsiaManaged empty />
+		<ProviderLocalModelControls onAdd={() => showAddLocal = true} {onAddProvider} corsiaManaged empty />
 	{/if}
 {:else}
 	{#if actionError}
@@ -349,7 +356,7 @@
 		/>
 	{/if}
 	{#if isCorsiaOmlx}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} corsiaManaged />
+		<ProviderLocalModelControls onAdd={() => showAddLocal = true} {onAddProvider} corsiaManaged />
 	{/if}
 {/if}
 
