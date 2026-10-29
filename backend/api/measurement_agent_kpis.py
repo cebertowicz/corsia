@@ -10,10 +10,9 @@ from api.measurement_partial import grain_instant
 from api.measurement_scope import resolve_grain, validate_scope
 from core.agent_kpi_formula import evaluate, prepare
 from core.agent_kpi_operands import Event, timestamp
-
-from core.workflow_builtin_operands import Value, prepare_builtin, read_builtin, scoped_runs
-from core.correction_attribution import attributed_facts
 from core.agent_kpi_read import definitions, event_names, facts
+from core.correction_attribution import attributed_facts
+from core.workflow_builtin_operands import Value, prepare_builtin, read_builtin, scoped_runs
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
@@ -47,6 +46,12 @@ def _versions(rows) -> list[dict[str, Any]]:
     return labels
 
 
+def _builtins(spec: dict[str, Any]) -> set[str]:
+    needed = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
+    if spec['formula'] == 'rate_per_run':
+        needed.add('runs')
+    return needed
+
 
 def _builtin_value(result, version: str | None) -> Value:
     if result.reason:
@@ -78,25 +83,19 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         workflow_names: dict[str, set[str]] = {}
         for item in kpis:
-            spec = item['spec']
-            needed = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
-            if spec['formula'] == 'rate_per_run':
-                needed.add('runs')
-            if needed and item['workflow']:
+            if item['workflow'] and (needed := _builtins(item['spec'])):
                 workflow_names.setdefault(item['workflow'], set()).update(needed)
-        ledger = attributed_facts(db) if any('corrections' in names for names in workflow_names.values()) else []
+        ledger = attributed_facts(db) if any('corrections' in wanted for wanted in workflow_names.values()) else []
         scoped = scoped_runs(db, user_id, scope) if workflow_names else None
-        prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, names, ledger, scoped)
-                    for workflow, names in workflow_names.items()}
+        prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, wanted, ledger, scoped)
+                    for workflow, wanted in workflow_names.items()}
         results = []
         for item in kpis:
             spec = item["spec"]
             selected = prepare(spec, events)
             file_events = {entry["name"] for entry in declarations
                            if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
-            builtin_names = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
-            if spec['formula'] == 'rate_per_run':
-                builtin_names.add('runs')
+            builtin_names = _builtins(spec)
             version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
             if builtin_names and item['workflow']:
                 version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')

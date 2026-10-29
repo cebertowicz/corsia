@@ -114,7 +114,6 @@ class AttributedFact:
     node_id: str | None
 
 
-
 def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
     """Keep the latest classification for each source, preserving first on ties."""
     latest: dict[tuple[str, str], tuple[str, sqlite3.Row]] = {}

@@ -12,7 +12,6 @@ from core.measurement_pricing import classify_usage_rows, endpoint_listings, gro
 from core.measurement_scope import MeasurementScope, scope_cte
 
 
-
 def _in_window(db: sqlite3.Connection, times: list[str | None], start: str, end: str) -> set[int]:
     """Compare all timestamps in one query using SQLite's datetime rules."""
     return {int(row[0]) for row in db.execute("""
@@ -37,7 +36,7 @@ class Result:
 
 def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -> tuple:
     """Load scoped nodes and shared workflow roots."""
-    from core.workflow_verdict_read import run_roots
+    from core.workflow_verdict_read import run_roots  # imports api.*, which imports this module
 
     rows = db.execute(scope_cte() + """
         SELECT n.id,n.parent_id,n.workflow_ref,n.workflow_version,n.created_at
