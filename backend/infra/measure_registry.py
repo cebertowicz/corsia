@@ -272,7 +272,7 @@ def _claim_namespace(connection: sqlite3.Connection, namespace: str, owner: str,
     return retire, taken
 
 
-def _attempt(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str) -> dict[str, Any]:
+def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str) -> dict[str, Any]:
     """Plan from one read outside the transaction, then write the finished rows in one short transaction."""
     now = datetime.now(timezone.utc).isoformat()
     latest = _latest(db.execute(_OWNER_ROWS, (owner,)))
@@ -314,7 +314,7 @@ def sync(
     normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
     for attempt in (1, 2):
         try:
-            result = _attempt(db, owner_thread_id, path, namespace, normalized, sha)
+            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha)
             break
         except sqlite3.IntegrityError:
             if attempt == 2:

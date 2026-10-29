@@ -82,7 +82,7 @@ async def test_cc_sub_dispatch_forwards_exact_selector_and_expected_identity(mon
 
     monkeypatch.setattr(effort, "resolve_effort", lambda *_: None)
     monkeypatch.setattr(
-        "connections.models.connection_available", lambda _provider: True,
+        "connections.models.provider_may_run", lambda _provider: True,
     )
     feed = AsyncMock(return_value=TurnIdentity("turn-cc-exact", 1))
     monkeypatch.setattr(cc_runtime, "feed", feed)
@@ -117,7 +117,7 @@ async def test_cc_dispatch_rechecks_connection_immediately_before_feed(monkeypat
 
     monkeypatch.setattr(effort, "resolve_effort", lambda *_: None)
     monkeypatch.setattr(
-        "connections.models.connection_available", lambda _provider: False,
+        "connections.models.provider_may_run", lambda _provider: False,
     )
     feed = AsyncMock()
     monkeypatch.setattr(cc_runtime, "feed", feed)

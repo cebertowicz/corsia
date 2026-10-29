@@ -219,10 +219,10 @@ def _confined_record(
 async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
     _check_live_cap()
-    from connections.models import connection_available
+    from connections.models import provider_may_run
     from registry.cc_session import notify_cc_session, persist_cc_session
 
-    if not connection_available("claude-code", db=db):
+    if not provider_may_run("claude-code", db=db):
         raise ValueError("Claude Code connection is not available")
     parent_metadata, bcast = _parent_context(request, db)
     working_dir = request.working_dir

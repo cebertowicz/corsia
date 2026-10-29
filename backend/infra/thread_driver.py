@@ -298,14 +298,19 @@ def _claim_after_terminal(
         successor = None
         held_input = bool(idle_threads_with_held_input(connection, thread_id))
     else:
-        successor = start_idle_turn(
-            thread_id,
-            turn_id=successor_turn_id,
-            boot_epoch=boot_epoch,
-            started_at=ended_at,
-            db=connection,
-            hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-        )
+        from connections.fact_memo import fact_reads
+
+        # The claim updates bindings and holds, but not the shared account,
+        # catalog, or policy facts reused by its admission checks.
+        with fact_reads():
+            successor = start_idle_turn(
+                thread_id,
+                turn_id=successor_turn_id,
+                boot_epoch=boot_epoch,
+                started_at=ended_at,
+                db=connection,
+                hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+            )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,
         successor_claimed=isinstance(successor, ClaimedBatch),

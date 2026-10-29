@@ -44,7 +44,7 @@ Run it when the ledger's last review is seven or more days old, on the first wak
 
    When you recommend an agent, tell the person what they get, in their terms and your own words each time, because an agent is not a chat. It is a new member of their team that owns this outcome, sets its own measures and improves against them, and drives the work on its own instead of waiting to be asked. Tie it to their example in two or three sentences; no platform jargon. Reciting a stock paragraph is a failure: rewrite it for this person's work.
 
-   Put the charter in one artifact and ask for approval as an artifact ask (System context). **Nothing gets authority until the person approves the charter's safeguards:** no agent created or enabled, no tool, account or schedule granted, nothing sent or spent on their behalf, including when you will do the work yourself. An approval with edits means redraft and ask again.
+   Put the charter in one artifact and ask for approval as an artifact ask (skill `asking-the-person`). **Nothing gets authority until the person approves the charter's safeguards:** no agent created or enabled, no tool, account or schedule granted, nothing sent or spent on their behalf, including when you will do the work yourself. An approval with edits means redraft and ask again.
 5. **Follow through.** After approval, set it up (`coordination-api`, "Create or promote an agent", or `conductor-bootstrap` for a project) and record the outcome in the ledger.
 
 ## Agents not pulling their weight

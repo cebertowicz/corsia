@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.lesson_index import LessonPartition, TRIAL_MARK, index_line, line_tokens
 from core.skill_registry_types import SkillResolution, SkillRow
+from tests.test_lesson_index import db as lesson_db, workspace as lesson_workspace  # noqa: F401
 
 
 def _row(
@@ -162,13 +163,23 @@ def _trial_record(row: SkillRow) -> dict:
     }
 
 
-def test_trial_uses_the_same_bounded_line_as_its_lesson_record(monkeypatch):
-    trial = _trial("trial", "x" * 501)
-    index = _index(monkeypatch, [trial], lessons=[_trial_record(trial)])
-    delivered_line = _trial_record(trial)["index_line"]
+def test_trial_uses_the_same_bounded_line_as_its_lesson_record(monkeypatch, lesson_db, lesson_workspace):
+    from core.lesson_delivery import start_trials
+    from tests import test_lesson_index as lessons
 
-    assert delivered_line in (index.prompt_content or "").splitlines()
-    assert index.metadata["lessons"][0]["index_line"] == delivered_line
+    original = lessons._trial_text
+    monkeypatch.setattr(lessons, "_trial_text", lambda *args, **kwargs: original(*args, **kwargs).replace(
+        "Use when reporting a check result on a pull request.", "x" * 501,
+    ))
+    lessons._activate(lesson_db, lesson_workspace)
+    [lesson] = lessons._task_offers(lesson_db, lesson_workspace)
+    node = lesson_db.execute("SELECT node_id FROM guidance_loads WHERE variant='with'").fetchone()[0]
+    [offer] = start_trials(lesson_db, thread_id="owner", node_id=node)
+    delivered_line = offer["guidance"]
+
+    assert delivered_line == lesson["index_line"]
+    assert "x" * 500 in delivered_line
+    assert "x" * 501 not in delivered_line
 
 
 def test_trial_after_the_ordinary_limit_stays_full(monkeypatch):

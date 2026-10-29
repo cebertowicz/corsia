@@ -92,6 +92,53 @@ def test_missing_owner_history_is_not_disclosed_but_authorized_exact_offer_survi
     assert [reference["kind"] for reference in detail["detail"]["references"]] == ["indexed"]
 
 
+def test_deliveries_are_scoped_separate_and_paged_with_snapshot_refresh(db):
+    current = source()
+    db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES('foreign','other','test/model','t','t')")
+
+    def receipt(receipt_id, *, thread='owner', version=None, variant='with', created='2026-09-22'):
+        db.execute(
+            "INSERT INTO guidance_loads(id,thread_id,turn_id,path,raw_sha256,git_blob_oid,"
+            "delivered_sha256,byte_count,partial,node_id,variant,checkpoint_generation_id,"
+            "lesson_id,lesson_behavioral_sha256,created_at) VALUES(?,?,NULL,?,?,?,?,0,0,?,?,?,?,?,?)",
+            (receipt_id, thread, current['path'], current['raw_sha256'], 'a' * 40, 'b' * 64,
+             'task', variant, 'generation', current['id'], version or current['version'], created),
+        )
+
+    for index in range(21):
+        receipt(f'receipt-{index:02}')
+    receipt('other-version', version='f' * 64)
+    receipt('outside-window', created='2026-09-28')
+    receipt('omitted', variant=None)
+    receipt('foreign', thread='foreign')
+    entries = [{'source_id': 'dynamic:skills-index', 'lessons': [
+        {'id': current['id'], 'behavioral_sha256': current['version']}]}]
+    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) "
+               "VALUES('manifest','native',?,1,'t')", (json.dumps(entries),))
+    db.execute("INSERT INTO llm_usage(id,thread_id,model,created_at,context_manifest_id) "
+               "VALUES('call','owner','test/model','2026-09-22','manifest')")
+    first = report(db, sources=[current], lesson_id=current['id'], version=current['version'])
+    detail = first['detail']
+    assert detail['delivered'] == 21 and detail['indexed']['calls'] == 1
+    assert detail['reference_count'] == 22
+    assert [ref['kind'] for ref in detail['references']] == ['indexed'] + ['delivered'] * 19
+    assert detail['references'][1]['value'] == {
+        'receipt_id': 'receipt-00', 'thread_id': 'owner', 'turn_id': None, 'task_id': 'task',
+        'checkpoint_generation_id': 'generation', 'created_at': '2026-09-22',
+        'lesson_id': current['id'], 'behavioral_sha256': current['version'],
+        'path': current['path'], 'raw_sha256': current['raw_sha256'],
+    }
+    second = report(db, sources=[current], lesson_id=current['id'], version=current['version'],
+                    cursor=first['next_cursor'])
+    assert [ref['value']['receipt_id'] for ref in second['detail']['references']] == ['receipt-19', 'receipt-20']
+    assert second['next_cursor'] is None
+    assert report(db, sources=[current])['rows'][0]['delivered'] == 21
+    receipt('receipt-21')
+    with pytest.raises(ValueError, match='report changed'):
+        report(db, sources=[current], lesson_id=current['id'], version=current['version'],
+               cursor=first['next_cursor'])
+
+
 def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     current = source()
     result = report(db, sources=[current])

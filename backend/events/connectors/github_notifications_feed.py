@@ -59,7 +59,7 @@ class GhSignedOut(FeedError):
         super().__init__("gh_signed_out")
 
 
-def _remotes(policy: Any) -> set[str]:
+def github_repositories_for_policy(policy: Any) -> set[str]:
     """The GitHub repositories one registered source repository's remotes name."""
     from infra.worktree_reaper_probe import github_remote_full_name
 
@@ -85,7 +85,7 @@ def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]
     from infra.worktree_reaper_probe import ReaperGitError
 
     try:
-        return frozenset(repo for policy in _policies(project_id) for repo in _remotes(policy))
+        return frozenset(repo for policy in _policies(project_id) for repo in github_repositories_for_policy(policy))
     except ReaperGitError as exc:
         raise FeedError("repo_scope_unavailable") from exc
 
@@ -98,7 +98,7 @@ def projects_tracking_github_repository(repository: str) -> frozenset[str]:
     wanted = repository.lower()
     try:
         return frozenset(policy.project_id for policy in _policies()
-                         if wanted in _remotes(policy))
+                         if wanted in github_repositories_for_policy(policy))
     except ReaperGitError as exc:
         raise FeedError("repo_scope_unavailable") from exc
 

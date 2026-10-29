@@ -81,6 +81,7 @@ class RuleEvent:
     # The agent whose rule started the worker this event reports on, set by the server only:
     # with no owner to scope by, the event still reaches that agent's own rules.
     requester: str | None = None
+    origin: str | None = None  # assigned by event admission, never by event facts
 
 
 @dataclass(frozen=True)

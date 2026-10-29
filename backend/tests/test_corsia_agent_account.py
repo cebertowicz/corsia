@@ -738,3 +738,24 @@ def test_the_account_list_marks_a_signed_in_account_that_has_no_usable_model(con
     assert {row["id"]: row["no_usable_model"] for row in listed if not row["is_default"]} == {
         work["id"]: False, personal["id"]: True}
     assert renamed["no_usable_model"] is True  # a single-account response carries it too
+
+
+def test_clean_default_added_discovery_binds_setup(conductor):
+    from types import SimpleNamespace
+    from connections.account_discovery_commit import commit_discovery_bundle
+    from connections.corsia_agent_account import signin_outcome
+    from connections.vendor_accounts import record_default_identity
+
+    db, work, _ = conductor
+    db.execute("UPDATE connections SET status='needs_auth' WHERE provider='codex'")
+    db.commit()
+    record_default_identity('codex', {}, db=db)
+    receipt = receipt_of('codex', work['id'], db=db)
+    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
+        [{'selector_id': 'setup-model', 'available': True, 'resolved_identity': 'setup-model', 'context_window': 200000}],
+        context=SimpleNamespace(receipt=receipt, account_id=work['id']), harness_version='1', db=db)
+    assert result.status == 'ready'
+    outcome = signin_outcome(work['id'], 'ready', RefreshObservation(receipt, utc_now_iso()),
+                             bind=FirstRunBind(CONDUCTOR, 'user'))
+    assert outcome == ('ready', None)
+    assert _marked() == [work['id']]
