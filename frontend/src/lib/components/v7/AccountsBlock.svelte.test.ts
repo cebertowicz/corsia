@@ -448,13 +448,18 @@ describe('rendering and actions', () => {
 			const fetch = vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
 				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
-				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'same_account', duplicate_of: 'default' }));
+				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'same_account', duplicate_of: 'default' }))
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount] }));
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
 			button('Sign in').click();
 			await settle();
-			expect(document.body.textContent).toContain('Already signed in as Plus account 1');
+			expect(fetch).toHaveBeenCalledTimes(4);
+			expect(document.querySelector('#vendor-account-work')).toBeNull();
+			const reached = document.querySelector('#vendor-account-default');
+			expect(reached?.textContent).toContain('Already signed in as Plus account 1');
+			expect([...reached!.querySelectorAll('button')].map((b) => b.textContent?.trim())).not.toContain('Sign in again');
 			unmount(component);
 		});
 
@@ -716,7 +721,7 @@ describe('sign-in submit', () => {
 	 unmount(component);
 	});
 	it('offers Retry when the list cannot be reloaded after a cancelled sign-in', async () => {
-	 const lists = [response({ accounts: [ambient, work] }), response({ detail: 'offline' }, 503), response({ accounts: [ambient] })];
+	 const lists = [response({ accounts: [ambient, work] }), response({ detail: 'offline', ref: 'R-503' }, 503), response({ accounts: [ambient] })];
 	 vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
 		const path = input instanceof Request ? input.url : String(input);
 		if (path.includes('/api/provider-policy')) return Promise.resolve(response({ providers: [] }));
@@ -725,7 +730,7 @@ describe('sign-in submit', () => {
 	 }));
 	 const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 	 await settle(); await settle();
-	 expect(document.body.textContent).toContain('Couldn’t load your accounts.');
+	 expect(document.body.textContent).toContain('Couldn’t load your accounts. Reference: R-503');
 	 // This suite signs no token in, so the policy's own Retry comes first.
 	 [...document.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.trim() === 'Retry').at(-1)!.click(); await settle(); await settle();
 	 expect(document.body.textContent).not.toContain('Couldn’t load your accounts.');

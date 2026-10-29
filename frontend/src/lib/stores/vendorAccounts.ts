@@ -71,9 +71,16 @@ export function visibleVendorAccounts(accounts: VendorAccount[], provider: strin
 }
 
 export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
-	if (accounts.some((account) => account.id === result.account_id)) return { ...signins, [result.account_id]: result };
+	// A same-account sign-in removes the added row, so its message moves to the account it reached.
+	const listed = (id: string | null | undefined) => accounts.some((account) => account.id === id);
+	const key = listed(result.account_id) ? result.account_id : result.cause === 'same_account' && listed(result.duplicate_of) ? result.duplicate_of : null;
 	const { [result.account_id]: _, ...rest } = signins;
-	return rest;
+	return key ? { ...rest, [key]: result } : rest;
+}
+
+/** A list-reload failure line, with its support reference when the server gave one. */
+export function reloadErrorText(error: string, ref?: string): string {
+	return ref ? `${error} Reference: ${ref}` : error;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
@@ -215,7 +222,7 @@ export async function startVendorSignin(accountId: string): Promise<{ ok: boolea
 	if (!result.ok) return result;
 	if (wasSignedIn && result.data.status === 'waiting') {
 		const refreshed = await loadVendorAccounts();
-		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
 	}
 	return reconcileSignin(result.data);
 }
@@ -232,9 +239,8 @@ async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; sig
 			? { ...account, state: 'signed_in', details_stale: true } : account));
 	}
 	const refreshed = await loadVendorAccounts();
-	return refreshed.ok
-		? { ok: true, signin }
-		: { ok: true, signin, error: signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.' };
+	if (refreshed.ok || refreshed.superseded) return { ok: true, signin };
+	return { ok: true, signin, error: reloadErrorText(signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.', refreshed.ref) };
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {

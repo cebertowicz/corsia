@@ -28,7 +28,7 @@
 		renameVendorAccount,
 		signOutVendorAccount,
 		startVendorSignin,
-		vendorAccounts, visibleVendorAccounts, rememberVisibleSignin,
+		vendorAccounts, visibleVendorAccounts, rememberVisibleSignin, reloadErrorText,
 		type SigninResult,
 		type VendorAccount,
 	} from '$lib/stores/vendorAccounts';
@@ -82,7 +82,7 @@
 	});
 
 	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
-	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : `${result.error ?? 'Couldn’t load your accounts.'}${result.ref ? ` Reference: ${result.ref}` : ''}`; };
+	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : reloadErrorText(result.error ?? 'Couldn’t load your accounts.', result.ref); };
 	onMount(() => on('models_updated', refreshAccounts));
 
 	onMount(async () => {
@@ -347,7 +347,7 @@
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>
 								<Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => cancelSignin(account.id)}>Cancel</Button>
 							</div>
-						{:else if signIn.status === 'failed' || signIn.status === 'cancelled' || signIn.status === 'unavailable' || signIn.status === 'superseded'}
+						{:else if (signIn.status === 'failed' && signIn.account_id === account.id) || signIn.status === 'cancelled' || signIn.status === 'unavailable' || signIn.status === 'superseded'}
 							<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in again</Button></span>
 						{/if}
 					</div>
