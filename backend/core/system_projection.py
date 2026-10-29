@@ -60,6 +60,16 @@ class _Resource:
 _CACHE: dict[Path, ProjectionState] = {}
 
 
+def is_system_projection_path(path: Path, workspace: Path) -> bool:
+    """Whether an existing file is inside the generated System projection."""
+    try:
+        resolved = path.expanduser().resolve(strict=False)
+        projection = (resolve_workspace_root(workspace) / _PROJECTION_DIR).resolve(strict=False)
+        return resolved.is_file() and resolved.is_relative_to(projection)
+    except OSError:
+        return False
+
+
 def ensure_system_projection(workspace: Path) -> Path | None:
     """Return the verified workspace projection, or ``None`` on any failure."""
     try:

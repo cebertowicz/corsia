@@ -140,7 +140,11 @@ def workspace_context_files(workspace: Path, *, db=None) -> list[WorkspaceContex
 
 
 def is_workspace_context_path(path: Path, workspace: Path, *, db=None) -> bool:
-    """Return whether a path is exactly one canonical workspace bootstrap file."""
+    """Identify canonical workspace bootstrap files and the System projection."""
+    from core.system_projection import is_system_projection_path
+
+    if is_system_projection_path(path, workspace):
+        return True
     try:
         resolved = path.expanduser().resolve(strict=False)
     except OSError:

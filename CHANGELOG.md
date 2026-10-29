@@ -73,6 +73,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
 - On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
+- Open context files directly from a chat's context sheet.
 - Plan and decision messages use clearer, consistent wording.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
