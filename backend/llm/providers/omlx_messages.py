@@ -23,7 +23,8 @@ def shape_messages(
         return messages
     # oMLX 0.7.1rc1 merges tool responses into the preceding assistant message;
     # the Gemma 4 template closes the turn when that message has content.
-    # Remove this workaround once oMLX handles it.
+    # Providers & Inference: recheck on each oMLX bump; remove once oMLX keeps
+    # tool responses separate from the preceding assistant message.
     return [
         {**msg, "content": None}
         if msg.get("role") == "assistant" and msg.get("tool_calls") and isinstance(msg.get("content"), str)
