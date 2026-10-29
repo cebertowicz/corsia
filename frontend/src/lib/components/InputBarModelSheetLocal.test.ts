@@ -75,6 +75,18 @@ async function render() {
 const button = (label: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
 describe('the picker\'s Local group', () => {
+	it('keeps an installed model selectable when the setup memory floor is not met', async () => {
+		omlx = { eligible: false, state: 'ready', corsia_omlx: true, corsia_omlx_online: true };
+		activeThreadId.set(null);
+		models.set([claude, localModel]);
+		await render();
+		const row = button('Qwen');
+		expect(row).toBeDefined();
+		row!.click();
+		await vi.waitFor(() => expect(get(activeModelId)).toBe('omlx@qwen'));
+		expect(button('Add a local model')).toBeUndefined();
+	});
+
 	it('offers the shared add-model sheet on an eligible Mac with no local rows', async () => {
 		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: true };
 		await render();

@@ -24,7 +24,7 @@ describe('ProviderLocalModelControls', () => {
 		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider, corsiaManaged: true } });
 		await tick(); await tick(); flushSync();
 
-		expect(host.textContent).toContain('Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.');
+		expect(host.textContent).toContain('Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.');
 		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Add provider']);
 		expect(host.querySelector('button')?.classList.contains('ghost')).toBe(true);
 		expect(host.textContent).not.toContain('Add model');

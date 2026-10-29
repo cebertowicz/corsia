@@ -769,6 +769,16 @@ class TestOmlx:
         omlx = _sources(client)["omlx"]
         assert (omlx["state"], omlx["fix"], omlx["reason"]) == ("ready", None, None)
 
+    def test_online_installed_model_stays_ready_at_24_gib(self, isolated_db, client, monkeypatch):
+        monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
+        sid = _server()
+        _model(f"omlx@{sid}/qwen")
+
+        omlx = _sources(client)["omlx"]
+
+        assert omlx["eligible"] is False
+        assert omlx["state"] == "ready"
+
     def test_an_external_endpoint_never_counts_as_the_local_model(self, isolated_db, client, monkeypatch):
         monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         sid = _server(provider="external", kind="external", name="Lab")

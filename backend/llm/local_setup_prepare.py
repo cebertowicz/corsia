@@ -25,7 +25,7 @@ from llm.local_setup_results import failure_message
 
 log = logging.getLogger(__name__)
 
-#: Under 24 GiB: no local model, so Welcome shows no switch.
+#: Under 32 GiB: no local model is picked, so Welcome shows no switch.
 LOW_MEMORY = "low_memory"
 NOT_CHECKED = "not_checked"
 CHECKING = "checking"
@@ -33,7 +33,7 @@ PICKED = "picked"
 #: The recommender could not answer, even once more after oMLX reported ready.
 FAILED = "failed"
 
-#: Under 24 GiB there is no local model, so the one message says to connect something else.
+#: Under 32 GiB no local model is picked, so the one message says to connect something else.
 NO_LOCAL_MODEL = "This computer can't run a local model well. Connect a subscription or an API key in the app."
 
 
