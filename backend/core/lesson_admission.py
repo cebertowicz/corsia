@@ -43,8 +43,11 @@ FIXES = {
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
     "over-budget": "shorten the trial guidance so it fits at task start",
-    "target-full": ("wait for a trial on the target file to finish and call place again, or name a different "
-                    "target_section when the only other trial changes a different named section"),
+    "target-full": (
+        "wait for a trial on the target file to finish and call place again; or, if the only "
+        "other trial changes a named section, set target_section to a different section. "
+        "A trial with no section conflicts with every trial on the file"
+    ),
 }
 
 
@@ -181,7 +184,9 @@ def _target_full(
     section = metadata.get("target_section")
     return len(others) >= 2 or any(
         not section or not item.lesson.case_metadata.get("target_section")
-        or section == item.lesson.case_metadata.get("target_section")
+        or lesson_files.section_key(str(section)) == lesson_files.section_key(
+            str(item.lesson.case_metadata["target_section"])
+        )
         for item in others
     )
 
