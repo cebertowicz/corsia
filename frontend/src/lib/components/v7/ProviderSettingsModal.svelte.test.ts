@@ -168,7 +168,7 @@ describe('ProviderSettingsModal remove', () => {
 	});
 
 	it('shows the low-memory refusal when a started server has no model', async () => {
-		const message = 'Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.';
+		const message = "This computer can't run a local model well. Connect a subscription or an API key in the app.";
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: false, reason: 'mac_cannot_run', message })));
 		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'managed' as const, status: 'offline' as const, endpoints: [{ host: '127.0.0.1' }] };
 		component = mount(ProviderSettingsModal, {

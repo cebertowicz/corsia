@@ -69,7 +69,7 @@ describe('Setup local model below the setup floor', () => {
 	});
 
 	it('shows the no-model refusal after rollback without offering a download', async () => {
-		const message = 'Local models need at least 32 GB of memory. Connect a subscription or an API provider.';
+		const message = "This computer can't run a local model well. Connect a subscription or an API key in the app.";
 		await openSetup('not_running', { ok: true, in_progress: true }, { reason_code: 'no_models', local_state: 'failed', setup_error_code: 'mac_cannot_run', setup_error_message: message });
 		host.querySelector<HTMLButtonElement>('section[aria-label="Local model"] button[aria-label="Local model"]')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(message));

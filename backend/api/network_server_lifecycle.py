@@ -37,6 +37,7 @@ async def _confirm_low_memory_start(server_id: str, provider_module, cfg: dict) 
     """Confirm a model after starting CORSIA's stopped server; never download one."""
     from llm.catalog import discover_network_models
     from llm.local_sources import catalog_membership
+    from llm.local_setup_prepare import NO_LOCAL_MODEL
 
     refreshed = await discover_network_models(server_id)
     if not refreshed.get("ok"):
@@ -51,10 +52,7 @@ async def _confirm_low_memory_start(server_id: str, provider_module, cfg: dict) 
         log.warning("Local server rollback failed reference=%s: %s", ref, message)
         return {**stopped, "message": message, "ref": ref}
     await run_in_db(nd.update_server_status, server_id, status="offline")
-    return {"ok": False, "reason": "mac_cannot_run", "message": (
-        "Local models need at least 32 GB of memory, and this computer has less. "
-        "Smaller models and future updates may bring them to computers with less memory. "
-        "Connect a subscription or an API provider.")}
+    return {"ok": False, "reason": "mac_cannot_run", "message": NO_LOCAL_MODEL}
 
 
 @router.post("/{server_id}/lifecycle/{action}")
@@ -112,7 +110,7 @@ async def lifecycle_action(server_id: str, action: str):
     else:
         # The reference ties the failure the person sees to this line, which carries its cause.
         error = result.pop("error", None) or result.get("message")
-        result = {**result, "message": result.get("message") or error, "ref": new_reference("local")}
+        result = {**result, "ref": new_reference("local")}
         log.warning("Local server %s failed reference=%s: %s", action, result["ref"], error)
 
     return result

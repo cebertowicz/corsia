@@ -125,7 +125,8 @@ def test_settings_start_confirms_managed_models_only_below_floor(client, monkeyp
     body = response.json()
     if case == "empty":
         assert body["ok"] is False and body["reason"] == "mac_cannot_run"
-        assert "Local models need at least 32 GB" in body["message"]
+        from llm.local_setup_prepare import NO_LOCAL_MODEL
+        assert body["message"] == NO_LOCAL_MODEL
         stop.assert_awaited_once_with({"server_id": "ns-test"})
         assert states == ["online", "offline"]
         monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: False)
@@ -156,6 +157,14 @@ def test_settings_start_reports_discovery_failure_without_claiming_a_model(clien
     assert response.json()["ok"] is False
     assert response.json()["message"] == "Couldn’t refresh the model list. Try again."
     assert response.json()["ref"].startswith("local-")
+
+
+def test_lifecycle_failure_does_not_expose_provider_error(client):
+    with patch("llm.providers.omlx.start_server", new=AsyncMock(return_value={"ok": False, "error": "private provider detail"})):
+        response = client.post("/api/settings/network-servers/ns-test/lifecycle/start", headers={"Authorization": f"Bearer {_TOKEN}"})
+    body = response.json()
+    assert body["ok"] is False and body["ref"].startswith("local-")
+    assert "private provider detail" not in str(body)
 
 
 def test_lifecycle_invalid_action_400s(client):
