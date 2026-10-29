@@ -90,16 +90,14 @@ def test_packaged_setup_ignores_a_broken_path_leftover_without_brew(leftover, mo
     own.ensure_omlx(lambda _stage: None, needs_repair=True)
 
 
-def test_a_real_install_failure_names_homebrew_and_the_reason(leftover, monkeypatch):
+def test_a_real_install_failure_names_the_tool_and_the_reason(leftover, monkeypatch):
     _probe(monkeypatch, subprocess.CompletedProcess([], 126, "", ""))
 
     def run(command):
-        if command[1] == "install":
-            raise subprocess.CalledProcessError(1, command, stderr="Error: disk full\n")
+        raise subprocess.CalledProcessError(1, command, stderr="Error: disk full\n")
 
     monkeypatch.setattr(own, "run_command", run)
-    monkeypatch.setattr(own.managed, "command_output", lambda command: "")
-    monkeypatch.setattr(own.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
+    monkeypatch.setattr(own.shutil, "which", lambda _name: None)
 
-    with pytest.raises(RuntimeError, match=r"Homebrew couldn't install oMLX: Error: disk full\. Try again\."):
+    with pytest.raises(RuntimeError, match=r"curl couldn't download oMLX: Error: disk full\. Try again\."):
         own.ensure_omlx(lambda stage: None, needs_repair=True)

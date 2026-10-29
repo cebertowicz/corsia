@@ -26,13 +26,30 @@ def is_corsia_managed_server(server: dict) -> bool:
     )
 
 
+def source_omlx_environment() -> Path:
+    """Private source-install environment, separate from models and settings."""
+    return managed_omlx_paths().base_path / "runtime"
+
+
 def managed_omlx_executable(path: str | Path | None = None) -> str | None:
-    """Return the bundled executable by absolute path, or None when it is unavailable."""
+    """Return the bundled or completed private source executable, if present."""
     bundle = app_bundle_root(path)
-    if bundle is None:
+    if bundle is not None:
+        executable = bundle / "Contents" / "Resources" / "bin" / "omlx"
+        return str(executable) if executable.is_file() else None
+    if path is not None:
         return None
-    executable = bundle / "Contents" / "Resources" / "bin" / "omlx"
-    return str(executable) if executable.is_file() else None
+    environment = source_omlx_environment()
+    executable = environment / "bin" / "omlx"
+    return str(executable) if (environment / ".installed").is_file() and executable.is_file() else None
+
+
+def omlx_command(executable: str) -> list[str]:
+    """Use a relocatable module invocation for the private source runtime."""
+    environment = source_omlx_environment()
+    if Path(executable) == environment / "bin" / "omlx":
+        return [str(environment / "bin" / "python"), "-m", "omlx.cli"]
+    return [executable]
 
 
 def managed_omlx_install_error(path: str | Path | None = None) -> str | None:
