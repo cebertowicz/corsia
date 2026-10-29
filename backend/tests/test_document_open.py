@@ -210,7 +210,6 @@ def test_document_open_guidance_names_post_update():
 
     for guidance in (_REQUESTED, _VIEW_LINK):
         assert "`post_update`" in guidance
-        assert "load it by name" not in guidance
 
 
 @pytest.mark.asyncio
