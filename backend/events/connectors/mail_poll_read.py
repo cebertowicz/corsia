@@ -124,12 +124,12 @@ def event_payload(
         "thread_id": adapter.thread_key(account_id, message.thread_id),
         **adapter.cursor_facts(history_id),
         "from": email_screen.sender_for_screen(headers.get("from", ""), screen),
-        "to": headers.get("to", ""), "label": "INBOX",
+        "to": email_screen.addresses_for_screen(headers.get("to", ""), screen), "label": "INBOX",
         "screen_status": screen.status, "needs_person": screen.needs_person,
         "injection": bool(screen.injection), "injection_rule": screen.rule,
         "kind": screen.kind, "screen_model": screen.model_id,
     }
-    if date := adapter.date(headers):
+    if date := email_screen.date_for_screen(adapter.date(headers) or "", screen):
         payload["date"] = date
     if screen.clean and (subject := headers.get("subject")):
         payload["subject"] = subject
