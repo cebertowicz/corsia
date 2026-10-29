@@ -20,6 +20,10 @@ export type LocalRowInput = {
 	confirmStop?: (asking: boolean) => void; turnOff?: () => void;
 };
 
+export function canRestartStoppedLocal(source?: LocalRowState): boolean {
+	return source?.reason_code === 'not_running' && source.local_state === 'stopped';
+}
+
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
 export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading the local model so setup can continue. To turn it off, sign in to a subscription (Back to Your subscriptions) or add an API provider first.';
 export const LOCAL_HELD_READY = 'CORSIA needs the local model to continue setup. To turn it off, sign in to a subscription (Back to Your subscriptions) or add an API provider first.';
@@ -43,12 +47,14 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 			detail: failed ? localTurnOffFailed(turnOffFailed.reference) : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
-	if (source?.reason_code === 'not_running' && source.local_state === 'stopped') {
+	if (source?.local_state === 'starting' || (canRestartStoppedLocal(source) && preparing)) {
+		return { ...row, meta: 'Starting the local model…', busy: true };
+	}
+	if (canRestartStoppedLocal(source)) {
 		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
 	}
 	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (downloading) {
-		if (source?.local_state === 'starting') return { ...row, meta: 'Starting the local model…', busy: true };
 		const meta = source?.download_stalled ? 'Download paused. It continues when the connection returns.'
 			: [model, size, `Downloading ${source?.download_percent ?? 0}%`, measuredDownloadTime(source?.download_eta_seconds)].filter(Boolean).join(' · ');
 		const toggle = { on: !confirmingStop, held: !cloudReady, run: (next: boolean) => { if (!next) confirmStop?.(true); } };

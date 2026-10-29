@@ -29,7 +29,7 @@
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
-	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
+	import { canRestartStoppedLocal, setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
@@ -221,7 +221,7 @@
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
 	async function startLocal() {
-		if (!eligible || localBusy) return;
+		if ((!eligible && !canRestartStoppedLocal(local)) || localBusy) return;
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);

@@ -44,6 +44,11 @@ describe('setup provider rows', () => {
 		expect(start).toHaveBeenCalledOnce();
 	});
 
+	it('shows progress while an existing model starts below the floor', () => {
+		const row = setupLocalRow({ ...actions(), source: { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'starting' }, pick: null, eligible: false, downloading: true, ready: false, startError: '' });
+		expect(row).toMatchObject({ meta: 'Starting the local model…', busy: true });
+	});
+
 	it('shows a ready local model as a completed provider row', () => {
 		const row = setupLocalRow({
 			...actions(),
