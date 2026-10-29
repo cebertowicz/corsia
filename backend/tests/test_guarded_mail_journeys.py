@@ -52,7 +52,7 @@ def provider_state(mail, messages, *, sent_html=None):
 @pytest.fixture
 def clean_screen(monkeypatch):
     async def screen(account_id, message):
-        return json.dumps({'subject': message.headers['subject'], 'body': f'<untrusted-email>{message.body}</untrusted-email>'})
+        return json.dumps({'subject': message.headers['subject'], 'screen': {'state': 'clean'}, 'body': f'<untrusted-email>{message.body}</untrusted-email>'})
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
 
 
