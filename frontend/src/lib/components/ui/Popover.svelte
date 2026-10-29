@@ -8,10 +8,12 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
-	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', children }: {
+	import { menuPop } from '$lib/popoverMotion';
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
+		onClosed?: () => void;
 		restoreFocus?: () => void;
 		placement?: 'right' | 'bottom' | 'bottom-end';
 		/** Make the content a column bounded by the popover, so one child can shrink and scroll while the rest stay in view. */
@@ -34,7 +36,7 @@
 	let opener = $state<HTMLElement | null>(null);
 	let style = $state('left: 12px; top: 12px;');
 	/** A live anchor whose text is not drawn, or is scrolled out of the area, hides its surface; it returns when the text does. */
-	let hidden = $state(false);
+	let hidden = $state(true);
 	function rectFor(value: Anchor) { return typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value; }
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
@@ -58,11 +60,13 @@
 		// Measure the natural size: a width cap from an earlier placement must not shrink what a roomier one may use.
 		const capped = surface.style.maxWidth;
 		surface.style.maxWidth = '';
-		const box = surface.getBoundingClientRect();
+		// Layout dimensions are unaffected by the entrance scale; a transformed rect would permanently shrink the width cap.
+		const naturalWidth = surface.offsetWidth;
+		const naturalHeight = surface.offsetHeight;
 		surface.style.maxWidth = capped;
 		const gap = 8;
-		const width = Math.min(box.width, area.right - area.left - 2 * gap);
-		const height = Math.min(box.height, area.bottom - area.top - 2 * gap);
+		const width = Math.min(naturalWidth, area.right - area.left - 2 * gap);
+		const height = Math.min(naturalHeight, area.bottom - area.top - 2 * gap);
 		const avoided = avoidRect?.();
 		let left = rect.left;
 		let top = rect.bottom + gap;
@@ -98,13 +102,18 @@
 	});
 	$effect(() => {
 		if (!open) return;
-		hidden = false;
+		hidden = true;
+		let cancelled = false;
 		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		void tick().then(() => {
+		void tick().then(async () => {
+			if (cancelled) return;
 			position();
+			await tick(); // Apply placement and visibility before moving focus into the card.
+			if (cancelled || !open || hidden) return;
 			const preferred = initialFocus ? surface?.querySelector<HTMLElement>(initialFocus) : null;
 			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
 		});
+		return () => { cancelled = true; };
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
@@ -119,11 +128,14 @@
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} />
 
 {#if open}
-	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas. -->
-	<div class="popover" class:fill data-popover use:portal bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined}>{@render children()}</div>
+	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
+	     Clipping keeps it measurable without inherited visibility transitions delaying focus. -->
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
 {/if}
 
 <style>
 	.popover { position: fixed; z-index: 45; box-sizing: border-box; width: min(380px, calc(100vw - 24px)); max-height: min(70vh, 620px); overflow: auto; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); }
+	/* Placement and clipping update immediately; menuPop owns the entrance and exit. */
+	.popover { transition-property: none; }
 	.popover.fill { display: flex; flex-direction: column; overflow: hidden; }
 </style>

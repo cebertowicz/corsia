@@ -48,11 +48,16 @@ def _first_unread_line(first_unread: object) -> str:
     )
 
 
+def _reply_to(item: dict) -> str:
+    root = item.get("root_cid")
+    return f" (reply to {root})" if isinstance(root, str) else ""
+
+
 def _comments_lines(comments: object) -> str:
     if not isinstance(comments, list):
         return ""
     rows = [
-        f' {item["cid"]}. On #{item["seq"]}: "{item["quote"]}" | note: {item["note"]}'
+        f' {item["cid"]}. On #{item["seq"]}{_reply_to(item)}: "{item["quote"]}" | note: {item["note"]}'
         for item in comments
         if isinstance(item, dict) and isinstance(item.get("cid"), str)
         and _is_int(item.get("seq")) and isinstance(item.get("quote"), str)

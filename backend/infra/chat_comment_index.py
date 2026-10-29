@@ -15,9 +15,10 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
     for comment in comments:
         db.execute(
             "INSERT OR IGNORE INTO chat_comments "
-            "(thread_id,target_message_id,user_message_id,cid,created_at) "
-            "SELECT ?,id,?,?,? FROM messages WHERE thread_id=? AND seq=? AND role='assistant'",
-            (thread_id, user_message_id, comment['cid'], created_at, thread_id, comment['seq']),
+            "(thread_id,target_message_id,user_message_id,cid,created_at,root_user_message_id,root_cid) "
+            "SELECT ?,id,?,?,?,?,? FROM messages WHERE thread_id=? AND seq=? AND role='assistant'",
+            (thread_id, user_message_id, comment['cid'], created_at,
+             comment.get('root_user_message_id'), comment.get('root_cid'), thread_id, comment['seq']),
         )
 
 
@@ -28,7 +29,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         return
     rows = db.execute(
         "SELECT c.target_message_id,c.user_message_id,c.cid,c.created_at,"
-        "answer.assistant_message_id,answer.answered_at,m.content,"
+        "answer.assistant_message_id,answer.answered_at,m.content,c.root_user_message_id,c.root_cid,"
         f"EXISTS (SELECT 1 {UNREAD_FROM} WHERE {UNREAD_WHERE} "
         "AND a.cid=answer.cid AND a.assistant_message_id=answer.assistant_message_id) "
         "FROM chat_comments c "
@@ -66,22 +67,34 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
             comments[(sender_id, comment['cid'])] = comment
     threads = {}
-    for target, sender, cid, created, answer_id, answered_at, text, unread in rows:
+    for target, sender, cid, created, _, _, _, root_sender, _, _ in rows:
         comment = comments.get((sender, cid))
-        if comment is None:
+        if root_sender is None and comment is not None and (sender, cid) not in threads:
+            threads[(sender, cid)] = {**comment, 'user_message_id': sender, 'created_at': created, 'answers': []}
+            by_id[target].setdefault('chat_comments', []).append(threads[(sender, cid)])
+    replies_added = set()
+    for target, sender, cid, created, answer_id, answered_at, text, root_sender, root_cid, unread in rows:
+        comment = comments.get((sender, cid))
+        key = (root_sender, root_cid) if root_sender else (sender, cid)
+        if comment is None or key not in threads:
             continue
-        key = (sender, cid)
-        if key not in threads:
-            threads[key] = {**comment, 'user_message_id': sender, 'created_at': created, 'answers': []}
-            by_id[target].setdefault('chat_comments', []).append(threads[key])
+        if root_sender and (sender, cid) not in replies_added:
+            threads[key]['answers'].append({
+                'author_kind': 'user', 'user_message_id': sender, 'cid': cid,
+                'text': comment['note'], 'created_at': created, 'unread': False,
+            })
+            replies_added.add((sender, cid))
         if answer_id and text is not None:
             sections = parse_answers(text, answer_id).get(cid, [])
             if sections:
                 threads[key]['answers'].append({
+                    'author_kind': 'agent', 'user_message_id': sender, 'cid': cid,
                     'assistant_message_id': answer_id,
                     'text': '\n\n'.join(section['text'] for section in sections),
                     'created_at': answered_at, 'unread': bool(unread),
                 })
+    for thread in threads.values():
+        thread['answers'].sort(key=lambda answer: answer['created_at'])
     for message in by_id.values():
         if 'chat_comments' in message:
             message['chat_comments'].sort(key=lambda comment: comment['from_off'])
