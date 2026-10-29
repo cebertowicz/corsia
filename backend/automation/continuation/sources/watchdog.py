@@ -110,11 +110,12 @@ class WatchdogSource:
                 continue
             transition = f"{active_since}:cycle:{cycle}"
             dedupe_key = f"{self.kind}:{thread_id}:{row['id']}:{transition}"
+            # Only a settled cycle stops here. A live row is re-requested, so enqueue
+            # returns it and the runner drives it once due (a startup-spread row included).
             if db.execute(
                 """SELECT 1 FROM continuation_triggers
                    WHERE kind='t1_watchdog' AND subject_id=? AND dedupe_key=?
-                     AND state IN ('pending','deferred','delivered','failed',
-                                   'stalled','cancelled','suppressed')
+                     AND state IN ('delivered','failed','stalled','cancelled','suppressed')
                    LIMIT 1""",
                 (row["id"], dedupe_key),
             ).fetchone() is not None:
