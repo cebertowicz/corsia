@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
-import { activeThreadId, threads } from '$lib/stores/threads';
+import { activeThreadId, allThreads, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
 import { resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
@@ -135,7 +135,7 @@ describe('Header', () => {
 	});
 
 	it('shows conductor settings for the designated hidden thread, not a project gear', () => {
-		threads.set([]);
+		allThreads.set([{ id: 'conductor-1', user_id: 'u', profile: 'personal', title: 'Conductor', coordination: 'conductor', model: null, created_at: 'now', updated_at: 'now' }]);
 		activeThreadId.set('conductor-1');
 		uiScope.set({ id: 'project-1', name: 'CORSIA', color: '#d65a87' });
 		render('chat', 'conductor-1');
@@ -147,7 +147,7 @@ describe('Header', () => {
 	});
 
 	it('labels the settings gear CORSIA settings for the workspace scope\'s designated thread', () => {
-		threads.set([]);
+		allThreads.set([{ id: 'agent-1', user_id: 'u', profile: 'personal', title: 'CORSIA', coordination: 'corsia', model: null, created_at: 'now', updated_at: 'now' }]);
 		activeThreadId.set('agent-1');
 		uiScope.set(null);
 		render('chat', 'agent-1');
@@ -191,7 +191,7 @@ describe('Header', () => {
 	});
 
 	it('opens a conductor thread doorway at its project, not at the conductor (PL-2)', () => {
-		threads.set([]);
+		allThreads.set([{ id: 'conductor-1', user_id: 'u', profile: 'personal', title: 'Conductor', coordination: 'conductor', model: null, created_at: 'now', updated_at: 'now' }]);
 		activeThreadId.set('conductor-1');
 		uiScope.set({ id: 'prj-atlas', name: 'Atlas', color: '#d65a87' });
 		render('chat', 'conductor-1');
@@ -234,7 +234,7 @@ describe('Header title on the Measurement page', () => {
 	});
 
 	it('names the project when the active thread is the conductor', () => {
-		threads.set([]);
+		allThreads.set([{ id: 'conductor-1', user_id: 'u', profile: 'personal', title: 'Conductor', coordination: 'conductor', model: null, created_at: 'now', updated_at: 'now' }]);
 		activeThreadId.set('conductor-1');
 		measurementScope.set({ project: 'prj-atlas', agent: null });
 		render('measurement', 'conductor-1');
