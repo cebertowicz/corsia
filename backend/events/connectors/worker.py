@@ -8,8 +8,6 @@ none (``invalid`` for a payload that failed its workflow's result schema).
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from dataclasses import replace
 from typing import Any
 
 from events.connector_workflows import shipped_item_fields
@@ -47,29 +45,14 @@ def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
             "external_id": str(facts["item"])}
 
 
-class _WorkerEventTypes(Mapping[str, EventTypeDecl]):
-    """Read connector-contributed fields when the declaration is used."""
-
-    _types = {
-        RESULT: EventTypeDecl(RESULT, ("run_id",), _FACTS, event_class="actionable"),
-        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), _FACTS, event_class="informational"),
-    }
-
-    def __getitem__(self, key: str) -> EventTypeDecl:
-        return replace(self._types[key], filterable_fields=(*_FACTS, *shipped_item_fields()))
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._types)
-
-    def __len__(self) -> int:
-        return len(self._types)
-
-
 MANIFEST = register(ConnectorManifest(
     connector=NAMESPACE,
     namespace=NAMESPACE,
     version="1",
-    event_types=_WorkerEventTypes(),
+    event_types={
+        RESULT: EventTypeDecl(RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="actionable"),
+        NO_RESULT: EventTypeDecl(NO_RESULT, ("run_id",), (*_FACTS, *shipped_item_fields()), event_class="informational"),
+    },
     classify=_classify,
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,

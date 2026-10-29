@@ -100,7 +100,7 @@ async def test_floor_capture_failure_does_not_start_worker(screen, monkeypatch):
     spawn.assert_not_awaited()
     row = starts(screen["key"] + "_start")[0]
     assert row[0] == "refused" and "Couldn’t read" in row[1]
-    assert "Ask the rule’s owner to investigate the run" in row[1]
+    assert "The run ends without a result; a later event starts a new one" in row[1]
     event = next(item for item in screen["state"]["admitted"] if item["event_type"] == "worker.no_result")
     assert event["facts"]["source"] == "outside" and event["facts"]["injection_signs"] is None
     assert not list((screen["folder"] / "staging").glob("screen-*"))
