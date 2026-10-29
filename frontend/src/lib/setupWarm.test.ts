@@ -60,6 +60,61 @@ describe('setup local warm', () => {
 		warm.destroy();
 	});
 
+	it('does not report a failure when the warm is cancelled', async () => {
+		let started = false;
+		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
+			started = true;
+			return new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+			});
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const warm = createSetupWarm();
+		warm.start([local], 'session');
+		await vi.waitFor(() => expect(started).toBe(true));
+		warm.destroy();
+		await warm.finish();
+		await Promise.resolve();
+		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(0);
+	});
+
+	it('does not report a failure when cancelled while reading the response', async () => {
+		let reading = false;
+		let rejectBody!: (error: Error) => void;
+		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
+			return { ok: true, json: () => { reading = true; return new Promise((_resolve, reject) => { rejectBody = reject; }); } } as Response;
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const warm = createSetupWarm();
+		warm.start([local], 'session');
+		await vi.waitFor(() => expect(reading).toBe(true));
+		warm.destroy();
+		rejectBody(new DOMException('Aborted', 'AbortError'));
+		await warm.finish();
+		await Promise.resolve();
+		expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=warm_failed'))).toHaveLength(0);
+	});
+
+	it('reports a missing candidate once per session and again after a reset', async () => {
+		const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
+			return json({ ok: true });
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const warm = createSetupWarm();
+		warm.start([], 'one');
+		warm.start([], 'one');
+		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(1));
+		warm.start([], 'two');
+		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(2));
+		warm.start([], null);
+		warm.start([], 'two');
+		await vi.waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).includes('skip_reason=no_candidate'))).toHaveLength(3));
+		warm.destroy();
+	});
+
 	it('does no work without a session', async () => {
 		const fetcher = vi.fn();
 		vi.stubGlobal('fetch', fetcher);

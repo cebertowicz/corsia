@@ -115,13 +115,15 @@ export function createSetupWarm() {
 				try {
 					const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
 					const body: { ok?: boolean } | null = await response.json().catch(() => null);
-					if (!response.ok || !body || body.ok === false) {
+					if (!signal.aborted && (!response.ok || !body || body.ok === false)) {
 						logSkip(lookup.target.thread_id, session, 'warm_failed');
 						console.warn('Setup warm did not finish', response.status);
 					}
 				} catch {
-					logSkip(lookup.target.thread_id, session, 'warm_failed');
-					if (!signal.aborted) console.warn('Setup warm failed');
+					if (!signal.aborted) {
+						logSkip(lookup.target.thread_id, session, 'warm_failed');
+						console.warn('Setup warm failed');
+					}
 				}
 			} catch {
 				if (!signal.aborted) console.warn('Setup warm failed');
