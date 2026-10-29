@@ -16,7 +16,7 @@ from llm.local_model import (
     OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fits_now, omlx_has_recommender, order_models, pick_for_setup,
 )
 from llm.local_setup_auth import omlx_version
-from llm.local_setup_gates import host_ram_bytes, local_setup_memory_ok
+from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
 from llm.local_setup_disk import download_disk_space
 from llm.local_sources import corsia_omlx_server
@@ -34,7 +34,7 @@ async def _server() -> dict[str, Any]:
 
 
 async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]]]:
-    if not await asyncio.to_thread(local_setup_memory_ok):
+    if not await asyncio.to_thread(local_memory_ok):
         from llm.local_setup_prepare import NO_LOCAL_MODEL
 
         downloads = [item.view() for item in local_downloads.all()]

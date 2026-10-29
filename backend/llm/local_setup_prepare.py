@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from llm import local_model
 from llm.local_model import LocalModel, PickUnavailable
 from llm.local_profiles import STARTER_MODEL
-from llm.local_setup_gates import local_setup_memory_ok
+from llm.local_setup_gates import local_memory_ok
 from llm.local_setup_runtime import start_managed_omlx
 from llm.local_setup_results import failure_message
 
@@ -125,7 +125,7 @@ async def pick_view() -> dict:
     """What Welcome's local row shows: the state, the picked model, and why there is none."""
     from llm import local_setup as ls
 
-    if not await asyncio.to_thread(local_setup_memory_ok):
+    if not await asyncio.to_thread(local_memory_ok):
         return _view(LOW_MEMORY)
     flying = ls.flight_model()
     if flying is not None:

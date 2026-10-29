@@ -20,10 +20,6 @@ export type LocalRowInput = {
 	confirmStop?: (asking: boolean) => void; turnOff?: () => void;
 };
 
-export function canRestartStoppedLocal(source?: LocalRowState): boolean {
-	return source?.reason_code === 'not_running' && source.local_state === 'stopped';
-}
-
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
 export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading the local model so setup can continue. To turn it off, sign in to a subscription (Back to Your subscriptions) or add an API provider first.';
 export const LOCAL_HELD_READY = 'CORSIA needs the local model to continue setup. To turn it off, sign in to a subscription (Back to Your subscriptions) or add an API provider first.';
@@ -47,22 +43,9 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 			detail: failed ? localTurnOffFailed(turnOffFailed.reference) : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
-	if (source?.local_state === 'starting' || (canRestartStoppedLocal(source) && preparing)) {
-		return { ...row, meta: 'Starting the local model…', busy: true };
-	}
-	if (startError || LOCAL_FAILURE_STATES.has(source?.local_state ?? '')) {
-		const cause = startError || source?.setup_error_code;
-		const reference = startError ? startReference : source?.setup_error_reference;
-		const fix = startError ? startFix : source?.fix;
-		if (cause === 'mac_cannot_run') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
-		const meta = fix ?? 'CORSIA couldn’t start local setup. Try again.';
-		return { ...row, meta, reference, error: true, reportable: true, action: { label: 'Retry', run: start } };
-	}
-	if (canRestartStoppedLocal(source)) {
-		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
-	}
 	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (downloading) {
+		if (source?.local_state === 'starting') return { ...row, meta: 'Starting the local model…', busy: true };
 		const meta = source?.download_stalled ? 'Download paused. It continues when the connection returns.'
 			: [model, size, `Downloading ${source?.download_percent ?? 0}%`, measuredDownloadTime(source?.download_eta_seconds)].filter(Boolean).join(' · ');
 		const toggle = { on: !confirmingStop, held: !cloudReady, run: (next: boolean) => { if (!next) confirmStop?.(true); } };
@@ -74,10 +57,20 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		}
 		return { ...row, meta, toggle };
 	}
+	// Downloaded, and its server was turned off: the switch turns it back on.
+	if (source?.reason_code === 'not_running' && source.local_state === 'stopped') {
+		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
+	}
 	// The download finished: the model is being listed and loaded, never offered for download again;
 	// Check again asks the service now rather than waiting on the next refresh.
 	if (source?.local_state === 'ready') return { ...row, meta: `${model} · Loading…`, busy: true, spinning: true, action: { label: 'Check again', run: check } };
 	if (pick?.model && freeDisk !== undefined && freeDisk < pick.model.download_size_gb) return { ...row, meta: `Needs ${size} free, and this computer has ${freeDisk} GB. Free up space, then check again.`, action: { label: 'Check again', run: check } };
+	if (LOCAL_FAILURE_STATES.has(source?.local_state ?? '') || startError) {
+		const cause = source?.setup_error_code ?? startError;
+		const reference = source?.setup_error_reference ?? startReference;
+		const meta = startError ? startFix ?? '' : source?.fix ?? '';
+		return { ...row, meta, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
+	}
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'never_local_host' && pick.message ? pick.message
 			: pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'

@@ -62,6 +62,17 @@ def remove_staging_dir(root: Path, value: Any) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def remove_unclaimed_staging(owner: str, project_id: str | None, event_id: str,
+                             value: Any, db: sqlite3.Connection) -> None:
+    """Remove staged input only when no worker start claimed the event."""
+    claimed = db.execute(
+        "SELECT 1 FROM event_route_decisions WHERE event_id=? AND request_identity IS NOT NULL LIMIT 1",
+        (event_id,),
+    ).fetchone()
+    if not claimed:
+        remove_staging_dir(owner_root(owner, project_id, db), value)
+
+
 def staging_dir(root: Path, value: Any) -> str | None:
     """The request's staging directory, only inside the owner's own staging folder."""
     if value is None or value == "":

@@ -17,11 +17,18 @@ def capture_floor(staging: str) -> dict:
     return record
 
 
-def validate_captured_result(result: dict, record: dict) -> dict:
-    """Check the model's paths and signs, then apply the earlier fixed floor once."""
+def validate_signs(result: dict, _record: dict) -> dict:
+    """The shared outside-result sign list contains each rule at most once."""
     signs = result["injection_signs"]
     if len(signs) != len(set(signs)):
         raise ResultInvalid("injection signs must be unique")
+    return result
+
+
+def validate_captured_result(result: dict, record: dict) -> dict:
+    """Check the model's paths and signs, then apply the earlier fixed floor once."""
+    validate_signs(result, record)
+    signs = result["injection_signs"]
     payload = result["payload"]
     if any(finding["path"] not in record["paths"] for finding in payload["findings"]):
         raise ResultInvalid("a finding names a path outside the staged diff")

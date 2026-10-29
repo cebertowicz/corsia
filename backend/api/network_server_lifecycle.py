@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -27,34 +26,6 @@ def _remember_managed_choice(server: dict, running: bool) -> None:
         settings.save_setting_merge("providers", {server["provider"]: {"autoStart": running}})
 
 
-def _reload_failure(result: dict) -> dict:
-    ref = new_reference("local")
-    log.warning("Model list refresh failed reference=%s: %s", ref, result.get("error"))
-    return {"ok": False, "message": "Couldn’t refresh the model list. Try again.", "ref": ref}
-
-
-async def _confirm_low_memory_start(server_id: str, provider_module, cfg: dict) -> dict | None:
-    """Confirm a model after starting CORSIA's stopped server; never download one."""
-    from llm.catalog import discover_network_models
-    from llm.local_sources import catalog_membership
-    from llm.local_setup_prepare import NO_LOCAL_MODEL
-
-    refreshed = await discover_network_models(server_id)
-    if not refreshed.get("ok"):
-        return _reload_failure(refreshed)
-    available, _enabled = await asyncio.to_thread(catalog_membership)
-    if f"omlx@{server_id}" in available:
-        return None
-    stopped = await provider_module.stop_server(cfg)
-    if not stopped.get("ok"):
-        ref = new_reference("local")
-        message = stopped.get("message") or stopped.get("error") or "Couldn’t stop the local model."
-        log.warning("Local server rollback failed reference=%s: %s", ref, message)
-        return {**stopped, "message": message, "ref": ref}
-    await run_in_db(nd.update_server_status, server_id, status="offline")
-    return {"ok": False, "reason": "mac_cannot_run", "message": NO_LOCAL_MODEL}
-
-
 @router.post("/{server_id}/lifecycle/{action}")
 async def lifecycle_action(server_id: str, action: str):
     if action not in ("start", "stop", "reload"):
@@ -76,7 +47,13 @@ async def lifecycle_action(server_id: str, action: str):
                 "message": f"Discovered {result.get('discovered', 0)} model(s)",
                 **{k: v for k, v in result.items() if k != "ok"},
             }
-        return _reload_failure(result)
+        ref = new_reference("local")
+        log.warning("Model list refresh failed reference=%s: %s", ref, result.get("error"))
+        return {
+            "ok": False,
+            "message": "Couldn’t refresh the model list. Try again.",
+            "ref": ref,
+        }
 
     try:
         provider_module = for_provider(provider)
@@ -92,19 +69,10 @@ async def lifecycle_action(server_id: str, action: str):
     else:
         result = await provider_module.stop_server(cfg)
 
-    if result.get("ok") and action == "start":
-        # Discovery reads the persisted status and refuses an offline server.
-        await run_in_db(nd.update_server_status, server_id, status="online")
-        from llm.local_setup_gates import local_setup_memory_ok
-        from llm.managed_omlx_binary import is_corsia_managed_server
-
-        if is_corsia_managed_server(server) and not await asyncio.to_thread(local_setup_memory_ok):
-            failure = await _confirm_low_memory_start(server_id, provider_module, cfg)
-            if failure is not None:
-                return failure
-
     if result.get("ok"):
-        if action == "stop":
+        if action == "start":
+            await run_in_db(nd.update_server_status, server_id, status="online")
+        elif action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
         await run_in_db(_remember_managed_choice, server, action == "start")
     else:

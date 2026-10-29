@@ -21,7 +21,7 @@ def fresh_flight(monkeypatch, tmp_path):
 
 
 def test_ineligible_mac_does_not_start_a_managed_setup(monkeypatch):
-    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: False)
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: False)
 
     result = asyncio.run(flow.begin_local_setup())
 
@@ -29,100 +29,8 @@ def test_ineligible_mac_does_not_start_a_managed_setup(monkeypatch):
     assert local_setup.flight_task() is None
 
 
-def test_known_model_hint_requires_discovered_managed_catalog_row(monkeypatch):
-    from llm import local_sources
-
-    monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **kwargs: {"id": "managed"})
-    rows = [{"litellm_model": "omlx@other/m", "source": "discovered"},
-            {"litellm_model": "omlx@managed/m", "source": "manual"}]
-    monkeypatch.setattr(local_sources, "list_models", lambda **kwargs: rows)
-    assert local_sources.managed_server_with_known_model() is None
-    rows[1]["source"] = "discovered"
-    assert local_sources.managed_server_with_known_model()["id"] == "managed"
-
-
-@pytest.mark.usefixtures("mac_local_model_host")
-def test_non_discovered_row_does_not_offer_start_below_floor(monkeypatch):
-    from llm import local_sources
-
-    server = {"id": "managed", "status": "offline"}
-    monkeypatch.setattr(local_sources, "local_setup_memory_ok", lambda: False)
-    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [server])
-    monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda **_kwargs: server)
-    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: [{"litellm_model": "omlx@managed/m", "source": "manual"}])
-    source = local_sources._omlx_state((set(), set()), [])
-    assert source["eligible"] is False and source["reason_code"] == "no_models"
-
-
-@pytest.mark.usefixtures("mac_local_model_host")
-@pytest.mark.parametrize("installed", [True, False])
-def test_low_memory_projection_distinguishes_stopped_installed_server(monkeypatch, installed):
-    from llm import local_sources
-
-    server = {"id": "managed", "status": "disabled"}
-    monkeypatch.setattr(local_sources, "local_setup_memory_ok", lambda: False)
-    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda *_args: [])
-    monkeypatch.setattr(local_sources, "managed_server_with_known_model", lambda: server if installed else None)
-    monkeypatch.setattr(local_sources, "managed_omlx_executable", lambda: "/omlx")
-    monkeypatch.setattr(local_sources, "managed_omlx_install_error", lambda: None)
-    source = local_sources._omlx_state((set(), set()), [])
-    assert source["eligible"] is False
-    assert (source.get("reason_code") == "not_running") is installed
-
-
-@pytest.mark.parametrize("live_model", [True, False])
-def test_stopped_known_model_is_checked_below_floor_without_downloading(monkeypatch, live_model):
-    from llm import local_sources
-
-    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
-    monkeypatch.setattr(local_sources, "connected_local_server", lambda: None)
-    monkeypatch.setattr(local_sources, "managed_server_with_known_model", lambda: {"id": "managed"})
-    monkeypatch.setattr(local_setup, "_claim_operation", lambda *_args, **_kwargs: True)
-    calls = []
-
-    async def start(cfg):
-        calls.append((cfg["server_id"], "start"))
-        return {"ok": True}
-
-    async def stop(cfg):
-        calls.append((cfg["server_id"], "stop"))
-        return {"ok": True}
-
-    async def discover(server_id):
-        calls.append((server_id, "discover"))
-        return {"ok": True}
-
-    async def no_download(*_args, **_kwargs):
-        pytest.fail("restart must not download a model")
-
-    from types import SimpleNamespace
-    from api import network_server_lifecycle as lifecycle
-
-    server = {"id": "managed", "provider": "omlx", "kind": "managed", "source": "corsia", "instance_id": "corsia-managed", "status": "offline"}
-    monkeypatch.setattr(lifecycle.nd, "get_server", lambda _id: server)
-    monkeypatch.setattr(lifecycle.nd, "update_server_status", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(lifecycle, "_remember_managed_choice", lambda *_args: None)
-    monkeypatch.setattr(lifecycle, "for_provider", lambda _provider: SimpleNamespace(start_server=start, stop_server=stop))
-    monkeypatch.setattr("llm.catalog.discover_network_models", discover)
-    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: (
-        [{"litellm_model": "omlx@managed/m", "enabled": True}] if live_model else []))
-    monkeypatch.setattr(local_setup, "_download", no_download)
-
-    async def scenario():
-        result = await flow.begin_local_setup()
-        assert result["in_progress"]
-        finished = await local_setup.flight_task()
-        if live_model:
-            assert finished["ok"] and finished["existing"]
-        else:
-            assert not finished["ok"] and finished["reason"] == "mac_cannot_run"
-
-    asyncio.run(scenario())
-    assert calls == [("managed", "start"), ("managed", "discover")] + ([] if live_model else [("managed", "stop")])
-
-
 def test_setup_uses_one_managed_flight_for_overlapping_requests(monkeypatch):
-    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
     monkeypatch.setattr(local_setup, "_claim_operation", lambda *_args, **_kwargs: True)
     started = asyncio.Event()
     release = asyncio.Event()
@@ -151,7 +59,7 @@ def test_setup_uses_one_managed_flight_for_overlapping_requests(monkeypatch):
 
 
 def test_pending_operation_is_recovered_before_a_new_managed_flight(monkeypatch):
-    monkeypatch.setattr(flow, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
     local_setup_operation.write(local_setup_operation.Operation.for_model(PICK, "setup", "task-1"))
     recovered: list[bool] = []
 

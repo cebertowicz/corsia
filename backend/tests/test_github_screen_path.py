@@ -147,7 +147,7 @@ async def test_outside_pr_through_installed_rules_and_worker(screen):
 
 
 @pytest.mark.asyncio
-async def test_invalid_result_is_not_retried_and_is_delivered_as_digest(screen):
+async def test_invalid_result_is_not_retried_and_wakes_owner(screen):
     from infra.database import get_db
 
     screen['reply'].write_text(fenced({'not': 'a screen result'}))
@@ -160,9 +160,8 @@ async def test_invalid_result_is_not_retried_and_is_delivered_as_digest(screen):
     assert result['reason'] == 'invalid' and result['item'] == 'o/r#1'
     assert result['source'] == 'outside' and result['valid'] is False
     assert not list((screen['folder'] / 'staging').glob('screen-*'))
-    rows = get_db().execute("SELECT summary, details_json FROM context_change_journal "
-                            "WHERE object_kind='thread_context' AND object_id='pr-owner'").fetchall()
-    assert any('invalid' in (row['details_json'] or '') for row in rows), [tuple(row) for row in rows]
+    rows = get_db().execute("SELECT content FROM messages WHERE thread_id='pr-owner'").fetchall()
+    assert any('[EVENT: no_result]' in row[0] and 'invalid' in row[0] for row in rows), [tuple(row) for row in rows]
     await _route(screen['state']['sha'])
     await run_scripts()
     await settle_all()

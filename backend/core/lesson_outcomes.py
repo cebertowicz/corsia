@@ -52,9 +52,9 @@ CAPTURE_ACCEPTANCE = (
 )
 CAPTURE_STEPS = (
     "This captured hypothesis is not offered as guidance; the file linked to "
-    "this task says what it lacks. Complete it by placing its continuity entry "
-    "with verdict trial and the missing fields, which closes this task, or "
-    "drop the entry with the reason and finish this task."
+    "this task says why it was held. Once resolved (missing fields added or the "
+    "conflicting trial finished), place its continuity entry with verdict trial "
+    "to close this task, or drop the entry with the reason and finish this task."
 )
 
 

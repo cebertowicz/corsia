@@ -294,7 +294,7 @@ def test_finishing_a_setup_flight_nudges_open_screens(monkeypatch) -> None:
 
 
 def _stopped_server_with_flight(monkeypatch, flight_state: str) -> dict:
-    monkeypatch.setattr(local_sources, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(local_sources, "local_memory_ok", lambda: True)
     monkeypatch.setattr("llm.local_setup_prepare.known_model", lambda: None)
     monkeypatch.setattr(local_setup, "setup_kind", lambda: "setup")
     monkeypatch.setattr("onboarding.local_download_state.current", lambda: {"state": flight_state})

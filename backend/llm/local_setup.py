@@ -16,7 +16,7 @@ from llm import local_model, local_setup_download, local_setup_operation
 from llm.local_model import LocalModel
 from llm.local_profiles import format_size
 from llm.local_setup_disk import require_free_disk
-from llm.local_setup_results import RESTART_FAILURE_MESSAGE, setup_fix
+from llm.local_setup_results import setup_fix
 
 STATES = frozenset({"starting", "downloading", "ready", "stopped", "setup_failed", "start_failed", "failed"})
 EVENT_CATEGORY = "local_setup"
@@ -272,26 +272,17 @@ def setup_status() -> dict[str, Any]:
         result, downloaded=_flight.downloaded,
     )
     failed = result or {}
-    restart = failed.get("restart") is True
-    if restart:
-        from llm.local_setup_prepare import NO_LOCAL_MODEL
-        message = NO_LOCAL_MODEL if failed.get("reason") == "mac_cannot_run" else None
-    else:
-        message = failed.get("message")
     return {
         "state": state, "model": model.repository if model else None,
         "percent": _flight.download_percent,
         "eta_seconds": _flight.download_eta_seconds,
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
-        "cause": (result.get("cause") or result.get("reason")) if result else None,
-        "message": message,
-        "restart": restart,
+        "cause": result.get("cause") if result else None,
+        "message": result.get("message") if result else None,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": (RESTART_FAILURE_MESSAGE if restart and failed.get("reason") != "mac_cannot_run"
-                else failed.get("fix") if not restart and failed.get("fix")
-                else setup_fix(failed.get("cause"), failed.get("bytes_to_free")))
+        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 

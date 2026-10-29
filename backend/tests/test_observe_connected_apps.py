@@ -55,6 +55,7 @@ async def test_comment_marked_without_observe_rule_and_routing_suppresses_only_c
     from events.connectors.github_admission import record_delivery_for_admission
     from events.router import RouteOutcome, route_event
 
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "human")
     _agent("a")
     _agent("b")
     pr = result("create_pull_request", '{"id":"7","url":"https://github.com/owner/repo/pull/7"}')

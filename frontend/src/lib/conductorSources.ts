@@ -54,7 +54,6 @@ export interface ModelSource {
 	/** Setup's managed local lifecycle and bounded failure facts. */
 	local_state?: string;
 	setup_error_code?: string;
-	setup_error_message?: string;
 	setup_error_reference?: string;
 	bytes_to_free?: number;
 	/** CORSIA's own local service exists, online or offline. */

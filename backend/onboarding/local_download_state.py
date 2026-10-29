@@ -28,12 +28,8 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         if status.get("stalled") is True:
             detail["stalled"] = True
         cause = status.get("cause")
-        if cause in _SAFE_CAUSES or (status.get("restart") is True and cause == "mac_cannot_run"):
+        if cause in _SAFE_CAUSES:
             detail["cause"] = cause
-        # Only the known low-memory refusal is safe to project from a restart.
-        if status.get("restart") is True and cause == "mac_cannot_run":
-            from llm.local_setup_prepare import NO_LOCAL_MODEL
-            detail["message"] = NO_LOCAL_MODEL
         bytes_to_free = status.get("bytes_to_free")
         if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
             detail["bytes_to_free"] = bytes_to_free

@@ -44,18 +44,6 @@ def _corsia_server(monkeypatch, servers: list[dict]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_24_gib_without_installed_model_refuses_recommendations_and_download(monkeypatch) -> None:
-    monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
-    monkeypatch.setattr(local_downloads, "all", lambda: [])
-    monkeypatch.setattr(provider_local_models, "_clear_failed_record", lambda _model_id: None)
-    view = await provider_local_models.recommendations(_user={})
-    assert view["state"] == "low_memory" and view["models"] == []
-    with pytest.raises(HTTPException) as raised:
-        await provider_local_models.download_model({"repository": MODEL.repository}, _user={})
-    assert raised.value.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_server_refuses_a_persons_own_omlx_without_an_admin_call(monkeypatch) -> None:
     _omlx_rows(monkeypatch, [{"id": "studio", "status": "online", "source": "discovered"}])
     called = False
@@ -65,7 +53,7 @@ async def test_server_refuses_a_persons_own_omlx_without_an_admin_call(monkeypat
         called = True
         return {"best": [MODEL]}
 
-    monkeypatch.setattr(provider_local_models, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "ask_recommendations", recommendations)
 
     with pytest.raises(HTTPException) as raised:
@@ -286,7 +274,7 @@ async def test_recommendations_remove_available_records_missing_from_disk(monkey
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(MODEL))
     local_downloads.write(local_downloads.Download(failed_model, status="failed"))
-    monkeypatch.setattr(provider_local_models, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "_server", server)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
@@ -309,7 +297,7 @@ async def test_recommendations_leave_records_when_disk_listing_fails(monkeypatch
 
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(MODEL))
-    monkeypatch.setattr(provider_local_models, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "_server", server)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
@@ -334,7 +322,7 @@ def _ready_recommender(monkeypatch, tmp_path, sections: dict[str, list[LocalMode
     async def no_disk_models(_config):
         return []
 
-    monkeypatch.setattr(provider_local_models, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "host_ram_bytes", lambda: 64 * 1024**3)
     monkeypatch.setattr(provider_local_models, "model_room_bytes", lambda: room_gib * 1024**3)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)

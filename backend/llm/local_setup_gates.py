@@ -13,7 +13,7 @@ from functools import cache
 from dataclasses import dataclass
 from datetime import datetime
 
-from llm.local_model import memory_allows_local_setup
+from llm.local_model import memory_allows_local
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ def host_never_runs_local() -> bool:
     return platform.system() != "Darwin"
 
 
-def local_setup_memory_ok(ram_bytes: int | None = None) -> bool:
+def local_memory_ok(ram_bytes: int | None = None) -> bool:
     """Whether this Mac has the memory for a local model; reads its RAM when not given."""
-    return memory_allows_local_setup(host_ram_bytes() if ram_bytes is None else ram_bytes)
+    return memory_allows_local(host_ram_bytes() if ram_bytes is None else ram_bytes)
 
 
 def _default_limit(provider: str) -> dict | None:

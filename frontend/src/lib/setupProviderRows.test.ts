@@ -30,23 +30,10 @@ function sourceFromFlight(flight: typeof flightShapes[number]) {
 }
 
 describe('setup provider rows', () => {
-	it('tells a computer below the memory floor why and what to do instead', () => {
+	it('tells a computer under 24 GB why and what to do instead', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: false, startError: '' });
 
-		expect(row.meta).toBe('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.');
-	});
-
-	it('starts an installed stopped model below the setup floor without a pick', () => {
-		const start = vi.fn();
-		const row = setupLocalRow({ ...actions(), start, source: { source: 'omlx', name: 'Local model', state: 'needs_setup', reason_code: 'not_running', local_state: 'stopped' }, pick: null, eligible: false, downloading: false, ready: false, startError: '' });
-		expect(row.meta).toBe('Local model · Off');
-		row.toggle?.run(true);
-		expect(start).toHaveBeenCalledOnce();
-	});
-
-	it('shows progress while an existing model starts below the floor', () => {
-		const row = setupLocalRow({ ...actions(), source: { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'starting' }, pick: null, eligible: false, downloading: true, ready: false, startError: '' });
-		expect(row).toMatchObject({ meta: 'Starting the local model…', busy: true });
+		expect(row.meta).toBe('Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.');
 	});
 
 	it('shows a ready local model as a completed provider row', () => {
@@ -66,11 +53,12 @@ describe('setup provider rows', () => {
 		});
 	});
 
-	it('shows an existing ready model without a memory refusal below the floor', () => {
-		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: true, startError: '' });
-
-		expect(row).toMatchObject({ meta: 'Local model · runs on this computer', pill: { state: 'success', label: 'Ready' } });
-		expect(row.meta).not.toContain('Local models need at least 32 GB of memory');
+	it('keeps an already ready local model usable below the memory floor', () => {
+		const row = setupLocalRow({ ...actions(), pick: { state: 'low_memory', model: null, message: null }, eligible: false, downloading: false, ready: true, startError: '' });
+		expect(row.pill).toEqual({ state: 'success', label: 'Ready' });
+		expect(row.toggle).toMatchObject({ on: true, held: true });
+		expect(row.action).toBeUndefined();
+		expect(row.detail).toContain('needs the local model to continue setup');
 	});
 
 	it.each(flightShapes)('gives $state/$cause its matching local setup recovery', (flight) => {

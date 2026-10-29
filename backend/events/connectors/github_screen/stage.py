@@ -12,7 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from floor import diff_paths, floor_hits, workflow_paths
+from floor import diff_paths, edited_item_version, floor_hits, workflow_paths
 
 
 def github_read(path: str, *, accept: str | None = None) -> str:
@@ -97,10 +97,50 @@ def stage(event: dict, project: str, root: Path, tracked_repo: str | None, read=
             "staging_path": directory.name, "source": "outside"}
 
 
+def stage_item(event: dict, project: str, root: Path, tracked_repo: str | None, read=github_read) -> dict:
+    """Stage the exact issue, comment or review version through the same read broker."""
+    facts, kind = event["facts"], event["type"].removeprefix("github.")
+    repo, version = facts["repo"], facts["item_version"]
+    if not isinstance(repo, str) or not isinstance(tracked_repo, str) or repo.casefold() != tracked_repo.casefold():
+        raise ValueError("event repository does not match the tracked repository")
+    number = facts.get("pr_number") or facts.get("issue_number")
+    if type(number) is not int or number <= 0:
+        raise ValueError("item number must be an integer")
+    prefix = f"repos/{repo}"
+    item_id = str(version).split(":", 1)[0]
+    if not item_id.isdecimal():
+        raise ValueError("item id must be numeric")
+    if kind == "issue.opened":
+        endpoint = f"{prefix}/issues/{number}"
+    elif kind.startswith("review."):
+        endpoint = f"{prefix}/pulls/{number}/reviews/{item_id}"
+    elif kind.startswith("issue_comment.") or facts.get("issue_number"):
+        endpoint = f"{prefix}/issues/comments/{item_id}"
+    else:
+        endpoint = f"{prefix}/pulls/comments/{item_id}"
+    text = read(endpoint)
+    item = json.loads(text)
+    if kind.endswith(".edited"):
+        current = edited_item_version({**item, "id": item_id}, review=kind.startswith("review."))
+        if current != str(version):
+            raise RuntimeError("the item changed before staging")
+    root.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="triage-", dir=root))
+    try:
+        (directory / "item.json").write_text(text)
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    identity = hashlib.sha256(json.dumps([project, endpoint.casefold(), version]).encode()).hexdigest()
+    return {"repo": tracked_repo, "number": number, "item_version": str(version),
+            "request_identity": identity, "staging_path": directory.name, "source": "outside"}
+
+
 def main() -> None:
     event = json.load(sys.stdin)
     context = event["context"]
-    facts = stage(event, context["project_id"], Path(context["staging_root"]), context["github_repo"])
+    handler = stage_item if context["event_type"].endswith(".item_staged") else stage
+    facts = handler(event, context["project_id"], Path(context["staging_root"]), context["github_repo"])
     print(json.dumps({"event": {"type": context["event_type"], "facts": facts}}))
 
 

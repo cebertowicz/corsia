@@ -882,7 +882,7 @@ class TestRecheck:
         from llm import local_model, local_setup
 
         monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
-        monkeypatch.setattr("llm.local_setup_prepare.local_setup_memory_ok", lambda *_args: True)
+        monkeypatch.setattr("llm.local_setup_prepare.local_memory_ok", lambda *_args: True)
         # Status is derived from the managed local server and flight record.
         not_checked = {"state": "not_checked", "model": None, "message": None}
         idle = client.get("/api/providers/local/setup").json()

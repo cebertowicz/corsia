@@ -29,7 +29,7 @@
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
-	import { canRestartStoppedLocal, setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
+	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
@@ -51,7 +51,7 @@
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
 	let accountKnown = $state(false), savedName = '', savedEmail = '';
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localStartError = $state(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
 	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
@@ -93,7 +93,7 @@
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
 			key: row.key as SetupReportRow['key'], name: row.name, reference: row.reference,
-			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : (localStartError || local?.setup_error_code)) : connectFlow.attempts[row.key]?.cause,
+			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
 		}));
 	}
 	const jobs = $derived<SetupJob[]>([
@@ -217,17 +217,17 @@
 			const live = await response.json();
 			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error_code: live.cause, setup_error_message: live.message, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
+				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
 	async function startLocal() {
-		if ((!eligible && !canRestartStoppedLocal(local) && !(localFailed && localStartError !== 'mac_cannot_run' && local?.setup_error_code !== 'mac_cannot_run')) || localBusy) return;
+		if (!eligible || localBusy) return;
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
-			const { result, reference, fix, reason } = await requestLocalStart(current);
+			const { result, reference, fix } = await requestLocalStart(current);
 			localStartReference = reference ?? '';
-			if (result === 'failed') { localStartError = reason ?? 'other'; startFix = fix; }
+			if (result === 'failed') { localStartError = 'other'; startFix = fix; }
 			if (current) await refreshSources();
 		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
 		finally { localBusy = false; }

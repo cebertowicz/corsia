@@ -7,9 +7,14 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No local model we tested handles CORSIA's first-run work reliably on 24 GB.
+- The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
+- An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
+- Find the CORSIA agent and project conductors in search and Activity, with each conductor named for its project.
 - Signing in to an added Claude Code or Codex account makes its discovered models available during setup and in the model picker.
 - Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
 - Chat, Files, and project and workspace messages use clearer, consistent names.
+- A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Updates show the data upgrade step while your data is being upgraded.
 - Update settings show the changes for the update currently on offer.

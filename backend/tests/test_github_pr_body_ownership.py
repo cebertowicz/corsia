@@ -183,7 +183,8 @@ async def test_existing_owner_is_not_overridden_by_a_declaration(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_pr_comment_uses_its_issue_pr_body_declaration(isolated_db):
+async def test_pr_comment_uses_its_issue_pr_body_declaration(isolated_db, monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "alice")
     mk_session(ACTIVE_THREAD)
     with patch("events.connectors.github_ownership.cached_own_login", return_value=OWN_LOGIN), patch(
         "events.router.delivery.deliver_to_thread", return_value=True,

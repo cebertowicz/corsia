@@ -336,14 +336,14 @@ describe('SetupScreen', () => {
 			localEligible = false; macosSupported = true;
 			await providersStep();
 			expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
-			expect(host.textContent).toContain('Local models need at least 32 GB of memory');
+			expect(host.textContent).toContain('Adding a local model through CORSIA needs at least 32 GB of memory');
 		});
 
 		it('lists no Local model row, and no memory reason, on a server that is not macOS', async () => {
 			localEligible = false; macosSupported = null;
 			await providersStep();
 			expect(rowNames()).toEqual(['Claude Code', 'API provider']);
-			expect(host.textContent).not.toContain('Local models need at least 32 GB of memory');
+			expect(host.textContent).not.toContain('24 GB');
 			expect(host.textContent).not.toContain('Local model');
 		});
 

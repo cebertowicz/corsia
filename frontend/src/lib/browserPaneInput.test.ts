@@ -24,6 +24,13 @@ describe('pane pointer input', () => {
   expect(send.mock.calls[2][0]).toMatchObject({ x: 50, y: 60, button: 'left' });
   expect(send.mock.calls[3][0]).toMatchObject({ x: 100, y: 80 });
  });
+ it('sends the actual right button for a right click', () => {
+  const send = vi.fn(); const input = new BrowserPaneInput(send);
+  const right = { ...pointer('mouse'), button: 2 };
+  input.press(right, { x: 10, y: 20 });
+  input.release(right, { x: 10, y: 20 });
+  expect(send.mock.calls.map(([message]) => message.button)).toEqual(['none', 'right', 'right']);
+ });
  it('sums touch wheel deltas per display frame and preserves their order before release', () => {
   const send = vi.fn(); const shifts = vi.fn(); const input = new BrowserPaneInput(send, shifts);
   input.press(pointer(), { x: 40, y: 400 });

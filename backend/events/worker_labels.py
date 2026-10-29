@@ -2,7 +2,18 @@
 from collections.abc import Mapping
 from typing import Any
 
+from core.injection_rules import INJECTION_RULES
+
 OUTSIDE_CONTENT_LABEL = "from an untrusted agent; contains outside content"
+
+
+def injection_sign_text(connector: str, facts: Mapping[str, Any]) -> str | None:
+    """Describe a worker event's outside-content signs for delivery without changing their facts."""
+    signs = facts.get("injection_signs")
+    if connector != "worker" or facts.get("source") != "outside" or not isinstance(signs, list) or not signs:
+        return None
+    rules = dict(INJECTION_RULES)
+    return ", ".join(f"{sign} ({rules[sign]})" if sign in rules else str(sign) for sign in signs)
 
 
 def labelled_summary(text: str, facts: Mapping[str, Any]) -> str:

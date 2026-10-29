@@ -32,7 +32,7 @@ async def test_prepare_projects_personal_binary_update_cause_and_reference(monke
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare(state=prepare.CHECKING))
-    monkeypatch.setattr(prepare, "local_setup_memory_ok", lambda: True)
+    monkeypatch.setattr(prepare, "local_memory_ok", lambda: True)
 
     async def unowned(_report):
         raise installer.OwnOmlxUpgradeRequired("Update your oMLX, then Retry.")

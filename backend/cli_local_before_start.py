@@ -119,7 +119,7 @@ async def _discover(stages: _Stages) -> None:
 
 async def _setup(force_local: bool) -> int:
     from llm import local_setup_flow
-    from llm.local_setup_gates import limited_subscription_message, local_setup_memory_ok, subscription_available
+    from llm.local_setup_gates import limited_subscription_message, local_memory_ok, subscription_available
 
     stages = _Stages()
     heartbeat = asyncio.create_task(stages.heartbeat())
@@ -134,19 +134,10 @@ async def _setup(force_local: bool) -> int:
         notice = None if force_local else await limited_subscription_message()
         if notice:
             print(f"     {notice}", flush=True)
-        from llm.local_sources import managed_server_with_known_model
-
-        memory_ok = await asyncio.to_thread(local_setup_memory_ok)
-        known = await asyncio.to_thread(managed_server_with_known_model) if not memory_ok else None
-        if not memory_ok and known is None:
+        if not await asyncio.to_thread(local_memory_ok):
             return _needs_provider(limited=bool(notice), forced_local=force_local)
-        if known is not None:
-            result = await local_setup_flow.begin_local_setup()
-            if result.get("in_progress"):
-                result = await local_setup_flow.ls.flight_task()
-        else:
-            _installer_mode()
-            result = await local_setup_flow._run_flight(on_stage=stages)
+        _installer_mode()
+        result = await local_setup_flow._run_flight(on_stage=stages)
     finally:
         heartbeat.cancel()
     if result.get("downloading"):

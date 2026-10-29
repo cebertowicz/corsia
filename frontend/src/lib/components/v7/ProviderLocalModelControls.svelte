@@ -35,12 +35,12 @@
 	onDestroy(() => stop?.());
 </script>
 
-{#if corsiaManaged && lowMemory && source?.state !== 'ready' && source?.reason_code !== 'not_running'}
+{#if corsiaManaged && lowMemory}
 	<div class="local-refusal">
 		<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>
 		<Button size="sm" variant="ghost" onclick={onAddProvider}>Add provider</Button>
 	</div>
-{:else if corsiaManaged && !lowMemory && source?.never_local !== true}
+{:else if corsiaManaged && source?.never_local !== true}
 	<div class="add-local">
 		<Button size="sm" variant={empty ? 'primary' : 'ghost'} onclick={() => showAddLocal = true}>Add model</Button>
 	</div>

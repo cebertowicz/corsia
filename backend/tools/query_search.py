@@ -137,20 +137,23 @@ class SearchHistoryTool(Tool):
         # That omission is reported below rather than silently dropped: a
         # requested result source that cannot be searched must not look like a
         # source that was searched and found nothing.
-        caller = kwargs.get("_thread_id")
-        caller_resolved = isinstance(caller, str) and bool(caller)
+        from infra.thread_confinement import Reader
+
+        reader = Reader.from_tool(kwargs)
+        caller_resolved = reader.thread_id is not None
         search_checkpoints_here = include_checkpoints and caller_resolved
 
         def _query():
             db = get_db()
             rows = search_messages_fts(
-                db, query, thread_id=thread_id, sender=sender, limit=limit
+                db, query, thread_id=thread_id, sender=sender, limit=limit,
+                reader=reader,
             )
             cp_rows = (
                 search_checkpoints(
                     db,
                     query,
-                    caller_thread_id=str(caller),
+                    reader=reader,
                     thread_id=thread_id,
                     limit=limit,
                 )

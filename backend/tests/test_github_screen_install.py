@@ -16,6 +16,16 @@ def _rows(db, table, where, args):
     return [dict(r) for r in db.execute(f"SELECT * FROM {table} WHERE {where} ORDER BY id", args)]
 
 
+def _assert_rule_ids(rows):
+    key = install._key("screen-project")
+    ids = {row["id"] for row in rows}
+    assert {key + suffix for suffix in ("_opened", "_synchronize", "_start")} <= ids
+    assert {key + "_triage_" + suffix for suffix in ("issue_opened", "issue_comment_created",
+            "issue_comment_edited", "pr_comment_created", "pr_comment_edited", "review_submitted",
+            "review_edited", "start")} <= ids
+    assert len(ids) == 11
+
+
 def test_designation_installs_screen_and_observe_sync_preserves_it(isolated_db, tmp_path, monkeypatch):
     mk_session("screen-owner", project_id="screen-project")
     db = get_db()
@@ -26,7 +36,8 @@ def test_designation_installs_screen_and_observe_sync_preserves_it(isolated_db, 
     assert set_project_conductor("screen-project", "screen-owner", db=db)
     rows = _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
     schedules = _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
-    assert len(rows) == 3 and len(schedules) == 1
+    _assert_rule_ids(rows)
+    assert len(schedules) == 1
     observe_rules.sync_shipped_rules(db)
     assert rows == _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), "project:screen-project"))
     assert schedules == _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
@@ -51,7 +62,8 @@ def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path,
     scope = "project:screen-project"
     rows = _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))
     schedules = _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))
-    assert len(rows) == 3 and len(schedules) == 1
+    _assert_rule_ids(rows)
+    assert len(schedules) == 1
     assert {r["action"] for r in rows} == {"run_script", "start_worker"}
     assert all(r["created_by"] == "screen-owner" and r["to"] == "thread:screen-owner" for r in rows)
     for row in rows:
@@ -76,21 +88,22 @@ def test_screen_reconciles_full_set_and_conductor_changes(isolated_db, tmp_path,
     assert set_project_conductor("screen-project", "screen-new-owner", db=db)
     install.sync(db, "screen-project")
     rows = _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))
-    assert len(rows) == 3 and all(r["created_by"] == "screen-new-owner" and r["to"] == "thread:screen-new-owner" for r in rows)
+    _assert_rule_ids(rows)
+    assert all(r["created_by"] == "screen-new-owner" and r["to"] == "thread:screen-new-owner" for r in rows)
     schedule = _rows(db, "automation_schedules", "id=?", (install._key("screen-project") + "_script",))[0]
     assert schedule["thread_id"] == schedule["created_by_actor"] == "screen-new-owner"
     assert rule_declarations.declared_event(db, namespace, "pr_staged")[1].owner == "screen-new-owner"
     manifest = connectors.get_manifest("github")
     monkeypatch.setitem(connectors._REGISTRY, "github", replace(manifest, version="2"))
     install.sync(db, "screen-project")
-    assert len(_rows(db, "event_rules", "origin=? AND scope=?", ("rule_set:github@2", scope))) == 3
+    _assert_rule_ids(_rows(db, "event_rules", "origin=? AND scope=?", ("rule_set:github@2", scope)))
     with pytest.raises(RuntimeError):
         with write_transaction(db, scope="test_screen_rollback"):
             assert set_project_conductor("screen-project", None, db=db)
-            assert len(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))) == 3
+            _assert_rule_ids(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope)))
             raise RuntimeError("roll back designation")
     assert rule_declarations.declared_event(db, namespace, "pr_staged")[1].owner == "screen-new-owner"
-    assert len(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))) == 3
+    _assert_rule_ids(_rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope)))
     repos.clear()
     install.sync(db, "screen-project")
     assert not _rows(db, "event_rules", "origin=? AND scope=?", (install.origin(), scope))

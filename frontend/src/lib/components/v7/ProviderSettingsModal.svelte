@@ -8,7 +8,6 @@
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
-	import { LOW_MEMORY_LOCAL_MODEL_MESSAGE } from '$lib/setupLocalPick.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
@@ -47,8 +46,6 @@
 	let actionError = $state('');
 	let actionMessage = $state('');
 	let busy = $state(false);
-	let testing = $state(false);
-	let daemonAction = $state<'start' | 'stop' | 'reload' | null>(null);
 
 	const hasServer = $derived(!!provider.server);
 
@@ -84,18 +81,18 @@
 	function clearMessages() { actionError = ''; actionMessage = ''; }
 
 	async function handleTest() {
-		clearMessages(); busy = true; testing = true;
+		clearMessages(); busy = true;
 		const r = await testProvider(provider.name);
-		busy = false; testing = false;
+		busy = false;
 		if (r.ok) actionMessage = r.message ?? 'Connection OK';
 		else actionError = r.error ?? 'Test failed';
 	}
 
 	async function handleTestLocal() {
-		clearMessages(); busy = true; testing = true;
+		clearMessages(); busy = true;
 		if (provider.server?.kind === 'external') {
 			const r = await testNetworkServer(provider.server.id);
-			busy = false; testing = false;
+			busy = false;
 			if (r.ok) actionMessage = r.message;
 			else actionError = r.message;
 			await loadHostGroups();
@@ -133,7 +130,7 @@
 		} catch {
 			actionError = 'Couldn’t test the connection. Try again.';
 		} finally {
-			busy = false; testing = false;
+			busy = false;
 		}
 	}
 
@@ -201,7 +198,7 @@
 
 	async function handleDaemonAction(action: 'start' | 'stop' | 'reload') {
 		if (!provider.server) return;
-		clearMessages(); busy = true; daemonAction = action;
+		clearMessages(); busy = true;
 		const failure = action === 'reload' ? 'Couldn’t refresh the model list. Try again.'
 			: `Couldn’t ${action} the model server. Try again.`;
 		const success = action === 'reload' ? 'Model list refreshed.'
@@ -217,13 +214,12 @@
 				actionMessage = data.message ?? success;
 			} else {
 				const reference = typeof data.ref === 'string' && data.ref ? ` Reference: ${data.ref}` : '';
-				const message = data.reason === 'mac_cannot_run' ? LOW_MEMORY_LOCAL_MODEL_MESSAGE : data.message ?? data.detail ?? failure;
-				actionError = `${message}${reference}`;
+				actionError = `${data.message ?? data.detail ?? failure}${reference}`;
 			}
 		} catch {
 			actionError = failure;
 		} finally {
-			busy = false; daemonAction = null;
+			busy = false;
 			await loadHostGroups();
 		}
 	}
@@ -245,19 +241,19 @@
 
 		<div class="actions">
 			{#if provider.type === 'cloud'}
-				<Button disabled={busy} onclick={handleTest}>{testing ? 'Testing…' : 'Test connection'}</Button>
+				<Button disabled={busy} onclick={handleTest}>{busy ? 'Testing…' : 'Test connection'}</Button>
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>{daemonAction === 'stop' ? 'Stopping…' : 'Stop'}</Button>
-						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>{daemonAction === 'reload' ? 'Reloading…' : 'Reload models'}</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>{daemonAction === 'start' ? 'Starting…' : 'Start'}</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
 					{/if}
-					<Button disabled={busy} onclick={handleTestLocal}>{testing ? 'Testing…' : 'Test connection'}</Button>
+					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 
 				{:else}
-					<Button disabled={busy} onclick={handleTestLocal}>{testing ? 'Testing…' : 'Test connection'}</Button>
+					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 				{/if}
 			{/if}
 			{#if provider.type !== 'harness'}

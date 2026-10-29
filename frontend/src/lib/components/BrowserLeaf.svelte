@@ -3,9 +3,12 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { clampPoint, drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
+	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
@@ -25,6 +28,7 @@
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
 	let status = $state('');
+	const paneErrors = new BrowserPaneErrors();
 	let ended = $state(false);
 	let announcement = $state('');
 	const agent = new BrowserAgentPresence();
@@ -48,6 +52,7 @@
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
 	let decodeWarned = false;
+	let clipboard: BrowserPaneClipboard<ClipboardItem> | null = null;
 	const frameScroll = new FrameScrollShift(() => redraw());
 	const paneInput = new BrowserPaneInput(message => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -56,14 +61,16 @@
 		redraw();
 	});
 
-	function resetPointer() {
+	function resetInput() {
+		clipboard?.dispose();
+		paneErrors.resetUndo();
 		paneInput.reset();
 		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
 		activePointer = null;
 	}
 
 	function connect() {
-		resetPointer();
+		resetInput();
 		socket?.close();
 		ended = false;
 		if (status.startsWith('Browser stream')) status = '';
@@ -90,7 +97,7 @@
 				ended = true;
 			}
 			streaming = false;
-			resetPointer();
+			resetInput();
 		};
 	}
 
@@ -115,6 +122,13 @@
 		try {
 			message = JSON.parse(raw) as Record<string, unknown>;
 		} catch {
+			return;
+		}
+		if (paneErrors.handle(message)) return;
+		if (clipboardReply(message, clipboard)) return;
+		if (message.type === 'browser_target_changed') {
+			lastAppearance = '';
+			sendAppearance();
 			return;
 		}
 		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
@@ -182,12 +196,7 @@
 		marker = markerPlace(agent.mark, { left: canvas.offsetLeft + left, top: canvas.offsetTop + top, scale, right: canvas.offsetLeft + bounds.width });
 	}
 
-	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
-	function placement() {
-		const bounds = canvas.getBoundingClientRect();
-		const scale = Math.min(bounds.width / width, bounds.height / height);
-		return { bounds, scale, left: (bounds.width - width * scale) / 2, top: (bounds.height - height * scale) / 2 };
-	}
+	function placement() { return panePlacement(canvas, width, height); }
 
 	function redraw() {
 		if (!canvas || !image || !width || !height) return;
@@ -228,9 +237,7 @@
 	}
 
 	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
-		const { bounds, scale, left, top } = placement();
-		const point = { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
-		return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
+		return paneCoordinates(event, canvas, width, height, clamp);
 	}
 
 	function sendMouse(event: PointerEvent) {
@@ -271,6 +278,10 @@
 		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
 		paneInput.flush();
+		if (clipboardKey(event, () => clipboard ??= new BrowserPaneClipboard(
+			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
+			navigator.clipboard, data => new ClipboardItem(data)
+		), (error, cut) => paneErrors.set('clipboard', error, cut), () => paneErrors.set('clipboard', null))) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
@@ -361,8 +372,9 @@
 				<Avatar name={agentName} color={agentColor(threadId)} hidden />
 			</span>
 		{/if}
-		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		<BrowserPageStatus {status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
+		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
+		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} onundo={paneErrors.canUndoCut ? () => { socket?.send(JSON.stringify({ type: 'clipboard_undo' })); paneErrors.resetUndo(); } : undefined} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>

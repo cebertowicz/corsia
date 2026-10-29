@@ -27,13 +27,13 @@ const recommendations = {
 		{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, smarts_level: 2, tokens_per_second: 90, resident_bytes: 12 * 1024 ** 3, fits_now: true, disk: { state: 'ready' } },
 		{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_bytes: 31 * 1000 ** 3, download_size_gb: 31, context_window: 262144, smarts_level: 4.5, tokens_per_second: 18, resident_bytes: 48 * 1024 ** 3, fits_now: false, disk: { state: 'insufficient', required_bytes: 31 * 1000 ** 3 } },
 	],
-};type RenderState = 'recommendations' | 'downloading' | 'complete' | 'under-24gb' | '24gb-installed';
+};type RenderState = 'recommendations' | 'downloading' | 'complete' | 'under-24gb';
 
 function sourceFor(state: RenderState) {
 	return {
-		source: 'omlx', name: 'Local model', state: state === 'under-24gb' ? 'needs_setup' : 'ready',
-		eligible: state !== 'under-24gb' && state !== '24gb-installed',
-		corsia_omlx: true, corsia_omlx_online: true,
+		source: 'omlx', name: 'Local model', state: 'ready',
+		eligible: state === 'under-24gb' ? false : true,
+		corsia_omlx_online: true,
 		settings_download: state === 'downloading'
 			? { repository: 'qwen/qwen3.8-27b', name: 'Qwen3.8-27B', percent: 40, failed: false }
 			: null,
@@ -47,7 +47,6 @@ function serverRow(id: string, display_name: string, size_bytes: number) {
 
 function modelRows(state: RenderState) {
 	if (state === 'under-24gb') return { loaded: [], available: [] };
-	if (state === '24gb-installed') return { loaded: [serverRow('existing-model', 'Existing model', 8 * 1024 ** 3)], available: [] };
 	if (state === 'downloading') return {
 		loaded: [serverRow('qwen3.8-flash-next', 'Qwen3.8-Flash-Next', 16 * 1024 ** 3)],
 		available: [serverRow('gemma-4-31b-it', 'Gemma 4 31B IT', 20 * 1024 ** 3)],
@@ -67,7 +66,7 @@ async function fixtureLocalModelState(page: Page, state: RenderState) {
 	});
 	await page.route('**/api/system/host-resources?**', async (route) => {
 		await route.fulfill({ json: {
-			device_name: 'This Mac', total_gb: state === 'under-24gb' ? 16 : state === '24gb-installed' ? 24 : 64,
+			device_name: 'This Mac', total_gb: state === 'under-24gb' ? 16 : 64,
 			free_gb: state === 'under-24gb' ? 10 : 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8,
 			safe_reserve_gb: 8, by_provider: {},
 		} });
@@ -209,8 +208,8 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(card).toContainText('Settings measured on Macs like this one · omlx.ai');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 				} else {
-					await expect(page.getByText(/^16 GB memory · \d+(?:\.\d+)? GB used$/)).toBeVisible();
-					await expect(card).toContainText('Local models need at least 32 GB of memory, and this computer has less. Smaller models and future updates may bring them to computers with less memory. Connect a subscription or an API provider.');
+					await expect(page.getByText('16 GB memory', { exact: true })).toBeVisible();
+					await expect(card).toContainText('Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.');
 					await expect(card).not.toContainText('No models yet.');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 					await expect(card.getByRole('button', { name: 'Add provider', exact: true })).toBeVisible();
@@ -218,19 +217,6 @@ test('renders the approved local-model evidence states from intercepted fixtures
 				await capture(page, `${state}-${viewport.name}-${theme}`);
 			}
 	}
-});
-
-test('shows an installed model without low-memory guidance on a 24 GB Mac', async ({ page }, testInfo) => {
-	test.skip(testInfo.project.name !== 'chromium-desktop', 'Desktop evidence only.');
-	await page.setViewportSize({ width: 1440, height: 900 });
-	await page.emulateMedia({ colorScheme: 'light' });
-	await fixtureLocalModelState(page, '24gb-installed');
-	const card = await openLocalProvider(page);
-	await expect(page.getByText('24 GB memory', { exact: false })).toBeVisible();
-	await expect(card).toContainText('Existing model');
-	await expect(card).not.toContainText('Local models need at least 32 GB of memory');
-	await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
-	await capture(page, '24gb-installed-1440-light');
 });
 
 test('renders ownership, picker, recommender-failure, and picker-download evidence states', async ({ page }, testInfo) => {
@@ -301,7 +287,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await expect(corsiaCard.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 		const studioEmpty = studioCardInC.locator('.phase-stub');
 		await expect(studioEmpty).toContainText('No models on Studio. Add them in oMLX on that computer.');
-		expect(await studioEmpty.evaluate((element) => getComputedStyle(element).marginLeft)).not.toBe('0px');
+		expect(await studioEmpty.evaluate((element) => getComputedStyle(element).paddingLeft)).not.toBe('0px');
 		await expect(page.locator('[data-server-card="studio"]').getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 		await capture(page, `c-corsia-and-studio-${viewport.name}-${theme}`);
 

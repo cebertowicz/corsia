@@ -384,8 +384,8 @@ def account_readiness_detail(readiness) -> str:
     return f'Its account is not ready: {copy[0]}. {copy[1]}' if copy else ACCOUNT_READINESS_UNREAD
 
 
-def account_wake_fields(readiness, error):
-    """Validated fixed cause/actions for the existing account refusal notice."""
+def account_wake_fields(readiness):
+    """Validated fixed cause/actions for the existing account refusal notice; never the turn's error text."""
     if readiness and readiness['ready']:
         return 'pending_resume', {}
     copy = _account_copy(readiness)
