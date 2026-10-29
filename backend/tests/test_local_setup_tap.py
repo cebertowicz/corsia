@@ -35,7 +35,7 @@ def test_source_install_verifies_the_shared_wheel_before_install(monkeypatch, tm
     local_setup_executable.ensure_omlx(lambda _stage: None)
     assert f"/v{OMLX_VERSION}/omlx-{OMLX_VERSION}-" in commands[0][-3]
     assert commands[2][1:4] == ["-m", "pip", "install"]
-    assert (environment / ".installed").is_file()
+    assert (environment / ".installed").read_text() == OMLX_VERSION
 
 
 def test_hash_mismatch_never_runs_install(monkeypatch, tmp_path):
@@ -48,7 +48,7 @@ def test_hash_mismatch_never_runs_install(monkeypatch, tmp_path):
         Path(command[-1]).write_bytes(b"wheel")
 
     monkeypatch.setattr(local_setup_executable, "run_command", run)
-    with pytest.raises(RuntimeError, match="SHA-256 check"):
+    with pytest.raises(RuntimeError, match="didn't match the expected file"):
         local_setup_executable.install_omlx()
     assert len(commands) == 1
     assert not (tmp_path / "runtime" / ".installed").exists()
@@ -77,7 +77,7 @@ def test_pip_failure_keeps_its_own_stderr(monkeypatch, tmp_path):
 
     monkeypatch.setattr(local_setup_executable, "run_command", run)
     monkeypatch.setattr(managed_omlx_binary, "command_output", lambda _cmd: pytest.fail("unexpected follow-up probe"))
-    with pytest.raises(RuntimeError, match="pip couldn't install oMLX: Could not install package"):
+    with pytest.raises(RuntimeError, match="Couldn't install oMLX: Could not install package"):
         local_setup_executable.install_omlx()
     assert not (environment / ".installed").exists()
 
@@ -139,9 +139,9 @@ def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch):
 
 
 @pytest.mark.parametrize("stderr,expected", [
-    ("first failure\nlast failure", "curl couldn't download oMLX: last failure. Try again."),
-    ("old detail\nremote differs", "curl couldn't download oMLX: remote differs. Try again."),
-    ("", "curl couldn't download oMLX. Try again."),
+    ("first failure\nlast failure", "Couldn't download oMLX: last failure. Try again."),
+    ("old detail\nremote differs", "Couldn't download oMLX: remote differs. Try again."),
+    ("", "Couldn't download oMLX. Try again."),
 ])
 def test_fresh_install_failure_has_bounded_tool_feedback(monkeypatch, stderr, expected):
     monkeypatch.setattr(local_setup_executable.shutil, "which", lambda _name: None)
@@ -153,4 +153,52 @@ def test_fresh_install_failure_has_bounded_tool_feedback(monkeypatch, stderr, ex
     with pytest.raises(RuntimeError) as failure:
         local_setup_executable.ensure_omlx(lambda _stage: None)
     assert str(failure.value) == expected
-    assert len(local_setup_executable.installer_failure_message("pip", "install", subprocess.CalledProcessError(1, [], stderr="x" * 500))) < 350
+    assert len(local_setup_executable.installer_failure_message("install", subprocess.CalledProcessError(1, [], stderr="x" * 500))) < 350
+
+
+def _source_runtime(monkeypatch, tmp_path, marker):
+    environment = tmp_path / "runtime"
+    executable = environment / "bin" / "omlx"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    (environment / ".installed").write_text(marker)
+    monkeypatch.setattr(managed_omlx_binary, "app_bundle_root", lambda *_args: None)
+    monkeypatch.setattr(managed_omlx_binary, "source_omlx_environment", lambda: environment)
+    monkeypatch.setattr(managed_omlx_binary, "OMLX_VERSION", "2.0")
+
+
+@pytest.mark.parametrize("marker", ["1.0", ""])
+def test_source_runtime_from_another_pin_is_reinstalled(monkeypatch, tmp_path, marker):
+    _source_runtime(monkeypatch, tmp_path, marker)
+    installs, stages = [], []
+    monkeypatch.setattr(local_setup_executable, "install_omlx", lambda: installs.append(True))
+    local_setup_executable.ensure_omlx(stages.append)
+    assert installs == [True]
+    assert stages == ["Updating oMLX"]
+
+
+def test_source_runtime_on_the_current_pin_is_kept(monkeypatch, tmp_path):
+    _source_runtime(monkeypatch, tmp_path, "2.0")
+    monkeypatch.setattr(local_setup_executable, "install_omlx", lambda: pytest.fail("current runtime was reinstalled"))
+    local_setup_executable.ensure_omlx(lambda _stage: None)
+
+
+def test_failed_reinstall_leaves_no_complete_marker(monkeypatch, tmp_path):
+    environment = tmp_path / "runtime"
+    environment.mkdir()
+    (environment / ".installed").write_text("1.0")
+    monkeypatch.setattr(managed_omlx_binary, "source_omlx_environment", lambda: environment)
+
+    def failed(command):
+        raise subprocess.CalledProcessError(1, command, stderr="offline\n")
+
+    monkeypatch.setattr(local_setup_executable, "run_command", failed)
+    with pytest.raises(RuntimeError, match="Couldn't download oMLX"):
+        local_setup_executable.install_omlx()
+    assert not (environment / ".installed").exists()
+
+
+def test_packaged_app_runtime_is_never_outdated(monkeypatch, tmp_path):
+    _source_runtime(monkeypatch, tmp_path, "1.0")
+    monkeypatch.setattr(managed_omlx_binary, "app_bundle_root", lambda *_args: tmp_path / "CORSIA.app")
+    assert managed_omlx_binary.source_omlx_outdated() is False

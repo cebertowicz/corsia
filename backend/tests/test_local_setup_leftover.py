@@ -99,5 +99,5 @@ def test_a_real_install_failure_names_the_tool_and_the_reason(leftover, monkeypa
     monkeypatch.setattr(own, "run_command", run)
     monkeypatch.setattr(own.shutil, "which", lambda _name: None)
 
-    with pytest.raises(RuntimeError, match=r"curl couldn't download oMLX: Error: disk full\. Try again\."):
+    with pytest.raises(RuntimeError, match=r"Couldn't download oMLX: Error: disk full\. Try again\."):
         own.ensure_omlx(lambda stage: None, needs_repair=True)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from infra.platform_paths import app_bundle_root
+from llm.omlx_release import OMLX_VERSION
 
 OMLX_FORMULA = "jundot/omlx/omlx"
 MANAGED_DIR = "managed-omlx"
@@ -42,6 +43,16 @@ def managed_omlx_executable(path: str | Path | None = None) -> str | None:
     environment = source_omlx_environment()
     executable = environment / "bin" / "omlx"
     return str(executable) if (environment / ".installed").is_file() and executable.is_file() else None
+
+
+def source_omlx_outdated() -> bool:
+    """Whether the private source runtime was installed for a different oMLX pin."""
+    if app_bundle_root() is not None:
+        return False
+    try:
+        return (source_omlx_environment() / ".installed").read_text().strip() != OMLX_VERSION
+    except FileNotFoundError:
+        return False
 
 
 def omlx_command(executable: str) -> list[str]:
