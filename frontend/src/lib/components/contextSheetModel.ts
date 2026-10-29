@@ -44,7 +44,6 @@ export interface ContextSheetSourceRow {
 	/** An edit on disk the thread has not received; it applies at the next checkpoint. */
 	pendingEdit?: boolean;
 }
-
 export interface ContextSheetSourceGroup {
 	/** Stable across previews and renames: the scope, never the display name. */
 	id: string;
@@ -117,8 +116,6 @@ function displayStatus(status: string): { label: string; className: string } {
 	if (status === 'preview') return { label: 'Preview', className: 'preview' };
 	return { label: status || 'Unknown', className: status || 'unknown' };
 }
-
-
 
 export function formatContextDelta(metadata: Record<string, unknown> | undefined): string {
 	if (!metadata) return '';
