@@ -47,6 +47,8 @@ function serverRow(id: string, display_name: string, size_bytes: number) {
 
 function modelRows(state: RenderState) {
 	if (state === '24gb') return { loaded: [], available: [] };
+	// Nothing recommended is on disk here, so every recommendation offers Download (R5b).
+	if (state === 'recommendations') return { loaded: [serverRow('qwen3.8-27b', 'Qwen3.8-27B', 31 * 1024 ** 3)], available: [] };
 	if (state === 'downloading') return {
 		loaded: [serverRow('qwen3.8-flash-next', 'Qwen3.8-Flash-Next', 16 * 1024 ** 3)],
 		available: [serverRow('gemma-4-31b-it', 'Gemma 4 31B IT', 20 * 1024 ** 3)],
