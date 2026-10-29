@@ -9,11 +9,11 @@ readonly PYTHON_VERSION="3.11.17+20261013"
 readonly PYTHON_ARCHIVE="cpython-${PYTHON_VERSION}-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.11.17%2B20261013-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_SHA256="d81d757a9785850393cd695a9a686c765a6370fbdc83738589ef2ecd3e5c44b3"
-# Must equal OMLX_PIN in backend/llm/local_model.py: the first release with the model recommender.
-readonly OMLX_VERSION="0.7.1rc1"
+# Shared with source setup; this file is valid both as shell and Python.
+source "$ROOT/backend/llm/omlx_release.py"
+readonly OMLX_VERSION OMLX_SHA256
 readonly OMLX_WHEEL="omlx-${OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
 readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERSION}/${OMLX_WHEEL}"
-readonly OMLX_SHA256="5b1487bd09fd85da6e7566cd94f0e4b30be03277e49a9250811cf05addc9b26e"
 # Build Git from its upstream release instead of copying Apple's CLT binary. Runtime
 # prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
 readonly GIT_VERSION="2.53.0"

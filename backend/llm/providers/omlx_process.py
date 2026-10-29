@@ -17,7 +17,7 @@ from typing import Any
 
 import psutil
 
-from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
+from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error, omlx_command
 
 
 log = logging.getLogger("llm.providers.omlx.process")
@@ -211,7 +211,7 @@ def build_argv(
 ) -> list[str]:
     """Build argv for CORSIA's managed oMLX server."""
     executable = executable or managed_omlx_executable() or "omlx"
-    argv: list[str] = [executable, "serve", "--host", host, "--port", str(port)]
+    argv: list[str] = [*omlx_command(executable), "serve", "--host", host, "--port", str(port)]
 
     flag_map: list[tuple[str, str]] = [
         ("model_dir",                "--model-dir"),
