@@ -1048,6 +1048,24 @@ def test_salvage_reads_the_quarantined_tree(repo, monkeypatch):
     assert report.removed == 1 and read_from and read_from[0] != wt
 
 
+def test_detached_head_commit_stays_reachable_after_salvage(repo, monkeypatch):
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    wt = _add(repo, "detached")
+    _git(wt, "checkout", "-q", "--detach")
+    (wt / "README").write_text("committed\n")
+    _git(wt, "commit", "-qam", "local only")
+    head = _git(wt, "rev-parse", "HEAD")
+    (wt / "notes").write_text("keep")
+    _age_all(repo, wt, 8 * DAY)
+    report = _run(repo)
+    assert report.removed == len(report.salvaged) == 1 and not wt.exists()
+    saved = Path(report.salvaged[0].destination)
+    _git(repo, "gc", "-q", "--prune=now")
+    pin = f"refs/corsia-salvage/{saved.parent.name}/detached"
+    assert _git(repo, "rev-parse", pin) == head
+    assert _git(repo, "cat-file", "-t", head) == "commit"
+
+
 def test_salvage_is_reported_when_removal_then_fails(repo, monkeypatch):
     monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
     wt = _add(repo, "stuck")
