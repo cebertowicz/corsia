@@ -7,10 +7,16 @@ import pytest
 
 from core import correction_attribution
 from core.correction_attribution import NOT_IN_WORKFLOW, UNATTRIBUTED, attributed_facts, workflow_run_of
-from core.corrections_recording import ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE
+from core.corrections_recording import (
+    ACTIVE_VERSION_SETTING, ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE, version_attributes, version_key,
+)
+from infra.settings import set_setting
 from jobs.corrections_recording import _record_fact
 from infra.measure_validation import deciding_refusal
 from tests.plan_writer_authorizer import raw_plan_seed
+
+
+VERSION = ClassifierVersion("asset", "c1", "head", 0.5, "policy")
 
 
 @pytest.fixture
@@ -18,6 +24,7 @@ def db(isolated_db):
     from infra.database import get_db
 
     connection = get_db()
+    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(VERSION)}, db=connection)
     connection.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) "
                        "VALUES ('plan','thread','t0','active',1,'t','t')")
     for thread in ("t0", "t1", "t2", "t3", "t4"):
@@ -48,13 +55,15 @@ def message(db, message_id: str, thread: str, at: str, *, own_turn: str | None =
                (message_id, thread, at, own_turn))
 
 
-def legacy_fact(db, message_id: str, *, label: str = "correction", retracted: bool = False) -> None:
-    """The actual pre-source-kind attributes emitted by the historical writer."""
+def legacy_fact(db, message_id: str, *, label: str = "correction", retracted: bool = False,
+                complete_version: bool = True) -> None:
+    """A pre-source-kind fact, optionally missing classifier version fields."""
     db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
                "attributes,retracted_at) VALUES (?,?,'measurement.correction','corsia','instrumented','2026-10-15',"
                "'2026-10-15',?,?,?)",
                (f"legacy-{message_id}", f"legacy-{message_id}", f"message:{message_id}",
-                json.dumps({"message_id": message_id, "thread_id": "ignored", "label": label, "asset_version": "c1"}),
+                json.dumps({"message_id": message_id, "thread_id": "ignored", "label": label,
+                            **(version_attributes(VERSION) if complete_version else {"asset_version": "c1"})}),
                 "2026-10-16" if retracted else None))
 
 
@@ -63,8 +72,7 @@ def record_current_fact(db, message_id: str, thread: str, at: str) -> None:
     db.commit()
     candidate = CorrectionCandidate(SOURCE_KIND_MESSAGE, message_id, thread, None, "x", at)
     payload = {"label": "correction", "truncated": False, "original_tokens": 1, "failure_reason": "none"}
-    version = ClassifierVersion("asset", "current", "head", 0.5, "policy")
-    assert _record_fact(candidate, payload, version) is True
+    assert _record_fact(candidate, payload, VERSION) is True
 
 
 def test_only_the_answered_turn_counts_by_the_source_time_never_the_fact_time(db) -> None:
@@ -105,8 +113,12 @@ def test_current_writer_and_legacy_attributes_both_reach_their_workflow_run(db) 
     message(db, "current", "t2", "2026-10-02T00:00:01Z")
     legacy_fact(db, "legacy")
     record_current_fact(db, "current", "t2", "2026-10-02T00:00:01Z")
+    message(db, "incomplete", "t1", "2026-10-02T00:00:01Z")
+    legacy_fact(db, "incomplete", complete_version=False)
 
     facts = {fact.source_id: fact for fact in attributed_facts(db)}
+    # KPI design 4.2 and REVISION-2 rule 1 exclude facts without the active version identity.
+    assert "incomplete" not in facts
     assert {(source_id, fact.source_kind, fact.node_id) for source_id, fact in facts.items()} == {
         ("legacy", SOURCE_KIND_MESSAGE, "earlier"), ("current", SOURCE_KIND_MESSAGE, "own"),
     }

@@ -322,7 +322,7 @@ def test_keep_days_defaults_to_400_and_takes_a_value_in_bounds() -> None:
 def test_a_rebuild_skips_one_bad_stored_spec_and_keeps_every_other_event(bad: object) -> None:
     connection = db()
     sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
-    connection.execute("INSERT INTO measure_definitions VALUES ('agent-b','event','shop.broken',1,?,'/p','sha','t',0)", (json.dumps(bad),))
+    connection.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) VALUES ('agent-b','event','shop.broken',1,?,'/p','sha','t',0)", (json.dumps(bad),))
     REGISTRY.reset()
     REGISTRY.rebuild(connection)
     assert set(REGISTRY.events) == {"mail.triaged"}
