@@ -1,7 +1,35 @@
 import { tick } from 'svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import type { DocComment } from '$lib/stores/docComments';
-import type { CanvasScrollTarget } from '$lib/docCanvasComments';
+import { hasNewReplies, type DocComment } from '$lib/stores/docComments';
+import { canvasCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
+import { nextUnreadThread } from '$lib/docReplyChip';
+
+export function createReplyNavigation(source: {
+	target: () => DocViewerTarget | null;
+	ready: () => boolean;
+	comments: () => DocComment[];
+	text: () => string;
+	show: (thread: DocComment | null, landing: CanvasScrollTarget | null) => void;
+	openImageOr: (id: string, otherwise: () => void) => void;
+	onLanded: () => void;
+}) {
+	let lastReplyStep: string | null = null;
+	const first = () => source.comments().find(hasNewReplies) ?? null;
+	const landing = (thread: DocComment | null) => thread
+		? canvasCommentScrollTarget(source.comments(), source.text(), thread.id, false, 'quote-tap') : null;
+	createReplyLanding({
+		target: source.target, ready: source.ready, first, landing: () => landing(first()),
+		open: (thread, target) => { source.show(thread, target); lastReplyStep = thread?.id ?? null; source.onLanded(); },
+	});
+	function step(beforeText?: () => void, excludeId?: string) {
+		const thread = nextUnreadThread(source.comments(), lastReplyStep, excludeId);
+		if (!thread) return;
+		lastReplyStep = thread.id;
+		const target = landing(thread);
+		source.openImageOr(thread.id, () => { beforeText?.(); source.show(thread, target); });
+	}
+	return { step, reset: () => { lastReplyStep = null; } };
+}
 
 export function createReplyLanding(source: {
 	target: () => DocViewerTarget | null;
