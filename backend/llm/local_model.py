@@ -182,6 +182,11 @@ def to_record(model: LocalModel) -> dict:
         record["smarts_level"] = model.smarts_level
     if model.tokens_per_second is not None:
         record["tokens_per_second"] = model.tokens_per_second
+    if model.smarts is not None:
+        record["smarts"] = model.smarts
+    if model.table_on_ssd:
+        record["table_on_ssd"] = True
+        record["table_bytes"] = model.table_bytes
     return record
 
 

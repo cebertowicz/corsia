@@ -139,6 +139,7 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
         "context_window": row["max_context"], "quantization_bits": row["level"],
         "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
         "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
+        "smarts": row["smarts"],
     }
     restored = local_model.from_recommendation(local_model.to_record(model))
     assert restored == model and restored.view() == model.view()
