@@ -156,20 +156,24 @@ test('Add model sheet motion and Sort press', async ({ page }, info) => {
 
 test('Add model download and cancel journey', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop');
-  await fixture(page, 'available');
-  await loginByUrl(page);
-  await openSettings(page);
-  await openSettingsSection(page, 'Providers');
-  const card = page.locator('[data-server-card="omlx-local"]');
-  await card.locator('.pr-expand').click();
-  await card.getByRole('button', { name: 'Add model', exact: true }).click();
-  const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
-  await sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ }).click();
-  // The empty Settings state is replaced by the download row; the sheet stays open over it.
-  await expect(sheet).toContainText('Downloading 40%');
-  await expect(card).toContainText('Downloading 40%');
-  await sheet.getByRole('button', { name: /Cancel download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
-  await expect(sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ })).toBeEnabled();
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.setViewportSize(viewport);
+    await fixture(page, 'available');
+    await loginByUrl(page);
+    await openSettings(page);
+    await openSettingsSection(page, 'Providers');
+    const card = page.locator('[data-server-card="omlx-local"]');
+    await card.locator('.pr-expand').click();
+    await card.getByRole('button', { name: 'Add model', exact: true }).click();
+    const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+    await sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+    // The sheet stays open over the Settings row, which shows the download too.
+    await expect(sheet).toContainText('Downloading 40%');
+    await expect(card).toContainText('Downloading 40%');
+    await sheet.getByRole('button', { name: /Cancel download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+    await expect(sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ })).toBeEnabled();
+  }
 });
 
 test('Add model failure, retry, delete and complete journey', async ({ page }, info) => {
@@ -340,6 +344,47 @@ test('Add model robustness states', async ({ page }, info) => {
         }
         if (shots) await page.screenshot({ path: `${shots}/${state === 'many' ? 'many-scrolled' : state}-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
       }
+    }
+  }
+});
+
+// What the sheet shows while its list or a start request is still on the way, and the references it is compared with:
+// the chat view and the Settings Theme control whose segmented treatment Sort reuses.
+test('Add model pending states and references', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  test.setTimeout(240_000);
+  for (const viewport of [{ name: '1440', width: 1440, height: 900 }, { name: '393', width: 393, height: 852 }]) {
+    for (const theme of ['light', 'dark'] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme: theme });
+      await fixture(page, 'available');
+      let releaseList = () => {};
+      const listHeld = new Promise<void>(resolve => { releaseList = resolve; });
+      await page.route('**/api/providers/local/recommendations', async route => { await listHeld; await route.fallback(); });
+      let releaseStart = () => {};
+      const startHeld = new Promise<void>(resolve => { releaseStart = resolve; });
+      await page.route('**/api/providers/local/downloads', async route => { if (route.request().method() === 'POST') await startHeld; await route.fallback(); });
+      await loginByUrl(page);
+      if (shots) await page.screenshot({ path: `${shots}/reference-chat-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+      await openSettings(page);
+      await openSettingsSection(page, 'System');
+      await expect(page.getByRole('radiogroup', { name: /Theme/ })).toBeVisible();
+      if (shots) await page.screenshot({ path: `${shots}/reference-theme-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+      await openSettingsSection(page, 'Providers');
+      const card = page.locator('[data-server-card="omlx-local"]');
+      await card.locator('.pr-expand').click();
+      await card.getByRole('button', { name: 'Add model', exact: true }).click();
+      const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+      await expect(sheet).toContainText('Checking which models fit this computer');
+      if (shots) await page.screenshot({ path: `${shots}/checking-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+      releaseList();
+      await sheet.getByRole('button', { name: /Download Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+      // While the start request is out, every Download waits for it.
+      await expect(sheet.getByRole('button', { name: /Download Gemma oQ4e/ })).toBeDisabled();
+      if (shots) await page.screenshot({ path: `${shots}/starting-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
+      releaseStart();
+      await expect(sheet).toContainText('Downloading 40%');
     }
   }
 });
