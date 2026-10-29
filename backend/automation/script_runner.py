@@ -186,7 +186,8 @@ async def run_claimed(
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
     report = await _stamped(schedule, report)
-    report = await _admit_events(schedule, report, rule_run.trace if rule_run else ())
+    report = await _admit_events(schedule, report, rule_run.trace if rule_run else (),
+                                 rule_run.decision_id if rule_run else None)
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db, rule_run=rule_run,
@@ -202,7 +203,8 @@ async def run_claimed(
         await _drive_owner(schedule.thread_id)
 
 
-async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = ()) -> RunReport:
+async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
+                        rule_decision_id: int | None = None) -> RunReport:
     """Route parsed event lines before synchronous settlement; one refusal wakes the owner once.
 
     ``trace`` is the rule chain of a rule-started run; each event it sends carries it.
@@ -210,7 +212,8 @@ async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str,
     if not report.events:
         return report
     from automation.script_measures import run_stamps
-    from events.intake import admit_event, failure_code, format_event_error
+    from events.intake import admit_event
+    from events.intake_errors import failure_code, format_event_error
 
     stamps = run_stamps(schedule, report)
     producer = f"script:{schedule.id}"
@@ -221,6 +224,7 @@ async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str,
                 event_type=event["type"], facts=event["facts"], origin="emitter",
                 producer=producer, event_id=f"{producer}:{report.run_id}:{index}", stamps=stamps,
                 **({"trace": trace} if trace else {}),
+                **({"rule_decision_id": rule_decision_id} if rule_decision_id is not None else {}),
             )
         except asyncio.CancelledError:
             raise
@@ -314,10 +318,12 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:
+        stdin = await run_off_db(script_rule_runs.execution_input, schedule, rule_run) if rule_run else None
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"stdin": rule_run.stdin, "trace": rule_run.trace} if rule_run is not None else {}),
+            **({"stdin": stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
+                "github_repo": rule_run.github_repo} if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
