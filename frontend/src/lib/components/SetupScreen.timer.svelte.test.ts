@@ -114,11 +114,14 @@ describe('SetupScreen owned-job polling', () => {
 		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
+		expect(vi.getTimerCount()).toBe(0);
+		click('Sign in'); await settle();
 		expect(vi.getTimerCount()).toBe(1);
+		const readsBeforeTerminal = signinReads();
 		signinState = terminal; sourceState = nextSourceState;
 		await vi.advanceTimersByTimeAsync(3000); await tick();
-		expect(signinReads()).toBe(1);
-		expect(clearIntervalSpy).toHaveBeenCalledOnce();
+		expect(signinReads()).toBe(readsBeforeTerminal + 1);
+		expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
 		expect(vi.getTimerCount()).toBe(0);
 		// A failed sign-in shows the reference its service-log line carries.
 		if (terminal === 'failed') expect(host.textContent).toContain('Reference: signin-0123456789abcdef');
@@ -128,9 +131,10 @@ describe('SetupScreen owned-job polling', () => {
 		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
+		click('Sign in'); await settle();
 		expect(vi.getTimerCount()).toBe(1);
 		await unmount(component!); component = null;
-		expect(clearIntervalSpy).toHaveBeenCalledOnce();
+		expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
