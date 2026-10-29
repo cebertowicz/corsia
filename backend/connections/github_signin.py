@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from connections.github_agent_home import LOGIN, parse_status
+from connections.github_read_request import AUTH_PROBE, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ log = logging.getLogger(__name__)
 MIN_GH_VERSION = "2.81.0"
 UPDATE_GH_REASON = f"Update gh to {MIN_GH_VERSION} or later"
 
-_UNSUPPORTED_FLAG = re.compile(r"unknown flag: --(?:json|active)\b", re.I)
 _SIGNED_OUT = re.compile(r"not logged in", re.I)
 
 
@@ -38,10 +38,10 @@ def gh_status(binary: str) -> tuple[bool | None, str | None]:
     Read by the same parser as the agents' account, so the login comes from the
     same subprocess. A gh too old for ``--json`` falls back to ``_status_without_json``.
     """
-    result = _run([binary, "auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"])
+    result = _run([binary, *AUTH_PROBE, "--json", "hosts"])
     if result is None:
         return None, None
-    if result.returncode != 0 and _UNSUPPORTED_FLAG.search(result.stderr.decode("utf-8", "replace")):
+    if result.returncode != 0 and UNSUPPORTED_FLAG.search(result.stderr.decode("utf-8", "replace")):
         return _status_without_json(binary)
     authed, facts = parse_status(result.returncode, result.stdout)
     return authed, facts.get("login")
@@ -54,7 +54,7 @@ def _status_without_json(binary: str) -> tuple[bool | None, str | None]:
     resolve the same identity. A definite "not logged in" is signed out; a gh
     that cannot yield a login needs the update, never "not signed in".
     """
-    status = _run([binary, "auth", "status", "--hostname", "github.com"])
+    status = _run([binary, *SINGLE_ACCOUNT_PROBE])
     if status is None:
         return None, None
     text = (status.stdout + status.stderr).decode("utf-8", "replace")

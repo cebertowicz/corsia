@@ -16,15 +16,13 @@ import subprocess
 from typing import Callable
 
 from connections.github_agent_home import TOKEN_NAMES
-from connections.github_read_request import AUTH_PROBE, GithubReadRefused, parse_gh_args
+from connections.github_read_request import (
+    AUTH_PROBE, GH_HOST, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG, GithubReadRefused, parse_gh_args,
+)
 from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credential_text
 
 __all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker"]
 log = logging.getLogger(__name__)
-GH_HOST = "github.com"
-# gh before 2.40 has no ``--active`` and holds one account per host, so the
-# probe without it asks the same question there.
-_SINGLE_ACCOUNT_PROBE = AUTH_PROBE[:-1]
 
 
 def _scrub(text: str) -> str:
@@ -60,8 +58,8 @@ class GithubReadBroker:
         probe = tuple(argv) == AUTH_PROBE
         try:
             result = self._inner(argv, timeout=timeout)
-            if probe and result.returncode != 0 and "unknown flag: --active" in str(result.stderr or ""):
-                argv = list(_SINGLE_ACCOUNT_PROBE)
+            if probe and result.returncode != 0 and UNSUPPORTED_FLAG.search(str(result.stderr or "")):
+                argv = list(SINGLE_ACCOUNT_PROBE)
                 result = self._inner(argv, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise subprocess.TimeoutExpired([_scrub(part) for part in argv], exc.timeout) from None
