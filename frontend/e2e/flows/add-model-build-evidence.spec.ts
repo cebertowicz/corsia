@@ -65,12 +65,16 @@ test('Add model WebKit keyboard actions', async ({}, info) => {
         expect(count).toBe(state === 'available' ? 3 : 1);
         const seen = new Set<string>();
         for (let i = 0; i < 30 && seen.size < count; i++) {
-          await page.keyboard.press('Tab');
-          const focused = page.locator(':focus');
-          const label = await focused.getAttribute('aria-label').catch(() => null);
+          // WebKit on macOS follows Safari's default: Tab moves between form fields only, and
+          // Option-Tab reaches buttons too.
+          await page.keyboard.press('Alt+Tab');
+          const label = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null);
           if (label && (label.startsWith('Download ') || label.startsWith('Cancel download'))) {
             seen.add(label);
-            const style = await focused.evaluate((element) => ({ outline: getComputedStyle(element).outlineStyle, shadow: getComputedStyle(element).boxShadow }));
+            const style = await page.evaluate(() => {
+              const element = document.activeElement as Element;
+              return { outline: getComputedStyle(element).outlineStyle, shadow: getComputedStyle(element).boxShadow };
+            });
             expect(style.outline !== 'none' || style.shadow !== 'none').toBeTruthy();
             if (shots) await page.screenshot({ path: `${shots}/webkit-focus-${state}-${viewport.name}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
           }
