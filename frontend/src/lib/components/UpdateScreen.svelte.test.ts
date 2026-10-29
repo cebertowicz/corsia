@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import UpdateScreen from './UpdateScreen.svelte';
 import { updateScreenView } from '$lib/update/screenStore';
+import { updateStatus, type UpdateStatus } from '$lib/update/store';
 
 let component: Record<string, unknown> | null = null;
 
@@ -23,8 +24,34 @@ afterEach(() => {
 	component && unmount(component);
 	component = null;
 	updateScreenView.set(null);
+	updateStatus.set(null);
 	delete (window as unknown as Record<string, unknown>).__CORSIA_SHELL__;
 	delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+});
+
+describe('UpdateScreen waiting progress', () => {
+	it('shows the live count through ready, handles singular and hides it without agents', () => {
+		const view = { operationId: 'update-1', mode: 'progress', step: 'waiting', label: 'Waiting for agents to finish', percent: 12, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: false } as const;
+		const operation = { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining', drain_total: 12, blocking: 9 } as const;
+		updateStatus.set({ operation } as UpdateStatus);
+		showLocal(view);
+		expect(document.body.textContent).toContain('3 of 12 agents paused');
+		updateStatus.set({ operation: { ...operation, phase: 'ready', blocking: 0 } } as UpdateStatus);
+		flushSync();
+		expect(document.body.textContent).toContain('12 of 12 agents paused');
+		updateStatus.set({ operation: { ...operation, drain_total: 1, blocking: 0 } } as UpdateStatus);
+		flushSync();
+		expect(document.body.textContent).toContain('1 of 1 agent paused');
+		updateStatus.set({ operation: { ...operation, drain_total: 0 } } as UpdateStatus);
+		flushSync();
+		expect(document.body.textContent).not.toContain('agents paused');
+		expect(document.body.textContent).toContain('Your agents will resume where they left off after the update.');
+	});
+
+	it('shows reassurance on completion', () => {
+		showLocal({ operationId: 'update-1', mode: 'done', step: 'verifying', label: 'Checking the new version', percent: 100, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: false });
+		expect(document.body.textContent).toContain('Your agents will resume where they left off after the update.');
+	});
 });
 
 describe('UpdateScreen remote copy', () => {
