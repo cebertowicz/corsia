@@ -62,8 +62,8 @@ class FirstRunBind:
         return {"outcome": self.outcome, "bind_reason": self.bind_reason}
 
 
-def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> list[dict]:
-    """The vendor's catalog models the picker lists, each as its account-independent row."""
+def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> tuple[list[dict], bool]:
+    """Picker rows and whether any stored catalog models exist for this vendor."""
     from llm.harness_catalog import added_rows, added_rows_from_accounts, harness_base_from_row
     from llm.model_status import harness_base_row
 
@@ -76,10 +76,11 @@ def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> li
                  added_rows_from_accounts([account for account in accounts if account['provider'] == provider]))
     result = [row for row in (harness_base_row(model, db=db) for model in models) if row is not None]
     result.extend(harness_base_from_row(row, db=db) for model, row in projected.items() if model not in stored)
-    return result
+    return result, bool(catalog)
 
 
-def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None) -> tuple[str, str | None]:
+def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None,
+                  source_state: str | None = None) -> tuple[str, str | None]:
     """One account's first-run state, and when a limited one is back.
 
     Ready means at least one of its vendor's models passes the same per-account
@@ -99,10 +100,11 @@ def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | No
 
     if account["state"] == "signed_out" or (
             account["source_home"] is None
-            and row_state(get_connection(account["provider"], db=db))["state"] == NEEDS_AUTH):
+            and (source_state if source_state is not None else
+                 row_state(get_connection(account["provider"], db=db))["state"]) == NEEDS_AUTH):
         return SIGNED_OUT, None
     decisions = [account_model_status(account, row, project_ids=project_ids, db=db)
-                 for row in (_vendor_rows(account["provider"], db=db) if rows is None else rows)]
+                 for row in (_vendor_rows(account["provider"], db=db)[0] if rows is None else rows)]
     if any(decision["status"] == "ready" for decision in decisions):
         return READY, None
     resets = [decision["usage"].get("resets_at") for decision in decisions
@@ -307,24 +309,24 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
     return {"label": account_label(account, rows=labels)["text"], "reason": reason}
 
 
-def _scoped_states(provider: str, project, *, rows: list[dict], db,
-                   accounts: list[dict] | None = None) -> list[tuple[dict, str, str | None]]:
-    """Each account the scope permits (never a removed one) with its first-run state; none when the vendor lists no model."""
+def _scoped_states(provider: str, project, *, rows: list[dict], has_catalog: bool, db,
+                   accounts: list[dict] | None = None, source_state: str | None = None) -> list[tuple[dict, str, str | None]]:
+    """Each permitted, non-removed account's first-run state, preserving disabled-model suppression."""
     from connections.account_policy import permitted_accounts
 
-    if not rows:
-        return []
-    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows))
+    if not rows and has_catalog:
+        return []  # The vendor's stored models were deliberately disabled.
+    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows, source_state=source_state))
             for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
-            if account["state"] != "removed"]
+            if account["state"] != "removed" and (rows or not account["is_default"])]
 
 
 @fact_memo.fact_reads()
-def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
+def source_account_view(provider: str, *, source_state: str | None = None) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
     Lines: membership is the picker's: the accounts the CORSIA agent's scope
-    permits (never a removed one), and none when the vendor lists no model.
+    permits (never a removed one); disabled catalog models do not produce account lines.
     ``corsia_agent_binding`` reads only the conductor's stored binding for the vendor.
 
     Lost binding: ``{label, reason}`` when that stored binding names an account that
@@ -345,9 +347,10 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
                            (conductor, provider)).fetchone() if conductor else None
         labels = list_accounts(provider=provider, include_removed=True, db=db)
         lost = _lost_binding(provider, bound, labels, project, db=db)
-        rows = _vendor_rows(provider, db=db)  # read once per vendor, whatever its account count
+        rows, has_catalog = _vendor_rows(provider, db=db, accounts=labels)  # reuse the account rows already read
         lines = []
-        for account, state, resets_at in _scoped_states(provider, project, rows=rows, db=db):
+        for account, state, resets_at in _scoped_states(provider, project, rows=rows, has_catalog=has_catalog,
+                                                       db=db, accounts=labels, source_state=source_state):
             label = account_label(account, rows=labels)
             lines.append({"account_id": account["id"], "label": label["text"],
                           "label_verified": not (label["email"] is None and label["custom"]),
@@ -374,9 +377,14 @@ def accounts_without_usable_model(providers, accounts: list[dict] | None = None)
     try:
         conductor = get_corsia_agent(db=db)
         project = thread_scope(conductor, db=db)["project_id"] if conductor else None
-        return {account["id"] for provider in sorted(set(providers))
-                for account, state, _ in _scoped_states(
-                    provider, project, rows=_vendor_rows(provider, db=db, accounts=accounts), db=db, accounts=accounts)
-                if state == NO_USABLE_MODEL}
+        result: set[str] = set()
+        for provider in sorted(set(providers)):
+            rows, has_catalog = _vendor_rows(provider, db=db, accounts=accounts)
+            # With no decisions, account_state can only report signed out or unchecked.
+            if rows:
+                result.update(account["id"] for account, state, _ in _scoped_states(
+                    provider, project, rows=rows, has_catalog=has_catalog, db=db, accounts=accounts)
+                    if state == NO_USABLE_MODEL)
+        return result
     finally:
         db.close()
