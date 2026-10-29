@@ -292,6 +292,8 @@ class CCStreamSession:
         self._context_changed.set()
         if crash and not stderr.strip():
             stderr = f"CORSIA CC bridge error: {crash}"
+        if stderr.strip():
+            log.log(logging.ERROR if self._proc.returncode not in (0, None) else logging.WARNING, "cc_stream: claude exited %s: %s", self._proc.returncode, stderr[:500])
         if not self._closing:
             await self._on_exit(self._proc.returncode, stderr)
 

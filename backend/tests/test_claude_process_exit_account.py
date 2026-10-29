@@ -33,7 +33,8 @@ async def test_process_exit_signs_out_added_login_before_its_one_completion(clau
 
     await cc_process_exit._publish_process_exit('claude-destination', live, identity, 1, EXPIRED, broadcast, db)
     row = db.execute("SELECT content,metadata FROM messages WHERE thread_id='claude-destination' AND id!='claude-input'").fetchone()
-    assert row['content'] == f'⚠️ Claude Code stopped: {EXPIRED}'
+    assert row['content'] == 'Other is signed out of Claude Code. Sign it in again under Settings › Providers.'
+    assert json.loads(row['metadata'])['account_id'] == claude.other
     assert json.loads(row['metadata'])['cause'] == 'process_exited'
     default_reconcile.assert_not_called()
     assert get_connection('claude-code', db=db) == before

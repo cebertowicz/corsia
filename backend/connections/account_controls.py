@@ -16,7 +16,8 @@ import json
 import logging
 from typing import Any
 
-from connections import account_login_wait, account_signin_prompt, harness_models
+from connections import account_login_wait, account_signin_prompt
+from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
 from connections.account_identity import codex_identity, refresh_default_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
@@ -54,14 +55,6 @@ class _SigninWaitExpired(Exception):
 
 _SIGNINS: dict[str, SignIn] = {}
 
-
-async def _custom(account_id: str) -> dict:
-    account = await run_in_db(get_account, account_id)
-    if account["source_home"] is None:
-        raise AccountError("the Default account signs in through the vendor's own CLI")
-    if account["state"] == "removed":
-        raise AccountError("account was removed; choose another permitted account")
-    return account
 
 
 async def _binary(provider: str) -> str | None:
@@ -199,10 +192,15 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
-    """Begin, or return the live, vendor browser sign-in for one signed-out added account."""
-    account = await _custom(account_id)
-    if account["state"] != "signed_out":
-        raise AccountError("account is already signed in")
+    """Begin, or return the live, vendor browser sign-in for an added account."""
+    account = await custom_account(account_id)
+    if account["state"] == "signed_in":
+        if account["provider"] not in VENDORS:
+            raise AccountError("account is already signed in")
+        result = await signin_recheck(account_id, account["provider"], lambda selected: verify(selected, report_refresh=True))
+        if result is not None:
+            return result
+        account = await custom_account(account_id)
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:
@@ -286,7 +284,7 @@ async def _drop(account_id: str) -> SignIn | None:
 
 
 async def cancel_signin(account_id: str) -> dict[str, Any]:
-    """Stop one held sign-in; the account stays signed out and the vendor's logout is never run.
+    """Stop one held sign-in; the account keeps its state and the vendor's logout is never run.
 
     A sign-in the vendor already finished is not cancelled: its real result is
     returned and its record stays.
@@ -305,7 +303,7 @@ async def cancel_signin(account_id: str) -> dict[str, Any]:
 
 
 async def stop_all_signins() -> None:
-    """Stop every held sign-in when the backend shuts down; each account stays signed out."""
+    """Stop held sign-ins at shutdown; accounts keep their state and vendor logout is never run."""
     operations = list(_SIGNINS.values())
     for operation in operations:
         if operation.status == "waiting":
@@ -321,12 +319,12 @@ async def stop_all_signins() -> None:
             raise result
 
 
-async def verify(account_id: str) -> dict[str, Any]:
+async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, Any]:
     """Re-read vendor sign-in; only a definite signed-out answer flips a signed-in account.
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
     """
-    account = await _custom(account_id)
+    account = await custom_account(account_id)
     provider = account["provider"]
     receipt = account_receipt(account)
     current_c6 = readiness_reason(account) in ("codex_auth_projection_changed", "codex_auth_source_missing")
@@ -337,14 +335,13 @@ async def verify(account_id: str) -> dict[str, Any]:
         await refresh_default_identity(provider)
     if account["state"] == "signed_in" and signed_in is False:
         account = await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
-    if (provider in VENDORS and account["state"] == "signed_in" and signed_in is True
-            and receipt is not None and not current_c6):
-        try:
-            await harness_models.refresh_provider(provider, reason="account-verify", account_id=account_id,
-                expected_receipt=receipt, binary=binary)
-        except Exception as exc:
-            log.warning("account %s discovery failed: %s", account_id, type(exc).__name__)
-    return {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
+    refresh_ok, refresh_cause, refresh_ref = None, None, None
+    if account["state"] == "signed_in" and signed_in is True:
+        refresh_ok, refresh_cause, refresh_ref = await refresh_models(account, receipt, binary, current_c6)
+    result = {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
+    if report_refresh:
+        result.update(model_refresh_ok=refresh_ok, model_refresh_cause=refresh_cause, model_refresh_ref=refresh_ref)
+    return result
 
 
 async def vendor_logout(account: dict) -> dict[str, Any]:

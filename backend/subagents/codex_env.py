@@ -132,7 +132,9 @@ def _write_governed_model_catalog(*, source: Path, destination: Path,
         from connections.model_cache_stage import validate_cache
 
         if not isinstance(cache_receipt, dict) or not validate_cache(cache_receipt, catalog_source):
-            raise RuntimeError('account_model_cache_changed')
+            from subagents.codex_runtime_errors import CodexModelCacheChanged
+
+            raise CodexModelCacheChanged()
         candidates = [catalog_source]
     candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
     if not candidates:

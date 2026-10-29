@@ -28,8 +28,10 @@ from core.turn_activity import turn_activity_frame
 from subagents.codex_runtime_errors import (
     CodexLiveTurnBusy,
     CodexPreparedContextStale,
+    cache_error_marker,
     surface_exit_error,
 )
+from subagents.codex_runtime_support import require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
 from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
 from subagents.codex_retirement import retire_if_current
@@ -190,6 +192,7 @@ async def retarget_if_current(
         return True
 
 
+
 def _default_broadcast(thread_id: str, message: dict) -> None:
     from infra import state
 
@@ -221,10 +224,6 @@ def _surface_exit_error(
     )
 
 
-def _require_owned_accept_db(db) -> None:
-    if db is not None:
-        raise RuntimeError("Codex async acceptance requires an owned DB connection")
-
 
 async def _start_live_turn(
     thread_id: str,
@@ -237,7 +236,7 @@ async def _start_live_turn(
     preadmitted_turn: TurnIdentity | None = None,
     transfer_delivery_to_turn: Callable[[], None] | None = None,
 ) -> TurnIdentity:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
 
     def _bind_turn(identity: TurnIdentity) -> None:
         live.last_assistant_message_id = live.open_tool_step_id = None
@@ -674,7 +673,7 @@ async def _spawn_turn(
     db=None,
     held_lock: asyncio.Lock,
 ) -> TurnIdentity | None:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     binary = _spawn_binary(binary, db)
     payload = await run_in_db(_resolve_spawn_payload,
         thread_id=thread_id, text=text,
@@ -751,7 +750,7 @@ async def _finish_failed_app_server_spawn(
             terminal = await _end_owned_turn(
                 thread_id, live, live.corsia_turn, outcome,
                 error=detail, bcast=bcast, source="codex-app-server:input-rejected",
-                defer_drive=True,
+                marker=cache_error_marker(exc, thread_id, live.corsia_turn, bcast, db, insert_message, log), defer_drive=True,
             )
         except CommittedTerminalFailure:
             if not live.input_delivery_unproven:
@@ -778,7 +777,7 @@ async def _accept_spec_app_server_input(
 
 
 async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
-    _require_owned_accept_db(spec.db)
+    require_owned_accept_db(spec.db)
     bcast = spec.broadcast or _default_broadcast
     session = _reusable_app_session(spec.thread_id)
     tool_registry, dynamic_tools = _resolve_app_server_tools(
@@ -1332,7 +1331,7 @@ async def _hard_preempt_live_turn(
     held_lock: asyncio.Lock,
 ) -> TurnIdentity | None:
     """Terminalize, quarantine, and replace an uninterruptible turn."""
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     bcast = broadcast or _default_broadcast
     if not await _fence_hard_preempted_live(thread_id, live, bcast, db=db):
         return None
@@ -1544,7 +1543,7 @@ async def _feed_live(
     preadmitted_turn: TurnIdentity | None = None,
     db=None,
 ) -> TurnIdentity | None:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     bcast = broadcast or _default_broadcast
     live = _LIVE.get(thread_id)
     if live is not None and live.provider_context_untrusted:
@@ -1859,7 +1858,7 @@ async def ensure_live_then_feed(
     db=None,
 ) -> TurnIdentity | None:
     """Steer, resume, or start one Codex turn under its transition lock."""
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     if target.harness != "codex":
         raise ValueError("Codex runtime received a non-Codex execution target")
     lock = _LIVE.lock(thread_id)

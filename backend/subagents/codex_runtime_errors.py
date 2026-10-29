@@ -25,6 +25,52 @@ class CodexPreparedContextStale(RuntimeError):
     """Raised before provider write when Codex admission is no longer exact."""
 
 
+class CodexModelCacheChanged(RuntimeError):
+    """The model cache captured for this account changed before admission."""
+
+    def __init__(self):
+        super().__init__("account_model_cache_changed")
+
+
+def cache_error_marker(exc, thread_id, identity, bcast, db, insert_message_fn, logger):
+    if not isinstance(exc, CodexModelCacheChanged):
+        return None
+
+    async def marker():
+        from connections.vendor_accounts import get_account
+        from infra.db_async import run_in_db_unless_owned
+        from connections.account_runtime import thread_launch_homes
+        from infra.database import get_db
+
+        def write_marker():
+            connection = db or get_db()
+            try:
+                homes = thread_launch_homes(thread_id, "codex", turn_id=identity.turn_id, db=connection)
+                account = get_account(homes.account_id, db=connection) if homes.account_id else None
+                name = account["name"] if account else "this account"
+                text = (f"Couldn’t start Codex on {name}: its model list is out of date. "
+                        f"Use Sign in again on {name} under Settings › Providers.")
+                meta = {"codex": True, "type": "cc_error", "event_type": "harness.error",
+                        "harness": "codex", "cause": "account_model_cache_changed"}
+                if account:
+                    meta["account_id"] = account["id"]
+                mid = insert_turn_error(insert_message_fn, thread_id, text, meta,
+                                        turn_id=identity.turn_id, msg_id=str(uuid.uuid4()), db=connection)
+                broadcast_stored_message(thread_id, mid, db=connection, broadcast=bcast)
+                return mid
+            finally:
+                if db is None:
+                    connection.close()
+
+        try:
+            return await run_in_db_unless_owned(db, write_marker)
+        except Exception as exc:
+            logger.error("codex_runtime: failed to surface cache error: %s", exc)
+            return None
+
+    return marker
+
+
 def surface_exit_error(
     thread_id: str,
     code: int | None,
