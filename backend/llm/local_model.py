@@ -1,7 +1,8 @@
 """Local model recommendations shared by setup and the Add model sheet.
 
-Both use recommend(): setup passes the room free now because it loads at once;
-the sheet passes the computer's total room.
+The sheet's Recommended is recommend(): oMLX's first "best" build that fits the
+computer's total room. Setup's pick_for_setup() passes the room free now because
+it loads at once, and falls back to oMLX's other sections, then the smallest.
 """
 
 from __future__ import annotations
@@ -262,15 +263,15 @@ def recommend(
     sections: dict[str, list[LocalModel]], room_bytes: int,
     obtainable: Callable[[LocalModel], bool] | None = None,
 ) -> LocalModel | None:
-    """Return oMLX's first fitting and obtainable model."""
-    return next((model for model in fitting_models(sections, room_bytes)
+    """Return oMLX's first fitting and obtainable "best" model; another section never takes the badge."""
+    return next((model for model in fitting_models({"best": sections.get("best", [])}, room_bytes)
                  if obtainable is None or obtainable(model)), None)
 
 
 def pick_for_setup(sections: dict[str, list[LocalModel]], room_bytes: int) -> LocalModel | None:
     """oMLX's own ranking: its first row that fits ``room_bytes``, "best" first; when none fits, the smallest."""
     rows = _in_omlx_order(sections)
-    fitting = recommend(sections, room_bytes)
+    fitting = next(iter(fitting_models(sections, room_bytes)), None)
     if fitting is not None or not rows:
         return fitting
     return min(rows, key=lambda model: model.resident_bytes or 0)

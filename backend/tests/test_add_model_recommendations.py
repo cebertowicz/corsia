@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from api import provider_local_models as route
-from llm.local_model import LocalModel
+from llm.local_model import LocalModel, recommend
 
 GIB = 1024**3
 
@@ -23,6 +23,15 @@ def test_fixture_quality_does_not_decrease_with_higher_bit_builds():
                     f"{higher['repo_id']} has lower quality than {lower['repo_id']}"
                 )
     assert comparisons > 0
+
+
+def test_recommended_comes_only_from_best():
+    best = LocalModel('org/Best-oQ4e', 10 * GIB, 32768, resident_bytes=120 * GIB)
+    bigger = LocalModel('org/Bigger-oQ2e', 10 * GIB, 32768, resident_bytes=40 * GIB)
+    sections = {'best': [best], 'bigger': [bigger]}
+    assert recommend(sections, 64 * GIB) is None
+    assert recommend({'best': [bigger], 'faster': [best]}, 64 * GIB, obtainable=lambda _: False) is None
+    assert recommend({'best': [bigger]}, 64 * GIB) == bigger
 
 
 @pytest.mark.asyncio
