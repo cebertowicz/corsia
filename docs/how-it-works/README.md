@@ -1,0 +1,42 @@
+# How CORSIA works
+
+These pages explain how CORSIA is built and why, for an engineer deciding whether to adopt it or contribute to it. Each page says what a part is, why it exists, how it works, what can go wrong, and where it lives in the code. For a file-by-file map of the code, read [ARCHITECTURE.md](../../ARCHITECTURE.md); these pages explain the ideas behind that map.
+
+Every claim here was checked against the code at the commit this section was written from. Where the code and an older document disagree, these pages follow the code.
+
+## Reading order
+
+| Page | Read it to learn |
+|---|---|
+| [Architecture](architecture.md) | The processes, the database, and what happens at startup |
+| [Scopes](scopes.md) | How a workspace is divided into projects, and what each level owns |
+| [Agents and threads](agents-and-threads.md) | What an agent is, how threads relate, and how work is delegated |
+| [Turns and delivery](turns-and-delivery.md) | How a message becomes a turn, and how it survives a restart |
+| [Plans](plans.md) | How commitments, waits and decisions are recorded |
+| [Context and memory](context-and-memory.md) | What an agent is told, in what order, and what survives a checkpoint |
+| [Models and harnesses](models-and-harnesses.md) | How a model is chosen and run, and what a switch preserves |
+| [Coordination models](coordination-models.md) | How a project's way of working is packaged and versioned |
+| [Measuring work](measuring-work.md) | What CORSIA counts, and what it refuses to claim |
+
+Security is covered in its own section: [Security](../security/README.md). These pages mention security only where it changes how a part works, and link there instead of repeating it.
+
+## Terms used throughout
+
+- **Workspace:** the top-level folder CORSIA manages. It holds shared context, shared skills, shared documents and every project.
+- **Project:** a body of work inside the workspace, such as a product or a household, with its own context, skills, documents and agents.
+- **Scope:** the level something belongs to: workspace, project or thread. Context and skills are resolved by scope.
+- **Thread:** one conversation with its own history, plan and model. Everything that runs, runs in a thread.
+- **Agent:** a thread that has been given a standing responsibility. Other threads are temporary workers.
+- **Conductor:** the one thread designated to coordinate a scope. In a project it is the project conductor; in the workspace it is the CORSIA agent.
+- **Turn:** one run of a thread's agent loop, from an admitted input until it finishes.
+- **Harness:** the program that runs the agent loop for a turn. CORSIA has three: its own native loop, Claude Code and Codex.
+- **Checkpoint:** a summary of a thread's earlier history that replaces that history in the model's context when it grows too large.
+- **Plan:** a thread's structured list of tasks, with acceptance criteria, waits and decisions.
+- **Context source:** one file or generated block that is delivered to a model, such as a system rule, a project file or the skills index.
+- **State root:** the folder outside the workspace where CORSIA keeps its database and runtime files.
+
+## What these pages do not cover
+
+- How to install or use CORSIA. See the project [README](../../README.md).
+- Security and the sandbox model. See [Security](../security/README.md).
+- The measurement page in the app. See [Measurement](../measurement.md); [Measuring work](measuring-work.md) covers how it is built.
