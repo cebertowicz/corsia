@@ -14,6 +14,9 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
 interface Sample { top: number | null; t: number }
 type Win = Window & { __eachPaintedFrame?: EachPaintedFrame; __samples?: Sample[]; __done?: boolean };
 
+/** The waiting dots leave when the turn ends, which a reader at the live edge can see as a drop of about this much; a drop of a reply's height is the regression. */
+const WAITING_DOTS_PX = 60;
+
 const LINE = 'The reader keeps their place while the agent works and the reply keeps arriving below. ';
 
 async function openThread(page: Page, title: string): Promise<void> {
@@ -76,8 +79,10 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge'] 
 			await expect(page.locator('.messages .message.assistant').nth(index)).toBeVisible({ timeout: 20_000 });
 		}
 		await installPaintedFrames(page);
+		// Every third step also says something, so the run commits streamed replies mid-turn as well as swapping reasoning and tools.
 		const steps = Array.from({ length: 10 }, (_, index) => ({
 			reasoning_content: `Looking at step ${index}. `.repeat(20), delay_ms: 500, finish_reason: 'tool_calls',
+			...(index % 3 === 2 ? { content: `Step ${index} note. ${LINE.repeat(25)}` } : {}),
 			tool_calls: [{ id: `step-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }],
 		}));
 		await seedMockResponses(request, [...steps, { content: `Live reply. ${LINE.repeat(120)}`, completion_gate: gate, finish_reason: 'stop' }]);
@@ -88,11 +93,14 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge'] 
 			await page.locator('.messages').evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight / 2 - el.clientHeight / 2); });
 			await page.waitForTimeout(600);
 		}
-		const samples = await sampleAnchor(page, 200, 8000);
+		// The gate opens part-way through, so the final reply's arrival and the end of the turn are sampled too.
+		const sampling = sampleAnchor(page, 200, 12_000);
+		await page.waitForTimeout(7000);
 		await releaseMockGate(request, gate);
+		const samples = await sampling;
 		expect(samples.filter((sample) => sample.top !== null).length, 'the sampled text stayed on the page').toBeGreaterThan(samples.length / 2);
 		const seen = moves(samples);
 		if (reading === 'scrolled up mid-transcript') expect(seen, 'the text under the reader moved while the turn worked').toEqual([]);
-		else expect(seen.filter((by) => by > 0), 'the transcript dropped back under a reader at the live edge').toEqual([]);
+		else expect(seen.filter((by) => by > WAITING_DOTS_PX), 'the transcript dropped back under a reader at the live edge').toEqual([]);
 	});
 }

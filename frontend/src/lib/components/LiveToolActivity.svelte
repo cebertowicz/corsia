@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		activeThreadId, activeToolsByThread, isThreadTurnActive, liveReasoningByThread, streamContentByThread,
 	} from '$lib/stores/threads';
@@ -31,6 +32,20 @@
 	const streamContent = $derived((boundThreadId && $streamContentByThread.get(boundThreadId)) || '');
 	const isStreaming = $derived(isThreadTurnActive($turnStates, boundThreadId));
 
+	/**
+	 * A streamed reply that commits as a transcript row takes the slot's height with it; the slot's floor must go
+	 * with it, or the row and the floor would both stand there until the turn ends.
+	 */
+	let commits = $state(0);
+	let hadReply = false;
+	$effect(() => {
+		if (streamContent) hadReply = true;
+		else if (hadReply) {
+			hadReply = false;
+			untrack(() => commits++);
+		}
+	});
+
 	function autoScroll(node: HTMLElement, _content: string) {
 		node.scrollTop = node.scrollHeight;
 		return {
@@ -51,11 +66,9 @@
 		status: t.status,
 	})));
 
-	// The live region belongs to a live turn, and a spinner must never outlive
-	// one. Tool buffers are cleared on every terminal, so this changes nothing in
-	// the ordinary case — it makes "the turn ended" sufficient to stop spinning,
-	// rather than depending on the clear having reached us.
-	const showLiveTools = $derived(isStreaming && activeTools.length > 0);
+	// The whole region is under `{#if isStreaming}`: a spinner never outlives its turn,
+	// whether or not the tool buffers have been cleared yet.
+	const showLiveTools = $derived(activeTools.length > 0);
 
 	// #1083: once every known tool reaches 'done', the turn keeps generating
 	// (its next call_llm) with no interstitial frame — the finished tool set
@@ -70,7 +83,7 @@
 
 {#if isStreaming}
 <!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. -->
-<div class="live-slot" use:holdHeight={`${boundThreadId}:${toggles}`}>
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${toggles}:${commits}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -101,7 +114,7 @@
 			{/if}
 		</div>
 	</div>
-{:else if isStreaming}
+{:else}
 	<div class="message assistant">
 		<div class="assistant-msg">
 			{#if liveReasoning}
