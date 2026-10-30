@@ -50,6 +50,7 @@ def git(
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            errors="surrogateescape",
             timeout=timeout,
             env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         )
@@ -212,7 +213,7 @@ def is_tool_output_dir(path: Path) -> bool:
 
 
 def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:
-    """Return ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
+    """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
     worktree's untracked and ignored files are scratch, not unshipped work.

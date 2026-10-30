@@ -98,6 +98,23 @@ def test_reaper_keeps_gitlinks_without_running_nested_git(tmp_path):
     assert not marker.exists()
 
 
+def test_reaper_status_survives_a_non_utf8_index_path(tmp_path):
+    from infra.worktree_reaper_checks import _status_reason
+
+    repo = tmp_path / 'workspace'
+    init(repo)
+    git(repo, 'commit', '--allow-empty', '-qm', 'root')
+    blob = subprocess.run(
+        ['git', 'hash-object', '-w', '--stdin'], cwd=repo, input=b'one',
+        capture_output=True, check=True,
+    ).stdout.decode().strip()
+    subprocess.run(
+        ['git', 'update-index', '--index-info'], cwd=repo,
+        input=f'100644 {blob} 0\t'.encode() + b'\xffname\n', check=True,
+    )
+    assert _status_reason(repo, False) == 'dirty'
+
+
 def test_workspace_git_rules_and_no_repository(tmp_path):
     from tools.host_path_policy import ProtectedHostPathPolicy
 
@@ -217,4 +234,4 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
     assert (workspace / '.git').is_file() if separate else (workspace / '.git').is_dir()
     result = run('printf content > file && git add file && git commit -qm test')
     assert result.returncode == 0, result.stderr
-    assert git(workspace, 'status', '--porcelain').stdout == ''
+    assert git(workspace, 'status', '--porcelain').stdout == ('?? metadata/\n' if separate else '')
