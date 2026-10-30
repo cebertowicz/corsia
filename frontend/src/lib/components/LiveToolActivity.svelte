@@ -3,7 +3,9 @@
 		activeThreadId, activeToolsByThread, isThreadTurnActive, liveReasoningByThread, streamContentByThread,
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
+	import { replyCommitsByThread } from '$lib/stores/liveStep';
 	import { renderMarkdown } from '$lib/markdown';
+	import { holdHeight } from '$lib/actions/holdHeight';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -43,11 +45,9 @@
 		status: t.status,
 	})));
 
-	// The live region belongs to a live turn, and a spinner must never outlive
-	// one. Tool buffers are cleared on every terminal, so this changes nothing in
-	// the ordinary case — it makes "the turn ended" sufficient to stop spinning,
-	// rather than depending on the clear having reached us.
-	const showLiveTools = $derived(isStreaming && activeTools.length > 0);
+	// The whole region is under `{#if isStreaming}`: a spinner never outlives its turn,
+	// whether or not the tool buffers have been cleared yet.
+	const showLiveTools = $derived(activeTools.length > 0);
 
 	// #1083: once every known tool reaches 'done', the turn keeps generating
 	// (its next call_llm) with no interstitial frame — the finished tool set
@@ -60,6 +60,9 @@
 	);
 </script>
 
+{#if isStreaming}
+<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. A reply committing to the transcript takes its height out of the slot into its row, and the person expanding or collapsing a step changes it themselves; both let the floor go. -->
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${$replyCommitsByThread.get(boundThreadId ?? '') ?? 0}:${expandedTools.size}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -90,7 +93,7 @@
 			{/if}
 		</div>
 	</div>
-{:else if isStreaming}
+{:else}
 	<div class="message assistant">
 		<div class="assistant-msg">
 			{#if liveReasoning}
@@ -114,8 +117,11 @@
 		</div>
 	</div>
 {/if}
+</div>
+{/if}
 
 <style>
+	.live-slot { display: flow-root; }
 	.message { max-width: 760px; margin: 0 auto 20px; overflow-x: hidden; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
 	@keyframes fadeInUp {
