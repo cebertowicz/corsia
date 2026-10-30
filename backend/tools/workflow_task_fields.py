@@ -292,9 +292,10 @@ def _system_workflow_version(skill) -> str | None:
 
 
 START_NOTICE = (
-    "[Workflow skill · When you apply it, start one run: plan_update add with kind \"phase\", "
-    "workflow_ref \"{name}\", a difficulty and a size. CORSIA builds the steps; don't add them "
-    "yourself. More: skill task-discipline, Declared workflows.]"
+    "[Workflow skill · When you apply it and any \"Applying these steps\" note covers this run, "
+    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty "
+    "and a size. CORSIA builds the steps; don't add them yourself. More: skill task-discipline, "
+    "Declared workflows.]"
 )
 
 

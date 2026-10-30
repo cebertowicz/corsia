@@ -70,13 +70,14 @@ def _corrections(db: sqlite3.Connection, ids: list[str]) -> dict[str, int]:
 
 
 def _revision_children(db: sqlite3.Connection) -> dict[str, list[str]]:
-    """Return only rejection revisions, never ordinary accept-with-follow-up work."""
+    """Return every further round of a step: rejection revisions and follow-ups that count as the step."""
     rows = db.execute(
         """SELECT n.id AS child_id,n.follow_up_of AS parent_id
-           FROM plan_nodes n JOIN plan_node_events e
-             ON e.node_id=n.id AND e.event='revision_created'
-           WHERE n.follow_up_of IS NOT NULL AND json_valid(e.payload_json)
-             AND json_extract(e.payload_json,'$.source_node_id')=n.follow_up_of"""
+           FROM plan_nodes n JOIN plan_nodes s ON s.id=n.follow_up_of
+           LEFT JOIN plan_node_events e
+             ON e.node_id=n.id AND e.event='revision_created' AND json_valid(e.payload_json)
+             AND json_extract(e.payload_json,'$.source_node_id')=n.follow_up_of
+           WHERE e.id IS NOT NULL OR (n.workflow_ref=s.workflow_ref AND n.workflow_step=s.workflow_step)"""
     ).fetchall()
     children: dict[str, list[str]] = defaultdict(list)
     for row in rows:
