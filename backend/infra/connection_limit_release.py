@@ -324,10 +324,11 @@ def release_after_sign_in(connection: str, *, db, schedule_usage_check: bool = T
     from infra.write_effects import after_commit
 
     from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import default_account
+    from connections.vendor_accounts import resolve_account_id
 
-    # The provider's own sign-in is the Default account's login.
-    identity = default_account(connection, db=db)['id']
+    identity = resolve_account_id(connection, db=db)
+    if identity is None:
+        return
     receipt = capture_receipt(connection, account_id=identity, db=db)
     if receipt is None:
         return  # A READY source check is not evidence for an observed unknown login.

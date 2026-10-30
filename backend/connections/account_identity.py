@@ -1,19 +1,10 @@
 """Read comparison facts without retaining vendor credentials or raw identifiers."""
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
-import logging
 from pathlib import Path
-
-from connections.account_profiles import profile_for
-from connections.harness_process import killed_on_exit
-from connections.vendor_accounts import record_default_identity
-from infra.db_async import run_in_db
-
-log = logging.getLogger(__name__)
 
 CODEX_PUBLIC_USER_CLAIMS = ("https://api.openai.com/auth", "chatgpt_user_id", "user_id")
 
@@ -53,105 +44,4 @@ def claude_login_status(report: object, code: int | None) -> str:
     return "signed_in" if flag is True and code == 0 else "unknown"
 
 
-async def default_identity(provider: str) -> dict[str, str]:
-    """Read the ambient Default only, never signing it in or out."""
-    if provider == "codex":
-        from subagents.codex_env import default_codex_home
-
-        return await run_in_db(codex_identity, default_codex_home())
-    from connections.account_controls import _binary, _COMMAND_SECONDS
-
-    binary = await _binary(provider)
-    if binary is None:
-        return {}
-    profile = profile_for(provider)
-    env = profile.clean_env()
-    env.pop(profile.home_variable, None)
-    try:
-        process = await asyncio.create_subprocess_exec(
-            binary, *profile.commands["status"], env=env, stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        async with killed_on_exit(process):
-            async with asyncio.timeout(_COMMAND_SECONDS):
-                stdout, _ = await process.communicate()
-        report = json.loads(stdout)
-        status = claude_login_status(report, process.returncode)
-        if status == "signed_out":
-            return {"_login_status": status}
-        if status != "signed_in":
-            return {}
-        return profile.facts_from_status(report)
-    except (OSError, TimeoutError, ValueError):
-        return {}
-
-
-def capture_default_observation(provider: str, *, db=None):
-    """Fence a discovery's Default observation before its CLI read; none without a Default row."""
-    from connections.account_observation import begin_default_observation
-    from connections.vendor_accounts import resolve_account_id
-    from infra.database import get_db
-
-    connection = db or get_db()
-    try:
-        if resolve_account_id(provider, db=connection) is None:
-            return None
-        return begin_default_observation(provider, db=connection)
-    finally:
-        if db is None:
-            connection.close()
-
-
-async def read_default_facts(provider: str) -> dict[str, str]:
-    """The Default's facts for a discovery; a failed read is logged and observes nothing."""
-    try:
-        return await default_identity(provider)
-    except Exception as exc:  # noqa: BLE001 - a failed identity read must not fail the catalog refresh
-        # Only the type: the message of a vendor read can carry the account's email.
-        log.warning("Default %s identity read failed: %s", provider, type(exc).__name__)
-    return {}
-
-
-def observe_discovered_identity(provider: str, identity: dict, *, token, db=None) -> bool:
-    """Commit a discovery's fenced Default observation; False only when a newer one superseded it.
-
-    Unreadable or incomplete facts are not evidence that the login changed, so
-    they update only the Default's visibility: the last known identity, receipt
-    and usage stand. A definite signed-out read commits as a full observation.
-    """
-    from connections.account_observation import commit_default_visibility, has_comparison_facts
-
-    if token is None:
-        return True
-    if not has_comparison_facts(provider, identity) and identity.get('_login_status') != 'signed_out':
-        return commit_default_visibility(provider, identity, token=token, db=db)
-    return record_default_identity(provider, identity, token=token,
-                                   schedule_usage_check=False, db=db).accepted
-
-
-async def observe_default_read(provider: str, token) -> None:
-    """Commit a discovery's Default identity under the fence taken before its read."""
-    if token is not None:
-        await run_in_db(observe_discovered_identity, provider, await read_default_facts(provider), token=token)
-
-
-def _default_observation_token(provider: str):
-    from connections.account_observation import begin_default_observation
-    from infra.database import get_db
-
-    connection = get_db()
-    try:
-        return begin_default_observation(provider, db=connection)
-    finally:
-        connection.close()
-
-
-async def refresh_default_identity(provider: str):
-    """Capture before the external read so a delayed observation cannot replace newer facts."""
-    token = await run_in_db(_default_observation_token, provider)
-    try:
-        identity = await default_identity(provider)
-    except Exception:  # noqa: BLE001 - a failed ambient read must clear the old comparison snapshot
-        identity = {}
-    if provider == 'codex':
-        identity = {**identity, '_login_status': 'not_read'}
-    return await run_in_db(record_default_identity, provider, identity, token=token)
+# Login identity reads are account-scoped; ambient identity is only a setup hint.

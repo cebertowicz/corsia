@@ -96,7 +96,7 @@ def account_fact_reason(account: dict | None, *, provider: str, policies: list,
                         execution: bool, model: str | None = None) -> str | None:
     """Evaluate loaded account/policy facts for both claim and advisory batches."""
     if account is None:
-        return None
+        return NOT_CONFIGURED
     if account["provider"] != provider:
         return "account_vendor_mismatch"
     if any(account["id"] in p["disabled"] for p in policies):
@@ -117,14 +117,6 @@ def account_reason(account: dict, *, provider: str, project_ids: list, execution
     """Evaluate lifecycle and project state without interpreting usage limits."""
     reason = account_fact_reason(account, provider=provider, execution=execution, model=model,
                                  policies=_policies(provider, project_ids, db=db))
-    if reason is None and execution and model and account and account['source_home'] is None:
-        from llm.harness_catalog import harness_row
-
-        row = harness_row(model, db=db)
-        if row is not None and row.get('default_listed') is False:
-            return 'account_model_not_discovered'
-        if row is not None and row.get('added_available') and not row.get('available'):
-            return 'account_runtime_pending'
     return reason
 
 

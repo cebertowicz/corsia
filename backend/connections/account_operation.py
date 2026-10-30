@@ -28,10 +28,6 @@ def admit_operation(provider, model, request, *, actor_thread_id=None):
             actor_thread_id=actor_thread_id, account_id=request.vendor_account_id,
             frozen=request.vendor_account_bound, db=db)
         launch = launch_homes(identity, db=db)
-        if not launch.custom:
-            from connections.account_profiles import profile_for
-
-            launch = replace(launch, warm_home=profile_for(provider).default_warm_home())
         receipt = capture_receipt(provider, account_id=identity, db=db) if identity is not None else None
         return replace(request, vendor_account_id=identity, vendor_account_bound=True,
             vendor_account_receipt=receipt, vendor_launch=launch)
@@ -95,8 +91,6 @@ def require_same_operation_home(request, source_home):
         return
     launch = request.vendor_launch
     expected = launch.claude_dir or launch.codex_runtime or launch.warm_home
-    if source_home is None and not launch.custom:
-        source_home = launch.warm_home
     if source_home is None or Path(source_home).absolute() != Path(expected).absolute():
         _refuse_warm_source('warm_fork_home_mismatch')
     receipt = getattr(request, 'vendor_account_receipt', None)

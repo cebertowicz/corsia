@@ -386,6 +386,4 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn,
         context_window=context_window, status=status, status_reason=status_reason,
         private_servers=private_servers, local_servers=local_servers,
     )
-    if row.get('default_listed') is False:
-        entry['default_listed'] = False
     return entry

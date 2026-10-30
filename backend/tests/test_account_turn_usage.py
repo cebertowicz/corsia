@@ -641,10 +641,6 @@ def test_full_compact_account_facts_and_copy_are_identical(held_worker, default,
         assert detail == ACCOUNT_PENDING_DETAIL
     elif state == 'signed_out':
         assert 'it is signed out' in detail
-    elif state == 'stale' and default:
-        # The ambient Default owns no per-account model record: the same stale record holds
-        # an added account and cannot hide the vendor's own rows.
-        assert detail == ACCOUNT_PENDING_DETAIL
     else:
         assert 'selected model has not been discovered' in detail
     rows = activity_facts.compact_nodes([plan.id], db=db)
@@ -733,6 +729,17 @@ def test_snapshot_works_with_execute_only_proxy_and_preserves_outer_transaction(
         assert db.execute("SELECT title FROM threads WHERE id='worker'").fetchone()[0] != 'uncommitted'
 
 
+@pytest.fixture
+def usage_default_accounts(isolated_db):
+    from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import seed_default_account
+
+    for provider in ('codex', 'claude-code'):
+        account = seed_default_account(provider)
+        set_account_state(account['id'], 'signed_in', expected_revision=account['revision'])
+
+
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_availability_projects_allowed_limited_and_unknown_states(isolated_db) -> None:
     db = _db()
     harness_usage.record_allowed(provider="claude-code", source="test", db=db, receipt=default_receipt("claude-code", db=db))
@@ -754,6 +761,7 @@ def test_availability_projects_allowed_limited_and_unknown_states(isolated_db) -
     assert harness_usage.connection_availability("omlx@local/qwen", db=db, account_id=model_default_id("omlx@local/qwen", db=db)).state == "unknown"
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_availability_uses_model_scoped_verdict_without_blocking_sibling(isolated_db) -> None:
     db = _db()
     harness_usage.record_limited(
@@ -770,6 +778,7 @@ def test_availability_uses_model_scoped_verdict_without_blocking_sibling(isolate
     assert harness_usage.connection_availability("claude-code/sonnet", db=db, account_id=model_default_id("claude-code/sonnet", db=db)).state == "limited_with_reset"
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_past_reset_is_not_limited_and_a_transactional_read_sees_its_verdict(isolated_db) -> None:
     db = _db()
     past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
@@ -783,6 +792,7 @@ def test_past_reset_is_not_limited_and_a_transactional_read_sees_its_verdict(iso
         assert harness_usage.connection_availability("claude-code/opus", db=connection, account_id=model_default_id("claude-code/opus", db=connection)).state == "limited_with_reset"
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_terminal_refusal_records_limit_before_successor_claim(isolated_db, monkeypatch) -> None:
     db = _db()
     claude, _codex = _refusals(monkeypatch)
@@ -806,6 +816,7 @@ def test_terminal_refusal_records_limit_before_successor_claim(isolated_db, monk
     assert availability.reason is not None and len(availability.reason) <= 300
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_codex_terminal_refusal_parses_its_reset_and_non_limit_error_records_nothing(
     isolated_db, monkeypatch,
 ) -> None:
@@ -828,6 +839,7 @@ def test_codex_terminal_refusal_parses_its_reset_and_non_limit_error_records_not
     assert harness_usage.stored_usage(provider="claude-code", db=db, account_id=default_id("claude-code", db=db)) is None
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_refusal_is_attributed_to_the_turn_model_not_the_thread_model(isolated_db, monkeypatch) -> None:
     db = _db()
     claude, _codex = _refusals(monkeypatch)
@@ -842,6 +854,7 @@ def test_refusal_is_attributed_to_the_turn_model_not_the_thread_model(isolated_d
     assert harness_usage.stored_usage(provider="codex", db=db, account_id=default_id("codex", db=db)) is None
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_completed_post_reset_turn_clears_its_scoped_verdict(isolated_db) -> None:
     db = _db()
     reset = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
@@ -862,6 +875,7 @@ def test_completed_post_reset_turn_clears_its_scoped_verdict(isolated_db) -> Non
     assert harness_usage.connection_availability("claude-code/sonnet", db=db, account_id=model_default_id("claude-code/sonnet", db=db)).state == "allowed"
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_refusal_observed_after_turn_start_is_never_overwritten(isolated_db) -> None:
     db = _db()
     started = datetime.now(timezone.utc) - timedelta(seconds=2)
@@ -883,6 +897,7 @@ def test_refusal_observed_after_turn_start_is_never_overwritten(isolated_db) -> 
     assert verdict["state"] == "limited"
 
 
+@pytest.mark.usefixtures('usage_default_accounts')
 def test_completed_pre_reset_turn_never_clears_expired_verdict(isolated_db) -> None:
     db = _db()
     started = datetime.now(timezone.utc) - timedelta(minutes=2)

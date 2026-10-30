@@ -21,7 +21,6 @@ from connections.harness_process import killed_on_exit
 from infra.db_async import run_in_db
 from subagents.codex_app_server import CodexAppServerSession
 from subagents.codex_env import governed_codex_model_catalog_path
-from subagents.codex_usage_observer import observe_account_limits
 
 log = logging.getLogger(__name__)
 _MODEL_CACHE_FILENAME = "models_cache.json"
@@ -62,8 +61,10 @@ def _promote_fresh_model_cache(fresh: Path, persistent: Path) -> None:
 
 def _prepare_discovery_home(context):
     """Prepare the existing fresh home and its captured retirement closure."""
-    custom = context is not None and not context.is_default
-    persistent_home = Path(context.runtime_home) if custom else codex_app_server_home()
+    if context is None or not context.source_home or not context.runtime_home:
+        raise RuntimeError('account_discovery_failed')
+    custom = True
+    persistent_home = Path(context.runtime_home)
     if custom:
         from connections.account_projection import projection_gate
 
@@ -86,19 +87,6 @@ def _prepare_discovery_home(context):
     return custom, persistent_cache, fresh_home, cleanup
 
 
-def _default_observation():
-    from connections.account_identity import capture_default_observation
-
-    return capture_default_observation("codex")
-
-
-async def _observe_default(observation) -> None:
-    """Identity commits before the limits co-read, so a login change cannot stale the new read."""
-    from connections.account_identity import observe_default_read
-
-    await observe_default_read("codex", observation)
-
-
 async def discover_codex_models(binary: str, *, context=None):
     """Return a freshly online app-server catalog or fail without reconciling.
 
@@ -108,7 +96,6 @@ async def discover_codex_models(binary: str, *, context=None):
     is that cache atomically promoted for subsequent managed execution.
     """
     custom, persistent_cache, fresh_home, cleanup = await run_in_db(_prepare_discovery_home, context)
-    observation = None if context is not None else await run_in_db(_default_observation)
     transferred = False
     session = None
 
@@ -134,15 +121,10 @@ async def discover_codex_models(binary: str, *, context=None):
             payload = await session.list_models()
             if not fresh_cache.is_file():
                 raise RuntimeError("Codex model/list returned without an online model refresh")
-            if context is None:
-                await _observe_default(observation)
-                await observe_account_limits(session)
+            try:
+                usage_report = await session._request('account/rateLimits/read', None)
+            except Exception:
                 usage_report = None
-            else:
-                try:
-                    usage_report = await session._request('account/rateLimits/read', None)
-                except Exception:
-                    usage_report = None
             try:
                 debug = await discover_codex_debug_models(binary,
                     **({'env': await run_in_db(session.build_env)} if context is not None else {}))

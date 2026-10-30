@@ -405,6 +405,15 @@ class TestCleanCodexAppServerEnv:
             }],
         }))
 
+        if cache_owner == "default":
+            with pytest.raises(RuntimeError, match="model catalog"):
+                codex_env.clean_codex_app_server_env(
+                    source_home=source_home,
+                    isolated_home=destination,
+                    govern_model_catalog=True,
+                )
+            return
+
         codex_env.clean_codex_app_server_env(
             source_home=source_home,
             isolated_home=destination,
@@ -423,14 +432,9 @@ class TestCleanCodexAppServerEnv:
 
         source_home = tmp_path / "user-codex"
         self._subscription_auth(source_home)
-        default_home = tmp_path / "default-runtime-codex"
-        default_home.mkdir()
-        monkeypatch.setattr(
-            codex_env,
-            "_default_app_server_home",
-            lambda: default_home,
-        )
-        valid = default_home / "models_cache.json"
+        destination = tmp_path / "detached-codex"
+        destination.mkdir()
+        valid = destination / "models_cache.json"
         valid.write_text(json.dumps({
             "models": [{"slug": "older", "multi_agent_version": "v2"}],
         }))
@@ -489,8 +493,9 @@ class TestCodexAppServerSessionEnvGate:
             captured_env = kwargs.get("env")
             raise FileNotFoundError("stop after env capture")
 
-        session = CodexAppServerSession(binary="codex", task=None)
-        with patch(
+        session = CodexAppServerSession(binary="codex", task=None, codex_home="/corsia/codex", source_codex_home="/account/codex")
+        # Admission is covered separately; isolate the spawn environment here.
+        with patch("subagents.vendor_write_admission.prepare_session_launch"), patch(
             "subagents.codex_env.clean_codex_app_server_env",
             return_value=isolated_env,
         ) as build_env:
@@ -500,5 +505,5 @@ class TestCodexAppServerSessionEnvGate:
                 with pytest.raises(FileNotFoundError, match="env capture"):
                     asyncio.run(session.start())
 
-        build_env.assert_called_once_with(govern_model_catalog=True, confined=False)
+        build_env.assert_called_once_with(source_home=Path("/account/codex"), isolated_home=Path("/corsia/codex"), govern_model_catalog=True, confined=False)
         assert captured_env == isolated_env

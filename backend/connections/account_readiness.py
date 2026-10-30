@@ -48,19 +48,14 @@ def _accounts(choices, *, db):
         return {}
     marks = ','.join('?' for _ in ids)
     rows = db.execute(
-        f"SELECT a.id,a.state,a.revision,a.is_default,a.source_home,a.discovery_json,c.provider, "
-        f"CASE WHEN json_type(a.identity_json,'$.default_comparison.auth_state') IS NOT NULL "
-        f"THEN json_object('auth_state',json_extract(a.identity_json,'$.default_comparison.auth_state'),"
-        f"'login_seq',json_extract(a.identity_json,'$.default_comparison.login_seq')) END AS comparison_json "
+        f"SELECT a.id,a.state,a.revision,a.is_default,a.source_home,a.discovery_json,c.provider "
         f"FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id WHERE a.id IN ({marks})", ids).fetchall()
-    return {r['id']: {**dict(r), 'identity': {'default_comparison': json.loads(r['comparison_json'])
-                    if r['comparison_json'] else None},
-                    'discovery': json.loads(r['discovery_json']) if r['discovery_json'] else None}
+    return {r['id']: {**dict(r), 'discovery': json.loads(r['discovery_json']) if r['discovery_json'] else None}
             for r in rows}
 
 
 def _batch(ids, *, db) -> dict[str, AccountReadiness]:
-    from connections.account_policy import NOT_CONFIGURED, account_reason, turn_account
+    from connections.account_policy import account_reason, turn_account
     from connections.vendor_accounts import AccountError
 
     targets = _targets(ids, db=db)
@@ -83,8 +78,6 @@ def _batch(ids, *, db) -> dict[str, AccountReadiness]:
         account = accounts.get(identity)
         if identity is not None and account is None:
             continue  # Missing evidence never becomes ready.
-        if choice_reason == NOT_CONFIGURED:
-            choice_reason = None
         project_id = target['project_id']
         cause = choice_reason or (account_reason(
             account, provider=target['harness'], project_ids=[project_id] if project_id is not None else [],

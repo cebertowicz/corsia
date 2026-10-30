@@ -18,7 +18,7 @@ from typing import Any
 
 from connections import account_cleanup, account_login_wait, account_signin_prompt
 from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
-from connections.account_identity import codex_identity, refresh_default_identity
+from connections.account_identity import codex_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for
 from connections.account_receipts import account_receipt
@@ -160,8 +160,6 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
             await account_cleanup.cleanup(await run_in_db(get_account, operation.account_id))
             operation.status, operation.cause = "failed", refused
             return
-        if operation.provider in VENDORS:
-            await refresh_default_identity(operation.provider)
         try:
             operation.duplicate_of, receipt = await run_in_db(
                 commit_signed_in, operation.account_id, operation.revision, identity)
@@ -330,8 +328,6 @@ async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, 
     binary = await _binary(provider)
     signed_in, _, cause = ((None, {}, profile_for(provider).missing_cause) if binary is None
                            else await _vendor_status(provider, account["source_home"], binary))
-    if provider in VENDORS:
-        await refresh_default_identity(provider)
     if account["state"] == "signed_in" and signed_in is False:
         account = await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
     refresh_ok, refresh_cause, refresh_ref = None, None, None

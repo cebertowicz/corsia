@@ -42,7 +42,7 @@ def current_ready_discovery(account: dict) -> dict | None:
     """Return an added account's ready discovery only for its current login."""
     from connections.account_receipts import account_receipt
 
-    if account['is_default'] or account['state'] != 'signed_in':
+    if account['state'] != 'signed_in':
         return None
     receipt = account_receipt(account)
     discovery = discovery_view(account)['discovery']
@@ -121,20 +121,9 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
     (``missing_home_reason``); never a vendor or network call.
     """
     from connections.account_receipts import account_receipt
-    from connections.vendor_accounts import DEFAULT_COMPARISON
 
     record = discovery_view(account)
-    # A built-in Default runs on the ambient login its own CLI already holds, and
-    # its models come from the vendor catalog rather than from an account-scoped
-    # discovery record. Nothing that record can do may hide those rows.
-    ambient = account['source_home'] is None
-    if ambient:
-        comparison = account['identity'].get(DEFAULT_COMPARISON)
-        if not isinstance(comparison, dict) or 'auth_state' not in comparison:
-            return None  # Existing unobserved legacy Default compatibility.
-        if comparison['auth_state'] != 'known':
-            return 'account_login_unverified'
-    # A custom account whose homes cannot launch is held before its receipt is read: the
+    # An account whose homes cannot launch is held before its receipt is read: the
     # same rule launch validation applies, so a hold never lifts on a home launch refuses.
     if reason := missing_home_reason(account):
         return reason
@@ -149,8 +138,6 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
         return failed['cause']
     if any(item.get('phase') == 'pending' for item in projection['stale']):
         return 'codex_auth_projection_changed'
-    if ambient:
-        return None
     discovery = record['discovery']
     if discovery.get('status') != 'ready' or discovery.get('receipt') != {
             'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq}:

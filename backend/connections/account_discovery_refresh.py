@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 
 from connections.account_discovery_commit import commit_discovery_bundle, record_discovery_failure
 from connections.account_discovery_types import StagedDiscovery
@@ -24,11 +25,17 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
     staged = None
     try:
         try:
-            if context.is_default:
-                version = harness_version or await version_read(binary)
-            else:
-                env = _version_environment(context)
-                version = harness_version or await version_read(binary, env=env)
+            env = _version_environment(context)
+        except Exception:
+            return await db_call(record_discovery_failure, provider, context=context,
+                                 cause='account_discovery_failed', harness_version=harness_version, db=db)
+        try:
+            version = harness_version or await version_read(binary, env=env)
+        except Exception as error:
+            result = await db_call(record_discovery_failure, provider, context=context,
+                                   cause='account_discovery_failed', harness_version=harness_version, db=db)
+            return replace(result, source_error=str(error))
+        try:
             staged = await discover(binary, context=context)
             if not isinstance(staged, StagedDiscovery):
                 raise RuntimeError('account_discovery_failed')

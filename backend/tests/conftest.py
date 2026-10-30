@@ -192,12 +192,6 @@ def _seed_test_model_catalog(conn: sqlite3.Connection) -> None:
             ("test-codex", "cli", "codex", "available", "t", "t"),
         ],
     )
-    # A raw insert bypasses the configuration writer, so adopt each default
-    # account the way production does; nothing resolves an account at runtime.
-    from connections.vendor_accounts import ensure_default_account
-
-    for connection_id in ("test-cc", "test-codex"):
-        ensure_default_account(connection_id, db=conn)
 
 
 @pytest.fixture
@@ -455,11 +449,6 @@ def _no_real_harness_cli(request, monkeypatch):
 
     # Account sign-in, status and logout find no vendor binary, so they start nothing.
     monkeypatch.setattr("connections.account_controls._binary", _no_binary)
-
-    async def _no_default_identity(_provider):
-        return {}
-
-    monkeypatch.setattr("connections.account_identity.default_identity", _no_default_identity)
 
 
 def _on_path(name: str, search: str) -> str | None:

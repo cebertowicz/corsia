@@ -27,20 +27,25 @@ async def reask_harness_catalogs() -> list[dict]:
 
 
 async def startup_harness_discovery() -> list[dict]:
-    """Re-ask both catalogs and re-check both sign-ins, once.
+    """Refresh account catalogs and record source checks without ambient login probes.
 
-    Claude Code's sign-in is its catalog session's own result, so no second
-    session runs for an available row. Its check waits for the catalogs:
-    run beside them, a check that signs a row in can finish before the
-    catalog refresh reads that row, which then asks Claude Code a second time.
-    Codex's ``codex login status`` runs at startup in
-    ``seed_builtin_connections`` (before this) and again here, and on the
-    recheck route; its later sign-outs wait for one of them.
+    Claude's source check uses the catalog result, so startup does not launch
+    a second session for it. Codex's source check runs alongside the refresh.
     """
     async def catalogs_then_claude() -> list[dict]:
+        from connections.models import get_connection
+        from connections.source_state import apply_check, NEEDS_AUTH, READY, UNVERIFIED
+        from infra.db_async import run_in_db
+
         results = await reask_harness_catalogs()
-        if not any(result.get("provider") == "claude-code" for result in results):
+        result = next((item for item in results if item.get("provider") == "claude-code"), None)
+        row = await run_in_db(get_connection, "claude-code")
+        if result is None:
             await check_harness_source("claude-code")
+        elif row and row["status"] != "not_installed":
+            state = READY if result.get("ok") else (
+                NEEDS_AUTH if result.get("error") == "account_not_configured" else UNVERIFIED)
+            await run_in_db(apply_check, "claude-code", state, result.get("error"))
         return results
 
     outcomes = await asyncio.gather(

@@ -1,4 +1,4 @@
-"""Read-only harness catalog rows from Default and current added-account discovery."""
+"""Read-only harness catalog rows from current account discovery."""
 from __future__ import annotations
 
 import json
@@ -48,7 +48,7 @@ def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
                 'enabled': 1, 'available': available, 'context_window': discovered_window(evidence),
                 'supports_vision': 'image' in (capabilities.get('input_modalities') or []),
                 'supports_tools': 1, 'supports_reasoning': bool(capabilities.get('effort_levels') or capabilities.get('reasoning_efforts')),
-                'metadata_json': json.dumps(metadata), 'last_error': None, 'default_listed': False,
+                'metadata_json': json.dumps(metadata), 'last_error': None,
             }
     return rows
 
@@ -76,8 +76,7 @@ def harness_base_from_row(row: dict, *, db) -> dict:
     row = dict(row)
     status, reason = _harness_status(row['harness'], row, json.loads(row.get('metadata_json') or '{}'),
                                      resolve_window_for_row(row, db=db), provider_may_run(row['harness'], db=db))
-    return {'litellm_model': row['litellm_model'], 'status': status, 'status_reason': reason,
-            'default_listed': row.get('default_listed', True)}
+    return {'litellm_model': row['litellm_model'], 'status': status, 'status_reason': reason}
 
 
 def project_stored_row(row, *, db) -> dict:

@@ -172,7 +172,6 @@ def _init_isolated_db_schema():
     with pytest.MonkeyPatch.context() as seed_probe:
         seed_probe.setattr(shutil, "which", lambda name, *_a, **_k: name)
         seed_probe.setattr(connections, "_gh_status", lambda _binary: (True, None))
-        seed_probe.setattr(connections, "_codex_sign_in_state", lambda _binary: "ready")
         init_db()
     # A token authenticates only if it is a row, so the session database needs
     # the accounts the suite signs in as before any authenticated route is

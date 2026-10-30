@@ -58,6 +58,19 @@ def _read(fn, db):
             connection.close()
 
 
+def seed_default_account(provider: str, *, db=None) -> dict:
+    """Create a home-backed Default for tests that do not exercise sign-in."""
+    from connections.vendor_accounts import add_account, get_account
+
+    def write(connection):
+        account = add_account(provider, 'Default', db=connection)
+        connection.execute('UPDATE vendor_accounts SET is_default=1 WHERE id=?', (account['id'],))
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    return _read(write, db)
+
+
 def default_id(provider: str, *, db=None) -> str:
     """The provider's Default account row."""
     identity = _read(lambda connection: resolve_account_id(provider, db=connection), db)
@@ -176,12 +189,15 @@ def _ready(db, account, model='codex/test'):
 
 
 def _known_default(db, account, login=1):
-    db.execute("UPDATE vendor_accounts SET identity_json=? WHERE id=?", (
-        json.dumps({"default_comparison": {"facts": {"account_fp": "synthetic"},
-                    "auth_state": "known", "observation_seq": login, "login_seq": login}}), account["id"]))
+    from connections.account_evidence import invalidate_discovery, mark_discovery
     from connections.account_receipts import capture_receipt
-    from connections.account_evidence import mark_discovery
+    from connections.vendor_accounts import get_account
 
+    db.execute("UPDATE vendor_accounts SET state='signed_in', identity_json=? WHERE id=?",
+               (json.dumps({'account_fp': 'synthetic'}), account['id']))
+    current = get_account(account['id'], db=db)
+    (Path(current['source_home']) / 'auth.json').touch()
+    invalidate_discovery(current, login_seq=login, auth_state='known', db=db)
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={'codex/test': {}}, db=db)
     db.commit()
@@ -266,11 +282,11 @@ def _move(db):
 @pytest.fixture
 def accounts(isolated_db):
     from connections.models import upsert_connection
-    from connections.vendor_accounts import add_account, default_account, set_account_state
+    from connections.vendor_accounts import add_account, set_account_state
     from infra.database import get_db
 
     upsert_connection(type="cli", provider="codex", status="available", config={"binary": "/bin/test"})
-    legacy = default_account("codex")
+    legacy = seed_default_account('codex')
     second = add_account("codex", "Second")
     second = set_account_state(second["id"], "signed_in", expected_revision=0)
     third = add_account("codex", "Third")

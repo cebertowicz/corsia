@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -43,32 +42,6 @@ def _gh_status(binary: str) -> tuple[bool | None, str | None]:
 
     return gh_status(binary)
 
-
-_NOT_LOGGED_IN = re.compile(
-    r"not logged in|not signed in|log ?in required|please (?:log|sign) ?in", re.I,
-)
-
-
-def _codex_sign_in_state(binary: str) -> str:
-    """Classify ``codex login status`` as ready, needs_auth or unverified.
-
-    Exit 0 is ready. A non-zero exit whose output says nobody is logged in is
-    needs_auth. A timeout, an OSError or any other failure proves nothing about
-    the login, so it is unverified (#1912), never needs_auth.
-    """
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            [binary, "login", "status"], capture_output=True, timeout=10
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        log.debug("codex auth check failed: %s", e)
-        return "unverified"
-    if result.returncode == 0:
-        return "ready"
-    output = (result.stdout + result.stderr).decode("utf-8", "replace")
-    return "needs_auth" if _NOT_LOGGED_IN.search(output) else "unverified"
 
 
 _BINARY_CANDIDATES = {
@@ -129,9 +102,8 @@ def agent_binary_from_config(cfg: dict) -> str | None:
 def seed_builtin_connections(*, db=None) -> int:
     """Detect installed CLI connectors on PATH and upsert their records.
 
-    Claude Code stays usable here whenever its binary exists: its sign-in needs
-    the async control probe, which runs at startup and on recheck
-    (``connections.source_state``). Codex is classified now.
+    Seed installation status without reading either vendor's ambient login.
+    Account-scoped source checks run at startup and on recheck.
     """
     from connections.models import (
         SOURCE_CHECK_KEY,
@@ -163,7 +135,7 @@ def seed_builtin_connections(*, db=None) -> int:
     refresh_github_connection(db=db)
 
     codex_cfg, codex_bin = resolve_builtin_binary("codex", db=db)
-    codex_state = _codex_sign_in_state(codex_bin) if codex_bin else "not_installed"
+    codex_state = "unverified" if codex_bin else "not_installed"
     codex_status, codex_check = resolve_check(
         get_connection("codex", db=db), codex_state, None,
     )

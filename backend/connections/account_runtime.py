@@ -7,7 +7,7 @@ from typing import cast
 
 from connections.account_home import missing_home_reason
 from connections.account_policy import AccountAdmissionError, require_inference
-from connections.account_receipts import ReceiptFence, account_receipt, receipt_is_current, unobserved_default
+from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
 
 
@@ -22,14 +22,11 @@ class LaunchHomes:
     warm_home: str | None = None
 
 
-DEFAULT_HOMES = LaunchHomes(None, False)
-
-
 def homes_for(account: dict) -> LaunchHomes:
     # A non-inference account never gets a launch home, whatever its stored homes say.
     require_inference(account['provider'])
-    if account['source_home'] is None:
-        return LaunchHomes(str(account['id']), False)
+    if not account['source_home']:
+        raise AccountAdmissionError('account_home_mismatch')
     if account['provider'] == 'claude-code':
         # Claude uses its explicit config/source root; runtime_home is unused.
         return LaunchHomes(str(account['id']), True, claude_dir=str(account['source_home']))
@@ -40,7 +37,9 @@ def homes_for(account: dict) -> LaunchHomes:
 
 
 def launch_homes(account_id: str | None, *, db=None) -> LaunchHomes:
-    return homes_for(get_account(account_id, db=db)) if account_id else DEFAULT_HOMES
+    if not account_id:
+        raise AccountAdmissionError('account_not_configured')
+    return homes_for(get_account(account_id, db=db))
 
 
 def thread_launch_homes(thread_id: str, provider: str, *, turn_id: str | None = None, db) -> LaunchHomes:
@@ -61,9 +60,8 @@ def thread_launch_homes(thread_id: str, provider: str, *, turn_id: str | None = 
 def thread_claude_dir(thread_id: str, *, turn_id: str | None = None, db) -> str:
     """The one Claude root a thread's sessions are written to, resumed from, and launched in.
 
-    An added account's own config home, else the Default root. Every transcript
-    writer, lookup, and launcher for a thread takes its root from here, so none
-    can fall back to the Default for a thread bound to another account.
+    Every transcript writer, lookup, and launcher for a thread takes the chosen
+    account's explicit root from here.
     """
     from subagents.cc_sessions import resolve_claude_dir
 
@@ -96,26 +94,8 @@ def validate_launch(account: dict | None, *, launch: LaunchHomes, receipt: Recei
                     model: str | None, db) -> None:
     if launch.account_id != (account['id'] if account else None):
         raise AccountAdmissionError('account_home_mismatch')
-    if account is None or account['source_home'] is None:
-        if launch.custom or (launch.codex_source is not None and not (
-                launch.isolated and _same_path(launch.codex_source, launch.warm_home))):
-            raise AccountAdmissionError('account_home_mismatch')
-        if launch.claude_dir is not None:
-            from subagents.cc_sessions import resolve_claude_dir
-
-            if not _same_path(launch.claude_dir, resolve_claude_dir()):
-                raise AccountAdmissionError('account_home_mismatch')
-        if launch.codex_runtime is not None and not launch.isolated:
-            from subagents.codex_env import _default_app_server_home
-
-            if not _same_path(launch.codex_runtime, _default_app_server_home()):
-                raise AccountAdmissionError('account_home_mismatch')
-        # A launch with no receipt (an unstamped Turn, a session bound at its first write) on a
-        # Default no one has observed yet cannot belong to another login: it is on login 0.
-        if (account and account_receipt(account) is not None and not receipt_is_current(receipt, db=db)
-                and not (receipt is None and unobserved_default(account))):
-            raise AccountAdmissionError('account_login_unverified')
-        return
+    if account is None or not account['source_home']:
+        raise AccountAdmissionError('account_home_mismatch')
     if not launch.custom or model is None:
         raise AccountAdmissionError('account_home_mismatch' if not launch.custom else 'account_model_not_discovered')
     if not receipt_is_current(receipt, db=db) or cast(ReceiptFence, receipt).account_id != account['id']:

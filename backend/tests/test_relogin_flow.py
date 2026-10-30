@@ -19,7 +19,6 @@ async def test_signed_in_relogin_refresh_result(accounts, monkeypatch, caplog, s
     _, _, account, _ = accounts
     monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
     monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(True, {}, None)))
-    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
     monkeypatch.setattr(harness_models, 'refresh_provider', AsyncMock(return_value=SimpleNamespace(status=status, cause=cause)))
     spawn = AsyncMock()
     monkeypatch.setattr(account_controls, '_spawn', spawn)
@@ -41,7 +40,6 @@ async def test_signed_in_account_without_refresh_starts_vendor_login(accounts, m
     _, _, account, _ = accounts
     monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
     monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(True, {}, None)))
-    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
     monkeypatch.setattr(account_controls, 'readiness_reason', lambda _: None if skip_reason == 'no_receipt' else skip_reason)
     monkeypatch.setattr(account_controls, 'account_receipt', lambda _: None if skip_reason == 'no_receipt' else {'revision': 1})
     refresh = AsyncMock()
@@ -65,7 +63,6 @@ async def test_unreadable_signed_in_status_has_logged_reference(accounts, monkey
     _, _, account, _ = accounts
     monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
     monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(None, {}, 'vendor_status_unreadable')))
-    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
     result = await account_controls.start_signin(account['id'])
     assert result['status'] == 'unavailable'
     assert result['cause'] == 'vendor_status_unreadable'
@@ -102,7 +99,6 @@ async def test_signed_in_account_found_signed_out_starts_login(accounts, monkeyp
     db, _, account, _ = accounts
     monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
     monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(False, {}, None)))
-    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
     monkeypatch.setattr(account_controls, '_spawn', AsyncMock(return_value=SimpleNamespace()))
     monkeypatch.setattr(account_controls, '_hold', AsyncMock())
     monkeypatch.setattr(account_controls, '_run', AsyncMock(return_value=(0, b'')))

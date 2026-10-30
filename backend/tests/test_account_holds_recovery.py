@@ -526,7 +526,8 @@ def test_loaded_evaluator_matches_actual_require_claim(accounts, state):
 def test_readiness_deduplicates_missing_targets_without_effects_or_private_reads(accounts):
     from connections import read_account_readiness
 
-    db = accounts[0]
+    db, default, *_ = accounts
+    _known_default(db, default)
     db.executemany("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES (?,'user','codex/test','t','t')",
                    [(f'batch-{index}',) for index in range(901)])
     db.commit()
@@ -549,6 +550,21 @@ def test_readiness_deduplicates_missing_targets_without_effects_or_private_reads
     assert len(result) == 901
     assert all(row == {'ready': True, 'cause': None, 'is_default': True} for row in result.values())
     assert tuple(db.iterdump()) == before
+
+
+def test_readiness_without_a_configured_account_matches_claim(accounts):
+    from connections import read_account_readiness
+    from connections.account_policy import AccountAdmissionError, require_claim
+
+    db = accounts[0]
+    db.execute("UPDATE vendor_accounts SET state='removed' WHERE connection_id='test-codex'")
+    db.execute("DELETE FROM thread_vendor_accounts WHERE thread_id='destination' AND provider='codex'")
+    db.commit()
+    with pytest.raises(AccountAdmissionError) as exc:
+        require_claim('codex', thread_id='destination', model='codex/test', db=db)
+    assert exc.value.reason == 'account_not_configured'
+    assert read_account_readiness(['destination'], db=db)['destination'] == {
+        'ready': False, 'cause': 'account_not_configured', 'is_default': None}
 
 
 def test_null_ambient_allowlist_denial_and_missing_project(accounts):
@@ -574,7 +590,8 @@ def test_null_ambient_allowlist_denial_and_missing_project(accounts):
 
 def test_exact_target_wins_and_ambiguous_native_missing_are_omitted(accounts):
     from connections import read_account_readiness
-    db = accounts[0]
+    db, default, *_ = accounts
+    _known_default(db, default)
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES ('alias','Alias','codex/test','native','alias','native','t','t')")
     db.commit()
@@ -827,16 +844,15 @@ def test_missing_concrete_launch_does_not_claim_a_ready_custom_transport(account
     assert refused.value.reason == 'account_runtime_pending'
 
 
-def test_default_observed_unknown_refuses_claim_without_changing_lifecycle(accounts):
+def test_signed_out_default_refuses_claim_without_changing_lifecycle(accounts):
     from connections.account_policy import AccountAdmissionError, require_claim
-    from connections.vendor_accounts import record_default_identity, get_account
+    from connections.vendor_accounts import get_account
 
     db, default, _, _ = accounts
-    record_default_identity('codex', {}, db=db)
     with pytest.raises(AccountAdmissionError) as refused:
-        require_claim('codex', thread_id='destination', model='codex/test', db=db)
-    assert refused.value.reason == 'account_login_unverified'
-    assert get_account(default['id'], db=db)['state'] == 'legacy'
+        require_claim('codex', thread_id='destination', model='codex/test', account_id=default['id'], db=db)
+    assert refused.value.reason == 'account_signed_out'
+    assert get_account(default['id'], db=db)['state'] == 'signed_out'
 
 
 def test_current_durable_link_failure_gates_every_claim_before_home_preparation(accounts):
@@ -1041,7 +1057,8 @@ def test_shared_kind_uses_actual_head_and_current_saved_selector(accounts, cause
 
 
 def test_earlier_plain_or_unproved_head_never_selects_later_hold(accounts):
-    db, _, _, _ = accounts
+    db, default, _, _ = accounts
+    _known_default(db, default)
     _accept(db, 'first')
     _accept(db, 'later')
     _held(db, 'later')

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 
 from connections.claude_discovery import (
-    ClaudeCatalogCheckFailed, _discover_claude_context, discover_claude_models,
+    _discover_claude_context, discover_claude_models,
 )
 from connections.claude_unlisted import add_accepted_unlisted
 from connections.codex_discovery import discover_codex_models
@@ -214,11 +214,23 @@ def _retire_unlisted(
         )
 
 
-def store_success(
+def retain_discovered_context(row: dict, previous: dict | None) -> dict:
+    """Keep exact-identity context evidence when this refresh could not re-observe it."""
+    result = dict(row)
+    if (result.get('context_window') is None and previous
+            and result.get('resolved_identity')
+            and result.get('resolved_identity') == previous.get('resolved_identity')):
+        result['context_window'] = previous.get('context_window')
+        if isinstance(previous.get('context_observation'), dict):
+            result['context_observation'] = previous['context_observation']
+    return result
+
+
+def upsert_discovered_rows(
     provider: str, rows: list[dict[str, Any]], *, harness_version: str,
     source: str, timestamp: str, db=None, unlisted_errors: dict[str, str] | None = None,
 ) -> None:
-    """Atomically persist discovery rows and the connection refresh envelope.
+    """Atomically persist discovery rows.
 
     ``unlisted_errors`` names why each previously known, now unlisted selector
     was not kept; it becomes that row's ``last_error``.
@@ -290,14 +302,15 @@ def store_success(
                 "harness_version": harness_version,
                 "discovery_order": order,
             })
+            previous_context = ({'resolved_identity': _metadata(old).get('resolved_identity'),
+                                 'context_window': old.get('context_window'),
+                                 'context_observation': _metadata(old).get('context_observation')}
+                                if old else None)
+            row = retain_discovered_context(row, previous_context)
             observation = row.get("context_observation")
             if isinstance(observation, dict):
                 meta["context_observation"] = observation
             context_window = row.get("context_window")
-            if context_window is None and old is not None and same_resolved_identity:
-                # A failed per-model probe does not erase a prior exact
-                # discovery/runtime observation.
-                context_window = old.get("context_window")
             available = row.get("available") is True
             if not available:
                 meta["availability_reason"] = (
@@ -338,6 +351,16 @@ def store_success(
                     None, timestamp, timestamp, timestamp, timestamp,
                 ),
             )
+
+
+def store_success(
+    provider: str, rows: list[dict[str, Any]], *, harness_version: str,
+    source: str, timestamp: str, db=None, unlisted_errors: dict[str, str] | None = None,
+) -> None:
+    """Persist model rows and their connection refresh envelope together."""
+    with write_transaction(db, scope="harness_model_catalog") as connection:
+        upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
+                               timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
         previous = read_discovery_envelope(provider, db=connection) or {}
         _save_discovery_envelope(provider, {
             **previous,
@@ -444,7 +467,7 @@ def _provider_binary(provider: str, *, db=None) -> tuple[str | None, str | None]
     connection = get_connection(provider, db=db)
     if not connection:
         return None, "connection_not_found"
-    if connection.get("status") != "available":
+    if connection.get("status") == "not_installed":
         return None, "connection_unavailable"
     binary = str((connection.get("config") or {}).get("binary") or provider)
     return binary, None
@@ -463,48 +486,17 @@ async def _refresh_provider_once(
     binary, unavailable = (binary, None) if binary else await _db_call(
         _provider_binary, provider, db=db)
     if unavailable:
-        return {"provider": provider, "ok": False, "reason": reason, "error": unavailable}
-    assert binary is not None
-    if context is not None:
-        from connections.account_discovery_refresh import refresh_account_once
+        from connections.account_discovery_types import AccountRefreshResult
 
-        return await refresh_account_once(provider, context=context, binary=binary,
-            harness_version=harness_version, adapter=_ADAPTERS[provider], db_call=_db_call,
-            version_read=binary_version, db=db)
-    discover, normalize, source = _ADAPTERS[provider]
-    timestamp = datetime.now(timezone.utc).isoformat()
-    version = harness_version
-    try:
-        version = version or await binary_version(binary)
-        payload = await discover(binary)
-        unlisted_errors: dict[str, str] = {}
-        if provider == "claude-code":
-            prior = await _db_call(_prior_selectors, provider, db=db)
-            unlisted_errors = await add_accepted_unlisted(
-                payload, prior,
-                lambda selector: _discover_claude_context(binary, selector),
-            )
-        rows = normalize(payload, harness_version=version, timestamp=timestamp)
-        await _db_call(
-            store_success,
-            provider, rows, harness_version=version, source=source,
-            timestamp=timestamp, db=db, unlisted_errors=unlisted_errors,
-        )
-        return {"provider": provider, "ok": True, "reason": reason,
-                "model_count": len(rows), "harness_version": version}
-    except Exception as exc:
-        version = version or await _db_call(
-            _cached_harness_version, provider, db=db,
-        )
-        error = str(exc)
-        await _db_call(
-            store_failure,
-            provider, error, harness_version=version, source=source,
-            timestamp=timestamp, db=db,
-        )
-        return {"provider": provider, "ok": False, "reason": reason,
-                "error": error, "harness_version": version,
-                "source_check_recorded": isinstance(exc, ClaudeCatalogCheckFailed)}
+        return AccountRefreshResult(provider, context.account_id, cause=unavailable)
+    assert binary is not None
+    from connections.account_discovery_refresh import refresh_account_once
+
+    if context is None:
+        raise ValueError('account discovery requires an account')
+    return await refresh_account_once(provider, context=context, binary=binary,
+        harness_version=harness_version, adapter=_ADAPTERS[provider], db_call=_db_call,
+        version_read=binary_version, db=db)
 
 
 async def refresh_provider(
@@ -512,19 +504,24 @@ async def refresh_provider(
     binary: str | None = None, account_id: str | None = None, expected_receipt=None,
 ) -> dict[str, Any]:
     """Single-flight by account generation; unscoped Default retains its provider key."""
-    context = None
-    key = provider
-    if account_id is not None:
-        from connections.account_discovery_types import capture_discovery_context, AccountRefreshResult
+    from connections.account_discovery_types import capture_discovery_context, AccountRefreshResult
 
-        context = await _db_call(capture_discovery_context, provider, account_id=account_id,
-                                expected_receipt=expected_receipt, db=db)
-        if context is None:
-            return AccountRefreshResult(provider, account_id, cause='account_refresh_superseded')
-        if context.is_default:
-            context = None  # Default's pre/post observation is handled by its canonical path.
-        else:
-            key = context.key
+    if account_id is None:
+        from connections.vendor_accounts import list_accounts
+
+        accounts = await _db_call(list_accounts, provider=provider, db=db)
+        results = [await refresh_provider(provider, reason=reason, harness_version=harness_version,
+                                          db=db, binary=binary, account_id=account['id'])
+                   for account in accounts if account['state'] == 'signed_in']
+        ready = any(result.status == 'ready' for result in results)
+        error = None if ready else (next((result.source_error for result in results if result.source_error), None)
+                                    if results else 'account_not_configured')
+        return {'provider': provider, 'reason': reason, 'ok': ready, 'error': error}
+    context = await _db_call(capture_discovery_context, provider, account_id=account_id,
+                             expected_receipt=expected_receipt, db=db)
+    if context is None:
+        return AccountRefreshResult(provider, account_id, cause='account_refresh_superseded')
+    key = context.key
     task = _REFRESH_TASKS.get(key)
     if task is None or task.done():
         task = asyncio.create_task(_refresh_provider_once(

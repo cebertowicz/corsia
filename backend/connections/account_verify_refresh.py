@@ -10,7 +10,7 @@ from infra.db_async import run_in_db
 async def custom_account(account_id):
     account = await run_in_db(get_account, account_id)
     if account["source_home"] is None:
-        raise AccountError("the Default account signs in through the vendor's own CLI")
+        raise AccountError("account home is missing")
     if account["state"] == "removed":
         raise AccountError("account was removed; choose another permitted account")
     return account

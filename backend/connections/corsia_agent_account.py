@@ -88,20 +88,13 @@ def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | No
     project policy, this account's discovered models, then its usage). With none
     ready, a limit on any model reads limited; models never read for this login
     read unchecked; otherwise this plan offers no model CORSIA can run. ``rows``
-    are the vendor's catalog rows when the caller already read them. The ambient
-    Default has no managed account lifecycle, so its source's definitive
-    needs-auth state is its signed-out state.
+    are the vendor's catalog rows when the caller already read them.
     """
     from connections.account_evidence import readiness_reason
-    from connections.models import get_connection
-    from connections.source_state import NEEDS_AUTH, row_state
     from llm.account_catalog import account_model_status
     from llm.model_status import USAGE_LIMITED
 
-    if account["state"] == "signed_out" or (
-            account["source_home"] is None
-            and (source_state if source_state is not None else
-                 row_state(get_connection(account["provider"], db=db))["state"]) == NEEDS_AUTH):
+    if account["state"] == "signed_out":
         return SIGNED_OUT, None
     decisions = [account_model_status(account, row, project_ids=project_ids, db=db)
                  for row in (_vendor_rows(account["provider"], db=db)[0] if rows is None else rows)]
@@ -318,7 +311,7 @@ def _scoped_states(provider: str, project, *, rows: list[dict], has_catalog: boo
         return []  # The vendor's stored models were deliberately disabled.
     return [(account, *account_state(account, project_ids=[project], db=db, rows=rows, source_state=source_state))
             for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
-            if account["state"] != "removed" and (rows or not account["is_default"])]
+            if account["state"] != "removed"]
 
 
 @fact_memo.fact_reads()

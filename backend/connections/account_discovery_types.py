@@ -48,22 +48,20 @@ class AccountRefreshResult:
     cause: str | None = None
     model_count: int = 0
     effective_receipt: ReceiptFence | None = field(default=None, repr=False)
+    source_error: str | None = field(default=None, repr=False)
 
 
 def capture_discovery_context(provider: str, *, account_id: str | None = None,
                               expected_receipt: ReceiptFence | None = None, db=None) -> DiscoveryContext | None:
-    from connections.account_observation import begin_default_observation
-
     with write_transaction(db, scope='capture_account_discovery') as connection:
         identity = resolve_account_id(provider, account_id, db=connection)
         if identity is None:
-            return DiscoveryContext(provider, None, True, None, None, None, None, None)
+            return None
         account = get_account(identity, db=connection)
         receipt = account_receipt(account)
         if expected_receipt is not None and expected_receipt != receipt:
             return None
-        if not account['is_default'] and (account['state'] != 'signed_in' or receipt is None):
+        if account['state'] != 'signed_in' or receipt is None:
             return None
-        token = begin_default_observation(provider, db=connection) if account['is_default'] else None
-        return DiscoveryContext(provider, identity, bool(account['is_default']), receipt,
-            account['source_home'], account['runtime_home'], token, account['discovery'])
+        return DiscoveryContext(provider, identity, False, receipt,
+            account['source_home'], account['runtime_home'], None, account['discovery'])

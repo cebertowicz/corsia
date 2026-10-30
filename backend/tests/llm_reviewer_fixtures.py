@@ -60,12 +60,6 @@ def _seed_reviewer_catalog(conn: sqlite3.Connection) -> None:
             ("reviewer-codex", "cli", "codex", "available", "t", "t"),
         ],
     )
-    # The reviewer runs on an account like any other consumer: each configured
-    # harness connection has its Default row.
-    from connections.vendor_accounts import ensure_default_account
-
-    for connection_id in ("reviewer-cc", "reviewer-codex"):
-        ensure_default_account(connection_id, db=conn)
     conn.commit()
 
 
