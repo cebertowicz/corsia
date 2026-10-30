@@ -9,6 +9,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 import pytest
 
 import core.workflow_verdict_evaluator as evaluator
@@ -442,12 +443,18 @@ def test_an_unclear_result_keeps_the_current_version_even_when_the_changed_arm_i
     assert result is not None and (result.word, result.reason) == ("revert", "unclear_after_look_3")
 
 
-def test_cheaper_arm_is_not_kept_when_quality_is_not_measured_near_zero() -> None:
+def test_cheaper_arm_is_not_kept_when_its_interval_sits_wholly_on_the_harm_side() -> None:
     source = history(_priced("v1", 5, 1.0, started=40, ended=30), _priced("v2", 6, 0.5))
 
     result = verdict(source)
 
-    assert (result.word, result.reason) == ("revert", "cheaper_not_near_zero")
+    assert (result.word, result.reason) == ("revert", "cheaper_small_harm")
+
+
+def test_cheaper_arm_with_a_real_improvement_below_the_margin_is_kept() -> None:
+    result = verdict(history(_priced("v1", 8, 1.0, started=40, ended=30), _priced("v2", 7, 0.5)))
+
+    assert (result.word, result.reason) == ("keep", "no_worse")
 
 
 def test_frozen_plan_carries_raised_confidence_and_reason() -> None:
@@ -529,7 +536,16 @@ def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
 
     assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 1
     assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 0
-    assert wakes == [(("owner", "measurement.verdict.reached", "Workflow verdict reached: revert.",
+    logged: list[str] = []
+    sink = logger.add(logged.append, level="WARNING", format="{message}")
+    orphan = history(runs("v1", 1, started=40, ended=30), runs("v3", 2))
+    unowned = plan_for(orphan, "v3")
+    assert evaluator.write_verdicts(db, [Evaluation(unowned.subject, None, unowned, decide(orphan, unowned, NOW), True)],
+                                    wake_owners=True) == 1
+    logger.remove(sink)
+    assert [line.strip() for line in logged] == [f"verdict_wake: no owner to wake for {unowned.subject}"]
+    assert wakes == [(("owner", "measurement.verdict.reached",
+                       f"Workflow sdlc-process ({frozen.version}) verdict reached: revert the change.",
                       {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"}),
                      {"message_id": f"verdict:wake:{frozen.subject}", "db": db})]
 

@@ -395,7 +395,9 @@ def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner_when_swit
     rows = db.execute("SELECT event_name,subject_key FROM outcome_events ORDER BY event_name").fetchall()
     assert [(row["event_name"], row["subject_key"]) for row in rows] == [
         (evaluator.PLANNED_EVENT, trial.subject), (evaluator.REACHED_EVENT, trial.subject)]
-    assert len(wakes) == 1 and wakes[0][0] == "root" and wakes[0][2].startswith("Lesson verdict reached")
+    lesson, _, version = trial.subject.partition(":")[2].partition("@")
+    assert len(wakes) == 1 and wakes[0][0] == "root" and wakes[0][2] == (
+        f"Lesson {lesson} ({version[:7]}) verdict reached: keep the change.")
 
 
 def test_an_unavailable_owner_keeps_the_verdict_and_skips_the_wake(db, workspace, monkeypatch) -> None:
