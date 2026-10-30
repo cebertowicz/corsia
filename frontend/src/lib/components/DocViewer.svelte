@@ -153,7 +153,7 @@
 		feedback: () => feedbackStatus?.feedback(), imageCacheKey: () => imageKey.current, showInText: focusInText });
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
-	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
+	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); commentUI.selectMarkerThread(id); focusedDocComment.set(id); }
 	const replyNavigation = createReplyNavigation({
 		target: () => target, ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
 		comments: () => listedComments, text: () => editText,
@@ -370,6 +370,7 @@
 		onDraftBody={(body) => setCommentBody(body, targetKey)}
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
+		onThreadMissing={commentUI.focusRemainingThread}
 		restoreFocus={commentUI.restoreFocus}
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
