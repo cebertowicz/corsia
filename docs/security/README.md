@@ -28,7 +28,7 @@ flowchart TB
 - **Project:** a folder inside the workspace. Projects organize work and settings; they are **not** a security boundary. An agent in one project can read and change every other project in the same workspace.
 - **Thread:** one conversation with one agent. Each thread has its own working folder inside the workspace.
 - **Lease:** a short, reviewed grant that lets one agent run commands outside the workspace. See [Host access](host-access.md).
-- **Hard floor:** paths no lease ever opens.
+- **Hard floor:** paths no leased command can read or write. It stops direct access only; see [What no lease opens](host-access.md#what-no-lease-opens) for the indirect route.
 
 ## How strong each control is
 
@@ -57,7 +57,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Read a provider API key CORSIA stores | Refused; values are not in the shell's environment | Operating system and CORSIA code |
 | See a credential that sits in a workspace file | Masked in most cases; see [Secrets](secrets.md) for what masking misses | CORSIA code |
 | Send an email or calendar invite | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said | CORSIA code |
-| Reach outside the workspace | Only through a lease | CORSIA code to require it; Model judgment to review it |
+| Anything outside the workspace that the rows above refuse | Only through a lease | CORSIA code to require it; Model judgment to review it |
 | Approve its own lease | No; you approve, or the reviewer model does when Auto-approve is on ([Host access](host-access.md)) | CORSIA code; Model judgment under Auto-approve |
 
 ## The limits that matter most
@@ -69,7 +69,7 @@ The full list, with what to do about each, is in [Known limits](limits.md).
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
 4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A model can miss those. They will usually allow a plausible request to read your ordinary personal files.
 5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments and tool results are not screened. Labelled content still reaches the agent.
-6. **Stored keys are not encrypted.** They sit in a file only your user can read, outside every agent's reach. Anything running as your user outside CORSIA can read them.
+6. **Stored keys are not encrypted.** They sit in a file only your user can read, and no agent command can open it directly, even under a lease. Anything running as your user outside the sandbox can read them, and that includes something a leased command left behind to run later.
 7. **No outside security audit.** Nobody outside the project has tested these controls.
 
 ## Pages

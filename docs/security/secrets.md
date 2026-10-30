@@ -23,8 +23,9 @@ Key store values never go into the database or the settings table, so a database
 | Path to a key | Blocked by | Strength |
 |---|---|---|
 | An agent's shell reading the key store | The key store is on the hard floor; no lease opens it | Operating system |
+| A leased command leaving something behind that runs later outside the sandbox and reads the store | The reviewers, told to block changes to the code and settings that govern a lease ([Host access](host-access.md#what-no-lease-opens)) | Model judgment |
 | An agent's file tools reading it | Outside the workspace | CORSIA code |
-| The shell's environment | Variables named like secrets are removed before a command starts | CORSIA code |
+| The shell's environment | A command starts from a short allowed list of variables; anything else stays out, whatever its name | CORSIA code |
 | A command that passes a literal value where a credential goes (a credential-named variable, flag, header or URL field) | Refused before it runs | CORSIA code |
 | A leased command that tries to read `.env`, keychain or auth files | The reviewers are told to block it | Model judgment |
 
@@ -41,6 +42,8 @@ Every result a CORSIA tool returns passes through a credential masker before it 
 **What masking misses**, each tested for this page:
 
 - A value with no credential-looking name and no known shape, such as a random string on its own line.
+- A placeholder word after a credential name, such as `test`, `example` or `changeme`. A real password with one of those values stays visible.
+- In Markdown, a value that is one plain lowercase word after a credential name. In code, a bare name assigned to a credential name. Both read as ordinary text, so they stay visible.
 - Transformed output. If a command base64-encodes or reverses a file, the result isn't masked.
 - Anything a command *does* with the value. Masking changes what the model sees, not what runs. `source .env && curl -H "Authorization: Bearer $TOKEN" …` uses the real value, and the command could send it anywhere.
 - An isolated worker on Claude Code reads files with Claude Code's own read tool, which doesn't pass through CORSIA's masker. See [Untrusted content](untrusted-content.md).

@@ -66,6 +66,8 @@ The **hard floor** applies under every lease (Operating system for the shell, CO
 
 CORSIA's state folder (database and logs) is outside the default sandbox but **can** be opened by a lease.
 
+The floor binds the leased command and what it starts, nothing else. A leased command can write almost anywhere your user can, including shell startup files, startup items and CORSIA's own code. Whatever it leaves there runs later outside the sandbox, where the floor doesn't apply and stored keys are readable. The floor itself is Operating system; stopping that indirect route is Model judgment. The reviewers are told to block changes to the code and settings that govern a lease, and no instruction names startup files or startup items. Under Auto-approve, no person sees the request.
+
 ## When something fails
 
 | Failure | Result | Source |

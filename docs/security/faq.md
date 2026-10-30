@@ -33,10 +33,10 @@ On macOS: [Agent Safehouse](https://github.com/eugene1g/agent-safehouse), an ind
 ## Secrets
 
 **9. Can an agent read my API keys, SSH keys, cookies, Keychain, `.env` files?**
-- Keys in CORSIA's key store: no, not even with a lease.
+- Keys in CORSIA's key store: not directly, even with a lease. A leased command can leave something behind that runs later outside the sandbox and can read them; only the reviewers stand in the way ([Host access](host-access.md#what-no-lease-opens)).
 - The agents' GitHub account token, if you set that account up: yes. It is outside the key store and agent shells can read it, so they can use `gh` and `git` as that account ([Secrets](secrets.md#where-keys-live)).
 - SSH private keys, Keychains, your browsers' cookies: not without a lease, and a lease reviewer is told to block reading keychain and auth files. It can **use** keys loaded in your SSH agent.
-- The agents' own browser cookies: no, not even with a lease.
+- The agents' own browser cookies: same as CORSIA's key store.
 - `.env` files: yes, if they are in the workspace. Values the masker recognizes are hidden from the model, but commands can still use them.
 
 See [Secrets](secrets.md).

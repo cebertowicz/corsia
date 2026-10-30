@@ -70,7 +70,7 @@ CORSIA's email and invite tools send only the conversation's open draft, unchang
 Agents can drive a headless Chrome. Each CORSIA account has one saved browser profile, shared by all of that account's agents (`backend/host_access/browser_launch.py`).
 
 - If you sign in to a site in it, every agent of yours can use that sign-in.
-- The profile, which holds its cookies, is in the hard floor: no agent shell can read it, leased or not.
+- The profile, which holds its cookies, is in the hard floor: no agent shell can read it directly, leased or not ([the indirect route](host-access.md#what-no-lease-opens)).
 - Pages it visits are not screened.
 - It identifies as an ordinary Chrome browser to sites.
 
