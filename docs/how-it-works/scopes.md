@@ -29,7 +29,7 @@ workspace/
 
 Different work needs different rules. A household budget and a software product should not share a charter, a safety rule or a skill set, but both should share the platform rules above them. Scopes give a narrow default (a project's rules apply to the project) while letting broad guidance reach everything below it.
 
-Plain folders also mean a person can read, edit and version a scope with ordinary tools, and agents edit the same files the person does. Scope controls context and routing; it does not isolate project files. The agent shell's boundary is the workspace, so an agent can read and change files in other projects in the workspace, subject to repository protections and other sandbox rules (`backend/tools/sandbox_config.py`). Local only governs model choice; it does not prevent other agents from reading files or stop tool traffic (`backend/infra/local_only.py`).
+Plain folders also mean a person can read, edit and version a scope with ordinary tools, and agents edit the same files the person does. Scope controls context and routing; it does not isolate project files. The agent shell's boundary is the workspace, so an agent can read and change files in other projects in the workspace, subject to repository protections and other sandbox rules (`backend/tools/sandbox_config.py`). Local only restricts model choice and asks a sender to confirm that a message to a cloud-bound recipient contains no sensitive content; it does not prevent other agents from reading files or stop tool traffic (`backend/infra/local_only.py`).
 
 ## How it works
 

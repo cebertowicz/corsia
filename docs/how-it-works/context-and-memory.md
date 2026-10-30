@@ -6,8 +6,8 @@ Context is what an agent is told at the start of a turn. Memory is what outlives
 
 - **Context source:** a file or generated block delivered to the model, such as the platform's System rules, a project charter, a thread's own bootloader, or the skills index.
 - **Installed context:** sources retained from an install boundary, including static sources and the responsibility map; other turn-specific context can change.
-- **Checkpoint:** a structured summary of a thread's earlier history. When history nears the model's context limit, the checkpoint replaces the older messages in what the model sees.
-- **Continuity entries:** the checkpoint's contents, in 13 named fields such as active constraints, decisions, facts, open questions and next actions (`backend/core/continuity_types.py`). Retiring entries in three fields (active constraints, approvals and preferences, decisions) requires evidence.
+- **Checkpoint:** a structured summary of a thread's earlier history. An installed checkpoint replaces covered older messages in what the model sees; it can be created under context pressure or at other boundaries.
+- **Continuity entries:** structured entries included with a checkpoint's narrative, in 13 named fields such as active constraints, decisions, facts, open questions and next actions (`backend/core/continuity_types.py`). Retiring entries in three fields (active constraints, approvals and preferences, decisions) requires evidence.
 - **Knowledge base:** durable notes an agent writes and searches, kept as Markdown files.
 - **Message and checkpoint search:** keyword search over a thread's history and its retained checkpoints.
 
@@ -37,7 +37,7 @@ The installed-context snapshot is kept until the next install boundary (`backend
 
 ### Tools are loaded on demand
 
-Tools marked `core` are advertised in full. Others appear in an index and are loaded with `tools_load` and called with `tool_call`, so a thread does not carry every tool's schema in every turn (`backend/tools/catalog_entry.py`).
+Tools marked `core` are advertised in full. Other tools are listed by summary in an index, or counted there when tied to a connected account, and are loaded with `tools_load` and called with `tool_call`. This avoids carrying every tool's schema in every turn (`backend/tools/catalog_entry.py`).
 
 ### Checkpoints
 

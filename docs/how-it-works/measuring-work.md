@@ -50,11 +50,11 @@ Each series carries rules that the API enforces, so no chart has to remember the
 
 ### Cost
 
-Cost is computed at read time. The token ledger is priced at each provider's published API prices (`backend/llm/api_equivalent.py`, `backend/api/measurement_cost.py`). That is an API-equivalent figure, not what was charged. It is a subtotal of the usage records that could be priced, reported with the count of those that could not and why: no maintained list price for the recorded model, no published rate for cached tokens, unreported or inconsistent token counts, or an unproven counting format. Actual spend is recorded separately and its completeness is reported with the figure. A series for dollars over time is declared in the registry as unavailable.
+Cost is computed at read time. The token ledger is priced at each provider's published API prices (`backend/llm/api_equivalent.py`, `backend/api/measurement_cost.py`). That is an API-equivalent figure, not what was charged. It is a subtotal of the usage records that could be priced, reported with the count of those that could not and why: no maintained list price for the recorded model, no published rate for cached tokens, an unproven context tier, unreported or inconsistent token counts, or an unproven counting format. Actual spend is recorded separately and its completeness is reported with the figure. A series for dollars over time is declared in the registry as unavailable.
 
 ### Presence
 
-Time is the person's presence in the app, recorded as visits, merged and closed on events such as navigating away, hiding the page or going idle (`backend/infra/presence.py`). A visit with no thread belongs to the project or all work, never to an agent.
+Time is estimated from the person's presence in the app, recorded as visits, merged and closed on events such as navigating away, hiding the page or going idle (`backend/infra/presence.py`). Measurement uses focused spans when recorded, counts older visits without focus data in full, and shares overlapping time among active threads (`backend/api/measurement_presence.py`). A visit with no thread belongs to the project or all work, never to an agent.
 
 ## What can go wrong
 

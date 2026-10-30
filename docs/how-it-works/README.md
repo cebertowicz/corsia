@@ -30,7 +30,7 @@ Security is covered in its own section: [Security](../security/README.md). These
 - **Conductor:** the thread designated to coordinate a project. The workspace coordinator is called the CORSIA agent.
 - **Turn:** one run of a thread's agent loop, from an admitted input until it finishes.
 - **Harness:** the program that runs the agent loop for a turn. CORSIA has three: its own native loop, Claude Code and Codex.
-- **Checkpoint:** a summary of a thread's earlier history that replaces that history in the model's context when it grows too large.
+- **Checkpoint:** a summary that, when installed, replaces covered earlier history in the model's context.
 - **Plan:** a thread's or scope's structured record of tasks, with acceptance criteria, waits and decisions.
 - **Context source:** one file or generated block that is delivered to a model, such as a system rule, a project file or the skills index.
 - **State root:** the folder where CORSIA keeps its database and runtime files.
