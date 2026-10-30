@@ -90,6 +90,7 @@ PYTHON="${_CORSIA_REQUEST_PYTHON:-$CORSIA_DIR/.venv/bin/python}"
 BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
 ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
 if is_app_mode; then
+    [ "$#" -gt 0 ] || set -- help
     app_mode_checkout || exit 1
     app_mode_refuse_during_state_move "$@" || exit 1
 fi
@@ -557,6 +558,21 @@ case "${1:-status}" in
         esac
         ;;
     *)
+        if is_app_mode; then
+            echo "Usage: corsia <command>"
+            echo ""
+            echo "Commands:"
+            echo "  start [--open]      Start CORSIA"
+            echo "  open                Open CORSIA"
+            echo "  stop                Stop CORSIA"
+            echo "  restart             Restart CORSIA"
+            echo "  status              Show CORSIA status"
+            echo "  logs                Tail the backend log"
+            echo "  service start|stop|restart|status  Manage the app service"
+            echo "  init, setup, bind-host, remote-address  Set up CORSIA"
+            echo "  event, artifact, mcp  Work with CORSIA integrations"
+            exit 0
+        fi
         echo "Usage: corsia <command> [--force]"
         echo ""
         echo "Commands:"

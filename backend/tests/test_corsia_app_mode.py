@@ -408,6 +408,21 @@ class App:
         return staged
 
 
+@pytest.mark.parametrize("args", [(), ("help",), ("--help",), ("-h",)])
+def test_packaged_cli_help_lists_app_commands(app, args):
+    entry = app.bundle / "Contents" / "Resources" / "bin" / "corsia"
+    entry.parent.mkdir(parents=True)
+    shutil.copy(REPO / "desktop" / "scripts" / "corsia", entry)
+    result = app.run(*args, script=entry)
+    assert result.returncode == 0, result.stderr
+    for verb in ("start", "open", "stop", "restart", "status", "logs", "service",
+                 "init", "setup", "bind-host", "remote-address", "event", "artifact", "mcp"):
+        assert verb in result.stdout
+    for refused in ("redeploy", "install", "uninstall"):
+        assert refused not in result.stdout
+    assert not app.launchd_calls()
+
+
 @pytest.fixture
 def app(tmp_path):
     # Orphaned at once, so launchd (PID 1) reaps one that bootout stops, as it
