@@ -38,7 +38,7 @@ def test_installer_default_matches_backend() -> None:
 
 def test_desktop_source_install_default_matches_backend() -> None:
     assert (
-        _shell_default("desktop/src-tauri/src/adoption.rs", r"^pub const SOURCE_DEFAULT_PORT: u16 = (\d+);$")
+        _shell_default("desktop/src-tauri/src/adoption.rs", r"^(?:pub\(crate\) |pub )?const SOURCE_DEFAULT_PORT: u16 = (\d+);$")
         == DEFAULT_BACKEND_PORT
     )
 
