@@ -5,7 +5,7 @@ CORSIA is one backend process that owns all state, a browser UI it serves, and a
 ## What it is
 
 - **One backend.** A FastAPI application serves REST routes, one WebSocket (`/ws`) for live chat, a browser-pane stream, and the built UI. It is the only writer of the database.
-- **One UI.** A SvelteKit app built as a static site into `frontend/dist`. The backend serves those files and falls back to `index.html` for any non-file path, so the UI is client-routed. A path under `/api/` that matches no route returns a JSON 404, never the UI page.
+- **One UI.** A SvelteKit app built as a static site into the `dist` folder of `frontend/`. The backend serves those files and falls back to `index.html` for any non-file path, so the UI is client-routed. A path under `/api/` that matches no route returns a JSON 404, never the UI page.
 - **A desktop shell, optional.** `desktop/src-tauri` is a Tauri shell that owns one local backend for its window's lifetime, shows startup progress, then opens the local UI. `desktop/launchd` holds the service definition for the packaged app. The backend also has its own entry point (`backend/main.py`), so the UI works from a browser without the shell.
 - **Agent loops.** Each turn runs in one of three harnesses: CORSIA's native loop, Claude Code, or Codex. See [Models and harnesses](models-and-harnesses.md).
 
@@ -73,7 +73,7 @@ The backend binds to one interface chosen at setup: `127.0.0.1` for "this comput
 | Startup and lifecycle | `backend/app_lifecycle.py`, `backend/app_startup_init.py`, `backend/app_startup_runtime.py` |
 | Database, schema, migrations | `backend/infra/database.py`, `backend/infra/schema.py`, `backend/infra/database_migrations.py` |
 | Live chat over WebSocket | `backend/ws/` |
-| UI | `frontend/` (build output `frontend/dist`) |
+| UI | `frontend/` (its `dist` build folder is what the backend serves) |
 | Desktop shell | `desktop/src-tauri/` |
 | Code map | [ARCHITECTURE.md](../../ARCHITECTURE.md), [BACKEND.md](../../BACKEND.md), [FRONTEND.md](../../FRONTEND.md) |
 

@@ -20,7 +20,7 @@ flowchart TB
     R[Records<br/>plans, decisions,<br/>presence, tokens] --> P[Prepared tables<br/>per request]
     P --> F[Family queries]
     F --> M[Registry rules<br/>min n, proxy, break]
-    M --> A[/api/measurement<br/>read-only]
+    M --> A["/api/measurement<br/>read-only"]
     A --> U[Measurement page]
 ```
 
