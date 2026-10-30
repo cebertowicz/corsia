@@ -88,6 +88,13 @@ describe('update model', () => {
 		expect(result.headline).toBe(headline);
 	});
 
+	it.each([true, false])('words pre-stop refusal with health=%s', (healthy) => {
+		const copy = failureCopy({ ...failure('update_refused'), detail: JSON.stringify({ backend_healthy: healthy }) });
+		expect(copy.title).toBe("Update didn't finish");
+		expect(copy.body).toBe(healthy ? 'CORSIA is still running the version it had.' : '');
+		expect(copy.retryLabel).toBe('Retry');
+	});
+
 	it('offers a restart when it can recover an unfinished update', () => {
 		expect(failureCopy(failure('restart_pending')).retryAction).toBe('restart');
 		expect(failureCopy(failure('drain_failed')).retryAction).toBeUndefined();

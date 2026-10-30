@@ -17,6 +17,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Source installs use the same local model server release as the app and show the cause if installation fails.
 - The update screen shows how many agents have paused while it waits for them.
 - Update notices wait until setup is finished, when Updates can be opened.
+- Update refusals show their reason and the update's own log in Settings.
 - The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
 - On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.

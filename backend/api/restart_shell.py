@@ -39,6 +39,30 @@ _corsia_lifecycle_cleanup() {
     _corsia_cleanup_port="${_corsia_lifecycle_port:-${CORSIA_RESTART_BACKEND_PORT:-}}"
     _corsia_cleanup_operation="${_corsia_lifecycle_operation_id:-${CORSIA_RESTART_OPERATION_ID:-}}"
     _corsia_cleanup_curl="${_corsia_lifecycle_curl:-${CORSIA_RESTART_CURL:-}}"
+    _corsia_cleanup_refusal_args=()
+    if [ "$_corsia_lifecycle_status" -ne 0 ] && [ "$_corsia_lifecycle_is_update" = true ] \
+        && [ -n "${_corsia_update_refusal_reason:-}" ]; then
+        printf 'Update refused: %s\n' "$_corsia_update_refusal_reason"
+        _corsia_update_backend_healthy=false
+        if declare -F is_backend_running > /dev/null && is_backend_running \
+            && { [ "${_corsia_update_ownership_proven:-}" = true ] || (
+                declare -F service_is_loaded > /dev/null && service_is_loaded \
+                    && declare -F require_owned_service_definition > /dev/null \
+                    && require_owned_service_definition \
+                    && declare -F require_loaded_service_owns_port > /dev/null \
+                    && require_loaded_service_owns_port
+            ) > /dev/null 2>&1 || (
+                declare -F service_is_loaded > /dev/null && ! service_is_loaded \
+                    && declare -F backend_pids > /dev/null && [ -n "$(backend_pids)" ] \
+                    && declare -F require_port_served_by_this_checkout > /dev/null \
+                    && require_port_served_by_this_checkout
+            ) > /dev/null 2>&1; }; then
+            _corsia_update_backend_healthy=true
+        fi
+        _corsia_cleanup_refusal_args=(--data-urlencode 'failure_code=update_refused'
+            --data-urlencode "reason=$_corsia_update_refusal_reason"
+            --data-urlencode "backend_healthy=$_corsia_update_backend_healthy")
+    fi
     if [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
         && [ "$_corsia_lifecycle_is_update" = true ] \
@@ -53,7 +77,7 @@ _corsia_lifecycle_cleanup() {
     then
         "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
             --output /dev/null --write-out 'Lifecycle drain cleanup HTTP %{http_code}\n' \
-            --request DELETE --get \
+            --request DELETE --get "${_corsia_cleanup_refusal_args[@]}" \
             --data-urlencode "token=$_corsia_cleanup_token" \
             --data-urlencode "operation_id=$_corsia_cleanup_operation" \
             "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" 2>/dev/null \
@@ -130,6 +154,7 @@ def _lifecycle_launch_env(
             and not name.startswith("_CORSIA_REQUEST_")
             and not name.startswith("_corsia_lifecycle_")
             and not name.startswith("_corsia_cleanup_")
+            and not name.startswith("_corsia_update_")
         )
     }
     launch_env.update({

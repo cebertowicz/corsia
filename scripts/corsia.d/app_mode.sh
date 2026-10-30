@@ -342,18 +342,21 @@ app_mode_restart_prepared() {
         app_mode_release_update_lock
         return "$status"
     else
+        _corsia_update_preflight=true
         fail "There is no staged update to install at $staged"
         return 1
     fi
 }
 
 app_mode_swap_staged_update() {
+    _corsia_update_preflight=true
     local staged="$1" drain_attempted=false swap_status
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-update}"
     require_owned_service_definition || return 1
     if service_is_loaded; then
         if is_backend_running || [ -n "$(backend_pids)" ]; then
             require_loaded_service_owns_port || return 1
+            _corsia_update_ownership_proven=true
         fi
     else
         require_no_unmanaged_backend "$BACKEND_PORT" || return 1
@@ -368,11 +371,15 @@ app_mode_swap_staged_update() {
             fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The staged update was kept at $staged; recover the running service, or explicitly use --force if interruption is intended."
             return 1
         fi
+        _corsia_update_preflight=false
+        _corsia_update_refusal_reason=
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait \
             "update and restart" "$BACKEND_PORT" legacy-settings-update \
             || warn "Drain did not complete; updating anyway"
     fi
+    _corsia_update_preflight=false
+    _corsia_update_refusal_reason=
     if service_is_loaded \
         && ! bootout_service_and_wait "$(service_domain)" "$(service_label)"; then
         if service_is_loaded; then

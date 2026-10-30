@@ -184,6 +184,7 @@ def try_acquire(
     target_version: str | None = None,
     changes: str | None = None,
     previous_version: str | None = None,
+    log_path: str | None = None,
     operation_id: str | None = None,
     claim: Callable[[object], bool] | None = None,
     db=None,
@@ -223,6 +224,11 @@ def try_acquire(
             return None
         if claim is not None and not claim(connection):
             return None
+        detail = {}
+        if previous_version:
+            detail["previous_version"] = previous_version
+        if log_path:
+            detail["log_path"] = log_path
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
@@ -239,7 +245,7 @@ def try_acquire(
                 trigger,
                 target_version,
                 changes,
-                json.dumps({"previous_version": previous_version}) if previous_version else None,
+                json.dumps(detail) if detail else None,
                 _target_phase,
                 now,
                 now,

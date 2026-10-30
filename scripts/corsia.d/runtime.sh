@@ -1335,6 +1335,7 @@ ensure_current_frontend_release() {
 # Drain while the old release is intact. The lifecycle owner invokes frontend
 # activation only after it has confirmed that no old backend remains.
 restart_prepared() {
+    _corsia_update_preflight=true
     local checkout fe stage prepared backup absent original_force
     local drain_attempted=false
     checkout="$(serving_checkout_root)"
@@ -1361,18 +1362,22 @@ restart_prepared() {
         if service_is_loaded; then
             if is_backend_running || [ -n "$(backend_pids)" ]; then
                 require_loaded_service_owns_port || return 1
+                _corsia_update_ownership_proven=true
             fi
         else
             require_no_unmanaged_backend "$BACKEND_PORT" || return 1
         fi
     else
         require_port_served_by_this_checkout || return 1
+        [ -z "$(backend_pids)" ] || _corsia_update_ownership_proven=true
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
             fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
             return 1
         fi
+        _corsia_update_preflight=false
+        _corsia_update_refusal_reason=
         # Update is the only path that pulls, so refusing here on an incomplete
         # drain means new code can never reach this machine -- and the only
         # escape left, --force, skips the drain entirely: no steering, no hard
@@ -1386,6 +1391,8 @@ restart_prepared() {
             warn "Drain did not complete; updating anyway"
         fi
     fi
+    _corsia_update_preflight=false
+    _corsia_update_refusal_reason=
     REDEPLOY_FRONTEND_STATE=not_started
     original_force="$FORCE"
     FORCE=true
