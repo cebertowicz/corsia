@@ -19,7 +19,7 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 | Who can call it | Routes |
 |---|---|
-| Anyone who can reach the server | `/api/health`, `/api/version`, `/api/auth/status`, `/api/auth/login`, `/api/upload/limits`, `/api/models/{id}/profile`, `/api/devices/outside-address`, `/api/devices/identity` (signs a caller's challenge to prove this server's certificate key), and the web app's own files |
+| Anyone who can reach the server | `/api/health`, `/api/version`, `/api/auth/status`, `/api/auth/login`, `/api/upload/limits`, `/api/models` (the model list, with account ids and usage), `/api/models/{id}/profile`, `/api/devices/outside-address`, `/api/devices/identity` (signs a caller's challenge to prove this server's certificate key), and the web app's own files |
 | Anyone, with a check of its own | Webhooks (`/webhooks/…`): the sender's signature. Device pairing (`/api/devices/pair/…`): only while you have pairing open, with its pairing code. Sign-in callbacks: a matching sign-in you started |
 | Only programs on this machine, through a direct loopback connection | First-run setup routes, which close once an account exists. Also, at any time: whether an update or restart is running (`/api/system/operation-active`), stopping the local model servers CORSIA manages (`/api/system/stop-local-model`), and the corrections classifier's status and download (`/api/setup/classifier…`) |
 

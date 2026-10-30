@@ -144,7 +144,7 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](#security)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are dated tags on `main`. The release workflow builds an unsigned desktop app and signing is a separate manual step, so check a downloaded app before opening it ([Supply chain](docs/security/supply-chain.md#check-it-yourself)), or build one from your checkout (below).
+- **Pre-release.** Releases are version tags. The release workflow builds an unsigned desktop app and signing is a separate manual step, so check a downloaded app before opening it ([Supply chain](docs/security/supply-chain.md#check-it-yourself)), or build one from your checkout (below).
 
 ### Install
 
