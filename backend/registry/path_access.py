@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from core.workspace_context_sources import is_workspace_context_path
+from core.workspace_layout import uploads_root_for_path
 from infra import config
+from registry import registration_events
 from registry import service as registry_service
 
 
@@ -72,4 +74,6 @@ def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
         return FileLookup(candidate, True, True, None)
     artifact = registry_service.resolve_file_identity(identity, db=db)
     has_identity = artifact is not None or registry_service.find_file_identity(identity, db=db) is not None
+    if not has_identity and uploads_root_for_path(identity.canonical) is not None:
+        has_identity = registration_events.upload_path_has_identity(identity.canonical, db=db)
     return FileLookup(candidate, True, True, artifact, has_identity)

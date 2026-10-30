@@ -62,6 +62,20 @@ def resolve_upload(external_id: str, db=None) -> dict | None:
             _db.close()
 
 
+def upload_path_has_identity(path: str, db=None) -> bool:
+    """Whether a canonical upload path has an identity in any lifecycle state."""
+    _db = db or get_db()
+    try:
+        return _db.execute(
+            "SELECT 1 FROM artifact_identities "
+            "WHERE integration='upload' AND type IN (?, ?) AND path=? LIMIT 1",
+            (*UPLOAD_IDENTITY_TYPES, path),
+        ).fetchone() is not None
+    finally:
+        if not db:
+            _db.close()
+
+
 def resolve_upload_path(path: str, db=None) -> dict | None:
     """Resolve an active upload identity by its canonical local path."""
     _db = db or get_db()
