@@ -85,7 +85,6 @@ async def launch_update(
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
-    await _monitor_restart_process(process, operation_id)
     return operation_id, process
 
 

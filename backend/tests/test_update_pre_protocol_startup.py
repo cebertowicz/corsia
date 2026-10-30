@@ -7,6 +7,7 @@ import types
 import pytest
 from loguru import logger
 
+import automation.restart_startup
 from automation import self_restart
 from infra.database import get_db
 from infra.db_async import run_in_db

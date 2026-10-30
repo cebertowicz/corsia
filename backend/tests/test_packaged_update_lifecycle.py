@@ -148,6 +148,60 @@ def test_interrupted_confirmation_settles_without_holding(
     assert self_restart.previous_version(row) == previous
 
 
+async def test_pre_stop_refusal_cancels_through_real_shell_and_http(isolated_db, tmp_path):
+    import os
+    import socket
+    from pathlib import Path
+
+    import uvicorn
+    from api.drain import router
+    from api.restart_shell import spawn_restart_lifecycle
+
+    operation_id = await run_in_db(operation_in, "draining")
+    app = FastAPI()
+    app.include_router(router)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    serving = asyncio.create_task(server.serve(sockets=[listener]))
+    app_mode = Path(__file__).resolve().parents[2] / "scripts/corsia.d/app_mode.sh"
+    script = tmp_path / "corsia"
+    script.write_text(f'''#!/bin/bash
+SCRIPT_DIR=/disposable
+source "{app_mode}"
+require_owned_service_definition() {{ :; }}
+service_is_loaded() {{ return 1; }}
+require_no_unmanaged_backend() {{ :; }}
+app_mode_hold_update_lock() {{ :; }}
+is_backend_running() {{ return 1; }}
+fail() {{ printf '%s\\n' "$*"; }}
+FORCE=false
+BACKEND_PORT={port}
+app_mode_swap_staged_update /disposable/staged
+''')
+    script.chmod(0o755)
+    try:
+        with (tmp_path / "lifecycle.log").open("w") as log:
+            child = spawn_restart_lifecycle(
+                script, ["restart-prepared"],
+                {**os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port)},
+                operation_id, log, caller_credential=OWNER_TOKEN,
+            )
+            assert await asyncio.to_thread(child.wait, 10) == 1
+    finally:
+        server.should_exit = True
+        await serving
+        listener.close()
+    assert "Safe update refused" in (tmp_path / "lifecycle.log").read_text()
+    assert "Lifecycle drain cleanup HTTP 200" in (tmp_path / "lifecycle.log").read_text()
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "cancelled"
+    assert row["failure_code"] != "rolled_back"
+    assert not self_restart.restart_holds_new_work()
+
+
 async def test_failure_report_releases_before_bundle_rollback(isolated_db, monkeypatch):
     from automation.update_verification import confirm_packaged_update
 
