@@ -10,6 +10,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - When you type into an agent's document, the agent gets your edit as one change once you pause for 30 seconds, instead of a fragment every few seconds of typing.
 - Relative links inside a document's table cells open the linked file instead of saying the document is missing.
 - The reply box on a document comment no longer stays tall after you send a multi-line reply; it goes back to one line.
+- On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
+- On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
 - Source updates explain how to fix a branch with no tracking branch or a branch that has diverged from its tracked branch.
 - Source installs use the same local model server release as the app and show the cause if installation fails.
 - The update screen shows how many agents have paused while it waits for them.
