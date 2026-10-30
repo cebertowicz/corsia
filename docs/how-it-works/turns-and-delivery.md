@@ -42,7 +42,7 @@ In both cases the input keeps its place in the queue.
 
 ### Finishing
 
-A turn ends through one function, `finish_turn`, which settles the turn and claims its successor in one transaction (`backend/infra/thread_driver.py`). When a worker thread finishes, its result is admitted to its parent in the same transaction that ends the worker's turn (see [Agents and threads](agents-and-threads.md)).
+A turn ends through one function, `finish_turn`, which settles the turn and claims its successor in one transaction (`backend/infra/thread_driver.py`). When a worker thread's turn completes, its result is admitted to its parent in the same transaction that settles the worker's turn (see [Agents and threads](agents-and-threads.md)).
 
 When a turn is stopped because a plan limit or a vendor usage limit was reached, one continue input is left behind so the work can resume once the limit allows it (`backend/infra/plan_limit_continue.py`).
 

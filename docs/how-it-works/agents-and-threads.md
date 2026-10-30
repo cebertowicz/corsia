@@ -41,7 +41,7 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 
 - **A model is required.** The caller names the model; there is no default. See [Models and harnesses](models-and-harnesses.md).
 - **Confinement is `none` or `untrusted`.** `untrusted` limits the worker to file reads in directories the caller lists. It is for content neither the caller nor the person controls, such as outside contributors' code or mail from an unknown sender. The sandbox model is described in the security section: [Security](../security/README.md).
-- **Completion returns to the parent.** When the child's turn finishes, its result is admitted to the parent's thread in the same database transaction that finishes the child's turn, so a parent cannot see a finished child without its result, or the reverse.
+- **Completion returns to the parent.** When the child's turn completes, its result is admitted to the parent's thread in the same database transaction that settles the child's turn, so a parent cannot see a completed child without its result, or the reverse. A turn that ends in error does not send a completion this way (`backend/infra/thread_driver.py`).
 - **Skills inherit down the ancestry.** A child sees its ancestors' thread-level skills; a skill in the child overrides the parent's of the same name (`backend/core/skill_resolution.py`).
 
 ### Limits on live processes
