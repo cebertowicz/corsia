@@ -39,6 +39,7 @@ def base_git_control_paths(repo: Path) -> list[Path]:
     """Return shared Git controls no agent command may rewrite."""
     git_dir = repo.resolve(strict=False) / ".git"
     return [
+        git_dir / "commondir",
         git_dir / "config",
         git_dir / "config.lock",
         git_dir / "packed-refs",

@@ -40,6 +40,7 @@ from tools.sandbox_config import (
 from tools.sandbox_git import sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
+from tools.workspace_git_paths import workspace_git_rules
 from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, agent_tool_ro_dirs, shell_env_pass_names
 
 _WORKTREE_FLAGS_WITH_VALUE = {
@@ -803,10 +804,9 @@ def pinned_repo_sandbox_profile(
             f'(deny file-write* (literal "{_sandbox_path(path)}"))'
             for path in protected
         )
-        rules.append(
-            f'(deny file-write* '
-            f'(subpath "{_sandbox_path(repo / ".git" / "hooks")}"))'
-        )
+        # Any case: a base checkout has no commondir, and a literal rule misses a new spelling.
+        any_case = (repo / ".git" / "commondir", repo / ".git" / "hooks")
+        rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
         if repo != worktree_control_repo:
             rules.extend(
                 f'(deny file-write* '

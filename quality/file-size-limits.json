@@ -90,7 +90,7 @@
     "backend/tools/host_access_gate.py::consume_current_action_permit": 99,
     "backend/tools/shell.py::BashTool.execute": 266,
     "backend/tools/shell_guard.py::check_worktree_targets": 110,
-    "backend/tools/shell_guard.py::pinned_repo_sandbox_profile": 180,
+    "backend/tools/shell_guard.py::pinned_repo_sandbox_profile": 179,
     "scripts/migrations/migrate_messages.py::migrate": 82
   },
   "append_only": {
