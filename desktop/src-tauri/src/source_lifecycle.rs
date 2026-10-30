@@ -29,6 +29,9 @@ const STUCK_AFTER: Duration = Duration::from_secs(SOURCE_DRAIN_CAP_SECONDS + 300
 const INHERITED: [&str; 5] = ["HOME", "PATH", "USER", "LANG", "TMPDIR"];
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
 const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long launchd may take to unlist a job after a plain bootout: the source plist's
+/// `ExitTimeOut` (120 s) plus the 5 s its own stop adds to that.
+const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).
 /// Read only, over `mode=ro` and never immutable: the database is live.
@@ -62,6 +65,7 @@ pub struct SourceLifecycle {
     launchctl: PathBuf,
     env: Vec<(&'static str, OsString)>,
     proof_timeout: Duration,
+    bootout_timeout: Duration,
     count_interval: Duration,
     /// Reads a process's start time; replaced in tests.
     stop_clock: fn(u32) -> Option<String>,
@@ -78,6 +82,7 @@ impl SourceLifecycle {
                 .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
                 .collect(),
             proof_timeout: PROOF_TIMEOUT,
+            bootout_timeout: BOOTOUT_TIMEOUT,
             count_interval: COUNT_INTERVAL,
             stop_clock: process_started,
         }
@@ -155,8 +160,8 @@ impl SourceLifecycle {
         }
     }
 
-    fn wait_until(&self, mut done: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + self.proof_timeout;
+    fn wait_until(&self, timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
         while !done() {
             if Instant::now() >= deadline {
                 return false;
@@ -192,7 +197,7 @@ impl SourceLifecycle {
             release_proof::database_released(&self.bundled.python, &database)
         };
         let mut last = String::new();
-        if self.wait_until(|| match let_go() {
+        if self.wait_until(self.proof_timeout, || match let_go() {
             Ok(()) => true,
             Err(error) => {
                 last = error;
@@ -567,10 +572,12 @@ impl adoption::Lifecycle for SourceLifecycle {
             return self.released(None);
         }
         // The checkout's script can fail to stop a job launchd still lists (an old one asks
-        // `launchctl bootout --wait`). The app then unloads the job itself, before the proof
-        // starts counting down; the checks below still decide whether it stopped.
+        // `launchctl bootout --wait`). The app then unloads the job itself and waits, up to the
+        // job's own exit bound, while launchd still lists it; a plain bootout does not wait.
+        // The checks below still decide whether it stopped.
         if !status.success() && matches!(self.loaded_job(), Ok(Some(_))) {
             self.bootout();
+            self.wait_until(self.bootout_timeout, || !matches!(self.loaded_job(), Ok(Some(_))));
         }
         let let_go = self.released(source_pid);
         if !status.success() {
@@ -750,6 +757,7 @@ mod tests {
         lifecycle.launchctl = base.join("launchctl");
         lifecycle.env = vec![("HOME", base.into()), ("PATH", "/usr/bin:/bin".into())];
         lifecycle.proof_timeout = Duration::from_millis(300);
+        lifecycle.bootout_timeout = Duration::from_millis(300);
         lifecycle.count_interval = Duration::from_millis(30);
         fs::write(&loaded, "").unwrap();
         Home { root, lifecycle }
@@ -768,14 +776,19 @@ mod tests {
     }
 
     /// A launchctl like `fake_launchctl` (its process has exited) that also runs `bootout` for
-    /// the `bootout` verb, after recording that call's arguments in `bootouts`.
+    /// the `bootout` verb, after recording that call's arguments in `bootouts`. Once `PRINTS`
+    /// exists it counts the `print` calls after it and unlists the job on the twelfth, as a
+    /// job launchd is still tearing down does.
     fn fake_launchctl_with_bootout(base: &Path, bootout: &str) {
         script(
             &base.join("launchctl"),
             &format!(
-                "case \"$1\" in bootout) echo \"$@\" >> '{bootouts}'; {bootout}; exit $?;; esac\n[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'\necho 'pid = {pid}'",
+                "case \"$1\" in bootout) echo \"$@\" >> '{bootouts}'; {bootout}; exit $?;; esac\nif [ -e '{prints}' ]; then n=$(($(cat '{prints}') + 1)); echo $n > '{prints}'; [ $n -lt 12 ] || rm -f '{loaded}'; fi\n[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'\necho 'pid = {pid}'",
                 bootouts = base.join("bootouts").display(),
-                bootout = bootout.replace("LOADED", base.join("loaded").to_str().unwrap()),
+                prints = base.join("prints").display(),
+                bootout = bootout
+                    .replace("LOADED", base.join("loaded").to_str().unwrap())
+                    .replace("PRINTS", base.join("prints").to_str().unwrap()),
                 loaded = base.join("loaded").display(),
                 wd = base.join("checkout/backend").display(),
                 pid = gone_pid(),
@@ -1048,6 +1061,25 @@ mod tests {
             .unwrap_err();
         assert!(error.starts_with("`corsia stop` exited"), "{error}");
         assert_eq!(bootouts(&home).lines().count(), 1);
+    }
+
+    #[test]
+    fn a_job_launchd_is_still_tearing_down_is_waited_for_past_the_proof_window() {
+        // Plain bootout returns at once and launchd lists the job for a while longer, longer
+        // than the proof window but within the bootout bound.
+        let mut home = home("exit 64", "exit 0", "exit 0");
+        fake_launchctl_with_bootout(home.root.path(), "echo 0 > PRINTS");
+        home.lifecycle.bootout_timeout = Duration::from_secs(10);
+        home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
+        // The job is still listed at the bound: the same failure as without the wait.
+        let mut home = self::home("exit 64", "exit 0", "exit 0");
+        fake_launchctl_with_bootout(home.root.path(), "exit 0");
+        home.lifecycle.bootout_timeout = Duration::from_millis(100);
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| Ok(()))
+            .unwrap_err();
+        assert!(error.starts_with("`corsia stop` exited"), "{error}");
     }
 
     #[test]
