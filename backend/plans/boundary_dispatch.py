@@ -110,11 +110,12 @@ def _reorder(params: dict[str, Any], common: dict) -> dict:
     return {"node": node_projection(moved)}
 
 
-def _dispatch_structure(plan_id, operation, params, common, db, workflow_version, actor):
-    """Add, reshape, or re-specify nodes through the canonical evidence paths."""
+def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor):
+    """Add, reshape, or re-specify nodes; ``workflow`` is a creation's resolved (version, steps)."""
     acting = actor.thread_id if actor.kind == "thread" else None
     if operation in {"add", "insert"}:
-        from plans import intent_creation, user_step_instructions
+        from plans import intent_creation, user_step_instructions, workflow_fields
+        workflow_version, workflow_steps = workflow
         created, resolved_words = intent_creation.prepare(
             db, plan_id, params, workflow_version=workflow_version, operation=operation, actor=actor,
         )
@@ -132,10 +133,7 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
             triage_lines.add_line(db, service._plan_row(db, plan_id), node.id, actor_id=acting)
             if operation == "add" else None
         )
-        if line is None:
-            return node
-        from plans.boundary import node_projection
-        return {"node": node_projection(node), "rank": line}
+        return workflow_fields.added(db, node, line, workflow_steps, causing_executor=acting)
     if operation == "edit":
         from plans import intent_words
         changed = fields.edit_fields(params)
@@ -261,8 +259,8 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         mutations.fail_node(node_id, **fields.expected(params), **common)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
-        import plans.closure as closure
-
+        from plans import closure, workflow_fields
+        workflow_fields.refuse_required_skip(db, node_id)
         closure.close_node(
             node_id, reason=fields.text(params, "reason"),
             **fields.expected(params), **common,
@@ -348,7 +346,9 @@ def _record_verdict(params: dict[str, Any], verdict: str, common: dict) -> None:
     )
 
 
-def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_version=None):
+def dispatch(
+    plan_id, operation, params, actor, provenance, db, *, workflow_version=None, workflow_steps=(),
+):
     """Route one validated mutation without creating a second plan service.
 
     The user's Mark done and Won't do settle through ``user_settle``. Their
@@ -357,19 +357,20 @@ def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_vers
     instead for a delegated task, and tells the owner after.
     """
     common = {"actor_id": actor.audit_id, "provenance": provenance, "db": db}
+    workflow = (workflow_version, workflow_steps)
     if actor.kind != "user" or operation not in user_steering.STEERING_OPERATIONS:
-        return _route(plan_id, operation, params, actor, common, db, workflow_version)
+        return _route(plan_id, operation, params, actor, common, db, workflow)
     if operation in user_settle.OUTCOMES:
         return user_settle.settle(operation, params, actor.audit_id, common)
     params = user_steering.prepare(operation, params, db)
     if "worker_plan_id" in params:
         return user_steering.move_worker_plan(operation, params, common)
-    result = _route(plan_id, operation, params, actor, common, db, workflow_version)
+    result = _route(plan_id, operation, params, actor, common, db, workflow)
     user_steering.tell_owner(operation, params, common)
     return result
 
 
-def _route(plan_id, operation, params, actor, common, db, workflow_version):
+def _route(plan_id, operation, params, actor, common, db, workflow):
     """Send one mutation to the owner of its operation."""
     if operation in boundary_edges.EDGE_OPERATIONS:
         return boundary_edges.dispatch(plan_id, operation, params, actor, common, db)
@@ -392,9 +393,7 @@ def _route(plan_id, operation, params, actor, common, db, workflow_version):
     if operation == "resolve_watch":
         return watch_operations.resolve(plan_id, params, actor, db)
     if operation in _STRUCTURE_OPERATIONS:
-        return _dispatch_structure(
-            plan_id, operation, params, common, db, workflow_version, actor,
-        )
+        return _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
     if operation in _SETTLEMENT_OPERATIONS:
         return _dispatch_settlement(operation, params, actor, common, db)
     raise service.PlanInputError(f"unsupported plan operation: {operation}")

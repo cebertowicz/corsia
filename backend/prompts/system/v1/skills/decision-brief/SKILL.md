@@ -8,7 +8,7 @@ metadata:
 
 # Decision brief
 
-**Applying these steps:** only when you raise a decision to the user. For a status update, review result, blocker, or any other message that raises no decision, skip them entirely: no phase, no tasks. When they apply, plan one phase with a task per step in `corsia.yaml`, as `task-discipline` describes. Steps marked `required` need their `check` met; skip any other with a one-line reason on the phase.
+**Applying these steps:** only when you raise a decision to the user. For a status update, review result, blocker, or any other message that raises no decision, skip them entirely: no phase, no tasks. When they apply, add one phase (`kind: phase`) with `workflow_ref: decision-brief`, as `task-discipline` describes; CORSIA builds a task per step. Steps marked `required` need their `check` met; skip any other when you reach it, with `close_node` and a one-line reason.
 
 The user may have none of the task history. Make the result or decision understandable without reconstructing it; adapt depth to the requested deliverable and consequence.
 
