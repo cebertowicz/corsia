@@ -18,10 +18,10 @@
 		onToggleToolBlock: (id: string) => void;
 	} = $props();
 
-	/** Collapsing a tool step is the person's own change of height; the slot below lets go of its floor for it. */
-	let collapses = $state(0);
+	/** Expanding or collapsing a tool step is the person's own change of height; the slot below lets go of its floor for it. */
+	let toggles = $state(0);
 	function toggleTool(id: string): void {
-		collapses++;
+		toggles++;
 		onToggleToolBlock(id);
 	}
 
@@ -68,9 +68,9 @@
 	);
 </script>
 
-{#if showLiveTools || isStreaming}
+{#if isStreaming}
 <!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. -->
-<div class="live-slot" use:holdHeight={`${boundThreadId}:${collapses}`}>
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${toggles}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
