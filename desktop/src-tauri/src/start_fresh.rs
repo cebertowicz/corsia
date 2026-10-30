@@ -661,7 +661,10 @@ fn set_journal_aside(app_dir: &Path, details: String) -> (String, bool) {
 pub trait Launchd {
     /// launchd lists the earlier install's job.
     fn loaded(&mut self) -> Result<bool, String>;
-    /// Something answers on the earlier install's backend port.
+    /// Something answers on the earlier install's backend port, whatever it is.
+    fn port_open(&mut self) -> bool;
+    /// The earlier install itself answers there: for a plain install, whose port is a guess,
+    /// a listener that runs from its backend folder.
     fn port_answers(&mut self) -> bool;
     /// Ask launchd to stop the job. Only for an install this app can't adopt.
     fn bootout(&mut self) -> Result<(), String>;
@@ -700,11 +703,15 @@ impl Launchd for SystemLaunchd {
             })
     }
 
+    fn port_open(&mut self) -> bool {
+        self.port.is_some_and(|port| !release_proof::port_refuses(port))
+    }
+
     fn port_answers(&mut self) -> bool {
-        self.port.is_some_and(|port| {
-            !release_proof::port_refuses(port)
-                && self.listener_dir.as_ref().map_or(true, |dir| release_proof::listener_runs_from(port, dir))
-        })
+        self.port_open()
+            && self.port.is_some_and(|port| {
+                self.listener_dir.as_ref().map_or(true, |dir| release_proof::listener_runs_from(port, dir))
+            })
     }
 
     fn bootout(&mut self) -> Result<(), String> {
@@ -782,8 +789,10 @@ impl LaunchdService {
 }
 
 impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
+    /// After a stop nothing may answer on the port, whoever lsof says it is: a listener it
+    /// cannot attribute is not proof that the install let go.
     fn released(&mut self) -> Result<(), String> {
-        if self.running()? {
+        if self.launchd.loaded()? || self.launchd.port_open() {
             return Err("the earlier install is still running".into());
         }
         self.launchd.databases_released()
@@ -1435,8 +1444,11 @@ mod tests {
         databases_held: bool,
         bootouts: u32,
         bootstraps: u32,
-        /// Set by the earlier install's own stop: the job is gone and the port refuses.
+        /// Set by the earlier install's own stop: the job is gone and, unless `survives_stop`, the port refuses.
         stopped: Rc<Cell<bool>>,
+        survives_stop: bool,
+        /// After the stop, whatever answers on the port can no longer be tied to the install.
+        blind_after_stop: bool,
     }
 
     impl Launchd for FakeLaunchd {
@@ -1444,8 +1456,12 @@ mod tests {
             Ok(self.loaded && !self.stopped.get())
         }
 
+        fn port_open(&mut self) -> bool {
+            self.port && (!self.stopped.get() || self.survives_stop)
+        }
+
         fn port_answers(&mut self) -> bool {
-            self.port && !self.stopped.get()
+            self.port_open() && !(self.stopped.get() && self.blind_after_stop)
         }
 
         fn bootout(&mut self) -> Result<(), String> {
@@ -1475,8 +1491,6 @@ mod tests {
         refuse: bool,
         stops: u32,
         starts: u32,
-        /// A stop that succeeds but leaves the port answering.
-        leaves_port: bool,
         stopped: Rc<Cell<bool>>,
         /// Looks for which a stop left by an earlier run is still draining.
         draining: u32,
@@ -1497,7 +1511,7 @@ mod tests {
             if self.refuse {
                 return Err("`corsia stop` refused: work is still running".into());
             }
-            self.stopped.set(!self.leaves_port);
+            self.stopped.set(true);
             Ok(())
         }
 
@@ -1666,13 +1680,17 @@ mod tests {
         let home = Home::new("plain-port-stays");
         plain_install(&home);
         let before = home.files();
-        let source = FakeSource { leaves_port: true, ..Default::default() };
-        let mut service = launchd_service(Some(source), FakeLaunchd { port: true, ..Default::default() });
+        // Also when lsof can no longer say whose the listener is: the raw port decides.
+        for blind_after_stop in [false, true] {
+            let launchd = FakeLaunchd { port: true, survives_stop: true, blind_after_stop, ..Default::default() };
+            let mut service = launchd_service(Some(FakeSource::default()), launchd);
 
-        let error = start_fresh(&home.0, &home.app_dir(), &mut service, &mut |_| {}, SystemTime::now()).unwrap_err();
+            let error = start_fresh(&home.0, &home.app_dir(), &mut service, &mut |_| {}, SystemTime::now()).unwrap_err();
 
-        assert!(error.restored && !error.left_stopped, "{error:?}");
-        assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+            assert!(error.restored && !error.left_stopped, "blind {blind_after_stop}: {error:?}");
+            assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+            assert_eq!(home.files(), before, "nothing moved");
+        }
         assert_eq!(home.files(), before, "nothing moved");
     }
 
