@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comments, feedback_batch_edits, feedback_batches
+from doceditor import comments, feedback_batch_core, feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 
 LANES = ["immediate", "document-held"]
@@ -165,7 +165,7 @@ def test_record_reopen_and_the_transition_have_no_default_lane(isolated_db):
         db.close()
 
 
-def test_a_person_save_opens_an_immediate_batch_with_a_five_second_deadline(isolated_db):
+def test_a_person_save_opens_an_immediate_batch_that_waits_for_a_typing_pause(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -179,6 +179,6 @@ def test_a_person_save_opens_an_immediate_batch_with_a_five_second_deadline(isol
             )
         [batch] = batches(db)
         assert batch["delivery_policy"] == feedback_batches.IMMEDIATE
-        assert (datetime.fromisoformat(batch["closes_at"]) - datetime.fromisoformat(batch["last_item_at"])).total_seconds() == 5
+        assert (datetime.fromisoformat(batch["closes_at"]) - datetime.fromisoformat(batch["last_item_at"])).total_seconds() == feedback_batch_core.EDIT_IDLE
     finally:
         db.close()
