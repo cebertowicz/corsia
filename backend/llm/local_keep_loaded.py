@@ -1,8 +1,9 @@
-"""Keep a just-downloaded local model: pin it within the room for pins, then load it when it fits now.
+"""Keep a local model loaded: pin a download within the room for pins, then load it if it fits now or is pinned alone on the seat.
 
 oMLX's own ``is_pinned`` is the only pin record. A pinned model loads when oMLX
 starts and is never unloaded to make room for another, so CORSIA keeps no pin
-list. Setup's download and Add model's download both finish here.
+list. Setup's download and Add model's download both finish here, and a reload
+after an oMLX restart goes through the same load rule.
 
 Everything a row says about keeping a model loaded is derived live by
 ``host_resources.annotate_keep_loaded`` (no size, pins full, not loaded because it
@@ -105,9 +106,10 @@ def _log_no_room(size_bytes: float | None, others: list[int | None], room: int) 
 
 
 async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
-    """Load again, in order, each model that was loaded before oMLX exited and fits now.
+    """Load again, in order, each model that was loaded before oMLX exited, by ``keep_loaded``'s rule.
 
     A model pinned in oMLX is loaded by oMLX itself before it answers health, so it is skipped.
+    A pinned one it left unloaded follows the same rule: alone on the seat, oMLX decides.
     Nothing is pinned here: the person's choice of pin stays as it was.
     """
     from llm.providers.omlx_lifecycle import list_loaded
@@ -134,7 +136,7 @@ def _will_pin(rows: list[dict] | None, model_id: str, size_bytes: float | None, 
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
 ) -> dict:
-    """Pin a completed download, then load it when it fits now.
+    """Pin a completed download, then load it if it fits now or is pinned alone on the seat.
 
     Setup's ``force_pin`` pins its one model whatever the verdict. A pinned model alone on the seat
     loads past the verdict, since oMLX loads pins unchecked at start anyway; oMLX's guard decides.

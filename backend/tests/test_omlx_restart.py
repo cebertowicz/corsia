@@ -420,6 +420,48 @@ async def test_a_model_that_fails_to_load_shows_on_its_row_and_emits_the_failure
     assert [(a, p["error"]) for _, a, p in log] == [("load.failed", "out of memory")]
 
 
+def pinned_too_big(monkeypatch):
+    import infra.host_resources as host_resources
+
+    async def pinned_row(_server_id):
+        return [{"id": "big", "estimated_size": 90 * host_resources.GIB, "pinned": True}]
+
+    monkeypatch.setattr(local_keep_loaded, "_model_rows", pinned_row)
+
+
+async def test_a_pinned_model_alone_on_the_seat_reloads_past_the_verdict(monkeypatch):
+    import infra.host_resources as host_resources
+
+    _, loaded = reload_fakes(monkeypatch, [], sizes={"big": 90 * host_resources.GIB})
+    pinned_too_big(monkeypatch)
+    await local_keep_loaded.reload_after_restart(SID, ["big"])
+    assert loaded == ["big"]
+    assert local_keep_loaded.failures(SID) == {}
+
+
+async def test_a_pinned_model_omlx_refuses_alone_on_the_seat_keeps_the_failed_line(monkeypatch):
+    import infra.host_resources as host_resources
+
+    async def refuse(*_):
+        return {"ok": False, "message": "not enough memory"}
+
+    reload_fakes(monkeypatch, [], sizes={"big": 90 * host_resources.GIB}, load=refuse)
+    pinned_too_big(monkeypatch)
+    await local_keep_loaded.reload_after_restart(SID, ["big"])
+    assert local_keep_loaded.failures(SID) == {"big": local_keep_loaded.NOT_LOADED}
+
+
+async def test_a_pinned_model_beside_a_loaded_one_keeps_the_verdict_on_reload(monkeypatch):
+    import infra.host_resources as host_resources
+
+    gib = host_resources.GIB
+    _, loaded = reload_fakes(monkeypatch, [], sizes={"big": 90 * gib, "other": gib}, loaded_now=["other"])
+    pinned_too_big(monkeypatch)
+    await local_keep_loaded.reload_after_restart(SID, ["big"])
+    assert loaded == []
+    assert local_keep_loaded.failures(SID) == {}
+
+
 async def test_a_pinned_model_that_fails_to_reload_shows_the_pinned_retry(monkeypatch):
     import infra.host_resources as host_resources
 
