@@ -24,8 +24,9 @@ def flight(isolated_db, monkeypatch, tmp_path):
     monkeypatch.setattr("infra.state.ws.schedule_models_changed", lambda: None)
     monkeypatch.setattr(local_setup, "_emit", lambda *_args, **_kwargs: None)
 
-    def restore(result=REFUSED, *, kind="setup"):
-        operation = replace(records.Operation.for_model(MODEL, kind, onboarding=True), result=result, downloaded=True)
+    def restore(result=REFUSED, *, kind="setup", notified=False):
+        operation = replace(records.Operation.for_model(MODEL, kind, onboarding=True),
+                            result=result, downloaded=True, notified=notified)
         records.write(operation)
         local_setup.restore_terminal_flight(operation)
 
@@ -38,32 +39,35 @@ def _own_server():
     return {"id": "own", "provider": "omlx", "kind": "managed", "source": "corsia", "instance_id": MANAGED_INSTANCE_ID}
 
 
-def test_a_refused_load_stays_a_failure_while_the_model_is_not_loaded(flight):
+@pytest.mark.asyncio
+async def test_a_refused_load_stays_a_failure_while_the_model_is_not_loaded(flight):
     from llm import local_setup, local_setup_operation as records
 
     flight()
-    local_setup.settle_load_failure(_own_server(), {"another-model"})
+    await local_setup.settle_load_failure(_own_server(), {"another-model"})
 
     assert local_setup.setup_status()["state"] == "start_failed"
     assert local_setup.setup_status()["fix"]
     assert records.read().result == REFUSED
 
 
-def test_a_loaded_model_ends_the_failure_and_keeps_it_ended_when_it_unloads(flight):
+@pytest.mark.asyncio
+async def test_a_loaded_model_ends_the_failure_and_keeps_it_ended_when_it_unloads(flight):
     from llm import local_setup, local_setup_operation as records
 
     flight()
-    local_setup.settle_load_failure(_own_server(), {MODEL.model})
+    await local_setup.settle_load_failure(_own_server(), {MODEL.model})
 
     assert local_setup.setup_status()["state"] == "ready"
     assert records.read().result["ok"] is True
     assert records.read().downloaded is True
 
-    local_setup.settle_load_failure(_own_server(), set())
+    await local_setup.settle_load_failure(_own_server(), set())
     assert local_setup.setup_status()["state"] == "ready"
 
 
-def test_the_picker_stops_projecting_the_failure_once_the_model_is_loaded(flight, monkeypatch):
+@pytest.mark.asyncio
+async def test_the_picker_stops_projecting_the_failure_once_the_model_is_loaded(flight, monkeypatch):
     from llm import local_setup, local_sources
 
     monkeypatch.setattr(local_sources, "local_memory_ok", lambda: True)
@@ -77,34 +81,38 @@ def test_the_picker_stops_projecting_the_failure_once_the_model_is_loaded(flight
 
     assert row()["state"] == "ready"
     assert row()["local_state"] == "start_failed"
-    local_setup.settle_load_failure(_own_server(), {MODEL.model})
+    await local_setup.settle_load_failure(_own_server(), {MODEL.model})
     assert row()["state"] == "ready"
     assert row()["local_state"] == "stopped"
 
 
 @pytest.mark.asyncio
-async def test_the_first_run_wake_reports_ready_not_the_stale_failure(flight, monkeypatch):
-    from llm import local_setup
+@pytest.mark.parametrize("failure_delivered", (False, True), ids=("failure-pending", "failure-already-in-chat"))
+async def test_the_first_chat_hears_ready_when_the_failure_settles(flight, monkeypatch, failure_delivered):
+    from llm import local_setup, local_setup_operation as records
     from onboarding import local_download_wake as wake
 
     delivered = AsyncMock(return_value=True)
     monkeypatch.setattr("events.delivery.deliver_to_thread", delivered)
     monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda: "conductor")
     monkeypatch.setattr(wake, "_first_run_rendered", lambda _thread_id: True)
-    flight()
+    flight(notified=failure_delivered)
 
-    local_setup.settle_load_failure(_own_server(), {MODEL.model})
+    await local_setup.settle_load_failure(_own_server(), {MODEL.model})
 
-    assert await wake.flush_pending_local_download("conductor") is True
+    # The settle itself delivers, with no later flush, even after the chat already had the failure.
+    delivered.assert_awaited_once()
     assert delivered.await_args.kwargs["chip"] == "Local model download ready."
     assert "load_refused" not in delivered.await_args.kwargs["notice"]
+    assert records.read().notified is True
 
 
-def test_a_persons_own_server_with_the_same_model_leaves_the_failure(flight):
+@pytest.mark.asyncio
+async def test_a_persons_own_server_with_the_same_model_leaves_the_failure(flight):
     from llm import local_setup
 
     flight()
-    local_setup.settle_load_failure({**_own_server(), "source": "manual", "instance_id": "lan"}, {MODEL.model})
+    await local_setup.settle_load_failure({**_own_server(), "source": "manual", "instance_id": "lan"}, {MODEL.model})
 
     assert local_setup.setup_status()["state"] == "start_failed"
 
@@ -114,11 +122,12 @@ def test_a_persons_own_server_with_the_same_model_leaves_the_failure(flight):
     ({"ok": False, "cause": "connection"}, "setup"),
     (REFUSED, "settings"),
 ])
-def test_other_failures_and_settings_flights_are_left_alone(flight, result, kind):
+@pytest.mark.asyncio
+async def test_other_failures_and_settings_flights_are_left_alone(flight, result, kind):
     from llm import local_setup, local_setup_operation as records
 
     flight(result, kind=kind)
-    local_setup.settle_load_failure(_own_server(), {MODEL.model})
+    await local_setup.settle_load_failure(_own_server(), {MODEL.model})
 
     assert records.read().result == result
 

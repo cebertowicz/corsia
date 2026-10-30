@@ -155,8 +155,8 @@ def finish_flight(result: dict) -> dict:
     """Publish a terminal result and release ownership, keeping unfinished downloads resumable."""
     _flight.result, _flight.stage = result, None
     operation = local_setup_operation.read()
-    if operation is not None:
-        local_setup_operation.write(replace(operation, result=result, downloaded=_flight.downloaded))
+    if operation is not None:  # a new terminal result has not reached the first chat yet
+        local_setup_operation.write(replace(operation, result=result, downloaded=_flight.downloaded, notified=False))
     _flight.downloading = bool(result.get("downloading"))
     _release_operation_lock()
     from infra.state.ws import schedule_models_changed
@@ -165,19 +165,26 @@ def finish_flight(result: dict) -> dict:
     return result
 
 
-def settle_load_failure(server: dict, loaded: set[str]) -> None:
+def setup_succeeded(server_id: str, model: LocalModel) -> dict:
+    """Setup's success result, emitted as completed: its last step loaded ``model``."""
+    _emit("completed", model=model.repository)
+    return {"ok": True, "server_id": server_id, "model": model.model,
+            "download_size": format_size(model.download_size_bytes)}
+
+
+async def settle_load_failure(server: dict, loaded: set[str]) -> None:
     """End a setup load failure once its model is loaded on CORSIA's own server.
 
-    Loading is setup's last step, so the flight has then succeeded. This ends the failure
-    for good: a check at each read would bring it back whenever the model unloads.
+    Loading is setup's last step, so the flight has then succeeded, and the first chat hears
+    it as any finished setup does. This ends the failure for good: a check at each read would
+    bring it back whenever the model unloads.
     """
     model, cause = _flight.model, (_flight.result or {}).get("cause")
     if (cause not in LOAD_FAILURE_CAUSES or _running() or _flight.kind != "setup" or model is None
             or model.model not in loaded or not is_corsia_managed_server(server)):
         return
-    finish_flight({"ok": True, "server_id": server["id"], "model": model.model,
-                   "download_size": format_size(model.download_size_bytes)})
-    _emit("completed", model=model.repository)
+    result = finish_flight(setup_succeeded(server["id"], model))
+    await _notify_terminal_setup_download(result)
 
 
 def _download_progress(eta_seconds: int | None, stalled: bool, percent: int | None) -> None:
