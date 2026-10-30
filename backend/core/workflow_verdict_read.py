@@ -89,17 +89,24 @@ def terminal_times(db: sqlite3.Connection, node_ids: Sequence[str]) -> dict[tupl
 def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
     where = "" if plan_ids is None else "WHERE plan_id IN (SELECT value FROM json_each(:plans))"
     return [dict(row) for row in db.execute(f"""
-        SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
-          created_at, updated_at FROM plan_nodes {where}
+        SELECT id, plan_id, parent_id, follow_up_of, kind, state, assignee, workflow_ref, workflow_version,
+          difficulty, size, created_at, updated_at FROM plan_nodes {where}
     """, {} if plan_ids is None else {"plans": _ids(plan_ids)}).fetchall()]
 
 
 def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """Nodes carrying a workflow with no ancestor carrying the same workflow (design §3.1)."""
+    """Nodes carrying a workflow with no ancestor carrying the same workflow (design §3.1).
+
+    A send-back's revision keeps its source's workflow and continues that run. Only a
+    revision does: accept-with-follow-up work never inherits the workflow fields.
+    """
     by_id = {node["id"]: node for node in nodes}
     roots = []
     for node in nodes:
         if not node["workflow_ref"]:
+            continue
+        source = by_id.get(node["follow_up_of"])
+        if source is not None and source["workflow_ref"] == node["workflow_ref"]:
             continue
         parent, seen = by_id.get(node["parent_id"]), set()
         while parent is not None and parent["id"] not in seen and parent["workflow_ref"] != node["workflow_ref"]:
