@@ -9,6 +9,31 @@ fn absolute_link(link: &Path, target: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
+fn resolve_missing(path: &Path) -> io::Result<PathBuf> {
+    let mut ancestor = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match fs::canonicalize(&ancestor) {
+            Ok(mut resolved) => {
+                for component in missing.iter().rev() { resolved.push(component); }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A dangling symlink is not a missing path component we can safely infer.
+                match fs::symlink_metadata(&ancestor) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+                    _ => return Err(error),
+                }
+                let Some(name) = ancestor.file_name() else { return Err(error); };
+                missing.push(name.to_os_string());
+                if !ancestor.pop() { return Err(error); }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(unix)]
 #[derive(Clone, Copy)]
 pub(crate) enum Repair<'a> {
     Launch(Option<&'a Path>),
@@ -28,10 +53,12 @@ pub(crate) fn repoint(link: &Path, target: &Path, home: &Path, repair: Repair<'_
     if resolved == target { return Ok(()); }
     let eligible = match repair {
         Repair::Launch(retired) => {
-            let recognizable = retired.is_some_and(|path| resolved == path)
-                || resolved == home.join(".corsia/scripts/corsia")
-                || resolved.ends_with("CORSIA.app/Contents/Resources/bin/corsia")
-                || resolved.ends_with("CORSIA.app/Contents/Resources/scripts/corsia");
+            let Ok(resolved_path) = resolve_missing(&resolved) else { return Ok(()); };
+            let same_as = |path: &Path| resolve_missing(path).is_ok_and(|known| known == resolved_path);
+            let recognizable = retired.is_some_and(same_as)
+                || same_as(&home.join(".corsia/scripts/corsia"))
+                || resolved_path.ends_with("CORSIA.app/Contents/Resources/bin/corsia")
+                || resolved_path.ends_with("CORSIA.app/Contents/Resources/scripts/corsia");
             recognizable && matches!(fs::metadata(&resolved), Err(error) if error.kind() == io::ErrorKind::NotFound)
         }
         Repair::Adoption(retired) => fs::metadata(&resolved).is_ok()

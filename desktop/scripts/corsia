@@ -9,7 +9,7 @@ while [ -L "$source_path" ]; do
 done
 resources="$(CDPATH= cd -- "$(dirname -- "$source_path")/.." && pwd -P)"
 case "${1:-status}" in
-  init|setup|bind-host|remote-address) ;;
+  init|setup|bind-host|remote-address|event|artifact|mcp) ;;
   *) exec "$resources/scripts/corsia" "$@" ;;
 esac
 export PATH="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"

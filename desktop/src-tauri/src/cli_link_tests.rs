@@ -90,6 +90,47 @@ fn adoption_handles_live_retired_links_and_launch_handles_dead_links() {
 }
 
 #[test]
+fn launch_repairs_a_relative_dead_checkout_link() {
+    let (_root, home, target) = setup();
+    let bin = home.join(".local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let link = bin.join("corsia");
+    symlink("../../.corsia/scripts/corsia", &link).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+    assert_eq!(fs::read_link(link).unwrap(), target);
+}
+
+#[test]
+fn launch_preserves_a_relative_link_redirected_by_a_symlinked_parent() {
+    let (root, home, target) = setup();
+    let foreign = root.path().join("foreign/nested");
+    fs::create_dir_all(foreign.join("bin")).unwrap();
+    symlink(&foreign, home.join(".local")).unwrap();
+    let link = home.join(".local/bin/corsia");
+    symlink("../../.corsia/scripts/corsia", &link).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+    assert_eq!(fs::read_link(link).unwrap(), std::path::PathBuf::from("../../.corsia/scripts/corsia"));
+}
+
+#[test]
+fn launch_preserves_a_link_with_an_unreadable_target_parent() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, home, target) = setup();
+    let blocked = home.join(".corsia");
+    fs::create_dir_all(&blocked).unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+    let link = root.path().join("corsia");
+    let old = blocked.join("scripts/corsia");
+    symlink(&old, &link).unwrap();
+    let access_error = fs::metadata(&old).unwrap_err().kind();
+    let result = repoint(&link, &target, &home, Repair::Launch(None));
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(access_error, std::io::ErrorKind::PermissionDenied);
+    result.unwrap();
+    assert_eq!(fs::read_link(link).unwrap(), old);
+}
+
+#[test]
 fn launch_repairs_a_dead_custom_checkout_only_if_recorded() {
     let (root, home, target) = setup();
     let source = root.path().join("custom-checkout/scripts/corsia");

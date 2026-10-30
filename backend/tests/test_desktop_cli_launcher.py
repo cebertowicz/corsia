@@ -34,8 +34,8 @@ def test_lifecycle_commands_forward_arguments_and_exit_code(launcher, args):
     assert result.stdout.splitlines() == ["lifecycle", *[f"<{arg}>" for arg in args]]
 
 
-@pytest.mark.parametrize("verb", ["init", "setup", "bind-host", "remote-address"])
-def test_bootstrap_commands_still_reach_python(launcher, verb):
+@pytest.mark.parametrize("verb", ["init", "setup", "bind-host", "remote-address", "event", "artifact", "mcp"])
+def test_python_commands_still_reach_python(launcher, verb):
     entry, resources = launcher
     result = subprocess.run([entry, verb], text=True, capture_output=True)
     assert result.returncode == 37
