@@ -127,7 +127,7 @@ async def test_a_phase_add_builds_every_step_from_the_definition(isolated_db, tm
         None,
     ]
     assert {(row["workflow_ref"], row["workflow_version"], row["size"], row["intent_node_id"]) for row in steps} == {
-        ("ship", phase["workflow_version"], "M", phase["id"]),
+        ("ship", phase["workflow_version"], "unknown", phase["id"]),
     }
     assert phase["workflow_version"] is not None
     assert run.rows(

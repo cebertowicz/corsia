@@ -110,7 +110,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             order_key=None, description=step.get("instruction"),
             workflow_ref=nested or phase.workflow_ref,
             workflow_version=step.get("version") if nested else phase.workflow_version,
-            workflow_step=step["id"], difficulty=difficulty, size=phase.size,
+            workflow_step=step["id"], difficulty=difficulty, size="unknown",
             checkpoint_exception=False, assignee=None, spawn_kind=None,
             watchdog_budget_seconds=None, follow_up_of=None, actor_id=None,
             provenance="plans.workflow_run", node_id=service._id(),
