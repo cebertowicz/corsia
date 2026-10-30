@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
+from typing import Any
 
 _VENDORS = ('claude-code', 'codex')
 _OWNER_STATES = ('owner-pinned', 'owner-active')
@@ -106,7 +107,7 @@ def migrate_166_to_167(conn: sqlite3.Connection) -> None:
             for key in ('email', 'plan'):
                 if isinstance(facts.get(key), str) and facts[key]:
                     hint = dict(hint, **{key: facts[key]})
-            saved = {'upgrade_reason': 'sign_in_to_keep_using_account'}
+            saved: dict[str, Any] = {'upgrade_reason': 'sign_in_to_keep_using_account'}
             if hint:
                 saved['hint'] = hint
             conn.execute(

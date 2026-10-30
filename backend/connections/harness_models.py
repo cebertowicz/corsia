@@ -24,6 +24,7 @@ from connections.harness_model_rows import (
     CLAUDE_SOURCE,
     CODEX_SOURCE,
     normalize_claude_models,
+    discovered_row_metadata,
     normalize_codex_models,
 )
 from connections.harness_model_rows import VERSION as _VERSION, _positive_int
@@ -214,16 +215,27 @@ def _retire_unlisted(
         )
 
 
-def retain_discovered_context(row: dict, previous: dict | None) -> dict:
-    """Keep exact-identity context evidence when this refresh could not re-observe it."""
-    result = dict(row)
-    if (result.get('context_window') is None and previous
-            and result.get('resolved_identity')
-            and result.get('resolved_identity') == previous.get('resolved_identity')):
-        result['context_window'] = previous.get('context_window')
-        if isinstance(previous.get('context_observation'), dict):
-            result['context_observation'] = previous['context_observation']
-    return result
+def _reject_collisions(connection, provider: str, current: dict) -> None:
+    """Refuse a selector whose model id or provider key already names another row."""
+    for selector in current:
+        model_id = f"{provider}/{selector}"
+        by_id = connection.execute(
+            "SELECT id,harness,provider,provider_model_id FROM models WHERE id = ?",
+            (model_id,),
+        ).fetchone()
+        by_key = connection.execute(
+            "SELECT id,harness,provider,provider_model_id FROM models "
+            "WHERE provider = ? AND provider_model_id = ?",
+            (provider, selector),
+        ).fetchone()
+        for existing in (by_id, by_key):
+            if existing and (
+                existing["id"] != model_id
+                or existing["harness"] != provider
+                or existing["provider"] != provider
+                or existing["provider_model_id"] != selector
+            ):
+                raise ValueError(f"harness model collision: {model_id}")
 
 
 def upsert_discovered_rows(
@@ -250,25 +262,7 @@ def upsert_discovered_rows(
         remove_legacy_fallback(provider, db=connection)
         prior_rows = _catalog_rows(provider, db=connection)
         prior = {str(row["provider_model_id"]): row for row in prior_rows}
-        for selector in current:
-            model_id = f"{provider}/{selector}"
-            by_id = connection.execute(
-                "SELECT id,harness,provider,provider_model_id FROM models WHERE id = ?",
-                (model_id,),
-            ).fetchone()
-            by_key = connection.execute(
-                "SELECT id,harness,provider,provider_model_id FROM models "
-                "WHERE provider = ? AND provider_model_id = ?",
-                (provider, selector),
-            ).fetchone()
-            for existing in (by_id, by_key):
-                if existing and (
-                    existing["id"] != model_id
-                    or existing["harness"] != provider
-                    or existing["provider"] != provider
-                    or existing["provider_model_id"] != selector
-                ):
-                    raise ValueError(f"harness model collision: {model_id}")
+        _reject_collisions(connection, provider, current)
 
         _retire_unlisted(connection, prior, current, timestamp, unlisted_errors or {})
 
@@ -276,46 +270,10 @@ def upsert_discovered_rows(
         for selector, (order, row) in current.items():
             model_id = f"{provider}/{selector}"
             old = prior.get(selector)
-            meta = _metadata(old) if old else {}
-            resolved_identity = str(row.get("resolved_identity") or "")
-            same_resolved_identity = bool(
-                old
-                and resolved_identity
-                and str(meta.get("resolved_identity") or "")
-                == resolved_identity
-            )
-            if not same_resolved_identity:
-                meta.pop("context_observation", None)
-            meta.pop("reference_only", None)
-            meta.pop("availability_reason", None)
-            alias_of = row.get("alias_of")
-            # An accepted-but-unlisted selector keeps running for whatever is
-            # pinned to it; the picker offers only the listed name it aliases.
-            if alias_of:
-                meta["alias_of"] = f"{provider}/{alias_of}"
-            else:
-                meta.pop("alias_of", None)
-            meta.update({
-                "resolved_identity": row.get("resolved_identity"),
-                "discovered_capabilities": row.get("capabilities") or {},
-                "is_default": bool(row.get("is_default")),
-                "harness_version": harness_version,
-                "discovery_order": order,
-            })
-            previous_context = ({'resolved_identity': _metadata(old).get('resolved_identity'),
-                                 'context_window': old.get('context_window'),
-                                 'context_observation': _metadata(old).get('context_observation')}
-                                if old else None)
-            row = retain_discovered_context(row, previous_context)
-            observation = row.get("context_observation")
-            if isinstance(observation, dict):
-                meta["context_observation"] = observation
+            meta, row = discovered_row_metadata(
+                provider, selector, order, row, old, _metadata(old) if old else {}, harness_version)
             context_window = row.get("context_window")
             available = row.get("available") is True
-            if not available:
-                meta["availability_reason"] = (
-                    row.get("availability_reason") or "discovered_model_unavailable"
-                )
             capabilities = row.get("capabilities") or {}
             supports_vision = "image" in (capabilities.get("input_modalities") or [])
             supports_reasoning = bool(
@@ -513,9 +471,9 @@ async def refresh_provider(
         from connections.vendor_accounts import list_accounts
 
         accounts = await _db_call(list_accounts, provider=provider, db=db)
-        results = [await refresh_provider(provider, reason=reason, harness_version=harness_version,
-                                          db=db, binary=binary, account_id=account['id'])
-                   for account in accounts if account['state'] == 'signed_in']
+        results = [cast(AccountRefreshResult, await refresh_provider(
+            provider, reason=reason, harness_version=harness_version, db=db, binary=binary,
+            account_id=account['id'])) for account in accounts if account['state'] == 'signed_in']
         ready = any(result.status == 'ready' for result in results)
         error = None if ready else (next((result.source_error or result.cause for result in results
                                      if result.source_error or result.cause), None)

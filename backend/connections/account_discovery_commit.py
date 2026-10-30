@@ -65,7 +65,7 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
     with write_transaction(db, scope='account_discovery_bundle') as connection:
         if not receipt_is_current(receipt, db=connection):
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
-        from connections.harness_models import retain_discovered_context
+        from connections.harness_model_rows import retain_discovered_context
 
         account = get_account(context.account_id, db=connection)
         prior = ((account.get('discovery') or {}).get('discovery') or {}).get('models') or {}
