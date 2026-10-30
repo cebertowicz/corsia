@@ -715,14 +715,8 @@ impl Launchd for SystemLaunchd {
     }
 
     fn bootout(&mut self) -> Result<(), String> {
-        let status = Command::new("/bin/launchctl")
-            .args(["bootout", &Self::target()])
-            .status()
-            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
-        if !status.success() {
-            log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
-        }
-        Ok(())
+        release_proof::launchctl_bootout(Path::new("/bin/launchctl"), &Self::target())
+            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))
     }
 
     fn bootstrap(&mut self) -> Result<(), String> {
@@ -799,8 +793,16 @@ impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
     }
 
     /// Wait until `check` passes, or say why it never did.
-    fn wait_for(&mut self, mut check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
-        let deadline = Instant::now() + self.timeout;
+    fn wait_for(&mut self, check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        self.wait_within(self.timeout, check)
+    }
+
+    fn wait_within(
+        &mut self,
+        timeout: Duration,
+        mut check: impl FnMut(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
         loop {
             match check(self) {
                 Ok(()) => return Ok(()),
@@ -828,7 +830,9 @@ impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
             } else {
                 progress(None);
                 self.launchd.bootout()?;
-                return self.wait_for(Self::released);
+                // A plain bootout returns at once and launchd lists the job until its process
+                // has exited, which a source job's `ExitTimeOut` allows 120 s for.
+                return self.wait_within(release_proof::BOOTOUT_TIMEOUT, Self::released);
             }
         }
         // Whatever stopped it, and even when launchd never ran it, a backend still holding a

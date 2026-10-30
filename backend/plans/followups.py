@@ -40,6 +40,7 @@ def add_follow_up(
     spawn_kind: str | None = None,
     intent: str | None = None,
     intent_words: list[dict[str, str]] | None = None,
+    same_step: bool = False,
     db=None,
 ):
     """Create one DOD-bearing task linked to a follow-up chain.
@@ -47,7 +48,8 @@ def add_follow_up(
     Reached by ``accept_with_follow_up``, which has already settled the
     source; as a standalone non-blocking sidetrack that leaves the source
     exactly where it was; and by a rejection, whose revision carries the
-    source's description and delegation kind. Only the standalone boundary
+    source's description and delegation kind and, with ``same_step``, stays
+    the workflow step the source was. Only the standalone boundary
     path supplies ``expected_revision``, because only it owes concurrency
     evidence. The chain has no depth limit, and every follow-up keeps its
     ``follow_up_of`` link, so an initiative's lineage stays whole (C2).
@@ -57,14 +59,16 @@ def add_follow_up(
         service.require_live_node(source)
         if expected_revision is not None:
             errors.require_node_revision(source, expected_revision)
+        from plans import workflow_fields
+
         follow_up_id = service._id()
+        step = workflow_fields.same_step_fields(connection, source) if same_step else workflow_fields.NOT_A_STEP
         follow_up = service._create_node(
             connection, source["plan_id"], kind="task", title=title,
             acceptance_criteria=acceptance_criteria,
             parent_id=_unsettled_parent(connection, source["parent_id"]),
             order_key=None, description=description,
-            workflow_ref=None, workflow_version=None, workflow_step=None,
-            difficulty=None, size=size, intent=intent,
+            size=size, intent=intent, **step,
             intent_node_id=(None if intent is not None else _canonical_intent(connection, source["id"])),
             checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=spawn_kind,
