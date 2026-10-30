@@ -8,10 +8,9 @@ from typing import Any
 
 from loguru import logger
 
-from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from registry import models, registration_events, registration_writer
+from registry import file_identity_reads, models, registration_events, registration_writer
 from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
@@ -126,18 +125,13 @@ def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, An
         return None
     _db = db or get_db()
     try:
-        return models.find_identity_by_external_ids(
-            "workspace",
-            identity.artifact_type,
-            (identity.external_id, identity.canonical),
-            db=_db,
-        )
+        return file_identity_reads.find_workspace(identity, db=_db)
     finally:
         if not db:
             _db.close()
 
 
-def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
+def resolve_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
     """Resolve an active file owner from a physical path.
 
     Workspace paths prefer their relocatable logical identity and retain the
@@ -150,18 +144,20 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
         return None
     _db = db or get_db()
     try:
-        for candidate in dict.fromkeys((identity.external_id, identity.canonical)):
-            artifact = models.resolve(
-                "workspace",
-                identity.artifact_type,
-                candidate,
-                db=_db,
-            )
-            if artifact is not None:
-                return artifact
-        if uploads_root_for_path(identity.canonical) is None:
-            return None
-        return registration_events.resolve_upload_path(identity.canonical, db=_db)
+        return file_identity_reads.resolve_active(identity, db=_db)
+    finally:
+        if not db:
+            _db.close()
+
+
+def inspect_file_identity(abs_path: str | FileIdentity, *, db=None) -> tuple[dict[str, Any] | None, bool]:
+    """Return the active owner and whether a routed identity exists in any state."""
+    identity = prepare_file_identity(abs_path, db=db)
+    if identity is None:
+        return None, False
+    _db = db or get_db()
+    try:
+        return file_identity_reads.inspect(identity, db=_db)
     finally:
         if not db:
             _db.close()

@@ -656,6 +656,7 @@ service_restart() {
     require_owned_service_definition || return 1
     if ! service_is_loaded; then
         require_no_unmanaged_backend "$port" || return 1
+        _corsia_update_stopping=1
         if [ -n "$after_teardown" ] && ! "$after_teardown"; then
             fail "Release activation failed before service definition installation"
             return 1
@@ -698,6 +699,7 @@ service_restart() {
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service restart" "$port" \
             || warn "Drain did not complete; restarting anyway"
     fi
+    _corsia_update_stopping=1
     if bootout_service_and_wait "$domain" "$label"; then
         :
     else

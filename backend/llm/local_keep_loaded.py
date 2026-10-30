@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 
-from infra.host_resources import load_verdict, model_room_bytes, pin_fits, pin_room_bytes
+from infra.host_resources import GIB, load_verdict, memory_reading, model_room_bytes, not_loaded_line, pin_fits, pin_room_bytes
 from llm.local_model_load import seat_lock
 from infra.product_events import emit_product_event
 from llm.local_model import LocalModel
@@ -92,6 +92,17 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
         download["will_pin"] = pin_fits(int(size), _pinned_bytes(rows), pin_room_bytes())
 
 
+def _log_no_room(size_bytes: float | None, others: list[int | None], room: int) -> None:
+    """Name the verdict's inputs, so a refusal on a machine that looked free can be explained."""
+    log.warning(
+        "Not loading the downloaded local model now: not enough free memory "
+        "(needs %s, room %.1f GiB, beside it %s; %s)",
+        f"{size_bytes / GIB:.1f} GiB" if size_bytes else "an unreported size", room / GIB,
+        [f"{s / GIB:.1f} GiB" if s else "unreported" for s in others] or "nothing",
+        memory_reading(),
+    )
+
+
 async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
     """Load again, in order, each model that was loaded before oMLX exited and fits now.
 
@@ -107,9 +118,15 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
             await keep_loaded(server_id, model, pin_if_fits=False)
 
 
+def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: list[dict]) -> dict:
+    return {"status": "refused", "verdict": verdict,
+            "line": not_loaded_line(int(size), room) if size and pinned else None,
+            "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
+
+
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
-) -> None:
+) -> dict:
     """Pin a completed download, then load it when it fits now.
 
     Setup uses ``force_pin`` for its one managed model. Settings downloads retain
@@ -136,11 +153,9 @@ async def keep_loaded(
     if row is None:
         log.warning("Not keeping the downloaded local model loaded: oMLX's model list couldn't be read")
         _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNKNOWN  # a reload was not downloaded
-        return
+        return {"status": "failed", "detail": "oMLX model list unavailable"}
     size = row.get("estimated_size")
-    size_bytes: float | None = (
-        float(size) if isinstance(size, (int, float)) and size > 0 else None
-    )
+    size_bytes: float | None = float(size) if isinstance(size, (int, float)) and size > 0 else None
     pinned = force_pin or (
         pin_if_fits
         and size_bytes is not None
@@ -152,7 +167,7 @@ async def keep_loaded(
             log.warning("oMLX did not confirm the downloaded local model as pinned")
             emit("pin", pin.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
-            return
+            return {"status": "failed", "detail": pin.get("message") or "Pin did not persist"}
         emit("pin")
     not_loaded = NOT_LOADED if pinned or row.get("pinned") else NOT_LOADED_UNPINNED
     step = "memory check"
@@ -164,18 +179,20 @@ async def keep_loaded(
             if loaded is None:
                 raise RuntimeError("oMLX loaded status unavailable")
             if any(item["identifier"] == model.model for item in loaded):
-                return
+                return {"status": "loaded"}
             others = [int(item.get("size_bytes") or 0) or None for item in loaded]
-            if load_verdict(int(size_bytes) if size_bytes else None, others, model_room_bytes()) != "fits_now":
-                log.warning("Not loading the downloaded local model now: not enough free memory")
-                return
+            room = model_room_bytes()
+            verdict = load_verdict(int(size_bytes) if size_bytes else None, others, room)
+            if verdict != "fits_now":
+                _log_no_room(size_bytes, others, room)
+                return _refusal(verdict, size_bytes, room, bool(pinned or row.get("pinned")), loaded)
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model")
                 emit("load.failed", result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
-                return
+                return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
@@ -185,3 +202,5 @@ async def keep_loaded(
         if step != "catalog refresh":
             emit("load.failed", f"{step} failed: {type(exc).__name__}")
             _FAILED[key] = not_loaded
+            return {"status": "failed", "exception": exc}
+    return {"status": "loaded"}

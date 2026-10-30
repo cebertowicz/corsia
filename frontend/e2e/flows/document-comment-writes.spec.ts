@@ -35,7 +35,7 @@ async function seedCommentedDocument({ page, request }: { page: Page; request: A
 			} }, splitWidth: 420,
 		}));
 	}, { threadId, docPath, title });
-	return { title, commentUrl, commentId };
+	return { title, commentUrl, commentId, artifactId, threadId };
 }
 
 test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request }, testInfo) => {
@@ -95,6 +95,46 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await expect(comment).toContainText('Agreed');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await saveEvidenceScreenshot(page, testInfo, 'document-comment-persisted', { fullPage: false });
+});
+
+test('@flow:resolved-reply a person can reply to an agent on a resolved thread', async ({ page, request }, testInfo) => {
+	const mobile = testInfo.project.name.includes('mobile');
+	await page.setViewportSize({ width: mobile ? 393 : 1440, height: mobile ? 852 : 900 });
+	await page.emulateMedia({ colorScheme: 'light' });
+	const { title, commentUrl, commentId, threadId } = await seedCommentedDocument({ page, request });
+	const params = { token: TEST_TOKEN };
+	let result = await request.post('/api/delegation/docs/comments', { params, data: { as_session_id: threadId, parent_id: commentId, body: 'Agent reply before resolution' } });
+	expect(result.ok(), await result.text()).toBeTruthy();
+	result = await request.patch(`/api/delegation/docs/comments/${commentId}`, { params, data: { as_session_id: threadId, resolved: true } });
+	expect(result.ok(), await result.text()).toBeTruthy();
+	await loginByUrl(page);
+	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await page.getByText(title, { exact: true }).first().click();
+	await page.getByRole('button', { name: /^0 open threads\b/ }).click();
+	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
+	await drawer.getByRole('button', { name: /Filter comments:/ }).click();
+	await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
+	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
+	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
+	await expect(resolved).toContainText('Agent reply before resolution');
+	const input = resolved.getByRole('textbox', { name: 'Reply' });
+	await expect(input).toBeVisible();
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-open', { fullPage: false });
+	await input.click(); await page.keyboard.type('Hello');
+	await expect(input).toBeFocused();
+	await input.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(2, 2));
+	await page.keyboard.type('X');
+	await expect(input).toHaveValue('HeXllo'); await expect(input).toBeFocused();
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-typing', { fullPage: false });
+	await resolved.getByRole('button', { name: 'Send reply' }).click();
+	await expect(resolved).toContainText('HeXllo');
+	await expect(resolved.getByRole('button', { name: 'Re-open', exact: true })).toBeVisible();
+	await expect.poll(async () => {
+		const response = await request.get(commentUrl);
+		const rows = (await response.json()).comments;
+		return rows.find((row: { id: string }) => row.id === commentId);
+	}).toMatchObject({ resolved: 1, replies: [expect.objectContaining({ body: 'Agent reply before resolution' }), expect.objectContaining({ body: 'HeXllo', author_kind: 'user' })] });
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-sent', { fullPage: false });
 });
 
 test('@flow:document-comment-highlight a resolved comment loses its highlight, shows it again only while picked in the drawer, and re-opening restores it', async ({ page, request }, testInfo) => {

@@ -119,6 +119,14 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
+		case 'update_refused':
+			return {
+				title: "Update didn't finish",
+				headline: "Update didn't finish",
+				body: parseDetail(failure.detail).backend_healthy === true ? KEPT_VERSION : '',
+				toastLine: null,
+				retryLabel: 'Retry',
+			};
 		case 'launch_failed':
 			return {
 				title: "Update didn't finish",

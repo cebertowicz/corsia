@@ -55,6 +55,8 @@ export interface ModelSource {
 	local_state?: string;
 	setup_error_code?: string;
 	setup_error_reference?: string;
+	/** The catalog's local load refusal, when available. */
+	detail?: string | null;
 	bytes_to_free?: number;
 	/** CORSIA's own local service exists, online or offline. */
 	corsia_omlx?: boolean;
@@ -140,14 +142,19 @@ export type LocalModelRecommendation = {
 	repository: string;
 	download_size_gb: number;
 	context_window: number;
-	/** Structured oMLX recommender facts; display wording belongs to localModelRecommendationMeta. */
+	/** Structured oMLX recommender facts. */
 	quantization_bits?: number;
 	relative_speed?: number;
 	/** oMLX's quality estimate, 0.5 to 5 dots, and its estimated decode speed. */
 	smarts_level?: number;
 	tokens_per_second?: number;
-	/** Whether the model fits the memory free for a model now. */
-	fits_now?: boolean;
+	/** Whether this exact build is already on this computer. */
+	on_disk?: boolean;
+	/** oMLX's raw quality estimate and section for ordering and attribution. */
+	smarts?: number;
+	section?: string;
+	table_on_ssd?: boolean;
+	table_bytes?: number;
 	/** Memory oMLX says the model needs once loaded; absent when oMLX gives none. */
 	resident_bytes?: number;
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
@@ -158,15 +165,13 @@ export type LocalModelDownload = { repository: string; model: string; status?: '
 export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
-	/** Setup's pick (the recommended row) first, then fits-now models, then the rest, each by quality then speed. */
+	/** Recommendations annotated with this computer's fit and disk state. */
 	models?: LocalModelRecommendation[];
-	/** Durable Settings download records for the add-model sheet. */
-	downloads?: LocalModelDownload[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
-	/** Memory a model may take now: free memory less the load reserve, the room setup's pick uses. */
-	memory_room_gb?: number;
-	/** The row setup would pick now, by the same fit rule; null when the list has none. */
+	/** Memory occupied by currently loaded models. */
+	memory_in_use_gb?: number;
+	/** The first eligible build from oMLX's best list, if any. */
 	recommended_repository?: string | null;
 	disk_free_gb?: number;
 };
@@ -197,7 +202,7 @@ export async function startLocalModelDownload(t: string, repository: string): Pr
 		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ repository }),
 	});
-	if (!response.ok) throw await localRouteError(response, "Couldn't start the download. Try again.");
+	if (!response.ok) throw await localRouteError(response, 'Couldn’t start the download. Try again.');
 }
 
 /** Delete a completed Settings-selected local model download. */

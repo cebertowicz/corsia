@@ -1,4 +1,4 @@
-"""Immutable raw-CDN retrieval and search helpers for library skill items."""
+"""Verified raw-CDN retrieval and search helpers for library items."""
 
 from __future__ import annotations
 
@@ -16,13 +16,18 @@ class LibraryItemError(RuntimeError):
 
 
 class LibraryIntegrityError(LibraryItemError):
-    """An immutable item file did not match its declared digest."""
+    """An item file did not match its declared digest."""
+
+
+class LibraryMainChangedError(LibraryIntegrityError):
+    """A library-owned file no longer matches the fetched index."""
 
 
 class LibraryItemUnavailableError(LibraryItemError):
-    """A pinned raw item file could not be retrieved."""
+    """A raw item file could not be retrieved."""
 
 
+LIBRARY_REPOSITORY = "cebertowicz/corsia-library"
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -74,10 +79,11 @@ def search_items(skills: tuple[dict[str, Any], ...], query: str, *, limit: int =
 def fetch_bundle(
     item: dict[str, Any], *, fetch: Callable[[str], bytes] | None = None,
 ) -> dict[str, bytes]:
-    """Fetch every item file from its immutable raw commit and verify before writing."""
+    """Fetch every item file and verify its digest before writing."""
     source = item["source"]
     repository, commit, base = source["repository"], source["commit"], source["path"]
-    if not REPOSITORY.fullmatch(repository) or not COMMIT.fullmatch(commit):
+    own_item = repository == LIBRARY_REPOSITORY and commit == "main"
+    if not REPOSITORY.fullmatch(repository) or not (COMMIT.fullmatch(commit) or own_item):
         raise LibraryItemError("invalid library item source")
     validate_relative_path(base)
     getter = fetch or _fetch_raw
@@ -89,16 +95,21 @@ def fetch_bundle(
         try:
             data = getter(url)
         except (OSError, TimeoutError) as error:
-            raise LibraryItemUnavailableError(f"could not retrieve {relative} from its reviewed commit") from error
+            raise LibraryItemUnavailableError(f"could not retrieve {relative} from its source") from error
         expected = file_row["sha256"].removeprefix("sha256:").casefold()
         if hashlib.sha256(data).hexdigest() != expected:
+            if own_item:
+                raise LibraryMainChangedError(
+                    f"{relative} may have changed moments ago; try once more in a few minutes, "
+                    "and if it fails again, report it to the conductor"
+                )
             raise LibraryIntegrityError(f"integrity check failed for {relative}")
         bundle[relative] = data
     return bundle
 
 
 def _raw_url(repository: str, commit: str, base: str, relative: str) -> str:
-    """Build the only item fetch route: raw CDN at an immutable commit."""
+    """Build the raw-CDN item fetch route at the validated ref."""
     segments = [segment for value in (base, relative) for segment in value.split("/")]
     path = "/".join(quote(segment, safe="._-") for segment in segments)
     return f"https://raw.githubusercontent.com/{repository}/{commit}/{path}"

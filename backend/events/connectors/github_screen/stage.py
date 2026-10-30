@@ -22,7 +22,7 @@ def github_read(path: str, *, accept: str | None = None) -> str:
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode:
         detail = result.stderr.strip()[:1000]
-        raise RuntimeError(f"GitHub read failed: {detail}" if detail else "GitHub read failed")
+        raise RuntimeError(f"GitHub read of {path} failed: {detail}" if detail else f"GitHub read of {path} failed")
     return result.stdout
 
 

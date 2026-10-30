@@ -342,7 +342,11 @@ struct Journal {
 }
 
 fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
-    let raw = match fs::read_to_string(journal_path(plan)) {
+    read_journal_for_app(&plan.app_dir)
+}
+
+fn read_journal_for_app(app_dir: &Path) -> Result<Option<Journal>, String> {
+    let raw = match fs::read_to_string(app_dir.join("adopted").join(JOURNAL)) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io(error)),
@@ -1026,17 +1030,17 @@ fn restore_files(plan: &Plan) -> Result<(), String> {
     Ok(())
 }
 
+/// The checkout named by a completed takeover is the only live source CLI
+/// that the app may replace in an existing PATH link.
+pub fn retired_cli(app_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(journal) = read_journal_for_app(app_dir)? else { return Ok(None); };
+    Ok((journal.step == Step::Registered).then_some(journal.source.cli))
+}
+
 /// Recover an interrupted adoption before first-run selection. A possible app
 /// start is always stopped and restored before the source service starts.
 pub fn interrupted_plan(app_dir: &Path) -> Result<Option<Plan>, String> {
-    let path = app_dir.join("adopted").join(JOURNAL);
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(io(error)),
-    };
-    let journal: Journal = serde_json::from_str(&raw)
-        .map_err(|error| format!("adoption journal is unreadable: {error}"))?;
+    let Some(journal) = read_journal_for_app(app_dir)? else { return Ok(None); };
     if journal.step == Step::Registered {
         Ok(None)
     } else {
@@ -1429,6 +1433,19 @@ mod tests {
 
     fn journal_step(plan: &Plan) -> Option<Step> {
         read_journal(plan).unwrap().map(|journal| journal.step)
+    }
+
+    #[test]
+    fn only_completed_adoption_identifies_a_retired_cli() {
+        let (_home, plan) = plan(false);
+        assert_eq!(retired_cli(&plan.app_dir).unwrap(), None);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        for step in [Step::Stopping, Step::ServiceWritten, Step::Reverted] {
+            write_journal(&plan, step, None).unwrap();
+            assert_eq!(retired_cli(&plan.app_dir).unwrap(), None);
+        }
+        write_journal(&plan, Step::Registered, None).unwrap();
+        assert_eq!(retired_cli(&plan.app_dir).unwrap(), Some(plan.source.cli.clone()));
     }
 
     /// The journal and the moved plist a crash at `step` leaves behind.

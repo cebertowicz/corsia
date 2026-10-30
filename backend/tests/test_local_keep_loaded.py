@@ -124,15 +124,74 @@ async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(calls) -> None:
+async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(calls, monkeypatch, caplog) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
+    monkeypatch.setattr(local_keep_loaded, "memory_reading", lambda: "available 8.0 of 32.0 GiB")
 
-    await local_keep_loaded.keep_loaded("server", MODEL)
+    with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
+        outcome = await local_keep_loaded.keep_loaded("server", MODEL)
 
+    assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None, "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
     assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == []
     # The row derives "Not loaded: needs N GB, M GB free for a model now"; the backend writes no second line.
     assert local_keep_loaded.failures("server") == {}
+    # The log carries the verdict's inputs, so a refusal on a machine that looked free can be explained.
+    assert ("(needs 10.0 GiB, room 4.0 GiB, beside it nothing; available 8.0 of 32.0 GiB)"
+            in caplog.text)
+
+
+def test_the_memory_reading_names_available_total_reserve_and_pages(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import psutil
+
+    from infra.host_resources import memory_reading
+
+    vm = SimpleNamespace(available=10 * GIB, total=32 * GIB, free=2 * GIB, inactive=8 * GIB, active=20 * GIB)
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: vm)
+
+    # A field this platform's psutil lacks (here ``wired``) is left out rather than guessed.
+    assert memory_reading() == ("available 10.0 of 32.0 GiB, reserve 4.0 GiB "
+                                "(free 2.0, inactive 8.0, active 20.0)")
+
+
+@pytest.mark.asyncio
+async def test_known_neighbour_refuses_with_catalog_line_and_no_room(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    async def loaded(_cfg):
+        return [{"identifier": "other", "size_bytes": 8 * GIB}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+    assert outcome == {"status": "refused", "verdict": "no_room", "neighbour_id": "other",
+                       "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
+    assert calls["loads"] == []
+
+
+@pytest.mark.asyncio
+async def test_multiple_neighbours_use_generic_refusal(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    async def loaded(_cfg):
+        return [{"identifier": "one", "size_bytes": 8 * GIB}, {"identifier": "two", "size_bytes": 8 * GIB}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+    assert outcome["verdict"] == "no_room" and outcome["neighbour_id"] is None
+    assert calls["loads"] == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_neighbour_refuses_without_catalog_line(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    async def loaded(_cfg):
+        return [{"identifier": "other", "size_bytes": None}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"status": "refused", "verdict": "no_room", "neighbour_id": "other", "line": None}
+    assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
 
 
 @pytest.mark.asyncio
@@ -140,7 +199,8 @@ async def test_a_load_oMLX_refuses_says_so_on_the_row(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["load"] = {"ok": False}
 
-    await local_keep_loaded.keep_loaded("server", MODEL)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL)
+    assert outcome == {"status": "failed", "detail": "Load failed"}
 
     # The row is pinned, so its switch is already on: the line names the retry from that state.
     assert local_keep_loaded.failures("server") == {
@@ -150,6 +210,30 @@ async def test_a_load_oMLX_refuses_says_so_on_the_row(calls) -> None:
         ("model.pin", True, None),
         ("model.load.failed", True, "Load failed"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_early_pin_exception_propagates_for_setup(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+
+    async def fail_pin(*_args):
+        raise RuntimeError("private pin detail")
+
+    monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", fail_pin)
+    with pytest.raises(RuntimeError, match="private pin detail"):
+        await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_preserves_existing_load_event(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["load"] = {"ok": False, "message": "private upstream detail"}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"status": "failed", "detail": "private upstream detail"}
+    assert calls["events"][-1][1]["error"] == "private upstream detail"
+    assert local_keep_loaded.failures("server")["new-model"] == local_keep_loaded.NOT_LOADED
 
 
 @pytest.mark.asyncio

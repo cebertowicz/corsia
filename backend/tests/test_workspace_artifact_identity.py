@@ -36,6 +36,47 @@ def identity_scope(isolated_db, tmp_path, monkeypatch):
     return workspace, repository, thread_id, db
 
 
+def test_inspect_identity_preserves_workspace_contract_and_active_precedence(identity_scope):
+    from registry import models, service
+
+    workspace, _repository, thread_id, db = identity_scope
+    path = workspace / "identity.md"
+    prepared = service.prepare_file_identity(str(path), db=db)
+    for artifact_id, external_id in (("logical", prepared.external_id), ("legacy", prepared.canonical)):
+        seed_artifact(db, artifact_id=artifact_id, integration="workspace", type="document",
+                      external_id=external_id, parent_thread_id=thread_id, path=prepared.canonical)
+    db.commit()
+    active, exists = service.inspect_file_identity(prepared, db=db)
+    assert exists and active["id"] == "logical"
+    assert service.resolve_file_identity(prepared, db=db)["id"] == "logical"
+    models.retire("logical", db=db)
+    active, exists = service.inspect_file_identity(prepared, db=db)
+    assert exists and active["id"] == "legacy"
+    assert service.find_file_identity(prepared, db=db)["id"] == "logical"
+    models.retire("legacy", tombstone=True, db=db)
+    before = db.total_changes
+    assert service.inspect_file_identity(prepared, db=db) == (None, True)
+    assert service.resolve_file_identity(prepared, db=db) is None
+    assert service.find_file_identity(prepared, db=db)["id"] == "logical"
+    assert db.total_changes == before
+    assert service.inspect_file_identity(str(workspace / "missing.md"), db=db) == (None, False)
+    assert db.total_changes == before
+
+
+def test_inspect_active_owner_skips_any_state_reads(identity_scope, monkeypatch):
+    from registry import file_identity_reads, service
+
+    workspace, _repository, thread_id, db = identity_scope
+    path = workspace / "active.md"
+    artifact = service.register_write_strict(thread_id, str(path), db=db)
+    before = db.total_changes
+    monkeypatch.setattr(file_identity_reads, "find_workspace", lambda *_a, **_k: pytest.fail("raw lookup on active hit"))
+    active, exists = service.inspect_file_identity(str(path), db=db)
+    assert exists and active["id"] == artifact["id"]
+    assert service.resolve_file_identity(str(workspace / "missing.md"), db=db) is None
+    assert db.total_changes == before
+
+
 def test_workspace_write_uses_logical_identity_and_physical_path(identity_scope):
     from registry import service
 

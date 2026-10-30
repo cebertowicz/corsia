@@ -213,7 +213,7 @@
 	connectionStatusId={connectionDescriptionId} />
 <span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 {#if readonly && ready}
-	<div class="readonly-note">Read-only. CORSIA manages this file.</div>
+	<div class="readonly-note">Read-only.</div>
 {/if}
 <!-- Delivery controls above remain mounted with the document identity so they never force a second header row. -->
 </header>

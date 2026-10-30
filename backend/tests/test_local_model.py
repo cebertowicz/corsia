@@ -94,6 +94,18 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
     assert mac.omlx.asks() == 1 and mac.downloads == [] and mac.omlx.puts() == []
 
 
+def test_get_started_keeps_failure_when_fake_load_fails(monkeypatch):
+    mac = _mac(monkeypatch, 32)
+    mac.keep_outcome = {"status": "failed", "detail": "fake load failed"}
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    asyncio.run(_prepared())
+
+    result = asyncio.run(_flown())
+
+    assert not result["ok"] and result["cause"] == "load_failed"
+    assert local_setup.setup_status()["state"] == "start_failed"
+
+
 @pytest.mark.parametrize("gib", FITTING)
 def test_get_started_downloads_the_pick_and_every_reader_sees_that_model(monkeypatch, gib):
     mac = _mac(monkeypatch, gib)
@@ -143,6 +155,7 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
         "context_window": row["max_context"], "quantization_bits": row["level"],
         "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
         "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
+        "smarts": row["smarts"],
     }
     restored = local_model.from_recommendation(local_model.to_record(model))
     assert restored == model and restored.view() == model.view()

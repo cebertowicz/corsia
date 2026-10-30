@@ -3,11 +3,14 @@
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from library.pack_digest import pack_digest
 from tests.event_routing_helpers import mk_session
 
 
-def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
+@pytest.mark.parametrize("own", [False, True])
+def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch, own):
     from infra import config
     from infra.database import get_db
     from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
@@ -18,7 +21,7 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
     profile = workspace / PROFILE_RELATIVE_PATH
     profile.parent.mkdir(parents=True, exist_ok=True)
     profile.write_text(f"{USE_COMMUNITY_LABEL} Yes\n")
-    project_root = workspace / "projects" / "blueprint-journey"
+    project_root = workspace / "projects" / ("blueprint-own" if own else "blueprint-journey")
     project_root.mkdir(parents=True)
     db = get_db()
     try:
@@ -48,10 +51,17 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
              "source": {"repository": "example/library", "path": "skills/helper", "commit": "a" * 40},
              "files": [{"path": "SKILL.md", "sha256": hashlib.sha256(skill_content).hexdigest()}],
              "withdrawn": False, "withdrawn_reason": None}
+    if own:
+        row.update(source="library", url="packs/demo/")
+        skill.update(source="library", url="skills/helper/SKILL.md")
     connector = {"kind": "pack", "pack_kind": "connector", "name": "connector"}
     catalog = {"skills": [row, skill, connector, {"kind": "future"}]}
     monkeypatch.setattr(index, "_fetch_index", lambda: catalog)
-    monkeypatch.setattr(items, "_fetch_raw", lambda url: skill_content if "/skills/helper/" in url else files[url.split("/packs/demo/", 1)[1]])
+    urls = []
+    def fetch(url):
+        urls.append(url)
+        return skill_content if "/skills/helper/" in url else files[url.split("/packs/demo/", 1)[1]]
+    monkeypatch.setattr(items, "_fetch_raw", fetch)
 
     thread = {"project_id": "blueprint-project"}
     search = skill_library._execute("search", owner, thread, "project blueprint", None, False)
@@ -62,8 +72,18 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
     assert skill_library._execute("fetch_pack", owner, thread, None, "connector", False)["error"] == "not_in_library"
     denied = skill_library._execute("fetch_pack", worker, thread, None, "demo", False)
     assert denied["error"] == "not_conductor"
+    if own:
+        monkeypatch.setattr(items, "_fetch_raw", lambda _url: b"changed")
+        failed = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
+        assert failed["error"] == "integrity"
+        assert "changed moments ago" in failed["message"] and "report it to the conductor" in failed["message"]
+        assert not (project_root / ".threads" / owner / "packs" / "demo").exists()
+        monkeypatch.setattr(items, "_fetch_raw", fetch)
     result = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
     assert result["outcome"] == "fetched"
+    if own:
+        assert "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/skills/helper/SKILL.md" in urls
+        assert "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/packs/demo/manifest.yaml" in urls
     assert skill_library._execute("search", owner, thread, "demo", None, False)["results"][0]["state"] == "fetched"
     assert skill_library._execute("search", worker, thread, "demo", None, False)["results"][0]["state"] == "not_fetched"
     folder = project_root / ".threads" / owner / "packs" / "demo" / "1.0.0"

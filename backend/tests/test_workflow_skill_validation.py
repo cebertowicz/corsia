@@ -35,6 +35,10 @@ def _validate(steps: str):
             "      - id: build\n        quality: malformed\n",
             "quality must be a list of mappings",
         ),
+        (
+            "      - id: build\n        instruction: Drafting\n",
+            "instruction must be a SKILL.md heading",
+        ),
     ],
 )
 def test_workflow_steps_refuse_uncheckable_or_unresolvable_metadata(steps, message):
@@ -70,7 +74,7 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
     ]
     assert "Applying these steps" in decision.body
     for contract in (
-        "skipped: <step id>, <reason>",
+        "close_node",
         "workflow_ref",
         "workflow_step",
         "+<short-name>",

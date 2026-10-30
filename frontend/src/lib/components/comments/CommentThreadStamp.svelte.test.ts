@@ -256,6 +256,25 @@ describe('CommentThread stamping', () => {
 		warn.mockRestore();
 	});
 
+	it('stamps the earlier reply while a later reply is still dwelling', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		render(onViewed);
+		vi.useFakeTimers();
+		try {
+			const observers = FakeObserver.live();
+			observers[0].report(true);
+			vi.advanceTimersByTime(100);
+			observers[1].report(true);
+			vi.advanceTimersByTime(1401);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+			vi.advanceTimersByTime(100);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('stamps both visible unread replies together and keeps the collapse point stable', async () => {
 		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
 		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.

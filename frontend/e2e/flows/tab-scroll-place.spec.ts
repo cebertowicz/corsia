@@ -29,7 +29,7 @@ const link = (page: Page) => page.locator('.cm-md-link-open', { hasText: 'the se
 
 async function selectTab(page: Page, title: string, touch: boolean): Promise<void> {
 	if (touch) {
-		await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+		await page.getByRole('button', { name: /Files \(2\)/ }).click();
 		await page.getByRole('dialog', { name: 'Open side panel items' })
 			.getByRole('button', { name: title, exact: true }).click();
 		return;
@@ -245,7 +245,7 @@ for (const width of [1440, 393]) {
 					expect(Math.abs(secondBefore.scrollTop - before.scrollTop)).toBeGreaterThan(200);
 					expect(secondBefore.line).toContain('Second filler');
 					if (touch) {
-						await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+						await page.getByRole('button', { name: /Files \(2\)/ }).click();
 						await armReturnSampler(page);
 						await page.getByRole('dialog', { name: 'Open side panel items' })
 							.getByRole('button', { name: 'INDEX.md', exact: true }).click();
@@ -518,12 +518,12 @@ for (const width of [1440, 393]) {
 				report.reopenedTop = reopenedTop;
 				const tabsSheet = () => page.getByRole('dialog', { name: 'Open side panel items' });
 				if (touch) {
-					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await page.getByRole('button', { name: /^Files \(2\)/ }).click();
 					await tabsSheet().getByRole('button', { name: 'OTHER.md', exact: true }).click();
 				} else await page.getByRole('tab', { name: 'OTHER.md', exact: true }).click();
 				await expect(page.locator('.cm-content').first()).toContainText('Other paragraph 1');
 				if (touch) {
-					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await page.getByRole('button', { name: /^Files \(2\)/ }).click();
 					await armImageSampler(page, 1_000);
 					await tabsSheet().getByRole('button', { name: 'walkthrough.md', exact: true }).click();
 				} else {

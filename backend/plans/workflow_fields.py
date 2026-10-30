@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import plans.service as service
@@ -71,3 +72,89 @@ def rerating(value: Any) -> dict[str, str]:
     if reason is None:
         raise service.PlanInputError("difficulty_rerated.reason is required")
     return {"level": level, "reason": reason}
+
+
+#: The add reply's line once a phase's run is built.
+STEPS_CREATED = (
+    "Created this run's steps. Skip an optional one with close_node and a reason."
+)
+#: Why a required step can't be closed or archived as not done.
+REQUIRED_STEP_SKIP = (
+    "required workflow step {step} can't be skipped: close it with evidence "
+    "(mark_done, request_review, accept) or fail it"
+)
+
+
+def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[str, Any]]:
+    """Create one child per resolved step of the run ``phase`` starts, in definition order.
+
+    ``steps`` are the plain steps ``tools.workflow_task_fields`` resolved off the
+    database. Every step carries the run's intent and records no actor (a trusted
+    writer), so its instruction and check reach the agent the step is handed to.
+    A step naming a workflow becomes a child phase built the same way.
+    """
+    from plans import dependencies, intent_words, node_creation
+
+    intent_node_id = intent_words.canonical(db, phase.id)["id"]
+    built: dict[str, Any] = {}
+    listed = []
+    for step in steps:
+        title = step.get("title") or step["id"]
+        difficulty = step.get("difficulty") or phase.difficulty
+        if difficulty is None:
+            raise service.PlanInputError(f"step {step['id']}: {difficulty_rubric()}")
+        nested = step.get("workflow")
+        node = node_creation.create_node(
+            db, phase.plan_id, kind="task" if nested is None else "phase", title=title,
+            acceptance_criteria=step.get("check") or f"Done: {title}", parent_id=phase.id,
+            order_key=None, description=step.get("instruction"),
+            workflow_ref=nested or phase.workflow_ref,
+            workflow_version=step.get("version") if nested else phase.workflow_version,
+            workflow_step=step["id"], difficulty=difficulty, size="unknown",
+            checkpoint_exception=False, assignee=None, spawn_kind=None,
+            watchdog_budget_seconds=None, follow_up_of=None, actor_id=None,
+            provenance="plans.workflow_run", node_id=service._id(),
+            intent_node_id=intent_node_id, required_step=step.get("required") is True,
+        )
+        built[step["id"]] = node
+        entry = {"id": node.id, "title": title, "required": step.get("required") is True}
+        if nested:
+            entry["steps"] = build_run(db, node, step.get("steps") or (), causing_executor=causing_executor)
+        listed.append(entry)
+    for step in steps:
+        for prior in step.get("after") or ():
+            dependencies.add_dependency(
+                built[step["id"]].id, built[prior].id, provenance="plans.workflow_run",
+                causing_executor=causing_executor, db=db,
+            )
+    return listed
+
+
+def added(db, node, line, steps, *, causing_executor: str | None):
+    """The add reply: the node, its rank line, and the run built under a workflow phase."""
+    from plans.boundary import node_projection
+
+    listed = build_run(db, node, steps, causing_executor=causing_executor) if steps else []
+    if line is None and not listed:
+        return node
+    result: dict[str, Any] = {"node": node_projection(service._node_from_row(db, service._node_row(db, node.id)))}
+    if line is not None:
+        result["rank"] = line
+    if listed:
+        result["steps"] = listed
+        result["notice"] = STEPS_CREATED
+    return result
+
+
+def refuse_required_skip(db, node_id: str) -> None:
+    """Refuse closing or archiving an unfinished required step of a workflow run."""
+
+    row = db.execute(
+        "SELECT n.state,n.workflow_step,e.payload_json FROM plan_nodes n JOIN plan_node_events e "
+        "ON e.node_id=n.id AND e.event='node_created' WHERE n.id=? ORDER BY e.created_at,e.id LIMIT 1",
+        (node_id,),
+    ).fetchone()
+    if row is None or row["state"] in service._TERMINAL_STATES or not row["payload_json"]:
+        return
+    if json.loads(row["payload_json"]).get("workflow_required") is True:
+        raise service.PlanError(REQUIRED_STEP_SKIP.format(step=row["workflow_step"]))
