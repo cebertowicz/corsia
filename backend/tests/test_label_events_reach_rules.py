@@ -127,8 +127,7 @@ async def test_any_label_change_fires_a_rule_and_wakes_no_one_else(
     result = await route(event, payload)
 
     assert sent == []  # the PR's owner isn't woken by a label
-    assert result.outcome in (RouteOutcome.SUPPRESSED, RouteOutcome.PARKED)
-    assert result.reason == "label_rule_only"
+    assert (result.outcome, result.reason) == (RouteOutcome.PARKED, "label_rule_only")
     assert [row["outcome"] for row in _fired(rule)] == ["woke"]
     assert _rows("SELECT id FROM dead_letter_events") == []
 
