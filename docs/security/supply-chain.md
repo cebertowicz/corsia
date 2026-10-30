@@ -18,6 +18,8 @@ Where CORSIA's code and its dependencies come from, what is pinned or signed, ho
 
 No automated dependency-update service (Dependabot or Renovate) is configured.
 
+**Checking for known vulnerabilities** is manual: `scripts/security-audit.sh` runs `pip-audit` on CORSIA's Python environment and other Python environments it finds (pipx, Homebrew), runs `npm audit fix --omit=dev` on the web app (this **changes** `frontend/` packages), lists outdated Homebrew packages, and writes a dated report to the state folder's `security` folder, deleting reports older than 30 days. `pip-audit` needs installing into CORSIA's environment first. Nothing runs it on a schedule or in CI.
+
 ## The desktop app and releases
 
 - The release workflow (`.github/workflows/release-macos.yml`) builds an **unsigned** app. Signing and notarization happen in a separate script run by hand (`desktop/scripts/sign-macos-bundle.sh`).

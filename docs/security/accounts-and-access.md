@@ -8,10 +8,11 @@ How people and programs sign in to CORSIA, how agents act, and what a project or
 
 | | How it works | Source |
 |---|---|---|
-| Password | Stored as a salted scrypt hash (N=2^17, r=8, p=1) | `backend/infra/passwords.py` |
+| Password | At least 8 characters. Stored as a salted scrypt hash (N=2^17, r=8, p=1) | `backend/infra/passwords.py`, `backend/infra/account_validation.py` |
 | Wrong passwords | Three free attempts per username, then a delay of 5 seconds that doubles with each failure up to 5 minutes; forgotten after an hour without failures | `backend/api/auth.py` |
 | Second factor | None | — |
 | Session | A random token, valid for 30 days. The server keeps only its SHA-256 digest. The web app keeps the token in the browser's local storage | `backend/infra/accounts.py`, `frontend/src/lib/stores/auth.ts` |
+| Sign-out | Revokes that session's token | `backend/infra/accounts.py` |
 | Password change | Ends every browser session of that account; API tokens stay valid | `backend/infra/accounts.py` |
 | First run | Before the first account exists, setup routes accept any program on the same computer; they close once the account is created | `backend/infra/local_connection.py` |
 
