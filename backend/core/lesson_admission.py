@@ -158,21 +158,24 @@ def admit(
     rendered = lesson_files.read_trial(text)
     assert rendered is not None
     additive_only(replace(decision, case_metadata=rendered.lesson.case_metadata))
-    payload = delivery_for_trial(rendered, write_path, text.encode(), _binding(db, place, rendered)).payload
+    payload = delivery_for_trial(rendered, write_path, text.encode(), _binding(rendered)).payload
     if _text_tokens(payload, None) > START_TOKEN_CAP:
         return Admission(identity, capture_id, "over-budget", case_metadata=pending)
     return Admission(identity, capture_id, None, text, destination_path=write_path)
 
 
-def _binding(db, place: ThreadPlace, trial):
-    """Use the thread's effective skills when budgeting the trial payload."""
-    from core.lesson_delivery import step_bindings, trial_step_binding
-    from core.skills_registry import resolve_effective_skills
+def _binding(trial):
+    """The step binding the target file itself declares, whichever thread later starts the step.
+
+    Any thread that has this file as an effective skill delivers the step body, so
+    admission budgets that body even when the admitting thread doesn't see the file.
+    """
+    from core.lesson_delivery import skill_target, step_binding
+    from core.skill_validation import validate_skill_file
     from infra.config import WORKSPACE
 
-    workspace = Path(WORKSPACE)
-    resolved = resolve_effective_skills(thread_id=place.thread_id, project_id=place.project_id, workspace=workspace, db=db)
-    return trial_step_binding(trial, step_bindings(resolved.included), workspace)
+    target = skill_target(trial, Path(WORKSPACE))
+    return None if target is None else step_binding(validate_skill_file(target[0]), target[1])
 
 
 def _section_taken(

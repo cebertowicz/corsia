@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.skill_sidecar import SIDECAR_FILE
-from core.skill_validation import declares_sidecar, parse_frontmatter
+from core.skill_validation import declares_sidecar, instruction_section, parse_frontmatter
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.database import get_db
@@ -115,7 +115,7 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
         if isinstance(heading, str):
             if body is None:
                 body = _skill_body(name, step_id, workflow.skill)
-            built["instruction"] = _section(body, heading)
+            built["instruction"] = instruction_section(body, heading)
             if built["instruction"] is None:
                 raise PlanInputError(
                     f"step {step_id} names instruction {heading.strip()!r}, which {name}'s SKILL.md doesn't have"
@@ -144,25 +144,6 @@ def _skill_body(name: str, step_id: str, skill) -> str:
         return parse_frontmatter(Path(skill.body_path).read_text(encoding="utf-8"))[1]
     except (OSError, ValueError) as exc:
         raise PlanInputError(f"step {step_id}'s instruction can't be read from {name}'s SKILL.md") from exc
-
-
-def _section(body: str, heading: str) -> str | None:
-    """The heading's section: from it through the line before the next heading of its level or higher."""
-    wanted = heading.strip()
-    level = len(wanted) - len(wanted.lstrip("#"))
-    lines = body.splitlines()
-    start, fenced = None, False
-    for index, line in enumerate(lines):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        hashes = 0 if fenced else len(line) - len(line.lstrip("#"))
-        if not hashes or line[hashes:hashes + 1] not in (" ", ""):
-            continue
-        if start is None and level and line.strip() == wanted:
-            start = index
-        elif start is not None and hashes <= level:
-            return "\n".join(lines[start:index]).strip()
-    return None if start is None else "\n".join(lines[start:]).strip()
 
 
 def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:

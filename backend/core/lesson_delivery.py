@@ -22,10 +22,10 @@ from typing import Literal
 
 from loguru import logger
 
-from core.lesson_files import has_section, section_key
+from core.lesson_files import TrialFile, has_section, section_key
 from core.lesson_index import NON_SYSTEM_DESCRIPTION_LIMIT, line_for
 from core.skill_registry_types import SkillRow
-from core.skill_validation import is_skill_file
+from core.skill_validation import SkillValidation, instruction_section, is_skill_file, parse_frontmatter
 from core.token_estimation import _text_tokens
 
 Variant = Literal["with", "without", "crossover"]
@@ -79,7 +79,15 @@ def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with"
     return "with" if digest[0] & 1 else "without"
 
 
-def _delivery(row: SkillRow, binding: tuple[str, frozenset[str]] | None) -> TrialDelivery:
+@dataclass(frozen=True)
+class StepBinding:
+    """The workflow steps whose instruction is the section a trial targets; it runs only at them."""
+
+    workflow: str
+    steps: frozenset[str]
+
+
+def _delivery(row: SkillRow, binding: StepBinding | None) -> TrialDelivery:
     """Build a delivery from the validation snapshot the skill scan already took."""
     trial, data = row.trial, row.source_data
     if trial is None or data is None:
@@ -87,27 +95,28 @@ def _delivery(row: SkillRow, binding: tuple[str, frozenset[str]] | None) -> Tria
     return delivery_for_trial(trial, row.path, data, binding)
 
 
-def step_bindings(skills: list[SkillRow]) -> dict[tuple[str, str], tuple[str, frozenset[str]]]:
-    """Build bindings from effective skills; shadowed or unreadable targets remain unbound as on dev."""
-    groups: dict[tuple[str, str], tuple[str, set[str]]] = {}
-    for skill in skills:
-        workflow = (skill.corsia or {}).get("workflow")
-        steps = workflow.get("steps") if isinstance(workflow, dict) else None
-        if not isinstance(steps, list) or skill.source_data is None:
-            continue
-        body = skill.source_data.decode("utf-8")
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            instruction, step_id = step.get("instruction"), step.get("id")
-            if isinstance(instruction, str) and isinstance(step_id, str) and has_section(body, instruction):
-                key = (str(skill.path), section_key(instruction))
-                groups.setdefault(key, (skill.name, set()))[1].add(step_id)
-    return {key: (name, frozenset(ids)) for key, (name, ids) in groups.items()}
+def step_binding(skill: SkillRow | SkillValidation | None, heading: str) -> StepBinding | None:
+    """The steps of ``skill``'s workflow whose instruction the run builder copies from ``heading``.
+
+    It uses the run builder's own section parser on the same body, so a step
+    is bound only when its run would carry that instruction.
+    """
+    workflow = None if skill is None or skill.corsia is None else skill.corsia.get("workflow")
+    steps = workflow.get("steps") if isinstance(workflow, dict) else None
+    if skill is None or not isinstance(steps, list) or skill.source_data is None or not skill.name:
+        return None
+    body = parse_frontmatter(skill.source_data.decode("utf-8"))[1]
+    ids = frozenset(
+        step["id"] for step in steps
+        if isinstance(step, dict) and isinstance(step.get("id"), str) and isinstance(step.get("instruction"), str)
+        and section_key(step["instruction"]) == section_key(heading)
+        and instruction_section(body, step["instruction"]) is not None
+    )
+    return StepBinding(skill.name, ids) if ids else None
 
 
-def trial_step_binding(trial, bindings: dict[tuple[str, str], tuple[str, frozenset[str]]], workspace: Path) -> tuple[str, frozenset[str]] | None:
-    """Look up a trial's target and section in the effective skill bindings."""
+def skill_target(trial: TrialFile, workspace: Path) -> tuple[Path, str] | None:
+    """The resolved SKILL.md and section a trial targets; None when it targets no skill section."""
     from tools.filesystem_gate import resolve_path
 
     metadata = trial.lesson.case_metadata
@@ -115,13 +124,12 @@ def trial_step_binding(trial, bindings: dict[tuple[str, str], tuple[str, frozens
     if not isinstance(target, str) or not isinstance(heading, str) or not is_skill_file(Path(target)):
         return None
     try:
-        path = resolve_path(target, workspace=workspace)
+        return resolve_path(target, workspace=workspace), heading
     except (OSError, ValueError):
         return None
-    return bindings.get((str(path), section_key(heading)))
 
 
-def delivery_for_trial(trial, path: Path, data: bytes, binding: tuple[str, frozenset[str]] | None = None) -> TrialDelivery:
+def delivery_for_trial(trial, path: Path, data: bytes, binding: StepBinding | None = None) -> TrialDelivery:
     """Build exactly the payload admission and task-start delivery both budget."""
     lesson = trial.lesson
     metadata = lesson.case_metadata
@@ -192,12 +200,20 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
 
     project = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
     node = db.execute("SELECT workflow_ref, workflow_step FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
-    admitted_rows, capped_rows = trial_delivery_rows(
+    rows, included = trial_delivery_rows(
         thread_id=thread_id, project_id=None if project is None else project["project_id"],
         workspace=Path(WORKSPACE), db=db,
-        workflow_ref=None if node is None else node["workflow_ref"],
-        workflow_step=None if node is None else node["workflow_step"],
     )
+    # A shadowed or unreadable target isn't effective here, so its trial stays unbound.
+    skills = {skill.path: skill for skill in included}
+    eligible: list[tuple[SkillRow, StepBinding | None]] = []
+    for row in rows:
+        target = None if row.trial is None else skill_target(row.trial, Path(WORKSPACE))
+        binding = None if target is None else step_binding(skills.get(target[0]), target[1])
+        if binding is None or (node is not None and node["workflow_ref"] == binding.workflow
+                               and node["workflow_step"] in binding.steps):
+            eligible.append((row, binding))
+    admitted_rows, capped_rows = eligible[:START_TRIAL_CAP], eligible[START_TRIAL_CAP:]
     admitted: dict[tuple[str, str], TrialDelivery] = {}
     omitted: dict[tuple[str, str], TrialDelivery] = {}
     spent = 0
