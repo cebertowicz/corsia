@@ -403,8 +403,15 @@ def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner_when_swit
     trial = seed_finished_trial(db, workspace)
     db.commit()
     wakes = []
+
+    def wake(*args, message_id, db):
+        # Accepted the way the real wake is: its message row exists afterwards, so the next run doesn't retry it.
+        wakes.append(args)
+        db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,'system','',?)",
+                   (message_id, args[0], NOW.isoformat()))
+
     monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
-    monkeypatch.setattr(delivery, "enqueue_event_wake", lambda *args, **kwargs: wakes.append(args))
+    monkeypatch.setattr(delivery, "enqueue_event_wake", wake)
     assert workflow_verdicts.run_daily(now=NOW).recorded == 1
     assert workflow_verdicts.run_daily(now=NOW).recorded == 0
     rows = db.execute("SELECT event_name,subject_key FROM outcome_events ORDER BY event_name").fetchall()
