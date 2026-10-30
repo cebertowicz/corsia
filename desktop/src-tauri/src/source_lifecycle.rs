@@ -19,7 +19,6 @@ use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
     release_proof, run_service_command,
     service_management::service_label,
-    start_fresh::SOURCE_DEFAULT_PORT,
     startup_failure::StartupFailure,
     unregister_service, wait_for_service, wait_for_startup, NOT_RUNNING_WINDOW, STARTUP_CAP,
 };
@@ -110,6 +109,11 @@ impl SourceLifecycle {
             stop_clock: process_started,
             listener_runs_from: release_proof::listener_runs_from,
         }
+    }
+
+    /// The port a source install with no plist serves; see `SourceInstall::plain_port`.
+    pub fn plain_port(&self) -> u16 {
+        self.source.plain_port()
     }
 
     fn target() -> String {
@@ -218,15 +222,16 @@ impl SourceLifecycle {
     /// Proof that the source holds nothing adoption touches: launchd and the port say it is
     /// down, the process launchd ran before the stop is gone, and the database opens exclusively.
     /// A plain install has no job or process id to prove gone, and the database check alone
-    /// passes while its backend holds an idle connection, so no listener on the script's default
-    /// port may still run from its backend folder.
+    /// passes while its backend holds an idle connection, so no listener on its port may still
+    /// run from its backend folder.
     fn released(&self, pid: Option<u32>) -> Result<(), String> {
         let database = self.source.state.join("corsia.db");
+        let port = self.plain_port();
         let let_go = || -> Result<(), String> {
             if self.source.plist.is_some() {
                 self.is_down()?;
-            } else if (self.listener_runs_from)(SOURCE_DEFAULT_PORT, &self.source.working_directory) {
-                return Err(format!("port {SOURCE_DEFAULT_PORT} still accepts connections"));
+            } else if (self.listener_runs_from)(port, &self.source.working_directory) {
+                return Err(format!("port {port} still accepts connections"));
             }
             if let Some(pid) = pid.filter(|pid| !release_proof::pid_is_gone(*pid)) {
                 return Err(format!("process {pid} is still running"));
@@ -975,11 +980,25 @@ mod tests {
         // folder, while its database opens (an idle connection does not hold the lock).
         home.lifecycle.listener_runs_from = |port, directory| {
             ASKED.fetch_add(1, Ordering::Relaxed);
-            port == SOURCE_DEFAULT_PORT && directory.ends_with("checkout/backend")
+            port == adoption::SOURCE_DEFAULT_PORT && directory.ends_with("checkout/backend")
         };
         let error = home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap_err();
-        assert_eq!(error, format!("port {SOURCE_DEFAULT_PORT} still accepts connections"));
+        assert_eq!(error, format!("port {} still accepts connections", adoption::SOURCE_DEFAULT_PORT));
         assert!(ASKED.load(Ordering::Relaxed) > 1, "it keeps waiting for the backend to stop");
+    }
+
+    #[test]
+    fn a_plain_install_whose_env_names_another_port_is_judged_on_that_port() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        home.lifecycle.source.plist = None;
+        home.lifecycle.source.port = None;
+        home.lifecycle.source.generation = None;
+        home.lifecycle.stop_clock = |_| Some("test-start".into());
+        fs::write(&home.lifecycle.source.env_file, "export BACKEND_PORT='47123' # second instance\n").unwrap();
+        // The backend serves its own port; nothing runs on the default one.
+        home.lifecycle.listener_runs_from = |port, _| port == 47123;
+        let error = home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap_err();
+        assert_eq!(error, "port 47123 still accepts connections");
     }
 
     #[test]
@@ -991,6 +1010,9 @@ mod tests {
         home.lifecycle.source.port = None;
         home.lifecycle.source.generation = None;
         home.lifecycle.stop_clock = |_| Some("test-start".into());
+        // It returns the moment the backend stops serving; the long budget only keeps a loaded
+        // machine's slow sleeps from running out the default 300 ms before the fourth look.
+        home.lifecycle.proof_timeout = Duration::from_secs(10);
         home.lifecycle.listener_runs_from = |_, _| ASKED.fetch_add(1, Ordering::Relaxed) < 3;
         assert!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok());
         assert!(ASKED.load(Ordering::Relaxed) >= 4);
