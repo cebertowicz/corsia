@@ -106,8 +106,9 @@ class ProtectedHostPathPolicy:
         The System hard floor covers protected credentials and a lease never
         opens it. Add a root here only with the project owner's approval.
         """
-        from scripts.corsia_api import token_file  # the token file's one location rule
-        return (self.state_root / "keys", self.state_root / "browser-profile", token_file(self.home))
+        from scripts.corsia_api import token_file  # the CLI's own location rule
+        # Resolved like every other root: the sandbox and containment checks match real paths.
+        return (self.state_root / "keys", self.state_root / "browser-profile", canonical(token_file(self.home)))
 
     @property
     def control_files(self) -> tuple[Path, ...]:

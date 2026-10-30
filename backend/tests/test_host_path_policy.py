@@ -263,6 +263,20 @@ def test_the_api_token_remains_hard_floor_denied(tmp_path) -> None:
     assert f'(deny file-read* file-write* (subpath "{token}"))' in policy.hard_floor_sandbox_rules()
 
 
+def test_the_api_token_floor_matches_its_real_path_through_a_symlinked_corsia_dir(tmp_path) -> None:
+    """A symlinked ``~/.corsia`` must not leave the token's real path open."""
+    real = tmp_path / "real-corsia"
+    real.mkdir()
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / ".corsia").symlink_to(real)
+    policy = _token_policy(tmp_path)
+    token = real.resolve() / ".api-token"
+
+    assert token in policy.credential_roots
+    assert policy.hard_floor_denial(token)
+    assert f'(deny file-read* file-write* (subpath "{token}"))' in policy.hard_floor_sandbox_rules()
+
+
 def test_hard_floor_denials_say_that_no_lease_will_open_them(tmp_path) -> None:
     """An agent must not request a lease that cannot possibly help."""
     from tools.host_path_policy import ProtectedHostPathPolicy
