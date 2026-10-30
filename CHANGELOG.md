@@ -85,6 +85,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Select text in chat to add comments to your next message.
 - Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
 - Settings no longer offers an update after it finishes.
+- Setup can continue when a provider added by address has a model that is ready to use.
 - Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.

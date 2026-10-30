@@ -3,6 +3,7 @@ import type { RunsOn } from './stores/modelTurn';
 
 import {
 	hasReadySetupModel,
+	readySetupEndpoint,
 	setupModelWorks,
 	type SetupModel,
 } from './setupModels';
@@ -57,6 +58,15 @@ describe('setup model readiness', () => {
 		expect(hasReadySetupModel([claude])).toBe(true);
 		expect(hasReadySetupModel([local])).toBe(true);
 		expect(hasReadySetupModel([api], [{ source: 'anthropic' }])).toBe(true);
+	});
+
+	it('requires a ready source and selectable model for the exact external server', () => {
+		const external = model({ connection: 'external', provider: 'external', litellm_model: 'external@server-10/model' });
+		const source = { source: 'external:server-10', name: 'My server', state: 'ready' as const };
+		expect(readySetupEndpoint([source], [external])).toEqual(source);
+		expect(readySetupEndpoint([{ ...source, source: 'external:server-1' }], [external])).toBeUndefined();
+		expect(readySetupEndpoint([source], [{ ...external, status: 'unavailable' }])).toBeUndefined();
+		expect(readySetupEndpoint([{ ...source, state: 'unverified' }], [external])).toBeUndefined();
 	});
 
 	it('does not count an untested API provider or a subscription without a ready account', () => {

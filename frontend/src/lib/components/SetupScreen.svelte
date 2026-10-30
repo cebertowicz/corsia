@@ -22,7 +22,7 @@
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
-	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
+	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -67,8 +67,8 @@
 	const neverLocal = $derived(local?.never_local === true || status.macos_supported === null);
 	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
 	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
-	const tested = $derived($testedProviders.map((source) => ({ source })));
-	const canFinish = $derived(hasReadySetupModel(catalog, tested));
+	const tested = $derived($testedProviders.map((source) => ({ source }))), endpoint = $derived(readySetupEndpoint(sources, catalog));
+	const canFinish = $derived(hasReadySetupModel(catalog, tested) || Boolean(endpoint));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
 	const cliPicked = (vendor: string) => !toolsOff.includes(vendor) && (picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude));
 	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
@@ -119,8 +119,8 @@
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
-		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
-			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
+		const ready = provider || endpoint;
+		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : endpoint ? `${endpoint.name} · added` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.', pill: ready ? { state: 'success', label: 'Ready' } : undefined, action: ready ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
 	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading || localPreparing, local?.download_eta_seconds));
