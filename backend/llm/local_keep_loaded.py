@@ -121,7 +121,7 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
 def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: list[dict]) -> dict:
     return {"status": "refused", "verdict": verdict,
             "line": not_loaded_line(int(size), room) if size and pinned else None,
-            "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and loaded else None}
+            "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
 async def keep_loaded(

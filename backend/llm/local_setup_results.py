@@ -35,9 +35,9 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
     if cause == "load_refused":
         action = "press Retry." if retry == RETRY_IN_APP else retry
         if verdict == "no_room":
-            if isinstance(neighbour, str) and neighbour.strip():
-                return f"CORSIA couldn’t load the model because {neighbour} is already loaded and there isn’t room for both."
-            return "CORSIA couldn’t load the model because another model is already loaded and there isn’t room for both."
+            other = neighbour if isinstance(neighbour, str) and neighbour.strip() else "another model"
+            return (f"CORSIA couldn’t load the model while {other} is loaded. "
+                    f"Unload it in oMLX or quit the app using it, then {action}")
         return f"CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then {action}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).

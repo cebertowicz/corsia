@@ -38,9 +38,12 @@ async def test_no_room_uses_catalog_display_name_or_fallback(display, monkeypatc
     fix = setup_fix("load_refused", verdict=exc.verdict, neighbour=exc.neighbour)
     assert exc.line == "Not loaded: exact line"
     if display:
-        assert fix == "CORSIA couldn’t load the model because Friendly Model is already loaded and there isn’t room for both."
+        assert fix == "CORSIA couldn’t load the model while Friendly Model is loaded. Unload it in oMLX or quit the app using it, then press Retry."
     else:
-        assert fix == "CORSIA couldn’t load the model because another model is already loaded and there isn’t room for both."
+        assert fix == "CORSIA couldn’t load the model while another model is loaded. Unload it in oMLX or quit the app using it, then press Retry."
+    assert setup_fix("load_refused", retry=RETRY_IN_TERMINAL, verdict="no_room").endswith(
+        "Unload it in oMLX or quit the app using it, then run `corsia local setup` again."
+    )
 
 
 @pytest.mark.asyncio

@@ -170,6 +170,18 @@ async def test_known_neighbour_refuses_with_catalog_line_and_no_room(calls, monk
 
 
 @pytest.mark.asyncio
+async def test_multiple_neighbours_use_generic_refusal(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    async def loaded(_cfg):
+        return [{"identifier": "one", "size_bytes": 8 * GIB}, {"identifier": "two", "size_bytes": 8 * GIB}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+    assert outcome["verdict"] == "no_room" and outcome["neighbour_id"] is None
+    assert calls["loads"] == []
+
+
+@pytest.mark.asyncio
 async def test_unknown_neighbour_refuses_without_catalog_line(calls, monkeypatch) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     async def loaded(_cfg):
