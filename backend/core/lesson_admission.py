@@ -165,17 +165,10 @@ def admit(
 
 
 def _binding(trial):
-    """The step binding the target file itself declares, whichever thread later starts the step.
+    """The step binding the target file itself declares, the one task start delivers in every thread."""
+    from core.workflow_step_binding import declared_binding
 
-    Any thread that has this file as an effective skill delivers the step body, so
-    admission budgets that body even when the admitting thread doesn't see the file.
-    """
-    from core.lesson_delivery import skill_target, step_binding
-    from core.skill_validation import validate_skill_file
-    from infra.config import WORKSPACE
-
-    target = skill_target(trial, Path(WORKSPACE))
-    return None if target is None else step_binding(validate_skill_file(target[0]), target[1])
+    return declared_binding(trial, {})[0]
 
 
 def _section_taken(

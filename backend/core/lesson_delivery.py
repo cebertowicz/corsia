@@ -22,11 +22,12 @@ from typing import Literal
 
 from loguru import logger
 
-from core.lesson_files import TrialFile, has_section, section_key
+from core.lesson_files import has_section
 from core.lesson_index import NON_SYSTEM_DESCRIPTION_LIMIT, line_for
 from core.skill_registry_types import SkillRow
-from core.skill_validation import SkillValidation, instruction_section, is_skill_file, parse_frontmatter
+from core.skill_validation import is_skill_file
 from core.token_estimation import _text_tokens
+from core.workflow_step_binding import StepBinding, declared_binding
 
 Variant = Literal["with", "without", "crossover"]
 
@@ -79,54 +80,12 @@ def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with"
     return "with" if digest[0] & 1 else "without"
 
 
-@dataclass(frozen=True)
-class StepBinding:
-    """The workflow steps whose instruction is the section a trial targets; it runs only at them."""
-
-    workflow: str
-    steps: frozenset[str]
-
-
 def _delivery(row: SkillRow, binding: StepBinding | None) -> TrialDelivery:
     """Build a delivery from the validation snapshot the skill scan already took."""
     trial, data = row.trial, row.source_data
     if trial is None or data is None:
         raise ValueError(f"trial row has no validation snapshot: {row.path}")
     return delivery_for_trial(trial, row.path, data, binding)
-
-
-def step_binding(skill: SkillRow | SkillValidation | None, heading: str) -> StepBinding | None:
-    """The steps of ``skill``'s workflow whose instruction the run builder copies from ``heading``.
-
-    It uses the run builder's own section parser on the same body, so a step
-    is bound only when its run would carry that instruction.
-    """
-    workflow = None if skill is None or skill.corsia is None else skill.corsia.get("workflow")
-    steps = workflow.get("steps") if isinstance(workflow, dict) else None
-    if skill is None or not isinstance(steps, list) or skill.source_data is None or not skill.name:
-        return None
-    body = parse_frontmatter(skill.source_data.decode("utf-8"))[1]
-    ids = frozenset(
-        step["id"] for step in steps
-        if isinstance(step, dict) and isinstance(step.get("id"), str) and isinstance(step.get("instruction"), str)
-        and section_key(step["instruction"]) == section_key(heading)
-        and instruction_section(body, step["instruction"]) is not None
-    )
-    return StepBinding(skill.name, ids) if ids else None
-
-
-def skill_target(trial: TrialFile, workspace: Path) -> tuple[Path, str] | None:
-    """The resolved SKILL.md and section a trial targets; None when it targets no skill section."""
-    from tools.filesystem_gate import resolve_path
-
-    metadata = trial.lesson.case_metadata
-    target, heading = metadata.get("target_file"), metadata.get("target_section")
-    if not isinstance(target, str) or not isinstance(heading, str) or not is_skill_file(Path(target)):
-        return None
-    try:
-        return resolve_path(target, workspace=workspace), heading
-    except (OSError, ValueError):
-        return None
 
 
 def delivery_for_trial(trial, path: Path, data: bytes, binding: StepBinding | None = None) -> TrialDelivery:
@@ -204,24 +163,27 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
         thread_id=thread_id, project_id=None if project is None else project["project_id"],
         workspace=Path(WORKSPACE), db=db,
     )
-    # A shadowed or unreadable target isn't effective here, so its trial stays unbound.
     skills = {skill.path: skill for skill in included}
-    eligible: list[tuple[SkillRow, StepBinding | None]] = []
+    eligible: list[tuple[SkillRow, StepBinding | None, str | None]] = []
     for row in rows:
-        target = None if row.trial is None else skill_target(row.trial, Path(WORKSPACE))
-        binding = None if target is None else step_binding(skills.get(target[0]), target[1])
-        if binding is None or (node is not None and node["workflow_ref"] == binding.workflow
-                               and node["workflow_step"] in binding.steps):
-            eligible.append((row, binding))
+        binding, effective = (None, False) if row.trial is None else declared_binding(row.trial, skills)
+        if binding is None:
+            eligible.append((row, None, None))
+        elif node is not None and node["workflow_ref"] == binding.workflow and node["workflow_step"] in binding.steps:
+            # A shadowed target's step ran from another file: neither arm, never the index line.
+            eligible.append((row, binding, None if effective else OMIT_TARGET_NOT_IN_CONTEXT))
     admitted_rows, capped_rows = eligible[:START_TRIAL_CAP], eligible[START_TRIAL_CAP:]
     admitted: dict[tuple[str, str], TrialDelivery] = {}
     omitted: dict[tuple[str, str], TrialDelivery] = {}
     spent = 0
     context: set[str] | None = None
-    for row, binding in admitted_rows:
+    for row, binding, reason in admitted_rows:
         trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key in admitted or key in omitted:
+            continue
+        if reason is not None:
+            omitted[key] = replace(trial, omission_reason=reason)
             continue
         if not trial.target or (trial.section is not None and not trial.section):
             omitted[key] = replace(trial, omission_reason=OMIT_MISSING_SECTION)
@@ -239,7 +201,7 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
             continue
         spent += cost
         admitted[key] = trial
-    for row, binding in capped_rows:
+    for row, binding, _reason in capped_rows:
         trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key not in admitted:

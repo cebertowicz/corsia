@@ -6,9 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from core import skills_registry
-from core.lesson_delivery import (
-    StepBinding, _resolve, delivery_for_trial, draw, skill_target, start_trials, step_binding,
-)
+from core.lesson_delivery import _resolve, delivery_for_trial, draw, start_trials
+from core.workflow_step_binding import StepBinding, skill_target, step_binding
 from core.skill_scanning import scan_scope
 from core.skill_validation import instruction_section, parse_frontmatter
 from infra.schema import SCHEMA_SQL
@@ -86,6 +85,8 @@ def test_binding_normalizes_heading_and_unbound_skill_still_gets_index(trial_set
     assert step_binding(skill, "Unrelated") is None
     assert delivery_for_trial(row.trial, row.path, row.source_data).payload.startswith("- trial-01 (trial, unproven):")
     assert step_binding(replace(skill, source_data=b"# Missing heading\n"), heading) is None
+    outside = replace(row.trial.lesson, case_metadata={"target_file": "/elsewhere/SKILL.md", "target_section": "draft"})
+    assert skill_target(replace(row.trial, lesson=outside), workspace) is None
 
 
 @pytest.mark.parametrize(("body", "frontmatter"), [
@@ -100,7 +101,7 @@ def test_binding_follows_the_run_builders_section_parser(trial_setup, body, fron
     assert step_binding(skill, "Draft") is None
 
 
-def test_shadowed_target_remains_unbound(trial_setup, tmp_path, monkeypatch, db):
+def test_shadowed_target_keeps_its_binding_and_is_omitted_at_its_step(trial_setup, tmp_path, monkeypatch, db):
     from core.skill_scanning import resolve_winners
 
     workspace, row = trial_setup
@@ -112,14 +113,19 @@ def test_shadowed_target_remains_unbound(trial_setup, tmp_path, monkeypatch, db)
                                          scan_scope(higher, "thread", "thread"))
     assert len(omitted) == 1
     _resolution(monkeypatch, [row], workspace, included=included)
-    admitted, _ = _resolve(db, "thread", _step(db, "node", "review"))
-    assert [trial.payload.startswith("- trial-01 (trial, unproven):") for trial in admitted] == [True]
+    # One trial version, one intervention: never the index line where another file shadows the target.
+    assert _resolve(db, "thread", _step(db, "node", "review")) == ([], [])
+    admitted, omitted = _resolve(db, "thread", _step(db, "draft-node", "draft"))
+    assert admitted == [] and [trial.omission_reason for trial in omitted] == ["target_not_in_context"]
+    assert "addition to this step's instruction" in omitted[0].payload
 
 
 def test_delivery_uses_resolution_snapshot_without_reading_skill(trial_setup, monkeypatch, db):
     workspace, row = trial_setup
     _resolution(monkeypatch, [row], workspace)
     monkeypatch.setattr("core.skill_validation.validate_skill_file", lambda *_: pytest.fail("unexpected read"))
+    # Path identity only: repository policy (SQLite, Git) stays off the task-start path.
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path", lambda *_a, **_k: pytest.fail("authorization"))
     admitted, _ = _resolve(db, "thread", _step(db, "node", "draft"))
     assert "Check Check" in admitted[0].payload
 

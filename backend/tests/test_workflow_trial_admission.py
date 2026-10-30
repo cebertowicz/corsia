@@ -75,5 +75,6 @@ async def test_relative_target_binds_through_real_resolution(env):
     assert not other
 
     _shadow(env)
-    admitted, _ = _resolve(env.db, "owner", "draft-node")
-    assert len(admitted) == 1 and admitted[0].payload.startswith("- cite-the-head (trial, unproven):")
+    # The binding is the file's: the shadowed owner leaves it out of both arms, never the index line.
+    admitted, omitted = _resolve(env.db, "owner", "draft-node")
+    assert not admitted and [trial.omission_reason for trial in omitted] == ["target_not_in_context"]
