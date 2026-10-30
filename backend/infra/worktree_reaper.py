@@ -164,7 +164,7 @@ def _remove_candidate(
 
             def copy_out(quarantined: Path) -> None:
                 copies.append(salvage_worktree(
-                    repo, quarantined, candidate.name, ctx.now, candidate.path,
+                    repo, quarantined, candidate.admin, candidate.name, ctx.now, candidate.path,
                 ))
 
             outcome = verdict if isinstance(verdict, str) else remove_worktree(
