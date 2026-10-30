@@ -22,7 +22,7 @@ async function seedCommentedDocument({ page, request }: { page: Page; request: A
 	const artifactId = (await seeded.json()).artifact.id;
 	const commentUrl = `/api/artifacts/${artifactId}/comments?token=${token}`;
 	const created = await request.post(commentUrl, {
-		data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13 },
+		data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const commentId = (await created.json()).comment.id;
@@ -52,9 +52,15 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await openComments();
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Review this sentence.');
-	await (await replyField(comment)).fill('Reply persisted.');
+	const field = await replyField(comment);
+	const oneLine = (await field.boundingBox())!.height;
+	const reply = 'Reply persisted.\nOn several\nlines.\nAs a person types it.';
+	await field.fill(reply);
+	await expect.poll(async () => (await field.boundingBox())!.height).toBeGreaterThan(oneLine);
 	await comment.getByRole('button', { name: 'Send reply' }).click();
 	await expect(comment).toContainText('Reply persisted.');
+	// The sent reply leaves the field empty and one line tall again, not held at the height of the text it held.
+	await expect.poll(async () => (await (await replyField(comment)).boundingBox())!.height).toBe(oneLine);
 	await comment.getByRole('button', { name: 'Agree', exact: true }).click();
 	await expect(comment).toContainText('Agreed');
 	await expect(await replyField(comment)).toBeVisible();
@@ -81,7 +87,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 		expect(response.ok()).toBeTruthy();
 		return (await response.json()).comments.find((row: { id: string }) => row.id === commentId);
 	}).toMatchObject({ resolved: 0, acked: 1, from_off: 14, to_off: 20,
-		replies: [expect.objectContaining({ body: 'Reply persisted.' })] });
+		replies: [expect.objectContaining({ body: reply })] });
 	await expectQuietSave(page);
 	await page.reload();
 	await page.getByText(title, { exact: true }).first().click();

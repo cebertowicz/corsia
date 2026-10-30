@@ -2,7 +2,8 @@
  * Makes a textarea as tall as its text, so a long line wraps and shows instead of scrolling sideways. The height is
  * written as an explicit pixel value, which the field's own CSS transition eases (motion.md: the input box gains or
  * loses a line). The field's CSS `max-height` caps it; past the cap it scrolls. Pass the field's value so the action
- * re-fits whenever it changes, including when it is cleared after a send.
+ * re-fits whenever it changes, including when it is cleared after a send. Write `use:autosize` after `bind:value`: effects
+ * run in attribute order, and a re-fit that runs before the bound value is written measures the old text.
  */
 export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	let current = node.offsetHeight;
