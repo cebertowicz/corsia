@@ -23,6 +23,7 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
+	import { readLocalSource, readPreauthLocal } from '$lib/setupLocalSources';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -211,16 +212,7 @@
 		await localPick.start();
 		await readLocalProgress();
 	}
-	async function readLocalProgress() {
-		try {
-			const response = await fetch('/api/setup/local-download');
-			if (!response.ok) return;
-			const live = await response.json();
-			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
-				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix, detail: live.cause === 'load_refused' ? live.catalog_line ?? undefined : undefined };
-		} catch { /* Preserve the last job projection until the next successful read. */ }
-	}
+	async function readLocalProgress() { preauthLocal = (await readPreauthLocal()) ?? preauthLocal; }
 	async function startLocal() {
 		if (!eligible || localBusy) return;
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
@@ -344,13 +336,21 @@
 		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
+	/** Signed in, the download's percent and end reach every setup page: models_updated comes every 10% and is heard only on the models page. */
+	let pollingLocal = false;
+	async function pollLocalSources() {
+		const current = get(token);
+		if (!current || pollingLocal) return;
+		pollingLocal = true;
+		try { ({ sources, catalog } = await readLocalSource(current, sources, catalog)); }
+		catch { /* Keep the last reading until the next one succeeds. */ } finally { pollingLocal = false; }
+	}
 	$effect(() => {
-		// Authenticated source/catalog state arrives through models_updated. Poll only the two setup-owned jobs
-		// that have no event while running: CLI install/sign-in, and the pre-account local downloader.
-		if (!connectFlow.active && (!downloading || get(token))) return;
+		// Other authenticated state arrives through models_updated; poll the setup-owned jobs that have no event: CLI install/sign-in and the local download.
+		if (!connectFlow.active && !downloading) return;
 		const timer = setInterval(() => {
 			if (connectFlow.active) void connectFlow.tick();
-			if (!get(token) && downloading) void readLocalProgress();
+			if (downloading) void (get(token) ? pollLocalSources() : readLocalProgress());
 		}, POLL_MS);
 		return () => clearInterval(timer);
 	});

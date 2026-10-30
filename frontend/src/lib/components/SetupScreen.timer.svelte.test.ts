@@ -22,6 +22,7 @@ let sourceState: 'not_installed' | 'ready' | 'unverified' | 'needs_auth' = 'not_
 let calls: string[];
 let signinState: 'waiting' | 'completed' | 'failed' = 'waiting';
 let localFailure = false;
+let localRow: Record<string, unknown> | null = null;
 let catalogModels: Record<string, unknown>[] = [];
 let intervalSpy: ReturnType<typeof vi.spyOn>, clearIntervalSpy: ReturnType<typeof vi.spyOn>;
 
@@ -38,6 +39,7 @@ function mountResume() {
 		if (url === '/api/setup/progress') return json({ setup_completed: false, step: 'models', local_ai: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url === '/api/providers/sources' || url === '/api/providers/sources/recheck') return json({ sources: [
 			{ source: 'codex', name: 'Codex', state: sourceState },
+			...(localRow ? [localRow] : []),
 			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', setup_error_reference: 'local-0123456789abcdef', fix: 'CORSIA couldn’t set up the local model.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
@@ -63,7 +65,7 @@ function click(label: string) {
 }
 
 beforeEach(() => {
-	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false; catalogModels = [];
+	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false; localRow = null; catalogModels = [];
 	intervalSpy = vi.spyOn(globalThis, 'setInterval'); clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 });
 afterEach(async () => {
@@ -236,5 +238,75 @@ describe('SetupScreen owned-job polling', () => {
 		await unmount(component); component = null;
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	describe('signed-in local download', () => {
+		const downloadingRow = (percent: number) => ({ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'downloading', download_percent: percent });
+		const refusedRow = { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'failed', setup_error_code: 'load_refused', fix: 'The model downloaded but would not load.' };
+		const readyRow = { source: 'omlx', name: 'Local model', state: 'ready', local_state: 'ready' };
+		const startButton = () => [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Start using CORSIA') as HTMLButtonElement | undefined;
+		async function poll() { await vi.advanceTimersByTimeAsync(3000); await tick(); }
+		/** The subscriptions page, reached from Providers & models with a CLI not yet signed in. */
+		async function openSubscriptions() { mountResume(); await settle(); click('Back'); await settle(); expect(host.textContent).toContain('Your subscriptions'); }
+
+		it('moves the percent on Your subscriptions and on Providers & models', async () => {
+			localRow = downloadingRow(8);
+			await openSubscriptions();
+			expect(host.textContent).toContain('Downloading 8%');
+			localRow = downloadingRow(34); await poll();
+			expect(host.textContent).toContain('Downloading 34%');
+			click('Neither'); await settle();
+			expect(host.textContent).toContain('Providers & models');
+			expect(host.textContent).toContain('Downloading 34%');
+			localRow = downloadingRow(61); await poll();
+			expect(host.textContent).toContain('Downloading 61%');
+		});
+
+		it('reads the catalog only when the local state changes, not on a percent', async () => {
+			localRow = downloadingRow(8);
+			mountResume(); await settle();
+			const catalogBefore = catalogCalls(), sourcesBefore = sourceCalls();
+			localRow = downloadingRow(20); await poll();
+			expect(sourceCalls()).toBe(sourcesBefore + 1);
+			expect(catalogCalls()).toBe(catalogBefore);
+		});
+
+		it('shows the load refusal after Neither with no reload, and stops polling', async () => {
+			localRow = downloadingRow(8);
+			await openSubscriptions();
+			localRow = refusedRow; await poll();
+			expect(host.textContent).toContain('The model downloaded but would not load.');
+			expect(vi.getTimerCount()).toBe(0);
+			click('Neither'); await settle();
+			expect(host.textContent).toContain('Providers & models');
+			expect(host.textContent).toContain('The model downloaded but would not load.');
+			expect(host.textContent).not.toContain('Downloading');
+		});
+
+		it('shows Ready with Start enabled after Neither when the download finishes meanwhile', async () => {
+			localRow = downloadingRow(90);
+			await openSubscriptions();
+			localRow = readyRow; catalogModels = [{ id: 'local', connection: 'omlx', status: 'ready' }]; await poll();
+			click('Neither'); await settle();
+			expect(host.textContent).not.toContain('Downloading');
+			expect(startButton()?.disabled).toBe(false);
+			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it('keeps the last reading when one poll fails, so Start does not flicker', async () => {
+			localRow = downloadingRow(40);
+			catalogModels = [{ id: 'cloud', connection: 'codex', status: 'ready', runs_on: [{ selected: true, status: 'ready' }] }];
+			mountResume(); await settle();
+			expect(startButton()?.disabled).toBe(false);
+			const fetchMock = vi.mocked(globalThis.fetch);
+			const working = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation(async (input, init) => String(input) === '/api/providers/sources' ? new Response('{}', { status: 500 }) : working(input, init));
+			await poll();
+			expect(startButton()?.disabled).toBe(false);
+			expect(host.textContent).not.toContain('couldn’t check your model sources');
+			fetchMock.mockImplementation(working);
+			localRow = downloadingRow(55); await poll();
+			expect(host.textContent).toContain('Downloading 55%');
+		});
 	});
 });
