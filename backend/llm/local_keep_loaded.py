@@ -118,6 +118,12 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
             await keep_loaded(server_id, model, pin_if_fits=False)
 
 
+def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: list[dict]) -> dict:
+    return {"status": "refused", "verdict": verdict,
+            "line": not_loaded_line(int(size), room) if size and pinned else None,
+            "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and loaded else None}
+
+
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
 ) -> dict:
@@ -176,10 +182,10 @@ async def keep_loaded(
                 return {"status": "loaded"}
             others = [int(item.get("size_bytes") or 0) or None for item in loaded]
             room = model_room_bytes()
-            if load_verdict(int(size_bytes) if size_bytes else None, others, room) != "fits_now":
+            verdict = load_verdict(int(size_bytes) if size_bytes else None, others, room)
+            if verdict != "fits_now":
                 _log_no_room(size_bytes, others, room)
-                line = not_loaded_line(int(size_bytes), room) if size_bytes and (pinned or row.get("pinned")) else None
-                return {"status": "refused", "line": line}
+                return _refusal(verdict, size_bytes, room, bool(pinned or row.get("pinned")), loaded)
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):

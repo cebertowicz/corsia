@@ -14,6 +14,7 @@ from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
 from llm.local_setup_gates import host_never_runs_local, local_memory_ok
+from llm.local_setup_results import LOAD_FAILURE_CAUSES
 from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
@@ -64,8 +65,8 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
         download_stalled=flight.get("stalled") is True,
         fix=flight.get("fix"),
     )
-    if flight.get("message"):
-        result["detail"] = flight["message"]
+    if flight.get("cause") == "load_refused" and flight.get("catalog_line"):
+        result["detail"] = flight["catalog_line"]
 
 
 async def local_server_for_install(
@@ -189,7 +190,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     if not settings_flight:
         # A finished setup whose server has since stopped was turned off, not still finishing.
         turned_off = flight is not None and flight["state"] == "ready" and result.get("reason_code") == "not_running"
-        load_unsuccessful = flight is not None and flight["state"] == "start_failed" and flight.get("cause") in {"load_refused", "load_failed"}
+        load_unsuccessful = flight is not None and flight["state"] == "start_failed" and flight.get("cause") in LOAD_FAILURE_CAUSES
         _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or load_unsuccessful else None)
     return result
 

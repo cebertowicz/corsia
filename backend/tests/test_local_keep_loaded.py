@@ -132,7 +132,7 @@ async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(cal
     with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
         outcome = await local_keep_loaded.keep_loaded("server", MODEL)
 
-    assert outcome == {"status": "refused", "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
+    assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None, "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
     assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == []
     # The row derives "Not loaded: needs N GB, M GB free for a model now"; the backend writes no second line.
     assert local_keep_loaded.failures("server") == {}
@@ -157,6 +157,19 @@ def test_the_memory_reading_names_available_total_reserve_and_pages(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_known_neighbour_refuses_with_catalog_line_and_no_room(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    async def loaded(_cfg):
+        return [{"identifier": "other", "size_bytes": 8 * GIB}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+    assert outcome == {"status": "refused", "verdict": "no_room", "neighbour_id": "other",
+                       "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
+    assert calls["loads"] == []
+
+
+@pytest.mark.asyncio
 async def test_unknown_neighbour_refuses_without_catalog_line(calls, monkeypatch) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     async def loaded(_cfg):
@@ -165,7 +178,7 @@ async def test_unknown_neighbour_refuses_without_catalog_line(calls, monkeypatch
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
-    assert outcome == {"status": "refused", "line": None}
+    assert outcome == {"status": "refused", "verdict": "no_room", "neighbour_id": "other", "line": None}
     assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
 
 

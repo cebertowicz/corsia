@@ -11,12 +11,13 @@ from fastapi import HTTPException
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
 CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_failed", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
+LOAD_FAILURE_CAUSES = frozenset({"load_refused", "load_failed"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
-def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP, *, load_line: object = True) -> str:
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP, *, verdict: object = None, neighbour: object = None) -> str:
     """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
     if cause == "damaged_bundle":
         return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
@@ -33,8 +34,10 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"CORSIA couldn’t load the model. {action}"
     if cause == "load_refused":
         action = "press Retry." if retry == RETRY_IN_APP else retry
-        if not load_line:
-            return f"CORSIA couldn’t load the model because another model is already loaded. In Settings › Providers, turn off the other model, then {action}"
+        if verdict == "no_room":
+            if isinstance(neighbour, str) and neighbour.strip():
+                return f"CORSIA couldn’t load the model because {neighbour} is already loaded and there isn’t room for both."
+            return "CORSIA couldn’t load the model because another model is already loaded and there isn’t room for both."
         return f"CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then {action}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
@@ -69,8 +72,10 @@ def task_from_payload(payload: object, task_id: str) -> dict | None:
 class LoadRefused(RuntimeError):
     """A memory check refused the load, with the catalog line when available."""
 
-    def __init__(self, line: str | None) -> None:
+    def __init__(self, verdict: str, line: str | None, neighbour: str | None = None) -> None:
+        self.verdict = verdict
         self.line = line
+        self.neighbour = neighbour
         super().__init__(line or "")
 
 

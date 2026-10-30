@@ -48,7 +48,7 @@ def _first_run_rendered(conductor_id: str) -> bool:
         db.close()
 
 
-def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None, bytes_to_free: int | None, load_line: object = True) -> dict:
+def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None, bytes_to_free: int | None, verdict: object = None, neighbour: object = None) -> dict:
     detail: dict = {"outcome": outcome}
     if outcome == "ready":
         if not model:
@@ -56,7 +56,7 @@ def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None,
         detail["model"] = model[:512]
         return detail
     cause = str(cause) if cause in CAUSES else "other"
-    detail.update(cause=cause, fix=setup_fix(cause, bytes_to_free, load_line=load_line))
+    detail.update(cause=cause, fix=setup_fix(cause, bytes_to_free, verdict=verdict, neighbour=neighbour))
     if ref and _REF.fullmatch(ref):
         detail["ref"] = ref
     if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
@@ -84,7 +84,7 @@ async def flush_pending_local_download(conductor_id: str | None = None) -> bool:
             return False
         result = operation.result or {}
         payload = _payload(outcome, model=operation.repository, cause=result.get("cause"),
-                           ref=result.get("ref"), bytes_to_free=result.get("bytes_to_free"), load_line=result.get("message"))
+                           ref=result.get("ref"), bytes_to_free=result.get("bytes_to_free"), verdict=result.get("verdict"), neighbour=result.get("neighbour"))
         delivery_id = f"local-download:{operation.flight_id}:{outcome}"
         try:
             delivered = await deliver_to_thread(
