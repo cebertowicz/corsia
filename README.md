@@ -233,7 +233,7 @@ An agent you don't watch needs real capabilities, or it stops to ask you at ever
 - **Agents can't approve their own access.** A lease is approved by a signed-in person or, if you turn it on, by the automatic reviewer. A lease that launches an outside agent always needs a person.
 - **Credentials stay masked.** Credential values are masked before file contents reach a model.
 
-In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. More in [`SECURITY.md`](SECURITY.md).
+In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. How each control works, what it doesn't stop, and every known limit: [security documentation](docs/security/README.md).
 
 ## Questions
 
@@ -349,7 +349,8 @@ flowchart TB
 | Topic | Read |
 |---|---|
 | Code map and runtime isolation | [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`BACKEND.md`](BACKEND.md) · [`FRONTEND.md`](FRONTEND.md) |
-| Security and accounts | [`SECURITY.md`](SECURITY.md) |
+| Security and accounts | [`docs/security/`](docs/security/README.md) · report a vulnerability: [`SECURITY.md`](SECURITY.md) |
+| Every documentation page | [`docs/README.md`](docs/README.md) |
 | What has shipped | [`CHANGELOG.md`](CHANGELOG.md) |
 | Rules for coding agents in this repository | [`AGENTS.md`](AGENTS.md) |
 
