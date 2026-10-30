@@ -41,6 +41,7 @@ test('@surface:first-run setup counts a declared model only when selectable', as
 			return rows.find((item: { id: string }) => item.id === modelId)?.status;
 		}, { timeout: 15000 }).toBe('ready');
 		await expect(page.getByRole('button', { name: 'Start using CORSIA' })).toBeEnabled({ timeout: 15000 });
+		await expect(page.getByText(/127\.0\.0\.1.* · added/)).toBeVisible();
 	} finally {
 		await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 	}

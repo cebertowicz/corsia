@@ -1,4 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
 import { token, user } from '$lib/stores/auth';
@@ -15,9 +16,10 @@ let component: ReturnType<typeof mount> | null = null;
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 function button(text: string) { const result = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text); if (!result) throw new Error(`Missing button ${text}`); return result; }
 
-async function openSetup(count: number, reachable = true, modelStatus = 'ready', declared = false) {
+async function openSetup(count: number, reachable = true, modelStatus = 'ready', declared = false, testedApi = false) {
 	let added = false;
 	token.set('test-session'); user.set({ id: 'user', name: 'Ada' });
+	if (testedApi) testedProviders.set(['anthropic']);
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_started: true, local_eligible: false, macos_supported: null } });
@@ -28,13 +30,14 @@ async function openSetup(count: number, reachable = true, modelStatus = 'ready',
 			added = true; return json({ ok: true, server_id: 'server-1', models: count });
 		}
 		if (url.includes('/api/settings/network-servers')) return json({ servers: added ? [{ id: 'server-1', instance_name: 'My server' }] : [] });
-		if (url.startsWith('/api/models')) return json({ models: added && (count || declared) ? [{ id: 'm', status: modelStatus, connection: 'external', provider: 'external', litellm_model: 'external@server-1/model' }] : [] });
+		if (url.startsWith('/api/models')) return json({ models: testedApi ? [{ id: 'api', status: 'ready', provider: 'anthropic' }] : added && (count || declared) ? [{ id: 'm', status: modelStatus, connection: 'external', provider: 'external', litellm_model: 'external@server-1/model' }] : [] });
 		if (url.includes('/api/settings/providers')) return json({ providers: [] });
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
 	flushSync(); await settle(); await settle();
+	if (testedApi) return;
 	button('Add provider').click(); await settle();
 	([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Other provider by address')) as HTMLButtonElement).click(); await settle();
 	const input = document.querySelector('input[placeholder="https://host.example.com/compatible-mode/v1"]') as HTMLInputElement;
@@ -57,7 +60,12 @@ describe('own endpoint during setup', () => {
 	it('enables setup when the endpoint lists a selectable model', async () => {
 		await openSetup(1);
 		expect(button('Start using CORSIA').disabled).toBe(false);
-		expect(host.textContent).toContain('My server · passed a test call');
+		expect(host.textContent).toContain('My server · added');
+		expect(get(testedProviders)).toEqual([]);
+	});
+	it('keeps the test-call label for a tested API provider', async () => {
+		await openSetup(0, true, 'ready', false, true);
+		expect(host.textContent).toContain('anthropic · passed a test call');
 	});
 	it('enables setup for a ready declared model when the model list is empty', async () => {
 		await openSetup(0, true, 'ready', true);

@@ -2,7 +2,6 @@ import type { Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 import { get } from 'svelte/store';
 import { networkServers } from '$lib/stores/networkServers';
-import { testedProviders } from '$lib/stores/providers';
 
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string };
@@ -17,17 +16,12 @@ export function setupModelWorks(model: SetupModel): boolean {
 }
 
 /** True when a subscription, a tested API provider or the local model is ready to answer. Setup only reports this; the person picks the model. */
-export function hasReadySetupModel(models: SetupModel[], tested: TestedProvider[] = []): boolean {
+export function hasReadySetupModel(models: SetupModel[], tested: TestedProvider[] = [], addedEndpoints: string[] = []): boolean {
 	return models.some((row) => setupModelWorks(row) && (
 		row.connection === 'claude-code' || row.connection === 'codex' || row.connection === 'omlx'
-		|| tested.some((test) => row.connection === test.source || row.provider === test.source
-			|| row.litellm_model?.startsWith(`external@${test.source}/`))
+		|| tested.some((test) => row.connection === test.source || row.provider === test.source)
+		|| addedEndpoints.some((id) => row.litellm_model?.startsWith(`external@${id}/`))
 	));
-}
-
-/** Record successful registration; catalog readiness decides whether setup can continue. */
-export function recordSetupEndpoint(id: string): void {
-	testedProviders.update((names) => [...new Set([...names, id])]);
 }
 
 export function setupProviderName(source: string): string {

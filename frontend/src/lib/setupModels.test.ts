@@ -59,11 +59,11 @@ describe('setup model readiness', () => {
 		expect(hasReadySetupModel([api], [{ source: 'anthropic' }])).toBe(true);
 	});
 
-	it('matches an external model only to the tested server', () => {
+	it('matches an external model only to the added server', () => {
 		const external = model({ connection: 'external', provider: 'external', litellm_model: 'external@server-10/model' });
-		expect(hasReadySetupModel([external], [{ source: 'server-10' }])).toBe(true);
-		expect(hasReadySetupModel([external], [{ source: 'server-1' }])).toBe(false);
-		expect(hasReadySetupModel([{ ...external, status: 'unavailable' }], [{ source: 'server-10' }])).toBe(false);
+		expect(hasReadySetupModel([external], [], ['server-10'])).toBe(true);
+		expect(hasReadySetupModel([external], [], ['server-1'])).toBe(false);
+		expect(hasReadySetupModel([{ ...external, status: 'unavailable' }], [], ['server-10'])).toBe(false);
 	});
 
 	it('does not count an untested API provider or a subscription without a ready account', () => {
