@@ -37,9 +37,6 @@ pub const BACKUPS_FOLDER: &str = "CORSIA backups";
 const PLIST: &str = "Library/LaunchAgents/com.corsia.prod.plist";
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
-/// The port a source install's own `scripts/corsia` serves when no launchd plist names one.
-/// `backend/tests/test_default_port.py` holds it equal to the script's.
-const SOURCE_DEFAULT_PORT: u16 = 1956;
 
 /// One rename, from where the earlier install had it to its place in the backup.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -759,12 +756,14 @@ impl LaunchdService {
         let plist = home.join(PLIST);
         let roots = plist_roots(&plist);
         // An install this app can adopt either has a plist that names its port or is a plain
-        // checkout, started by hand or by `install.sh`, that serves its script's default. Its
-        // own `.env` may name another port (the opt-in second-instance setup), which this
-        // misses: such an install is not seen as running, and the database check does not
-        // catch it, since it passes while a backend holds an idle connection.
+        // checkout, started by hand or by `install.sh`, that serves the port its own `.env`
+        // names, else its script's default. Either way the port is a guess, which is why a plain
+        // install counts as running only when a listener there runs from its backend folder.
         let plain = roots.port.is_none().then_some(backend_dir).flatten();
-        let port = roots.port.or_else(|| plain.is_some().then_some(SOURCE_DEFAULT_PORT));
+        let port = roots.port.or_else(|| {
+            plain.as_ref()?;
+            Some(source.as_ref().map_or(adoption::SOURCE_DEFAULT_PORT, SourceLifecycle::plain_port))
+        });
         let mut states: Vec<PathBuf> = roots.state.into_iter().collect();
         if let Some((_, state)) = adoption::bootstrap_roots(&home.join(".corsia").join("config.json")) {
             states.push(state);
@@ -1657,6 +1656,14 @@ mod tests {
         let home = Home::new("plain-port");
         let source = plain_install(&home);
         assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(1956));
+    }
+
+    #[test]
+    fn a_plain_install_is_looked_for_on_the_port_its_env_names() {
+        let home = Home::new("plain-env-port");
+        let source = plain_install(&home);
+        home.write(".corsia/.env", "# a second instance\nexport BACKEND_PORT=\"47124\"\n");
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(47124));
     }
 
     #[test]

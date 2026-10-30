@@ -88,6 +88,8 @@ pub struct SourceLifecycle {
     count_interval: Duration,
     /// Reads a process's start time; replaced in tests.
     stop_clock: fn(u32) -> Option<String>,
+    /// Whether a listener on the port runs from the directory; replaced in tests.
+    listener_runs_from: fn(u16, &Path) -> bool,
 }
 
 impl SourceLifecycle {
@@ -105,7 +107,13 @@ impl SourceLifecycle {
             macos_major: macos_major(),
             count_interval: COUNT_INTERVAL,
             stop_clock: process_started,
+            listener_runs_from: release_proof::listener_runs_from,
         }
+    }
+
+    /// The port a source install with no plist serves; see `SourceInstall::plain_port`.
+    pub fn plain_port(&self) -> u16 {
+        self.source.plain_port()
     }
 
     fn target() -> String {
@@ -213,11 +221,17 @@ impl SourceLifecycle {
 
     /// Proof that the source holds nothing adoption touches: launchd and the port say it is
     /// down, the process launchd ran before the stop is gone, and the database opens exclusively.
+    /// A plain install has no job or process id to prove gone, and the database check alone
+    /// passes while its backend holds an idle connection, so no listener on its port may still
+    /// run from its backend folder.
     fn released(&self, pid: Option<u32>) -> Result<(), String> {
         let database = self.source.state.join("corsia.db");
+        let port = self.plain_port();
         let let_go = || -> Result<(), String> {
             if self.source.plist.is_some() {
                 self.is_down()?;
+            } else if (self.listener_runs_from)(port, &self.source.working_directory) {
+                return Err(format!("port {port} still accepts connections"));
             }
             if let Some(pid) = pid.filter(|pid| !release_proof::pid_is_gone(*pid)) {
                 return Err(format!("process {pid} is still running"));
@@ -833,6 +847,7 @@ mod tests {
         lifecycle.bootout_timeout = Duration::from_millis(300);
         lifecycle.macos_major = Some(15);
         lifecycle.count_interval = Duration::from_millis(30);
+        lifecycle.listener_runs_from = |_, _| false;
         fs::write(&loaded, "").unwrap();
         Home { root, lifecycle }
     }
@@ -950,6 +965,57 @@ mod tests {
             assert!(home.lifecycle.check_ready(&state, &BTreeSet::new()).is_ok());
             assert_eq!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok(), expected);
         }
+    }
+
+    #[test]
+    fn a_plain_install_whose_backend_still_serves_is_not_released_whatever_the_database_says() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static ASKED: AtomicU32 = AtomicU32::new(0);
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        home.lifecycle.source.plist = None;
+        home.lifecycle.source.port = None;
+        home.lifecycle.source.generation = None;
+        home.lifecycle.stop_clock = |_| Some("test-start".into());
+        // The backend still listens on the script's default port, from the checkout's backend
+        // folder, while its database opens (an idle connection does not hold the lock).
+        home.lifecycle.listener_runs_from = |port, directory| {
+            ASKED.fetch_add(1, Ordering::Relaxed);
+            port == adoption::SOURCE_DEFAULT_PORT && directory.ends_with("checkout/backend")
+        };
+        let error = home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap_err();
+        assert_eq!(error, format!("port {} still accepts connections", adoption::SOURCE_DEFAULT_PORT));
+        assert!(ASKED.load(Ordering::Relaxed) > 1, "it keeps waiting for the backend to stop");
+    }
+
+    #[test]
+    fn a_plain_install_whose_env_names_another_port_is_judged_on_that_port() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        home.lifecycle.source.plist = None;
+        home.lifecycle.source.port = None;
+        home.lifecycle.source.generation = None;
+        home.lifecycle.stop_clock = |_| Some("test-start".into());
+        fs::write(&home.lifecycle.source.env_file, "export BACKEND_PORT='47123' # second instance\n").unwrap();
+        // The backend serves its own port; nothing runs on the default one.
+        home.lifecycle.listener_runs_from = |port, _| port == 47123;
+        let error = home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap_err();
+        assert_eq!(error, "port 47123 still accepts connections");
+    }
+
+    #[test]
+    fn a_plain_install_whose_backend_stops_serving_during_the_wait_is_released() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static ASKED: AtomicU32 = AtomicU32::new(0);
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        home.lifecycle.source.plist = None;
+        home.lifecycle.source.port = None;
+        home.lifecycle.source.generation = None;
+        home.lifecycle.stop_clock = |_| Some("test-start".into());
+        // It returns the moment the backend stops serving; the long budget only keeps a loaded
+        // machine's slow sleeps from running out the default 300 ms before the fourth look.
+        home.lifecycle.proof_timeout = Duration::from_secs(10);
+        home.lifecycle.listener_runs_from = |_, _| ASKED.fetch_add(1, Ordering::Relaxed) < 3;
+        assert!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok());
+        assert!(ASKED.load(Ordering::Relaxed) >= 4);
     }
 
     #[test]
