@@ -32,6 +32,17 @@ pub fn launchd_pid(target: &str) -> Option<u32> {
     pid_from_launchctl_print(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// Asks launchd to unload a job, plainly: never `--wait`, which macOS 15 rejects. It returns
+/// at once and launchd keeps the job listed until its process has exited. A non-zero exit is
+/// only logged; the caller's release proof decides whether the job let go.
+pub fn launchctl_bootout(launchctl: &Path, target: &str) -> std::io::Result<()> {
+    let status = Command::new(launchctl).args(["bootout", target]).status()?;
+    if !status.success() {
+        log::warn!("`launchctl bootout` exited {status}; checking whether the install stopped");
+    }
+    Ok(())
+}
+
 pub fn pid_from_launchctl_print(text: &str) -> Option<u32> {
     text.lines()
         .find_map(|line| line.trim().strip_prefix("pid = ")?.trim().parse().ok())

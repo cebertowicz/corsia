@@ -699,14 +699,8 @@ impl Launchd for SystemLaunchd {
     }
 
     fn bootout(&mut self) -> Result<(), String> {
-        let status = Command::new("/bin/launchctl")
-            .args(["bootout", &Self::target()])
-            .status()
-            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
-        if !status.success() {
-            log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
-        }
-        Ok(())
+        release_proof::launchctl_bootout(Path::new("/bin/launchctl"), &Self::target())
+            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))
     }
 
     fn bootstrap(&mut self) -> Result<(), String> {
