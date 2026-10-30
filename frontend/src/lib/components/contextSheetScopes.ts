@@ -2,6 +2,7 @@
 // can see which layer a token belongs to and where to change it.
 import type { ContextSheetSourceRow } from './contextSheetModel';
 import { promptTokenLabel } from './contextSheetFormat';
+import { contextSourceActionLabel, contextSourceOwnerLabel } from '$lib/contextSourceNavigation';
 
 export const SCOPE_GROUPS = [
 	{ id: 'system', name: 'System' },
@@ -100,6 +101,7 @@ interface ListedSkill {
 	role: string;
 	trial: boolean;
 	listed: string;
+	path: string;
 	tokens: number | null;
 }
 
@@ -122,6 +124,7 @@ function listedSkills(metadata: Record<string, unknown> | undefined): ListedSkil
 			role: text(row.role),
 			trial: typeof row.lesson_id === 'string' && row.lesson_id.length > 0,
 			listed: text(row.listed),
+			path: text(row.path),
 			tokens,
 		});
 	}
@@ -156,6 +159,11 @@ export function expandSkillsIndex(
 			label: skill.name,
 			fullLabel: skill.name,
 			stableReference: '',
+			filePath: skill.path,
+			actionLabel: contextSourceActionLabel({ filePath: skill.path }),
+			ownerLabel: contextSourceOwnerLabel({ filePath: skill.path }),
+			ownerSurface: '',
+			layer: 'skill',
 			reason: `${category} skill${skill.trial ? ' (trial, unproven)' : ''}`,
 			countLabel: '',
 			tokenCount: skill.tokens,
@@ -172,6 +180,10 @@ export function expandSkillsIndex(
 			category: 'System',
 			label: 'Skills index',
 			fullLabel: 'Skills index',
+			stableReference: '',
+			filePath: '',
+			actionLabel: '',
+			ownerLabel: '',
 			countLabel: '',
 			tokenCount: header,
 			tokenLabel: promptTokenLabel(header),
