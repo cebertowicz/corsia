@@ -164,7 +164,7 @@ async function settle(page: Page) {
 		const before = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 		const after = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
-		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running').length, steady: before === after };
+		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length, steady: before === after };
 	}), { message: 'setup: the canvas is loaded, still and untransformed' }).toEqual({ transformed: [], running: 0, steady: true });
 }
 
