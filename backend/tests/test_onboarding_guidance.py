@@ -441,7 +441,7 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
     posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder, unless Auto-approve is on" in step
+    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on.**" in step
     assert "**Auto-approve is on.** A reviewer model checks each request" in step
     assert "every command that uses it" in step and "Most requests start without asking you" in step
     assert "turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review" in step

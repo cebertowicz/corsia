@@ -70,7 +70,6 @@ The server posts `references/first-run-opening.md` as your first message, with `
    > **Agents ask you before they:**
    > - send or post as you
    > - spend money
-   > - open files outside your work folder, unless Auto-approve is on
    >
    > **Auto-approve is on.** A reviewer model checks each request for access outside your work folder, and every command that uses it. Most requests start without asking you, so agents keep working while you're away. Access covers one chat and ends when its time is up. Anything that would change a repository's rules still asks you.
    > To approve each request yourself instead, turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.

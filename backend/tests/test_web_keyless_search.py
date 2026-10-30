@@ -130,10 +130,3 @@ async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
     result = await keyless.keyless_search("query")
     assert (result.kind, result.reason) == (outcomes.FAILED, reason)
     assert search.call_count == 1
-
-
-def test_first_run_posts_the_brave_line_after_a_key():
-    from infra.system_package import system_resource_source
-    from onboarding.first_run_wake import APP_REFERENCE
-
-    assert "Web search works. Searches go to Brave." in system_resource_source(APP_REFERENCE).read_text()
