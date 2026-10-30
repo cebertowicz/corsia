@@ -33,6 +33,7 @@ from core.workflow_verdict_rules import (
     Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, assert_evaluator_fields, decide_arms,
     definitions_in_force,
 )
+from core.workflow_verdict_types import subject_of
 from core.workflow_verdicts import (
     CORRECTION_FLOOR, COST, DEFAULT_MINIMUM, KpiRow, PlannedMeasure, Run, parse_ts,
 )
@@ -89,7 +90,7 @@ class OpenTrial:
 
     @property
     def subject(self) -> str:
-        return subject_of(self.lesson_id, self.sha)
+        return subject_of("lesson", self.lesson_id, self.sha)
 
 
 @dataclass(frozen=True)
@@ -104,10 +105,6 @@ class Arms:
     def inputs(self) -> dict[str, object]:
         return {"with": len(self.with_runs), "without": len(self.without_runs),
                 "crossed_over": self.crossed_over, "omitted": self.omitted}
-
-
-def subject_of(lesson_id: str, sha: str) -> str:
-    return f"lesson:{lesson_id}@{sha}"
 
 
 def open_trials(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LIMIT) -> list[OpenTrial]:

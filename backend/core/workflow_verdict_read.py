@@ -27,6 +27,7 @@ from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
 from infra.measure_registry import workflow_for_file
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
+from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
 from tools.workflow_task_fields import judged_version
@@ -190,7 +191,7 @@ def open_workflow_subjects(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LI
     found: list[str] = []
     for row in db.execute(_OPEN_WORKFLOWS_SQL, {"reached": REACHED_EVENT}):
         if judged_version(row["version"]):
-            found.append(f"workflow:{row['ref']}@{row['version']}")
+            found.append(subject_of("workflow", row["ref"], row["version"]))
             if len(found) == limit:
                 break
     return frozenset(found)
@@ -279,7 +280,7 @@ def read_open_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
                        limit: int = OPEN_BATCH_LIMIT, kpi_reader: KpiReader | None = None) -> Snapshot:
     """One bounded open-verdict batch; selected workflows retain only their own full history."""
     subjects = open_workflow_subjects(db, limit=limit)
-    refs = {subject.removeprefix("workflow:").rpartition("@")[0] for subject in subjects}
+    refs = {split_subject(subject)[1] for subject in subjects}
     snapshot = read_snapshot(db, now=now, kpi_reader=kpi_reader, workflow_refs=refs)
     plans, reached = recorded_verdicts(db, subjects)
     return replace(snapshot, plans=plans, reached=reached, subjects=subjects)

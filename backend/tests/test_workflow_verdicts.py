@@ -17,6 +17,7 @@ from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
     decide_arms, freeze_plan,
 )
+from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
@@ -161,6 +162,22 @@ def test_kpi_n_counts_deciding_denominator_rows_with_allowed_labels() -> None:
     rows = [("num", "observed", 0.0), ("den", "observed", 1.0), ("den", "self_reported", 1.0)]
     call = measure_call(KPI, runs("v2", 0, kpi=rows), runs("v1", 0, kpi=rows), minimum=20, now=NOW, seed=1)
     assert (call.call, call.n_new) == ("no_worse", 20)
+
+
+@pytest.mark.parametrize(("better", "new_num", "reason"), [
+    ("lower", 1.05, "small_harm"), ("lower", 0.95, None),
+    ("higher", 0.95, "small_harm"), ("higher", 1.05, None),
+])
+def test_small_harm_follows_the_measure_direction(better, new_num, reason) -> None:
+    measure = PlannedMeasure("escapes", "quality", better, "kpi", 0, 1, margin_gap=0.1)
+    old = runs("v1", 0, kpi=[("num", "observed", 1.0), ("den", "observed", 1.0)])
+    new = runs("v2", 0, kpi=[("num", "observed", new_num), ("den", "observed", 1.0)])
+    call = measure_call(measure, new, old, minimum=20, now=NOW, seed=1)
+    assert (call.call, call.reason) == ("no_worse", reason)
+
+
+def test_subject_round_trips_a_name_with_an_at_sign() -> None:
+    assert split_subject(subject_of("workflow", "team@ops", "ab12cd")) == ("workflow", "team@ops", "ab12cd")
 
 
 @pytest.mark.parametrize(("new", "reason"), [
