@@ -122,6 +122,7 @@ Released 2026-10-30.
 ### Documents and collaboration
 
 - A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
+- A file an agent names by its path in the workspace or a repository shows as a document chip you can open, and a reply shows a chip for every file it names, however many.
 - Agent replies to your document comments now show as one notice above the message box until you read them.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Agents can suggest individual additions to a document without replacing the text they follow.
