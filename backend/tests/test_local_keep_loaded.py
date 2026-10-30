@@ -124,21 +124,71 @@ async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(calls, monkeypatch, caplog) -> None:
-    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+async def test_an_unpinned_model_without_free_memory_leaves_the_line_to_the_row(calls, monkeypatch, caplog) -> None:
+    calls["set_rows"]([_row("new-model", 10), _row("other", 15, pinned=True)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
     monkeypatch.setattr(local_keep_loaded, "memory_reading", lambda: "available 8.0 of 32.0 GiB")
 
     with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
         outcome = await local_keep_loaded.keep_loaded("server", MODEL)
 
-    assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None, "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
-    assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == []
-    # The row derives "Not loaded: needs N GB, M GB free for a model now"; the backend writes no second line.
+    # Pins full left it unpinned, so oMLX won't load it at start either: the verdict still decides.
+    assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None, "line": None}
+    assert calls["pins"] == [] and calls["loads"] == []
     assert local_keep_loaded.failures("server") == {}
     # The log carries the verdict's inputs, so a refusal on a machine that looked free can be explained.
     assert ("(needs 10.0 GiB, room 4.0 GiB, beside it nothing; available 8.0 of 32.0 GiB)"
             in caplog.text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("force_pin", (True, False), ids=("setup", "add-model"))
+async def test_a_pinned_model_alone_on_the_seat_loads_past_the_memory_check(calls, force_pin) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["can_load"] = {"ok": False, "free_gb": 4}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=force_pin)
+
+    assert outcome == {"status": "loaded"}
+    assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == ["new-model"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("force_pin", (True, False), ids=("setup", "add-model"))
+@pytest.mark.parametrize("message", (
+    "model files are damaged",
+    "Cannot load new-model: projected memory 22 GB would exceed the dynamic memory ceiling 20 GB",
+))
+async def test_omlx_refusing_a_load_past_the_memory_check_reads_as_not_enough_memory(calls, force_pin, message) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["can_load"] = {"ok": False, "free_gb": 4}
+    calls["load"] = {"ok": False, "status": 500, "message": message}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=force_pin)
+
+    # Setup names the shortfall CORSIA's own check measured, whatever oMLX's words; the row
+    # names only the failed load, so it still says something once memory reads free.
+    assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None,
+                       "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
+    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
+    assert calls["events"][-1] == ("model.load.failed", {
+        "provider": "omlx", "model_id": "new-model", "server_id": "server", "automatic": True, "error": message,
+    })
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_log_names_what_is_beside_it_in_words(calls, monkeypatch, caplog) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    monkeypatch.setattr(local_keep_loaded, "memory_reading", lambda: "reading")
+    async def loaded(_cfg):
+        return [{"identifier": "one", "size_bytes": 8 * GIB}, {"identifier": "two", "size_bytes": None}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+
+    with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
+        await local_keep_loaded.keep_loaded("server", MODEL)
+
+    assert "beside it 8.0 GiB, unreported; reading" in caplog.text
 
 
 def test_the_memory_reading_names_available_total_reserve_and_pages(monkeypatch) -> None:

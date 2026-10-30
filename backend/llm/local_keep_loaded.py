@@ -1,8 +1,9 @@
-"""Keep a just-downloaded local model: pin it within the room for pins, then load it when it fits now.
+"""Keep a local model loaded: pin a download within the room for pins, then load it if it fits now or is pinned alone on the seat.
 
 oMLX's own ``is_pinned`` is the only pin record. A pinned model loads when oMLX
 starts and is never unloaded to make room for another, so CORSIA keeps no pin
-list. Setup's download and Add model's download both finish here.
+list. Setup's download and Add model's download both finish here, and a reload
+after an oMLX restart goes through the same load rule.
 
 Everything a row says about keeping a model loaded is derived live by
 ``host_resources.annotate_keep_loaded`` (no size, pins full, not loaded because it
@@ -18,7 +19,8 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 | pin written | none | live verdicts | ``model.pin`` |
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
 | pins full | none (derived live) | pins-full line | none |
-| doesn't fit now | none (derived live) | not-loaded line, if pinned | none |
+| doesn't fit now, beside a loaded model or unpinned | none (derived live) | not-loaded line, if pinned | none |
+| doesn't fit now, pinned and alone on the seat | none: oMLX decides, as at its start; if it refuses, set NOT_LOADED and setup hears doesn't fit now | live verdicts, or NOT_LOADED | as the load ends |
 | loaded | none | live verdicts | ``model.load.completed`` |
 | load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
 | person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
@@ -95,18 +97,19 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
 def _log_no_room(size_bytes: float | None, others: list[int | None], room: int) -> None:
     """Name the verdict's inputs, so a refusal on a machine that looked free can be explained."""
     log.warning(
-        "Not loading the downloaded local model now: not enough free memory "
+        "The downloaded local model doesn't fit free memory now "
         "(needs %s, room %.1f GiB, beside it %s; %s)",
         f"{size_bytes / GIB:.1f} GiB" if size_bytes else "an unreported size", room / GIB,
-        [f"{s / GIB:.1f} GiB" if s else "unreported" for s in others] or "nothing",
+        ", ".join(f"{s / GIB:.1f} GiB" if s else "unreported" for s in others) or "nothing",
         memory_reading(),
     )
 
 
 async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
-    """Load again, in order, each model that was loaded before oMLX exited and fits now.
+    """Load again, in order, each model that was loaded before oMLX exited, by ``keep_loaded``'s rule.
 
     A model pinned in oMLX is loaded by oMLX itself before it answers health, so it is skipped.
+    A pinned one it left unloaded follows the same rule: alone on the seat, oMLX decides.
     Nothing is pinned here: the person's choice of pin stays as it was.
     """
     from llm.providers.omlx_lifecycle import list_loaded
@@ -124,17 +127,21 @@ def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: 
             "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
+def _will_pin(rows: list[dict] | None, model_id: str, size_bytes: float | None, *, force_pin: bool, pin_if_fits: bool) -> bool:
+    """Setup's model is always pinned; another only within the room for pins, and only when sized."""
+    return force_pin or (pin_if_fits and size_bytes is not None
+                         and pin_fits(int(size_bytes), _pinned_bytes(rows, skip=model_id), pin_room_bytes()))
+
+
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
 ) -> dict:
-    """Pin a completed download, then load it when it fits now.
+    """Pin a completed download, then load it if it fits now or is pinned alone on the seat.
 
-    Setup uses ``force_pin`` for its one managed model. Settings downloads retain
-    the capacity guard so adding another model does not displace that setup model.
-    Every outcome is a row state: a guarded pin that does not fit leaves the model
-    downloaded and unpinned, while a failed forced pin is visible on the row. A
-    completed download is never undone here. ``pin_if_fits=False`` loads without
-    pinning, for a model that is already the person's.
+    Setup's ``force_pin`` pins its one model whatever the verdict. A pinned model alone on the seat
+    loads past the verdict, since oMLX loads pins unchecked at start anyway; oMLX's guard decides.
+    Every outcome is a row state, and a completed download is never undone here.
+    ``pin_if_fits=False`` loads without pinning, for a model already the person's.
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
     from llm.server_observation import observation_generation
@@ -156,11 +163,7 @@ async def keep_loaded(
         return {"status": "failed", "detail": "oMLX model list unavailable"}
     size = row.get("estimated_size")
     size_bytes: float | None = float(size) if isinstance(size, (int, float)) and size > 0 else None
-    pinned = force_pin or (
-        pin_if_fits
-        and size_bytes is not None
-        and pin_fits(int(size_bytes), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
-    )
+    pinned = _will_pin(rows, model.model, size_bytes, force_pin=force_pin, pin_if_fits=pin_if_fits)
     if pinned:
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
         if not pin.get("ok") or pin.get("settings", {}).get("pinned") is not True:
@@ -169,7 +172,8 @@ async def keep_loaded(
             _FAILED[key] = NOT_KEPT
             return {"status": "failed", "detail": pin.get("message") or "Pin did not persist"}
         emit("pin")
-    not_loaded = NOT_LOADED if pinned or row.get("pinned") else NOT_LOADED_UNPINNED
+    kept = bool(pinned or row.get("pinned"))
+    not_loaded = NOT_LOADED if kept else NOT_LOADED_UNPINNED
     step = "memory check"
     try:
         # The seat's lock, so this load and a send's never check the same free memory at once.
@@ -185,13 +189,17 @@ async def keep_loaded(
             verdict = load_verdict(int(size_bytes) if size_bytes else None, others, room)
             if verdict != "fits_now":
                 _log_no_room(size_bytes, others, room)
-                return _refusal(verdict, size_bytes, room, bool(pinned or row.get("pinned")), loaded)
+                if loaded or not kept:
+                    return _refusal(verdict, size_bytes, room, kept, loaded)
+                log.warning("Loading the pinned model anyway: it is alone on the seat, so oMLX decides")
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
-                log.warning("Couldn't load the downloaded local model")
+                log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
-                _FAILED[key] = not_loaded
+                _FAILED[key] = not_loaded  # the row keeps the failed attempt once memory reads free
+                if verdict != "fits_now":  # setup names the shortfall CORSIA itself measured
+                    return _refusal(verdict, size_bytes, room, kept, loaded)
                 return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
