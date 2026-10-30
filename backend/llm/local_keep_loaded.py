@@ -125,6 +125,10 @@ def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: 
             "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
+#: oMLX's status for a load its memory guard refused.
+_OMLX_NO_MEMORY = 507
+
+
 def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dict | None:
     """The refusal this load gets from the one fit verdict, or None when it fits."""
     others = [int(item.get("size_bytes") or 0) or None for item in loaded]
@@ -201,10 +205,12 @@ async def keep_loaded(
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
-                log.warning("Couldn't load the downloaded local model")
+                log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
-                return refusal or {"status": "failed", "detail": result.get("message") or "Load failed"}
+                if refusal and result.get("status") == _OMLX_NO_MEMORY:
+                    return refusal
+                return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"

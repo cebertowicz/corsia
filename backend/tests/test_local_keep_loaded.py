@@ -156,11 +156,23 @@ async def test_setup_loads_its_own_model_on_an_empty_seat_past_the_memory_check(
 async def test_setup_past_the_memory_check_still_hears_omlx_refuse(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
-    calls["load"] = {"ok": False, "message": "would exceed the memory ceiling"}
+    calls["load"] = {"ok": False, "status": 507, "message": "would exceed the memory ceiling"}
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
     assert outcome["status"] == "refused" and outcome["verdict"] == "no_memory"
+    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
+
+
+@pytest.mark.asyncio
+async def test_setup_past_the_memory_check_keeps_a_load_failure_that_isnt_memory(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["can_load"] = {"ok": False, "free_gb": 4}
+    calls["load"] = {"ok": False, "status": 500, "message": "model files are damaged"}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"status": "failed", "detail": "model files are damaged"}
     assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
 
 
