@@ -29,6 +29,7 @@ from infra.guidance_messages import (
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
+from tools.workspace_git_paths import is_empty_git_dir
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
@@ -73,10 +74,10 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None,
 # Public digest and path helpers remain re-exported from guidance_history_paths.
 
 def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path | None, str | None]:
-    """The workspace's own repository, never an enclosing one; only a guidance save passes ``create``."""
+    """The workspace's own repository, never an enclosing one; only a guidance save and a Linux shell launch pass ``create``, and with it an empty ``.git`` directory counts as absent because that is the marker the launch leaves when it cannot init."""
     workspace = workspace.resolve(strict=False)
     try:
-        if (workspace / ".git").exists():
+        if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):
             top = Path(_git(workspace, "rev-parse", "--show-toplevel").strip()).resolve(strict=False)
             return (workspace, None) if top == workspace else (None, "the workspace Git directory resolves elsewhere")
         if _git(workspace, "rev-parse", "--show-toplevel", ok=(0, 128)).strip():

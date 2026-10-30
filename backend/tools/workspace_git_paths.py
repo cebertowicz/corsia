@@ -20,6 +20,17 @@ def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path:
     return (base / text.removeprefix(prefix).strip()).resolve(strict=False)
 
 
+def is_empty_git_dir(path: Path) -> bool:
+    """Return whether ``path`` is an empty Git directory, which Git discovery skips.
+
+    A Linux shell launch leaves one where it could not init, so a create still treats it as absent.
+    """
+    try:
+        return path.is_dir() and not path.is_symlink() and not any(path.iterdir())
+    except OSError:
+        return False
+
+
 def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
     """Return the Git marker and control paths, ending with the hooks directory.
 
