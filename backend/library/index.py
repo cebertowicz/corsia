@@ -181,16 +181,8 @@ def _validate_item(row: Any) -> dict[str, Any]:
     if row["withdrawn"] and not row["withdrawn_reason"]:
         raise LibraryIndexValidationError("withdrawn library items must include withdrawn_reason")
 
-    source = row["source"]
-    own_item = source == "library"
-    if own_item:
-        url = row.get("url")
-        pattern = r"skills/[^/]+/SKILL\.md" if kind == "skill" else r"packs/[^/]+/"
-        if not isinstance(url, str) or not re.fullmatch(pattern, url) or url.split("/")[1] in {".", ".."}:
-            raise LibraryIndexValidationError("library-owned item url must identify its item folder")
-        base_path = url.removesuffix("/SKILL.md") if kind == "skill" else url.removesuffix("/")
-        _validate_relative_path(base_path)
-        source = {"repository": LIBRARY_REPOSITORY, "path": base_path, "commit": "main"}
+    own_item = row["source"] == "library"
+    source = _own_source(row.get("url"), kind) if own_item else row["source"]
     if not isinstance(source, dict):
         raise LibraryIndexValidationError("library index item source must be an object")
     for field in ("repository", "path", "commit"):
@@ -231,6 +223,16 @@ def _validate_item(row: Any) -> dict[str, Any]:
     if len(paths) != len({path.casefold() for path in paths}):
         raise LibraryIndexValidationError("library index file paths must be unique, ignoring case")
     return {**row, "source": source}
+
+
+def _own_source(url: Any, kind: str) -> dict[str, str]:
+    """The library's own rows name only their folder; their files are read from main."""
+    pattern = r"skills/[^/]+/SKILL\.md" if kind == "skill" else r"packs/[^/]+/"
+    if not isinstance(url, str) or not re.fullmatch(pattern, url) or url.split("/")[1] in {".", ".."}:
+        raise LibraryIndexValidationError("library-owned item url must identify its item folder")
+    base_path = url.removesuffix("/SKILL.md") if kind == "skill" else url.removesuffix("/")
+    _validate_relative_path(base_path)
+    return {"repository": LIBRARY_REPOSITORY, "path": base_path, "commit": "main"}
 
 
 def _validate_relative_path(path: str) -> None:
