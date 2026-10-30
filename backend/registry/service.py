@@ -137,7 +137,7 @@ def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, An
             _db.close()
 
 
-def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
+def resolve_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
     """Resolve an active file owner from a physical path.
 
     Workspace paths prefer their relocatable logical identity and retain the

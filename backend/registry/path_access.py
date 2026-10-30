@@ -67,6 +67,9 @@ def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
         return FileLookup(candidate, False, False, None)
     if not candidate.is_file():
         return FileLookup(candidate, True, False, None)
-    artifact = registry_service.resolve_file_identity(str(candidate), db=db)
-    has_identity = artifact is not None or registry_service.find_file_identity(str(candidate), db=db) is not None
+    identity = registry_service.prepare_file_identity(str(candidate), db=db)
+    if identity is None:
+        return FileLookup(candidate, True, True, None)
+    artifact = registry_service.resolve_file_identity(identity, db=db)
+    has_identity = artifact is not None or registry_service.find_file_identity(identity, db=db) is not None
     return FileLookup(candidate, True, True, artifact, has_identity)

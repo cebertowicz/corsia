@@ -17,7 +17,7 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
-from registry.chat_cards import card_for, reference_card
+from registry.chat_cards import file_card, reference_card
 from registry import service as registry_service
 from registry.path_access import FileLookup, lookup_file
 
@@ -121,8 +121,7 @@ def reference_cards(
             # a retired file must not reappear as an openable file-only card.
             if found.has_identity:
                 continue
-            card = card_for({"state": "active", "path": canonical, "type": registry_service.classify(found.path),
-                             "integration": "workspace"}, None, kind="artifact")
+            card = file_card(canonical, registry_service.classify(found.path))
         if card is not None:
             seen_paths.add(canonical)
             if artifact_id:

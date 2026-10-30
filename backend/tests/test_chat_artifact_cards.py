@@ -589,6 +589,53 @@ def test_a_message_gets_cards_for_accessible_named_files_without_registering(db,
     assert registry_service.resolve_file_identity(str(ws / "unregistered.md"), db=db) is None
 
 
+def test_file_lookup_prepares_once_and_reuses_identity_for_both_queries(db, ws, monkeypatch):
+    from registry.path_access import lookup_file
+
+    path = ws / "plain.md"
+    path.write_text("plain")
+    prepare = registry_service.prepare_file_identity
+    resolve = registry_service.resolve_file_identity
+    find = registry_service.find_file_identity
+    prepared_inputs = []
+    query_inputs = []
+
+    def counted_prepare(value, **kwargs):
+        if isinstance(value, str):
+            prepared_inputs.append(value)
+        return prepare(value, **kwargs)
+
+    def counted_resolve(value, **kwargs):
+        query_inputs.append(value)
+        return resolve(value, **kwargs)
+
+    def counted_find(value, **kwargs):
+        query_inputs.append(value)
+        return find(value, **kwargs)
+
+    monkeypatch.setattr(registry_service, "prepare_file_identity", counted_prepare)
+    monkeypatch.setattr(registry_service, "resolve_file_identity", counted_resolve)
+    monkeypatch.setattr(registry_service, "find_file_identity", counted_find)
+    found = lookup_file(str(path), [ws.resolve()], db=db)
+    assert found.allowed and found.is_file and not found.has_identity
+    assert prepared_inputs == [str(path.resolve())]
+    assert len(query_inputs) == 2 and query_inputs[0] is query_inputs[1]
+    assert isinstance(query_inputs[0], registry_service.FileIdentity)
+
+
+def test_file_only_card_has_exact_payload_without_registry_lifecycle(db, ws, monkeypatch):
+    from registry import path_cards
+
+    path = ws / "plain.md"
+    path.write_text("plain")
+    monkeypatch.setattr(path_cards, "card_for", lambda *_a, **_k: pytest.fail("no registry row exists"), raising=False)
+    assert reference_cards(db, "plain.md", [ws.resolve()], "user") == [{
+        "kind": "artifact", "artifact_id": None, "title": "plain.md",
+        "type": "document", "icon": "file-text", "name": "plain.md",
+        "path": str(path.resolve()), "available": True, "opens": True,
+    }]
+
+
 def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
     from registry.path_access import lookup_file
 
@@ -632,7 +679,7 @@ def test_page_memoizes_unregistered_and_retired_classification(db, ws, monkeypat
 
     monkeypatch.setattr(service, "find_file_identity", counted)
     page = _page(db)
-    assert sorted(Path(path).name for path in calls) == ["plain.md", "retired.md"]
+    assert sorted(Path(path.canonical).name for path in calls) == ["plain.md", "retired.md"]
     assert all([card["title"] for card in page[f"m{i}"]["cards"]] == ["plain.md"] for i in range(1, 4))
 
 

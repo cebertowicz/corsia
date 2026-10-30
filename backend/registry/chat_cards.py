@@ -61,33 +61,38 @@ def _counts(raw: object) -> dict[str, int] | None:
     return counts or None
 
 
+def _presentation(
+    row: Mapping[str, Any] | None, artifact_id: str | None, kind: str, available: bool,
+) -> dict[str, Any]:
+    title = (row.get("title") or _file_name(row)) if row is not None else None
+    shown = resolve_descriptor(row.get("integration"), row.get("type")) if row is not None else None
+    return {
+        "kind": kind,
+        "artifact_id": artifact_id,
+        "title": title or UNAVAILABLE_TITLE,
+        "type": row.get("type") if row is not None else None,
+        "icon": shown.icon if shown else "file-question",
+        "name": _file_name(row) if row is not None else None,
+        "path": (row.get("path") or row.get("external_id")) if row is not None else None,
+        "available": available,
+        # Only a file the artifact pane opens in the canvas is a button.
+        "opens": available and shown is not None and shown.capability == CAPABILITY_LEAF_PACKAGE,
+    }
+
+
+def file_card(path: str, file_type: str) -> dict[str, Any]:
+    """Present a file already verified to exist within scope."""
+    return _presentation({"path": path, "type": file_type, "integration": "workspace"}, None, "artifact", True)
+
+
 def card_for(
     artifact: Mapping[str, Any] | None, artifact_id: str | None, *, kind: str,
     hold_id: str | None = None, state: str | None = None,
     feedback: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """One card in its wire shape.
-
-    A retired artifact keeps its registry title and reads unavailable; only a row
-    that is gone has no title, which the tile words as "No longer available".
-    """
-    row: Mapping[str, Any] = artifact or {}
-    gone = artifact is None
-    retired = gone or row.get("state") not in ("active", "archived")
-    title = None if gone else (row.get("title") or _file_name(row))
-    shown = None if gone else resolve_descriptor(row.get("integration"), row.get("type"))
-    card: dict[str, Any] = {
-        "kind": kind,
-        "artifact_id": artifact_id,
-        "title": title or UNAVAILABLE_TITLE,
-        "type": None if gone else row.get("type"),
-        "icon": shown.icon if shown else "file-question",
-        "name": None if gone else _file_name(row),
-        "path": None if gone else (row.get("path") or row.get("external_id")),
-        "available": not retired,
-        # Only a file the artifact pane opens in the canvas is a button.
-        "opens": not retired and shown is not None and shown.capability == CAPABILITY_LEAF_PACKAGE,
-    }
+    """One registry card in its wire shape, with availability from its state."""
+    retired = artifact is None or artifact.get("state") not in ("active", "archived")
+    card = _presentation(artifact, artifact_id, kind, not retired)
     if kind == "ask":
         card["hold_id"] = hold_id
         card["state"] = UNAVAILABLE if retired else state
