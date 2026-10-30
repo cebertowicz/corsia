@@ -33,6 +33,8 @@ _PREPARE_EXIT_CODES = {
     44: "checkout_detached",
     45: "checkout_dirty",
     46: "restart_pending",
+    47: "checkout_no_upstream",
+    48: "checkout_diverged",
 }
 
 

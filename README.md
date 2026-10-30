@@ -162,7 +162,7 @@ The installer adds any missing prerequisites, builds the environment and opens C
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → Update**, which waits for running turns to finish and keeps the old build serving if the new one fails.
+Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out, and changes nothing while the checkout has local edits or has diverged from that upstream.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 

@@ -6,6 +6,8 @@ Thank you for contributing. Public contributions must contain only material you 
 
 Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work from a feature branch in a linked worktree based on `dev`; do not develop in a serving checkout or test against an operational database.
 
+Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`.
+
 ## Contributor License Agreement
 
 Before your first pull request from a fork can be merged, you accept the [CORSIA Contributor License Agreement](CLA.md) once for your GitHub account. A bot comments on the pull request and a check named **CLA** fails until you post this exact comment:

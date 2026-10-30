@@ -7,7 +7,6 @@ v0.7.1rc1 recommender output and replaces every install, start and download.
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 import httpx
@@ -57,9 +56,14 @@ async def _flown(**kwargs) -> dict:
 
 
 def test_every_oMLX_pin_site_names_the_same_release():
+    from llm import local_setup_executable, omlx_release
+
     script = (_REPO / "desktop" / "scripts" / "build-macos-bundle.sh").read_text()
-    bundled = re.search(r'^(?:readonly )?OMLX_VERSION="([^"]+)"', script, re.MULTILINE).group(1)
-    assert bundled == local_model.OMLX_PIN
+    assert 'source "$ROOT/backend/llm/omlx_release.py"' in script
+    assert 'readonly OMLX_VERSION OMLX_SHA256' in script
+    assert 'fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"' in script
+    assert local_setup_executable.OMLX_VERSION == omlx_release.OMLX_VERSION == local_model.OMLX_PIN
+    assert local_setup_executable.OMLX_SHA256 == omlx_release.OMLX_SHA256
     assert FIXTURE["tag"] == f"v{local_model.OMLX_PIN}"
     assert local_model.omlx_has_recommender(local_model.OMLX_PIN)
     assert not local_model.omlx_has_recommender("0.7.0") and not local_model.omlx_has_recommender(None)
