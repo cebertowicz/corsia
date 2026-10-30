@@ -54,7 +54,7 @@ def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
 
 
 def catalog_rows(stored: list[dict]) -> list[dict]:
-    """Append projected rows, preserving stored and hidden Default model identities."""
+    """Append each signed-in account's listed models that have no stored catalog row."""
     from infra.database import get_db
 
     db = get_db()
@@ -80,7 +80,7 @@ def harness_base_from_row(row: dict, *, db) -> dict:
 
 
 def project_stored_row(row, *, db) -> dict:
-    """Add account availability to a stored Default row without rereading it."""
+    """Add other accounts' availability to an unavailable stored row without rereading it."""
     result = dict(row)
     if not result['available']:
         added = added_rows(db=db).get(result['litellm_model'])
@@ -90,7 +90,7 @@ def project_stored_row(row, *, db) -> dict:
 
 @fact_memo.memoized_reader
 def harness_row(model: str, *, db) -> dict | None:
-    """Return Default's stored row, or an added-account-only projected row."""
+    """Return the stored catalog row, or the row projected from the accounts that list it."""
     row = db.execute(
         "SELECT id,harness,provider,provider_model_id,litellm_model,display_name,alias,description,backend,source,"
         "enabled,available,context_window,supports_vision,supports_tools,supports_reasoning,default_temperature,"

@@ -39,7 +39,7 @@ def discovery_view(account: dict) -> dict:
 
 
 def current_ready_discovery(account: dict) -> dict | None:
-    """Return an added account's ready discovery only for its current login."""
+    """Return an account's ready discovery only for its current login."""
     from connections.account_receipts import account_receipt
 
     if account['state'] != 'signed_in':
@@ -69,7 +69,7 @@ def invalidate_discovery(account: dict, *, login_seq: int, auth_state: str, db) 
 
 
 def change_login(account: dict, *, revision: int, db) -> None:
-    """New explicit custom login invalidates receipts and retains managed cleanup evidence."""
+    """A new explicit login invalidates receipts and retains managed cleanup evidence."""
     record = discovery_record(account)
     generation = record['login_seq'] + 1
     projection = record['auth_projection']
@@ -117,7 +117,7 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
     """One evaluator for claim, catalog and batched advisory readers.
 
-    Reads stored records, plus at most two stats of a custom account's source home
+    Reads stored records, plus at most two stats of the account's source home
     (``missing_home_reason``); never a vendor or network call.
     """
     from connections.account_receipts import account_receipt

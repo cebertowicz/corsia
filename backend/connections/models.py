@@ -150,7 +150,7 @@ def connection_available(provider: str, db=None) -> bool:
 
 
 def provider_may_run(provider: str, db=None) -> bool:
-    """Whether a provider has a connection or a signed-in added account to try.
+    """Whether a provider has an available connection or a signed-in account to try.
 
     Per-account discovery and policy are checked at turn admission.
     """
