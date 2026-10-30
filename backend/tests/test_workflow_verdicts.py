@@ -499,7 +499,7 @@ def test_frozen_plan_carries_raised_confidence_and_reason() -> None:
 
     assert FrozenPlan.decoded(frozen.encoded()).confidence == pytest.approx(0.95)
     assert FrozenPlan.decoded(frozen.encoded()).confidence_reason == "security"
-    assert FrozenPlan.decoded(frozen.encoded()).policy_version == "workflow-verdict-v2"
+    assert FrozenPlan.decoded(frozen.encoded()).policy_version == "workflow-verdict-v3"
 
 
 @pytest.mark.parametrize(("confidence", "reason"), [

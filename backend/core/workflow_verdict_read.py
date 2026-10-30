@@ -219,6 +219,18 @@ def recorded_verdicts(db: sqlite3.Connection, subjects: Iterable[str] | None = N
     return plans, frozenset(reached)
 
 
+def recorded_lesson_plans(db: sqlite3.Connection, lesson_id: str) -> dict[str, FrozenPlan]:
+    """A lesson's latest recorded plan per version, for the trial read."""
+    prefix = subject_of("lesson", lesson_id, "")
+    plans: dict[str, FrozenPlan] = {}
+    for row in db.execute(
+            "SELECT subject_key, attributes FROM outcome_events WHERE event_name=:planned AND retracted_at IS NULL "
+            "AND subject_key>=:low AND subject_key<:high ORDER BY ts, id",
+            {"planned": PLANNED_EVENT, "low": prefix, "high": prefix[:-1] + chr(ord(prefix[-1]) + 1)}):
+        plans[split_subject(row["subject_key"])[2]] = FrozenPlan.decoded(json.loads(row["attributes"])["plan"])
+    return plans
+
+
 def node_terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) -> str | None:
     if node["state"] not in TERMINAL_STATES:
         return None

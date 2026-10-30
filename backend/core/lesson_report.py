@@ -21,6 +21,8 @@ from core.lesson_report_reads import read_bodies
 from core.lesson_report_receipts import offer_counts, read_offer_evidence
 from core.lesson_trial_receipts import read_trial_deliveries
 from core.lesson_trials import parse_instant
+from core.workflow_verdict_looks import LOOK_MULTIPLES, look_confidence
+from core.workflow_verdict_types import FrozenPlan
 from plans import public as plans
 
 # A stale watch is omitted from list reads, never retired or otherwise mutated.
@@ -194,6 +196,7 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
                          facts=sources + retained)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
     from core.lesson_gate import gate_counts
+    from core.workflow_verdict_read import recorded_lesson_plans
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
@@ -201,7 +204,8 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
             "retained": retained, "period": period, "bodies": bodies, "deliveries": deliveries,
             "correction_facts": correction_facts(db, subjects),
             "placement_checks": placement_check_counts(db, scope.thread_ids),
-            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts)}
+            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts),
+            "trial_plans": recorded_lesson_plans(db, detail.lesson_id) if detail is not None else {}}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
@@ -215,9 +219,10 @@ def detail_request(lesson_id: str | None, version: str | None, cursor: str | Non
 def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[str, Any],
                  reads: list[dict[str, Any]], boundaries: list[dict[str, Any]],
                  deliveries: list[dict[str, Any]], offset: int,
-                 fingerprint: str, query: dict[str, Any]) -> dict[str, Any]:
+                 fingerprint: str, query: dict[str, Any], plans: dict[str, FrozenPlan]) -> dict[str, Any]:
     """Page references for one exact behavior without expanding the list surface."""
     offers, identity = period["offers"], (row["id"], row["version"])
+    plan = plans.get(row["version"])
     reviews = [{"kind": "review", "value": review} for review in row["reviews"]]
     delivered = [{"kind": "delivered", "value": receipt} for receipt in deliveries
                  if (receipt["lesson_id"], receipt["behavioral_sha256"]) == identity]
@@ -246,6 +251,7 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
     result["detail"] = _summary(row, offers, len(bodies), len(delivered)) | {
         "current_source": row["current_source"],
         **({"correction_facts": row["correction_facts"]} if "correction_facts" in row else {}),
+        **({"verdict_plan": _verdict_plan(plan)} if plan is not None and row["state"] == "trial" else {}),
         "references": page,
         "reference_count": total, "source_bytes": None,
         "carrying_cost": {"descriptor_tokens": None, "body_tokens": None,
@@ -254,6 +260,13 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
     }
     result["next_cursor"] = _cursor(fingerprint, query, offset + PAGE_SIZE) if offset + PAGE_SIZE < total else None
     return result
+
+
+def _verdict_plan(plan: FrozenPlan) -> dict[str, Any]:
+    """What a trial's verdict will judge: the confidence each look is judged at and each measure's MDC (null: unknown)."""
+    return {"confidence": plan.confidence,
+            "look_confidence": [look_confidence(plan.confidence, look) for look in LOOK_MULTIPLES],
+            "mdc": {name: list(values) for name, values in plan.mdc.items()}}
 
 
 def _cursor_offset(cursor: Any) -> int:
@@ -354,7 +367,7 @@ def read_report(
                            "next_call": "lesson_report(scope=\"all\")"})
             return result
         return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
-                            deliveries=deliveries, offset=offset, fingerprint=fingerprint, query=query)
+                            deliveries=deliveries, offset=offset, fingerprint=fingerprint, query=query, plans=data.get("trial_plans", {}))
     visible_inventory = _list_inventory(inventory, now, state)
     limit = 5 if preview else 20
     if offset > len(visible_inventory):

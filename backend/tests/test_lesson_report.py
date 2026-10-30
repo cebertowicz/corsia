@@ -184,3 +184,27 @@ def test_report_hides_only_old_watches_without_a_recent_correction_anchor():
     assert [row["id"] for row in _list_inventory(rows, "2026-10-02T12:00:00Z")] == ["recent", "recurred"]
     assert rows[2]["correction_status"] == "linked"
     assert rows[2]["recurrence_count"] == 1
+
+
+def _plan(subject: str, state_mdc) -> str:
+    from core.workflow_verdict_types import FrozenPlan
+    return FrozenPlan(subject, "v", None, (), (), 20, (), 1, mdc=state_mdc).encoded()
+
+
+def _record_plan(db, subject: str, mdc) -> None:
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES (?,?,'measurement.verdict.planned','corsia','instrumented','2026-10-01','2026-10-01',?,?)",
+               (subject, subject, subject, json.dumps({"plan": _plan(subject, mdc)})))
+
+
+def test_trial_detail_shows_the_recorded_plans_confidence_and_mdc_with_unknown_as_null(db):
+    trial = source()
+    subject = f"lesson:{trial['id']}@{trial['version']}"
+    assert "verdict_plan" not in report(db, sources=[trial], lesson_id=trial["id"], version=trial["version"])["detail"]
+    _record_plan(db, subject, {"escapes": (0.5, None, 0.2)})
+    plan = report(db, sources=[trial], lesson_id=trial["id"], version=trial["version"])["detail"]["verdict_plan"]
+    assert plan["mdc"] == {"escapes": [0.5, None, 0.2]}
+    assert plan["confidence"] == 0.8
+    assert [round(value, 4) for value in plan["look_confidence"]] == [0.9931, 0.9438, 0.8231]
+    retired = source(state="retired")
+    assert "verdict_plan" not in report(db, sources=[retired], lesson_id=retired["id"], version=retired["version"])["detail"]

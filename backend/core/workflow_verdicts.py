@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from math import sqrt
 from typing import Iterable, Mapping, Sequence
 
-POLICY_VERSION = "workflow-verdict-v2"
+POLICY_VERSION = "workflow-verdict-v3"
 DEFAULT_MINIMUM = 20
 GROUP_MINIMUM = 5
 BOOTSTRAP_DRAWS = 2_000
