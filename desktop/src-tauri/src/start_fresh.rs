@@ -39,7 +39,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
 /// The port a source install's own `scripts/corsia` serves when no launchd plist names one.
 /// `backend/tests/test_default_port.py` holds it equal to the script's.
-const SOURCE_DEFAULT_PORT: u16 = 1956;
+pub(crate) const SOURCE_DEFAULT_PORT: u16 = 1956;
 
 /// One rename, from where the earlier install had it to its place in the backup.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
