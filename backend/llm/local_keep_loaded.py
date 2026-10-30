@@ -121,18 +121,6 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
 ) -> dict:
-    """Keep the model and return its load outcome for setup."""
-    try:
-        return await _keep_loaded(server_id, model, force_pin=force_pin, pin_if_fits=pin_if_fits)
-    except Exception as exc:
-        if not force_pin:
-            raise
-        return {"status": "failed", "detail": str(exc)}
-
-
-async def _keep_loaded(
-    server_id: str, model: LocalModel, *, force_pin: bool, pin_if_fits: bool,
-) -> dict:
     """Pin a completed download, then load it when it fits now.
 
     Setup uses ``force_pin`` for its one managed model. Settings downloads retain
@@ -171,7 +159,7 @@ async def _keep_loaded(
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
         if not pin.get("ok") or pin.get("settings", {}).get("pinned") is not True:
             log.warning("oMLX did not confirm the downloaded local model as pinned")
-            emit("pin", "Pin did not persist" if force_pin else pin.get("message") or "Pin did not persist")
+            emit("pin", pin.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
             return {"status": "failed", "detail": pin.get("message") or "Pin did not persist"}
         emit("pin")
@@ -196,7 +184,7 @@ async def _keep_loaded(
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model")
-                emit("load.failed", "Load failed" if force_pin else result.get("message") or "Load failed")
+                emit("load.failed", result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
                 return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
@@ -204,9 +192,9 @@ async def _keep_loaded(
         step = "catalog refresh"
         await discover_and_notify(server_id)
     except Exception as exc:
-        log.warning("Not loading the downloaded local model after %s failed", step, exc_info=not force_pin or step == "catalog refresh")
+        log.warning("Not loading the downloaded local model after %s failed", step, exc_info=True)
         if step != "catalog refresh":
             emit("load.failed", f"{step} failed: {type(exc).__name__}")
             _FAILED[key] = not_loaded
-            return {"status": "failed", "detail": str(exc)}
+            return {"status": "failed", "exception": exc}
     return {"status": "loaded"}

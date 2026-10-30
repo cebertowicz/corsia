@@ -267,6 +267,21 @@ def terminal_outcome(result: dict | None, *, downloaded: bool = False) -> str:
 def setup_status() -> dict[str, Any]:
     """Bounded live state for setup and the first-run download rail."""
     result, model = _flight.result, _flight.model
+    if result and result.get("cause") in {"load_refused", "load_failed"} and model and not _running():
+        from llm.catalog import get_model_by_litellm
+        from llm.local_sources import corsia_omlx_server
+        from llm.network_discovery import get_loaded_model_ids
+
+        server = corsia_omlx_server()
+        if server and server.get("status") == "online":
+            identity = f"omlx@{server['id']}/{model.model}"
+            row = get_model_by_litellm(identity)
+            if row and row.get("litellm_model") == identity and row.get("available") and row.get("enabled") and model.model in get_loaded_model_ids(server["id"]):
+                result = {"ok": True, "server_id": server["id"], "model": model.model}
+                _flight.result = result
+                operation = local_setup_operation.read()
+                if operation and operation.model == model and not operation.in_flight:
+                    local_setup_operation.write(replace(operation, result=result))
     stage = setup_stage()
     state = ("downloading" if _flight.downloading else "starting") if _running() else terminal_outcome(
         result, downloaded=_flight.downloaded,
@@ -282,7 +297,7 @@ def setup_status() -> dict[str, Any]:
         "message": result.get("message") if result else None,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"), load_line=failed.get("message"))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 

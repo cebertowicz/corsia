@@ -16,7 +16,7 @@ RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
-def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP, *, load_line: object = True) -> str:
     """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
     if cause == "damaged_bundle":
         return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
@@ -30,10 +30,12 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return "Choose a subscription or API provider instead."
     if cause == "load_failed":
         action = "Press Retry." if retry == RETRY_IN_APP else retry[0].upper() + retry[1:]
-        return f"CORSIA couldn't load the model. {action} If it fails again, send the report."
+        return f"CORSIA couldn’t load the model. {action}"
     if cause == "load_refused":
         action = "press Retry." if retry == RETRY_IN_APP else retry
-        return f"CORSIA couldn't load the model because there isn't enough free memory right now. Close other apps, then {action}"
+        if not load_line:
+            return f"CORSIA couldn’t load the model because another model is already loaded. In Settings › Providers, turn off the other model, then {action}"
+        return f"CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then {action}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:

@@ -188,26 +188,26 @@ async def test_a_load_oMLX_refuses_says_so_on_the_row(calls) -> None:
 
 
 @pytest.mark.asyncio
-async def test_setup_reports_early_pin_exception_as_failure(calls, monkeypatch) -> None:
+async def test_early_pin_exception_propagates_for_setup(calls, monkeypatch) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
 
     async def fail_pin(*_args):
         raise RuntimeError("private pin detail")
 
     monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", fail_pin)
-    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
-    assert outcome == {"status": "failed", "detail": "private pin detail"}
+    with pytest.raises(RuntimeError, match="private pin detail"):
+        await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
 
 @pytest.mark.asyncio
-async def test_setup_failure_keeps_upstream_detail_out_of_events(calls) -> None:
+async def test_setup_failure_preserves_existing_load_event(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["load"] = {"ok": False, "message": "private upstream detail"}
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
     assert outcome == {"status": "failed", "detail": "private upstream detail"}
-    assert calls["events"][-1][1]["error"] == "Load failed"
+    assert calls["events"][-1][1]["error"] == "private upstream detail"
     assert local_keep_loaded.failures("server")["new-model"] == local_keep_loaded.NOT_LOADED
 
 

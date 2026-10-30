@@ -16,7 +16,7 @@ const flightShapes = [
 	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check your internet connection, then try again.' },
-	{ state: 'start_failed', cause: 'load_refused', ref: 'local-42', fix: 'Not loaded: needs 12 GB, 8 GB free for a model now' },
+	{ state: 'start_failed', cause: 'load_refused', ref: 'local-42', fix: 'CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then press Retry.', detail: 'Not loaded: needs 12 GB, 8 GB free for a model now' },
 	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.' }
 ] as const;
 
@@ -27,6 +27,7 @@ function sourceFromFlight(flight: typeof flightShapes[number]) {
 		setup_error_reference: 'ref' in flight ? flight.ref : undefined,
 		bytes_to_free: 'bytes_to_free' in flight ? flight.bytes_to_free : undefined,
 		fix: flight.fix,
+		detail: 'detail' in flight ? flight.detail : undefined,
 	};
 }
 
@@ -76,6 +77,7 @@ describe('setup provider rows', () => {
 		});
 
 		expect(row.meta).toBe(flight.fix);
+		expect(row.detail).toBe('detail' in flight ? flight.detail : undefined);
 		expect(row.reference).toBe('ref' in flight ? flight.ref : undefined);
 		expect(row.action?.label).toBe('Retry');
 		row.action?.run();

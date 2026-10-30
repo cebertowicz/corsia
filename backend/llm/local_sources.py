@@ -64,6 +64,8 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
         download_stalled=flight.get("stalled") is True,
         fix=flight.get("fix"),
     )
+    if flight.get("message"):
+        result["detail"] = flight["message"]
 
 
 async def local_server_for_install(
@@ -187,8 +189,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     if not settings_flight:
         # A finished setup whose server has since stopped was turned off, not still finishing.
         turned_off = flight is not None and flight["state"] == "ready" and result.get("reason_code") == "not_running"
-        load_failed = flight is not None and flight["state"] == "start_failed" and flight.get("cause") in {"load_refused", "load_failed"}
-        _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or load_failed else None)
+        load_unsuccessful = flight is not None and flight["state"] == "start_failed" and flight.get("cause") in {"load_refused", "load_failed"}
+        _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or load_unsuccessful else None)
     return result
 
 
