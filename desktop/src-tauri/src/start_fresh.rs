@@ -760,8 +760,9 @@ impl LaunchdService {
         let roots = plist_roots(&plist);
         // An install this app can adopt either has a plist that names its port or is a plain
         // checkout, started by hand or by `install.sh`, that serves its script's default. Its
-        // own `.env` may name another port, which this misses; the database check still holds
-        // the move then.
+        // own `.env` may name another port (the opt-in second-instance setup), which this
+        // misses: such an install is not seen as running, and the database check does not
+        // catch it, since it passes while a backend holds an idle connection.
         let plain = roots.port.is_none().then_some(backend_dir).flatten();
         let port = roots.port.or_else(|| plain.is_some().then_some(SOURCE_DEFAULT_PORT));
         let mut states: Vec<PathBuf> = roots.state.into_iter().collect();
