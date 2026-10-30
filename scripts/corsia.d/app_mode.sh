@@ -633,6 +633,7 @@ app_mode_install_overrides() {
     service_restart() { app_mode_service_restart; }
     service_install() { app_mode_refuse_registration install; }
     service_uninstall() { app_mode_refuse_registration uninstall; }
+    redeploy_self() { fail "corsia redeploy is for a source checkout; update CORSIA using the app"; return 1; }
     prepare_redeploy() { app_mode_stage_update; }
     discard_redeploy_build() { app_mode_discard_staged; }
     ensure_current_frontend_release() { :; }

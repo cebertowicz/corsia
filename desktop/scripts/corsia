@@ -9,15 +9,8 @@ while [ -L "$source_path" ]; do
 done
 resources="$(CDPATH= cd -- "$(dirname -- "$source_path")/.." && pwd -P)"
 case "${1:-status}" in
-  redeploy)
-    printf '%s\n' 'Update CORSIA using the app; redeploy is for installations from source.' >&2
-    exit 1
-    ;;
-esac
-case "${1:-status}" in
-  start|stop|restart|status|logs|open|service|prepare-redeploy|restart-prepared|discard-prepared|ensure-current-release|delegate|doc|context|providers|perf|user|token|local|sources|agent)
-    exec "$resources/scripts/corsia" "$@"
-    ;;
+  init|setup|bind-host|remote-address) ;;
+  *) exec "$resources/scripts/corsia" "$@" ;;
 esac
 export PATH="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONNOUSERSITE=1

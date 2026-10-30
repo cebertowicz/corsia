@@ -604,10 +604,11 @@ fn local_service_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &A
     {
         let app_dir = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone();
         if let (Ok(home), Ok(resources), Some(app_dir)) = (app.path().home_dir(), bundled_resource_dir(app), app_dir) {
-            match adoption::retired_cli(&app_dir) {
-                Ok(retired) => cli_link::repoint_existing(&home, &resources.join("bin/corsia"), retired.as_deref()),
-                Err(error) => log::warn!("could not inspect adoption record for CLI links: {error}"),
-            }
+            let retired = adoption::retired_cli(&app_dir).unwrap_or_else(|error| {
+                log::warn!("could not inspect adoption record for CLI links: {error}");
+                None
+            });
+            cli_link::repoint_existing(&home, &resources.join("bin/corsia"), cli_link::Repair::Launch(retired.as_deref()));
         }
     }
     Ok(ServiceStartup::Ready { url: service_url(port) })
@@ -1884,6 +1885,12 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
         lifecycle::request_quit(app);
     }
     adopted?;
+    #[cfg(all(unix, not(test)))]
+    match adoption::retired_cli(&app_dir) {
+        Ok(Some(retired)) => cli_link::repoint_existing(&home, &resources.join("bin/corsia"), cli_link::Repair::Adoption(&retired)),
+        Ok(None) => (),
+        Err(error) => log::warn!("could not inspect adoption record for CLI links: {error}"),
+    }
     // Adoption is done: from here a failure is the app's own service still coming up, never the old install.
     let switched = |message: &str| adoption::AdoptionError::switched(message);
     *service.app_dir.lock().map_err(|_| switched("service state is unavailable"))? = Some(app_dir.clone());

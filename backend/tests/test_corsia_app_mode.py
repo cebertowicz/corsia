@@ -626,6 +626,14 @@ def test_registration_belongs_to_the_app_binary(app):
     assert not (app.home / "Library" / "LaunchAgents").exists()
 
 
+def test_direct_app_script_refuses_source_redeploy(app):
+    result = app.run("redeploy")
+
+    assert result.returncode != 0
+    assert "source checkout" in result.stdout
+    assert app.launchd_calls() == []
+
+
 def test_prepare_discard_and_ensure_use_the_app_binary_and_its_staged_copy(app):
     (app.launchd / "update-stage_exit").write_text("41")
 

@@ -1,4 +1,4 @@
-use super::cli_link::repoint;
+use super::cli_link::{repoint, Repair};
 use std::{fs, os::unix::fs::symlink};
 use tempfile::TempDir;
 
@@ -22,7 +22,7 @@ fn repoints_an_adopted_checkout_at_each_supported_location() {
         let link = root.path().join(location);
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         symlink(&source, &link).unwrap();
-        repoint(&link, &target, &home, Some(source.as_path())).unwrap();
+        repoint(&link, &target, &home, Repair::Adoption(source.as_path())).unwrap();
         assert_eq!(fs::read_link(link).unwrap(), target);
     }
 }
@@ -31,20 +31,35 @@ fn repoints_an_adopted_checkout_at_each_supported_location() {
 fn preserves_missing_regular_foreign_and_live_links() {
     let (root, home, target) = setup();
     let link = root.path().join("corsia");
-    repoint(&link, &target, &home, None).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
     assert!(!link.exists());
     fs::write(&link, "mine").unwrap();
-    repoint(&link, &target, &home, None).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
     assert_eq!(fs::read_to_string(&link).unwrap(), "mine");
     fs::remove_file(&link).unwrap();
     for source in [root.path().join("other"), home.join(".corsia/scripts/corsia")] {
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, "mine").unwrap();
         symlink(&source, &link).unwrap();
-        repoint(&link, &target, &home, None).unwrap();
+        repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
         assert_eq!(fs::read_link(&link).unwrap(), source);
         fs::remove_file(&link).unwrap();
     }
+}
+
+#[test]
+fn a_user_relink_after_adoption_is_left_alone_on_launch() {
+    let (root, home, target) = setup();
+    let source = home.join(".corsia/scripts/corsia");
+    let link = root.path().join("corsia");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, "source cli").unwrap();
+    symlink(&source, &link).unwrap();
+    repoint(&link, &target, &home, Repair::Adoption(&source)).unwrap();
+    fs::remove_file(&link).unwrap();
+    symlink(&source, &link).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+    assert_eq!(fs::read_link(link).unwrap(), source);
 }
 
 #[test]
@@ -57,23 +72,48 @@ fn resolves_relative_links_to_the_retired_checkout() {
     fs::write(&source, "source cli").unwrap();
     let link = bin.join("corsia");
     symlink("../../.corsia/scripts/corsia", &link).unwrap();
-    repoint(&link, &target, &home, Some(&source)).unwrap();
+    repoint(&link, &target, &home, Repair::Adoption(&source)).unwrap();
     assert_eq!(fs::read_link(link).unwrap(), target);
     drop(root);
+}
+
+#[test]
+fn adoption_handles_live_retired_links_and_launch_handles_dead_links() {
+    let (root, home, target) = setup();
+    let source = home.join(".corsia/scripts/corsia");
+    let link = root.path().join("corsia");
+    symlink(&source, &link).unwrap();
+    repoint(&link, &target, &home, Repair::Adoption(&source)).unwrap();
+    assert_eq!(fs::read_link(&link).unwrap(), source);
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+    assert_eq!(fs::read_link(&link).unwrap(), target);
+}
+
+#[test]
+fn launch_repairs_a_dead_custom_checkout_only_if_recorded() {
+    let (root, home, target) = setup();
+    let source = root.path().join("custom-checkout/scripts/corsia");
+    let link = root.path().join("corsia");
+    symlink(&source, &link).unwrap();
+    repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+    assert_eq!(fs::read_link(&link).unwrap(), source);
+    repoint(&link, &target, &home, Repair::Launch(Some(&source))).unwrap();
+    assert_eq!(fs::read_link(link).unwrap(), target);
 }
 
 #[test]
 fn only_repoints_recognizable_dead_corsia_links() {
     let (root, home, target) = setup();
     let link = root.path().join("corsia");
-    let foreign = root.path().join("missing");
-    symlink(&foreign, &link).unwrap();
-    repoint(&link, &target, &home, None).unwrap();
-    assert_eq!(fs::read_link(&link).unwrap(), foreign);
-    fs::remove_file(&link).unwrap();
+    for foreign in [root.path().join("missing"), root.path().join("custom-checkout/scripts/corsia")] {
+        symlink(&foreign, &link).unwrap();
+        repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
+        assert_eq!(fs::read_link(&link).unwrap(), foreign);
+        fs::remove_file(&link).unwrap();
+    }
     for old in [home.join(".corsia/scripts/corsia"), root.path().join("old/CORSIA.app/Contents/Resources/bin/corsia"), root.path().join("old/CORSIA.app/Contents/Resources/scripts/corsia")] {
         symlink(&old, &link).unwrap();
-        repoint(&link, &target, &home, None).unwrap();
+        repoint(&link, &target, &home, Repair::Launch(None)).unwrap();
         assert_eq!(fs::read_link(&link).unwrap(), target);
         fs::remove_file(&link).unwrap();
     }

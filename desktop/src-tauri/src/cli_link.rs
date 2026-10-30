@@ -9,7 +9,14 @@ fn absolute_link(link: &Path, target: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-pub(crate) fn repoint(link: &Path, target: &Path, home: &Path, retired: Option<&Path>) -> io::Result<()> {
+#[derive(Clone, Copy)]
+pub(crate) enum Repair<'a> {
+    Launch(Option<&'a Path>),
+    Adoption(&'a Path),
+}
+
+#[cfg(unix)]
+pub(crate) fn repoint(link: &Path, target: &Path, home: &Path, repair: Repair<'_>) -> io::Result<()> {
     let metadata = match fs::symlink_metadata(link) {
         Ok(metadata) if metadata.file_type().is_symlink() => metadata,
         Ok(_) => return Ok(()),
@@ -19,18 +26,21 @@ pub(crate) fn repoint(link: &Path, target: &Path, home: &Path, retired: Option<&
     let old = fs::read_link(link)?;
     let resolved = absolute_link(link, &old);
     if resolved == target { return Ok(()); }
-    let is_retired = retired.is_some_and(|path| {
-        resolved == path || match (fs::canonicalize(&resolved), fs::canonicalize(path)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => false,
+    let eligible = match repair {
+        Repair::Launch(retired) => {
+            let recognizable = retired.is_some_and(|path| resolved == path)
+                || resolved == home.join(".corsia/scripts/corsia")
+                || resolved.ends_with("CORSIA.app/Contents/Resources/bin/corsia")
+                || resolved.ends_with("CORSIA.app/Contents/Resources/scripts/corsia");
+            recognizable && matches!(fs::metadata(&resolved), Err(error) if error.kind() == io::ErrorKind::NotFound)
         }
-    });
-    let recognizable = resolved == home.join(".corsia/scripts/corsia")
-        || resolved.ends_with("CORSIA.app/Contents/Resources/bin/corsia")
-        || resolved.ends_with("CORSIA.app/Contents/Resources/scripts/corsia");
-    let known_dead = recognizable
-        && matches!(fs::metadata(&resolved), Err(error) if error.kind() == io::ErrorKind::NotFound);
-    if !is_retired && !known_dead { return Ok(()); }
+        Repair::Adoption(retired) => fs::metadata(&resolved).is_ok()
+            && (resolved == retired || match (fs::canonicalize(&resolved), fs::canonicalize(retired)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            }),
+    };
+    if !eligible { return Ok(()); }
     // Create the replacement in the same directory for an atomic rename.
     // Recheck the existing link immediately before replacing it.
     let parent = link.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "link has no parent"))?;
@@ -53,10 +63,10 @@ pub(crate) fn repoint(link: &Path, target: &Path, home: &Path, retired: Option<&
 }
 
 #[cfg(unix)]
-pub(crate) fn repoint_existing(home: &Path, target: &Path, retired: Option<&Path>) {
+pub(crate) fn repoint_existing(home: &Path, target: &Path, repair: Repair<'_>) {
     if !target.is_file() { return; }
     for link in [home.join(".local/bin/corsia"), PathBuf::from("/opt/homebrew/bin/corsia"), PathBuf::from("/usr/local/bin/corsia")] {
-        if let Err(error) = repoint(&link, target, home, retired) {
+        if let Err(error) = repoint(&link, target, home, repair) {
             log::warn!("could not update CLI link {}: {error}", link.display());
         }
     }

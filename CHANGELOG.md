@@ -45,7 +45,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
 - CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
 - CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
-- CORSIA's app command now supports logs and restart. If your command pointed to an earlier install taken over by the app, it now runs the app's version.
+- CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
 - CORSIA's own local model defaults to medium reasoning effort unless you chose another.
 - CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
 - During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
