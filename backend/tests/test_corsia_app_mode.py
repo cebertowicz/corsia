@@ -468,6 +468,22 @@ def _snapshot(root: Path) -> list[tuple[str, int, int, int]]:
     )
 
 
+def test_app_mode_user_receives_configured_workspace_and_state(app):
+    import json
+
+    workspace = app.root / "workspace"
+    state = app.root / "custom-state"
+    service_file = app.home / "Library" / "Application Support" / "CORSIA" / "service.json"
+    service_file.write_text(json.dumps({"workspace": str(workspace), "state_dir": str(state), "port": PORT}))
+    cli = app.bundle / "Contents" / "Resources" / "backend" / "cli.py"
+    cli.write_text('import os\nprint(os.environ["CORSIA_WORKSPACE"])\nprint(os.environ["CORSIA_STATE_DIR"])\n')
+
+    result = app.run("user")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [str(workspace), str(state)]
+
+
 def test_app_mode_keeps_bundled_tools_ahead_of_service_defaults(app):
     bundled_bin = app.bundle / "Contents" / "Resources" / "bin"
     service_bin = app.home / ".local" / "bin"

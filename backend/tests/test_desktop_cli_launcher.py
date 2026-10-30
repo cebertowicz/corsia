@@ -26,7 +26,7 @@ def launcher(tmp_path):
     return link, resources
 
 
-@pytest.mark.parametrize("args", [["status"], ["logs", "backend"], ["restart"], ["service", "status"], ["service", "install"], ["redeploy"], ["future-lifecycle"], ["start", "--open"], ["stop"]])
+@pytest.mark.parametrize("args", [["status"], ["logs", "backend"], ["restart"], ["service", "status"], ["service", "install"], ["redeploy"], ["future-lifecycle"], ["start", "--open"], ["stop"], ["user"], ["token"], ["sources"], ["local"], ["agent"], ["perf"]])
 def test_lifecycle_commands_forward_arguments_and_exit_code(launcher, args):
     entry, _ = launcher
     result = subprocess.run([entry, *args], text=True, capture_output=True)

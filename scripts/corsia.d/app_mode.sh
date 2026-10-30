@@ -81,6 +81,9 @@ if (app_dir / SERVICE_FILE).is_file():
         echo "CORSIA refused to run: $config_error, so no other state folder was opened" >&2
         return 1
     fi
+    if [ -n "${CORSIA_WORKSPACE:-}" ]; then
+        export CORSIA_STATE_DIR="${CORSIA_STATE_DIR:-$_corsia_app_state_root}"
+    fi
 }
 
 # While the app moves the data folder (CORSIA/state-move.json exists), nothing
