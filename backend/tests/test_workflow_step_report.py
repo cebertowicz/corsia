@@ -272,6 +272,24 @@ def test_m_follow_up_on_the_same_step_is_its_next_round(db):
     assert metrics["rework_tokens_known_total"] == 20
 
 
+def test_n_closed_follow_up_leaves_the_step_accepted(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _node(db, plan.id, "run", kind="phase", workflow_ref="demo", workflow_version="v1")
+    original = _node(db, plan.id, "build", parent_id=phase.id, workflow_ref="demo",
+                     workflow_version="v1", workflow_step="build", difficulty="standard")
+    follow_up = _node(db, plan.id, "re-check", parent_id=phase.id, workflow_ref="demo",
+                      workflow_version="v1", workflow_step="build", difficulty="standard")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted_with_followup' WHERE id=?", (original.id,))
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (follow_up.id,))
+    db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (original.id, follow_up.id))
+    db.commit()
+
+    metrics = report(db)["groups"][0]["metrics"]
+    assert metrics["task_count"] == 1 and metrics["revisions"] == 1
+    assert metrics["failed_or_closed_without_completion"] == 0
+
+
 def test_attached_child_usage_does_not_create_own_attribution_mismatch(db):
     db.execute("INSERT INTO threads (id,user_id,project_id,spawned_by,model,created_at,updated_at) VALUES ('child', 'u', 'p', 'owner', 'test/model', 't', 't')")
     parent_plan = service.ensure_plan("thread", "owner", db=db)

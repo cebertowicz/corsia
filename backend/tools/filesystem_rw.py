@@ -209,10 +209,12 @@ class ReadFileTool(Tool):
         await self._record_skill_read(authorized.resolved, outcome, kwargs)
         from tools.workflow_task_fields import skill_read_notice
 
-        annotation = await self._shared_document_annotation(
-            authorized.resolved, outcome, offset,
-        ) or await skill_read_notice(authorized.resolved, outcome.data, offset)
-        annotation = sanitize_credential_text(annotation) if annotation else None
+        notes = [
+            await self._shared_document_annotation(authorized.resolved, outcome, offset),
+            await skill_read_notice(authorized.resolved, outcome.data, offset),
+        ]
+        joined = "\n".join(note for note in notes if note)
+        annotation = sanitize_credential_text(joined) if joined else None
         if not annotation:
             return outcome.text
         rendered = f"{annotation}\n{outcome.text}"

@@ -47,3 +47,20 @@ async def test_a_workflow_skill_read_names_its_start_call_and_the_call_works(iso
 
     reply = await run.start("ship", difficulty="standard", size="S")
     assert [step["title"] for step in reply["steps"]] == ["Draft it", "review", "polish"]
+
+
+async def test_a_workflow_skill_at_a_shared_document_path_keeps_both_notes(isolated_db, tmp_path, monkeypatch):
+    from infra import config
+    from tools.filesystem_rw import ReadFileTool
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    _configure_sandbox(monkeypatch, workspace)
+
+    async def shared_note(*_args):
+        return "[Shared document]"
+
+    monkeypatch.setattr(ReadFileTool, "_shared_document_annotation", staticmethod(shared_note))
+    text = await _read(run, workspace, "ship")
+    assert text.startswith("[Shared document]\n[Workflow skill") and NOTICE in text
