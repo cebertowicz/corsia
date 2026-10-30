@@ -26,7 +26,7 @@ def launcher(tmp_path):
     return link, resources
 
 
-@pytest.mark.parametrize("args", [["status"], ["logs", "backend"], ["restart"], ["service", "status"], ["start", "--open"], ["stop"]])
+@pytest.mark.parametrize("args", [["status"], ["logs", "backend"], ["restart"], ["service", "status"], ["service", "install"], ["start", "--open"], ["stop"]])
 def test_lifecycle_commands_forward_arguments_and_exit_code(launcher, args):
     entry, _ = launcher
     result = subprocess.run([entry, *args], text=True, capture_output=True)
@@ -42,9 +42,9 @@ def test_bootstrap_commands_still_reach_python(launcher, verb):
     assert result.stdout.splitlines() == ["python", f"<{resources / 'backend/cli.py'}>", f"<{verb}>"]
 
 
-@pytest.mark.parametrize("args", [["redeploy"], ["service", "install"]])
+@pytest.mark.parametrize("args", [["redeploy"]])
 def test_source_only_commands_explain_their_scope(launcher, args):
     entry, _ = launcher
     result = subprocess.run([entry, *args], text=True, capture_output=True)
     assert result.returncode != 0
-    assert "source checkout" in result.stderr
+    assert "Update CORSIA using the app" in result.stderr
