@@ -124,15 +124,35 @@ async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(calls) -> None:
+async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(calls, monkeypatch, caplog) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
+    monkeypatch.setattr(local_keep_loaded, "memory_reading", lambda: "available 8.0 of 32.0 GiB")
 
-    await local_keep_loaded.keep_loaded("server", MODEL)
+    with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
+        await local_keep_loaded.keep_loaded("server", MODEL)
 
     assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == []
     # The row derives "Not loaded: needs N GB, M GB free for a model now"; the backend writes no second line.
     assert local_keep_loaded.failures("server") == {}
+    # The log carries the verdict's inputs, so a refusal on a machine that looked free can be explained.
+    assert ("(needs 10.0 GiB, room 4.0 GiB, beside it nothing; available 8.0 of 32.0 GiB)"
+            in caplog.text)
+
+
+def test_the_memory_reading_names_available_total_reserve_and_pages(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import psutil
+
+    from infra.host_resources import memory_reading
+
+    vm = SimpleNamespace(available=10 * GIB, total=32 * GIB, free=2 * GIB, inactive=8 * GIB, active=20 * GIB)
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: vm)
+
+    # A field this platform's psutil lacks (here ``wired``) is left out rather than guessed.
+    assert memory_reading() == ("available 10.0 of 32.0 GiB, reserve 4.0 GiB "
+                                "(free 2.0, inactive 8.0, active 20.0)")
 
 
 @pytest.mark.asyncio

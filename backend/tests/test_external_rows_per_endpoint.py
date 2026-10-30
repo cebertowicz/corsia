@@ -122,3 +122,33 @@ def test_the_provider_card_shows_the_saved_checkpoint_window(isolated_db) -> Non
     listed = {m["model_id"]: m for m in external_catalog_models("ns-plan")["loaded"]}
     assert listed["glm-5.3"]["context_window_override"] == 262144
     assert listed["deepseek-v4.1-flash"]["context_window_override"] is None
+
+
+def _windows(path) -> dict[str, int | None]:
+    with closing(sqlite3.connect(str(path))) as db:
+        return dict(db.execute(
+            "SELECT provider_model_id, context_window FROM models WHERE provider = 'external'"
+        ).fetchall())
+
+
+def test_a_window_the_server_reports_is_kept_and_the_users_window_wins(isolated_db) -> None:
+    from llm import external_provider as ep
+
+    _seed_servers(isolated_db, "ns-vllm", "ns-user")
+    server = {"id": "ns-vllm", "instance_name": "ns-vllm", "status": "online"}
+    reported = {"served": 32768, "unreported": None}
+    ep._reconcile_external_models(
+        "ns-vllm", server, "openai", list(reported), _CAPS, "t1",
+        {"ok": False, "discovered": 0, "updated": 0, "missing": 0},
+        reported_windows=reported,
+    )
+    ep._reconcile_external_models(
+        "ns-user", {**server, "id": "ns-user"}, "openai", ["served"],
+        {**_CAPS, "context_window": 8192}, "t1",
+        {"ok": False, "discovered": 0, "updated": 0, "missing": 0},
+        reported_windows={"served": 32768},
+    )
+
+    assert _windows(isolated_db) == {
+        "ns-vllm/served": 32768, "ns-vllm/unreported": None, "ns-user/served": 8192,
+    }
