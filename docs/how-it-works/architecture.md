@@ -12,14 +12,18 @@ CORSIA has a backend process that manages application state, a browser UI it ser
 ```mermaid
 flowchart TB
     UI[Browser or<br/>desktop shell] -->|REST, /ws| BE[Backend<br/>FastAPI]
-    BE --> DB[(SQLite<br/>corsia.db)]
-    BE --> AN[(DuckDB<br/>analytics)]
-    BE --> WS[Workspace<br/>files]
     BE -->|native loop| LLM[Model providers]
     BE -->|spawns| CC[Claude Code]
     BE -->|spawns| CX[Codex]
-    CC -->|MCP bridge when configured| BE
+    BE --> DB[(SQLite<br/>corsia.db)]
+    BE --> AN[(DuckDB<br/>analytics)]
+    BE --> WS[Workspace<br/>files]
+    CC -->|MCP bridge<br/>when configured| BE
     CX -->|tools| BE
+    %% invisible links only stack the stores under the agent row, to keep the diagram narrow
+    LLM ~~~ DB
+    CC ~~~ AN
+    CX ~~~ WS
 ```
 
 ## Why it is shaped this way
