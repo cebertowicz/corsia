@@ -284,6 +284,21 @@ def test_installs_from_that_read_for_one_hour_only(wired, monkeypatch):
     assert "that hour has passed" in expired
 
 
+def test_a_failed_install_keeps_its_reason_in_the_receipt(wired, monkeypatch):
+    from onboarding import agent_import_skills
+
+    decision_id = _consent(wired)
+    item_id = json.loads(asyncio.run(_execute(consent_decision_id=decision_id)))["skills"][0]["item_id"]
+    failed = {"item_id": item_id, "name": "rfc-writer", "sha256": "a" * 64, "outcome": "failed",
+              "reason": "invalid_sidecar", "detail": "corsia.workflow.extra is an unknown key"}
+    monkeypatch.setattr(agent_import_skills, "install_skills", lambda *_args, **_kwargs: [failed])
+    done = json.loads(asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=[item_id])))
+
+    assert done["results"] == [failed]
+    assert _receipt(wired, tool_module.INSTALL_OPERATION)["items"] == [
+        {key: failed[key] for key in ("item_id", "sha256", "outcome", "reason", "detail")}]
+
+
 def test_install_needs_a_finished_read(wired):
     decision_id = _consent(wired)
     refused = asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=["x"]))

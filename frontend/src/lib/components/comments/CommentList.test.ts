@@ -23,6 +23,33 @@ it('holds document order through focus changes inside a card and updates after l
 	expect(ids()).toEqual(['b', 'a']);
 });
 
+it('keeps a card and its reply box where they are when the thread changes section', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, orphaned: boolean, resolved = false) => ({ id, anchor: id, orphaned, author: 'you', text: id, at: 'now', resolved, replies: [] });
+	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment('a', false), comment('b', true)] } });
+	flushSync();
+	const headings = () => [...host.querySelectorAll('h3')].map((heading) => heading.textContent);
+	const replies = () => [...host.querySelectorAll<HTMLTextAreaElement>('.ct-input')];
+	const [first, second] = replies();
+	expect(headings()).toEqual(['Open comments', 'Text changed']);
+	second.focus(); flushSync();
+	component.$set({ comments: [comment('a', false), comment('b', false)] }); flushSync();
+	expect(replies()).toEqual([first, second]);
+	expect(document.activeElement).toBe(second);
+	expect(headings()).toEqual(['Open comments']);
+	// Focus has left the reply box for a control in the same card, and WebKit gives no related target: nothing may hang on where focus is.
+	first.focus(); flushSync();
+	first.blur(); flushSync();
+	component.$set({ comments: [comment('a', true), comment('b', false)] }); flushSync();
+	expect(replies()).toEqual([first, second]);
+	expect(headings()).toEqual(['Text changed', 'Open comments']);
+	first.focus(); flushSync();
+	component.$set({ comments: [comment('a', false, true), comment('b', false)], keptIds: new Set(['a']) }); flushSync();
+	expect(replies()).toEqual([first, second]);
+	expect(document.activeElement).toBe(first);
+	expect(first.closest('details')).toBeNull();
+});
+
 it('shows a card quote as plain text, for a placed comment and for one whose text changed', () => {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const comment = (id: string, anchor: string, orphaned = false) => ({ id, anchor, orphaned, author: 'you', text: id, at: 'now', resolved: false, replies: [] });

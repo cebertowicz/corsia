@@ -8,6 +8,9 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
+- CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
 Released 2026-10-30.

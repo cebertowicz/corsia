@@ -43,6 +43,65 @@ def _origin(target: Path) -> dict:
     return yaml.safe_load((target / "corsia.yaml").read_text())["origin"]
 
 
+def test_workflow_install_update_and_local_edits(library_skill):
+    from infra.skill_install import install_skill_bundle, origin_metadata, update_skill_bundle
+    from library.installed import local_edits
+    from tools.skill_library_common import changed_paths
+
+    workspace, _ = library_skill
+    skill = b"---\nname: workflow\ndescription: test\n---\nbody\n"
+    sidecar = b"handler: dangerous\norigin:\n  source: upstream\nworkflow:\n  steps:\n  - id: first\n"
+    origin = origin_metadata("library/workflow", skill, "2026-10-19T00:00:00+00:00")
+    result = install_skill_bundle(workspace, "workflow", skill, {"Corsia.yaml": sidecar}, "test", origin,
+                                  author_thread_id="owner", scope="thread", thread_id="owner")
+    assert result["outcome"] == "installed"
+    target = workspace / ".threads" / "owner" / "skills" / "workflow"
+    installed = yaml.safe_load((target / "corsia.yaml").read_text())
+    assert set(installed) == {"origin", "workflow"}
+    assert installed["origin"]["source"] == "library/workflow"
+    assert installed["workflow"] == {"steps": [{"id": "first"}]}
+    assert local_edits(target, installed["origin"]) == (False, [])
+    current = {p.relative_to(target).as_posix(): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    second = b"workflow:\n  steps:\n  - id: second\n"
+    assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": second}) == ["corsia.yaml"]
+    assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": sidecar}) == []
+    invalid = b"workflow:\n  extra: value\n  steps:\n  - id: first\n"
+    assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": invalid}) == ["corsia.yaml"]
+    result = update_skill_bundle(workspace, "workflow", skill, {"corsia.yaml": second}, "test", origin,
+                                 author_thread_id="owner", thread_id="owner")
+    assert result["outcome"] == "updated"
+    installed = yaml.safe_load((target / "corsia.yaml").read_text())
+    assert installed["workflow"] == {"steps": [{"id": "second"}]}
+    assert local_edits(target, installed["origin"]) == (False, [])
+    installed["workflow"]["steps"][0]["id"] = "edited"
+    (target / "corsia.yaml").write_text(yaml.safe_dump(installed))
+    assert local_edits(target, installed["origin"])[0] is True
+
+
+@pytest.mark.parametrize("sidecar, detail", [
+    (b"workflow:\n  steps: nope\n", "corsia.workflow.steps must be a list"),
+    (b"workflow: [broken", "corsia.yaml parse failed"),
+    (b"workflow:\n  extra: value\n", "corsia.workflow.extra is an unknown key"),
+])
+@pytest.mark.parametrize("operation", ["install", "update"])
+def test_invalid_sidecar_refused_without_writes(library_skill, sidecar, detail, operation):
+    from infra.skill_install import install_skill_bundle, update_skill_bundle
+    from tools.skill_library_common import write_result
+
+    workspace, target = library_skill
+    before = {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    skill = b"---\nname: example\ndescription: test\n---\nbody\n"
+    args = (workspace, "example", skill, {"corsia.yaml": sidecar}, "test", {"source": "library"})
+    if operation == "install":
+        result = install_skill_bundle(*args, author_thread_id="owner", scope="thread", thread_id="owner")
+    else:
+        result = update_skill_bundle(*args, author_thread_id="owner", thread_id="owner")
+    error = write_result(result)
+    assert error["error"] == "invalid_sidecar"
+    assert detail in error["message"]
+    assert {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+
+
 def test_bundle_skips_hidden_upstream_paths_to_match_the_installed_bundle_reader():
     from infra.skill_install import _bundle_files
 

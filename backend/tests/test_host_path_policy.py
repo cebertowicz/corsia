@@ -521,3 +521,17 @@ def test_ancestors_outside_every_granted_root_are_not_pinned(tmp_path) -> None:
     )
 
     assert set(policy.ancestor_pins) == {(workspace / ".corsia").resolve(), workspace.resolve()}
+
+
+def test_hard_floor_ignores_path_case(tmp_path):
+    from tools.host_path_policy import ProtectedHostPathPolicy
+
+    home = tmp_path / "home"
+    state_root = tmp_path / "state"
+    (home / ".ssh").mkdir(parents=True)
+    (state_root / "keys").mkdir(parents=True)
+    policy = ProtectedHostPathPolicy(home=home, state_root=state_root)
+
+    assert policy.ordinary_denial(home / ".SSH" / "ID_ED25519", for_write=False)
+    assert policy.hard_floor_denial(state_root / "KEYS" / "provider")
+    assert policy.ordinary_denial(home / "notes" / "ssh.txt", for_write=False) is None
