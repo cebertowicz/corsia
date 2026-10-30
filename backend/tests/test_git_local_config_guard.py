@@ -388,6 +388,7 @@ def test_local_gc_hook_is_not_run_by_the_fetch_housekeeping(tmp_path: Path) -> N
             shard += 1
     for key, value in (
         ("gc.auto", "1"), ("gc.autoDetach", "false"), ("maintenance.autoDetach", "false"),
+        ("maintenance.strategy", "gc"),  # newer Git's default strategy never runs gc
         ("gc.pruneExpire", "now"), ("gc.recentObjectsHook", f"{command}; true"),
     ):
         _git(repo, "config", key, value)
@@ -573,7 +574,7 @@ def test_switch_does_not_recurse_into_a_submodule_with_its_own_filter(
     # A second superproject branch pointing the submodule at a newer commit.
     (sub / "a.dat").write_text("two\n", encoding="utf-8")
     _git(sub, "add", "-A")
-    _git(sub, "commit", "-m", "sub newer")
+    _git(sub, *_IDENT, "commit", "-m", "sub newer")  # a clone has no identity of its own
     _git(top, "add", "sm")
     _git(top, "commit", "-m", "submodule moves")
     _git(top, "branch", "old", "HEAD~1")
