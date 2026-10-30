@@ -118,8 +118,6 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'ship it');
 	});
 
-	const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
-
 	function visibleObserver() {
 		vi.stubGlobal('IntersectionObserver', class {
 			constructor(private callback: IntersectionObserverCallback) {}
@@ -135,8 +133,7 @@ describe('CommentThread', () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
-		await dwell();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'));
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		vi.unstubAllGlobals();
 	});
 
@@ -145,13 +142,11 @@ describe('CommentThread', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
 		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
-		await dwell();
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await dwell();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
 		warn.mockRestore(); vi.unstubAllGlobals();
 	});
 
@@ -190,13 +185,24 @@ describe('CommentThread', () => {
 	});
 
 	it('keeps a reply being typed on a thread someone else resolves, and says so', () => {
-		const { onResolve } = render(thread({ resolved: true }), false, { replyText: 'half a reply' });
+		const { onResolve } = render(thread({ resolved: true }), false, { replyText: 'half a reply', kept: true });
 		expect(host.querySelector('.ct-res-head')).toBeNull();
 		expect((host.querySelector('.ct-input') as HTMLTextAreaElement).value).toBe('half a reply');
 		expect(host.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
 		expect(host.querySelector('.ct-act.ack')).toBeNull();
 		button('[data-resolved-note] .reopen').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', false);
+	});
+
+	it('keeps a reply started inside a resolved thread in its resolved row, collapsed or not', () => {
+		render(thread({ resolved: true }), false, { replyText: 'started after it was resolved' });
+		expect(host.querySelector('.ct-res-head')).not.toBeNull();
+		expect(host.querySelector('[data-resolved-note]')).toBeNull();
+		button('.ct-res-head').click(); flushSync();
+		expect((host.querySelector('.ct-input') as HTMLTextAreaElement).value).toBe('started after it was resolved');
+		button('.ct-res-head').click(); flushSync();
+		expect(host.querySelector('.ct-res-head')).not.toBeNull();
+		expect(host.querySelector('[data-resolved-note]')).toBeNull();
 	});
 
 	it('collapses a resolved thread with no reply being typed', () => {

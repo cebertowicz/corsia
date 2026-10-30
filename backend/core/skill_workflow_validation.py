@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.workflow_result import schema_errors
@@ -17,6 +18,8 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "after",
         "replaces",
         "workflow",
+        "instruction",
+        "by",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
@@ -26,6 +29,11 @@ def text_value(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _is_heading(value: Any) -> bool:
+    """A Markdown heading line: one to six '#' and a space, then its text."""
+    return isinstance(value, str) and re.fullmatch(r"#{1,6} \S.*", value.strip()) is not None
 
 
 def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
@@ -44,6 +52,12 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
             errors.append(
                 f"{label}.difficulty.default must be one of routine, standard, hard"
             )
+    if "by" in step and step["by"] not in ("agent", "reviewer", "person"):
+        errors.append(f"{label}.by must be one of agent, reviewer, person")
+    elif "workflow" in step and step.get("by", "agent") != "agent":
+        errors.append(f"{label}.by can't be set on a step that runs a workflow; set by on that workflow's own steps")
+    if "instruction" in step and not _is_heading(step["instruction"]):
+        errors.append(f"{label}.instruction must be a SKILL.md heading, such as '## Draft'")
     quality = step.get("quality")
     if quality is not None and (
         not isinstance(quality, list) or any(not isinstance(item, dict) for item in quality)

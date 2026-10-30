@@ -11,6 +11,8 @@
 		state?: 'current' | 'idle' | 'todo' | 'done' | 'busy' | 'error';
 		/** The second line, in caption type. */
 		meta?: string;
+		/** Use the accent color for a download status. */
+		accentMeta?: boolean;
 		/** 0 to 1: a hairline under the text. */
 		progress?: number;
 		/** The row's own fix, an inline text action on its own line under the message. It is the row's only click target. */
@@ -28,7 +30,7 @@
 		onclick?: () => void;
 	}
 
-	const { label, state = 'todo', meta, progress, icon, iconName, action, pick, checked = false, onclick }: Props = $props();
+	const { label, state = 'todo', meta, accentMeta = false, progress, icon, iconName, action, pick, checked = false, onclick }: Props = $props();
 	/** A pick row shows checked as `current` and unchecked as `idle`; the glyph and wash carry it. */
 	const shown = $derived(pick ? (checked ? 'current' : 'idle') : state);
 	const interactive = $derived(!!onclick && shown !== 'todo' && shown !== 'current');
@@ -91,7 +93,7 @@
 		<span class="lbl">{label}</span>
 		<span class="details" class:open={hasDetails}>
 			<span class="details-inner">
-				{#if meta}<span class="meta" in:tokenFade out:tokenFade>{meta}</span>{/if}
+				{#if meta}<span class="meta" class:accent={accentMeta} in:tokenFade out:tokenFade>{meta}</span>{/if}
 				{#if progress !== undefined}
 					<span class="hair" in:tokenFade out:tokenFade role="progressbar" aria-label={label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}><i style:width={`${Math.round(progress * 100)}%`}></i></span>
 				{/if}
@@ -159,6 +161,7 @@
 	.details.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
 	.details-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
 	.meta { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.2; text-wrap: pretty; }
+	.meta.accent { color: var(--accent-text); }
 	.row.error .meta { color: var(--red-text); }
 	/* A row that carries its own fix keeps its message in secondary text; only its dot is red. */
 	.row.has-action .meta { color: var(--text-secondary); }

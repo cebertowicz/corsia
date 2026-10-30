@@ -23,7 +23,7 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -32,6 +32,7 @@
 		readOnly?: boolean;
 		/** The document the image is in, and the way back to it. */
 		docName?: string;
+		docPath?: string | null;
 		onBack?: () => void;
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
@@ -252,6 +253,7 @@
 			onResolve={image.threads.resolve}
 			onAgree={image.threads.agree}
 			target={null}
+			{docPath}
 			{artifactId}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}

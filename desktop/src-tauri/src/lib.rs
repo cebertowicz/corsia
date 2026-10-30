@@ -27,6 +27,9 @@ use tauri::{ipc::CapabilityBuilder, Manager};
 
 mod adoption;
 mod app_paths;
+mod cli_link;
+#[cfg(all(test, unix))]
+mod cli_link_tests;
 mod classify;
 mod discovery;
 mod first_run;
@@ -597,6 +600,17 @@ fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, serv
 
 fn local_service_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<ServiceStartup, String> {
     grant_local_service_origin(app, service, port)?;
+    #[cfg(all(unix, not(test)))]
+    {
+        let app_dir = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if let (Ok(home), Ok(resources), Some(app_dir)) = (app.path().home_dir(), bundled_resource_dir(app), app_dir) {
+            let retired = adoption::retired_cli(&app_dir).unwrap_or_else(|error| {
+                log::warn!("could not inspect adoption record for CLI links: {error}");
+                None
+            });
+            cli_link::repoint_existing(&home, &resources.join("bin/corsia"), cli_link::Repair::Launch(retired.as_deref()));
+        }
+    }
     Ok(ServiceStartup::Ready { url: service_url(port) })
 }
 
@@ -1850,7 +1864,7 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     let first_run::FirstRun::Adoptable { source } = first_run else {
         return Err(untouched("there is no source install ready to adopt".to_string()));
     };
-    let port = source.port;
+    let port = source.app_port(&app_dir);
     let plan = adoption::Plan { source: source.clone(), app_dir: app_dir.clone() };
     let resources = bundled_resource_dir(app).map_err(untouched)?;
     service.adoption_cancel_requested.store(false, Ordering::Release);
@@ -1871,6 +1885,12 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
         lifecycle::request_quit(app);
     }
     adopted?;
+    #[cfg(all(unix, not(test)))]
+    match adoption::retired_cli(&app_dir) {
+        Ok(Some(retired)) => cli_link::repoint_existing(&home, &resources.join("bin/corsia"), cli_link::Repair::Adoption(&retired)),
+        Ok(None) => (),
+        Err(error) => log::warn!("could not inspect adoption record for CLI links: {error}"),
+    }
     // Adoption is done: from here a failure is the app's own service still coming up, never the old install.
     let switched = |message: &str| adoption::AdoptionError::switched(message);
     *service.app_dir.lock().map_err(|_| switched("service state is unavailable"))? = Some(app_dir.clone());

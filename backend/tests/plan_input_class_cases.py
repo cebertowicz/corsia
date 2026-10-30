@@ -162,6 +162,28 @@ def _dispatch_fallthrough(db, scene):
     )
 
 
+def _long_person_run_step(db, scene):
+    """A resolved person step exceeds the existing description limit."""
+    from plans import workflow_fields
+
+    return partial(
+        workflow_fields.build_run, db, service.get_node(scene.pending, db=db),
+        [{"id": "person", "by": "person", "difficulty": "routine", "instruction": "x" * 400}],
+        causing_executor=None,
+    )
+
+
+def _unrated_run_step(db, scene):
+    """A run's steps come resolved from the tool layer, so a step with no
+    difficulty under an unrated run is reachable only by building the run."""
+    from plans import workflow_fields
+
+    return partial(
+        workflow_fields.build_run, db, service.get_node(scene.pending, db=db),
+        [{"id": "guess"}], causing_executor=None,
+    )
+
+
 def _blank_detach_reason(db, scene):
     """Detach is not a published operation; its callers always pass a reason,
     so the writer's own guard is reachable only by calling it directly."""
@@ -697,6 +719,8 @@ _CASES = {
         "kind": "task", "title": "T", "acceptance_criteria": "DOD",
         "workflow_step": "build",
     }),
+    ("workflow_fields.py", 'f"step {step[\'id\']}: {difficulty_rubric()}"'): _unrated_run_step,
+    ("workflow_fields.py", 'f"step {step[\'id\']}: a person step\'s instruction must fit " f"{PERSON_STEP_DESCRIPTION_LIMIT} characters; shorten its SKILL.md section"'): _long_person_run_step,
     ("workflow_fields.py", '"difficulty_rerated must be {level, reason}"'):
         _operation("edit", {
             "node_id": NODE, "expected_revision": REV, "difficulty_rerated": {},

@@ -23,10 +23,11 @@ GH_TIMEOUT_SECONDS = 60.0
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,
 # generated build metadata, and symlinked dependency entries. Any other ignored
-# path (``.env``, seeded databases, local notes) blocks removal.
+# path (``.env``, seeded databases, local notes) requires salvage before removal.
 DISPOSABLE_DIRS = frozenset({
     "node_modules", ".venv", "__pycache__", ".pytest_cache", "dist", "build",
     ".svelte-kit", ".mypy_cache", ".ruff_cache", "test-results", "playwright-report",
+    "target", ".next", ".vite", ".turbo", ".tox", ".eggs", "coverage", ".cache",
 })
 DISPOSABLE_TOP_LEVEL_DIR_PREFIXES = (".check-pr-",)
 DISPOSABLE_FILES = frozenset({
@@ -49,6 +50,7 @@ def git(
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            errors="surrogateescape",
             timeout=timeout,
             env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         )
@@ -195,12 +197,23 @@ def _is_disposable(ignored: str) -> bool:
             and bool(parts)
             and parts[-1] in DISPOSABLE_NON_DIRECTORY_NAMES
         )
-        or any(part in DISPOSABLE_DIRS for part in directories)
+        or any(
+            part in DISPOSABLE_DIRS or part.endswith(".egg-info") for part in directories
+        )
     )
 
 
+def is_tool_output_dir(path: Path) -> bool:
+    """Return whether a directory marks itself as a virtualenv or a cache.
+
+    The marker, not the name, decides: a directory merely named ``build`` or
+    ``results_cache`` may hold someone's work.
+    """
+    return (path / "pyvenv.cfg").is_file() or (path / "CACHEDIR.TAG").is_file()
+
+
 def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:
-    """Return ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
+    """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
     worktree's untracked and ignored files are scratch, not unshipped work.
@@ -208,7 +221,12 @@ def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | N
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
     ]
-    result = git(worktree, ["status", "--porcelain=v2", *files])
+    index = git(worktree, ["ls-files", "--stage", "-z"])
+    if index.returncode != 0:
+        raise ReaperGitError(f"index failed: {git_detail(index)}")
+    if any(record.startswith("160000 ") for record in index.stdout.split("\0")):
+        return "submodule"
+    result = git(worktree, ["status", "--porcelain=v2", "--ignore-submodules=all", *files])
     if result.returncode != 0:
         raise ReaperGitError(f"status failed: {git_detail(result)}")
     reasons: set[str] = set()

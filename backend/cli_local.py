@@ -76,7 +76,7 @@ def _follow_server_setup(token: str, command: str) -> int:
                 return _print_terminal_error({"message": "Local setup stopped.", "next_action": f"Run `{command}` again."})
             # The flight says what happened; the fix gives its terminal-specific next step.
             message = str(flight.get("message") or "Local setup failed.")
-            message += "\n" + setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL)
+            message += "\n" + setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL, verdict=flight.get("verdict"), neighbour=flight.get("neighbour"))
             if flight.get("ref"):
                 message += f" Reference: {flight['ref']}"
             return _print_terminal_error({"message": message})

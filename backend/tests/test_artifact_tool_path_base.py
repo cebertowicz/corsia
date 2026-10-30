@@ -75,6 +75,7 @@ async def test_artifact_tools_name_the_file_write_file_wrote(
     assert resolved["artifact"]["id"] == registered["id"]
     assert listed == {
         "found": True, "artifact_id": registered["id"], "comments": [], "anchors_checked": True,
+        "closed_count": 0,
     }
 
 

@@ -8,7 +8,7 @@
 	import LivingMark from './LivingMark.svelte';
 
 	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code' | 'card'; state: 'current' | 'todo' | 'done' };
-	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
+	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; accentMeta?: boolean; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
 		steps: SetupStep[];

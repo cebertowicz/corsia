@@ -144,7 +144,7 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](#security)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are dated tags on `main`. There is no packaged desktop app yet.
+- **Pre-release.** Releases are version tags. The release workflow builds an unsigned desktop app and signing is a separate manual step, so check a downloaded app before opening it ([Supply chain](docs/security/supply-chain.md#check-it-yourself)), or build one from your checkout (below).
 
 ### Install
 
@@ -156,13 +156,13 @@ cd ~/.corsia
 bash scripts/install.sh
 ```
 
-The installer adds any missing prerequisites, builds the environment and opens CORSIA at `http://localhost:1956`. The rest happens in the browser:
+The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. It asks no setup questions in Terminal. The rest happens in the browser:
 
-1. Choose where your work lives and create a local account.
+1. Create a local account.
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → Update**, which waits for running turns to finish and keeps the old build serving if the new one fails.
+Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 
@@ -194,6 +194,18 @@ First-run setup runs only from a checkout at `~/.corsia`.
 </details>
 
 <details>
+<summary><strong>Desktop app from your checkout</strong></summary>
+
+```bash
+cd ~/.corsia
+bash desktop/scripts/build-macos-bundle.sh --skip-dmg
+```
+
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Treat Take over as one-way for now: going back to running the checkout afterwards, opening a newer build over an installed one, and how the app updates after a takeover are not yet tested. If a takeover fails, your source install is restarted as it was.
+
+</details>
+
+<details>
 <summary><strong>Everyday commands</strong></summary>
 
 `corsia` means `~/.corsia/scripts/corsia`.
@@ -216,12 +228,12 @@ A second checkout on the same machine needs its own `CORSIA_WORKSPACE`, `CORSIA_
 An agent you don't watch needs real capabilities, or it stops to ask you at every step. So CORSIA lets agents get the work done and limits what a mistake can reach, in layers, rather than taking away tools and routing every action back to you.
 
 - **Sandboxed by default.** Shell commands run inside Agent Safehouse, and file tools reach only allowed paths.
-- **Leases for anything outside.** To reach beyond the workspace, an agent applies for a short **host-access lease** that states the purpose, the exact resources and the effects. A reviewer checks the request, then every command run under it, and blocks any that is harmful or clearly unrelated to that purpose. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
-- **Some things no lease opens:** credentials and SSH keys, CORSIA's own state and sandbox, and system startup files.
+- **Leases for anything outside.** To reach beyond the workspace, an agent applies for a short **host-access lease** that states the purpose, the exact resources and the effects. A reviewer model checks the request, then every command run under it. It is instructed to block secret exposure, changes to access controls, needless destruction, and commands clearly unrelated to that purpose; as a model, it can miss them. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
+- **Some things no lease opens:** the keys CORSIA stores, the agents' browser sign-ins, and the sandbox itself.
 - **Agents can't approve their own access.** A lease is approved by a signed-in person or, if you turn it on, by the automatic reviewer. A lease that launches an outside agent always needs a person.
-- **Credentials stay masked.** Credential values are masked before file contents reach a model.
+- **Recognized credentials are masked.** Values with a credential-looking name or a known key shape are masked in tool results before they reach a model; other values aren't.
 
-In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. More in [`SECURITY.md`](SECURITY.md).
+In one week on the install building CORSIA, with automatic approval on, 471 of 519 reviewed lease requests (91%) were approved automatically, 34 were rejected and 14 went to a person. Of 1,586 commands run under leases, 48 were blocked. A server setup listens on your network behind sign-in, so run it on a trusted network or a private tailnet. How each control works, what it doesn't stop, and every known limit: [security documentation](docs/security/README.md).
 
 ## Questions
 
@@ -337,7 +349,8 @@ flowchart TB
 | Topic | Read |
 |---|---|
 | Code map and runtime isolation | [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`BACKEND.md`](BACKEND.md) · [`FRONTEND.md`](FRONTEND.md) |
-| Security and accounts | [`SECURITY.md`](SECURITY.md) |
+| Security and accounts | [`docs/security/`](docs/security/README.md) · before reporting a vulnerability: [`SECURITY.md`](SECURITY.md) |
+| Every documentation page | [`docs/README.md`](docs/README.md) |
 | What has shipped | [`CHANGELOG.md`](CHANGELOG.md) |
 | Rules for coding agents in this repository | [`AGENTS.md`](AGENTS.md) |
 

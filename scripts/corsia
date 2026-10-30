@@ -90,6 +90,7 @@ PYTHON="${_CORSIA_REQUEST_PYTHON:-$CORSIA_DIR/.venv/bin/python}"
 BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
 ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
 if is_app_mode; then
+    [ "$#" -gt 0 ] || set -- help
     app_mode_checkout || exit 1
     app_mode_refuse_during_state_move "$@" || exit 1
 fi
@@ -327,7 +328,12 @@ NC='\033[0m'
 
 ok() { echo -e "  ${GREEN}✅ $1${NC}"; }
 warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
-fail() { echo -e "  ${RED}❌ $1${NC}"; }
+fail() {
+    if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-false}" = true ] && [ -z "${_corsia_lifecycle_refusal_reason:-}" ]; then
+        _corsia_lifecycle_refusal_reason="$1"
+    fi
+    echo -e "  ${RED}❌ $1${NC}"
+}
 
 status() {
     echo "CORSIA Status"
@@ -349,6 +355,10 @@ if [ "$(uname -s)" = Linux ]; then
 else
     source "$SCRIPT_DIR/corsia.d/service.sh"
 fi
+# Direct lifecycle calls and their backend children need the same installed
+# tools as the service, even before a fresh shell has loaded Homebrew.
+# Keep an explicitly selected toolchain ahead of these platform defaults.
+export PATH="$PATH:$SERVICE_PATH"
 source "$SCRIPT_DIR/corsia.d/delegate.sh"
 if is_app_mode; then
     app_mode_install_overrides
@@ -391,7 +401,7 @@ case "${1:-status}" in
             if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
                 echo "3/3  Starting…"
             else
-                echo "7/8  Starting…"
+                echo "4/4  Starting…"
             fi
         else
             echo "Starting CORSIA..."
@@ -548,6 +558,31 @@ case "${1:-status}" in
         esac
         ;;
     *)
+        if is_app_mode; then
+            help_status=0
+            case "$1" in
+                help|-h|--help) ;;
+                *) echo "Unknown command '$1'" >&2; exec 1>&2; help_status=2 ;;
+            esac
+            echo "Usage: corsia <command>"
+            echo ""
+            echo "Commands:"
+            echo "  start [--open]      Start CORSIA"
+            echo "  open                Open CORSIA"
+            echo "  stop                Stop CORSIA"
+            echo "  restart             Restart CORSIA"
+            echo "  status              Show CORSIA status"
+            echo "  logs                Tail the backend log"
+            echo "  service start|stop|restart|status  Manage the app service"
+            echo "  init                First-run setup — configure workspace path"
+            echo "  setup               Choose local or server exposure"
+            echo "  bind-host           Print the interface CORSIA listeners bind"
+            echo "  remote-address      Print the saved outside address while devices can connect"
+            echo "  event               Emit a declared event from a local program."
+            echo "  artifact            Artifact registry lifecycle (resolve/register/update/reconcile/relocate/rehome/release)."
+            echo "  mcp                 Configure external MCP tools"
+            exit "$help_status"
+        fi
         echo "Usage: corsia <command> [--force]"
         echo ""
         echo "Commands:"

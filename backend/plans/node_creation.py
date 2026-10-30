@@ -285,8 +285,14 @@ def create_node(
     intent_node_id: str | None = None,
     commitment_id: str | None = None,
     person_step: bool = True,
+    required_step: bool = False,
+    workflow_by: str = "agent",
 ) -> PlanNode:
-    """Validate and insert a node without opening another transaction."""
+    """Validate and insert a node without opening another transaction.
+
+    ``required_step`` marks a workflow run's required step in its creation
+    event, the one record ``plans.workflow_fields.refuse_required_skip`` reads.
+    """
     (
         base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
         intent, intent_node_id, commitment_id,
@@ -309,6 +315,8 @@ def create_node(
             "difficulty": difficulty, "size": size, "follow_up_of": follow_up_of,
             "commitment_id": commitment_id,
             **({"person_step": False} if not person_step else {}),
+            **({"workflow_required": True} if required_step else {}),
+            **({"workflow_by": workflow_by} if workflow_by != "agent" else {}),
         },
     )
     return service._node_from_row(connection, service._node_row(connection, node_id))

@@ -11,6 +11,7 @@ export type UpdateFailureCode =
 	| 'fetch_failed'
 	| 'build_failed'
 	| 'launch_failed'
+	| 'update_refused'
 	| 'rolled_back'
 	| 'version_unverified'
 	| 'wrong_version_running'
@@ -21,6 +22,8 @@ export type UpdateFailureCode =
 	| 'index_locked'
 	| 'checkout_detached'
 	| 'checkout_dirty'
+	| 'checkout_no_upstream'
+	| 'checkout_diverged'
 	| 'restart_pending';
 
 export interface UpdateOperation {

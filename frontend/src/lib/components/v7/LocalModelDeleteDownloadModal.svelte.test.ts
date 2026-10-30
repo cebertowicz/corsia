@@ -2,6 +2,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
 import { token } from '$lib/stores/auth';
+import { ctxAndSizeMeta } from '$lib/stores/providerModelUtils';
 
 let component: ReturnType<typeof mount> | null = null;
 let host: HTMLElement;
@@ -29,8 +30,8 @@ describe('LocalModelDeleteDownloadModal', () => {
 		});
 		flushSync();
 
-		expect(document.body.textContent).toContain('8.6 GB');
-		expect(document.body.textContent).not.toContain('You can download it again later.');
+		expect(document.body.textContent).toContain('8.0 GB');
+		expect(document.body.textContent).toContain(ctxAndSizeMeta(undefined, 8 * 1024 ** 3));
 		expect(fetchMock).not.toHaveBeenCalled();
 		[...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
 		await tick(); await tick();

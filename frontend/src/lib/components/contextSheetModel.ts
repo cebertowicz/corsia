@@ -22,6 +22,7 @@ export interface ContextSheetSourceRow {
 	category: string;
 	label: string;
 	stableReference: string;
+	filePath?: string;
 	status: string;
 	reason: string;
 	ownerSurface: string;
@@ -43,7 +44,6 @@ export interface ContextSheetSourceRow {
 	/** An edit on disk the thread has not received; it applies at the next checkpoint. */
 	pendingEdit?: boolean;
 }
-
 export interface ContextSheetSourceGroup {
 	/** Stable across previews and renames: the scope, never the display name. */
 	id: string;
@@ -116,8 +116,6 @@ function displayStatus(status: string): { label: string; className: string } {
 	if (status === 'preview') return { label: 'Preview', className: 'preview' };
 	return { label: status || 'Unknown', className: status || 'unknown' };
 }
-
-
 
 export function formatContextDelta(metadata: Record<string, unknown> | undefined): string {
 	if (!metadata) return '';
@@ -242,6 +240,7 @@ function inventoryRow(source: ContextSourceInventoryEntry, isAgent: boolean): Co
 	const statusDisplay = displayStatus(status);
 	const ownerSurface = text(source.owner_surface);
 	const stableReference = text(source.stable_reference);
+	const filePath = text(source.metadata?.path);
 	const tokenCount = promptTokenCount(source);
 	return {
 		id: text(source.source_id),
@@ -253,13 +252,14 @@ function inventoryRow(source: ContextSourceInventoryEntry, isAgent: boolean): Co
 		...(source.edited_since_install === true ? { pendingEdit: true } : {}),
 		kind: text(source.metadata?.provider) === 'skills' ? 'skill' : 'instruction',
 		stableReference,
+		filePath,
 		status,
 		reason: text(source.reason),
 		ownerSurface,
-		ownerLabel: contextSourceOwnerLabel({ layer: originSection, ownerSurface, stableReference }),
+		ownerLabel: contextSourceOwnerLabel({ layer: originSection, ownerSurface, stableReference, filePath }),
 		...(rowProjectId !== undefined ? { projectId: rowProjectId } : {}),
 		deltaLabel: formatContextDelta(source.metadata),
-		actionLabel: contextSourceActionLabel({ layer: originSection, ownerSurface, stableReference }),
+		actionLabel: contextSourceActionLabel({ layer: originSection, ownerSurface, stableReference, filePath }),
 		statusLabel: statusDisplay.label,
 		statusClass: statusDisplay.className,
 		tokenCount,

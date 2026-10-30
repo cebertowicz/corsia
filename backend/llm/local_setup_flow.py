@@ -13,48 +13,86 @@ from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
 from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
-from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_message, local_setup_error
+from llm.local_setup_results import LOAD_FAILURE_CAUSES, LoadFailed, LoadRefused, SETUP_COMMAND, failure_cause, failure_message, local_setup_error
 from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
 
 
+async def _check_load(server_id: str, model: LocalModel) -> None:
+    try:
+        outcome = await keep_loaded(server_id, model, force_pin=True)
+    except Exception as exc:
+        raise LoadFailed("Model load failed") from exc
+    if outcome["status"] == "refused":
+        neighbour = None
+        if outcome.get("neighbour_id"):
+            from infra.db_async import run_in_db
+            from llm.catalog import get_model_by_litellm
+
+            identity = f"omlx@{server_id}/{outcome['neighbour_id']}"
+            try:
+                row = await run_in_db(get_model_by_litellm, identity)
+                if row and row.get("litellm_model") == identity:
+                    neighbour = row.get("display_name")
+            except Exception:
+                ls.log.warning("Could not look up the loaded model's display name", exc_info=True)
+        raise LoadRefused(outcome["verdict"], outcome.get("line"), neighbour)
+    if outcome["status"] == "failed":
+        raise LoadFailed(outcome.get("detail") or "Model load failed") from outcome.get("exception")
+
+
 async def _setup_new_omlx(report: Callable[..., None], events: list[str],
-                         model: LocalModel | None = None) -> dict:
+                         model: LocalModel | None = None, *, retry_after_load_failure: bool = False) -> dict:
     from llm.local_sources import local_server_for_install
 
     await prepare.join()
     resolved = await local_server_for_install(report, start_managed=start_managed_omlx)
     assert resolved is not None
     server_id, port, existing = resolved
-    if existing:
+    if existing and not retry_after_load_failure:
         return {"ok": True, "existing": True, "server_id": server_id,
                 "message": "A local model is already connected. Its settings are unchanged.", "progress": events}
+    if retry_after_load_failure:
+        from llm.local_keep_loaded import _model_rows
+        from llm.local_model import set_up_model
+
+        recorded = await asyncio.to_thread(set_up_model)
+        if not recorded or recorded != model:
+            return {"state": "stopped", "ok": False, "progress": events}
+        rows = await _model_rows(server_id)
+        if rows is None:
+            raise LoadFailed("oMLX model list unavailable")
+        if not any(row.get("id") == recorded.model for row in rows):
+            return {"state": "stopped", "ok": False, "progress": events}
+        ls._record_model(recorded)
+        ls.record_downloaded()
+        model = recorded
     model = model or prepare.picked_model()
     if model is None:
         report("Finding the model that fits this computer")
         model = await prepare.ask(server_id, port)
-    ls._record_model(model)
-    await ls._download(server_id, report, model)
-    ls.record_downloaded()
-    # Same order as a Settings download: the benchmark's settings when oMLX
-    # has them, otherwise CORSIA's own per-model settings.
-    optimal = await apply_optimal_settings(server_id, model)
-    if optimal.status != "applied" and not optimal.writer_attempted:
-        await configure_model_settings(server_id, model)
-    report("Refreshing model catalog", finishing=True)
-    from llm.catalog_network_models import discover_network_models
+    if not retry_after_load_failure:
+        ls._record_model(model)
+        await ls._download(server_id, report, model)
+        ls.record_downloaded()
+        # Same order as a Settings download: apply the model's settings first.
+        optimal = await apply_optimal_settings(server_id, model)
+        if optimal.status != "applied" and not optimal.writer_attempted:
+            await configure_model_settings(server_id, model)
+        report("Refreshing model catalog", finishing=True)
+        from llm.catalog_network_models import discover_network_models
 
-    result = await discover_network_models(server_id)
-    if not result.get("ok"):
-        raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
-    await asyncio.to_thread(record_set_up, model)
+        result = await discover_network_models(server_id)
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
+        await asyncio.to_thread(record_set_up, model)
     report("Loading model", finishing=True)
-    await keep_loaded(server_id, model, force_pin=True)
+    await _check_load(server_id, model)
     ls._emit("completed", model=model.repository)
     return {"ok": True, "server_id": server_id, "model": model.model,
             "download_size": format_size(model.download_size_bytes), "progress": events}
 
 
-async def _run_flight(*, model: LocalModel | None = None,
+async def _run_flight(*, model: LocalModel | None = None, retry_after_load_failure: bool = False,
                       on_stage: Callable[[str], None] | None = None) -> dict:
     events: list[str] = []
 
@@ -65,7 +103,7 @@ async def _run_flight(*, model: LocalModel | None = None,
             on_stage(stage)
 
     try:
-        result = await _setup_new_omlx(report, events, model)
+        result = await _setup_new_omlx(report, events, model, retry_after_load_failure=retry_after_load_failure)
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
@@ -77,6 +115,8 @@ async def _run_flight(*, model: LocalModel | None = None,
         ls.log.exception("Local setup failed reference=%s cause=%s", ref, cause)
         result = {**local_setup_error(failure_message(exc)), "progress": events,
                   "cause": cause, "ref": ref, "pre_download": ls.selected_model() is None}
+        if isinstance(exc, LoadRefused):
+            result.update(verdict=exc.verdict, catalog_line=exc.line, neighbour=exc.neighbour)
         if isinstance(exc, DiskSpaceError):
             result["bytes_to_free"] = exc.bytes_to_free
         ls._emit("failed", cause=cause, ref=ref)
@@ -140,8 +180,13 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
     existing = await local_server_for_install(lambda _stage: None, start_if_absent=False)
     if existing is not None:
         server_id, _port, _is_existing = existing
-        if not ls._claim_operation("setup"):
+        refused = operation is not None and operation.downloaded and (operation.result or {}).get("cause") in LOAD_FAILURE_CAUSES
+        if not ls._claim_operation("setup", onboarding=onboarding):
             return _in_progress_or_blocked()
+        if refused:
+            ls.start_flight(_run_flight(model=operation.model, retry_after_load_failure=True), "Installing")
+            ls._emit("started")
+            return ls._in_progress_result()
         return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})
     memory_ok = await asyncio.to_thread(local_memory_ok)

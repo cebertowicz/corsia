@@ -67,7 +67,7 @@ def _label_for(path: Path, workspace: Path) -> str:
         return path.name
 
 
-def _role_label(path: Path, scope_root: Path) -> str | None:
+def role_file_label(path: Path, scope_root: Path) -> str | None:
     """Return the label when ``path`` is a role file the loader actually reads.
 
     Role directories are directory-backed, but only the roles in
@@ -114,7 +114,7 @@ def _workspace_change(path: Path, workspace: Path, db) -> ContextSourceChange | 
             return ContextSourceChange(
                 "workspace_context", "workspace", _label_for(path, workspace)
             )
-    role_label = _role_label(path, workspace)
+    role_label = role_file_label(path, workspace)
     if role_label is not None:
         return ContextSourceChange("workspace_context", "workspace", role_label)
     return None
@@ -270,7 +270,7 @@ def _project_change(path: Path, workspace: Path, db) -> ContextSourceChange | No
     if not relative.parts:
         return None
     project_root = projects_root / relative.parts[0]
-    label = _scope_context_label(path, project_root) or _role_label(path, project_root)
+    label = _scope_context_label(path, project_root) or role_file_label(path, project_root)
     if label is None:
         return None
     project_id = _project_id_for_root(project_root, workspace, db)

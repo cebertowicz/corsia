@@ -15,6 +15,47 @@ from tests.test_document_live_file_tools import opened
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
 
 
+def test_live_open_skips_setup_only_for_shared_context_it_cannot_save(ownership_scope, monkeypatch):
+    from api.files_load import read_document
+    from infra import config
+    from unittest.mock import Mock
+    from tests.test_system_projection_document_access import project_system_file
+
+    scope = ownership_scope
+    projection = project_system_file(scope['workspace'])
+    skill = config.WORKSPACE / 'skills' / 'alpha' / 'SKILL.md'
+    skill.parent.mkdir(parents=True)
+    skill.write_text('skill content', encoding='utf-8')
+    role_skill = config.WORKSPACE / 'context' / 'roles' / 'agent' / 'skills' / 'beta' / 'SKILL.md'
+    role_skill.parent.mkdir(parents=True)
+    role_skill.write_text('role skill content', encoding='utf-8')
+    normal = scope['root'] / 'note.md'
+    normal.write_text('ordinary content', encoding='utf-8')
+    manager = Mock()
+    manager.setup_shared.side_effect = AssertionError('a read-only open must not prepare writes')
+    monkeypatch.setattr('doceditor.live_runtime.get_documents', lambda: manager)
+    monkeypatch.setattr('infra.guidance_targets.guidance_target', lambda *_: None)
+    user_id = scope['db'].execute('SELECT user_id FROM threads WHERE id=?', (scope['owner'],)).fetchone()[0]
+    for read_only in (projection, skill, role_skill):
+        result = read_document(str(read_only), user_id, 'project-alpha', scope['owner'], live_open=True)
+        assert result['text'] == read_only.read_text(encoding='utf-8')
+        assert result['writable'] is False
+    manager.setup_shared.assert_not_called()
+
+    manager.setup_shared.side_effect = None
+    result = read_document(str(normal), user_id, 'project-alpha', scope['owner'], live_open=True)
+    assert result['text'] == 'ordinary content'
+    assert result['writable'] is True
+    manager.setup_shared.assert_called_once()
+
+    # Not writable from here but not a shared context file: setup still runs before register-on-read.
+    manager.setup_shared.reset_mock()
+    monkeypatch.setattr('api.files_load._writable', lambda *_args, **_kwargs: False)
+    result = read_document(str(normal), user_id, 'project-alpha', scope['owner'], live_open=True)
+    assert result['writable'] is False
+    manager.setup_shared.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_open_setup_failure_blocks_live_write_until_success(ownership_scope, tmp_path, monkeypatch):
     scope = ownership_scope

@@ -102,7 +102,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				const press = (target: ReturnType<typeof link>) => (touch ? target.tap() : target.click());
 				const goToIndex = async () => {
 					if (touch) {
-						await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+						await page.getByRole('button', { name: /Files \(2\)/ }).click();
 						await page.getByRole('dialog', { name: 'Open side panel items' }).getByRole('button', { name: 'INDEX.md', exact: true }).click();
 					} else {
 						await page.getByRole('tab', { name: 'INDEX.md' }).click();
@@ -152,7 +152,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await expect(toast).toBeVisible();
 				await shoot('missing-toast');
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(1);
-				else await expect(page.getByRole('button', { name: /Tabs \(1\)/ })).toBeVisible();
+				else await expect(page.getByRole('button', { name: /Files \(1\)/ })).toBeVisible();
 				await toast.getByRole('button').click();
 				await expect(toast).toHaveCount(0);
 
@@ -169,7 +169,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 					await expect(page.getByRole('tab', { name: 'DECISIONS.md' })).toHaveAttribute('aria-selected', 'true');
 					await expect(page.getByRole('tab')).toHaveCount(2);
 				} else {
-					await expect(page.getByRole('button', { name: /Tabs \(2\)/ })).toBeVisible();
+					await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
 					await expect(page.locator('.shell-header')).toContainText('DECISIONS.md');
 				}
 				await shoot('second-tab');
@@ -186,7 +186,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await press(link(page, 'the decisions').first());
 				await expect(page.getByText('The decisions record body.')).toBeVisible();
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(2);
-				else await expect(page.getByRole('button', { name: /Tabs \(2\)/ })).toBeVisible();
+				else await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
 
 				// No click wrote to the document.
 				expect(fs.readFileSync(indexPath, 'utf8')).toBe(INDEX);
@@ -195,6 +195,52 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				// The recording is finalized when the context closes.
 				await context.close();
 				await page.video()?.saveAs(testInfo.outputPath(`doc-links-${width}-${scheme}-follow-and-return.webm`));
+			}
+		});
+
+		test(`opens a sibling document from a comment at ${width}px in ${scheme}`, async ({ browser, request }, testInfo) => {
+			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+			const context = await browser.newContext({
+				baseURL: testInfo.project.use.baseURL, viewport: { width, height }, hasTouch: touch, colorScheme: scheme,
+			});
+			const page = await context.newPage();
+			const title = `comment-link-${width}-${scheme}-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
+			const workspace = tree.roots.find((root: { kind: string }) => root.kind === 'workspace').path;
+			const dir = path.join(workspace, title);
+			const docPath = path.join(dir, 'INDEX.md');
+			fs.mkdirSync(dir, { recursive: true });
+			fs.writeFileSync(docPath, INDEX);
+			fs.writeFileSync(path.join(dir, 'DECISIONS.md'), DECISIONS);
+			try {
+				const registered = await request.post(`/api/files/register?${query()}`, { data: { path: docPath, thread_id: threadId } });
+				expect(registered.ok()).toBeTruthy();
+				const artifactId = (await registered.json()).artifact.id;
+				const from = INDEX.indexOf('Read');
+				const comment = await request.post(`/api/artifacts/${artifactId}/comments?${query()}`, {
+					data: { body: '[Open sibling](DECISIONS.md)', anchor_text: 'Read', from_off: from, to_off: from + 4, delivery_policy: 'immediate' },
+				});
+				expect(comment.ok()).toBeTruthy();
+				await page.addInitScript(({ threadId, artifactId, docPath }) => {
+					localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
+						threads: { [threadId]: { tabs: [{ instanceId: 'tab-index', artifactId, path: docPath, title: 'INDEX.md', loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'tab-index', visible: true, activeSurface: 'artifact' } },
+						splitWidth: null,
+					}));
+				}, { threadId, artifactId, docPath });
+				await loginByUrl(page);
+				if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+				await page.getByText(title).first().click();
+				await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+				const drawer = page.locator('[data-doc-comments-drawer]');
+				await drawer.getByRole('link', { name: 'Open sibling' }).click();
+				await expect(page.getByText('The decisions record body.')).toBeVisible();
+				if (touch) await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
+				else await expect(page.getByRole('tab')).toHaveCount(2);
+				await expect(page.getByRole('status').filter({ hasText: MISSING_TOAST })).toHaveCount(0);
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+				await context.close();
 			}
 		});
 	});

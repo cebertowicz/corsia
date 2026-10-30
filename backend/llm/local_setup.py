@@ -280,9 +280,12 @@ def setup_status() -> dict[str, Any]:
         "stalled": _flight.download_stalled,
         "cause": result.get("cause") if result else None,
         "message": result.get("message") if result else None,
+        "catalog_line": result.get("catalog_line") if result else None,
+        "verdict": result.get("verdict") if result else None,
+        "neighbour": result.get("neighbour") if result else None,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
-        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"), verdict=failed.get("verdict"), neighbour=failed.get("neighbour"))
         if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 

@@ -4,14 +4,19 @@ export type ContextSourceOwnerTarget =
 	| 'providers'
 	| 'workspace-settings'
 	| 'system'
-	| 'document'
-	| 'runtime-details';
+	| 'document';
 
 type ContextSourceLike = {
 	layer?: string;
 	ownerSurface?: string;
 	stableReference?: string;
+	filePath?: string;
 };
+
+export function contextSourceFilePath(source: ContextSourceLike): string {
+	const isPath = (value: string | undefined) => value && (/^\//.test(value) || /^[a-z]:[\\/]/i.test(value));
+	return isPath(source.stableReference) ? source.stableReference! : isPath(source.filePath) ? source.filePath! : '';
+}
 
 function normalized(value: string | undefined): string {
 	return (value ?? '').toLowerCase();
@@ -22,10 +27,9 @@ export function contextSourceOwnerTarget(source: ContextSourceLike): ContextSour
 	const owner = normalized(source.ownerSurface);
 	const reference = normalized(source.stableReference);
 
-	if (owner.includes('document') && reference) {
-		return 'document';
-	}
-	if (layer === 'corsia') return 'runtime-details';
+	if (['skills', 'portable-checkpoint', 'tool-registry', 'runtime-context', 'conductor-designation'].includes(owner) && !contextSourceFilePath(source)) return null;
+	if (owner.includes('document') && contextSourceFilePath(source)) return 'document';
+	if (layer === 'corsia') return contextSourceFilePath(source) ? 'document' : null;
 	if (
 		owner.includes('project') ||
 		owner.includes('agent') ||
@@ -43,12 +47,9 @@ export function contextSourceOwnerTarget(source: ContextSourceLike): ContextSour
 	) {
 		return 'providers';
 	}
-	if (owner.includes('runtime') || reference.endsWith('/runtime-context')) {
-		return 'runtime-details';
-	}
 	if (owner === 'workspace-settings' || layer === 'workspace') return 'workspace-settings';
 	if (owner === 'context-builder' || owner.includes('system') || layer === 'system') return 'system';
-	return null;
+	return contextSourceFilePath(source) ? 'document' : null;
 }
 
 export function contextSourceActionLabel(source: ContextSourceLike): string {
@@ -59,7 +60,6 @@ export function contextSourceActionLabel(source: ContextSourceLike): string {
 	if (target === 'workspace-settings') return 'Open Context settings';
 	if (target === 'system') return 'Open System';
 	if (target === 'document') return 'Open Document';
-	if (target === 'runtime-details') return 'Open details';
 	return '';
 }
 
@@ -71,6 +71,5 @@ export function contextSourceOwnerLabel(source: ContextSourceLike): string {
 	if (target === 'workspace-settings') return 'Context settings';
 	if (target === 'system') return 'System context';
 	if (target === 'document') return 'Document';
-	if (target === 'runtime-details') return 'Runtime context';
 	return '';
 }

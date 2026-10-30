@@ -52,6 +52,7 @@ async function settle() { await Promise.resolve(); flushSync(); await Promise.re
 const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
 
 afterEach(() => {
+	vi.useRealTimers();
 	if (component) unmount(component);
 	component = null; host?.remove();
 	FakeObserver.all = []; FakeObserver.visibleOnObserve = false; surface.active = true;
@@ -67,11 +68,9 @@ describe('CommentThread stamping', () => {
 		render(onViewed, true);
 		const observers = FakeObserver.live();
 		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r2')!.reportTall();
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r1')!.report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });
 	});
 
 	it('stamps a tall reply filling the visible area', async () => {
@@ -79,8 +78,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
 		FakeObserver.live()[0].reportTall();
-		await dwell();
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 	});
 
 	it('stamps a tall reply filling a scroller shorter than the viewport, and not one that falls short of it', async () => {
@@ -93,8 +91,7 @@ describe('CommentThread stamping', () => {
 		await dwell();
 		expect(onViewed).not.toHaveBeenCalled();
 		FakeObserver.live()[0].reportTall(300, 800);
-		await dwell();
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		style.mockRestore();
 	});
 
@@ -105,8 +102,7 @@ describe('CommentThread stamping', () => {
 		FakeObserver.live()[0].report(true);
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		arrive({ newReplyIds: ['r1'] });
-		await new Promise((resolve) => setTimeout(resolve, 1100));
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 1100 });
 	});
 	it('preserves an existing dwell when another unread reply arrives', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
@@ -115,8 +111,7 @@ describe('CommentThread stamping', () => {
 		FakeObserver.live()[0].report(true);
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		arrive({ replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] });
-		await new Promise((resolve) => setTimeout(resolve, 1100));
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 1100 });
 	});
 
 	it('observes against the viewport even inside a scroll container', () => {
@@ -149,8 +144,7 @@ describe('CommentThread stamping', () => {
 		await dwell();
 		FakeObserver.live()[1].report(false);
 		FakeObserver.live()[0].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 	});
 
 	it('stamps only the earliest unread reply when it alone is visible', async () => {
@@ -158,8 +152,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[0].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
 	});
 
 	it('stamps a resolved thread\'s unread reply only once the thread is expanded and the reply dwells', async () => {
@@ -170,8 +163,7 @@ describe('CommentThread stamping', () => {
 		expect(FakeObserver.live()).toHaveLength(0);
 		host.querySelector<HTMLButtonElement>('.ct-res-head')!.click(); flushSync();
 		expect(newMarks()).toBe(1);
-		await dwell();
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 	});
 
 	it('cancels a resolved thread\'s dwell when it is collapsed before the reply has dwelled', async () => {
@@ -199,8 +191,7 @@ describe('CommentThread stamping', () => {
 		await dwell();
 		expect(onViewed).not.toHaveBeenCalled();
 		surface.active = true; flushSync();
-		await dwell();
-		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 	});
 
 	it('does not stamp a reply that arrives while the previous newest was visible, until its own element is fully visible', async () => {
@@ -208,8 +199,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
 		FakeObserver.live()[0].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
 
 		// The store answers the stamp, then another reply arrives; its element has not reported yet.
 		arrive({ newReplyIds: ['r2'], replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')] });
@@ -219,8 +209,7 @@ describe('CommentThread stamping', () => {
 		FakeObserver.live()[0].report(false);
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		FakeObserver.live()[0].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]), { timeout: 3000 });
 	});
 
 	it('does not stamp in a hidden document, and stamps once when it becomes visible with the reply still fully visible', async () => {
@@ -233,8 +222,7 @@ describe('CommentThread stamping', () => {
 
 		setVisibility('visible');
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
 		// A reply stamped from this mount is not stamped again by a later visibility change.
 		expect(onViewed).toHaveBeenCalledTimes(1);
@@ -258,19 +246,39 @@ describe('CommentThread stamping', () => {
 		FakeObserver.visibleOnObserve = true;
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
-		await dwell();
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		await settle(); await settle();
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await dwell();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
 		await settle();
 		expect(onViewed).toHaveBeenCalledTimes(2);
 		warn.mockRestore();
 	});
 
+	it('stamps the earlier reply while a later reply is still dwelling', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		render(onViewed);
+		vi.useFakeTimers();
+		try {
+			const observers = FakeObserver.live();
+			observers[0].report(true);
+			vi.advanceTimersByTime(100);
+			observers[1].report(true);
+			vi.advanceTimersByTime(1401);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+			vi.advanceTimersByTime(100);
+			expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('stamps both visible unread replies together and keeps the collapse point stable', async () => {
+		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
+		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
+		vi.useFakeTimers();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
 		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
@@ -279,7 +287,10 @@ describe('CommentThread stamping', () => {
 		expect(host.textContent).toContain('Show 4 earlier replies');
 
 		for (const observer of FakeObserver.live()) observer.report(true);
-		await dwell();
+		await vi.advanceTimersByTimeAsync(1_499);
+		expect(onViewed).not.toHaveBeenCalled();
+		// The dwells end at 1500 ms and their shared stamp timer runs on the next tick.
+		await vi.advanceTimersByTimeAsync(2);
 		expect(onViewed.mock.calls).toEqual([['c1', 'r5']]);
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(0);

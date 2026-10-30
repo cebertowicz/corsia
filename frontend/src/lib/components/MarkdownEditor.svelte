@@ -12,6 +12,7 @@
 	import { imageContext, imageOpener, refreshMarkdownImages, type OpenImageRequest } from '$lib/cm/markdown-image';
 	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
+	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { commentMarks, coveredByMove, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
@@ -338,7 +339,11 @@
 		// A marker's card anchors to the rows of the comment's text, read again as the canvas scrolls.
 		const ranges = highlights.map((h) => ({
 			...h,
-			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement) => h.onMarkerFocus!(ids, opener, liveAnchor(ids[0]))),
+			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement) => h.onMarkerFocus!(ids, opener, () => {
+				const focused = get(focusedDocComment);
+				const id = focused && ids.includes(focused) ? focused : ids.find((candidate) => curHighlights.some((highlight) => highlight.id === candidate));
+				return id ? liveAnchor(id)() : null;
+			})),
 		}));
 		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.replyWaiting ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
 		if (sig === lastPainted) return;

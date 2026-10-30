@@ -344,7 +344,10 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 14px 0 4px;
+		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
+		   and sits on the scroller's edge instead of above a strip of padding the
+		   content scrolls through. */
+		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
 		background: var(--glass-thick);
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);

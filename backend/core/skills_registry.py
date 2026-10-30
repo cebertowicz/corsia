@@ -186,15 +186,12 @@ def _ordered_index_rows(
 def trial_delivery_rows(
     *, thread_id: str, project_id: str | None, workspace: Path, db,
 ) -> tuple[list[SkillRow], list[SkillRow]]:
-    """Return eligible and cap-omitted trial snapshots in scope precedence order."""
-    from core.lesson_delivery import START_TRIAL_CAP
-
+    """Return per-task trial snapshots in scope precedence order, and the effective skills."""
     resolved = resolve_effective_skills(
         thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
     )
     split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
-    rows = _scope_order(split.per_task, resolved.precedence)
-    return rows[:START_TRIAL_CAP], rows[START_TRIAL_CAP:]
+    return _scope_order(split.per_task, resolved.precedence), resolved.included
 
 
 def _displayable_skill_errors(rows: list[SkillRow]) -> list[SkillRow]:

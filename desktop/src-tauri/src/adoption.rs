@@ -49,11 +49,13 @@ pub fn wrong_folder_line(running: Option<&str>, checkout: &str) -> String {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SourceInstall {
-    pub plist: PathBuf,
+    /// Present for a launchd-managed source installation.
+    pub plist: Option<PathBuf>,
     pub state: PathBuf,
     pub workspace: PathBuf,
-    pub port: u16,
-    /// The plist's `WorkingDirectory`: where the loaded job runs from.
+    /// The managed source port; unmanaged sources use the app's port choice.
+    pub port: Option<u16>,
+    /// The source checkout's backend directory.
     pub working_directory: PathBuf,
     /// The plist's `CORSIA_SERVICE_GENERATION`: what `launchctl print` echoes for the job
     /// bootstrapped from this plist.
@@ -120,7 +122,7 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
         return Err(format!("the source checkout has no {}", cli.display()));
     }
     Ok(SourceInstall {
-        plist: plist_path.to_path_buf(),
+        plist: Some(plist_path.to_path_buf()),
         generation: text("CORSIA_SERVICE_GENERATION")
             .map(|value| value.to_string_lossy().into_owned()),
         cli,
@@ -129,8 +131,41 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
         plist_variable_names: environment.keys().cloned().collect(),
         state,
         workspace,
-        port,
+        port: Some(port),
     })
+}
+
+/// Recognize the canonical checkout and its machine bootstrap without a launchd plist.
+pub fn source_from_bootstrap(home: &Path) -> Result<SourceInstall, String> {
+    let checkout = home.join(".corsia");
+    let (workspace, state) = bootstrap_roots(&checkout.join("config.json"))
+        .ok_or("source bootstrap has no valid workspace and state")?;
+    if !workspace.is_absolute() || !state.is_absolute() {
+        return Err("source bootstrap roots are not absolute".into());
+    }
+    let cli = checkout.join("scripts/corsia");
+    if !cli.is_file() {
+        return Err(format!("the source checkout has no {}", cli.display()));
+    }
+    Ok(SourceInstall {
+        plist: None,
+        state,
+        workspace,
+        port: None,
+        working_directory: checkout.join("backend"),
+        generation: None,
+        cli,
+        env_file: checkout.join(".env"),
+        plist_variable_names: vec![],
+    })
+}
+
+impl SourceInstall {
+    pub fn app_port(&self, app_dir: &Path) -> u16 {
+        self.port
+            .or_else(|| crate::first_run::recorded_port(app_dir))
+            .unwrap_or(crate::DEFAULT_SERVICE_PORT)
+    }
 }
 
 /// The roots the source install's bootstrap config records: a v2 file names
@@ -307,7 +342,11 @@ struct Journal {
 }
 
 fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
-    let raw = match fs::read_to_string(journal_path(plan)) {
+    read_journal_for_app(&plan.app_dir)
+}
+
+fn read_journal_for_app(app_dir: &Path) -> Result<Option<Journal>, String> {
+    let raw = match fs::read_to_string(app_dir.join("adopted").join(JOURNAL)) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io(error)),
@@ -414,7 +453,7 @@ fn write_service(plan: &Plan) -> Result<(), String> {
     let payload = serde_json::json!({
         "state_dir": plan.source.state,
         "workspace": plan.source.workspace,
-        "port": plan.source.port,
+        "port": plan.source.app_port(&plan.app_dir),
     });
     write_atomically(
         &plan.app_dir.join("service.json"),
@@ -835,7 +874,9 @@ pub fn adopt(
             false,
         );
     }
-    if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
+    if let Some(Err(error)) = plan.source.plist.as_ref().map(|plist| {
+        move_to(plist, &plan.adopted_dir().join(PLIST))
+    }) {
         return rollback(
             plan,
             lifecycle,
@@ -940,7 +981,7 @@ pub fn adopt(
         );
     }
     phase(Phase::Starting);
-    if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
+    if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.app_port(&plan.app_dir), &plan.app_dir) {
         return rollback(
             plan,
             lifecycle,
@@ -979,7 +1020,8 @@ fn restore_files(plan: &Plan) -> Result<(), String> {
     }
     let old_plist = plan.adopted_dir().join(PLIST);
     if old_plist.exists() {
-        move_to(&old_plist, &plan.source.plist)?;
+        let plist = plan.source.plist.as_ref().ok_or("unexpected saved source plist")?;
+        move_to(&old_plist, plist)?;
     }
     let old_env = plan.adopted_dir().join("service.env");
     if old_env.exists() {
@@ -988,17 +1030,17 @@ fn restore_files(plan: &Plan) -> Result<(), String> {
     Ok(())
 }
 
+/// The checkout named by a completed takeover is the only live source CLI
+/// that the app may replace in an existing PATH link.
+pub fn retired_cli(app_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(journal) = read_journal_for_app(app_dir)? else { return Ok(None); };
+    Ok((journal.step == Step::Registered).then_some(journal.source.cli))
+}
+
 /// Recover an interrupted adoption before first-run selection. A possible app
 /// start is always stopped and restored before the source service starts.
 pub fn interrupted_plan(app_dir: &Path) -> Result<Option<Plan>, String> {
-    let path = app_dir.join("adopted").join(JOURNAL);
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(io(error)),
-    };
-    let journal: Journal = serde_json::from_str(&raw)
-        .map_err(|error| format!("adoption journal is unreadable: {error}"))?;
+    let Some(journal) = read_journal_for_app(app_dir)? else { return Ok(None); };
     if journal.step == Step::Registered {
         Ok(None)
     } else {
@@ -1113,7 +1155,7 @@ fn rollback(
     if restore_snapshot {
         let snapshot = snapshot.ok_or("rollback needs its backup snapshot")?;
         lifecycle
-            .stop_new(&plan.source.state, plan.source.port)
+            .stop_new(&plan.source.state, plan.source.app_port(&plan.app_dir))
             .map_err(|error| format!("{}; app service could not be stopped: {error}", failure.message))?;
         lifecycle.restore_backup(&plan.source.state, snapshot)
             .map_err(|error| format!("{}; backup could not be restored, so the old install was not restarted: {error}", failure.message))?;
@@ -1326,7 +1368,7 @@ mod tests {
             snapshot_is_file: false,
             quit_at: None,
             service_json: plan.app_dir.join("service.json"),
-            plist: plan.source.plist.clone(),
+            plist: plan.source.plist.clone().unwrap_or_else(|| plan.app_dir.join("no-source-plist")),
             start_old_saw: vec![],
             counts: vec![],
             ready_script: vec![],
@@ -1374,10 +1416,10 @@ mod tests {
             home,
             Plan {
                 source: SourceInstall {
-                    plist,
+                    plist: Some(plist),
                     state,
                     workspace: source.join("workspace"),
-                    port: 47_895,
+                    port: Some(47_895),
                     working_directory: source.join("backend"),
                     generation: None,
                     cli: source.join("scripts/corsia"),
@@ -1393,11 +1435,24 @@ mod tests {
         read_journal(plan).unwrap().map(|journal| journal.step)
     }
 
+    #[test]
+    fn only_completed_adoption_identifies_a_retired_cli() {
+        let (_home, plan) = plan(false);
+        assert_eq!(retired_cli(&plan.app_dir).unwrap(), None);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        for step in [Step::Stopping, Step::ServiceWritten, Step::Reverted] {
+            write_journal(&plan, step, None).unwrap();
+            assert_eq!(retired_cli(&plan.app_dir).unwrap(), None);
+        }
+        write_journal(&plan, Step::Registered, None).unwrap();
+        assert_eq!(retired_cli(&plan.app_dir).unwrap(), Some(plan.source.cli.clone()));
+    }
+
     /// The journal and the moved plist a crash at `step` leaves behind.
     fn interrupted_at(plan: &Plan, step: Step) {
         fs::create_dir_all(plan.adopted_dir()).unwrap();
         if step >= Step::MetadataMoved && step != Step::Reverted {
-            move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+            move_to(plan.source.plist.as_ref().unwrap(), &plan.adopted_dir().join(PLIST)).unwrap();
         }
         write_journal(
             plan,
@@ -1436,6 +1491,63 @@ mod tests {
         );
         assert_eq!(journal_step(&plan), Some(Step::Registered));
         assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
+    }
+
+    #[test]
+    fn unmanaged_adoption_and_rollback_need_no_plist() {
+        for failure in [None, Some("stop_old"), Some("start_new")] {
+            let (_home, mut plan) = plan(false);
+            fs::remove_file(plan.source.plist.take().unwrap()).unwrap();
+            plan.source.port = None;
+            fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
+            fs::write(&plan.source.env_file, "EXAMPLE=1\n").unwrap();
+            let mut fake = fake_for(&plan, failure);
+            let result = adopt_quietly(&plan, &mut fake).0;
+            assert_eq!(result.is_ok(), failure.is_none());
+            assert!(!plan.adopted_dir().join(PLIST).exists());
+            if failure.is_some() {
+                assert!(plan.source.env_file.exists());
+                assert!(!plan.app_dir.join("service.json").exists());
+                assert_eq!(journal_step(&plan), None);
+                assert!(fake.events.contains(&"start_old"));
+            } else {
+                let service: serde_json::Value = serde_json::from_slice(
+                    &fs::read(plan.app_dir.join("service.json")).unwrap(),
+                ).unwrap();
+                assert_eq!(service["port"], crate::DEFAULT_SERVICE_PORT);
+                assert_eq!(journal_step(&plan), Some(Step::Registered));
+            }
+        }
+    }
+
+    #[test]
+    fn unmanaged_preflight_refusal_leaves_source_untouched() {
+        let (_home, mut plan) = plan(false);
+        fs::remove_file(plan.source.plist.take().unwrap()).unwrap();
+        plan.source.port = None;
+        let mut fake = fake_for(&plan, Some("check_ready"));
+        assert!(adopt_quietly(&plan, &mut fake).0.is_err());
+        assert!(fake.events.is_empty());
+        assert!(plan.source.state.join("corsia.db").exists());
+        assert!(journal_step(&plan).is_none());
+    }
+
+    #[test]
+    fn interrupted_unmanaged_metadata_move_restores_environment() {
+        let (_home, mut plan) = plan(false);
+        fs::remove_file(plan.source.plist.take().unwrap()).unwrap();
+        plan.source.port = None;
+        fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
+        fs::write(&plan.source.env_file, "EXAMPLE=1\n").unwrap();
+        move_to(&plan.source.env_file, &plan.adopted_dir().join("service.env")).unwrap();
+        write_journal(&plan, Step::MetadataMoved, None).unwrap();
+        let recovered = interrupted_plan(&plan.app_dir).unwrap().unwrap();
+        assert!(recovered.source.plist.is_none());
+        let mut fake = fake_for(&recovered, None);
+        recover(&recovered, &mut fake).unwrap();
+        assert!(plan.source.env_file.exists());
+        assert!(!plan.adopted_dir().join(PLIST).exists());
+        assert!(journal_step(&plan).is_none());
     }
 
     #[test]
@@ -1496,7 +1608,7 @@ mod tests {
             "signed-in"
         );
         assert!(
-            !plan.source.plist.exists(),
+            !plan.source.plist.as_ref().unwrap().exists(),
             "the old service definition moved only after adoption"
         );
     }
@@ -1557,7 +1669,7 @@ mod tests {
     fn a_refused_stop_changes_nothing_and_its_cause_reaches_the_person() {
         // The stop is the first effect: before it only the app's own journal exists.
         let (_home, plan) = plan(false);
-        let plist = fs::read(&plan.source.plist).unwrap();
+        let plist = fs::read(plan.source.plist.as_ref().unwrap()).unwrap();
         let state_before = fs::read(plan.source.state.join("corsia.db")).unwrap();
         let mut fake = fake_for(&plan, Some("stop_old"));
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
@@ -1568,7 +1680,7 @@ mod tests {
             error.message()
         );
         assert_eq!(fake.events, ["stop_old", "start_old"]);
-        assert_eq!(fs::read(&plan.source.plist).unwrap(), plist);
+        assert_eq!(fs::read(plan.source.plist.as_ref().unwrap()).unwrap(), plist);
         assert_eq!(
             fs::read(plan.source.state.join("corsia.db")).unwrap(),
             state_before
@@ -1614,7 +1726,7 @@ mod tests {
             fake.events.is_empty(),
             "nothing is asked of the old install"
         );
-        assert!(plan.source.plist.exists() && journal_step(&plan).is_none());
+        assert!(plan.source.plist.as_ref().unwrap().exists() && journal_step(&plan).is_none());
     }
 
     #[test]
@@ -1631,7 +1743,7 @@ mod tests {
             assert_eq!(error.outcome, Outcome::Restored, "{at}");
             assert!(error.message().contains("cancelled"), "{at}");
             assert_eq!(fake.events, expected, "{at}");
-            assert!(plan.source.plist.exists(), "{at}");
+            assert!(plan.source.plist.as_ref().unwrap().exists(), "{at}");
             assert_eq!(journal_step(&plan), None, "{at}");
         }
     }
@@ -1708,7 +1820,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         recover(&plan, &mut fake).unwrap();
         assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
-        assert!(plan.source.plist.exists());
+        assert!(plan.source.plist.as_ref().unwrap().exists());
         assert!(
             interrupted_plan(&plan.app_dir).unwrap().is_none(),
             "a finished undo leaves no journal to repeat"
@@ -1734,7 +1846,7 @@ mod tests {
                 &["start_old"]
             };
             assert_eq!(fake.events, expected, "{step:?}");
-            assert!(plan.source.plist.exists(), "{step:?}");
+            assert!(plan.source.plist.as_ref().unwrap().exists(), "{step:?}");
             assert_eq!(fake.start_old_saw, [(false, true)], "{step:?}");
             assert_eq!(journal_step(&plan), None, "{step:?}");
         }
@@ -1802,7 +1914,7 @@ mod tests {
         broken.also_fail = Some("start_old");
         let error = adopt_quietly(&plan, &mut broken).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
-        assert!(plan.source.plist.exists());
+        assert!(plan.source.plist.as_ref().unwrap().exists());
         assert!(!plan.app_dir.join("service.json").exists());
         assert_eq!(journal_step(&plan), Some(Step::Reverted));
 
@@ -1821,7 +1933,7 @@ mod tests {
         assert_eq!(error.outcome, Outcome::Unconfirmed);
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
         assert!(
-            plan.source.plist.exists(),
+            plan.source.plist.as_ref().unwrap().exists(),
             "the reboot line needs the plist on disk"
         );
         assert_eq!(journal_step(&plan), Some(Step::Reverted));
@@ -1855,7 +1967,7 @@ mod tests {
         let error = adopt_quietly(&plan, &mut stalled).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::Reopen));
         assert!(
-            !plan.source.plist.exists(),
+            !plan.source.plist.as_ref().unwrap().exists(),
             "files are part-way between homes"
         );
 
@@ -1866,7 +1978,7 @@ mod tests {
         let mut launch = fake_for(&plan, None);
         recover(&interrupted, &mut launch).unwrap();
         assert_eq!(launch.events, ["stop_new", "restore_backup", "start_old"]);
-        assert!(plan.source.plist.exists());
+        assert!(plan.source.plist.as_ref().unwrap().exists());
         assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
     }
 
@@ -1885,7 +1997,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         recover(&interrupted, &mut fake).unwrap();
         assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
-        assert!(plan.source.plist.exists());
+        assert!(plan.source.plist.as_ref().unwrap().exists());
     }
 
     #[test]
@@ -1898,7 +2010,7 @@ mod tests {
         write_journal(&plan, Step::Stopping, None).unwrap();
         let service: serde_json::Value =
             serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
-        assert_eq!(service["port"], plan.source.port);
+        assert_eq!(service["port"], plan.source.port.unwrap());
         assert!(
             !plan.app_dir.join("service.json.tmp").exists()
                 && !plan.adopted_dir().join("adoption.json.tmp").exists()
@@ -2038,7 +2150,7 @@ mod tests {
         let source = source_from_plist(home.path(), &plist).unwrap();
         assert_eq!(source.workspace, PathBuf::from("/work"));
         assert_eq!(source.state, PathBuf::from("/state"));
-        assert_eq!(source.port, 47_895);
+        assert_eq!(source.port, Some(47_895));
         assert_eq!(source.cli, home.path().join("checkout/scripts/corsia"));
         assert!(source
             .plist_variable_names
@@ -2379,7 +2491,7 @@ mod tests {
         let error = adopt(&plan, &mut fake, &cancel, &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Restored);
         assert_eq!(fake.events, ["stop_old", "start_old"]);
-        assert!(plan.source.plist.exists());
+        assert!(plan.source.plist.as_ref().unwrap().exists());
         assert_eq!(journal_step(&plan), None);
     }
 

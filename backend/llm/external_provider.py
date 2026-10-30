@@ -34,15 +34,6 @@ PREFIX = "external@"
 DIALECTS = ("openai", "anthropic")
 _ANTHROPIC_VERSION = "2023-06-01"
 
-# litellm's model table keys each provider's models under its own namespace.
-# The endpoint's host is the only evidence of which provider serves a model --
-# the dialect is just the wire format -- so a window is looked up only where the
-# host names the provider, and only by exact model id. Anything else stays
-# unknown rather than borrowing another provider's number.
-_REFERENCE_NAMESPACES: dict[str, tuple[str, ...]] = {
-    "aliyuncs.com": ("dashscope",),
-}
-
 
 def catalog_model_id(server_id: str, pmid: str) -> str:
     """A row's ``provider_model_id``: qualified by its endpoint.
@@ -130,9 +121,10 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
 def _capability_overrides(server: dict) -> dict:
     """Per-server capability defaults the user supplied at add time.
 
-    Generic ``/v1/models`` carries no context-window / capability metadata, so
-    External models inherit these user-supplied defaults (HMC11: unknown models
-    get truth from catalog OR user override). Stored in ``metadata_json``."""
+    Generic ``/v1/models`` carries no capability metadata and often no context
+    window, so External models inherit these user-supplied defaults (HMC11:
+    unknown models get truth from catalog OR user override). Stored in
+    ``metadata_json``."""
     from llm.external_declared_models import declared_model_ids
     from llm.network_discovery import get_server_metadata
 
@@ -146,33 +138,12 @@ def _capability_overrides(server: dict) -> dict:
     }
 
 
-def _reference_namespaces(host: str) -> tuple[str, ...]:
-    host = (host or "").lower().rstrip(".")
-    return next(
-        (ns for suffix, ns in _REFERENCE_NAMESPACES.items()
-         if host == suffix or host.endswith("." + suffix)),
-        (),
-    )
-
-
-def reference_context_window(host: str, model_id: str) -> int | None:
-    """The provider-published input window for ``model_id`` on ``host``, if known."""
-    namespaces = _reference_namespaces(host)
-    if not namespaces:
-        return None
-    import litellm
-
-    for namespace in namespaces:
-        window = (litellm.model_cost.get(f"{namespace}/{model_id}") or {}).get("max_input_tokens")
-        if isinstance(window, int) and window > 0:
-            return window
-    return None
-
-
 async def fetch_external_models(
     api_base: str, dialect: str, api_key: str | None
-) -> list[str]:
-    """Return the model ids an external endpoint exposes via ``/v1/models``."""
+) -> dict[str, int | None]:
+    """The model ids an external endpoint lists via ``/v1/models``, in order, each
+    with the context window its entry reports (vLLM's ``max_model_len``), or None."""
+    from llm.external_windows import reported_window
     from llm.network_endpoints import models_probe_url
 
     headers = auth_headers(dialect, api_key)
@@ -180,12 +151,12 @@ async def fetch_external_models(
         resp = await client.get(models_probe_url(api_base, dialect=dialect), headers=headers)
         resp.raise_for_status()
         data = resp.json() or {}
-    ids: list[str] = []
+    listed: dict[str, int | None] = {}
     for m in (data.get("data") or []):
         mid = m.get("id") if isinstance(m, dict) else None
         if isinstance(mid, str) and mid:
-            ids.append(mid)
-    return ids
+            listed[mid] = reported_window(m)
+    return listed
 
 
 def _external_discovery_config(
@@ -217,10 +188,12 @@ def _upsert_external_model(
     now: str,
     host: str = "",
     shapes: dict[str, dict | None] | None = None,
+    reported_window: int | None = None,
 ) -> str:
+    from llm.external_windows import discovered_window
+
     litellm_model = f"{PREFIX}{server_id}/{pmid}"
-    # The user's per-server window wins; otherwise the provider's published one.
-    window = caps.get("context_window") or reference_context_window(host, pmid)
+    window = discovered_window(caps.get("context_window"), reported_window, host, pmid)
     display_name = pmid.split("/")[-1] or pmid
     metadata = {
         "server_id": server_id,
@@ -315,6 +288,7 @@ def _reconcile_external_models(
     host: str = "",
     target: tuple | None = None,
     shapes: dict[str, dict | None] | None = None,
+    reported_windows: dict[str, int | None] | None = None,
 ) -> dict:
     """Apply one authoritative External snapshot in the DB worker pool."""
     from llm import external_discovery_result as outcome
@@ -327,6 +301,7 @@ def _reconcile_external_models(
         for pmid in model_ids:
             result[_upsert_external_model(
                 db, server_id, server, dialect, pmid, caps, now, host, shapes,
+                (reported_windows or {}).get(pmid),
             )] += 1
         result["missing"] = _reconcile_stale_external_models(
             db, server_id, seen, now,
@@ -341,9 +316,10 @@ async def discover_external_models(server_id: str) -> dict:
 
     Observe-only: every listed model is recorded as available. Capability facts
     come from the user-supplied per-server overrides (generic ``/v1/models`` has
-    none). Mirrors the managed discovery's stale-row cleanup."""
+    none); a context window an entry reports is kept. Mirrors the managed
+    discovery's stale-row cleanup."""
     from infra.db_async import run_in_db
-    from llm.external_declared_models import discoverable_model_ids
+    from llm.external_declared_models import discoverable_models
     from llm.external_discovery_result import finish_external_discovery
     from llm.external_reasoning import discovery_shapes
     from llm.server_observation import observe_discovery
@@ -369,9 +345,10 @@ async def discover_external_models(server_id: str) -> dict:
     # committed meanwhile supersedes it, failures included.
     target = (dialect, api_base, api_key)
     try:
-        model_ids = await discoverable_model_ids(
+        windows = await discoverable_models(
             api_base, dialect, api_key, (caps or {}).get("declared_models") or [],
         )
+        model_ids = list(windows)
     except Exception as exc:
         result["error"] = f"Connection failed: {exc}"
         await observe_discovery(server, None, exc)
@@ -381,7 +358,9 @@ async def discover_external_models(server_id: str) -> dict:
     if levels_error:
         result["reasoning_levels_error"] = levels_error
     host = urlsplit(api_base).hostname or ""
-    if _reference_namespaces(host):  # Only these hosts read LiteLLM's map.
+    from llm.external_windows import reference_namespaces
+
+    if reference_namespaces(host):  # Only these hosts read LiteLLM's map.
         from llm.live_cost_map import wait_for_refresh
 
         await wait_for_refresh()
@@ -395,6 +374,7 @@ async def discover_external_models(server_id: str) -> dict:
             host,
             target,
             shapes,
+            windows,
         )
     except Exception as exc:
         log.error("external model discovery DB error: %s", exc)
