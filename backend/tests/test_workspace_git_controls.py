@@ -161,6 +161,25 @@ def test_reaper_reads_ignore_a_rewritten_commondir(tmp_path):
     assert not marker.exists()
 
 
+def test_salvage_pin_lands_in_the_repository_or_fails(tmp_path):
+    from infra.worktree_reaper_salvage import SalvageError, salvage_worktree
+
+    repo, worktree, admin, _marker = worktree_with_rewritten_commondir(tmp_path)
+    common = tmp_path / 'agent-common'
+    copied = salvage_worktree(repo, worktree, admin, 'pinned', 0, worktree)
+    meta = (copied / 'meta.txt').read_text().splitlines()
+    pin = next(line for line in meta if line.startswith('pinned: ')).removeprefix('pinned: ')
+    git(repo, 'rev-parse', '--verify', pin)
+    assert not (common / pin).exists()
+
+    tree = git(repo, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+    foreign = git(tmp_path, f'--git-dir={common}', 'commit-tree', tree, '-m', 'elsewhere').stdout.strip()
+    (common / 'refs' / 'heads' / 'worktree').write_text(f'{foreign}\n')
+    with pytest.raises(SalvageError):
+        salvage_worktree(repo, worktree, admin, 'foreign', 0, worktree)
+    assert not (copied.parent / 'foreign').exists()
+
+
 def test_reaper_removal_child_status_ignores_a_rewritten_commondir(tmp_path):
     from infra.worktree_reaper_remove import remove_worktree
 

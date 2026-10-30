@@ -149,7 +149,9 @@ def salvage_worktree(
         (destination / "meta.txt").write_text(
             "\n".join(lines) + "\n", encoding="utf-8", errors="surrogateescape",
         )
-        _git_output(worktree, git_env, ["update-ref", pin, head])
+        # Refs follow the admin ``commondir`` file, not GIT_COMMON_DIR, so the pin
+        # is written from the repository's own directory, where that file has no say.
+        _git_output(repo, {"GIT_DIR": str(repo / ".git")}, ["update-ref", pin, head])
         return destination
     except (OSError, UnicodeError, SalvageError) as exc:
         if created:
