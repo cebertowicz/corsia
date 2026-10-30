@@ -290,6 +290,21 @@ def _reply_body(response: Any) -> str | None:
     return None
 
 
+async def _final_reply(
+    response, bodies, usage_calls, iteration, request, messages, tools, measured, *, kind,
+) -> ProviderForkResult:
+    """End the fold on a reply without tool calls; one cut off at its output cap is truncated."""
+    body = _reply_body(response)
+    if response.finish_reason == "length":
+        return await _truncated_result(
+            [*bodies, body] if body is not None else bodies, usage_calls, "iv_output_cap",
+            iteration, request, messages, tools, response, measured,
+        )
+    if body is None:
+        raise ProviderForkRejected(f"Native {kind.name} produced no body")
+    return ProviderForkResult(body, {"calls": usage_calls})
+
+
 async def invoke_fork(
     request: ProviderForkRequest,
     cancel_event: asyncio.Event,
@@ -360,12 +375,10 @@ async def invoke_fork(
                         _iteration, request, messages, tools, response, measured,
                     )
                 continue
-            body = _reply_body(response)
-            if body is not None:
-                return ProviderForkResult(body, {"calls": usage_calls})
-            break
-        else:
-            raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
+            return await _final_reply(
+                response, partial_bodies, usage_calls, _iteration, request, messages, tools,
+                measured, kind=kind,
+            )
+        raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
     finally:
         state._current_thread_id.reset(thread_token)
-    raise ProviderForkRejected(f"Native {kind.name} produced no body")
