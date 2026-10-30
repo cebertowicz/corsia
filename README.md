@@ -144,7 +144,7 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](#security)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are dated tags on `main`. There is no packaged desktop app yet.
+- **Pre-release.** Releases are dated tags on `main`. No signed desktop app is published yet; you can build one from your checkout (below).
 
 ### Install
 
@@ -156,13 +156,13 @@ cd ~/.corsia
 bash scripts/install.sh
 ```
 
-The installer adds any missing prerequisites, builds the environment and opens CORSIA at `http://localhost:1956`. The rest happens in the browser:
+The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. It asks no setup questions in Terminal. The rest happens in the browser:
 
-1. Choose where your work lives and create a local account.
+1. Create a local account.
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out, and changes nothing while the checkout has local edits or has diverged from that upstream.
+Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 
@@ -190,6 +190,18 @@ scripts/corsia start
 ```
 
 First-run setup runs only from a checkout at `~/.corsia`.
+
+</details>
+
+<details>
+<summary><strong>Desktop app from your checkout</strong></summary>
+
+```bash
+cd ~/.corsia
+bash desktop/scripts/build-macos-bundle.sh --skip-dmg
+```
+
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Treat Take over as one-way for now: going back to running the checkout afterwards, opening a newer build over an installed one, and how the app updates after a takeover are not yet tested. If a takeover fails, your source install is restarted as it was.
 
 </details>
 

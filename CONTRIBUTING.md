@@ -4,9 +4,9 @@ Thank you for contributing. Public contributions must contain only material you 
 
 ## Before you start
 
-Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work from a feature branch in a linked worktree based on `dev`; do not develop in a serving checkout or test against an operational database.
+Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work on a feature branch based on `dev`. You can make it in your CORSIA checkout at `~/.corsia` and edit there: `corsia restart` serves your edits, uncommitted ones included. Commit or stash them before **Settings → System → Update now**, which refuses while the checkout has uncommitted edits. Try a risky change, such as a migration, on a second checkout with its own data first (see the README's everyday commands). Never run tests against your real CORSIA's data.
 
-Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`.
+Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`, and a desktop app that has taken over your source install stops it from serving your checkout.
 
 ## Contributor License Agreement
 
