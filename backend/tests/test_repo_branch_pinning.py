@@ -2210,6 +2210,7 @@ def test_real_worktree_git_profile_protects_common_control_files(
     hooks = repo / ".git" / "hooks"
     hooks.mkdir(exist_ok=True)
     protected = [
+        repo / ".git" / "commondir",
         repo / ".git" / "config",
         repo / ".git" / "packed-refs",
         hooks / "post-merge",

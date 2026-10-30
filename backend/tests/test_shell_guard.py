@@ -60,6 +60,7 @@ def _assert_verified_worktree_grant_keeps_controls_denied(
         repo / ".git" / "refs" / "heads" / "main.lock",
         repo / ".git" / "logs" / "refs" / "heads" / "main",
         repo / ".git" / "logs" / "refs" / "heads" / "main.lock",
+        repo / ".git" / "commondir",
         repo / ".git" / "config",
         repo / ".git" / "config.lock",
         repo / ".git" / "packed-refs",
