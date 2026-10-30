@@ -141,6 +141,44 @@ async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(cal
             in caplog.text)
 
 
+@pytest.mark.asyncio
+async def test_setup_loads_its_own_model_on_an_empty_seat_past_the_memory_check(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["can_load"] = {"ok": False, "free_gb": 4}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"status": "loaded"}
+    assert calls["loads"] == ["new-model"]
+
+
+@pytest.mark.asyncio
+async def test_setup_past_the_memory_check_still_hears_omlx_refuse(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["can_load"] = {"ok": False, "free_gb": 4}
+    calls["load"] = {"ok": False, "message": "would exceed the memory ceiling"}
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"status": "failed", "detail": "would exceed the memory ceiling"}
+    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_log_names_what_is_beside_it_in_words(calls, monkeypatch, caplog) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 4 * GIB)
+    monkeypatch.setattr(local_keep_loaded, "memory_reading", lambda: "reading")
+    async def loaded(_cfg):
+        return [{"identifier": "one", "size_bytes": 8 * GIB}, {"identifier": "two", "size_bytes": None}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+
+    with caplog.at_level("WARNING", logger=local_keep_loaded.__name__):
+        await local_keep_loaded.keep_loaded("server", MODEL)
+
+    assert "beside it 8.0 GiB, unreported; reading" in caplog.text
+
+
 def test_the_memory_reading_names_available_total_reserve_and_pages(monkeypatch) -> None:
     from types import SimpleNamespace
 

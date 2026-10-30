@@ -41,6 +41,7 @@ Released 2026-10-30.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
 - A local model that cannot load during setup now says why and lets you try again.
 - The local model chosen in setup stays loaded afterwards.
+- On a Mac with only just enough free memory, setup no longer refuses the local model it chose and downloaded.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
