@@ -9,7 +9,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', keepSide = false, sideKey, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -30,6 +30,9 @@
 		initialFocus?: string;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
+		/** Keep the opening placement until the card closes or its semantic anchor changes. */
+		keepSide?: boolean;
+		sideKey?: unknown;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -37,6 +40,9 @@
 	let style = $state('left: 12px; top: 12px;');
 	/** A live anchor whose text is not drawn, or is scrolled out of the area, hides its surface; it returns when the text does. */
 	let hidden = $state(true);
+	type Side = 'left' | 'right' | 'above' | 'below' | 'avoid-above' | 'avoid-below';
+	let rememberedSide: Side | null = null;
+	let rememberedKey: unknown;
 	function rectFor(value: Anchor) { return typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value; }
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
@@ -70,24 +76,38 @@
 		const avoided = avoidRect?.();
 		let left = rect.left;
 		let top = rect.bottom + gap;
+		let side: Side = 'below';
 		if (placement === 'bottom' || placement === 'bottom-end') {
 			if (placement === 'bottom-end' || left + width > area.right - gap) left = rect.right - width;
 			// Below the anchor when it fits; otherwise above it, never clamped up over the anchor.
-			if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) top = rect.top - height - gap;
+			if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) { top = rect.top - height - gap; side = 'above'; }
 		} else if (rect.right + gap + width <= area.right - gap) {
 			// Beside the anchor, never over it.
-			left = rect.right + gap; top = rect.top;
+			left = rect.right + gap; top = rect.top; side = 'right';
 		} else if (rect.left - gap - width >= area.left + gap) {
-			left = rect.left - width - gap; top = rect.top;
+			left = rect.left - width - gap; top = rect.top; side = 'left';
 		} else if (avoided && avoided.bottom + gap + height <= area.bottom - gap) {
 			// For an image region, use empty canvas below the image before covering another tag.
-			top = avoided.bottom + gap;
+			top = avoided.bottom + gap; side = 'avoid-below';
 		} else if (avoided && avoided.top - gap - height >= area.top + gap) {
 			// When the lower canvas is full, use the empty canvas above the image instead.
-			top = avoided.top - height - gap;
+			top = avoided.top - height - gap; side = 'avoid-above';
 		} else if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) {
 			// No room beside or outside the avoided rectangle: above the anchor. Otherwise it stays below it, clamped into the canvas.
-			top = rect.top - height - gap;
+			top = rect.top - height - gap; side = 'above';
+		}
+		if (keepSide) {
+			const key = sideKey ?? anchor;
+			if (key !== rememberedKey) { rememberedKey = key; rememberedSide = null; }
+			rememberedSide ??= side;
+			side = rememberedSide;
+			left = placement === 'bottom-end' || (placement === 'bottom' && rect.left + width > area.right - gap) ? rect.right - width : rect.left;
+			if (side === 'right') { left = rect.right + gap; top = rect.top; }
+			else if (side === 'left') { left = rect.left - width - gap; top = rect.top; }
+			else if (side === 'above') top = rect.top - height - gap;
+			else if (side === 'avoid-above') top = (avoided?.top ?? rect.top) - height - gap;
+			else if (side === 'avoid-below') top = (avoided?.bottom ?? rect.bottom) + gap;
+			else top = rect.bottom + gap;
 		}
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));
 		left = Math.max(area.left + gap, Math.min(left, area.right - width - gap));
@@ -96,7 +116,7 @@
 		if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 	}
 	$effect(() => {
-		if (!open) return;
+		if (!open) { rememberedSide = null; return; }
 		window.addEventListener(ANCHOR_MOVED, position);
 		return () => window.removeEventListener(ANCHOR_MOVED, position);
 	});
@@ -118,6 +138,7 @@
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
 		void anchor;
+		void sideKey;
 		if (open) void tick().then(position);
 	});
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }

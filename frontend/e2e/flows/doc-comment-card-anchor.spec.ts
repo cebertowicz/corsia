@@ -171,8 +171,10 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			await scroller.evaluate((element) => { element.scrollTop = 0; });
 			// Hidden, not closed: the comment is still open, only its text is elsewhere.
 			await expect(popover(page)).toHaveCount(1);
-			await expect(popover(page)).toBeHidden();
+			await expect(popover(page)).toHaveAttribute('aria-hidden', 'true');
+			await expect(popover(page)).toHaveCSS('clip-path', 'inset(100%)');
 			await placeTarget(page, 0.5);
+			await expect(popover(page)).not.toHaveAttribute('aria-hidden', 'true');
 			await expect(popover(page)).toBeVisible();
 			await expectBesideAnchor(page, marker(page, plain), lineOf(page, `The ${SECTION} note is`), 'after scrolling back', expanded);
 		});

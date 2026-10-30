@@ -48,6 +48,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
 - CORSIA's own local model defaults to medium reasoning effort unless you chose another.
 - CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
+- Document comment boxes stay on the side where they opened while you type.
 - During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
 - Email drafts describe the conversation in plain sentences, say why a message’s text is withheld, and say when your usual font couldn’t be read. A message that arrives while a reply draft is being saved now stops the send.
 - Email replies check for newer messages and support attachments and your usual font.
