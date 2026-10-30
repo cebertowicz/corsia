@@ -1,7 +1,8 @@
 //! The production side of in-place adoption: the source install's own
 //! `scripts/corsia` stops and starts its service, launchd and the loopback
 //! port prove what it did, and the app's bundled backend and Python make the
-//! backup. Nothing here reads the CLI's output to decide anything.
+//! backup. Nothing here reads the CLI's output to decide anything, except one line of a
+//! checkout older than #1746 (`OLD_BOOTOUT_FAILURE`), which no longer changes.
 
 use std::{
     collections::BTreeSet,
@@ -32,6 +33,10 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long launchd may take to unlist a job after a plain bootout: the source plist's
 /// `ExitTimeOut` (120 s) plus the 5 s its own stop adds to that.
 const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
+/// What a checkout older than #1746 ends its stop with when its `launchctl bootout --wait`
+/// fails (macOS 15 rejects `--wait`). It comes only after the checkout's ownership checks
+/// passed and its drain ran, so a refused stop never carries it.
+const OLD_BOOTOUT_FAILURE: &str = "stop failed (bounded bootout exit";
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).
 /// Read only, over `mode=ro` and never immutable: the database is live.
@@ -354,7 +359,7 @@ fn stop_record() -> Option<(std::fs::File, PathBuf)> {
 }
 
 /// The last line the checkout's CLI wrote, without its colour codes and marker glyph: its own
-/// words for why it refused. Shown to the person, never matched.
+/// words for why it refused. Shown to the person; only `OLD_BOOTOUT_FAILURE` is matched.
 fn refusal_line(path: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).ok()?;
@@ -497,7 +502,7 @@ impl adoption::Lifecycle for SourceLifecycle {
     ) -> Result<(), String> {
         // The stop's output goes to a file, never a pipe: a pipe closed by an app that quit
         // would kill the stop mid-drain. It is read only after the stop has failed, to show
-        // the checkout's own refusal; no decision is made from it.
+        // the checkout's own refusal; only `OLD_BOOTOUT_FAILURE` is looked for in it.
         let record = stop_record();
         // The process launchd runs for the source, read before the stop so a failed stop can
         // still be judged by whether that process let go.
@@ -571,11 +576,15 @@ impl adoption::Lifecycle for SourceLifecycle {
             }
             return self.released(None);
         }
-        // The checkout's script can fail to stop a job launchd still lists (an old one asks
-        // `launchctl bootout --wait`). The app then unloads the job itself and waits, up to the
-        // job's own exit bound, while launchd still lists it; a plain bootout does not wait.
-        // The checks below still decide whether it stopped.
-        if !status.success() && matches!(self.loaded_job(), Ok(Some(_))) {
+        // An old checkout's stop that got as far as `launchctl bootout --wait` and failed on it
+        // (macOS 15 rejects `--wait`) leaves a drained job loaded. The app then unloads the job
+        // itself and waits, up to the job's own exit bound, while launchd still lists it; a plain
+        // bootout does not wait. A refused stop never boots out. The checks below still decide
+        // whether it stopped.
+        let old_bootout_failed = refusal
+            .as_deref()
+            .is_some_and(|line| line.contains(OLD_BOOTOUT_FAILURE));
+        if !status.success() && old_bootout_failed && matches!(self.loaded_job(), Ok(Some(_))) {
             self.bootout();
             self.wait_until(self.bootout_timeout, || !matches!(self.loaded_job(), Ok(Some(_))));
         }
@@ -794,6 +803,15 @@ mod tests {
                 pid = gone_pid(),
             ),
         );
+    }
+
+    /// A checkout older than #1746 whose `bootout --wait` failed: `fail` in scripts/corsia at
+    /// v0.4.1-dev.746 writes this coloured, marked line to stdout, and `set -e` ends the script
+    /// with status 1 right after it.
+    fn old_stop_failed(bootout_status: u8) -> String {
+        format!(
+            "printf '  \\033[0;31m\u{274c} com.corsia.prod stop failed (bounded bootout exit {bootout_status})\\033[0m\\n'; exit 1"
+        )
     }
 
     /// What the app asked launchd to boot out, one call per line.
@@ -1042,7 +1060,7 @@ mod tests {
     #[test]
     fn a_failed_stop_of_a_loaded_job_is_followed_by_a_plain_bootout() {
         // The checkout's script fails (macOS 15 rejects its `--wait`) and the job stays loaded.
-        let mut home = home("exit 64", "exit 0", "exit 0");
+        let mut home = home(&old_stop_failed(1), "exit 0", "exit 0");
         fake_launchctl_with_bootout(home.root.path(), "rm -f LOADED");
         home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
         assert_eq!(
@@ -1053,7 +1071,7 @@ mod tests {
 
     #[test]
     fn a_bootout_that_does_not_let_go_leaves_the_stop_failed_as_before() {
-        let mut home = home("exit 1", "exit 0", "exit 0");
+        let mut home = home(&old_stop_failed(1), "exit 0", "exit 0");
         fake_launchctl_with_bootout(home.root.path(), "exit 5");
         let error = home
             .lifecycle
@@ -1067,12 +1085,12 @@ mod tests {
     fn a_job_launchd_is_still_tearing_down_is_waited_for_past_the_proof_window() {
         // Plain bootout returns at once and launchd lists the job for a while longer, longer
         // than the proof window but within the bootout bound.
-        let mut home = home("exit 64", "exit 0", "exit 0");
+        let mut home = home(&old_stop_failed(1), "exit 0", "exit 0");
         fake_launchctl_with_bootout(home.root.path(), "echo 0 > PRINTS");
         home.lifecycle.bootout_timeout = Duration::from_secs(10);
         home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
         // The job is still listed at the bound: the same failure as without the wait.
-        let mut home = self::home("exit 64", "exit 0", "exit 0");
+        let mut home = self::home(&old_stop_failed(1), "exit 0", "exit 0");
         fake_launchctl_with_bootout(home.root.path(), "exit 0");
         home.lifecycle.bootout_timeout = Duration::from_millis(100);
         let error = home
@@ -1089,7 +1107,7 @@ mod tests {
         home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
         assert_eq!(bootouts(&home), "");
         // `bounded bootout exit 2`: the script reports a failure after launchd tore the job down.
-        let mut home = self::home("rm -f LOADED; exit 2", "exit 0", "exit 0");
+        let mut home = self::home(&format!("rm -f LOADED; {}", old_stop_failed(2)), "exit 0", "exit 0");
         fake_launchctl_with_bootout(home.root.path(), "rm -f LOADED");
         home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
         assert_eq!(bootouts(&home), "");
@@ -1141,6 +1159,7 @@ mod tests {
             "exit 0",
             "exit 0",
         );
+        fake_launchctl_with_bootout(home.root.path(), "rm -f LOADED");
         let error = home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
@@ -1153,6 +1172,12 @@ mod tests {
             home.root.path().join("loaded").exists(),
             "nothing was stopped"
         );
+        assert_eq!(bootouts(&home), "", "a refusal is the answer");
+        // A failed stop that says nothing about a bootout is no reason to boot out either.
+        let mut home = self::home("exit 1", "exit 0", "exit 0");
+        fake_launchctl_with_bootout(home.root.path(), "rm -f LOADED");
+        assert!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_err());
+        assert_eq!(bootouts(&home), "");
     }
 
     #[test]
