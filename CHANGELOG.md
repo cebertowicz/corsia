@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- A model on your own server that reports its context window, such as one served by vLLM, can be used as soon as you add the server.
 - The reply box on a document comment no longer stays tall after you send a multi-line reply; it goes back to one line.
 - Source updates explain how to fix a branch with no tracking branch or a branch that has diverged from its tracked branch.
 - Source installs use the same local model server release as the app and show the cause if installation fails.
