@@ -303,6 +303,12 @@ async def _launch_settings_restart(
         if release_failed:
             detail += f" {_RELEASE_FAILURE_NOTE}"
         raise HTTPException(500, detail) from exc
+    except asyncio.CancelledError as error:
+        await _compensate_cancelled_acquire([operation_id], error)
+        raise
+    except BaseException as error:
+        await _compensate_preparation_failure(operation_id, error)
+        raise
     return process
 
 

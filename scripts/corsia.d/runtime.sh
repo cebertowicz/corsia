@@ -1335,15 +1335,18 @@ ensure_current_frontend_release() {
 # Pre-stop checks are read-only. Capture their existing diagnostic as the
 # reason passed directly to the detached owner's existing cleanup.
 update_preflight_check() {
-    local output
-    if output="$("$@" 2>&1)"; then
-        [ -z "$output" ] || printf '%s\n' "$output"
-        return 0
-    fi
+    local output error error_file status=0 reason
+    error_file="$(mktemp "${TMPDIR:-/tmp}/corsia-preflight.XXXXXX")" || return 1
+    output="$("$@" 2>"$error_file")" || status=$?
+    error="$(< "$error_file")"
+    rm -f "$error_file"
     [ -z "$output" ] || printf '%s\n' "$output"
+    [ -z "$error" ] || printf '%s\n' "$error" >&2
+    [ "$status" -ne 0 ] || return 0
     if declare -F _corsia_lifecycle_refuse > /dev/null; then
-        [ -n "$output" ] || output="Update didn't finish"
-        _corsia_lifecycle_refuse "$output"
+        reason="${output}${output:+${error:+$'\n'}}${error}"
+        [ -n "$reason" ] || reason="Update didn't finish"
+        _corsia_lifecycle_refuse "$reason"
     fi
     return 1
 }
