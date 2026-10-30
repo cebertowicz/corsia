@@ -10,6 +10,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
 - CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+- On a computer with only just enough free memory, setup no longer refuses the local model it chose and downloaded.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
@@ -41,7 +42,6 @@ Released 2026-10-30.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
 - A local model that cannot load during setup now says why and lets you try again.
 - The local model chosen in setup stays loaded afterwards.
-- On a Mac with only just enough free memory, setup no longer refuses the local model it chose and downloaded.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.

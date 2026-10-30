@@ -19,7 +19,7 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
 | pins full | none (derived live) | pins-full line | none |
 | doesn't fit now | none (derived live) | not-loaded line, if pinned | none |
-| setup's own model on an empty seat | none | live verdicts | as the load ends |
+| setup's own model past the verdict on an empty seat | none, unless oMLX refuses it (then as load refused) | live verdicts | as the load ends |
 | loaded | none | live verdicts | ``model.load.completed`` |
 | load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
 | person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
@@ -96,7 +96,7 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
 def _log_no_room(size_bytes: float | None, others: list[int | None], room: int) -> None:
     """Name the verdict's inputs, so a refusal on a machine that looked free can be explained."""
     log.warning(
-        "Not loading the downloaded local model now: not enough free memory "
+        "The downloaded local model doesn't fit free memory now "
         "(needs %s, room %.1f GiB, beside it %s; %s)",
         f"{size_bytes / GIB:.1f} GiB" if size_bytes else "an unreported size", room / GIB,
         ", ".join(f"{s / GIB:.1f} GiB" if s else "unreported" for s in others) or "nothing",
@@ -125,16 +125,12 @@ def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: 
             "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
-def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool, *, force_pin: bool) -> dict | None:
-    """The refusal this load gets from the one fit verdict, or None when it goes ahead.
-
-    Setup's pick already judged its own model. Alone on the seat nothing can be evicted, and
-    oMLX's own ceiling decides, as it does when it loads the pin at every start.
-    """
+def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dict | None:
+    """The refusal this load gets from the one fit verdict, or None when it fits."""
     others = [int(item.get("size_bytes") or 0) or None for item in loaded]
     room = model_room_bytes()
     verdict = load_verdict(int(size) if size else None, others, room)
-    if verdict == "fits_now" or (force_pin and not loaded):
+    if verdict == "fits_now":
         return None
     _log_no_room(size, others, room)
     return _refusal(verdict, size, room, pinned, loaded)
@@ -145,9 +141,9 @@ async def keep_loaded(
 ) -> dict:
     """Pin a completed download, then load it when it fits now.
 
-    Setup uses ``force_pin`` for its one managed model, which on an empty seat loads
-    without a second memory check. Settings downloads retain the capacity guard so
-    adding another model does not displace that setup model.
+    Setup's ``force_pin`` pins its one model whatever the verdict, so oMLX loads it unchecked
+    at its next start. On an empty seat this load goes the same way: oMLX's memory guard decides,
+    and a model it won't load gets the verdict's refusal. Settings downloads keep the guard.
     Every outcome is a row state: a guarded pin that does not fit leaves the model
     downloaded and unpinned, while a failed forced pin is visible on the row. A
     completed download is never undone here. ``pin_if_fits=False`` loads without
@@ -197,16 +193,18 @@ async def keep_loaded(
                 raise RuntimeError("oMLX loaded status unavailable")
             if any(item["identifier"] == model.model for item in loaded):
                 return {"status": "loaded"}
-            refusal = _memory_refusal(size_bytes, loaded, bool(pinned or row.get("pinned")), force_pin=force_pin)
-            if refusal:
+            refusal = _memory_refusal(size_bytes, loaded, bool(pinned or row.get("pinned")))
+            if refusal and (loaded or not force_pin):
                 return refusal
+            if refusal:
+                log.warning("Loading setup's own model anyway: it is alone on the seat, so oMLX decides")
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model")
                 emit("load.failed", result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
-                return {"status": "failed", "detail": result.get("message") or "Load failed"}
+                return refusal or {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"

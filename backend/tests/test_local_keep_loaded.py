@@ -160,7 +160,7 @@ async def test_setup_past_the_memory_check_still_hears_omlx_refuse(calls) -> Non
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
-    assert outcome == {"status": "failed", "detail": "would exceed the memory ceiling"}
+    assert outcome["status"] == "refused" and outcome["verdict"] == "no_memory"
     assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
 
 
