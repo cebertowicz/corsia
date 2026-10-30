@@ -2,7 +2,7 @@
 
 A **host-access lease** lets one agent run commands outside the [sandbox](agent-sandbox.md) for a short time and a stated purpose. This page covers the whole path: the request, the review, approval, the check on every command, expiry, what no lease opens, and what happens when something fails.
 
-**Read this first:** the reviewers are models told to let the agent's work proceed. They default to allow. They assume the applicant is your own agent doing a task you gave it, and they cannot check that you actually gave it. They are instructed to block only three things: exposing secrets, changing access controls, and destroying data the purpose doesn't need, and as models they can miss those. They are **not** a defense against an agent that has been tricked into asking for your ordinary personal files with a plausible reason.
+**Read this first:** the reviewers are models told to let the agent's work proceed. They default to allow. They assume the applicant is your own agent doing a task you gave it, and they cannot check that you actually gave it. They are instructed to block a short list: exposing secrets, changing access controls, destroying data the purpose doesn't need, and commands plainly outside the approved purpose. As models, they can miss those. They are **not** a defense against an agent that has been tricked into asking for your ordinary personal files with a plausible reason.
 
 ## The path
 

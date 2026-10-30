@@ -67,7 +67,7 @@ The full list, with what to do about each, is in [Known limits](limits.md).
 1. **Agents run as you.** The sandbox narrows what a command can touch; it is not a container or a separate user. A sandbox flaw exposes what your user can reach.
 2. **The workspace is the boundary, not the project.** Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
-4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block only secret exposure, changes to access controls and needless destruction, and a model can miss those. They will usually allow a plausible request to read your ordinary personal files.
+4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A model can miss those. They will usually allow a plausible request to read your ordinary personal files.
 5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments and tool results are not screened. Labelled content still reaches the agent.
 6. **Stored keys are not encrypted.** They sit in a file only your user can read, outside every agent's reach. Anything running as your user outside CORSIA can read them.
 7. **No outside security audit.** Nobody outside the project has tested these controls.
