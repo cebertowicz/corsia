@@ -170,6 +170,26 @@ async def test_update_log_attachment_failure_releases_hold_before_launch(
     drain.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_update_log_attachment_rejected_does_not_launch(monkeypatch, tmp_path):
+    from api import settings_restart
+    from automation import update_log
+
+    monkeypatch.setattr(settings_restart, "_update_log_path", lambda _id: tmp_path / "update.log")
+    monkeypatch.setattr(update_log, "record_update_log", lambda *_args: False)
+    spawn = AsyncMock()
+    monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
+    compensate = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_compensate_preparation_failure", compensate)
+
+    with pytest.raises(HTTPException, match="update log could not be recorded"):
+        await settings_restart._launch_settings_restart(
+            "operation", True, Path("/unused"), {}, ["restart"], lambda name: Path(name),
+        )
+    spawn.assert_not_called()
+    assert compensate.await_args.kwargs["failure_code"] == "update_refused"
+
+
 def test_update_precheck_credits_prunable_backups(tmp_path, monkeypatch):
     """The preflight accepts room the migration will make by pruning stale backups."""
     from api import update_preflight

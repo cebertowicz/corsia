@@ -270,7 +270,12 @@ async def _launch_settings_restart(
                 from automation.update_log import record_update_log
                 from infra.db_async import run_in_db
 
-                await run_in_db(record_update_log, operation_id, str(log_path))
+                attached = await run_in_db(record_update_log, operation_id, str(log_path))
+                if not attached:
+                    raise _with_failure_code(
+                        HTTPException(409, "The update log could not be recorded."),
+                        "update_refused",
+                    )
             process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
@@ -307,7 +312,9 @@ async def _launch_settings_restart(
         await _compensate_cancelled_acquire([operation_id], error)
         raise
     except BaseException as error:
-        await _compensate_preparation_failure(operation_id, error)
+        await _compensate_preparation_failure(
+            operation_id, error, failure_code=getattr(error, "update_failure_code", None)
+        )
         raise
     return process
 
