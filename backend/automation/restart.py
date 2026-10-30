@@ -174,21 +174,29 @@ async def begin_restart_drain(
     """Hold ingress and ask every captured Turn to stop at its safe boundary."""
     from automation import self_restart
     from infra import drain
+    from infra.db_async import run_in_db
 
-    operation_id = _restart_operation(reason, operation_id)
+    acquired: list[str] = []
+
+    def acquire() -> str:
+        owned = _restart_operation(reason, operation_id)
+        acquired.append(owned)
+        return owned
+
     try:
-        _enter_steering(operation_id)
-        drain.start_drain_projection(reason)
+        operation_id = await run_in_db(acquire)
+        await run_in_db(_enter_steering, operation_id)
+        await run_in_db(drain.start_drain_projection, reason)
         excluded = exclude_thread_ids or set()
         turns = [
-            turn for turn in _snapshot_active_turns()
+            turn for turn in await run_in_db(_snapshot_active_turns)
             if turn["thread_id"] not in excluded
             and (
                 include_thread_ids is None
                 or turn["thread_id"] in include_thread_ids
             )
         ]
-        self_restart.record_drain_total(operation_id, len(turns))
+        await run_in_db(self_restart.record_drain_total, operation_id, len(turns))
         outcomes = await _steer_turns(turns)
         controlled = [
             turn["thread_id"] for turn in turns if outcomes[turn["turn_id"]]
@@ -201,12 +209,12 @@ async def begin_restart_drain(
                 "restart control was not accepted by active task(s): "
                 + ",".join(uncontrolled)
             )
-        if not self_restart.transition_operation(
-            operation_id, expected="steering", target="draining",
+        if not await run_in_db(
+            self_restart.transition_operation, operation_id, expected="steering", target="draining",
         ):
             raise RuntimeError("restart operation changed before steering settled")
         return {
-            **drain.get_drain_status(),
+            **await run_in_db(drain.get_drain_status),
             "operation_id": operation_id,
             "controlled": controlled,
             "accounted": [],
@@ -214,20 +222,22 @@ async def begin_restart_drain(
             "excluded_thread_ids": sorted(excluded),
         }
     except asyncio.CancelledError:
-        await abort_restart_control(
-            operation_id,
-            error="restart control cancelled during steering",
-            cancelled=True,
-            failure_code="drain_cancelled",
-        )
+        if acquired:
+            await abort_restart_control(
+                acquired[0],
+                error="restart control cancelled during steering",
+                cancelled=True,
+                failure_code="drain_cancelled",
+            )
         raise
     except Exception as exc:
-        await abort_restart_control(
-            operation_id,
-            error="restart control setup failed",
-            failure_code="drain_failed",
-            failure_detail=f'{{"exception": "{type(exc).__name__}"}}',
-        )
+        if acquired:
+            await abort_restart_control(
+                acquired[0],
+                error="restart control setup failed",
+                failure_code="drain_failed",
+                failure_detail=f'{{"exception": "{type(exc).__name__}"}}',
+            )
         raise
 
 

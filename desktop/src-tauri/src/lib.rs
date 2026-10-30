@@ -1850,7 +1850,7 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     let first_run::FirstRun::Adoptable { source } = first_run else {
         return Err(untouched("there is no source install ready to adopt".to_string()));
     };
-    let port = source.port;
+    let port = source.app_port(&app_dir);
     let plan = adoption::Plan { source: source.clone(), app_dir: app_dir.clone() };
     let resources = bundled_resource_dir(app).map_err(untouched)?;
     service.adoption_cancel_requested.store(false, Ordering::Release);

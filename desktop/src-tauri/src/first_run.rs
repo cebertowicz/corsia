@@ -39,7 +39,7 @@ pub enum FirstRun {
     /// contract required for adoption: write nothing and offer Start fresh with this reason.
     /// `details` carries the runtime cause, shown only behind Details.
     ExistingInstall { reason: String, details: String },
-    /// A rendered source service plist identifies a moveable source install.
+    /// A recognizable source install can be taken over.
     Adoptable { source: adoption::SourceInstall },
 }
 
@@ -256,11 +256,13 @@ pub fn plan_trusting(home: &Path, app_dir: &Path, trusted: Option<&Path>) -> Res
     }
 
     if present(&home.join(".corsia").join("config.json"))? {
-        return existing_install(
-            "CORSIA found an existing install on this computer (~/.corsia), \
-             and this app can’t open it."
-                .into(),
-        );
+        return match adoption::source_from_bootstrap(home) {
+            Ok(source) => Ok(FirstRun::Adoptable { source }),
+            Err(details) => Ok(FirstRun::ExistingInstall {
+                reason: "CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it.".into(),
+                details,
+            }),
+        };
     }
     let legacy = home
         .join("Library")
@@ -618,6 +620,53 @@ mod tests {
         fs::write(home.0.join(".corsia").join("config.json"), "{}").unwrap();
 
         assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn canonical_bootstrap_without_plist_is_adoptable_for_both_formats() {
+        let home = Home::new("unmanaged-bootstrap");
+        let checkout = home.0.join(".corsia");
+        fs::create_dir_all(checkout.join("scripts")).unwrap();
+        fs::write(checkout.join("scripts/corsia"), "cli").unwrap();
+        let workspace = home.0.join("work");
+        let state = home.0.join("state");
+        for (config, expected_state) in [
+            (serde_json::json!({"workspace": {"root": workspace}, "state_root": state}), state.clone()),
+            (serde_json::json!({"workspace": workspace}), workspace.join(".corsia")),
+        ] {
+            fs::write(checkout.join("config.json"), config.to_string()).unwrap();
+            let FirstRun::Adoptable { source } = plan(&home.0, &home.app_dir()).unwrap() else {
+                panic!("expected unmanaged source");
+            };
+            assert_eq!(source.workspace, workspace);
+            assert_eq!(source.state, expected_state);
+            assert_eq!(source.cli, checkout.join("scripts/corsia"));
+            assert!(source.plist.is_none() && source.port.is_none());
+        }
+        fs::write(checkout.join("config.json"), r#"{"workspace":"relative"}"#).unwrap();
+        assert_refused(&home, "~/.corsia");
+        fs::write(checkout.join("config.json"), serde_json::json!({"workspace": workspace}).to_string()).unwrap();
+        fs::remove_file(checkout.join("scripts/corsia")).unwrap();
+        assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn managed_source_plist_remains_adoptable() {
+        let home = Home::new("managed-plist");
+        let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
+        let checkout = home.0.join("checkout");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::create_dir_all(checkout.join("scripts")).unwrap();
+        fs::write(checkout.join("scripts/corsia"), "cli").unwrap();
+        fs::write(&plist, format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>{}</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>1956</string></dict></dict></plist>"#,
+            checkout.join("backend").display()
+        )).unwrap();
+        let FirstRun::Adoptable { source } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected managed source");
+        };
+        assert_eq!(source.plist, Some(plist));
+        assert_eq!(source.port, Some(1956));
     }
 
     #[test]
