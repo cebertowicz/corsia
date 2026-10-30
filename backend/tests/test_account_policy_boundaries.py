@@ -447,7 +447,7 @@ def test_affected_account_threads_filter_provider_subjects_through_canonical_che
         return (legacy["id"] if thread_id == "destination" else second["id"], None)
 
     # turn_account is this selector once a caller has read the thread's project (and binding)
-    monkeypatch.setattr(account_policy, "_scoped_turn_account", canonical)
+    monkeypatch.setattr(account_policy, "scoped_turn_account", canonical)
 
     assert affected_thread_ids(legacy["id"], db=db) == ["destination"]
     assert checked == [("codex", "destination", "codex/test", legacy["id"]),

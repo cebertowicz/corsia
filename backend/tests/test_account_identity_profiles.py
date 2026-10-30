@@ -81,12 +81,11 @@ def _slug(target):
     return json.loads(target.read_text())['models'][0]['slug']
 
 
-async def _refresh(monkeypatch, provider, *, is_default=False, source_home='/synthetic/./source'):
+async def _refresh(monkeypatch, provider, *, source_home='/synthetic/./source'):
     from connections import harness_models
     from connections.account_discovery_types import StagedDiscovery
 
-    context = SimpleNamespace(provider=provider, is_default=is_default, source_home=source_home,
-                              prior_discovery=None)
+    context = SimpleNamespace(provider=provider, source_home=source_home, prior_discovery=None)
     calls, writes = [], []
     async def spawn(*argv, **kwargs):
         calls.append((argv, kwargs))
@@ -459,7 +458,7 @@ async def test_actual_custom_refresh_version_uses_clean_own_verbatim_source_home
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
 async def test_actual_default_refresh_version_uses_clean_own_source_home(monkeypatch, provider):
-    result, calls, writes = await _refresh(monkeypatch, provider, is_default=True)
+    result, calls, writes = await _refresh(monkeypatch, provider)
     assert result == 'committed'
     assert calls == [(('/synthetic/vendor', '--version'),
                       {'stdout': asyncio.subprocess.PIPE, 'stderr': asyncio.subprocess.PIPE,

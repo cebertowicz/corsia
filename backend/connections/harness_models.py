@@ -441,7 +441,7 @@ def _cached_harness_version(provider: str, *, db=None) -> str:
 
 async def _refresh_provider_once(
     provider: str, *, reason: RefreshReason, harness_version: str | None = None, db=None,
-    binary: str | None = None, context=None,
+    binary: str | None = None, context,
 ) -> dict[str, Any]:
     # A caller that names the binary asks even a row that is not available (a sign-in check).
     binary, unavailable = (binary, None) if binary else await _db_call(
@@ -453,8 +453,6 @@ async def _refresh_provider_once(
     assert binary is not None
     from connections.account_discovery_refresh import refresh_account_once
 
-    if context is None:
-        raise ValueError('account discovery requires an account')
     return await refresh_account_once(provider, context=context, binary=binary,
         harness_version=harness_version, adapter=_ADAPTERS[provider], db_call=_db_call,
         version_read=binary_version, db=db)
@@ -464,7 +462,12 @@ async def refresh_provider(
     provider: str, *, reason: RefreshReason, harness_version: str | None = None, db=None,
     binary: str | None = None, account_id: str | None = None, expected_receipt=None,
 ) -> dict[str, Any]:
-    """Single-flight by account generation; unscoped Default retains its provider key."""
+    """Refresh one account's catalog, single-flight by account generation.
+
+    Without ``account_id`` it refreshes every signed-in account of the provider and
+    returns the summary ``{provider, reason, ok, error}``; with one it returns that
+    account's ``AccountRefreshResult``.
+    """
     from connections.account_discovery_types import capture_discovery_context, AccountRefreshResult
 
     if account_id is None:
@@ -487,8 +490,7 @@ async def refresh_provider(
     task = _REFRESH_TASKS.get(key)
     if task is None or task.done():
         task = asyncio.create_task(_refresh_provider_once(
-            provider, reason=reason, harness_version=harness_version, db=db, binary=binary,
-            **({'context': context} if context is not None else {}),
+            provider, reason=reason, harness_version=harness_version, db=db, binary=binary, context=context,
         ))
         _REFRESH_TASKS[key] = task
 
@@ -497,10 +499,7 @@ async def refresh_provider(
                 _REFRESH_TASKS.pop(key, None)
 
         task.add_done_callback(_clear)
-    result = await asyncio.shield(task)
-    if context is not None:
-        return result
-    return {**result, "reason": reason}
+    return await asyncio.shield(task)
 
 
 def start_background_check(provider: str, check) -> None:

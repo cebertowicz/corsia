@@ -62,7 +62,7 @@ def _harness_connection_available(provider: str) -> bool:
 def _harness_discovery_envelope(provider: str) -> dict | None:
     from connections.harness_models import read_discovery_envelope
 
-    return read_discovery_envelope(provider)
+    return fact_memo.memoized(("harness_discovery_envelope", provider), lambda: read_discovery_envelope(provider))
 
 
 def _cloud_providers_active() -> set[str]:
@@ -335,11 +335,13 @@ def catalog_base_rows() -> list[dict]:
     from llm.harness_catalog import catalog_rows
     rows: list[dict] = []
     connections: dict[str, bool] = {}
-    for row in catalog_rows(model_catalog.get_model_status_catalog_rows()):
-        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers, local_servers,
-                              harness_connections=connections)
-        if entry is not None:
-            rows.append(entry)
+    # The build reads one envelope per harness, however many models it lists.
+    with fact_memo.fact_reads():
+        for row in catalog_rows(model_catalog.get_model_status_catalog_rows()):
+            entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers, local_servers,
+                                  harness_connections=connections)
+            if entry is not None:
+                rows.append(entry)
     return rows
 
 

@@ -156,9 +156,7 @@ def _turn_identity(provider: str, *, thread_id: str | None, project_id: str | No
     the answer is the same without a second read.
     """
     if binding is _READ:
-        binding = db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
-                             "WHERE thread_id=? AND provider=?",
-                             (thread_id, provider)).fetchone() if thread_id and account_id is None else None
+        binding = thread_binding(thread_id, provider, db=db) if thread_id and account_id is None else None
     if binding is not None and binding["pending_account_id"] is not None:
         # A person's choice made during a running turn: the next claim moves to it, and it never rolls over.
         return str(binding["pending_account_id"])
@@ -175,11 +173,16 @@ def _turn_identity(provider: str, *, thread_id: str | None, project_id: str | No
     return rollover_destination(provider, source, harness_base_row(model, db=db), project_id, db=db) or source
 
 
+def thread_binding(thread_id: str, provider: str, *, db):
+    """The thread's own account binding row for the provider, or ``None``."""
+    return db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
+                      "WHERE thread_id=? AND provider=?", (thread_id, provider)).fetchone()
+
+
 def pending_account(thread_id: str, provider: str, *, db) -> str | None:
     """The account a person chose while a turn was running, which the next claim moves to."""
-    row = db.execute("SELECT pending_account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?",
-                     (thread_id, provider)).fetchone()
-    return str(row[0]) if row is not None and row[0] is not None else None
+    row = thread_binding(thread_id, provider, db=db)
+    return str(row["pending_account_id"]) if row is not None and row["pending_account_id"] is not None else None
 
 
 def turn_account(provider: str, *, thread_id: str | None = None, project_id: str | None = None,
@@ -193,11 +196,11 @@ def turn_account(provider: str, *, thread_id: str | None = None, project_id: str
     """
     require_inference(provider)
     project = thread_scope(thread_id, db=db)["project_id"] if thread_id else project_id
-    return _scoped_turn_account(provider, thread_id=thread_id, project=project, account_id=account_id,
+    return scoped_turn_account(provider, thread_id=thread_id, project=project, account_id=account_id,
                                 model=model, db=db)
 
 
-def _scoped_turn_account(provider: str, *, thread_id: str | None, project: str | None,
+def scoped_turn_account(provider: str, *, thread_id: str | None, project: str | None,
                          account_id: str | None, model: str | None, db,
                          binding=_READ) -> tuple[str | None, str | None]:
     """``turn_account`` for a caller that already holds the thread's project, and optionally its binding."""

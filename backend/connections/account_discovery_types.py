@@ -6,18 +6,16 @@ from dataclasses import dataclass, field
 
 from connections.account_receipts import ReceiptFence, account_receipt
 from connections.vendor_accounts import get_account, resolve_account_id
-from infra.database import write_transaction
+from infra.database import get_db
 
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryContext:
     provider: str
     account_id: str | None
-    is_default: bool
     receipt: ReceiptFence | None
     source_home: str | None
     runtime_home: str | None
-    observation_token: object | None
     prior_discovery: dict | None = field(repr=False)
 
     @property
@@ -54,7 +52,9 @@ class AccountRefreshResult:
 
 def capture_discovery_context(provider: str, *, account_id: str | None = None,
                               expected_receipt: ReceiptFence | None = None, db=None) -> DiscoveryContext | None:
-    with write_transaction(db, scope='capture_account_discovery') as connection:
+    """The account's discovery inputs from one row read: the commit re-checks the receipt it carries."""
+    connection = db or get_db()
+    try:
         identity = resolve_account_id(provider, account_id, db=connection)
         if identity is None:
             return None
@@ -64,5 +64,8 @@ def capture_discovery_context(provider: str, *, account_id: str | None = None,
             return None
         if account['state'] != 'signed_in' or receipt is None:
             return None
-        return DiscoveryContext(provider, identity, False, receipt,
-            account['source_home'], account['runtime_home'], None, account['discovery'])
+        return DiscoveryContext(provider, identity, receipt,
+            account['source_home'], account['runtime_home'], account['discovery'])
+    finally:
+        if db is None:
+            connection.close()
