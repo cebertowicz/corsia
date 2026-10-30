@@ -57,7 +57,7 @@ What follows from that:
 
 ## What no lease opens
 
-The **hard floor** applies under every lease (Operating system):
+The **hard floor** applies under every lease (Operating system for the shell, CORSIA code for file tools):
 
 - CORSIA's key store and the agents' saved browser profile
 - The Safehouse binary and the generated sandbox profile, so a leased command can't rewrite its own confinement

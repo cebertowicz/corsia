@@ -20,7 +20,7 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 **Writable outside the workspace, from the shell (macOS):** temporary folders (`/tmp` and the system temp folder, which holds each conversation's package caches), `~/.ssh/known_hosts`, and some developer-tool caches that Agent Safehouse allows, such as `~/.npm`, `~/.cargo` and `~/.rustup`. On Linux, each thread gets its own `/tmp` (below).
 
-**Read only, from the shell:** system files such as `/etc`, and some tool settings in your home folder: `~/.gitconfig`, most of `~/.config`, `~/.cache`, `~/.npm`, `~/.cargo`. The file tools don't reach these.
+**Read only, from the shell:** system files such as `/etc`, and some tool settings in your home folder: `~/.gitconfig`, most of `~/.config`, most of `~/.cache`. The file tools don't reach these.
 
 **Network:** any outbound connection, to the internet or your local network. Not limited. See [Network](network.md).
 
@@ -36,7 +36,7 @@ The project is not a boundary. `backend/tools/filesystem_gate.py` states it in c
 | CORSIA's state folder (database, logs, keys, the agents' browser profile) and its checkout's private files | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
-| Writes to the workspace's Git settings and hooks (`.git/config`, `.git/hooks`) and its `.git` marker, because the server runs Git there outside the sandbox. Agents can't run `git init` at the workspace root. On Linux, an absent `.git` isn't covered yet | Operating system for the shell, CORSIA code for file tools |
+| Writes to the workspace's Git settings and hooks (`.git/config`, `.git/hooks`) and its `.git` marker, because the server runs Git there outside the sandbox. Agents can't run `git init` at the workspace root. On Linux, this rule doesn't cover a workspace with no `.git` | Operating system for the shell, CORSIA code for file tools |
 | Raw disk devices | Operating system |
 | Reading or signalling processes outside the command's own sandbox (the server, other threads) | Operating system |
 | The clipboard (macOS) | Operating system |
