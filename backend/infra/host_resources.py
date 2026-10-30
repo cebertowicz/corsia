@@ -62,7 +62,7 @@ def host_available_ram_bytes() -> int:
 
 
 def memory_reading() -> str:
-    """This machine's memory as the fit verdict reads it, for the log line beside a refusal.
+    """This machine's memory read just after the fit verdict, for the log line beside a refusal.
 
     The page breakdown shows which pages ``available`` left out, so a refusal
     on a machine that looked free can be explained from the log alone.
