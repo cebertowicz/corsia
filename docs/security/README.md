@@ -58,7 +58,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | See a credential that sits in a workspace file | Masked in most cases; see [Secrets](secrets.md) for what masking misses | CORSIA code |
 | Send an email or calendar invite | Only after you have seen the draft and written back | CORSIA code |
 | Reach outside the workspace | Only through a lease | CORSIA code to require it; Model judgment to review it |
-| Approve its own lease | No; you approve, or the automatic reviewer if you turned it on | CORSIA code; Model judgment when automatic |
+| Approve its own lease | No; you approve, or the reviewer model does when Auto-approve is on ([Host access](host-access.md)) | CORSIA code; Model judgment under Auto-approve |
 
 ## The limits that matter most
 
