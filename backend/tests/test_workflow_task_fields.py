@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import itertools
 import sqlite3
 import subprocess
@@ -17,13 +16,9 @@ from infra.system_package import system_package_dir
 from plans import service
 from plans.boundary import PlanActor, mutate, read_current_plan
 from plans.current import read_current_status
+from plans.workflow_fields import STEPS_CREATED
 from tests.skill_sidecar_helpers import POINTER
-from tools.workflow_task_fields import (
-    Workflow,
-    append_add_notice,
-    append_close_notice,
-    version_short_hash,
-)
+from tools.workflow_task_fields import version_short_hash
 
 
 _MUTATION_IDS = itertools.count()
@@ -247,74 +242,6 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
     assert split["size"] == "S" and follow_up["size"] == "S"
 
 
-def test_required_step_prompts_are_report_only(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    phase = service.add_node(
-        plan.id, kind="phase", title="Run", acceptance_criteria="Run recorded",
-        workflow_ref="sample", workflow_version="abc", db=db,
-    )
-    task = service.add_node(
-        plan.id, kind="task", title="Build", acceptance_criteria="Build passes",
-        parent_id=phase.id, workflow_ref="sample", workflow_version="abc",
-        workflow_step="build", difficulty="standard", db=db,
-    )
-    workflows = {"sample": Workflow(required_steps=("build", "review"), version="abc")}
-    added = {"node": asdict(task)}
-    append_add_notice(added, db, workflows)
-    assert added["notice"] == "Required steps not in this run: review."
-
-    service.transition_node(task.id, "active", db=db)
-    service.transition_node(task.id, "closed", db=db)
-    closed: dict = {}
-    append_close_notice(closed, node_id=task.id, db=db, workflows=workflows)
-    assert closed["notice"] == "Required step review has no task in this run."
-
-
-@pytest.mark.parametrize("workflow_ref", ["other", None])
-def test_required_step_prompts_ignore_other_or_unreferenced_workflows(db, workflow_ref):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    phase = service.add_node(
-        plan.id, kind="phase", title="Sample run", acceptance_criteria="Run recorded",
-        workflow_ref="sample", workflow_version="abc", db=db,
-    )
-    service.add_node(
-        plan.id, kind="task", title="Other task", acceptance_criteria="Recorded",
-        parent_id=phase.id, workflow_ref=workflow_ref, workflow_step="build",
-        difficulty="standard", db=db,
-    )
-
-    result: dict = {"node": asdict(phase)}
-    append_add_notice(result, db, {"sample": Workflow(required_steps=("build",), version="abc")})
-
-    assert result["notice"] == "Required steps not in this run: build."
-
-
-def test_required_step_prompts_name_an_unavailable_workflow(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    phase = service.add_node(
-        plan.id, kind="phase", title="Sample run", acceptance_criteria="Run recorded",
-        workflow_ref="sample", workflow_version="abc", db=db,
-    )
-    task = service.add_node(
-        plan.id, kind="task", title="Task", acceptance_criteria="Recorded",
-        parent_id=phase.id, db=db,
-    )
-
-    added: dict = {"node": asdict(task)}
-    append_add_notice(added, db, {})
-    assert added["notice"] == (
-        "Workflow sample is no longer available; required steps not checked."
-    )
-
-    service.transition_node(task.id, "active", db=db)
-    service.transition_node(task.id, "closed", db=db)
-    closed: dict = {}
-    append_close_notice(closed, node_id=task.id, db=db, workflows={})
-    assert closed["notice"] == (
-        "Workflow sample is no longer available; required steps not checked."
-    )
-
-
 def test_effective_workflows_read_the_corsia_block(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
@@ -335,7 +262,7 @@ def test_effective_workflows_read_the_corsia_block(tmp_path, monkeypatch):
 
     workflows = workflow_task_fields.effective_workflows(actor, None)
 
-    assert {name: flow.required_steps for name, flow in workflows.items()} == {"current": ("build",)}
+    assert {name: flow.steps for name, flow in workflows.items()} == {"current": tuple(steps)}
 
 
 @pytest.mark.asyncio
@@ -358,8 +285,8 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     skill.write_text(f"---\nname: sample\ndescription: Sample workflow\n{POINTER}---\n", encoding="utf-8")
     (skill.parent / "corsia.yaml").write_text(
         "handler: {kind: instruction}\nworkflow:\n  steps:\n"
-        "    - {id: build, required: true, check: Build passes}\n"
-        "    - {id: review, required: true, check: Review passes}\n",
+        "    - {id: build, required: true, check: Build passes, difficulty: {default: standard}}\n"
+        "    - {id: review, required: true, check: Review passes, difficulty: {default: standard}}\n",
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -417,20 +344,9 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             },
         },
     )
-    task = json.loads(await execute_as(
-        registry, identity, thread_id, "plan_update",
-        {
-            "plan_id": plan.id, "mutation_id": "build", "operation": "add",
-            "params": {
-                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
-                "parent_id": phase["id"], "workflow_ref": "sample",
-                "workflow_step": "build", "difficulty": "standard",
-                **_WORKFLOW_TASK_INTENT,
-            },
-        },
-    ))
+    build = phase_result["steps"][0]
     detail = json.loads(await execute_as(
-        registry, identity, thread_id, "plan_read", {"node_id": task["node"]["id"]},
+        registry, identity, thread_id, "plan_read", {"node_id": build["id"]},
     ))
 
     rejected_version = await execute_as(
@@ -456,15 +372,17 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     ))
 
     assert phase_result["node"]["workflow_version"] == expected_workspace_version
-    assert phase_result["notice"] == "Required steps not in this run: build, review."
+    assert phase_result["notice"] == STEPS_CREATED
+    assert [(step["title"], step["required"]) for step in phase_result["steps"]] == [
+        ("build", True), ("review", True),
+    ]
     assert "is the wanted result clear" in missing_difficulty
-    assert task["node"]["workflow_version"] == expected_workspace_version
-    assert task["notice"] == "Required steps not in this run: review."
+    assert detail["workflow_version"] == expected_workspace_version
     assert detail["workflow_step"] == "build"
     assert detail["difficulty"] == "standard"
     assert "workflow_version" in rejected_version and "Caller version" not in rejected_version
     assert unknown["node"]["workflow_version"] is None
-    assert unknown["notice"].startswith("Workflow version unavailable; recorded null.")
+    assert unknown["notice"] == f"{STEPS_CREATED}\nWorkflow version unavailable; recorded null."
 
 
 @pytest.mark.asyncio
@@ -488,7 +406,7 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
     skill.write_text(f"---\nname: sample\ndescription: Sample workflow\n{POINTER}---\n", encoding="utf-8")
     (skill.parent / "corsia.yaml").write_text(
         "handler: {kind: instruction}\nworkflow:\n  steps:\n"
-        "    - {id: build, required: true, check: Build passes}\n",
+        "    - {id: build, required: true, check: Build passes, difficulty: {default: routine}}\n",
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -535,7 +453,7 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
     fail_status = True
     faulted = await add("faulted", workflow_ref="sample")
     assert faulted["node"]["workflow_version"] is None
-    assert faulted["notice"].startswith("Workflow version unavailable; recorded null.")
+    assert faulted["notice"] == f"{STEPS_CREATED}\nWorkflow version unavailable; recorded null."
 
 
 @pytest.mark.asyncio
