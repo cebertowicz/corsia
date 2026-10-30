@@ -1,8 +1,9 @@
 //! The production side of in-place adoption: the source install's own
 //! `scripts/corsia` stops and starts its service, launchd and the loopback
 //! port prove what it did, and the app's bundled backend and Python make the
-//! backup. Nothing here reads the CLI's output to decide anything, except one line of a
-//! checkout older than #1746 (`OLD_BOOTOUT_FAILURE`), which no longer changes.
+//! backup. Nothing here reads the CLI's output to decide anything, except the line a
+//! checkout's stop prints when its `bootout` fails (`BOOTOUT_FAILED_LINE`). It comes after the
+//! checkout's checks and drain, and a later rewording only stops the match, which is safe.
 
 use std::{
     collections::BTreeSet,
@@ -33,10 +34,11 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long launchd may take to unlist a job after a plain bootout: the source plist's
 /// `ExitTimeOut` (120 s) plus the 5 s its own stop adds to that.
 const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
-/// What a checkout older than #1746 ends its stop with when its `launchctl bootout --wait`
-/// fails (macOS 15 rejects `--wait`). It comes only after the checkout's ownership checks
-/// passed and its drain ran, so a refused stop never carries it.
-const OLD_BOOTOUT_FAILURE: &str = "stop failed (bounded bootout exit";
+/// What a checkout's stop ends with when its `launchctl bootout` fails (macOS 15 rejects the
+/// `--wait` that checkouts older than #1746 pass; dev still prints this line). It comes only
+/// after the checkout's ownership checks passed and its drain ran, so a refused stop never
+/// carries it. If a later checkout rewords it the match stops, and the stop fails as it did.
+const BOOTOUT_FAILED_LINE: &str = "stop failed (bounded bootout exit";
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).
 /// Read only, over `mode=ro` and never immutable: the database is live.
@@ -359,7 +361,7 @@ fn stop_record() -> Option<(std::fs::File, PathBuf)> {
 }
 
 /// The last line the checkout's CLI wrote, without its colour codes and marker glyph: its own
-/// words for why it refused. Shown to the person; only `OLD_BOOTOUT_FAILURE` is matched.
+/// words for why it refused. Shown to the person; only `BOOTOUT_FAILED_LINE` is matched.
 fn refusal_line(path: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).ok()?;
@@ -502,7 +504,7 @@ impl adoption::Lifecycle for SourceLifecycle {
     ) -> Result<(), String> {
         // The stop's output goes to a file, never a pipe: a pipe closed by an app that quit
         // would kill the stop mid-drain. It is read only after the stop has failed, to show
-        // the checkout's own refusal; only `OLD_BOOTOUT_FAILURE` is looked for in it.
+        // the checkout's own refusal; only `BOOTOUT_FAILED_LINE` is looked for in it.
         let record = stop_record();
         // The process launchd runs for the source, read before the stop so a failed stop can
         // still be judged by whether that process let go.
@@ -578,12 +580,13 @@ impl adoption::Lifecycle for SourceLifecycle {
         }
         // An old checkout's stop that got as far as `launchctl bootout --wait` and failed on it
         // (macOS 15 rejects `--wait`) leaves a drained job loaded. The app then unloads the job
-        // itself and waits, up to the job's own exit bound, while launchd still lists it; a plain
-        // bootout does not wait. A refused stop never boots out. The checks below still decide
-        // whether it stopped.
+        // itself. A plain bootout returns at once, and launchd keeps the job listed until its
+        // process has exited, so the app waits, up to the job's own exit bound, for it to be
+        // unlisted. A refused stop never boots out. The checks below still decide whether it
+        // stopped.
         let old_bootout_failed = refusal
             .as_deref()
-            .is_some_and(|line| line.contains(OLD_BOOTOUT_FAILURE));
+            .is_some_and(|line| line.contains(BOOTOUT_FAILED_LINE));
         if !status.success() && old_bootout_failed && matches!(self.loaded_job(), Ok(Some(_))) {
             self.bootout();
             self.wait_until(self.bootout_timeout, || !matches!(self.loaded_job(), Ok(Some(_))));
