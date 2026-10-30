@@ -11,4 +11,10 @@ REVIEWER_GATE_SCHEMA_SQL = """
         pr_key       TEXT PRIMARY KEY,
         approved_sha TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS reviewer_gate_pending (
+        pr_key         TEXT NOT NULL,
+        head_sha       TEXT NOT NULL,
+        internal_event TEXT NOT NULL,
+        PRIMARY KEY (pr_key, head_sha)
+    );
 """
