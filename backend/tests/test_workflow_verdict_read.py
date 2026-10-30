@@ -10,7 +10,9 @@ import pytest
 
 from core.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs
-from core.workflow_verdict_read import price_snapshot, read_snapshot
+from core.workflow_verdict_read import (
+    _OPEN_WORKFLOWS_SQL, open_workflow_subjects, price_snapshot, read_open_snapshot, read_snapshot,
+)
 from core.workflow_verdict_rules import compute, freeze_plan
 from core.workflow_verdicts import MIXED, KpiRow
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
@@ -190,6 +192,33 @@ def test_reached_verdicts_remain_skipped_after_an_old_event(db) -> None:
                "'{}')", (old, old, subject))
     snapshot = read_snapshot(db, now=NOW)
     assert subject in snapshot.reached and compute(snapshot) == []
+
+
+def _reached(db, subject: str, index: int = 0) -> None:
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES (?,?,'measurement.verdict.reached','corsia','instrumented','2026-10-01',"
+               "'2026-10-01',?,'{}')", (f"reached-{index}", f"reached-{index}", subject))
+
+
+def test_open_snapshot_selects_judged_versions_in_use_without_reached_verdicts(db) -> None:
+    node(db, "run")
+    node(db, "other", workflow="decision-brief", version="v9", created="2026-10-03T00:00:00Z")
+    node(db, "done", version="v0")
+    node(db, "plain", workflow="decision-brief", version=None)
+    node(db, "edited", workflow="decision-brief", version=f"v2{LOCAL_EDIT_MARK}")
+    correction(db, "bounded", "run")
+    _reached(db, "workflow:sdlc-process@v0")
+
+    assert open_workflow_subjects(db) == {"workflow:sdlc-process@v1", "workflow:decision-brief@v9"}
+    snapshot = read_open_snapshot(db, now=NOW, limit=1)
+    assert snapshot.subjects == {"workflow:decision-brief@v9"}  # latest use first
+    snapshot = read_open_snapshot(db, now=NOW)
+    assert [history.ref for history in snapshot.workflows if history.runs] == ["decision-brief", "sdlc-process"]
+    runs, _ = runs_of(snapshot)
+    assert runs["run"].corrections[0].source_id == "bounded"
+    details = [str(row["detail"]) for row in db.execute(
+        f"EXPLAIN QUERY PLAN {_OPEN_WORKFLOWS_SQL}", {"reached": "measurement.verdict.reached"})]
+    assert not any("SCAN outcome_events" in detail for detail in details)
 
 
 def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:

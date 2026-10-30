@@ -112,6 +112,9 @@ async def record_reachable(
         nd._LOADED_BY_SERVER[sid] = set(loaded)
         if changed:
             nd._notify_models_changed_safe()
+        from llm.local_setup import settle_load_failure
+
+        await settle_load_failure(server, loaded)
     if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
         _schedule(nd._discover_and_notify(sid))
 
