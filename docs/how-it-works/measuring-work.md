@@ -7,7 +7,7 @@ CORSIA counts what its agents finished, how much of the person's time it took an
 - **Series:** one named measurement over time, such as outcomes, first-try acceptance or fresh tokens per outcome. Each is defined once, server-side, in a registry (`backend/api/measurement_registry.py`).
 - **Family:** the group of series that read the same source, such as outcomes, active time, decisions, corrections, tokens or limits.
 - **Scope:** the slice measured: all work, one project, or one agent. A project and an agent can combine.
-- **Outcome:** a plan task that was accepted. See [Plans](plans.md).
+- **Outcome:** an eligible accepted plan task. Measurement excludes user-assigned tasks, correction nodes and tasks owned by spawned worker plans. See [Plans](plans.md).
 
 ## Why it exists
 
@@ -28,12 +28,12 @@ flowchart TB
 
 Series read from records the system already writes for other reasons (`backend/api/measurement_queries.py`):
 
-- **Outcomes, first-try acceptance, rejections:** accepted plan tasks and the rejections recorded against them, aggregated by the period in which they settled.
+- **Outcomes and first-try acceptance:** eligible accepted plan tasks, aggregated by the period in which they settled. **Rejections:** recorded review send-backs, grouped by when they happened.
 - **Active time:** the person's recorded presence in the app on that scope.
 - **Decisions and corrections:** raised decisions, how they were answered, and recorded corrections.
 - **Tokens:** the retained usage ledger, with cache re-reads counted separately and excluded from "fresh" tokens.
 - **Limits:** recorded usage-limit hits.
-- **Size:** a rating of each outcome's size, using the newest rating per outcome and counting, without using, ratings that are retracted, stale, conflicting or unknown. See [size rating import](../size-rating-import.md).
+- **Size:** the newest size rating for an outcome, or its author's declared size when no rating exists. Retracted, malformed, stale, conflicting and unknown latest ratings are counted but not used; outcomes can also be unsized. See [size rating import](../size-rating-import.md).
 
 The API is read-only. It serves series, an agents table, a models table and a lessons report (`backend/api/measurement.py`).
 
@@ -41,10 +41,10 @@ The API is read-only. It serves series, an agents table, a models table and a le
 
 Each series carries rules that the API enforces, so no chart has to remember them:
 
-- **Minimum sample.** A ratio is withheld, served with no value, until it has enough outcomes: 20 for most series, 10 for the shares of how decisions were answered. The raw value is kept alongside so the cut-off is visible.
+- **Minimum sample.** A ratio is withheld, served with no value, until it has enough samples: 20 outcomes for most ratios, 10 answered decisions for the shares of how decisions were answered. The raw value is kept alongside so the cut-off is visible.
 - **Not measured is not zero.** A period before a series' source existed is served as not measured. A chart is never given a zero to draw a baseline through.
 - **Proxies are labeled.** A series that estimates something, such as active hours or asks per outcome, carries a proxy flag.
-- **Comparability is marked.** Each series has a method version. The API also derives, per series, the period its source first has data on this computer and any recorded definition changes, and marks periods as comparable or not (`backend/api/measurement_breaks.py`) instead of letting a chart draw one line across them.
+- **Comparability is marked.** Each series has a method version. The API also uses a stored source-start mark or derives one from records, includes definition-change marks, and marks periods as comparable or not (`backend/api/measurement_breaks.py`) instead of letting a chart draw one line across them.
 - **Partial periods are marked.** A period still in progress is served with a partial flag, for fresh tokens and, on the Days view, for outcomes.
 - **Token counts are lower bounds when records lack counts.** The series includes how many calls had no token count. A period where no call had one has no figure; it is never served as zero tokens.
 
@@ -58,10 +58,10 @@ Time is the person's presence in the app, recorded as visits, merged and closed 
 
 ## What can go wrong
 
-- **Little data looks like no data.** A new install, or a scope with few outcomes, shows empty charts. That is the minimum-sample rule, not a measured zero.
-- **Only plan work counts.** Work done outside a plan task is not an outcome. An agent that never uses its plan has no measurable output.
+- **Little data looks like no data.** A new install or a scope with few outcomes can show empty ratio charts because of the minimum-sample rule. Count series need not have the same threshold.
+- **Only eligible plan work counts as outcomes.** Work done outside a plan task is not an outcome. Other records, such as token usage, can still be measured.
 - **Proxies are estimates.** Active hours, asks per outcome and size-based hours are approximations and are marked so. Do not read a small difference as a result.
-- **First-try rate depends on rejections being recorded.** It counts outcomes accepted without being sent back; it cannot see a rejection that happened in conversation and was never recorded on the plan.
+- **First-try rate depends on recorded work.** A send-back, certain failed or changed-requirement attempts, or a failed predecessor makes an outcome not first-try. It cannot see a rejection that happened in conversation and was never recorded on the plan.
 - **API-equivalent is not the bill.** Subscriptions and plan limits change what a person actually pays.
 - **Method changes break trends.** After a break, compare only within one side.
 - **No model-quality claim.** The series describe how work flowed through the platform. They are not a benchmark of any model.

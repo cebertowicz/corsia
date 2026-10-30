@@ -12,7 +12,7 @@ A plan is a thread's structured record of what it has committed to do, what it i
 
 ## Why it exists
 
-Chat history is a poor record of commitments. A long conversation buries what was promised, an agent that stops mid-task leaves no trace of what remains, and "done" is whatever the last message claimed. A plan makes the commitment a separate, checkable object. Whether a task is accepted is a recorded state change, which is also what lets [Measuring work](measuring-work.md) count outcomes without reading transcripts.
+Chat history is a poor record of commitments. A long conversation buries what was promised, an agent that stops mid-task leaves no trace of what remains, and "done" is whatever the last message claimed. A plan makes the commitment a separate, checkable object. Whether a task is accepted is a recorded state change, which lets [Measuring work](measuring-work.md) count eligible outcomes without reading transcripts.
 
 ## How it works
 
@@ -24,12 +24,17 @@ A task moves through a fixed set of states, and some are terminal (`backend/plan
 stateDiagram-v2
     [*] --> pending
     pending --> active
+    pending --> review_requested: delegated return
+    pending --> failed
+    pending --> closed
     active --> review_requested
+    active --> failed
+    active --> closed
     review_requested --> accepted
     review_requested --> accepted_with_followup
     review_requested --> active: sent back
-    active --> failed
-    active --> closed
+    review_requested --> failed
+    review_requested --> closed
 ```
 
 - `pending`, `active`: not yet started, or being worked.
@@ -42,32 +47,32 @@ stateDiagram-v2
 
 ### Delegated work
 
-A task handed to a worker appears in the worker's own plan. The worker returns evidence and the parent accepts or rejects it; see [Agents and threads](agents-and-threads.md).
+A task handed to a worker stays on the parent's plan and is linked to the worker's plan. The worker returns evidence and the parent accepts or rejects it; see [Agents and threads](agents-and-threads.md).
 
 ### Pause and wait
 
 - **Pause is the person's.** Only the person pauses or resumes a plan. An agent that wants to come back to a task later schedules it instead (`backend/plans/pause_authority.py`, `backend/plans/scheduled_wait.py`).
 - **Waits are watches.** A task can wait on a deadline, an event, a milestone or another task (`backend/registry/attention.py`).
-- **Every event wait ends.** An event wait is armed with a deadline: 24 hours by default, at most 7 days. When the deadline passes, the owner is woken with a note that the event did not arrive (`backend/plans/event_wait.py`). A scheduled task keeps whatever date the agent chose; a blocked wait refuses a date past 7 days.
+- **Event waits have deadlines.** An event wait is armed with a deadline: 24 hours by default, at most 7 days. On expiry the system attempts to wake the owner with a note that the event did not arrive (`backend/plans/event_wait.py`, `backend/automation/continuation/sources/watch_expiry.py`). A scheduled task keeps whatever date the agent chose; a blocked wait refuses a date past 7 days.
 - **Holds** record who can end a block: an external party, the system, another thread, or the person (`backend/plans/holds.py`).
 
 ### Decisions
 
-A decision goes through draft, parent review, raised, then answered, or invalidated if it can no longer be answered (`backend/plans/decision_lifecycle.py`). It has two to four lettered options and an optional free-form "other", plus a recommendation; it can ask for one pick or any subset (`backend/plans/decision_fields.py`). A decision belongs to the plan, not to the agent that asked it:
+A decision goes through draft, parent review, raised, then answered, or invalidated if it can no longer be answered (`backend/plans/decision_lifecycle.py`). It has two to four lettered options and a free-form "other", which must always be offered, plus a recommendation; it can ask for one pick or any subset (`backend/plans/decision_fields.py`). A decision belongs to the plan, not to the agent that asked it:
 
-- If the asking thread is archived, the question stays and still lands on the plan.
-- If the owning plan goes away, or the task it came from is closed, the question is withdrawn as `invalidated` and not counted as a failure.
+- If an asking thread is archived but the owning plan remains, the question stays and still lands on that plan.
+- If the owning plan goes away, including when its owner thread is archived, or the task it came from is closed, the question is withdrawn as `invalidated` and not counted as a failure.
 
 ### Liveness
 
-A thread with open work and no activity is woken so it does not stall silently. The first wake comes after 180 seconds and each later wake doubles the wait. A turn in progress is checked on a separate 600-second interval (`backend/automation/plan_liveness.py`). Wake state is derived from plan state, so a restart does not lose or duplicate wakes.
+A thread with actionable plan work can receive a liveness wake. The initial idle interval is 180 seconds; subsequent idle intervals double while there is no structured progress. A wake delivered to an already running turn uses a 600-second interval instead (`backend/automation/plan_liveness.py`, `backend/automation/continuation/sources/liveness.py`). The wake is stored durably and checked against current plan state before delivery. A failed delivery marks it stalled; unchanged work does not automatically re-arm that stalled wake.
 
 ## What can go wrong
 
 - **No plan, no outcome.** Work done without a plan task is not counted as an outcome and has no acceptance record.
 - **Acceptance is only as good as the criteria.** The system records that criteria were stated and a task was accepted; it does not judge whether the criteria were the right ones.
-- **A wait can end without its event.** The deadline is the guarantee that something looks at a stalled wait again. The wake says the event did not arrive; the owner still has to act.
-- **A paused plan stops agent-driven work.** Agents cannot unpause it; anything automatic that arrives for a paused agent goes into a digest instead of starting a turn.
+- **A wait can end without its event.** The deadline prompts a wake saying the event did not arrive; delivery can fail, and the owner still has to act.
+- **A paused plan stops agent-driven work.** Agents cannot unpause it. Scheduled wakes, connected events and worker completions are set aside in a digest; messages from a person or another agent, decision answers and restart continuations can still reach the thread (`backend/plans/pause_authority.py`).
 - **Terminal states are final.** A mistaken `closed` or `failed` cannot be undone; add a new task.
 
 ## Where it lives

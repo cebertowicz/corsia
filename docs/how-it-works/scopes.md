@@ -8,7 +8,7 @@ A scope is the level a piece of context, a skill or a responsibility belongs to:
 - **Project scope:** one body of work with its own context, skills and shared material.
 - **Thread scope:** one conversation's own context, skills and scratch space.
 
-Each scope has the same shape on disk, so an agent that understands one understands all three.
+Workspace and project folders share context, skills and shared-material directories. Thread-local files live under `.threads/`.
 
 ```text
 workspace/
@@ -29,7 +29,7 @@ workspace/
 
 Different work needs different rules. A household budget and a software product should not share a charter, a safety rule or a skill set, but both should share the platform rules above them. Scopes give a narrow default (a project's rules apply to the project) while letting broad guidance reach everything below it.
 
-Plain folders also mean a person can read, edit and version a scope with ordinary tools, and agents edit the same files the person does.
+Plain folders also mean a person can read, edit and version a scope with ordinary tools, and agents edit the same files the person does. Scope controls context and routing; it does not isolate project files. The agent shell's boundary is the workspace, so an agent can read and change files in other projects in the workspace, subject to repository protections and other sandbox rules (`backend/tools/sandbox_config.py`). Local only governs model choice; it does not prevent other agents from reading files or stop tool traffic (`backend/infra/local_only.py`).
 
 ## How it works
 
@@ -40,7 +40,7 @@ The workspace scaffold creates `context`, `skills`, `shared`, `projects` and `.t
 ### What resolves how
 
 - **Context** is delivered in a fixed order, broadest first: the platform's own System rules, workspace context, project context, role context, the thread's own bootloader, the skills index, then the roster of other agents (`backend/core/dynamic_context_registry.py`). Details are in [Context and memory](context-and-memory.md).
-- **Skills** resolve from broad to narrow: System, workspace, project, then the thread and its ancestors. For a skill name that appears at more than one level, the narrowest wins and the broader copy is reported as overridden. A System skill name cannot be overridden: a same-named skill elsewhere is omitted as shadowed by System (`backend/core/skill_resolution.py`, `backend/core/skill_scanning.py`).
+- **Skills** resolve from broad to narrow: System, workspace and project roots, including applicable role skills at each root, then the thread and its ancestors. For a skill name that appears at more than one level, the narrower copy wins and the broader copy is reported as overridden. A System skill name cannot be overridden: a same-named skill elsewhere is omitted as shadowed by System (`backend/core/skill_resolution.py`, `backend/core/skill_scanning.py`).
 
 ### Who coordinates a scope
 
@@ -53,7 +53,7 @@ A conductor receives a role template on top of the shared rules (`backend/core/c
 
 ### Crossing scopes
 
-Same-scope routing is the default. A message from one scope to another is refused unless the target is the workspace's CORSIA agent, sent through the server-bound delegation tool; otherwise the refusal names the target scope's coordinator and says to coordinate from there (`backend/infra/delegation_scope.py`). A thread designated conductor of one project is not an endpoint in another.
+Same-scope routing is the default. A server-bound native delegation send can cross scopes to or from the designated workspace CORSIA agent; other cross-scope sends are refused, with a repair path naming the target scope's coordinator when one is available (`backend/infra/delegation_scope.py`). A thread designated conductor of one project is not automatically an endpoint in another.
 
 ### Where the state root sits
 

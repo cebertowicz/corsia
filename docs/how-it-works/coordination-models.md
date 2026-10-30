@@ -6,7 +6,7 @@ A coordination model is the written agreement about how a project's agents work 
 
 - **Coordination model:** the files that describe a project's operating contract. They are ordinary Markdown in the project's `context/` folder.
 - **Core rules and project layer:** a model has generic rules (`COORDINATION-CORE.md`) and a project-specific file (`COORDINATION-MODEL.md`). Where the project layer states an exception, it governs.
-- **Package:** a published, versioned bundle of those files plus templates, with a manifest. The bundled package is `corsia-default`.
+- **Package:** a versioned bundle of those files plus templates, with a manifest. The bundled `corsia-default` package is unpublished.
 - **Conductor:** the thread that drafts and maintains the project's model. See [Scopes](scopes.md).
 
 ## Why it exists
@@ -17,13 +17,13 @@ Every project needs rules for ownership, approval, verification and escalation, 
 
 ### What `corsia-default` contains
 
-The manifest (`docs/coordination-models/corsia-default/manifest.yaml`) pins each file by size and SHA-256 and lists:
+The manifest (`docs/coordination-models/corsia-default/manifest.yaml`) lists package files with sizes and SHA-256 pins. It describes:
 
 - A project charter template, a project-layer template and a safety-invariants template, with placeholders.
 - The generic core rules.
 - Additive role context for ordinary agents and for the conductor.
 - A responsibility template and a standard for writing one.
-- A routing policy for which model tier to use, with tier placeholders instead of model identifiers. It is filled from the live model catalog at install.
+- A routing policy for which model tier to use, with tier placeholders instead of model identifiers. The manifest calls for it to be filled from the live model catalog at install; this version has no install script.
 - Interview questions, each naming the placeholders it fills.
 - A starter roster: a conductor and at most one owner role.
 - Five declared KPIs: first-try acceptance, rejections per outcome, fresh tokens per outcome, asks per outcome and active hours per outcome. Each refers to a metric in the measurement registry; targets are left to each project. See [Measuring work](measuring-work.md).
@@ -36,7 +36,7 @@ A new project scaffold creates `context/PROJECT.md` and `context/COORDINATION-MO
 
 ### How a model reaches agents
 
-Every top-level Markdown file in a project's `context/` folder is delivered as project context, in this order (`backend/core/project_context.py`):
+Top-level files ending in `.md` in a project's `context/` folder are delivered as project context, in this order (`backend/core/project_context.py`):
 
 1. `PROJECT.md`
 2. Files whose names start with `VISION` or `INTENT`
@@ -44,7 +44,7 @@ Every top-level Markdown file in a project's `context/` folder is delivered as p
 4. All other files, by filename, which includes `COORDINATION-CORE.md`
 5. `COORDINATION-MODEL.md`
 
-`PROJECT.md` and `COORDINATION-MODEL.md` are required. If either is missing, building project context fails with a named error instead of proceeding with partial policy. This order puts identity and intent before procedure, and the project-specific layer last. Role files under `context/roles/agent/` and `context/roles/conductor/` are delivered only to threads in that role (`backend/core/role_context_sources.py`). The conductor and CORSIA-agent role templates ship with CORSIA (`backend/prompts/conductor/`).
+`PROJECT.md` and `COORDINATION-MODEL.md` are required when project context is collected from disk. If either is missing, that collection fails with a named error instead of proceeding with partial policy. This order puts identity and intent before procedure, and the project-specific layer last. Role files under `context/roles/agent/` and `context/roles/conductor/` are delivered only to threads in that role (`backend/core/role_context_sources.py`). The conductor and CORSIA-agent role templates ship with CORSIA (`backend/prompts/conductor/`).
 
 Delivery follows the rules in [Context and memory](context-and-memory.md): an edited file reaches a running conversation at its next install boundary.
 
@@ -61,10 +61,10 @@ A withdrawn pack is refused. A pack is published into the fetching thread's `pac
 
 ## What can go wrong
 
-- **Unpublished and unproven.** `corsia-default` is version 0.1.0. Its bundled tests guard structure only: placeholder coverage, pinned sizes and digests, manifest shape (`tools/test_corsia_default_package.py`). There are no behavioral evaluations of the model itself, and the results table holds no rows (`docs/coordination-models/RESULTS.md`). Treat it as a starting draft.
+- **Unpublished and unproven.** `corsia-default` is version 0.1.0. Its bundled tests guard structure only: placeholder coverage, pinned sizes and digests, manifest shape (`tools/test_corsia_default_package.py`). The results table lists no behavioral evaluation of the model (`docs/coordination-models/RESULTS.md`). Treat it as a starting draft.
 - **Manifest and library check differ.** The library validator requires `kind: blueprint` in a pack manifest; the in-repository `corsia-default` manifest does not declare a `kind`. Check how a pack is built for the library before assuming the repository copy can be fetched as it is.
 - **A cited file is absent.** The core rules cite an optional standards file that this package version does not ship (the manifest says so).
-- **Missing required files stop context.** A project without `PROJECT.md` or `COORDINATION-MODEL.md` cannot assemble project context.
+- **Missing required files stop a fresh collection.** A project without `PROJECT.md` or `COORDINATION-MODEL.md` cannot collect project context from disk. A conversation can continue using its retained snapshot until an install boundary.
 - **Rules are advisory text.** A coordination model changes what agents are told. It is not enforced by code, except where a rule is also implemented elsewhere, such as the scope checks in [Scopes](scopes.md).
 
 ## Where it lives

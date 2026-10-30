@@ -2,7 +2,7 @@
 
 These pages explain how CORSIA is built and why, for an engineer deciding whether to adopt it or contribute to it. Each page says what a part is, why it exists, how it works, what can go wrong, and where it lives in the code. For a file-by-file map of the code, read [ARCHITECTURE.md](../../ARCHITECTURE.md); these pages explain the ideas behind that map.
 
-Every claim here was checked against the code at the commit this section was written from. Where the code and an older document disagree, these pages follow the code.
+These pages describe the implementation in the repository. Check the linked source when using them with a different version.
 
 ## Reading order
 
@@ -25,15 +25,15 @@ Security is covered in its own section: [Security](../security/README.md). These
 - **Workspace:** the top-level folder CORSIA manages. It holds shared context, shared skills, shared documents and every project.
 - **Project:** a body of work inside the workspace, such as a product or a household, with its own context, skills, documents and agents.
 - **Scope:** the level something belongs to: workspace, project or thread. Context and skills are resolved by scope.
-- **Thread:** one conversation with its own history, plan and model. Everything that runs, runs in a thread.
-- **Agent:** a thread that has been given a standing responsibility. Other threads are temporary workers.
+- **Thread:** one conversation with its own history, plan and model. Agent turns run in threads.
+- **Agent:** a thread that has been given a standing responsibility. A temporary worker is a thread created for a bounded task.
 - **Conductor:** the one thread designated to coordinate a scope. In a project it is the project conductor; in the workspace it is the CORSIA agent.
 - **Turn:** one run of a thread's agent loop, from an admitted input until it finishes.
 - **Harness:** the program that runs the agent loop for a turn. CORSIA has three: its own native loop, Claude Code and Codex.
 - **Checkpoint:** a summary of a thread's earlier history that replaces that history in the model's context when it grows too large.
 - **Plan:** a thread's structured list of tasks, with acceptance criteria, waits and decisions.
 - **Context source:** one file or generated block that is delivered to a model, such as a system rule, a project file or the skills index.
-- **State root:** the folder outside the workspace where CORSIA keeps its database and runtime files.
+- **State root:** the folder where CORSIA keeps its database and runtime files.
 
 ## What these pages do not cover
 

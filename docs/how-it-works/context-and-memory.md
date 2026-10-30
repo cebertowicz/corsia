@@ -7,7 +7,7 @@ Context is what an agent is told at the start of a turn. Memory is what outlives
 - **Context source:** a file or generated block delivered to the model, such as the platform's System rules, a project charter, a thread's own bootloader, or the skills index.
 - **Installed context:** the exact set of sources a conversation was started with, retained until its next install boundary.
 - **Checkpoint:** a structured summary of a thread's earlier history. When history nears the model's context limit, the checkpoint replaces the older messages in what the model sees.
-- **Continuity entries:** the checkpoint's contents, in 13 named fields such as active constraints, decisions, facts, open questions and next actions (`backend/core/continuity_types.py`). Entries in three fields (active constraints, approvals and preferences, decisions) require evidence.
+- **Continuity entries:** the checkpoint's contents, in 13 named fields such as active constraints, decisions, facts, open questions and next actions (`backend/core/continuity_types.py`). Retiring entries in three fields (active constraints, approvals and preferences, decisions) requires evidence.
 - **Knowledge base:** durable notes an agent writes and searches, kept as Markdown files.
 - **Message and checkpoint search:** keyword search over a thread's history and its retained checkpoints.
 
@@ -29,11 +29,11 @@ Static sources are delivered broadest first (`backend/core/dynamic_context_regis
 6. The skills index
 7. The roster of other agents
 
-Each delivered source records its version, and each turn records which sources it was started with (`backend/core/guidance_manifest.py`). Recording never blocks a turn; a failure is stored as a status on the turn.
+The guidance manifest records the sources a turn was started with and their versions where known (`backend/core/guidance_manifest.py`). Recording never blocks a turn; a failure is stored as a status on the turn.
 
 ### Installed context stays fixed
 
-The installed-context snapshot is kept until the next install boundary (`backend/core/installed_context.py`). A source edit therefore reaches a running conversation only at the next checkpoint install, model switch, scope change or conductor designation. It does not reach it because a turn started, a process restarted or the backend restarted. The effect is that the start of what the model reads stays identical between boundaries, so guidance does not change mid-conversation without a recorded boundary.
+The installed-context snapshot is kept until the next install boundary (`backend/core/installed_context.py`). A source edit therefore reaches a running conversation only at the next checkpoint install, model switch, scope change or conductor designation. It does not reach it because a turn started, a process restarted or the backend restarted. The retained static sources stay fixed between boundaries; other turn-specific context can still change.
 
 ### Tools are loaded on demand
 
@@ -43,11 +43,11 @@ Tools marked `core` are advertised in full. Others appear in an index and are lo
 
 Pressure checkpoint:
 
-- A checkpoint starts when the tokens remaining in the window fall to a reserve. The reserve is a tenth of the window, held between 8,192 and 32,768 tokens, raised so the checkpoint itself can finish, and never more than a quarter of the window (`backend/core/fork_pressure.py`). For a 200,000-token window that is about 28,700 tokens left, roughly 86% full; for a 32,768-token window it is 8,192 left, 75% full.
+- A pressure checkpoint can start when the tokens remaining in the window fall to a reserve, subject to admission and any checkpoint already in progress. The base reserve is a tenth of the window, held between 8,192 and 32,768 tokens. It can be raised so the checkpoint itself can finish, up to the greater of that base and a quarter of the window (`backend/core/fork_pressure.py`). For a 200,000-token window that is about 28,700 tokens left, roughly 86% full; for a 32,768-token window it is 8,192 left, 75% full.
 
 Idle checkpoint:
 
-- After 240 seconds idle, a checkpoint is taken if at least 32,768 tokens of new history have accumulated (`backend/infra/checkpoint_admission.py`). The 240 seconds sits inside a provider's prompt-cache lifetime so the summary can read the cached prefix.
+- After 240 seconds idle, a checkpoint can be taken if at least 32,768 tokens of new foldable history have accumulated (`backend/infra/checkpoint_admission.py`). The delay aims to start the summary while the provider's prompt cache is still warm; the duration of the last call also affects that.
 
 At a boundary the system decides to proceed, proceed and checkpoint, wait, adopt an existing checkpoint and proceed, or fail visibly (`backend/core/fork_fit.py`). A checkpoint costs a real model call.
 
@@ -68,9 +68,9 @@ A skill is a folder with a `SKILL.md`. The skills index in context lists them wi
 ## What can go wrong
 
 - **A context edit seems ignored.** Until an install boundary it is, by design. Trigger one with a checkpoint, a model switch, or a scope change.
-- **A checkpoint loses detail.** It is a summary. Anything a thread must never lose belongs in a continuity entry that requires evidence, a plan, a file or the knowledge base, not only in chat.
-- **Checkpoints cost model calls** and, when a model switch needs one, the person must consent before it runs.
-- **Small windows checkpoint sooner.** The reserve is capped at a quarter of the window, so a 32,768-token window starts one at 75% full, against about 86% for a 200,000-token window.
+- **A checkpoint loses detail.** It is a summary. Important details can also be recorded in a continuity entry, a plan, a file or the knowledge base, instead of relying only on chat.
+- **Checkpoints cost model calls.** A pending model switch can start a required checkpoint before committing the change.
+- **Small windows checkpoint sooner.** For a 32,768-token window the reserve is a quarter of the window, so the pressure threshold is 75% full, against about 86% for a 200,000-token window.
 - **Knowledge search is text matching.** It finds words, not meanings; a differently worded note is missed.
 
 ## Where it lives
