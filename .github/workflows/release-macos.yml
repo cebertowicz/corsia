@@ -25,7 +25,7 @@ on:
 
 # The release owner bumps this after each stable release.
 env:
-  NEXT_RELEASE_VERSION: '0.4.1'
+  NEXT_RELEASE_VERSION: '0.4.2'
   DEV_UPDATER_ENDPOINT: https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json
 
 jobs:
