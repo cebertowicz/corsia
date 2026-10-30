@@ -11,11 +11,13 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
  * looking at, read on every painted frame, must not leave its place and come back.
  */
 
-interface Sample { top: number | null; t: number }
+interface Sample { top: number | null; t: number; live: boolean }
 type Win = Window & { __eachPaintedFrame?: EachPaintedFrame; __samples?: Sample[]; __done?: boolean };
 
-/** The waiting dots leave when the turn ends, which a reader at the live edge can see as a drop of about this much; a drop of a reply's height is the regression. */
+/** The waiting dots leave when the turn ends, which a reader at the live edge can see as a drop of about this much; it is the only drop allowed, and only on the frames where the live region goes. */
 const WAITING_DOTS_PX = 60;
+/** While the turn is live the text under a reader at the live edge may only follow new text upward; any drop beyond rounding is the regression. */
+const LIVE_DROP_PX = 2;
 
 const LINE = 'The reader keeps their place while the agent works and the reply keeps arriving below. ';
 
@@ -37,6 +39,7 @@ async function sampleAnchor(page: Page, y: number, ms: number): Promise<Sample[]
 		const start = performance.now();
 		win.__eachPaintedFrame!(() => ({
 			t: performance.now() - start,
+			live: document.querySelector('.live-slot') !== null,
 			top: anchor && anchor.isConnected ? anchor.getBoundingClientRect().top - list.getBoundingClientRect().top : null,
 		}), (sample) => {
 			win.__samples!.push(sample);
@@ -50,11 +53,13 @@ async function sampleAnchor(page: Page, y: number, ms: number): Promise<Sample[]
 }
 
 /** Frame-to-frame movements of the sampled text, in px; a negative one is the transcript following new text upward. */
-function moves(samples: Sample[]): number[] {
-	const out: number[] = [];
+function moves(samples: Sample[]): { by: number; at: number; liveBefore: boolean; liveAfter: boolean }[] {
+	const out: { by: number; at: number; liveBefore: boolean; liveAfter: boolean }[] = [];
 	for (let i = 1; i < samples.length; i++) {
 		const [before, after] = [samples[i - 1].top, samples[i].top];
-		if (before !== null && after !== null && Math.abs(after - before) >= 0.5) out.push(Math.round((after - before) * 10) / 10);
+		if (before !== null && after !== null && Math.abs(after - before) >= 0.5) {
+			out.push({ by: Math.round((after - before) * 10) / 10, at: Math.round(samples[i].t), liveBefore: samples[i - 1].live, liveAfter: samples[i].live });
+		}
 	}
 	return out;
 }
@@ -101,6 +106,9 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge'] 
 		expect(samples.filter((sample) => sample.top !== null).length, 'the sampled text stayed on the page').toBeGreaterThan(samples.length / 2);
 		const seen = moves(samples);
 		if (reading === 'scrolled up mid-transcript') expect(seen, 'the text under the reader moved while the turn worked').toEqual([]);
-		else expect(seen.filter((by) => by > WAITING_DOTS_PX), 'the transcript dropped back under a reader at the live edge').toEqual([]);
+		else {
+			expect(seen.filter((move) => move.liveBefore && move.liveAfter && move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge while the turn worked').toEqual([]);
+			expect(seen.filter((move) => move.by > WAITING_DOTS_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
+		}
 	});
 }

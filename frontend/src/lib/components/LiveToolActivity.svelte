@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import {
 		activeThreadId, activeToolsByThread, isThreadTurnActive, liveReasoningByThread, streamContentByThread,
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
+	import { replyCommitsByThread } from '$lib/stores/liveStep';
 	import { renderMarkdown } from '$lib/markdown';
 	import { holdHeight } from '$lib/actions/holdHeight';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
@@ -19,32 +19,11 @@
 		onToggleToolBlock: (id: string) => void;
 	} = $props();
 
-	/** Expanding or collapsing a tool step is the person's own change of height; the slot below lets go of its floor for it. */
-	let toggles = $state(0);
-	function toggleTool(id: string): void {
-		toggles++;
-		onToggleToolBlock(id);
-	}
-
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
 	const activeTools = $derived((boundThreadId && $activeToolsByThread.get(boundThreadId)) || []);
 	const liveReasoning = $derived((boundThreadId && $liveReasoningByThread.get(boundThreadId)) || '');
 	const streamContent = $derived((boundThreadId && $streamContentByThread.get(boundThreadId)) || '');
 	const isStreaming = $derived(isThreadTurnActive($turnStates, boundThreadId));
-
-	/**
-	 * A streamed reply that commits as a transcript row takes the slot's height with it; the slot's floor must go
-	 * with it, or the row and the floor would both stand there until the turn ends.
-	 */
-	let commits = $state(0);
-	let hadReply = false;
-	$effect(() => {
-		if (streamContent) hadReply = true;
-		else if (hadReply) {
-			hadReply = false;
-			untrack(() => commits++);
-		}
-	});
 
 	function autoScroll(node: HTMLElement, _content: string) {
 		node.scrollTop = node.scrollHeight;
@@ -82,8 +61,8 @@
 </script>
 
 {#if isStreaming}
-<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. -->
-<div class="live-slot" use:holdHeight={`${boundThreadId}:${toggles}:${commits}`}>
+<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. A reply committing to the transcript takes its height out of the slot into its row, so the floor lets go. -->
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${$replyCommitsByThread.get(boundThreadId ?? '') ?? 0}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -104,7 +83,7 @@
 					blockKey="live-block"
 					live
 					expandedTools={expandedTools}
-					onToggle={toggleTool}
+					onToggle={onToggleToolBlock}
 				/>
 			</div>
 			{#if showQuietGapIndicator}

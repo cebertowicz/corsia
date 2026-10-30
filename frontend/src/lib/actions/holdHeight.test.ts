@@ -46,4 +46,16 @@ describe('holdHeight', () => {
 		notify();
 		expect(node.style.minHeight).toBe('40px');
 	});
+
+	it('lets go when the person clicks inside it, since expanding or collapsing a step is their own change of height', () => {
+		const node = slot();
+		holdHeight(node, 'a');
+		notify();
+		expect(node.style.minHeight).toBe('100px');
+		node.dispatchEvent(new Event('click'));
+		expect(node.style.minHeight).toBe('');
+		height = 40;
+		notify();
+		expect(node.style.minHeight).toBe('40px');
+	});
 });

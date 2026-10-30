@@ -5,7 +5,8 @@
  * region grows again.
  *
  * The floor is set after the layout that made the node its tallest, so it is already in place when the content
- * shrinks. A new `key` (the person collapsing something, a new turn) releases it.
+ * shrinks. A new `key` (content leaving for the transcript, a new turn) releases it, and so does a click inside the node,
+ * the person's own change of height (expanding or collapsing a step).
  */
 export function holdHeight(node: HTMLElement, key: string) {
 	let current = key;
@@ -17,15 +18,20 @@ export function holdHeight(node: HTMLElement, key: string) {
 		node.style.minHeight = `${height}px`;
 	});
 	observer?.observe(node);
+	const release = () => {
+		peak = 0;
+		node.style.minHeight = '';
+	};
+	node.addEventListener('click', release);
 	return {
 		update(next: string) {
 			if (next === current) return;
 			current = next;
-			peak = 0;
-			node.style.minHeight = '';
+			release();
 		},
 		destroy() {
 			observer?.disconnect();
+			node.removeEventListener('click', release);
 		},
 	};
 }
