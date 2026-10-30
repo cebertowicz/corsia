@@ -12,6 +12,14 @@ def digest(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode()).hexdigest()
 
 
+def is_empty_git_dir(path: Path) -> bool:
+    """Whether ``path`` is the empty ``.git`` a Linux shell launch leaves where it could not init; Git discovery skips it."""
+    try:
+        return path.is_dir() and not path.is_symlink() and not any(path.iterdir())
+    except OSError:
+        return False
+
+
 def history_git(workspace: Path, *args: str, ok: tuple[int, ...] = (0,)) -> bytes:
     """Run one read-only Git command in the workspace's own guidance history; a fault raises."""
     from infra.guidance_git import GitFault, _git_bytes, workspace_repository
