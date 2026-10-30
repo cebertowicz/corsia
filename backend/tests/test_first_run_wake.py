@@ -343,11 +343,14 @@ class TestAppPath:
         assert set(facts) == first_run_wake.APP_FACT_KEYS
 
     @pytest.mark.parametrize(("omlx_row", "expected"), [
+        ({"source": "omlx", "eligible": False, "state": "not_installed"}, False),
         ({"source": "omlx", "eligible": False}, False),
         ({"source": "omlx"}, False),
+        ({"source": "omlx", "eligible": False, "state": "ready"}, True),
+        ({"source": "omlx", "eligible": True, "state": "not_installed"}, True),
         (None, False),
     ])
-    def test_a_computer_that_cannot_run_a_local_model_reads_not_eligible(self, omlx_row, expected):
+    def test_a_computer_reads_eligible_when_it_can_run_a_local_model_or_already_runs_one(self, omlx_row, expected):
         from onboarding import first_run_wake
 
         rows = [omlx_row] if omlx_row else [{"source": "codex", "eligible": True}]

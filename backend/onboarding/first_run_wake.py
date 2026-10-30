@@ -153,7 +153,7 @@ def _app_local_download() -> dict[str, Any]:
 
 
 def _app_local_eligible(snapshot: dict[str, Any]) -> bool:
-    return any(item.get("source") == "omlx" and item.get("eligible") is True for item in snapshot["sources"])
+    return any(item.get("source") == "omlx" and (item.get("eligible") is True or item.get("state") == "ready") for item in snapshot["sources"])
 
 
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
