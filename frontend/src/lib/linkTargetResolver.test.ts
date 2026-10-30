@@ -204,6 +204,19 @@ describe('delegated rendered-markdown listener', () => {
 		return host.querySelector<HTMLAnchorElement>('a')!;
 	}
 
+	it.each([
+		['target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/conductor/target.md'],
+		['../target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
+		['/workspace/shared/target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
+		['shared/target.md', null, '/workspace/shared/target.md'],
+	])('routes %s from document path %s', async (href, docPath, expected) => {
+		const d = deps();
+		const anchor = installSurface(`[Open](${href})`, 'comment', d);
+		if (docPath) host!.dataset.docPath = docPath;
+		anchor.click();
+		await vi.waitFor(() => expect(d.fetchRevision).toHaveBeenCalledWith(expected, 'project-1'));
+	});
+
 	it('routes an AssistantMessage chat link through the one root listener', async () => {
 		const d = deps();
 		host = document.createElement('section');

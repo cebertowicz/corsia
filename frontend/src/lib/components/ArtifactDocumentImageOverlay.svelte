@@ -45,6 +45,7 @@
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
 				docName={target.name}
+				docPath={target.path}
 				{onBack}
 				bind:hasDraft
 				bind:sheetUp

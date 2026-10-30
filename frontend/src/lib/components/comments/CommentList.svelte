@@ -7,8 +7,9 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), replySelections = $bindable({}), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false }: {
+	let { comments, docPath = null, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), replySelections = $bindable({}), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false }: {
 		comments: Comment[];
+		docPath?: string | null;
 		documentOrder?: boolean;
 		focusedId?: string | null;
 		/** Image comments: the one whose tag is hovered or focused lights its card, and hovering or focusing a card reports it. */
@@ -79,7 +80,7 @@
 </script>
 
 {#if comments.length === 0}<p class="empty">No comments yet.</p>{/if}
-<div class="list" role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
+<div class="list" data-doc-path={docPath} role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
 	{#if documentOrder}
 		{#each rows as row (row.key ?? row.comments[0].id)}
 			{#if row.key !== null}{@render groupHead?.(row.comments)}{/if}
