@@ -151,7 +151,7 @@ def _app_local_download() -> dict[str, Any]:
 
 def _app_local_eligible(snapshot: dict[str, Any]) -> bool:
     """Whether this computer can run a local model, from the source snapshot's local model row."""
-    row = next((item for item in snapshot["sources"] if item.get("source") == "omlx"), {})
+    row: dict[str, Any] = next((item for item in snapshot["sources"] if item.get("source") == "omlx"), {})
     return row.get("eligible") is True
 
 
