@@ -53,12 +53,6 @@ To keep two bodies of work apart, give each its own workspace and CORSIA install
 
 ## Check it yourself
 
-```bash
-corsia token list
-```
-
-Lists API tokens by label, with no values. Revoke any you don't recognize.
-
 From an agent's shell, ask it to run:
 
 ```bash

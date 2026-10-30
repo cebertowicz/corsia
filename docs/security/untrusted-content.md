@@ -57,10 +57,4 @@ An agent that must read content from a source neither it nor you controls (an ou
 
 ## Check it yourself
 
-Measure the screen on your own local model with the synthetic set. The script boots a throwaway state and touches no real mail or data; it needs a running oMLX server:
-
-```bash
-python scripts/email_screen_eval.py --server-port <port> --model-id <model> --report report.md
-```
-
 See what the agent receives for a message: ask an agent to read one email with `email_read` and show you the raw result. The `screen` and `screen_notice` fields give the verdict.

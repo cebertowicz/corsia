@@ -62,7 +62,7 @@ Google, Microsoft and tool-server sign-ins store their tokens in the key store. 
 
 ## SSH keys
 
-Private key files in `~/.ssh` are unreadable from agent shells, leased or not. The SSH agent socket is passed through, so keys you have loaded into your SSH agent can be **used** for `ssh` and `git push` without being read. Remove keys from your SSH agent (`ssh-add -D`) if agents shouldn't use them.
+Private key files in `~/.ssh` are unreadable from agent shells without a lease (Operating system). They are not on the hard floor: a leased command can read them, and only the reviewers, told to block reading auth files, stand in the way (Model judgment). The SSH agent socket is passed through, so keys you have loaded into your SSH agent can be **used** for `ssh` and `git push` without being read. Remove keys from your SSH agent (`ssh-add -D`) if agents shouldn't use them.
 
 ## Check it yourself
 
