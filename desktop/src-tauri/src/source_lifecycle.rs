@@ -41,7 +41,9 @@ const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
 /// a refused stop never carries it. Two paths are left out on purpose: `exit 2` (the script's
 /// own bound ran out on a job that is not letting go, so a second bootout would only wait
 /// again) and a line with no readable process id for the job (see `stop_old`). If a later
-/// checkout rewords the line the match stops, and the stop fails as it did.
+/// checkout rewords the line the match stops, and the stop fails as it did. `service.sh`
+/// carries a comment naming this match. Remove this path when Take over stops accepting
+/// source installs whose `service.sh` predates #1746.
 const BOOTOUT_EXIT_1_LINE: &str = "stop failed (bounded bootout exit 1)";
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).

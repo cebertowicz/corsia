@@ -12,7 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
 - Each thread in a document's Comments panel is its own card, with space between cards.
 - Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
-- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install could not be stopped.
+- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
