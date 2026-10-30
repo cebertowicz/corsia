@@ -60,9 +60,10 @@ async def test_unreported_refusal_on_restart_recovery(isolated_db, monkeypatch, 
     log.write_text("Prepared update missing\n")
     operation_id = self_restart.try_acquire(
         None, "owner", None, None, "update", kind="update", target_version="1.2.3",
-        previous_version="1.2.2", log_path=str(log), operation_id=operation_id,
+        previous_version="1.2.2", operation_id=operation_id,
     )
     assert operation_id
+    assert self_restart.record_update_log(operation_id, str(log))
     # The shell refused before stopping and could not reach DELETE; no DB mutation occurred.
     monkeypatch.setattr(platform_paths, "app_bundle_root", lambda: "/CORSIA.app" if packaged else None)
     monkeypatch.setattr(build_info, "app_version", lambda: "1.2.2")
@@ -94,18 +95,21 @@ async def test_acquired_update_owns_log_through_later_failure(isolated_db, monke
     monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     first = await _acquire_settings_restart({"id": "owner"}, "update", [])
     first_row = self_restart.operation_by_id(first)
-    first_log = json.loads(first_row["failure_detail"])["log_path"]
-    assert first_log.endswith(f"update-{first}.log")
+    assert first_row["failure_detail"] is None
+    first_log = str(tmp_path / f"update-{first}.log")
     from pathlib import Path
     Path(first_log).write_text("first preparation\nfirst lifecycle\n")
+    assert self_restart.record_update_log(first, first_log)
     assert self_restart.abort_operation(first, error="first failure", failure_code="update_refused")
     assert "first lifecycle" in project_update_operation(self_restart.operation_by_id(first))["log_tail"]
 
     second = await _acquire_settings_restart({"id": "owner"}, "update", [])
     second_row = self_restart.operation_by_id(second)
-    second_log = json.loads(second_row["failure_detail"])["log_path"]
+    assert second_row["failure_detail"] is None
+    second_log = str(tmp_path / f"update-{second}.log")
     assert first_log != second_log
     Path(second_log).write_text("second lifecycle\n")
+    assert self_restart.record_update_log(second, second_log)
     assert self_restart.abort_operation(second, error="second failure", failure_code="update_refused")
     assert project_update_operation(self_restart.operation_by_id(second))["log_tail"] == "second lifecycle\n"
     assert "second lifecycle" not in project_update_operation(self_restart.operation_by_id(first))["log_tail"]
@@ -144,7 +148,7 @@ def test_lifecycle_refusal_logs_before_delete_even_when_backend_unreachable(tmp_
     curl.chmod(0o755)
     monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
     script = tmp_path / "corsia"
-    script.write_text('#!/bin/bash\n_corsia_update_refusal_reason="Prepared frontend build is missing"\n_corsia_update_backend_healthy=true\nreturn 1\n')
+    script.write_text('#!/bin/bash\n_corsia_lifecycle_refuse "Prepared frontend build is missing"\n')
     script.chmod(0o755)
     log = tmp_path / ("update-" + "a" * 32 + ".log")
     with log.open("w") as out:

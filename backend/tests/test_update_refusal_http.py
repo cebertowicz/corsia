@@ -34,7 +34,7 @@ async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path
     monkeypatch.setattr("automation.update_failure_notice.tell_conductor_detached", lambda *_args: None)
     operation_id = "b" * 32
     log = tmp_path / f"update-{operation_id}.log"
-    assert self_restart.try_acquire(None, "steve", None, None, "update", kind="update", operation_id=operation_id, log_path=str(log))
+    assert self_restart.try_acquire(None, "steve", None, None, "update", kind="update", operation_id=operation_id)
     app = FastAPI()
     app.include_router(router)
     listener = socket.socket()
@@ -45,11 +45,13 @@ async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path
     serving = asyncio.create_task(server.serve(sockets=[listener]))
     root = Path(__file__).resolve().parents[2]
     corsia_text = (root / "scripts/corsia").read_text()
-    fail = corsia_text[corsia_text.index("fail() {"):].split("\n}\n", 1)[0] + "\n}\n"
+    fail = next(line for line in corsia_text.splitlines() if line.startswith("fail() {"))
     app_mode = root / "scripts/corsia.d/app_mode.sh"
+    runtime = root / "scripts/corsia.d/runtime.sh"
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
 source "{app_mode}"
+source "{runtime}"
 RED=""; NC=""
 {fail}
 require_owned_service_definition() {{ { 'fail "foreign service ownership"; return 1' if case == 'ownership' else ':' }; }}
@@ -68,6 +70,7 @@ BACKEND_PORT={port}
     script.chmod(0o755)
     try:
         with log.open("w") as out:
+            assert self_restart.record_update_log(operation_id, str(log))
             child = spawn_restart_lifecycle(script, ["restart-prepared"], {
                 **os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port),
             }, operation_id, out, caller_credential=OWNER_TOKEN)
@@ -77,7 +80,7 @@ BACKEND_PORT={port}
         await serving
         listener.close()
     row = await run_in_db(self_restart.operation_by_id, operation_id)
-    assert row["status"] == "failed"
+    assert row["status"] == "failed", log.read_text()
     assert row["failure_code"] == "update_refused"
     assert reason in row["error"]
     assert json.loads(row["failure_detail"])["backend_healthy"] is claimed_healthy
@@ -90,11 +93,13 @@ def test_failure_after_preflight_is_not_reported_as_refusal(tmp_path, monkeypatc
 
     root = Path(__file__).resolve().parents[2]
     text = (root / "scripts/corsia").read_text()
-    fail = text[text.index("fail() {"):].split("\n}\n", 1)[0] + "\n}\n"
+    fail = next(line for line in text.splitlines() if line.startswith("fail() {"))
     app_mode = root / "scripts/corsia.d/app_mode.sh"
+    runtime = root / "scripts/corsia.d/runtime.sh"
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
 source "{app_mode}"
+source "{runtime}"
 RED=""; NC=""
 {fail}
 require_owned_service_definition() {{ :; }}

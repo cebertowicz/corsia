@@ -97,7 +97,9 @@ async def cancel_drain(
             raise HTTPException(400, "invalid update refusal")
         from automation import self_restart
         from infra.db_async import run_in_db
+        from infra.update_prepare_output import terminal_update_summary
 
+        reason = terminal_update_summary(reason, None)
         operation = await run_in_db(self_restart.operation_by_id, operation_id)
         if not operation or operation.get("kind") != "update":
             raise HTTPException(409, "update operation changed before refusal")

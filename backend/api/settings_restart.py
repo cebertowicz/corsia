@@ -52,7 +52,7 @@ def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
     return failure
 
 
-def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
+def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> Path | None:
     """Pull, validate, and stage the serving checkout before any restart."""
     try:
         result = subprocess.run(
@@ -92,7 +92,7 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
                 _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"),
             ) from exc
     if result.returncode == 0:
-        return
+        return log_path if log_path.is_file() else None
 
     summary = terminal_update_summary(stdout, stderr)
     failure = HTTPException(
@@ -157,7 +157,6 @@ async def _acquire_settings_restart(
             previous_version=_packaged_previous_version(mode),
             changes=json.dumps(changes) if changes else None,
             operation_id=requested_id,
-            log_path=str(_update_log_path(requested_id)) if requested_id else None,
             claim=claim,
         )
         if operation_id is not None:
@@ -188,7 +187,7 @@ async def _begin_settings_drain(operation_id: str, mode: str) -> None:
 
 
 
-async def _await_preparation(task: asyncio.Task[None]) -> None:
+async def _await_preparation(task: asyncio.Task[Path | None]) -> Path | None:
     """Await one owned preparation worker before propagating caller cancellation."""
     pending_cancel: asyncio.CancelledError | None = None
     while not task.done():
@@ -202,7 +201,7 @@ async def _await_preparation(task: asyncio.Task[None]) -> None:
         if not task.cancelled():
             task.exception()
         raise pending_cancel
-    task.result()
+    return task.result()
 
 
 async def _prepare_owned_release(
@@ -216,7 +215,12 @@ async def _prepare_owned_release(
         asyncio.to_thread(_prepare_current_release, corsia_script, restart_env)
     )
     try:
-        await _await_preparation(task)
+        log_path = await _await_preparation(task)
+        if isinstance(log_path, Path) and log_path.is_file():
+            from automation import self_restart
+            from infra.db_async import run_in_db
+
+            await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
     except asyncio.CancelledError as error:
         await _compensate_cancelled_acquire(acquired_ids, error)
         raise
@@ -284,7 +288,7 @@ async def _launch_settings_restart(
                 operation_id,
                 error="settings restart launch failed",
                 failure_code="launch_failed",
-                failure_detail=json.dumps({"log_path": str(log_path)}) if log_path else None,
+                failure_detail=json.dumps({"log_path": str(log_path) if log_path and log_path.is_file() else None}),
             )
         except Exception:
             release_failed = True
