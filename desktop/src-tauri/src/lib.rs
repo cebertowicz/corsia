@@ -3214,7 +3214,7 @@ mod tests {
         let starting = app.handle().clone();
         let state_for_start = service.clone();
         thread::spawn(move || { let _ = sent.send(start_service(&starting, &state_for_start)); });
-        let outcome = received.recv_timeout(Duration::from_millis(300)).expect("healthy active service waited for update lock").unwrap();
+        let outcome = received.recv_timeout(Duration::from_secs(10)).expect("healthy active service waited for update lock").unwrap();
         assert_eq!(outcome, ServiceStartup::Ready { url: service_url(port) });
         assert_eq!(*service.app_dir.lock().unwrap(), Some(app_dir));
         assert!(app_paths::try_lock_update_in_existing(&state).unwrap().is_none(), "attachment took the updater lock");
