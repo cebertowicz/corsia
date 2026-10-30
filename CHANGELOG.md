@@ -11,7 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
 - CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
 - Each thread in a document's Comments panel is its own card, with space between cards.
-- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps, as it already did whenever the model server started. If it still can't load, setup says there isn't enough free memory, and Settings shows how much the model needs and how much is free.
+- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps. If it still can’t load, setup says there isn’t enough free memory, and Settings says the model couldn’t load.
 - Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models

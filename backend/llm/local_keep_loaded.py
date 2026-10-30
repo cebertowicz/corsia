@@ -19,7 +19,7 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
 | pins full | none (derived live) | pins-full line | none |
 | doesn't fit now, beside a loaded model or unpinned | none (derived live) | not-loaded line, if pinned | none |
-| doesn't fit now, pinned and alone on the seat | none: oMLX decides, as at its start; if it refuses, as doesn't fit now | live verdicts | as the load ends |
+| doesn't fit now, pinned and alone on the seat | none: oMLX decides, as at its start; if it refuses, set NOT_LOADED and setup hears doesn't fit now | live verdicts, or NOT_LOADED | as the load ends |
 | loaded | none | live verdicts | ``model.load.completed`` |
 | load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
 | person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
@@ -195,9 +195,9 @@ async def keep_loaded(
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
-                if verdict != "fits_now":  # CORSIA's own check already found memory short
+                _FAILED[key] = not_loaded  # the row keeps the failed attempt once memory reads free
+                if verdict != "fits_now":  # setup names the shortfall CORSIA itself measured
                     return _refusal(verdict, size_bytes, room, kept, loaded)
-                _FAILED[key] = not_loaded
                 return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)

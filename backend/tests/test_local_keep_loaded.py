@@ -166,10 +166,11 @@ async def test_omlx_refusing_a_load_past_the_memory_check_reads_as_not_enough_me
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=force_pin)
 
-    # CORSIA's own check found memory short, so that is the cause it names, whatever oMLX's words.
+    # Setup names the shortfall CORSIA's own check measured, whatever oMLX's words; the row
+    # names only the failed load, so it still says something once memory reads free.
     assert outcome == {"status": "refused", "verdict": "no_memory", "neighbour_id": None,
                        "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
-    assert local_keep_loaded.failures("server") == {}
+    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
     assert calls["events"][-1] == ("model.load.failed", {
         "provider": "omlx", "model_id": "new-model", "server_id": "server", "automatic": True, "error": message,
     })
