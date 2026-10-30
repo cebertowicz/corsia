@@ -175,6 +175,35 @@ def test_install_refuses_a_name_another_skill_holds_and_writes_nothing(monkeypat
     assert holder.path in result["message"]
 
 
+def test_own_skill_changed_bytes_refuse_install_with_retry_message(monkeypatch):
+    from library import index, items
+    from tools import skill_library
+
+    row = _item()
+    row.update(source="library", url="skills/pdf/SKILL.md")
+    item = index._validate_item(row)
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(items=(item,)))
+    monkeypatch.setattr(skill_library, "_effective", lambda *_args: ([], []))
+    monkeypatch.setattr(items, "_fetch_raw", lambda _url: b"changed")
+    result = skill_library._install("pdf", "owner", None, object())
+    assert result["error"] == "integrity"
+    assert "changed moments ago" in result["message"]
+    assert "try again in a few minutes" in result["message"]
+
+
+def test_own_skill_file_and_version_changes_are_updates():
+    from library import index
+    from library.items import item_manifest, source_ref
+    from tools import skill_library
+
+    row = _item()
+    row.update(source="library", url="skills/pdf/SKILL.md")
+    item = index._validate_item(row)
+    origin = {"source": source_ref(item), "item_manifest": item_manifest(item)}
+    for change in ({"version": "1.1.0"}, {"files": [{"path": "SKILL.md", "sha256": "c" * 64}]}):
+        assert skill_library._state({**item, **change}, {"pdf": origin}) == "update_available"
+
+
 def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db, monkeypatch, community_workspace):
     from infra import product_events
     from tools import skill_library
