@@ -8,14 +8,13 @@ from typing import Any
 
 from loguru import logger
 
-from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from registry import models, registration_events, registration_writer
+from registry import file_identity_reads, models, registration_events, registration_writer
 from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
-from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
+from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES, written_row
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
@@ -126,18 +125,13 @@ def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, An
         return None
     _db = db or get_db()
     try:
-        return models.find_identity_by_external_ids(
-            "workspace",
-            identity.artifact_type,
-            (identity.external_id, identity.canonical),
-            db=_db,
-        )
+        return file_identity_reads.find_workspace(identity, db=_db)
     finally:
         if not db:
             _db.close()
 
 
-def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
+def resolve_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
     """Resolve an active file owner from a physical path.
 
     Workspace paths prefer their relocatable logical identity and retain the
@@ -150,18 +144,20 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
         return None
     _db = db or get_db()
     try:
-        for candidate in dict.fromkeys((identity.external_id, identity.canonical)):
-            artifact = models.resolve(
-                "workspace",
-                identity.artifact_type,
-                candidate,
-                db=_db,
-            )
-            if artifact is not None:
-                return artifact
-        if uploads_root_for_path(identity.canonical) is None:
-            return None
-        return registration_events.resolve_upload_path(identity.canonical, db=_db)
+        return file_identity_reads.resolve_active(identity, db=_db)
+    finally:
+        if not db:
+            _db.close()
+
+
+def inspect_file_identity(abs_path: str | FileIdentity, *, db=None) -> tuple[dict[str, Any] | None, bool]:
+    """Return the active owner and whether a routed identity exists in any state."""
+    identity = prepare_file_identity(abs_path, db=db)
+    if identity is None:
+        return None, False
+    _db = db or get_db()
+    try:
+        return file_identity_reads.inspect(identity, db=_db)
     finally:
         if not db:
             _db.close()
@@ -304,18 +300,18 @@ def register_write_strict(
             metadata=artifact_metadata, origin=origin,
             db=_db,
         )
-        merge_identity_metadata(_db, artifact["id"], artifact_metadata)
-        artifact = models.get_artifact(artifact["id"], db=_db) or artifact
+        artifact_id = (artifact or existing)["id"]
+        merge_identity_metadata(_db, artifact_id, artifact_metadata)
+        artifact = written_row(_db, artifact_id, thread_id)
         if existing is not None:
-            from registry.review_edit_journal import journal_reviewed_edit
-
-            journal_reviewed_edit(
+            from registry.review_edit_journal import note_content_edit
+            note_content_edit(
                 _db, artifact, previous_sha256=last_written_sha256(existing["metadata"]),
                 new_sha256=artifact_metadata.get("last_written_sha256"),
                 actor_thread_id=thread_id if actor_thread_id is None else actor_thread_id,
             )
     if origin is not None and (db is None or not db.in_transaction):
-        emit_committed_origin(db, existing["id"] if existing else artifact["id"], thread_id)
+        emit_committed_origin(db, artifact_id, thread_id)
     if notify:
         notify_changed(artifact)
     return artifact

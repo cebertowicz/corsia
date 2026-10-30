@@ -2,15 +2,18 @@ import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { expectContrast, TEXT } from '../support/contrast';
-import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
+import { headerSend } from '../support/heldComments';
+import { settled } from '../support/reviewFixtures';
 import { demoteAgent } from '../support/sharedLiveDocument';
+import { injectMessage, readMockCallCount, releaseMockGate, seedMockResponses } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const auth = () => ({ Authorization: `Bearer ${TEST_TOKEN}` });
-type SendState = 'pending' | 'grace' | 'undelivered';
+type SendState = 'pending' | 'undelivered';
 
 /** Every reviewer a case promoted; the agent rail lists a few before "Show more", so each case demotes its own and later specs still find their agents. */
 const promoted: string[] = [];
@@ -28,6 +31,10 @@ async function reviewers(request: APIRequestContext, stamp: string) {
 		promoted.push(id);
 		return { id, name };
 	}));
+}
+
+async function seedReviewerHistory(request: APIRequestContext, reviewer: string) {
+	await injectMessage(request, reviewer, { role: 'user', content: 'Earlier context.' }, TEST_TOKEN);
 }
 async function seedDocument(request: APIRequestContext, title: string) {
 	const threadId = await createSession(request, title);
@@ -60,6 +67,18 @@ async function requestReview(request: APIRequestContext, doc: DocumentFixture, r
 		artifact_id: doc.artifactId, thread_id: doc.threadId, reviewer, client_id: crypto.randomUUID(),
 	} });
 	expect(response.ok(), await response.text()).toBeTruthy();
+}
+
+async function waitForHeldReviewFork(request: APIRequestContext, calls: number) {
+	await expect.poll(() => readMockCallCount(request)).toBe(calls);
+}
+
+async function waitForReviewState(request: APIRequestContext, artifactId: string, state: string) {
+	await expect.poll(async () => {
+		const response = await request.get(`/api/artifacts/${artifactId}/reviews`, { headers: auth() });
+		expect(response.ok(), await response.text()).toBeTruthy();
+		return (await response.json()).reviews[0]?.state;
+	}).toBe(state);
 }
 
 function rewriteGeneratedBuildInfo() {
@@ -102,7 +121,7 @@ function setFeedbackFixture(artifactId: string, state: SendState) {
 		'connection = sqlite3.connect(sys.argv[1])',
 		'artifact, state = sys.argv[2:]',
 		'future = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()',
-		'changed = connection.execute("UPDATE doc_feedback_batches SET state=?, closed_reason=?, closes_at=?, undelivered_reason=? WHERE artifact_id=? AND author_kind=\'user\'", ("undelivered" if state == "undelivered" else "open", "leave" if state == "grace" else None, future, "owner_admission_refused" if state == "undelivered" else None, artifact)).rowcount',
+		'changed = connection.execute("UPDATE doc_feedback_batches SET state=?, closed_reason=?, closes_at=?, undelivered_reason=? WHERE artifact_id=? AND author_kind=\'user\'", ("undelivered" if state == "undelivered" else "open", None, future, "owner_admission_refused" if state == "undelivered" else None, artifact)).rowcount',
 		'assert changed == 1, changed',
 		'changed = connection.execute("UPDATE doc_comments SET anchor_text=?, from_off=NULL, to_off=NULL, anchor_prefix=NULL, anchor_suffix=NULL WHERE artifact_id=?", ("A quote removed from this document.", artifact)).rowcount',
 		'assert changed == 1, changed',
@@ -111,6 +130,7 @@ function setFeedbackFixture(artifactId: string, state: SendState) {
 	].join('\n'), path.join(root, 'corsia.db'), artifactId, state], { cwd: repoRoot, encoding: 'utf8' });
 }
 async function captureLayout(page: Page, info: TestInfo, label: string) {
+	await settled(page);
 	const measured = await page.locator('.doc').evaluate((root) => {
 		const header = root.querySelector('.document-header')!.getBoundingClientRect();
 		const editor = root.querySelector('.doc-main')!.getBoundingClientRect();
@@ -137,9 +157,12 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			root: geometry(root), header: geometry(root.querySelector('.document-header')!),
 			row: geometry(row), retryInset, descendants: [...row.querySelectorAll('*')].map(geometry),
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
-			controls: [...tools.querySelectorAll('button'), ...row.querySelectorAll('button')].map((button) => {
+			// The status row is the tools row, so a button reached through both is one control, never two.
+			controls: [...new Set([...tools.querySelectorAll('button'), ...row.querySelectorAll('button')])].map((button) => {
 				const rect = button.getBoundingClientRect();
-				return { name: button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height };
+				// Toolbar controls and phone actions are 44px; desktop Toggle and small Button keep their own sizes.
+				const minimum = window.innerWidth <= 768 || button.matches('.doc-tool') ? 44 : button.matches('.tg') ? 17 : 28;
+				return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height, minimum };
 			}),
 		};
 	});
@@ -147,13 +170,13 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 	await writeFile(measurementPath, JSON.stringify(measured, null, 2));
 	await info.attach(`${label}-measurements`, { path: measurementPath, contentType: 'application/json' });
 	console.info(`Review layout ${label}: ${JSON.stringify(measured)}`);
-	await saveEvidenceScreenshot(page, info, label, { fullPage: false });
+	await settled(page); await saveEvidenceScreenshot(page, info, label, { fullPage: false });
 	expect(measured.canvasWidth).toBeLessThanOrEqual(600);
 	expect(measured.overflow).toBeLessThanOrEqual(1);
 	expect(measured.row.scrollWidth).toBe(measured.row.clientWidth);
 	if (measured.retryInset !== null) expect(measured.retryInset).toBe('0px');
 	expect(measured.readingAreaHeight).toBeGreaterThan(0);
-	for (const control of measured.controls) expect(control.height, control.name).toBeGreaterThanOrEqual(44);
+	for (const control of measured.controls) expect(control.height, control.name).toBeGreaterThanOrEqual(control.minimum);
 	for (const [index, a] of measured.controls.entries()) for (const b of measured.controls.slice(index + 1)) {
 		const overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 		expect(overlap, `${a.name} overlaps ${b.name}`).toBe(false);
@@ -179,6 +202,26 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		const agents = await reviewers(request, stamp);
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+		await settled(page);
+		// A narrow canvas, whatever the screen, gives the delivery Toggle its 44px target; a wide one keeps the desktop Toggle.
+		if (expectedNarrow) {
+			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
+			const targetBox = (await toggle.boundingBox())!;
+			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
+			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
+			console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
+			expect(track).toEqual({ width: 30, height: 17 });
+			expect(targetBox.height, 'actual delivery button target').toBe(44);
+			expect(targetBox.width).toBe(44);
+			// The button's padding outside the painted track activates the same single control.
+			const pressPadding = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 4, y: 22 } }) : toggle.click({ position: { x: 4, y: 22 } });
+			await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		} else {
+			const box = (await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).boundingBox())!;
+			expect({ width: box.width, height: box.height }, 'desktop delivery Toggle stays unchanged').toEqual({ width: 30, height: 17 });
+		}
 		const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
 		await trigger.click();
 		const surface = await reviewSurface(page);
@@ -200,23 +243,47 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 			return { larger: parseFloat(name.fontSize) > parseFloat(duty.fontSize), distinctColour: name.color !== duty.color };
 		});
 		expect(rank, `${viewport} reviewer name hierarchy`).toEqual({ larger: true, distinctColour: true });
-		await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-open`, { fullPage: false });
+		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-open`, { fullPage: false });
 		await search.fill(agents[0].name); await search.press('Home'); await search.press('Enter');
 		const remove = page.getByRole('button', { name: `Remove ${agents[0].name}`, exact: true });
 		await expect(remove).toBeVisible(); await expect(search).toBeFocused(); await remove.click(); await expect(remove).toHaveCount(0); await expect(search).toBeFocused();
 		await search.press('Home'); await search.press('Enter');
 		if (surface.narrow) expect((await surface.close.button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-		await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-selected`, { fullPage: false });
+		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-selected`, { fullPage: false });
 		await surface.panel.getByRole('button', { name: 'Send', exact: true }).click();
 		// Sending closes the surface, confirms with a toast and leaves the new reviewer in the header.
 		await expect(page.getByText(/^Review requested from /)).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toBeVisible();
 		await expect(trigger).toBeFocused();
-		await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-sent`, { fullPage: false });
+		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-sent`, { fullPage: false });
 		await page.locator('.reviewer-group').click(); await expect(page.locator('[data-review-request]')).toHaveCount(1);
-		await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-list`, { fullPage: false });
+		await settled(page); await saveEvidenceScreenshot(page, info, `review-composed-${viewport}-${theme}-list`, { fullPage: false });
 		// Closing the list returns focus to the control that opened it.
-		await surface.close.click(); await expect(page.locator('.reviewer-group')).toBeFocused();
+		if (surface.narrow) {
+			const gesture = await page.evaluateHandle(() => {
+				const seen: { event: string; close: boolean; options: number; top: number | undefined }[] = [];
+				for (const name of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) window.addEventListener(name, (event) => {
+					seen.push({ event: name, close: !!(event.target as Element).closest('.drawer-done'),
+						options: document.querySelectorAll('[role="option"]').length, top: document.querySelector('.drawer-done')?.getBoundingClientRect().top });
+				}, { capture: true, once: true });
+				return seen;
+			});
+			if (info.project.name === 'chromium-mobile') await surface.close.button.tap();
+			else await surface.close.click();
+			const seen = await gesture.jsonValue();
+			await info.attach('review-close-gesture', { body: JSON.stringify(seen), contentType: 'application/json' });
+			console.info('Review Close gesture:', JSON.stringify(seen));
+			expect(seen.map(({ event }) => event).sort()).toEqual(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].sort());
+			expect(seen.every(({ close }) => close), 'Close stays under the entire gesture').toBe(true);
+			expect(seen[0].options).toBeGreaterThan(0);
+			for (const sample of seen) { expect(sample.options).toBe(seen[0].options); expect(sample.top).toBe(seen[0].top); }
+			await gesture.dispose();
+		} else await surface.close.click();
+		await expect(page.locator('[data-review-surface]')).toHaveCount(0);
+		await expect(page.getByRole('option')).toHaveCount(0);
+		await expect(page.locator('.reviewer-group')).toBeFocused();
+		const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
+		if (output && (width === 1440 || width === 393)) await page.screenshot({ path: path.join(output, `review-close-focus-${width}-${theme}.png`), fullPage: false, scale: 'css' });
 		await trigger.click(); await expect(search).toBeFocused(); await search.press('Escape'); await expect(trigger).toBeFocused();
 	});
 }
@@ -258,6 +325,12 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1440, height: 1000 });
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const stamp = String(Date.now()), agents = await reviewers(request, stamp);
+	await Promise.all([seedReviewerHistory(request, agents[0].id), seedReviewerHistory(request, agents[1].id)]);
+	const firstGate = `review-journey-first-${stamp}`, secondGate = `review-journey-second-${stamp}`;
+	await seedMockResponses(request, [
+		{ match_thread: agents[0].id, response_gate: firstGate },
+		{ match_thread: agents[1].id, response_gate: secondGate },
+	]);
 	const doc = await seedDocument(request, `review-journey-${stamp}`);
 	const frames: { type?: string; artifact_id?: string }[] = [];
 	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
@@ -274,19 +347,27 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	await expect(search).toBeFocused();
 	await search.fill(agents[0].name); await search.press('Home'); await search.press('Enter');
 	await page.getByRole('button', { name: 'Send', exact: true }).click();
+	await waitForHeldReviewFork(request, 1);
 	const list = page.locator('[data-review-surface]');
 	const summary = page.locator('.reviewer-group'); await expect(summary).toBeVisible();
 	await expect(page.getByText(/^Review requested from /)).toBeVisible(); await expect(trigger).toBeFocused();
 	await requestReview(request, doc, agents[1].id);
+	await waitForHeldReviewFork(request, 2);
 	await expect(summary.locator('.reviewer')).toHaveCount(2);
 	await summary.click(); await expect(list.locator('[data-review-request]')).toHaveCount(2);
 	await expect(list).toContainText(agents[0].name); await expect(list.locator('[data-review-request] .status').first()).toHaveText(/Requested \d/);
 	const cancel = list.getByRole('button', { name: /^Cancel request to / });
 	await cancel.first().click(); await expect(list.locator('[data-review-request]')).toHaveCount(1);
 	await cancel.click(); await expect(list.locator('[data-review-request]')).toHaveCount(0);
+	await releaseMockGate(request, firstGate); await releaseMockGate(request, secondGate);
 	await surface.close.click(); await expect(trigger).toBeFocused();
+	const settlementGate = `review-journey-settlement-${stamp}`;
+	await seedMockResponses(request, [{ match_thread: agents[0].id, response_gate: settlementGate }]);
 	await requestReview(request, doc, agents[0].id);
+	await waitForHeldReviewFork(request, 1);
 	await expect(summary).toBeVisible(); await summary.click();
+	await releaseMockGate(request, settlementGate);
+	await waitForReviewState(request, doc.artifactId, 'failed');
 	frames.length = 0;
 	// Counters rule out document reloads and navigations during settlement.
 	let reads = 0, navigations = 0;
@@ -301,22 +382,51 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	expect(frames.some((frame) => frame.type === 'artifacts_changed' && frame.artifact_id === doc.artifactId)).toBe(true);
 	expect(reads).toBe(0); expect(navigations).toBe(0);
 	await surface.close.click(); await expect(trigger).toBeFocused();
-	await saveEvidenceScreenshot(page, info, 'review-settled-without-reload', { fullPage: false });
+	await settled(page); await saveEvidenceScreenshot(page, info, 'review-settled-without-reload', { fullPage: false });
 });
 
-test('@flow:document-review-requests silent end refreshes on Plans change without reload', async ({ page, request }, info) => {
+test('@flow:document-review-requests closed continuation refreshes on Plans change without reload', async ({ page, request }, info) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable synthetic state');
 	test.setTimeout(100_000);
 	const mobile = info.project.name.includes('mobile');
 	await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1920, height: 1000 });
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const stamp = String(Date.now()), agents = await reviewers(request, stamp);
+	await seedReviewerHistory(request, agents[0].id);
+	const gate = `review-silent-${stamp}`;
+	await seedMockResponses(request, [{ match_thread: agents[0].id, response_gate: gate }]);
 	const doc = await seedDocument(request, `review-silent-${stamp}`);
 	await requestReview(request, doc, agents[0].id);
+	await waitForHeldReviewFork(request, 1);
 	const listed = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
 	expect(listed.ok(), await listed.text()).toBeTruthy();
-	const row = (await listed.json()).reviews[0];
-	expect(row.outcome).toBe('open');
+	let row = (await listed.json()).reviews[0];
+	expect(row).toMatchObject({ state: 'forked', node_id: null });
+	// Reuse this suite's disposable SQLite fixture route to exercise the real continuation creator.
+	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Requires disposable E2E mock state');
+	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), ['-c', [
+		'import os, sys',
+		"sys.path.insert(0, os.path.join(os.getcwd(), 'backend'))",
+		'from doceditor.review_requests import escalate_fork',
+		'from infra.database import get_db',
+		'connection = get_db()',
+		"changed = connection.execute(\"UPDATE doc_review_requests SET state='forked', node_id=NULL, fork_id='e2e-fixture', reason=NULL WHERE id=?\", (sys.argv[2],)).rowcount",
+		'assert changed == 1, changed',
+		'connection.commit()',
+		'request = escalate_fork(connection, sys.argv[2])',
+		"assert request and request['state'] == 'handed_back' and request['node_id'], request",
+	].join('\n'), path.join(stateRoot, 'corsia.db'), row.id], {
+		cwd: repoRoot,
+		encoding: 'utf8',
+		env: { ...process.env, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE, CORSIA_STATE_DIR: stateRoot, CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1' },
+	});
+	await releaseMockGate(request, gate);
+	const handedBack = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
+	expect(handedBack.ok(), await handedBack.text()).toBeTruthy();
+	row = (await handedBack.json()).reviews[0];
+	expect(row).toMatchObject({ state: 'handed_back' });
+	expect(row.node_id).toEqual(expect.any(String));
 	const frames: { type?: string; artifact_id?: string }[] = [];
 	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
 		try { frames.push(JSON.parse(String(frame.payload))); } catch { /* Only inspect JSON frames. */ }
@@ -337,17 +447,17 @@ test('@flow:document-review-requests silent end refreshes on Plans change withou
 	const node = plan.nodes.find((item: { id: string }) => item.id === row.node_id);
 	const closed = await request.post(`/api/plans/${plan.plan.id}/mutations`, { headers: auth(), data: {
 		operation: 'close_node', mutation_id: crypto.randomUUID(), params: {
-			node_id: node.id, expected_revision: node.revision, reason: 'Review ended without comments',
+			node_id: node.id, expected_revision: node.revision, reason: 'Review continuation completed',
 		},
 	} });
 	expect(closed.ok(), await closed.text()).toBeTruthy();
 	await expect.poll(() => frames.some((frame) => frame.type === 'plans_changed'), { timeout: 10_000 }).toBe(true);
 	await expect(list).toContainText('Ended without comments');
-	await expect(page.locator('.reviewer-group')).toHaveAttribute('aria-label', /ended without comments/);
+	await expect(page.locator('.reviewer-group')).toHaveAttribute('aria-label', /Ended without comments/);
 	await expect(list.getByRole('button', { name: /^Cancel request to / })).toHaveCount(0);
 	expect(frames.some((frame) => frame.type === 'artifacts_changed' && frame.artifact_id === doc.artifactId)).toBe(false);
 	expect(reads).toBe(0); expect(navigations).toBe(0);
-	await saveEvidenceScreenshot(page, info, 'review-ended-without-comments', { fullPage: false });
+	await settled(page); await saveEvidenceScreenshot(page, info, 'review-ended-without-comments', { fullPage: false });
 	const late = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: {
 		artifact_id: doc.artifactId, as_session_id: agents[0].id, review: true, body: 'A later review comment.', submit: true,
 	} });
@@ -356,7 +466,7 @@ test('@flow:document-review-requests silent end refreshes on Plans change withou
 	expect(reads).toBe(0); expect(navigations).toBe(0);
 });
 
-for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undelivered'] as const) {
+for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] as const) {
 	test(`@flow:document-review-requests ${count} reviews with ${state} send and changed text`, async ({ page, request }, info) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable synthetic state');
 		test.setTimeout(100_000);
@@ -368,7 +478,7 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 		const agents = count ? await reviewers(request, stamp) : [];
 		for (const agent of agents.slice(0, count)) await requestReview(request, doc, agent.id);
 		const comment = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: {
-			body: 'Check this removed quote.', anchor_text: 'Review document', from_off: 2, to_off: 17,
+			body: 'Check this removed quote.', anchor_text: 'Review document', from_off: 2, to_off: 17, delivery_policy: 'document-held',
 		} });
 		expect(comment.ok(), await comment.text()).toBeTruthy();
 		setFeedbackFixture(doc.artifactId, state);
@@ -376,12 +486,11 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
 		await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
 		if (state !== 'undelivered') {
-			// Send now and the countdown are in the comments drawer's footer; the header shows neither.
-			expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
-			const footer = await openUnsentFooter(page);
-			await expect(footer.getByRole('status')).toContainText(state === 'grace' ? '1 message not sent yet · sending to ' : '1 message not sent yet · it goes to ');
-			await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
-			await page.getByRole('region', { name: 'Document comments' }).getByRole('button', { name: 'Close comments', exact: true }).click();
+			// The held comment waits for the header's Send, whole inside the screen beside the review control.
+			await expect(headerSend(page)).toHaveText('Send 1 comment');
+			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
+			await expect(page.locator('[data-drawer-unsent]')).toHaveCount(0);
+			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
 		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
@@ -393,7 +502,7 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 			const surface = await reviewSurface(page);
 			await expect(surface.panel).toBeVisible();
 			await expect(page.locator('[data-review-request]')).toHaveCount(count);
-			await saveEvidenceScreenshot(page, info, `reviews-${count}-${state}-list`, { fullPage: false });
+			await settled(page); await saveEvidenceScreenshot(page, info, `reviews-${count}-${state}-list`, { fullPage: false });
 		}
 	});
 }

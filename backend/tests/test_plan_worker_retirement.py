@@ -17,7 +17,6 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -90,8 +89,7 @@ def _returned(db, *titles: str):
     )
     db.commit()
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     return parent_plan, delegated, plan, leaves, watch, schedule
 
@@ -114,6 +112,61 @@ def _lifecycle(db, thread_id: str) -> tuple:
     return (row["lifecycle_state"] or "active", row["archived_reason"])
 
 
+@pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
+def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integration, kind):
+    from infra import thread_confinement
+
+    db = _db(monkeypatch)
+    try:
+        parent_plan, delegated, *_ = _returned(db, "Work")
+        thread_confinement.record(db, "worker", "untrusted", ("/src",))
+        db.commit()
+        for thread in ("parent", "worker"):
+            metadata = None
+            if integration == "claude-code" and thread == "worker":
+                metadata = {"claude_invocation": {"confinement": "untrusted", "add_dirs": ["/src"],
+                                                   "working_dir": "/worker/confined"}}
+            models.register_artifact(integration=integration, type=kind, external_id=thread,
+                                     parent_thread_id=thread, metadata=metadata, db=db)
+        db.execute("UPDATE artifact_identities SET updated_at='9999' WHERE external_id='worker'")
+        db.commit()
+        submit_review_evidence(delegated.id, db=db, actor_id="parent")
+        _verdict(db, parent_plan.id, "accept", delegated.id)
+        assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
+        assert models.find_for_thread("parent", integration, kind, db=db)["external_id"] == "parent"
+        assert thread_confinement.read_dirs("parent", db) is None
+        assert thread_confinement.read_dirs("worker", db) == ("/src",)
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("parent_ended", [False, True])
+def test_settled_worker_document_passes_to_live_ancestor(monkeypatch, tmp_path, parent_ended):
+    db = _db(monkeypatch)
+    try:
+        db.execute("INSERT INTO threads (id,user_id,project_id,created_at,updated_at) "
+                   "VALUES ('grandparent','user-1','project-1','t','t')")
+        db.execute("UPDATE threads SET spawned_by='grandparent' WHERE id='parent'")
+        db.commit()
+        parent_plan, delegated, _plan, _leaves, _watch, _schedule = _returned(db, "Work")
+        document = {"integration": "workspace", "type": "document",
+                    "external_id": "workspace://ws-1/shared/result.md"}
+        path = tmp_path / "result.md"
+        path.write_text("Worker result")
+        models.register_artifact(**document, path=str(path), parent_thread_id="worker", db=db)
+        if parent_ended:
+            db.execute("UPDATE threads SET lifecycle_state='archived' WHERE id='parent'")
+        submit_review_evidence(delegated.id, db=db, actor_id="parent")
+        _verdict(db, parent_plan.id, "accept", delegated.id)
+        state = routing_registrations(**document, db=db)
+        assert state["owner"] is not None
+        assert state["owner"]["parent_thread_id"] == ("grandparent" if parent_ended else "parent")
+        assert state["identity"]["state"] == "active"
+        assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
+    finally:
+        db.close()
+
+
 def test_the_verdict_retires_the_worker_and_keeps_its_evidence(monkeypatch):
     db = _db(monkeypatch)
     try:
@@ -128,11 +181,10 @@ def test_the_verdict_retires_the_worker_and_keeps_its_evidence(monkeypatch):
         assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
         assert watches.get_watch(watch.id, db=db).status != "armed"
         assert schedules.get(schedule.id, db=db).state == "cancelled"
-        # Continuing artifact obligations pass to an accountable owner: the
-        # parent, as triage -- a parent-chain subscriber cannot own outright.
+        # Archiving transfers continuing obligations to the parent.
         state = routing_registrations(**PR, db=db)
-        assert state["owner"] is None
-        assert state["triage"]["parent_thread_id"] == "parent"
+        assert state["owner"]["parent_thread_id"] == "parent"
+        assert state["triage"] is None
         # Archiving is not evidence deletion.
         node = service.get_node(leaf.id, db=db)
         assert node.state == "accepted"
@@ -144,7 +196,7 @@ def test_the_verdict_retires_the_worker_and_keeps_its_evidence(monkeypatch):
 
 
 @pytest.mark.parametrize("retention", ["ephemeral", "durable"])
-def test_settled_worker_trim_keeps_released_active_identity(
+def test_settled_worker_trim_keeps_thread_folder_identity(
     monkeypatch, tmp_path, retention,
 ):
     now = datetime(2026, 8, 1, tzinfo=timezone.utc)
@@ -359,8 +411,7 @@ def test_a_nested_delegation_among_the_returned_steps_still_retires_its_own_work
         submit_review_evidence(nested.id, db=db, evidence="Nested done", actor_id="worker")
         db.commit()
         asyncio.run(runner.sweep(
-            NOW, db=db, sources=[HarvestSource()],
-            is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+            NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
         ))
         assert service.get_node(delegated.id, db=db).state == "review_requested"
 
@@ -423,8 +474,7 @@ def _accept_delegated_step_with_notes(db, *, parent_selects: bool) -> dict[str, 
     assert (parent_start is not None and parent_start[0] == "parent") == parent_selects
     submit_review_evidence(leaf.id, db=db, evidence="done", actor_id="worker")
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     submit_review_evidence(delegated.id, db=db, actor_id="parent")
 

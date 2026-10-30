@@ -1,3 +1,6 @@
+import { get } from 'svelte/store';
+import { prefersReducedMotion } from '$lib/stores/viewport';
+
 /** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 export function drawerFooterHeight(node: HTMLElement) {
 	const doc = node.closest<HTMLElement>('.doc');
@@ -77,4 +80,37 @@ export function presence(report: (shown: boolean) => void) {
 		if (mounted++ === 0) report(true);
 		return { destroy() { if (--mounted === 0) report(false); } };
 	};
+}
+
+/**
+ * Calls `reveal(true)` once a sheet has come up and `reveal(false)` whenever it then moves or changes size (the keyboard rising or
+ * falling under a followKeyboard sheet, its content settling), in the next frame so the layout it reads is current. The caller decides
+ * what a movement needs: it must not undo a scroll the reader chose. Returns the stop; with no sheet or nothing to call, there is
+ * nothing to watch.
+ */
+export function onSheetMoved(panel: HTMLElement | null, reveal?: (opening: boolean) => void): () => void {
+	if (!panel || !reveal) return () => {};
+	const viewport = panel.ownerDocument.defaultView?.visualViewport;
+	let frame = 0, opening = true;
+	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { reveal(opening); opening = false; }); };
+	const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
+	observer?.observe(panel);
+	viewport?.addEventListener('resize', schedule);
+	viewport?.addEventListener('scroll', schedule);
+	schedule();
+	return () => {
+		cancelAnimationFrame(frame);
+		observer?.disconnect();
+		viewport?.removeEventListener('resize', schedule);
+		viewport?.removeEventListener('scroll', schedule);
+	};
+}
+
+/** Brings a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
+export function scrollListToCard(drawer: HTMLElement | undefined, id: string, instant: boolean) {
+	const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+	const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+	if (!list || !card) return;
+	const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+	list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
 }

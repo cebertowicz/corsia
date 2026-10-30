@@ -1,4 +1,5 @@
 <script lang="ts">
+	import './ImageLightboxResponsive.css';
 	// The canvas image viewer: one image at Fit, zoomed and panned. Shared by an image artifact and an image of a
 	// document. The image only ever reaches the page through <img>, so an SVG cannot run script. The scroll
 	// container is the browser's own, so scrollbars, trackpad scrolling and keyboard scrolling pan it natively;
@@ -280,7 +281,7 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div class="lightbox">
+<div class="lightbox image-lightbox">
 	<div class="bar">
 		{#if onBack}
 			<button type="button" class="control back" onclick={onBack} aria-label={docName ? `Back to ${docName}` : 'Back'}>
@@ -309,7 +310,7 @@
 		<div class="load-error" role="alert">
 			<p>Couldn't load this image.</p>
 			{#if failure !== FAILED_IMAGE}<code>{alt ? `${alt} · ${failure}` : failure}</code>{/if}
-			<button type="button" class="control" onclick={retry}>Try again</button>
+			<button type="button" class="control" onclick={retry}>Retry</button>
 		</div>
 	{:else}
 		{#if natural === null}<div class="loadbar"><span></span></div>{/if}
@@ -390,10 +391,5 @@
 	.load-error code { font-size: var(--text-caption); color: var(--text-tertiary); word-break: break-all; }
 	.load-error :global(.control) { background: var(--amber-bg); color: var(--amber-text); }
 
-	@media (max-width: 768px) {
-		.bar { min-height: 44px; }
-		.lightbox :global(.control) { min-height: 44px; padding: 0 12px; }
-		.back { padding-left: 8px; }
-		.viewport { border-radius: 0; }
-	}
+	/* Responsive control layout is isolated in ImageLightboxResponsive.css. */
 </style>

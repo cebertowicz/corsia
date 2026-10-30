@@ -11,6 +11,12 @@
 	import { cardStateLabel, cardStateTone } from '$lib/components/plans/planDisplay';
 	import { openPlanAsk } from '$lib/planLeafReturn';
 	import ActivityIdentityGlyph from './ActivityIdentityGlyph.svelte';
+	import ThreadWaitingMark from '$lib/components/ThreadWaitingMark.svelte';
+	import SnoozeClock from '$lib/components/plans/SnoozeClock.svelte';
+	import { planSetAsideUntil, threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { setAsideLine, waitBack, waitChecksBack } from '$lib/components/plans/planWaits';
+	import { openWaitArtifact, UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
+	import { minuteClock } from '$lib/time';
 
 	let {
 		row,
@@ -63,6 +69,33 @@
 	// State vocabulary and tone come straight from the server projection.
 	const tone = $derived(cardStateTone(row.entry));
 	const stateLabel = $derived(cardStateLabel(row.state));
+	// The plan waits on something outside: what, and when its agent checks back (EW7). The server's thread
+	// state carries it; the activity index does not.
+	const wait = $derived.by(() => {
+		const entry = $threadPlanStates[threadId];
+		return entry?.state === 'waiting' ? entry.wait ?? null : null;
+	});
+	// Every wait is set aside by its agent: the plan comes back at a time it chose (EW7); no state word.
+	const setAside = $derived.by(() => {
+		const until = planSetAsideUntil($threadPlanStates[threadId]);
+		return !wait && until ? setAsideLine(until, $minuteClock) : null;
+	});
+	// A host-like label ("github.com/…/checks") stays as written; any other starts a sentence.
+	const waitLabel = $derived(!wait ? '' : /^[\w-]+(\.[\w-]+)+(\/|$)/.test(wait.label) ? wait.label
+		: wait.label.charAt(0).toUpperCase() + wait.label.slice(1));
+	const waitMore = $derived(wait && wait.more > 0 ? ` +${wait.more} more` : '');
+	const waitBackText = $derived(wait ? waitBack(wait.until, $minuteClock) : '');
+	const waitTitle = $derived(wait ? [`Waiting for ${wait.label}${waitMore}`, waitChecksBack(wait.until, $minuteClock)].filter(Boolean).join(' · ') : '');
+
+	// A document that fails to open stops being a link, and its title says so.
+	let unopenable = $state<string | null>(null);
+	const waitLinked = $derived(wait?.artifact_id && unopenable !== wait.artifact_id ? wait.artifact_id : null);
+
+	async function openWait(): Promise<void> {
+		if (!waitLinked || !wait) return;
+		const artifactId = waitLinked;
+		if (!(await openWaitArtifact(artifactId, wait.label, threadId))) unopenable = artifactId;
+	}
 
 	const STATE_SYMBOL: Record<string, string> = {
 		'human-review': '!',
@@ -117,40 +150,52 @@
 
 <article class="plan-row" class:expanded>
 	<div class="row-head">
-		<button
-			class="row-summary"
-			onclick={activateSummary}
-			aria-expanded={hasPlan ? expanded : undefined}
-			aria-label={hasPlan
-				? (expanded ? 'Collapse ' : 'Expand ') + row.entry.owner.label
-				: 'Open ' + row.entry.owner.label}
-		>
-			<span class="owner-mark" aria-hidden="true"><ActivityIdentityGlyph kind={row.ownerType} /></span>
-			<span class="owner-copy">
-				<strong>{row.entry.owner.label}</strong>
-				<span>{row.ownerType === 'agent' ? 'Agent' : 'Thread'}</span>
-			</span>
-			<!-- One group, so a narrow row can set the state under the name instead of
-			     squeezing the name; a wide row lays the parts out inline. -->
-			<span class="row-meta">
-				<span
-					class="plan-state {tone}"
-					class:spinning={row.entry.progress.liveness === 'advancing'}
-					role="img"
-					aria-label={stateLabel}
-					title={stateLabel}
-				>{STATE_SYMBOL[tone] ?? ''}</span>
-				<span class="state-word {tone}">{stateLabel}</span>
-				<!-- Failure state is carried by the canonical plan display above. -->
-				{#if row.entry.progress.open > 0}
-					<span class="progress">{row.entry.progress.open} left</span>
-				{/if}
-			</span>
-			<!-- A wide row expands with this chevron and opens with the Open button.
-			     A narrow row has one affordance: the whole row, with this chevron
-			     (down/up when it expands, forward when it opens). -->
-			<span class="chevron" class:expanded class:opens={!hasPlan} aria-hidden="true">›</span>
-		</button>
+		<!-- The row's toggle is a button laid under its content, so the wait's label link is its own
+		     button beside it, never inside it. -->
+		<div class="row-main">
+			<button
+				class="row-summary"
+				onclick={activateSummary}
+				aria-expanded={hasPlan ? expanded : undefined}
+				aria-label={hasPlan
+					? (expanded ? 'Collapse ' : 'Expand ') + row.entry.owner.label
+					: 'Open ' + row.entry.owner.label}
+			></button>
+			<div class="row-content">
+				<span class="owner-mark" aria-hidden="true"><ActivityIdentityGlyph kind={row.ownerType} /></span>
+				<span class="owner-copy">
+					<strong aria-hidden="true">{row.entry.owner.label}</strong>
+					{#if wait}
+						<!-- One line at every width: only the label truncates, and the time always shows. -->
+						<span class="wait" title={waitTitle}>{#if waitLinked}<button type="button" class="wait-label wait-link" onclick={openWait}>{waitLabel}{waitMore}</button>{:else}<span class="wait-label" title={wait.artifact_id ? UNOPENABLE_DOCUMENT : undefined}>{waitLabel}{waitMore}</span>{/if}{#if waitBackText}<span class="wait-when">{' · '}{waitBackText}</span>{/if}</span>
+					{:else if setAside}
+						<span class="set-aside">{setAside}</span>
+					{:else}
+						<span>{row.ownerType === 'agent' ? 'Agent' : 'Chat'}</span>
+					{/if}
+				</span>
+				<!-- One group, so a narrow row can set the state under the name instead of
+				     squeezing the name; a wide row lays the parts out inline. -->
+				<span class="row-meta">
+					<span
+						class="plan-state {tone}"
+						class:spinning={row.entry.progress.liveness === 'advancing'}
+						role="img"
+						aria-label={stateLabel}
+						title={stateLabel}
+					>{#if wait}<ThreadWaitingMark size={12} />{:else if setAside}<SnoozeClock />{:else}{STATE_SYMBOL[tone] ?? ''}{/if}</span>
+					{#if !setAside}<span class="state-word {tone}">{stateLabel}</span>{/if}
+					<!-- Failure state is carried by the canonical plan display above. -->
+					{#if row.entry.progress.open > 0}
+						<span class="progress">{row.entry.progress.open} {row.entry.progress.open === 1 ? 'task' : 'tasks'} left</span>
+					{/if}
+				</span>
+				<!-- A wide row expands with this chevron and opens with the Open button.
+				     A narrow row has one affordance: the whole row, with this chevron
+				     (down/up when it expands, forward when it opens). -->
+				<span class="chevron" class:expanded class:opens={!hasPlan} aria-hidden="true">›</span>
+			</div>
+		</div>
 		<span class="row-open">
 			<Button
 				variant="ghost"
@@ -228,15 +273,21 @@
 	.plan-row { border-bottom: 1px solid var(--border-subtle); }
 	.plan-row:last-child { border-bottom: 0; }
 	.row-head { display: flex; align-items: center; gap: var(--space-1); min-height: 54px; }
+	.row-main { position: relative; display: flex; flex: 1; min-width: 0; }
+	/* The toggle lies under the row's content; a tap anywhere but the wait link reaches it. */
 	.row-summary {
-		display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2);
-		min-height: 54px; padding: var(--space-2) 0;
-		border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer;
+		position: absolute; inset: 0; width: 100%; padding: 0;
+		border: 0; background: transparent; cursor: pointer;
 	}
+	.row-content {
+		display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2);
+		min-height: 54px; padding: var(--space-2) 0; pointer-events: none;
+	}
+	.row-content .wait-link { position: relative; z-index: 1; pointer-events: auto; }
 	/* Hover colour is for a pointer. A touch tap leaves :hover stuck on the last
 	   row tapped, which read as a different state. */
 	@media (hover: hover) {
-		.row-summary:hover .owner-copy strong { color: var(--accent-text); }
+		.row-summary:hover + .row-content .owner-copy strong { color: var(--accent-text); }
 	}
 	.row-meta, .row-open { display: contents; }
 	.row-summary:focus-visible {
@@ -252,7 +303,13 @@
 		overflow: hidden; color: var(--text-primary); font-size: var(--text-subhead);
 		font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap;
 	}
-	.owner-copy span { color: var(--text-tertiary); font-size: var(--text-caption); }
+	.owner-copy > span { color: var(--text-tertiary); font-size: var(--text-caption); }
+	.owner-copy > .wait { display: flex; min-width: 0; white-space: nowrap; }
+	.wait-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	.wait-when { flex: none; white-space: pre; }
+	.wait-link { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
+	.wait-link:hover { color: var(--text-primary); }
+	.wait-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: var(--radius-xs); }
 	.plan-state {
 		display: inline-flex; width: 18px; height: 18px; flex: none; align-items: center; justify-content: center;
 		border: 1px solid var(--border); border-radius: var(--radius-circle);
@@ -303,14 +360,14 @@
 	@media (max-width: 620px) {
 		.row-head { min-height: 56px; }
 		.row-open { display: none; }
-		.row-summary {
+		.row-content {
 			display: grid; grid-template-columns: 28px minmax(0, 1fr) 20px;
 			grid-template-areas: "mark copy chevron" ". meta meta";
 			align-items: center; column-gap: var(--space-2); row-gap: 2px; min-height: 56px;
 		}
 		.owner-mark { grid-area: mark; }
 		.owner-copy { grid-area: copy; }
-		.owner-copy span { display: none; }
+		.owner-copy > span:not(.wait):not(.set-aside) { display: none; }
 		.owner-copy strong {
 			display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 			line-clamp: 2; white-space: normal; overflow-wrap: anywhere;

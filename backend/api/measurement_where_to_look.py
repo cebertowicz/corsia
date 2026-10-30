@@ -53,12 +53,14 @@ class Measure:
 
     def __init__(self, series: str, label: str, higher_is_better: bool, fmt: str, action: str,
                  *, scale: float = 1.0, per_agent: bool = True, from_series: bool = True, per_model: bool = False,
-                 from_cost: bool = False, scope_label: str | None = None) -> None:
+                 from_cost: bool = False, scope_label: str | None = None,
+                 comparability_series: str | None = None) -> None:
         self.series, self.label, self.higher_is_better, self.format = series, label, higher_is_better, fmt
         self.action, self.scale, self.per_agent = action, scale, per_agent
         # ``from_series``: the scope's own windows come from ``/series``; otherwise the measure has no series id.
         # ``from_cost``: the scope's own windows are the Cost headline's ``latest`` and ``previous``.
         self.from_series, self.per_model, self.from_cost = from_series, per_model, from_cost
+        self.comparability_series = comparability_series or series
         # ``scope_label``: the scope row's wording where it differs from an agent row's ("Your minutes per outcome").
         self.scope_label = scope_label
 
@@ -73,7 +75,7 @@ MEASURES: dict[str, Measure] = {
         "Review its recent send-backs and how it asks you.", scale=60.0,
         scope_label="Your minutes per outcome"),
     "asks_per_outcome": Measure(
-        "asks_per_outcome", "Asks per outcome", False, "ratio",
+        "asks_per_outcome", "Decisions and tasks for you per outcome", False, "ratio",
         "Review what keeps being asked, and whether guidance answers it.", per_agent=False),
     "first_try_acceptance": Measure(
         "first_try_acceptance", "First try", True, "percent",
@@ -81,16 +83,19 @@ MEASURES: dict[str, Measure] = {
     # The Cost headline's own figure, read as served; no agent or model is ranked on it.
     "cost_per_hour": Measure(
         "cost_per_hour", "Cost per person-hour of work delivered", False, "dollars",
-        "Check which models and size classes drive the cost.", per_agent=False, from_series=False, from_cost=True),
+        "Check which models and size classes drive the cost.", per_agent=False, from_series=False, from_cost=True,
+        comparability_series="estimated_human_hours_per_active_hour"),
     # Agents only: the scope's figure is every agent's tasks pooled, served beside the rows.
     "dollars_per_hour": Measure(
         DOLLARS_PER_HOUR, "$ per person-hour of work delivered", False, "dollars",
-        "Check which size class and model drive the cost.", from_series=False),
+        "Check which size class and model drive the cost.", from_series=False,
+        comparability_series="estimated_human_hours_per_active_hour"),
     # Models only: the label names the size class, and each row reads its model's biggest comparable class.
     "cost_per_task": Measure(
         "cost_per_task", "$ per task", False, "dollars",
         "Check whether this model is the right fit for this size class.",
-        per_agent=False, from_series=False, per_model=True),
+        per_agent=False, from_series=False, per_model=True,
+        comparability_series="estimated_human_hours_per_active_hour"),
 }
 ACTIONS_BY_MEASURE = {key: measure.action for key, measure in MEASURES.items()}
 SERIES_IDS = tuple(dict.fromkeys(measure.series for measure in MEASURES.values() if measure.from_series))
@@ -132,7 +137,7 @@ def _scope_items(
         before, after = pair.get("previous"), pair.get("latest")
         if not before or not after or before["value"] is None or after["value"] is None:
             continue
-        if before["n"] < MINIMUM_N or after["n"] < MINIMUM_N or not all(comparable(measure.series, first) for first in firsts):
+        if before["n"] < MINIMUM_N or after["n"] < MINIMUM_N or not all(comparable(measure.comparability_series, first) for first in firsts):
             continue
         item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None, measure.scope_label)
         if item:
@@ -156,7 +161,7 @@ def _agent_items(
                 continue
             if (metric.get("previous_n") or 0) < MINIMUM_N or (metric.get("n") or 0) < MINIMUM_N:
                 continue
-            if not all(comparable(measure.series, first) for first in firsts):
+            if not all(comparable(measure.comparability_series, first) for first in firsts):
                 continue
             average = averages.get(measure.series)
             item = _item(subject, key, before * measure.scale, after * measure.scale, metric["n"],
@@ -178,7 +183,7 @@ def _model_items(models: dict[str, Any] | None, comparable: Any, firsts: tuple[s
         if not cells:
             continue
         cell = max(cells, key=lambda cell: cell["tasks"])
-        if not all(comparable(MEASURES["cost_per_task"].series, first) for first in firsts):
+        if not all(comparable(MEASURES["cost_per_task"].comparability_series, first) for first in firsts):
             continue
         item = _item({"id": row["model"], "name": row["label"], "kind": "model"}, "cost_per_task",
                      cell["previous_cost_per_task"], cell["cost_per_task"], cell["tasks"],
@@ -273,4 +278,5 @@ async def measurement_where_to_look(
         # The page's default Agents table: its dollars column is not a measure ranked here.
         agents = await page.agents_payload(project, agent, page_grain.unaveraged(), "ranked", "fresh_tokens_per_outcome",
                                            True, user, reuse_finished=True)
-    return build_where_to_look(scope, series["windows"], agents, page.period_comparable, page_grain, models, cost)
+    comparable = lambda metric, period: page.period_comparable(period, series["breaks"].get(metric, ()))
+    return build_where_to_look(scope, series["windows"], agents, comparable, page_grain, models, cost)

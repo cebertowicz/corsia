@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { activeToolsByThread } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
@@ -53,6 +53,7 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	vi.unstubAllGlobals();
 });
 
 describe('WorkBlock structure', () => {
@@ -66,6 +67,23 @@ describe('WorkBlock structure', () => {
 		expect(toggle().getAttribute('aria-controls')).toBeNull();
 		expect(host.querySelector('.fold-details')).toBeNull();
 		expect(toggle().textContent).toContain('Worked');
+	});
+
+	it('shows the browser chip of its open beside the closed capsule, and on the opening row once expanded', () => {
+		const open = { ...work('open', 2, '10:02:00'), metadata: { turn_id: 't1', tool_hints: ['Open a page'], browser_chip: { host: 'github.com' } } };
+		render(present([work('a', 1, '10:01:00'), open, said('reply', 5, '10:10:00')]));
+
+		const chips = () => [...host.querySelectorAll<HTMLElement>('button.tile.chip')];
+		expect(chips()).toHaveLength(1);
+		expect(chips()[0].closest('.fold-browser')).not.toBeNull();
+		expect(chips()[0].textContent).toContain('github.com');
+
+		toggle().click();
+		flushSync();
+
+		expect(chips()).toHaveLength(1);
+		expect(chips()[0].closest('.fold-browser')).toBeNull();
+		expect(chips()[0].closest('[data-message-id="open"]')).not.toBeNull();
 	});
 
 	it('opens a body the header controls, and closes it again', () => {
@@ -102,15 +120,41 @@ describe('WorkBlock lines', () => {
 });
 
 describe('WorkBlock new marker (F2)', () => {
-	it('adds one `· new` marker and a spoken name, without repeating new in the label', () => {
-		render(markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')])));
+	it('marks a new collapsed block with one capsule inside the chip, and no divider beside it', () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
+		render(entries);
 
 		const block = host.querySelector('[data-work-block]')!;
 		expect(block.hasAttribute('data-new')).toBe(true);
 		expect(host.querySelectorAll('[data-new-capsule]')).toHaveLength(1);
-		expect(host.querySelector('[data-new-capsule] i')).not.toBeNull();
+		expect(toggle().querySelector('[data-new-capsule] i')).not.toBeNull();
+		expect(toggle().querySelector('[data-new-capsule]')?.textContent).toMatch(/^·\s*new$/);
 		expect(toggle().textContent?.match(/new/g)).toHaveLength(1);
+		expect(host.querySelector('[data-visit-divider]')).toBeNull();
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
+	});
+
+	it('shows no capsule on a live block', () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, live: true } : entry);
+		render(entries);
+
+		expect(host.querySelector('[data-work-block]')?.classList.contains('live-work')).toBe(true);
+		expect(host.querySelector('[data-new-capsule]')).toBeNull();
+	});
+
+	it('moves that divider to the first new message only after the block opens', () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
+		render(entries);
+
+		toggle().click();
+		flushSync();
+
+		const divider = host.querySelector('[data-visit-divider]')!;
+		expect(host.querySelector('[data-work-block]')?.contains(divider)).toBe(true);
+		expect(host.querySelector('.fold-details')?.contains(divider)).toBe(true);
 	});
 
 	it('has no marker when nothing in the block is new', () => {

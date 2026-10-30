@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits
 from doceditor.document_scope import MAX_TEXT_BYTES
 from infra.database import write_transaction
 from registry import models
@@ -162,7 +162,7 @@ def report_owner_write(
     feedback = payload.get("feedback")
     if feedback is not None:
         kwargs, edit = feedback
-        feedback_batches.record_edit(db, **kwargs, prepared=edit)
+        feedback_batch_edits.record_edit(db, **kwargs, prepared=edit)
     allowed = authority.allowed
     _record_event(
         artifact, path=path, fallback_owner=authority.owner,

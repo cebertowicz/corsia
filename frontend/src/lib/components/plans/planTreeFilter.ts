@@ -1,5 +1,6 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { nodeStateTone } from './planDisplay';
+import { isScheduledMember } from './planScheduled';
 import type { OperatorFoldLevel } from '$lib/api/plans';
 import type { FoldedWork, FoldLevelView } from './planFoldLevels';
 import {
@@ -17,7 +18,7 @@ import {
 export interface PlanTreeIndex {
 	/** Every node by id, for ancestor walks. */
 	byId: Map<string, OperatorNode>;
-	/** Ancestors of current and attention-path nodes, expanded by default. */
+	/** Ancestors of current non-scheduled and attention-path nodes, expanded by default. */
 	defaultExpandedBranches: Set<string>;
 	/** Parents whose children sit past `maxDepth`, offering a drill affordance. */
 	boundaryParents: Set<string>;
@@ -104,6 +105,7 @@ function hasOwnState(node: OperatorNode, currentNodeIds: string[]): boolean {
 		node.child !== null
 		|| currentNodeIds.includes(node.id)
 		|| node.requires_user_action
+		|| node.display.label_key === 'needs_you'
 		|| OWN_STATE_TONES.has(nodeStateTone(node))
 	);
 }
@@ -125,7 +127,7 @@ export function ancestorChain(byId: Map<string, OperatorNode>, id: string): stri
 /** Index the flat node list once for every rule that needs structure. */
 export function indexPlanNodes(
 	nodes: OperatorNode[],
-	{ maxDepth, currentNodeIds, deepFolded = [] }: { maxDepth: number; currentNodeIds: string[]; deepFolded?: Iterable<string> },
+	{ maxDepth, currentNodeIds, deepFolded = [], now }: { maxDepth: number; currentNodeIds: string[]; deepFolded?: Iterable<string>; now?: number },
 ): PlanTreeIndex {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
 	const defaultExpandedBranches = new Set<string>();
@@ -134,7 +136,10 @@ export function indexPlanNodes(
 		// Skip index 0: the node itself is revealed, not expanded.
 		for (let index = 1; index < chain.length; index += 1) defaultExpandedBranches.add(chain[index]);
 	};
-	for (const id of currentNodeIds) revealAncestors(id);
+	for (const id of currentNodeIds) {
+		const node = byId.get(id);
+		if (now === undefined || !node || !isScheduledMember(node, now)) revealAncestors(id);
+	}
 	for (const node of nodes) for (const id of node.attention_path) revealAncestors(id);
 
 	const boundaryParents = new Set<string>();

@@ -18,7 +18,7 @@ def _indexes(db) -> set[str]:
 def test_fresh_schema_has_checkpoint_listing_index():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 123
+        assert SCHEMA_VERSION == 166
         assert "checkpoints_listing" in _indexes(db)
 
 

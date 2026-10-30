@@ -9,10 +9,11 @@ readonly PYTHON_VERSION="3.11.17+20261013"
 readonly PYTHON_ARCHIVE="cpython-${PYTHON_VERSION}-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.11.17%2B20261013-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_SHA256="d81d757a9785850393cd695a9a686c765a6370fbdc83738589ef2ecd3e5c44b3"
-readonly OMLX_VERSION="0.7.0"
+# Shared with source setup; this file is valid both as shell and Python.
+source "$ROOT/backend/llm/omlx_release.py"
+readonly OMLX_VERSION OMLX_SHA256
 readonly OMLX_WHEEL="omlx-${OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
 readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERSION}/${OMLX_WHEEL}"
-readonly OMLX_SHA256="a25b0fbf86579512ced2a45b9aba420a51e6e8f3ee9ea3832ea1b9111d2cc4a7"
 # Build Git from its upstream release instead of copying Apple's CLT binary. Runtime
 # prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
 readonly GIT_VERSION="2.53.0"
@@ -20,6 +21,20 @@ readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
 readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
+# The browser tool's CLI: the upstream native arm64 build. The version must stay inside
+# _VERIFIED_FAMILIES in backend/host_access/browser_cli.py.
+readonly AGENT_BROWSER_VERSION="0.31.2"
+readonly AGENT_BROWSER_URL="https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-darwin-arm64"
+readonly AGENT_BROWSER_SHA256="98042bcfee9afdf6119d6817a04ef5897f519f290491664911779b084ae1b82a"
+readonly AGENT_BROWSER_LICENSE_URL="https://raw.githubusercontent.com/vercel-labs/agent-browser/v${AGENT_BROWSER_VERSION}/LICENSE"
+readonly AGENT_BROWSER_LICENSE_SHA256="014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff"
+# The sandbox every agent shell runs inside: one self-contained bash script. Its floor is
+# _MIN_SAFEHOUSE_VERSION in backend/tools/shell_guard.py; without it every shell command is refused.
+readonly SAFEHOUSE_VERSION="0.11.1"
+readonly SAFEHOUSE_URL="https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/safehouse.sh"
+readonly SAFEHOUSE_SHA256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
+readonly SAFEHOUSE_LICENSE_URL="https://raw.githubusercontent.com/eugene1g/agent-safehouse/v${SAFEHOUSE_VERSION}/LICENSE"
+readonly SAFEHOUSE_LICENSE_SHA256="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -32,8 +47,30 @@ done
 fail() { echo "error: $*" >&2; exit 1; }
 fetch_verified() {
   local url="$1" file="$2" digest="$3"
-  curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
+}
+fetch_agent_browser() {
+  local download="$BUILD_ROOT/downloads/agent-browser-darwin-arm64"
+  fetch_verified "$AGENT_BROWSER_URL" "$download" "$AGENT_BROWSER_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/agent-browser"
+  fetch_verified "$AGENT_BROWSER_LICENSE_URL" "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$AGENT_BROWSER_LICENSE_SHA256"
+  mkdir -p "$BUNDLE_ROOT/licenses/agent-browser"
+  install -m 0644 "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$BUNDLE_ROOT/licenses/agent-browser/LICENSE"
+  printf 'agent-browser %s\n%s\nsha256 %s\n' "$AGENT_BROWSER_VERSION" "$AGENT_BROWSER_URL" "$AGENT_BROWSER_SHA256" > "$BUNDLE_ROOT/licenses/agent-browser/SOURCE"
+  [ "$("$BUNDLE_ROOT/bin/agent-browser" --version)" = "agent-browser $AGENT_BROWSER_VERSION" ] \
+    || fail "bundled agent-browser does not report version $AGENT_BROWSER_VERSION"
+}
+fetch_safehouse() {
+  local download="$BUILD_ROOT/downloads/safehouse.sh" license="$BUILD_ROOT/downloads/safehouse-LICENSE"
+  fetch_verified "$SAFEHOUSE_URL" "$download" "$SAFEHOUSE_SHA256"
+  fetch_verified "$SAFEHOUSE_LICENSE_URL" "$license" "$SAFEHOUSE_LICENSE_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/safehouse"
+  mkdir -p "$BUNDLE_ROOT/licenses/safehouse"
+  install -m 0644 "$license" "$BUNDLE_ROOT/licenses/safehouse/LICENSE"
+  printf 'agent-safehouse %s\n%s\nsha256 %s\n' "$SAFEHOUSE_VERSION" "$SAFEHOUSE_URL" "$SAFEHOUSE_SHA256" > "$BUNDLE_ROOT/licenses/safehouse/SOURCE"
+  [ "$("$BUNDLE_ROOT/bin/safehouse" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$SAFEHOUSE_VERSION" ] \
+    || fail "bundled safehouse does not report version $SAFEHOUSE_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -121,6 +158,8 @@ command -v cargo >/dev/null || fail "scoped Rust cargo is required"
 
 rm -rf "$BUILD_ROOT" "$BUNDLE_ROOT"
 mkdir -p "$BUILD_ROOT/downloads" "$BUNDLE_ROOT/bin"
+bash "$ROOT/desktop/scripts/write-updater-endpoint-resource.sh" \
+  "$ROOT/desktop/src-tauri/tauri.conf.json" "$BUNDLE_ROOT/updater-endpoint.json"
 fetch_verified "$PYTHON_URL" "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" "$PYTHON_SHA256"
 tar -xzf "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" -C "$BUNDLE_ROOT"
 readonly PYTHON="$BUNDLE_ROOT/python/bin/python3"
@@ -134,11 +173,13 @@ PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
 build_git_runtime
+fetch_agent_browser
+fetch_safehouse
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
   npm ci
-  CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
+  CORSIA_APP_VERSION="$app_version" CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
 )
 install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
 install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"
@@ -148,7 +189,15 @@ install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
 mkdir -p "$BUNDLE_ROOT/scripts"
 install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
 rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
+# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
+# its seal. Compile every packaged source only after every resource is staged,
+# using unchecked hashes so a later mtime change cannot make a cache stale.
+# The staged-app proof below checks every source on the finished app.
+"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
 
+node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
+node "$ROOT/desktop/scripts/gen-shell-logo.mjs"
+node "$ROOT/desktop/scripts/gen-shell-update.mjs"
 (
   cd "$ROOT/desktop/src-tauri"
   "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\",\"bundle\":{\"macOS\":{\"bundleVersion\":\"$macos_bundle_version\"}}}"
@@ -157,7 +206,9 @@ readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
 readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
+# scripts/corsia.d/app_mode.sh runs Contents/MacOS/CORSIA to stage, swap and roll back an update.
+[ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
+"$ROOT/desktop/scripts/stamp-bundle-version.sh" "$APP/Contents/Info.plist" "$macos_short_version" "$app_version"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
 # service record and constructs its identity itself at every launch.
@@ -165,6 +216,10 @@ install -d "$APP/Contents/Library/LaunchAgents"
 install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
   "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
 "$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
+"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"
+# Seal the finished source build so ServiceManagement can register its agent.
+# This uses no certificate; release signing replaces the ad-hoc signature later.
+"$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

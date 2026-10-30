@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from connections import account_controls, harness_models
+from connections import account_controls, account_login_wait, account_signin, harness_models
 from connections.account_receipts import account_receipt, receipt_is_current
 from connections.vendor_accounts import get_account, set_account_state
 from test_claude_catalog_usage_ownership import (  # noqa: F401
@@ -44,6 +44,20 @@ from vendor_account_fixtures import (  # noqa: F401
     receipt_of,
     seed_usage,
 )
+
+REF = "signin-0123456789abcdef"
+
+
+@pytest.fixture(autouse=True)
+def fixed_failure_reference(monkeypatch):
+    """A failed sign-in's reference is random; pin it so results compare whole."""
+    monkeypatch.setattr(account_signin, "new_reference", lambda prefix: REF)
+
+
+def test_a_failed_sign_in_logs_the_reference_its_row_shows(caplog):
+    with caplog.at_level("WARNING", logger="connections.account_signin"):
+        assert account_signin.failure_reference("codex", "vendor_login_failed") == REF
+    assert f"codex sign-in failed reference={REF} cause=vendor_login_failed" in caplog.text
 
 
 class ExitedLogin:
@@ -119,7 +133,9 @@ case "$*" in
     echo "vendor error text nobody may see" >&2
     while [ -n "$LOGIN_HOLD" ] && [ ! -f "$LOGIN_HOLD" ]; do sleep 0.05; done
     [ -n "$LOGIN_FAIL" ] && exit 1
-    touch "$CLAUDE_CONFIG_DIR/signed"; exit 0;;
+    touch "$CLAUDE_CONFIG_DIR/signed"
+    while [ -n "$LOGIN_LINGER" ] && [ ! -f "$LOGIN_LINGER" ]; do sleep 0.05; done
+    exit 0;;
   "auth logout")
     [ -n "$LOGOUT_FAIL" ] && exit 1
     rm -f "$CLAUDE_CONFIG_DIR/signed"; exit 0;;
@@ -211,6 +227,13 @@ def test_codex_identity_reads_email_from_the_existing_auth_file_reader(tmp_path)
 def _calls(log: Path) -> list[tuple[str, str]]:
     pairs = (line.partition("|") for line in log.read_text().splitlines())
     return [(home, args) for home, _, args in pairs]
+
+
+async def _baseline_read(log: Path) -> None:
+    """Wait until a held Claude Code login's status has been read once, before the person signs in."""
+    async with asyncio.timeout(30):
+        while "auth status" not in [args for _, args in _calls(log)]:
+            await asyncio.sleep(0.01)
 
 
 async def _started(log: Path, count: int = 1) -> None:
@@ -359,6 +382,26 @@ async def test_completion_record_precedes_discovery_and_failure_preserves_it(acc
     monkeypatch.setattr(harness_models, 'refresh_provider', discovery)
     await account_controls._hold(operation, row['source_home'], '/synthetic/codex')
     assert operation.status == 'completed' and operation.cause is None
+    assert get_account(row['id'], db=db)['state'] == 'signed_in'
+
+
+@pytest.mark.asyncio
+async def test_finished_login_reports_failure_when_outcome_cannot_be_recorded(accounts, monkeypatch):
+    db, _, row, _ = accounts
+    row = set_account_state(row['id'], 'signed_out', expected_revision=row['revision'], db=db)
+    operation = account_controls.SignIn(row['id'], 'codex', row['revision'], process=ExitedLogin(),
+                                        bind=account_controls.FirstRunBind('thread', 'user'))
+    async def status(*args):
+        return True, {'account_fp': 'synthetic-completed-login'}, None
+    async def finish(*args):
+        assert operation.status == 'completed' and operation.bind.outcome is None
+        raise RuntimeError('outcome unavailable')
+    monkeypatch.setattr(account_controls, '_vendor_status', status)
+    monkeypatch.setattr(account_controls, 'refresh_default_identity', _no_default_effect)
+    monkeypatch.setattr(account_controls, 'finish_signin', finish)
+    await account_controls._hold(operation, row['source_home'], '/synthetic/codex')
+    assert operation.status == 'failed' and operation.cause == 'signin_check_failed'
+    assert operation.ref is not None
     assert get_account(row['id'], db=db)['state'] == 'signed_in'
 
 
@@ -513,6 +556,48 @@ async def test_claude_signin_stores_identity_from_status_and_never_an_account_id
 
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
+@both
+async def test_signin_starts_when_the_source_row_reads_needs_auth(scripted_vendor_clis, provider):
+    """A fresh install's CLI is signed out, so its row reads needs_auth: that is when Sign in must work."""
+    from connections import account_controls
+    from connections.models import get_connection
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="test") as conn:
+        conn.execute("UPDATE connections SET status = 'needs_auth' WHERE provider = ?", (provider,))
+    assert get_connection(provider)["status"] == "needs_auth"
+    account = scripted_vendor_clis[provider]
+    started = await account_controls.start_signin(account["id"])
+    assert started["status"] != "unavailable"
+    assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_codex_default_signed_out_survives_added_signin_and_clears_on_identity(scripted_vendor_clis, monkeypatch):
+    from api.vendor_accounts import list_vendor_accounts
+    from connections import source_state
+    from connections.account_identity import refresh_default_identity
+
+    monkeypatch.setattr(source_state, 'apply_check', lambda *args: None)
+    default_id = scripted_vendor_clis['default']['codex']['id']
+    async def hidden():
+        rows = (await list_vendor_accounts(provider='codex'))['accounts']
+        return next(row for row in rows if row['id'] == default_id)['default_signed_out']
+
+    await source_state.check_harness_source('codex')
+    assert await hidden() is True
+    account = scripted_vendor_clis['codex']
+    await account_controls.start_signin(account['id'])
+    assert (await _finished(account['id']))['status'] == 'completed'
+    assert await hidden() is True
+    _identity_file(scripted_vendor_clis['default_homes']['codex'], 'codex', 'default', 'user')
+    await refresh_default_identity('codex')
+    assert await hidden() is False
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
 async def test_codex_signin_stores_only_the_private_identity_fingerprint(scripted_vendor_clis):
     from connections import account_controls
 
@@ -534,7 +619,7 @@ async def test_only_the_status_exit_decides_signed_in(scripted_vendor_clis, prov
     monkeypatch.setenv("STATUS_EXIT", code)
     await account_controls.start_signin(account["id"])
     assert await _finished(account["id"]) == {"account_id": account["id"], "route": "browser",
-                                              "status": "failed", "cause": expected}
+                                              "status": "failed", "cause": expected, "ref": REF}
     assert (_account(account["id"])["state"], _account(account["id"])["identity"]) == ("signed_out", {})
 
 
@@ -567,7 +652,7 @@ async def test_failed_vendor_login_never_reads_status(scripted_vendor_clis, prov
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 @both
-async def test_held_login_waits_without_a_timeout_and_shows_no_vendor_output(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+async def test_held_login_waits_past_the_command_bound_and_shows_no_vendor_output(scripted_vendor_clis, provider, monkeypatch, tmp_path):
     from connections import account_controls
 
     account = scripted_vendor_clis[provider]
@@ -586,6 +671,117 @@ async def test_held_login_waits_without_a_timeout_and_shows_no_vendor_output(scr
     release.touch()
     assert (await _finished(account["id"]))["status"] == "completed"
     assert "nobody may see" not in json.dumps(held)
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@both
+async def test_a_login_the_browser_never_returns_to_ends_failed_timed_out_and_the_vendor_is_killed(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis[provider]
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.3)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    ended = await _finished(account["id"])
+    assert ended == {"account_id": account["id"], "route": "browser", "status": "failed",
+                     "cause": "signin_timed_out", "ref": REF}
+    assert process.returncode is not None
+    # The status command never ran, the account stays signed out, and a new sign-in can start.
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])] == [_ARGV[provider]["login"]]
+    assert _account(account["id"])["state"] == "signed_out"
+    monkeypatch.delenv("LOGIN_HOLD")
+    await account_controls.start_signin(account["id"])
+    assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_a_claude_login_that_stored_its_credentials_but_never_exits_completes_the_sign_in(scripted_vendor_clis, monkeypatch, tmp_path):
+    """The person signed in and the vendor's status says so; a lingering login must not keep the row on Sign in."""
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    hold = tmp_path / "hold"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
+    monkeypatch.setenv("LOGIN_LINGER", str(tmp_path / "never"))
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 0.2)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()  # the person signs in after the baseline read
+    finished = await asyncio.wait_for(_finished(account["id"]), 10)
+    assert finished["status"] == "completed" and finished["cause"] is None
+    assert _account(account["id"])["state"] == "signed_in"
+    assert process.returncode is not None  # the lingering login was stopped, not left running
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_a_claude_login_that_exits_inside_the_linger_window_is_not_killed(scripted_vendor_clis, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    hold, release = tmp_path / "hold", tmp_path / "release"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
+    monkeypatch.setenv("LOGIN_LINGER", str(release))
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 10.0)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()
+    while [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") < 3:
+        await asyncio.sleep(0.01)
+    release.touch()
+    finished = await asyncio.wait_for(_finished(account["id"]), 10)
+    assert finished["status"] == "completed"
+    assert process.returncode == 0
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_credentials_already_in_the_home_never_end_a_new_login_early(scripted_vendor_clis, monkeypatch, tmp_path):
+    """A signed-out account can still hold credentials (a failed logout): only this login's own exit ends it."""
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    (Path(account["source_home"]) / "signed").touch()
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    ended = await _finished(account["id"])
+    assert ended["status"] == "failed" and ended["cause"] == "signin_timed_out"
+    assert _account(account["id"])["state"] == "signed_out"
+    # The one status read is the baseline; the old credentials are never polled again.
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") == 1
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@both
+async def test_a_held_login_whose_status_never_reads_signed_in_still_times_out(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis[provider]
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    ended = await _finished(account["id"])
+    assert ended["status"] == "failed" and ended["cause"] == "signin_timed_out"
+    asked = [args for _, args in _calls(scripted_vendor_clis["log"])]
+    # Claude Code's status is read while it waits; Codex's login alone decides, so its status is never read.
+    assert (_ARGV[provider]["status"] in asked) == (provider == "claude-code")
+    assert _account(account["id"])["state"] == "signed_out"
 
 
 @pytest.mark.real_harness_cli
@@ -707,10 +903,14 @@ async def test_concurrent_starts_for_one_account_spawn_one_login(scripted_vendor
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 @both
-async def test_cancel_kills_the_held_login_and_the_account_stays_signed_out(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+@pytest.mark.parametrize('previous_login', [False, True])
+async def test_cancel_kills_the_held_login_and_removes_only_new_account(scripted_vendor_clis, provider, monkeypatch, tmp_path, previous_login):
     from connections import account_controls
 
     account = scripted_vendor_clis[provider]
+    if previous_login:
+        account = set_account_state(account['id'], 'signed_in', expected_revision=account['revision'])
+        account = set_account_state(account['id'], 'signed_out', expected_revision=account['revision'])
     monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
     await account_controls.start_signin(account["id"])
     await _started(scripted_vendor_clis["log"])
@@ -719,8 +919,13 @@ async def test_cancel_kills_the_held_login_and_the_account_stays_signed_out(scri
     assert cancelled == {"account_id": account["id"], "route": "browser", "status": "cancelled", "cause": None}
     assert process.returncode is not None and process.returncode != 0
     assert account["id"] not in account_controls._SIGNINS
-    assert _account(account["id"])["state"] == "signed_out"
-    assert [args for _, args in _calls(scripted_vendor_clis["log"])] == [_ARGV[provider]["login"]]
+    assert _account(account["id"])["state"] == ("signed_out" if previous_login else "removed")
+    expected = [_ARGV[provider]["login"]] + ([] if previous_login else [_ARGV[provider]["logout"]])
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])] == expected
+    if previous_login:
+        monkeypatch.delenv("LOGIN_HOLD")
+        await account_controls.start_signin(account["id"])
+        assert (await _finished(account["id"]))["status"] == "completed"
 
 
 @pytest.mark.real_harness_cli
@@ -733,7 +938,8 @@ async def test_finished_sign_in_is_kept_until_the_next_start_sign_out_or_remove(
     monkeypatch.setenv("LOGIN_FAIL", "1")
     await account_controls.start_signin(codex["id"])
     failed = await _finished(codex["id"])
-    assert failed == {"account_id": codex["id"], "route": "browser", "status": "failed", "cause": "vendor_login_failed"}
+    assert failed == {"account_id": codex["id"], "route": "browser", "status": "failed", "cause": "vendor_login_failed",
+                      "ref": REF}
     kept = account_controls._SIGNINS[codex["id"]]
     assert [await account_controls.check_signin(codex["id"]) for _ in range(2)] == [failed, failed]
     assert account_controls._SIGNINS == {codex["id"]: kept}
@@ -782,9 +988,19 @@ async def test_second_sign_in_for_a_vendor_is_refused_while_one_is_held(scripted
     assert (await _finished(other["id"]))["status"] == "completed"
 
 
+def _checked_account(provider, account_id):
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope='test_checked_account') as db:
+        receipt = capture_receipt(provider, account_id=account_id, db=db)
+        assert mark_discovery(account_id, receipt=receipt, status='ready', models={}, db=db)
+
+
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
-async def test_a_repeated_account_is_refused_and_names_the_oldest_signed_in_match(scripted_vendor_clis):
+async def test_a_repeated_account_is_removed_and_names_the_oldest_signed_in_match(scripted_vendor_clis):
     from api import vendor_accounts as routes
     from connections import account_controls
     from connections.vendor_accounts import add_account, record_evidence, set_account_state
@@ -797,24 +1013,27 @@ async def test_a_repeated_account_is_refused_and_names_the_oldest_signed_in_matc
     third = add_account("claude-code", "Third")
     record_evidence(third["id"], identity=identity)
     set_account_state(third["id"], "signed_in", expected_revision=0)
+    # The oldest match has already been checked.
+    from infra.db_async import run_in_db
+    await run_in_db(_checked_account, 'claude-code', third['id'])
     _created(third["id"], "2026-01-01T00:00:00+00:00")
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
         "account_id": second["id"], "route": "browser", "status": "failed", "cause": "same_account",
-        "duplicate_of": third["id"]}
-    assert (_account(second["id"])["state"], _account(second["id"])["revision"]) == ("signed_out", 0)
+        "duplicate_of": third["id"], "ref": REF}
+    assert (_account(second["id"])["state"], _account(second["id"])["revision"]) == ("removed", 1)
     assert _account(second["id"])["identity"] == {} and _account(second["id"])["auth_cleanup"] is not None
-    renamed = await routes.rename_vendor_account(second["id"], routes.RenameAccount(name="Repeat", expected_revision=0))
-    assert renamed["duplicate_of"] is None
     assert {row["id"]: row["duplicate_of"] for row in
             (await routes.list_vendor_accounts(provider="claude-code"))["accounts"]} == {
                 scripted_vendor_clis["default"]["claude-code"]["id"]: None, first["id"]: third["id"],
-                second["id"]: None, third["id"]: first["id"]}
+                third["id"]: first["id"]}
+    all_rows = (await routes.list_vendor_accounts(provider="claude-code", include_removed=True))["accounts"]
+    assert next(row for row in all_rows if row["id"] == second["id"])["state"] == "removed"
 
 
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
-async def test_codex_repeated_account_is_refused_by_its_fingerprint(scripted_vendor_clis):
+async def test_codex_repeated_account_is_removed_by_its_fingerprint(scripted_vendor_clis):
     from api import vendor_accounts as routes
     from connections import account_controls
     from connections.vendor_accounts import add_account
@@ -824,13 +1043,19 @@ async def test_codex_repeated_account_is_refused_by_its_fingerprint(scripted_ven
         _identity_file(row["source_home"], "codex", "workspace-private", "user-private")
     await account_controls.start_signin(first["id"])
     assert (await _finished(first["id"]))["duplicate_of"] is None
+    # The match has already been checked.
+    from infra.db_async import run_in_db
+    await run_in_db(_checked_account, 'codex', first['id'])
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
         "account_id": second["id"], "route": "browser", "status": "failed", "cause": "same_account",
-        "duplicate_of": first["id"]}
+        "duplicate_of": first["id"], "ref": REF}
     rows = (await routes.list_vendor_accounts(provider="codex"))["accounts"]
-    assert [row["duplicate_of"] for row in rows] == [None, None, None]
-    assert rows[1]["identity"] == {} and rows[2]["identity"] == {}
+    assert [row["duplicate_of"] for row in rows] == [None, None]
+    assert _account(second["id"])["state"] == "removed"
+    assert _account(second["id"])["identity"] == {} and _account(second["id"])["auth_cleanup"] is not None
+    all_rows = (await routes.list_vendor_accounts(provider="codex", include_removed=True))["accounts"]
+    assert next(row for row in all_rows if row["id"] == second["id"])["state"] == "removed"
 
 
 @pytest.mark.real_harness_cli
@@ -882,7 +1107,7 @@ async def test_a_sign_in_check_that_hit_an_unexpected_error_ends_failed_and_bloc
     first, second = scripted_vendor_clis[provider]["id"], add_account(provider, "Other")["id"]
     vendor_status = account_controls._vendor_status
     broken = [True]
-    failed = {"account_id": first, "route": "browser", "status": "failed", "cause": "signin_check_failed"}
+    failed = {"account_id": first, "route": "browser", "status": "failed", "cause": "signin_check_failed", "ref": REF}
 
     async def status(*args):
         if broken[0]:
@@ -1218,7 +1443,8 @@ def test_an_unmarked_test_starts_no_vendor_process(sign_in_api_client, provider,
     added = sign_in_api_client.post("/api/vendor-accounts", json={"provider": provider, "name": "Added"}).json()
     started = sign_in_api_client.post("/api/vendor-accounts/" + added["id"] + "/signin")
     missing = "codex_executable_missing" if provider == "codex" else "claude_executable_missing"
-    assert started.json() == {"account_id": added["id"], "route": None, "status": "unavailable", "cause": missing}
+    assert started.json() == {"account_id": added["id"], "route": None, "status": "unavailable", "cause": missing,
+                              "ref": REF}
     path = "/api/vendor-accounts/" + added["id"]
     left = (sign_in_api_client.post(path + "/signout", json={"expected_revision": 0}) if leave == "signout"
             else sign_in_api_client.request("DELETE", path, json={"expected_revision": 0}))
@@ -1227,6 +1453,20 @@ def test_an_unmarked_test_starts_no_vendor_process(sign_in_api_client, provider,
     assert (body["auth_cleanup_status"], body["auth_cleanup_cause"]) == ("failed", missing)
     assert body["state"] == ("signed_out" if leave == "signout" else "removed")
     assert body["identity"] == {} and "auth_cleanup" not in body
+
+
+def test_missing_signin_check_route_matches_setup_recovery(monkeypatch):
+    from api.vendor_accounts import router
+    from infra.auth import require_user
+
+    monkeypatch.setattr(account_controls, '_SIGNINS', {})
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: {'id': 'user'}
+    with TestClient(app) as api:
+        response = api.post('/api/vendor-accounts/missing/signin/check')
+    assert response.status_code == 409
+    assert response.json() == {'detail': 'no sign-in is in progress for this account'}
 
 
 @pytest.mark.real_harness_cli
@@ -1293,7 +1533,7 @@ async def test_same_as_default_is_refused_only_after_the_held_login_finishes(scr
         release.touch()
         assert await _finished(account["id"]) == {
             "account_id": account["id"], "route": "browser", "status": "failed", "cause": "same_account",
-            "duplicate_of": scripted_vendor_clis["default"][provider]["id"]}
+            "duplicate_of": scripted_vendor_clis["default"][provider]["id"], "ref": REF}
     stored = _account(account["id"])
     assert (stored["state"], stored["revision"]) == ("signed_out", 0)
     assert stored["identity"] == before
@@ -1835,3 +2075,226 @@ async def test_same_default_row_delayed_login_A_receipts_cannot_mutate_login_B(a
     await observe_turn_error(session, {'codexErrorInfo': 'usageLimitExceeded'})
     assert usage.stored_usage(provider='codex', account_id=default['id'], db=db) == stored
     assert get_account(default['id'], db=db) == before
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['claude-code', 'codex'])
+async def test_setup_recovers_after_first_discovery_fails(scripted_vendor_clis, monkeypatch, provider):
+    from connections import account_controls, harness_models
+    from connections.account_discovery_types import AccountRefreshResult
+    from connections.corsia_agent_account import FirstRunBind
+    from connections.source_state import apply_check
+    from connections.vendor_accounts import add_account, list_accounts
+    from infra.corsia_agent import set_corsia_agent
+    from infra.database import get_db
+    from api.provider_sources import _harness_source
+    from llm.model_status import scoped_status_rows
+
+    account = scripted_vendor_clis[provider]
+    db = get_db()
+    try:
+        db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES ('first-run','user',NULL,'t','t')")
+        db.execute("DELETE FROM models WHERE harness=?", (provider,))
+        assert set_corsia_agent('first-run', db=db)
+        apply_check(provider, 'needs_auth', 'signed out', db=db)
+        db.commit()
+    finally:
+        db.close()
+    reads = []
+
+    async def discover(provider, **kwargs):
+        reads.append(kwargs['account_id'])
+        if len(reads) == 1:
+            return AccountRefreshResult(provider, kwargs['account_id'], status='failed')
+        from connections.account_discovery_commit import commit_discovery_bundle
+        from infra.db_async import run_in_db
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+            [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
+            context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
+            harness_version='1')
+
+    monkeypatch.setattr(harness_models, 'refresh_provider', discover)
+    identity = ('person@example.test', 'org-synthetic-1') if provider == 'claude-code' else ('workspace-private', 'user-private')
+    _identity_file(account['source_home'], provider, *identity)
+    await account_controls.start_signin(account['id'], bind=FirstRunBind('first-run', 'user'))
+    assert (await _finished(account['id']))['outcome'] == 'unchecked'
+    line = next(row for row in _harness_source(provider)['accounts'] if row['account_id'] == account['id'])
+    assert line['state'] == 'unchecked'
+    again = add_account(provider, 'Again')
+    _identity_file(again['source_home'], provider, *identity)
+    await account_controls.start_signin(again['id'], bind=FirstRunBind('first-run', 'user'))
+    result = await _finished(again['id'])
+    assert (result['status'], result['cause'], result['outcome']) == ('failed', 'same_account', 'ready')
+    assert result['duplicate_of'] == account['id']
+    assert await account_controls.check_signin(again['id']) == result
+    assert next(row for row in _harness_source(provider)['accounts'] if row['account_id'] == account['id'])['state'] == 'ready'
+    model = next(row for row in scoped_status_rows(account_id=account['id']) if row['id'] == provider + '/rechecked')
+    assert next(row for row in model['runs_on'] if row['account_id'] == account['id'])['status'] == 'ready'
+    added = [row['id'] for row in list_accounts(provider=provider) if not row['is_default']]
+    assert added == [account['id']]
+    assert _account(again['id'])['state'] == 'removed'
+    assert _account(again['id'])['auth_cleanup'] is not None
+    assert reads == [account['id'], account['id']]
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['claude-code', 'codex'])
+async def test_repeat_unchecked_signin_rechecks_existing_account(scripted_vendor_clis, monkeypatch, provider):
+    from connections import account_controls, harness_models
+    from connections.account_discovery_types import AccountRefreshResult
+    from connections.vendor_accounts import add_account
+
+    first = scripted_vendor_clis[provider]
+    second = add_account(provider, 'Again')
+    identity = ('person@example.test', 'org-synthetic-1') if provider == 'claude-code' else ('workspace-private', 'user-private')
+    for account in (first, second):
+        _identity_file(account['source_home'], provider, *identity)
+    reads = []
+
+    async def discover(provider, **kwargs):
+        reads.append(kwargs['account_id'])
+        if len(reads) == 1:
+            return AccountRefreshResult(provider, kwargs['account_id'], status='failed')
+        from types import SimpleNamespace
+        from connections.account_discovery_commit import commit_discovery_bundle
+        from infra.db_async import run_in_db
+
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+            [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
+            context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
+            harness_version='1')
+
+    monkeypatch.setattr(harness_models, 'refresh_provider', discover)
+    await account_controls.start_signin(first['id'])
+    assert (await _finished(first['id']))['status'] == 'completed'
+    await account_controls.start_signin(second['id'])
+    outcome = await _finished(second['id'])
+    assert outcome['status'] == 'failed'
+    assert outcome['cause'] == 'same_account'
+    assert outcome['duplicate_of'] == first['id']
+    assert reads == [first['id'], first['id']]
+    from llm.model_status import scoped_status_rows
+
+    row = next(row for row in scoped_status_rows(account_id=first['id']) if row['id'] == provider + '/rechecked')
+    assert next(entry for entry in row['runs_on'] if entry['account_id'] == first['id'])['status'] == 'ready'
+
+
+@pytest.mark.asyncio
+@both
+async def test_startup_removes_only_unreferenced_never_signed_in_accounts(scripted_vendor_clis, provider):
+    from connections.account_leftovers import remove_startup_leftovers
+    from connections.provider_policy import effective_policy, set_policy
+    from connections.vendor_accounts import add_account, list_accounts
+    from infra.database import get_db
+
+    leftover = scripted_vendor_clis[provider]
+    disabled = add_account(provider, 'Disabled')
+    prior = add_account(provider, 'Previously signed in')
+    prior = set_account_state(prior['id'], 'signed_in', expected_revision=prior['revision'])
+    prior = set_account_state(prior['id'], 'signed_out', expected_revision=prior['revision'])
+    default = scripted_vendor_clis['default'][provider]
+    order = [leftover['id'], default['id'], disabled['id'], prior['id']]
+    set_policy(None, provider, rollover=True, order=order, disabled=[disabled['id']], expected_revision=0)
+    await remove_startup_leftovers()
+    assert _account(leftover['id'])['state'] == 'removed'
+    assert _account(disabled['id'])['state'] == 'signed_out'
+    assert _account(prior['id'])['state'] == 'signed_out'
+    assert leftover['id'] not in {row['id'] for row in list_accounts(provider=provider)}
+    db = get_db()
+    try:
+        policy = effective_policy(None, provider, db=db)
+    finally:
+        db.close()
+    saved = set_policy(None, provider, rollover=policy['rollover'], order=policy['order'],
+                       disabled=policy['disabled'], expected_revision=policy['revision'])
+    assert leftover['id'] not in saved['order']
+
+
+@pytest.mark.asyncio
+@both
+async def test_startup_sweep_survives_one_accounts_failure(scripted_vendor_clis, provider, monkeypatch):
+    from connections import account_leftovers
+    from connections.vendor_accounts import add_account
+
+    failing = scripted_vendor_clis[provider]
+    other = add_account(provider, 'Other')
+    real = account_leftovers.commit_if_leftover
+
+    def commit(account_id, *, db=None):
+        if account_id == failing['id']:
+            raise RuntimeError('unexpected row')
+        return real(account_id, db=db)
+
+    monkeypatch.setattr(account_leftovers, 'commit_if_leftover', commit)
+    await account_leftovers.remove_startup_leftovers()
+    assert _account(failing['id'])['state'] == 'signed_out'
+    assert _account(other['id'])['state'] == 'removed'
+
+
+@pytest.mark.asyncio
+@both
+async def test_startup_keeps_account_with_failed_cleanup(scripted_vendor_clis, provider):
+    from connections.account_leftovers import remove_startup_leftovers
+    from connections.vendor_accounts import record_auth_cleanup
+
+    account = scripted_vendor_clis[provider]
+    record_auth_cleanup(account['id'], {'status': 'failed', 'cause': 'vendor_logout_failed', 'at': '2026-01-01T00:00:00Z'})
+    await remove_startup_leftovers()
+    assert _account(account['id'])['state'] == 'signed_out'
+
+
+@pytest.mark.asyncio
+@both
+async def test_cancel_keeps_a_never_signed_in_account_referenced_by_policy(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+    from connections.account_controls import cancel_signin, start_signin
+    from connections.provider_policy import set_policy
+
+    account = scripted_vendor_clis[provider]
+    set_policy(None, provider, rollover=False, order=None, disabled=[account['id']], expected_revision=0)
+    monkeypatch.setenv('LOGIN_HOLD', str(tmp_path / 'never'))
+    await start_signin(account['id'])
+    assert (await cancel_signin(account['id']))['status'] == 'cancelled'
+    assert _account(account['id'])['state'] == 'signed_out'
+
+
+@pytest.mark.parametrize(('report', 'code', 'expected'), [
+    ({'loggedIn': False}, 0, 'signed_out'),
+    ({'loggedIn': False}, 1, 'signed_out'),
+    ({'loggedIn': False}, 2, 'unknown'),
+    ({'loggedIn': True}, 0, 'signed_in'),
+    ({'loggedIn': True}, 1, 'unknown'),
+    ({'loggedIn': 0}, 0, 'unknown'),
+    (None, 1, 'unknown'),
+])
+def test_claude_login_status_classification(report, code, expected):
+    from connections.account_identity import claude_login_status
+
+    assert claude_login_status(report, code) == expected
+
+
+@pytest.mark.asyncio
+@both
+async def test_default_visibility_uses_only_definite_signed_out_evidence(scripted_vendor_clis, provider):
+    from api.vendor_accounts import list_vendor_accounts
+    from connections.account_identity import capture_default_observation, observe_discovered_identity
+    from connections.vendor_accounts import record_default_identity
+    from infra.db_async import run_in_db
+
+    default_id = scripted_vendor_clis['default'][provider]['id']
+
+    async def shown():
+        rows = (await list_vendor_accounts(provider=provider))['accounts']
+        return next(row for row in rows if row['id'] == default_id)['default_signed_out']
+
+    assert await shown() is False
+    identity = {'email': 'one@example.test', 'org_id': 'one'} if provider == 'claude-code' else {'account_fp': 'one'}
+    await run_in_db(record_default_identity, provider, identity)
+    assert await shown() is False
+    observation = await run_in_db(capture_default_observation, provider)
+    await run_in_db(observe_discovered_identity, provider, {'_login_status': 'signed_out'}, token=observation)
+    assert await shown() is True
+    observation = await run_in_db(capture_default_observation, provider)
+    await run_in_db(observe_discovered_identity, provider, {}, token=observation)
+    assert await shown() is False

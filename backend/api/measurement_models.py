@@ -1,6 +1,6 @@
 """Models comparison: one row per model identity, named and priced by Cost's owners.
 
-Identity comes from ``api.cost_identity`` and price from Cost's admission and
+Identity comes from ``core.cost_identity`` and price from Cost's admission and
 classification, so Models, Cost and Spend name and price a model the same way.
 Every figure reads the page grain's windows: tasks, rates, failed turns and the
 token share cover its latest window (7 days or 4 weeks), and the window before it
@@ -17,7 +17,8 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
-from api.cost_identity import IdentityResolver, ModelIdentity
+from connections import fact_memo
+from core.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_cost import ledger_read, ledger_shapes
 from api.measurement_join import joined_read
 from api.measurement_chain_costs import chain_costs, task_chain_costs, two_windows, window_params
@@ -259,6 +260,7 @@ def _latest_window_params(params: dict[str, Any]) -> dict[str, Any]:
     return {**params, "from_ts": start[:10], "to_ts": (date.fromisoformat(end[:10]) + timedelta(days=1)).isoformat()}
 
 
+@fact_memo.fact_reads()
 def models_inputs_without_costs(
     db, scope_params: dict[str, Any], grain: Grain, catalog_entries: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -289,6 +291,7 @@ def models_inputs(
     return {**inputs, **chain_costs(db, scope_params, grain)}
 
 
+@fact_memo.fact_reads()
 def models_from_inputs(db, inputs: Mapping[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Models from ``models_inputs`` and the usage ledger.
 

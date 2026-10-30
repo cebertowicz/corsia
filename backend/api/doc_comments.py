@@ -17,22 +17,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel, Field, model_validator
 
+from api.doc_comment_delivery import deliver_person_comment_after_response
 from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
 from doceditor.comment_state_updates import update_comment
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit, decide_all_from_author,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import accept_all_open, decide_all_from_author
 from doceditor.comments import CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
@@ -75,7 +78,7 @@ async def list_comments(artifact_id: str, token: str):
             path = artifact["path"] if artifact else None
             comments, anchors_checked = anchored_threads(artifact_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
-            feedback_state.annotate_reply_waiting_threads(db, user["id"], artifact_id, comments)
+            feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
             feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
         finally:
@@ -86,7 +89,9 @@ async def list_comments(artifact_id: str, token: str):
 
 
 @router.post("/artifacts/{artifact_id}/comments")
-async def create_comment(artifact_id: str, token: str, body: CommentCreate):
+async def create_comment(
+    artifact_id: str, token: str, body: CommentCreate, background: BackgroundTasks,
+):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
     if not user:
@@ -129,9 +134,10 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
         region=region,
+        delivery_policy=body.delivery_policy,
     )
     try:
-        row, _registered, feedback = await create_validated_comment(request, body.client_id)
+        row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except CommentActionError as exc:
@@ -143,91 +149,19 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
+    if created:
+        background.add_task(
+            deliver_person_comment_after_response,
+            feedback["batch_ids"],
+            artifact_id,
+            feedback["delivery_policy"],
+        )
     return {"comment": row, **feedback}
 
 
-class FeedbackDocumentAction(BaseModel):
-    artifact_id: str
+from api.doc_feedback_routes import add_feedback_routes
 
-
-def _user_feedback_write(user_id: str, artifact_id: str, action: str) -> dict:
-    db = get_db()
-    try:
-        _assert_owns_artifact(artifact_id, user_id, db)
-        with write_transaction(db, scope=f"user_doc_feedback_{action}") as connection:
-            woken: list[str] = []
-            if action == "send":
-                woken = feedback_batches.close_for_document(
-                    connection,
-                    author_kind="user",
-                    author_id=feedback_batches.USER_AUTHOR_ID,
-                    artifact_id=artifact_id,
-                    reason="send",
-                )
-            elif action == "leave":
-                feedback_batches.mark_user_left(connection, artifact_id)
-            elif action == "return":
-                feedback_batches.mark_user_returned(connection, artifact_id)
-            else:
-                woken = feedback_batches.retry_for_document(
-                    connection,
-                    author_kind="user",
-                    author_id=feedback_batches.USER_AUTHOR_ID,
-                    artifact_id=artifact_id,
-                )
-            undelivered = feedback_batches.undelivered_for_document(
-                connection,
-                author_kind="user",
-                author_id=feedback_batches.USER_AUTHOR_ID,
-                artifact_id=artifact_id,
-            )
-        return {"woken": woken, "undelivered_batches": undelivered}
-    finally:
-        db.close()
-
-
-async def _user_feedback_action(user_id: str, body: FeedbackDocumentAction, action: str) -> dict:
-    result = await run_in_db(_user_feedback_write, user_id, body.artifact_id, action)
-    if result["woken"]:
-        from plans import public
-
-        await public.drive_threads(result["woken"])
-    return result
-
-
-@router.post("/doc-feedback/send")
-async def send_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Close and deliver the user's open batches for one document."""
-    return await _user_feedback_action(user["id"], body, "send")
-
-
-@router.post("/doc-feedback/leave")
-async def leave_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Start the user's leave grace period for one document."""
-    return await _user_feedback_action(user["id"], body, "leave")
-
-
-@router.post("/doc-feedback/return")
-async def return_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Record that the user is looking at the document again: cancel leave grace.
-
-    Reply markers are not touched here; each clears only when its thread's reply is shown (the /viewed stamp).
-    """
-    return await _user_feedback_action(user["id"], body, "return")
-
-
-@router.post("/doc-feedback/retry")
-async def retry_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Retry the user's undelivered batches for one document."""
-    return await _user_feedback_action(user["id"], body, "retry")
+add_feedback_routes(router, _assert_owns_artifact)
 
 
 class PositionUpdates(BaseModel):
@@ -285,16 +219,11 @@ class CommentDecision(BaseModel):
 
 
 
-@router.post("/comments/{comment_id}/decision")
-async def decide_comment(comment_id: str, token: str, body: CommentDecision):
-    user = authenticate(token)
-    if not user:
-        raise HTTPException(401)
-
-    saved: dict = {}
-
+def _person_writer(user: dict, saved: dict):
+    """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
+        _suggestion_author: str | None,
     ) -> dict:
         try:
             receipt = await save_document_text(
@@ -305,6 +234,35 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
             raise document_save_http_exception(exc) from exc
         saved.update(text=text, revision=receipt["revision"])
         return receipt
+    return write
+
+
+@router.post("/artifacts/{artifact_id}/suggestions/accept-all")
+async def accept_all_suggestions(artifact_id: str, token: str):
+    """Accept every open suggestion on the document, from every author, in one write."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    saved: dict = {}
+    try:
+        result = await accept_all_open(
+            artifact_id, user_id=user["id"], decided_by=user["name"], actor_thread_id=None,
+            write=_person_writer(user, saved))
+    except CommentActionError as exc:
+        return decision_refusal(exc)
+    except DocumentSaveError as exc:
+        raise document_save_http_exception(exc) from exc
+    return {**result, **saved}
+
+
+@router.post("/comments/{comment_id}/decision")
+async def decide_comment(comment_id: str, token: str, body: CommentDecision):
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+
+    saved: dict = {}
+    write = _person_writer(user, saved)
 
     try:
         decide = decide_all_from_author if body.all_from_author else decide_suggestion
@@ -331,8 +289,17 @@ class CommentPatch(BaseModel):
     from_off: int | None = None
     to_off: int | None = None
     anchor_text: str | None = None
+    # The lane a re-open queues in; the browser sends the person's document preference with every re-open.
+    delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+
+    @model_validator(mode="after")
+    def _reopen_names_its_lane(self) -> "CommentPatch":
+        """A re-open queues feedback, so it must say which lane; no other patch has one."""
+        if self.resolved is False and self.delivery_policy is None:
+            raise ValueError("delivery_policy is required when re-opening a comment")
+        return self
 
 
 @router.patch("/comments/{comment_id}")
@@ -340,7 +307,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude={"delivery_policy"}).items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
 
@@ -362,7 +329,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:
                 row = update_comment(connection, comment_id, patch, user_name=user["name"])
-                apply_user_transition(connection, comment, patch, user)
+                apply_user_transition(connection, comment, patch, user, body.delivery_policy)
                 return row
         finally:
             db.close()

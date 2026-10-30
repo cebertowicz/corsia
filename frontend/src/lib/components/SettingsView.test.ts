@@ -3,10 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsView from './SettingsView.svelte';
 import { token } from '$lib/stores/auth';
-import { SETTINGS_SECTIONS, settingsActiveSection } from '$lib/stores/settingsNavigation';
+import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestConnectedAppKey, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { get } from 'svelte/store';
+import { projects } from '$lib/stores/projects';
+import { updateToastSuppressed } from '$lib/update/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+const scrollIntoView = Element.prototype.scrollIntoView;
 
 beforeEach(() => {
 	token.set('test-token');
@@ -23,8 +27,12 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+	Element.prototype.scrollIntoView = scrollIntoView;
 	token.set(null);
-	settingsActiveSection.set('providers');
+	resetSettingsNavigation();
+	projects.set([]);
+	updateToastSuppressed.set(false);
 });
 
 describe('SettingsView navigation', () => {
@@ -32,13 +40,23 @@ describe('SettingsView navigation', () => {
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
 		flushSync();
 
-		const entries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.textContent?.trim().toLowerCase());
+		const entries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.getAttribute('data-settings-section'));
 		expect(entries).toEqual([...SETTINGS_SECTIONS]);
 		for (const id of SETTINGS_SECTIONS) {
-			settingsActiveSection.set(id);
+			selectSettingsSection(id);
 			flushSync();
 			expect(host.querySelector('.settings-content')?.children.length, id).toBeGreaterThan(0);
 		}
+	});
+
+	it('draws the Connected apps title as the page title, as Skills does', () => {
+		selectSettingsSection('connected-apps');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		const titles = [...host.querySelectorAll('.section-host > h2.page-title')].map((el) => el.textContent);
+		expect(titles).toEqual(['Connected apps']);
+		expect(host.querySelectorAll('.section-host h2')).toHaveLength(1);
 	});
 
 	it('keeps Settings navigation limited to live product surfaces', async () => {
@@ -53,12 +71,107 @@ describe('SettingsView navigation', () => {
 		expect(host.textContent).toContain('Debug');
 	});
 
+	it('suppresses update toasts only while desktop System content is visible', () => {
+		selectSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(true);
+
+		selectSettingsSection('providers');
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
+	});
+
 	it('opens directly to a requested settings section', async () => {
-		settingsActiveSection.set('debug');
+		selectSettingsSection('debug');
 
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
 		flushSync();
 
 		expect(host.textContent).toContain('Debug');
+	});
+
+	it('opens a gear request made before Settings mounts to its page, not the phone list', () => {
+		openProjectSettings('p-garden');
+
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(true);
+		expect(get(settingsNavigation).drill?.backLabel).toBe('Projects');
+		closeSettingsProject();
+	});
+
+	it('uses the project name in the app header at desktop width', () => {
+		projects.set([{ id: 'p-garden', name: 'Garden plan', status: 'active', accent_color: null }]);
+		openProjectSettings('p-garden');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(get(settingsNavigation).drill).toMatchObject({ title: 'Garden plan', backLabel: 'Projects' });
+	});
+
+	it('uses the Settings header to return from a Connected apps key card', () => {
+		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(get(settingsNavigation).drill).toMatchObject({ title: 'Settings', backLabel: 'Connected apps' });
+		get(settingsNavigation).drill?.onBack();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', connectedAppKey: null });
+	});
+
+	it('shows the phone list when Settings opens without a new request', () => {
+		openProjectSettings('p-garden');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		unmount(component);
+		component = null;
+		closeSettingsProject();
+
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(false);
+	});
+
+	it('suppresses only when open mobile System content is not covered', () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+		selectSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: true } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: false } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: true } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(true);
+	});
+
+	it('mounts a phone section only once it is open, so an anchor scrolls in shown content', () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+		const shownWhenScrolled: boolean[] = [];
+		Element.prototype.scrollIntoView = function (this: Element) {
+			shownWhenScrolled.push(!!this.closest('.settings-content')?.classList.contains('mobile-section'));
+		};
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(host.querySelector('.section-host')).toBeNull();
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system', 'update');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(shownWhenScrolled).toEqual([true]);
 	});
 });

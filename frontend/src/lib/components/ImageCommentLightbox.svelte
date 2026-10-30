@@ -23,7 +23,7 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -32,6 +32,7 @@
 		readOnly?: boolean;
 		/** The document the image is in, and the way back to it. */
 		docName?: string;
+		docPath?: string | null;
 		onBack?: () => void;
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
@@ -48,6 +49,9 @@
 		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
 		draftOpen?: boolean;
+		hasDraft?: boolean;
+		sheetUp?: boolean;
+		selectedThread?: string | null;
 		place?: ImageViewportPlace | null;
 		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
@@ -66,11 +70,11 @@
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
 	function reload(id: string) {
-		void loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
+		return loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
 	}
 	/** Reads the comments (and their batch) again: the user came back to the browser tab. */
 	export function refresh() {
-		if (artifactId) reload(artifactId);
+		if (artifactId) return reload(artifactId);
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
@@ -84,7 +88,10 @@
 			lightbox?.revealFraction(centre.x, centre.y);
 		},
 		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
-		onCreated: () => feedback?.commentCreated(),
+		onCreated: () => {
+			feedback?.commentCreated();
+			if (artifactId) reload(artifactId);
+		},
 	});
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
@@ -108,7 +115,21 @@
 	}
 	$effect(() => { if (loaded && comments.length) void showFocus(); });
 
-	$effect(() => { draftOpen = image.hasDraftText; });
+	$effect(() => { draftOpen = image.hasDraftText; hasDraft = !!image.draftRegion; });
+	$effect(() => { selectedThread = image.ui.state?.kind === 'thread' ? image.ui.state.id : null; });
+	$effect(() => {
+		const currentRoot = root;
+		const id = artifactId;
+		const controller = feedback;
+		if (!currentRoot || !id || !controller || controller.imageHeld === 0) return;
+		const touch = () => controller.touchImage();
+		for (const event of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
+			currentRoot.addEventListener(event, touch, { passive: true });
+		}
+		return () => {
+			for (const event of ['pointermove', 'pointerdown', 'keydown', 'wheel']) currentRoot.removeEventListener(event, touch);
+		};
+	});
 	// A new revision of the image comes with a new `src`: read the comments again, so pins placed on the old one show as stale.
 	$effect(() => {
 		void src;
@@ -179,9 +200,9 @@
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
-					<!-- The bar is narrow at any window size (a canvas panel beside the chat): it keeps the batch's Retry and undelivered status; Send lives in the drawer footer (RSR-5), as in the document row. -->
-					{#if feedback && !inDocument}
-						<DocFeedbackControls {feedback} compact withSend={false} />
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): the image lane's Send is the one control here, so leaving the image and pressing it send the same comments. -->
+					{#if feedback}
+						<DocFeedbackControls {feedback} compact lane="image-held" />
 					{/if}
 				{/if}
 			{/snippet}
@@ -232,10 +253,11 @@
 			onResolve={image.threads.resolve}
 			onAgree={image.threads.agree}
 			target={null}
+			{docPath}
 			{artifactId}
 			readOnly={!canComment}
-			feedback={inDocument ? null : feedback}
 			onDrawerShown={(shown) => drawerShown = shown}
+			onSheetModalChange={(up) => sheetUp = up}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}

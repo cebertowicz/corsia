@@ -22,13 +22,20 @@ import sqlite3
 from typing import Any
 
 
-def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | None:
+def reasoning_shape_from_discovery(
+    model: dict[str, Any], *, managed_effort: str | None = None,
+) -> dict[str, Any] | None:
     """Build a reasoning descriptor from what an oMLX server reported.
 
     Three outcomes, in order:
 
     * discrete levels the template validates → an ``effort_levels`` picker,
-      opening on whatever level the server is currently configured to use;
+      opening on whatever level the server is currently configured to use.
+      ``managed_effort`` is CORSIA's level for its own server
+      (``local_profiles.MANAGED_REASONING_EFFORT``): when that server sets no
+      level and the model lists it, the picker opens on it and
+      ``send_when_unset`` names it, since only a level on the wire overrides
+      the template's default;
     * a thinking toggle but no levels → a ``boolean`` control, opening on the
       server's current setting;
     * no thinking support, or a server too old to report any of this → None,
@@ -38,14 +45,28 @@ def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | No
     the same as "this model has none" — both yield None here, but the absent
     case must never be recorded as a positive claim about the model.
     """
-    levels = model.get("reasoning_effort_options")
-    if levels:
+    efforts = model.get("reasoning_efforts")
+    # In oMLX 0.7.1rc1, [] means the template reads reasoning_effort but does
+    # not name standard levels. Its own _reasoning_levels exposes the generic
+    # options in that distinct case. An omitted field is an older server and
+    # must not be conflated with []; its generic custom list is untrusted.
+    if efforts == []:
+        efforts = model.get("reasoning_effort_options")
+    if efforts:
+        levels = [str(level) for level in efforts]
         configured = model.get("configured_reasoning_effort")
+        if configured not in levels and managed_effort in levels:
+            return {
+                "type": "effort_levels",
+                "values": levels,
+                "default": managed_effort,
+                "send_when_unset": managed_effort,
+            }
         declared = model.get("reasoning_effort_default")
         default = configured if configured in levels else declared
         return {
             "type": "effort_levels",
-            "values": list(levels),
+            "values": levels,
             "default": default if default in levels else levels[0],
         }
 
@@ -119,7 +140,9 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
     reconciles the two, and every reader of the saved value goes through it, so
     dispatch, cache warm, checkpoints and the picker agree by construction.
 
-    * ``None``, ``auto`` and ``none`` are returned as they are;
+    * ``None``, ``auto`` and ``none`` are returned as they are, without a
+      catalog read; an unset level on the managed oMLX is filled where the
+      request is shaped (``wire_reasoning_effort``);
     * no reported vocabulary (older server, free-form template, toggle-only
       model): the value passes through and the server validates it;
     * a level the model's vocabulary contains: itself;

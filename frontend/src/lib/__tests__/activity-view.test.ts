@@ -382,9 +382,10 @@ describe('ActivityView', () => {
 
 		const summary = host.querySelector('.row-summary[aria-label="Open Plan for thread-empty"]') as HTMLButtonElement;
 		expect(summary).toBeTruthy();
-		// One affordance inside the row-wide tap target: a forward chevron for a row that opens.
-		expect(summary.querySelectorAll('.chevron')).toHaveLength(1);
-		expect(summary.querySelector('.chevron.opens')).toBeTruthy();
+		// One affordance beside the row-wide tap target: a forward chevron for a row that opens.
+		const content = summary.parentElement!.querySelector('.row-content')!;
+		expect(content.querySelectorAll('.chevron')).toHaveLength(1);
+		expect(content.querySelector('.chevron.opens')).toBeTruthy();
 		summary.click();
 		await settle();
 		expect(onSelectThread).toHaveBeenCalledWith('thread-empty');
@@ -762,7 +763,8 @@ describe('ActivityView', () => {
 			props: { projectId: 'p1', scopeName: 'CORSIA', onSelectThread: vi.fn() },
 		});
 		await settle();
-		expect(host.textContent).toContain('No plan work yet');
+		expect(host.textContent).toContain('No plans');
+		expect(host.textContent).toContain('Plans in this project appear here.');
 		expect(host.textContent).not.toContain('no longer available');
 	});
 
@@ -774,7 +776,7 @@ describe('ActivityView', () => {
 			props: { projectId: 'p1', scopeName: 'CORSIA', onSelectThread: vi.fn(), onGoWorkspace },
 		});
 		await settle();
-		expect(host.textContent).toContain('This selected scope is no longer available');
+		expect(host.textContent).toContain('This project isn’t available');
 		expect(host.textContent).not.toContain('You don’t have access');
 		const recovery = [...host.querySelectorAll('button')].find((button) =>
 			button.textContent?.includes('Back to Workspace'),
@@ -785,7 +787,7 @@ describe('ActivityView', () => {
 
 	it('renders forbidden and server failures as distinct non-empty states', async () => {
 		for (const [status, expected] of [
-			[403, 'You don’t have access to this scope.'],
+			[403, 'You don’t have access to this project.'],
 			[500, 'Activity couldn’t load'],
 		] as const) {
 			resetPlanRuntimeForTests();

@@ -263,6 +263,7 @@ def test_execution_retry_requires_exact_canonical_lineage(
         name="read_file",
         arguments={"path": "README.md"},
         provider_turn_id="provider-turn-1",
+        assistant_step_id=assistant_step_id,
         db=db,
     ) == assistant_step_id
     request = {
@@ -681,7 +682,7 @@ async def test_codex_checkpoint_tool_uses_scope_without_live_turn_settlement(
     monkeypatch.setattr("subagents.harness_tool_bridge.settle_codex_tool_result", settle)
     session = CodexAppServerSession(
         binary="codex", task=None, tool_registry=object(),
-        corsia_thread_id="thread-1", checkpoint_id="cp-1",
+        corsia_thread_id="thread-1", fork_id="cp-1",
     )
     assert session.declared_tool_step_ids == {}
 
@@ -693,7 +694,7 @@ async def test_codex_checkpoint_tool_uses_scope_without_live_turn_settlement(
     assert error is None and result["success"] is True
     call = execute.await_args
     assert call is not None
-    assert call.kwargs["checkpoint_id"] == "cp-1"
+    assert call.kwargs["fork_id"] == "cp-1"
     assert call.kwargs["turn_identity"] is None
     assert call.kwargs["assistant_step_id"] is None
     settle.assert_not_awaited()
@@ -826,10 +827,10 @@ def test_bind_tool_result_echo_settles_undispatched_call_for_any_provider(
 def test_late_result_cannot_replace_terminal_synthetic_result(isolated_db) -> None:
     from core._tool_result_delivery_support import ToolResultBindingError
     from core.tool_result_delivery import (
-        PROVIDER_MISSING_RESULT_REASON,
         persist_tool_execution_result,
         synthetic_result_identity,
     )
+    from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
     from infra.database import get_db
     from subagents.child_thread import persist_tool_use
 

@@ -8,7 +8,8 @@ socket or block a message.
 
 Frames::
 
-    {"type": "presence", "surface": "chat", "thread_id": "…", "state": "foreground"}
+    {"type": "presence", "surface": "chat", "thread_id": "…", "state": "foreground",
+     "focused": true}          # focused optional; on a claimed session it only toggles focus
     {"type": "presence", "surface": "chat", "thread_id": "…", "state": "background",
      "reason": "hidden"}        # reason optional; "hidden" starts the 30 s grace
     {"type": "presence", "surface": "chat", "thread_id": "…", "state": "idle",
@@ -26,7 +27,7 @@ from datetime import timedelta
 from fastapi import WebSocket
 from loguru import logger
 
-from infra import presence, state, thread_updates
+from infra import presence, state, thread_updates, usage_summary
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.time import utc_now
@@ -102,6 +103,12 @@ async def handle_presence(ws: WebSocket, user: dict, data: dict, *, owned_thread
             )
             return
         if data.get("state") == "foreground":
+            focused = data.get("focused") if isinstance(data.get("focused"), bool) else None
+            if focused is not None and presence.is_claimed(
+                    session=session_id(ws), surface=surface, thread_id=thread_id):
+                await _apply(presence.set_focus, session=session_id(ws),
+                             surface=surface, focused=focused)
+                return
             if await owned_thread_fn(user, thread_id) is None:
                 await state.send_to_client(ws, {
                     "type": "error", "thread_id": thread_id,
@@ -109,7 +116,7 @@ async def handle_presence(ws: WebSocket, user: dict, data: dict, *, owned_thread
                 })
                 return
             await _apply(presence.claim, user_id=user["id"], surface=surface,
-                         thread_id=thread_id, session=session_id(ws))
+                         thread_id=thread_id, session=session_id(ws), focused=focused)
             return
         parsed = _parse_release(data)
         if parsed is None:
@@ -149,5 +156,6 @@ async def presence_sweep_loop() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
         try:
             await _apply(presence.sweep)
+            await run_in_db(usage_summary.record_current_install_week)  # a recorded week is one read; this covers a week boundary
         except Exception as exc:
             logger.warning(f"presence: sweep failed: {exc}")

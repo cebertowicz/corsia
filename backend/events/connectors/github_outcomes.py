@@ -7,14 +7,18 @@ same ``dedupe_key``, so re-admitting that payload is a no-op. That is exactly wh
 dedupe promises here, and nothing more.
 
 The keys then split into two kinds, and a backfill has to know which is which. The
-PR open, push, close and merge keys, the issue keys and the run id plus
-``run_attempt`` in ``github.workflow_run.completed`` are built from identities the
+PR open, push, close and merge keys, issue open and close keys and the run id plus
+``run_attempt`` in ``github.workflow_run.completed``, the job id in
+``github.workflow_job.completed``, the check run id plus ``completed_at`` in
+``github.check_run.completed``, the release id plus ``published_at`` in
+``github.release.published``, and the review or comment id (plus the action, for a
+review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
-``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
+``github.pr.retargeted``, PR ready/drafted, issue assigned, status and check suite keys use
 ``updated_at`` the delivering payload reported: a fact about that delivery no later
 read recovers, since the field moves with any subsequent edit or re-run. Re-deriving
-those three from the API yields a different key and adds a row instead of deduping,
+these from the API yields a different key and adds a row instead of deduping,
 so backfilling them needs the original delivery. Reconstructing a key is also not a
 promise that an event's other historical attributes still read the same way. The
 repository name is lowercased once on entry and that one value is used in every key,
@@ -29,11 +33,15 @@ check them.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from importlib import import_module
 from typing import Any
 
+from events.connectors import github_label_events as label_events
 from events.connectors.github_ownership import declared_owner_thread_ids
 from events.connectors import github_outcome_input as shape
+from events.connectors import github_outcome_measurements as measurements
 from infra.outcome_event_attributes import ISSUE_KIND_VALUES, PRIORITY_VALUES
 
 _INTRODUCED_BY = re.compile(r"^[ \t>*_-]*introduced[ \t]+by[ \t]+#(\d+)\b", re.I | re.M)
@@ -121,6 +129,8 @@ def _pr_draft(
 
 def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
+    if action in ("ready_for_review", "converted_to_draft"):
+        return _sibling("github_lifecycle_outcomes", "pr_drafts")(payload, repo)
     pr = shape.mapping(shape.required(payload, "pull_request"))
     number = shape.number(shape.required(pr, "number"))
     subject = pr_subject(repo, number)
@@ -154,11 +164,21 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
         return [_pr_draft(key, subject, common, f"closed:{closed}", "github.pr.closed", closed)]
     merged_at = shape.timestamp(shape.required(pr, "merged_at"))
     body = shape.body(pr.get("body"))
+    minutes_since_opened = measurements.minutes_between(pr.get("created_at"), merged_at)
+    revert = measurements.reverted_sha(pr.get("title"), body)
+    revert_pr = measurements.reverted_pr_number(pr.get("title"), body, repo)
+    measurement_attrs: dict[str, Any] = {}
+    if minutes_since_opened is not None:
+        measurement_attrs["minutes_since_opened"] = minutes_since_opened
+    if revert is not None:
+        measurement_attrs["reverts_sha"] = revert
+    if revert_pr is not None:
+        measurement_attrs["reverts_pr"] = revert_pr
     drafts = [_pr_draft(
         key, subject, common, "merged", "github.pr.merged", merged_at,
         head_ref=shape.text(shape.required(shape.mapping(pr["head"]), "ref")),
         merge_sha=shape.text(shape.required(pr, "merge_commit_sha")),
-        **declaration_attributes(pr),
+        **declaration_attributes(pr), **measurement_attrs,
     )]
     for introducing in introduced_by_numbers(body):
         drafts.append(OutcomeDraft(
@@ -265,7 +285,7 @@ def _check_suite_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft
     )]
 
 
-def _label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
+def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     """Scalar label facts: highest priority, lane, kind, and the label count."""
     names = sorted({shape.text(shape.required(shape.mapping(label), "name"))
                     for label in shape.members(labels)})
@@ -283,34 +303,63 @@ def _label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     return attrs
 
 
-def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    action = payload.get("action")
-    issue = shape.mapping(shape.required(payload, "issue"))
-    number = shape.number(shape.required(issue, "number"))
-    subject = f"github:issue:{repo}#{number}"
-    attrs = {"repo": repo, "issue": str(number)}
-    if "labels" in issue:
-        attrs.update(_label_attributes(issue["labels"]))
-    if action == "opened":
-        return [OutcomeDraft(
-            f"{subject}:opened", "github.issue.opened",
-            shape.timestamp(shape.required(issue, "created_at")), subject, attrs,
-        )]
-    if issue.get("state_reason") is not None:
-        attrs["state_reason"] = shape.text(issue["state_reason"])
-    closed = shape.timestamp(shape.required(issue, "closed_at"))
-    return [OutcomeDraft(
-        f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs,
-    )]
+def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    """The drafts one ``labeled``, ``unlabeled`` or issue ``reopened`` delivery carries.
+
+    Facts and identity come from ``github_label_events.change_event``; label names, logins and counts
+    only. A change with no ``labels`` (a poller copy) records no label-derived attributes.
+    """
+    change = label_events.change_event(event_type, payload)
+    if change is None:
+        return []
+    facts = change.facts
+    at = shape.timestamp(facts["at"])
+    label = facts.get("label")
+    if event_type == "pull_request":
+        subject = pr_subject(repo, facts["pr_number"])
+        attrs: dict[str, Any] = {"repo": repo, "pr": str(facts["pr_number"])}
+        if "labels" in facts:
+            attrs["label_count"] = len(facts["labels"])
+        if "sha" in facts:
+            attrs["head_sha"] = facts["sha"]
+    else:
+        subject = f"github:issue:{repo}#{facts['issue_number']}"
+        attrs = {"repo": repo, "issue": str(facts["issue_number"])}
+        if "labels" in facts:
+            attrs.update(label_attributes(payload["issue"]["labels"]))
+        if "minutes_since_opened" in facts:
+            attrs["minutes_since_opened"] = facts["minutes_since_opened"]
+    if label is not None:
+        attrs["label"] = label
+    if "actor" in facts:
+        attrs["actor"] = facts["actor"]
+    return [OutcomeDraft(f"{subject}:{change.type}:{label or ''}:{at}", f"github.{change.type}", at, subject, attrs)]
+
+
+def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[OutcomeDraft]]:
+    """A mapper in a sibling module, imported on first call: those modules import this one."""
+    def mapper(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+        return getattr(import_module(f"events.connectors.{module}"), name)(payload, repo)
+    return mapper
 
 
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "ready_for_review", "converted_to_draft"),
+                     _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
-    "issues": (("opened", "closed"), _issue_drafts),
+    "workflow_job": (("completed",), _sibling("github_ci_outcomes", "workflow_job_drafts")),
+    "check_run": (("completed",), _sibling("github_ci_outcomes", "check_run_drafts")),
+    "issues": (("opened", "closed", "assigned"), _sibling("github_lifecycle_outcomes", "issue_drafts")),
+    "status": ((None,), _sibling("github_lifecycle_outcomes", "status_drafts")),
+    "release": (("published",), _sibling("github_lifecycle_outcomes", "release_drafts")),
+    "pull_request_review": (("submitted", "dismissed"), _sibling("github_reply_outcomes", "review_drafts")),
+    "pull_request_review_comment": (("created",), _sibling("github_reply_outcomes", "review_comment_drafts")),
+    "issue_comment": (("created",), _sibling("github_reply_outcomes", "issue_comment_drafts")),
 }
+# The one declaration of the label changes and issue reopens that ``label_drafts`` maps.
+_LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
 
 
 def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[OutcomeDraft]:
@@ -325,13 +374,15 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
     actions, mapper = dispatch
     payload = shape.mapping(payload)
     action = payload.get("action")
-    if action not in actions:
+    if action not in (*actions, *_LABEL_ACTIONS.get(event_type, ())):
         return []
     base_from = _retarget_base_from(payload) if event_type == "pull_request" and action == "edited" else None
     if event_type == "pull_request" and action == "edited" and base_from is None:
         return []
     repository = shape.mapping(shape.required(payload, "repository"))
     repo = shape.text(shape.required(repository, "full_name")).lower()
+    if action in _LABEL_ACTIONS.get(event_type, ()):
+        return label_drafts(event_type, payload, repo)
     if base_from is not None:
         return _retarget_drafts(payload, repo, base_from)
     return mapper(payload, repo)

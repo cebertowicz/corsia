@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from connections.account_profiles import profile_for
 
 if TYPE_CHECKING:
-    from connections.account_controls import SignIn
+    from connections.account_signin import SignIn
 
 # Only this much of a sign-in's output is ever held, to find a prompt split across reads.
 _WINDOW = 4096
@@ -24,6 +24,8 @@ async def discard(stream: asyncio.StreamReader, operation: SignIn) -> None:
         window = (window + chunk.decode("utf-8", "replace"))[-_WINDOW:]
         if (prompt := reader(window)) is not None:
             operation.prompt = prompt
+            # A later complete prompt supersedes a prior bounded-wait diagnosis.
+            operation.cause = None
             operation.prompted.set()
 
 
@@ -37,3 +39,5 @@ async def wait(operation: SignIn, timeout: float) -> None:
         waiting.cancel()
     # The sign-in's own outcome is read from its record, never from these waits.
     await asyncio.gather(*waits, return_exceptions=True)
+    if operation.status == "waiting" and operation.prompt is None:
+        operation.cause = "prompt_unrecognized"

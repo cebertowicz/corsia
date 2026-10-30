@@ -62,7 +62,7 @@ def test_initialize_project_designates_project_conductor(project_environment):
     ).fetchone()
     assert dict(row) == {
         "user_id": "owner",
-        "title": "Conductor",
+        "title": "Created Conductor",
         "project_id": project["id"],
         "model": "claude-code/sonnet",
     }

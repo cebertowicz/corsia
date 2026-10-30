@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -36,7 +37,7 @@ for (const width of WIDTHS) {
 		const artifactId: string = (await seeded.json()).artifact.id;
 		const quoted = 'ordinary prose';
 		const from = TEXT.indexOf(quoted);
-		const comment = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length } });
+		const comment = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 		expect(comment.ok(), await comment.text()).toBeTruthy();
 		await page.addInitScript(({ threadId, docPath, fileName, artifactId }) => {
 			localStorage.setItem('corsia_theme', 'light');
@@ -73,7 +74,8 @@ for (const width of WIDTHS) {
 			const marker = document.querySelector<HTMLElement>('.cm-comment-marker')!.getBoundingClientRect();
 			const glyph = document.querySelector('.cm-comment-marker svg')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
-			const tools = document.querySelector('.document-tools')!.getBoundingClientRect();
+			const tool = document.querySelector<HTMLElement>('.document-tools button')!;
+			const tools = tool.getBoundingClientRect();
 			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
 			resolve({
 				left: rect.left - scroller.left, right: scroller.right - rect.right,

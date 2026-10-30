@@ -91,9 +91,9 @@ Asking for less of your attention is only safe with proof that the work is getti
 
 ## What it asks of you
 
-Decisions and results, not transcripts. Every agent you add is another stream to watch, unless it only interrupts you when something needs you.
+A problem for each agent, and the authority to work on it. The agent sets its KPIs and measures itself on your work; you steer as much or as little as you like.
 
-- **Decisions arrive prepared.** Agents act within the authority you give them. A choice outside it arrives with options, the trade-off and a recommendation, and you can answer from your phone. Widen the authority as results earn your trust, and fewer decisions reach you.
+- **You set the authority.** Agents act within it. A choice outside it comes with options, the trade-off and a recommendation, and you can answer from your phone. Widen it as the measurements show the work holding up.
 - **Focus mode**, on by default, shows your messages, each agent's marked updates and its decisions. Working steps collapse.
 - **Work doesn't stop when the chat does.** With GitHub connected, a pull-request comment, review or CI result wakes the agent that owns that work. Every wait has a deadline, a worker that stops with open work wakes the agent that sent it, and a step closes only with evidence against its acceptance criteria.
 - **Work in the same document.** You and your agents edit a document at the same time, and every change merges live. A comment or suggested edit goes to the agent that owns it.
@@ -132,19 +132,19 @@ xychart-beta
 
 <sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. * Monday to Friday.</sub>
 
-Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/contributing/bootstrap/starter-kit/shared/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
+Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
 
 ## Getting started
 
 ### Know before you start
 
-- **macOS on Apple Silicon only.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`. Local models need macOS 15 or later.
+- **A Mac with Apple Silicon (M1 or later) and macOS 15 or later.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`.
 - **16 GB Macs currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still needs to run locally.
 - **Corrections are recorded only once the local corrections classifier is installed.** Until then CORSIA records none. Installing the classifier during setup is tracked in [#704](https://github.com/cebertowicz/corsia/issues/704).
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](#security)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are dated tags on `main`. There is no packaged desktop app yet.
+- **Pre-release.** Releases are dated tags on `main`. No signed desktop app is published yet; you can build one from your checkout (below).
 
 ### Install
 
@@ -156,13 +156,13 @@ cd ~/.corsia
 bash scripts/install.sh
 ```
 
-The installer adds any missing prerequisites, builds the environment and opens CORSIA at `http://localhost:1956`. The rest happens in the browser:
+The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. It asks no setup questions in Terminal. The rest happens in the browser:
 
-1. Choose where your work lives and create a local account.
+1. Create a local account.
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
-3. Describe your work, or start with the ready-made Assistant for Gmail, Google Calendar, Drive and Docs. CORSIA shows each setup step in its plan as it sets up your first agent with you.
+3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → Update**, which waits for running turns to finish and keeps the old build serving if the new one fails.
+Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 
@@ -190,6 +190,18 @@ scripts/corsia start
 ```
 
 First-run setup runs only from a checkout at `~/.corsia`.
+
+</details>
+
+<details>
+<summary><strong>Desktop app from your checkout</strong></summary>
+
+```bash
+cd ~/.corsia
+bash desktop/scripts/build-macos-bundle.sh --skip-dmg
+```
+
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Treat Take over as one-way for now: going back to running the checkout afterwards, opening a newer build over an installed one, and how the app updates after a takeover are not yet tested. If a takeover fails, your source install is restarted as it was.
 
 </details>
 
@@ -245,7 +257,7 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 
 <br/>Write each instruction once, at the [scope](#scopes) it applies to: **Workspace settings → Create new context file** for everything, **Project settings → Create new context file** for one project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
-**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level.
+**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits, an agent can install a reviewed one from the public [skill library](docs/skill-library.md) and keep it up to date.
 
 Every turn shows what the agent loaded, by source and size. A context file in that list opens straight from it, so you can read or change what an agent works from.
 
@@ -294,7 +306,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Optional account rollover on usage limits, set for the workspace or per project
 
 **Measurement and learning**
-- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent
+- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent ([how to read them](docs/measurement.md))
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
 - [x] Versioned guidance and lesson trials with a boundary and review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*

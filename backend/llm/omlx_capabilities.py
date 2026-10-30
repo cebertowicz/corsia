@@ -6,8 +6,10 @@ concern from the catalog plumbing that stores them, so it lives here.
 
 A field the server omits means "this server cannot say", which is never the
 same as it saying the model has no such capability. Absent stays absent.
-``reasoning_effort_options`` is None when the template has no strict vocabulary,
-which reads the same way: no discrete picker, fall back to the on/off toggle.
+``reasoning_efforts`` (oMLX 0.7.1rc1+) is the template's own vocabulary; None
+means it names none, so the picker falls back to the on/off toggle.
+``reasoning_effort_options`` is oMLX's generic custom-control list, trusted only
+where ``reasoning_efforts`` is present and empty (see ``reasoning_config``).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any
 REPORTED_FIELDS = (
     "thinking_default",
     "preserve_thinking_default",
+    "reasoning_efforts",
     "reasoning_effort_options",
     "reasoning_effort_default",
 )
@@ -47,6 +50,28 @@ def capture_configured(settings: dict[str, Any], target: dict[str, Any]) -> None
         target["configured_reasoning_effort"] = effort
     if settings.get("enable_thinking") is not None:
         target["configured_enable_thinking"] = bool(settings["enable_thinking"])
+
+
+def apply_admin_model(canonical: dict[str, dict], model: dict) -> None:
+    """Enrich a discovered model with the admin endpoint's fields."""
+    from llm.model_metadata import extract_context_length
+
+    provider_model_id = model.get("id")
+    if not provider_model_id or provider_model_id not in canonical:
+        return
+    settings = model.get("settings") or {}
+    alias = (settings.get("model_alias") or "").strip()
+    if alias:
+        canonical[provider_model_id]["model_alias"] = alias
+    capture_configured(settings, canonical[provider_model_id])
+    capture_reported(model, canonical[provider_model_id])
+    if isinstance(model.get("config_model_type"), str):
+        canonical[provider_model_id]["config_model_type"] = model["config_model_type"]
+    if canonical[provider_model_id].get("context_length") is not None:
+        return
+    window = extract_context_length(model)
+    if window is not None:
+        canonical[provider_model_id]["context_length"] = window
 
 
 def apply_metadata(

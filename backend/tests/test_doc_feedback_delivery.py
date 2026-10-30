@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import feedback_batches
 from infra.database import get_db
-from plans import admission, service
+from plans import admission, current, service
+from plans.boundary import PlanActor
 from plans.feedback_nodes import AGENT_FRAMING, PROVENANCE, USER_FRAMING, create_feedback_node
 
 
@@ -68,6 +69,25 @@ def test_idle_owner_is_selected_but_busy_owner_is_not_preempted(isolated_db):
         db.close()
 
 
+def test_insertion_feedback_describes_insertion_to_owner(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author")
+        artifact_id = seed_document(db, "owner")
+        comment, _ = add_comment(db, artifact_id, replacement=" new fact")
+        db.execute("UPDATE doc_comments SET insert_after=1 WHERE id=?", (comment["id"],))
+        db.commit()
+        batch = batches(db, state="open")[0]
+        feedback_batches.close_batch(db, batch["id"], "quiet")
+        node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
+        assert "Quote: quoted source" in node.description
+        assert "Suggested insertion after the quote:  new fact" in node.description
+        assert "Suggested replacement:" not in node.description
+    finally:
+        db.close()
+
+
 def test_node_link_provenance_framing_counts_and_idempotency(isolated_db):
     db = get_db()
     try:
@@ -86,6 +106,10 @@ def test_node_link_provenance_framing_counts_and_idempotency(isolated_db):
         assert node.description.startswith(AGENT_FRAMING)
         assert "Comment " in node.description and "Suggested replacement: replacement text" in node.description
         assert "workspace" not in node.description.lower()
+        assert node.intent is None
+        assert db.execute(
+            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (node.id,)
+        ).fetchone()[0] == 0
         link = db.execute(
             "SELECT * FROM plan_node_artifact_links WHERE node_id=?",
             (node.id,),
@@ -105,11 +129,35 @@ def test_user_batch_uses_fixed_user_framing_and_ui_recipient_creates_no_node(iso
     try:
         seed_thread(db, "owner", title="Owner")
         artifact_id = seed_document(db, "owner")
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        first, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        second, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
         user_batch = batches(db, state="open")[0]
         feedback_batches.close_batch(db, user_batch["id"], "send")
         user_node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
         assert user_node.description.startswith(USER_FRAMING)
+        assert "Your replies reach the user through the chat's reply chip, so don't also send a post_update about a reply." in user_node.description
+        assert user_node.intent == "User document feedback: Please check this point.\nPlease check this point."
+        words = db.execute(
+            """SELECT author,role,source_kind,source_id,quote,requirements_revision
+               FROM plan_node_intent_words WHERE node_id=? ORDER BY source_id""",
+            (user_node.id,),
+        ).fetchall()
+        assert [dict(word) for word in words] == [
+            {"author": "person", "role": "origin", "source_kind": "doc_comment",
+             "source_id": comment_id, "quote": "Please check this point.", "requirements_revision": 1}
+            for comment_id in sorted((first["id"], second["id"]))
+        ]
+        detail = current.read_current_status(
+            actor=PlanActor("owner", "owner-token", None), node_id=user_node.id, db=db,
+        )
+        assert [word["quote"] for word in detail["intent_words"]] == ["Please check this point."] * 2
+        again = create_feedback_node(db, "owner", batches(db)[0])
+        assert (again.node_id, again.created) == (user_node.id, False)
+        assert db.execute(
+            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (user_node.id,)
+        ).fetchone()[0] == 2
+        # A reply under a comment the agent then resolves is hidden from the user.
+        assert "Leave the user's comment open for them to resolve" in user_node.description
 
         root, _ = add_comment(
             db, artifact_id, author_kind="user", author_id=None, author="Steve",
@@ -307,6 +355,39 @@ def test_invalid_target_config_refuses_one_due_batch_without_stopping_the_sweep(
         assert (by_document[good_document]["state"], by_document[good_document]["delivered_node_id"]) == (
             "delivered", _feedback_nodes(db)[0]["id"],
         )
+        assert len(_feedback_nodes(db)) == 1
+    finally:
+        db.close()
+
+
+def test_raising_due_batch_rolls_back_alone_and_siblings_continue(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, "bad-owner")
+        seed_thread(db, "good-owner", model="anthropic/claude-3-5-sonnet")
+        seed_thread(db, "author")
+        bad_document = seed_document(db, "bad-owner", name="bad.md")
+        good_document = seed_document(db, "good-owner", name="good.md")
+        add_comment(db, bad_document)
+        add_comment(db, good_document)
+        by_document = {row["artifact_id"]: row for row in batches(db)}
+        bad_batch_id = by_document[bad_document]["id"]
+        original = feedback_batches._claim_and_deliver
+
+        def raise_for_bad_batch(connection, batch_id, **kwargs):
+            if batch_id == bad_batch_id:
+                raise RuntimeError("injected delivery failure")
+            return original(connection, batch_id, **kwargs)
+
+        monkeypatch.setattr(feedback_batches, "_claim_and_deliver", raise_for_bad_batch)
+        db.execute("UPDATE doc_feedback_batches SET closes_at='2000-01-01T00:00:00+00:00'")
+        db.commit()
+
+        assert feedback_batches.close_due("2000-01-01T00:00:00+00:00", db=db) == ["good-owner"]
+
+        by_document = {row["artifact_id"]: row for row in batches(db)}
+        assert (by_document[bad_document]["state"], by_document[bad_document]["attempts"]) == ("open", 0)
+        assert (by_document[good_document]["state"], by_document[good_document]["attempts"]) == ("delivered", 1)
         assert len(_feedback_nodes(db)) == 1
     finally:
         db.close()

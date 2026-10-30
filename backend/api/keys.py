@@ -82,6 +82,15 @@ def _provider_rows() -> list[dict]:
     return key_store_providers.provider_key_rows(key_store_providers.provider_keys(), labels, hidden)
 
 
+def _keys_with_destinations() -> list[dict]:
+    """Key metadata plus H19 destination disclosures for every relevant mail-host row."""
+    from connections.mailhost.row_detail import destination_hosts_for_keys
+
+    entries = key_store.list_entries()
+    destinations = destination_hosts_for_keys()
+    return [{**entry, **({"destination_hosts": destinations[entry["name"]]} if entry["name"] in destinations else {})} for entry in entries]
+
+
 def _server_rows() -> list[dict]:
     from infra.key_store_servers import server_key_rows
     from llm.network_discovery import get_servers
@@ -116,7 +125,7 @@ def _added_by(user: dict) -> tuple[str | None, str | None]:
 @router.get("")
 async def list_keys(user: dict = Depends(require_user)) -> dict:
     """Every entry's metadata. Never a value."""
-    entries = await run_in_db(key_store.list_entries)
+    entries = await run_in_db(_keys_with_destinations)
     return {
         "keys": [_public(entry) for entry in entries],
         "provider_keys": await run_in_db(_provider_rows),
@@ -163,20 +172,23 @@ async def _reconnect_connected_app_for_key(name: str) -> None:
 
     app_id = await run_in_db(runtime_app_id_for_key_entry, name)
     if app_id is not None:
-        from tools.connected_apps_runtime import apply_connected_app_runtime
+        from tools.connected_apps_runtime import restart_after_saved_write
 
-        await apply_connected_app_runtime("reconnect", app_id)
+        await restart_after_saved_write(app_id)
 
 
 @router.put("/{name}/value")
 async def set_key_value(
     name: str, request: Request, session: tuple[dict, str] = Depends(_human_session),
 ) -> dict:
-    """Set or replace an entry's value, then refresh its approved MCP app."""
+    """Set or replace an entry's value, then refresh its approved MCP app or check its mail-host account."""
+    from connections.mailhost.check import start_after_key_write
+
     result = await _guarded(
         request, session, name, lambda body: key_store.set_value(name, body.get("value")), "write",
     )
     await _reconnect_connected_app_for_key(name)
+    await start_after_key_write(name)
     return result
 
 
@@ -185,7 +197,11 @@ async def clear_key_value(
     name: str, request: Request, session: tuple[dict, str] = Depends(_human_session),
 ) -> dict:
     """Remove an entry's value from Settings › Keys, keeping the entry."""
-    return await _guarded(request, session, name, lambda body: key_store.clear_value(name), "clear")
+    from connections.mailhost.check import reset_after_key_clear
+
+    result = await _guarded(request, session, name, lambda body: key_store.clear_value(name), "clear")
+    await reset_after_key_clear(name)
+    return result
 
 
 @router.post("/{name}/remove")

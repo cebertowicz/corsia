@@ -7,8 +7,10 @@ import { isCurrentTurn, type TurnIdentity } from './turnState';
 const TYPEWRITER_BASE_SPEED = 12;
 const TYPEWRITER_INTERVAL_MS = 33;
 const TYPEWRITER_SPEEDUP_AFTER = 200;
+const OPENING_REVEAL_DURATION_MS = 1_800;
 
-interface TypewriterTimer extends TurnIdentity {
+interface TypewriterTimer {
+	identity?: TurnIdentity;
 	timer: ReturnType<typeof setInterval>;
 }
 
@@ -58,12 +60,21 @@ export function startTypewriter(
 	messageId: string,
 	startPos: number,
 	endPos: number,
-	identity: TurnIdentity,
+	identity?: TurnIdentity,
+	pacing: 'characters' | 'words' = 'characters',
 ) {
 	const existing = _typewriters.get(threadId)?.get(messageId);
 	if (existing) clearInterval(existing.timer);
 
 	let pos = startPos;
+	// The scripted opening uses the same timer/store path as settled step text,
+	// but advances at word boundaries within the same total duration for every provider.
+	const content = get(messages).find(m => m.id === messageId)?.content ?? '';
+	const wordEnds = pacing === 'words'
+		? Array.from(content.matchAll(/\S+\s*/g), match => match.index! + match[0].length)
+			.filter(end => end > startPos && end <= endPos)
+		: [];
+	const startedAt = Date.now();
 
 	// Hiding content and animating it are ONE act, so they happen in one place.
 	// `handleStepText` used to set `typewriterPos: 0` on the row and then start
@@ -74,7 +85,10 @@ export function startTypewriter(
 	// disappears and comes back when the next one starts streaming": it was
 	// waiting for any unrelated update to rewrite the row.
 	messages.update(msgs =>
-		msgs.map(m => (m.id === messageId ? { ...m, typewriterPos: startPos } : m)),
+		msgs.map(m => (m.id === messageId ? {
+			...m, typewriterPos: startPos,
+			...(pacing === 'words' ? { firstRunOpeningReveal: true } : {}),
+		} : m)),
 	);
 
 	/** Stop animating and show the message WHOLE. Never leave it part-revealed.
@@ -105,7 +119,7 @@ export function startTypewriter(
 	const timer = setInterval(() => {
 		if (
 			!isDisplayedThread(threadId)
-			|| !isCurrentTurn(threadId, identity)
+			|| (identity !== undefined && !isCurrentTurn(threadId, identity))
 		) {
 			finish();
 			return;
@@ -116,7 +130,11 @@ export function startTypewriter(
 			? TYPEWRITER_BASE_SPEED + Math.floor((revealed - TYPEWRITER_SPEEDUP_AFTER) / 100) * 4
 			: TYPEWRITER_BASE_SPEED;
 
-		pos = Math.min(pos + speed, endPos);
+		const wordsShown = Math.max(1, Math.ceil(wordEnds.length
+			* Math.min(1, (Date.now() - startedAt) / OPENING_REVEAL_DURATION_MS)));
+		pos = pacing === 'words'
+			? wordEnds[wordsShown - 1] ?? endPos
+			: Math.min(pos + speed, endPos);
 
 		const current = get(messages);
 		const targetExists = current.some(m => m.id === messageId);
@@ -141,7 +159,7 @@ export function startTypewriter(
 		}
 	}, TYPEWRITER_INTERVAL_MS);
 
-	_registerTimer(threadId, messageId, { ...identity, timer });
+	_registerTimer(threadId, messageId, { identity, timer });
 }
 
 export function cancelThreadTypewriters(
@@ -154,7 +172,7 @@ export function cancelThreadTypewriters(
 		for (const [messageId, record] of inner) {
 			if (
 				identity
-				&& (record.turnId !== identity.turnId || record.turnOrder !== identity.turnOrder)
+				&& (record.identity?.turnId !== identity.turnId || record.identity?.turnOrder !== identity.turnOrder)
 			) continue;
 			clearInterval(record.timer);
 			inner.delete(messageId);

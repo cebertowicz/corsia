@@ -154,21 +154,45 @@ class TestFirstModelChoice:
         assert "unavailable" not in facts["your_model"]
 
     @pytest.mark.asyncio
-    async def test_an_unfinished_fact_is_unavailable_after_the_total_bound(self, fresh_install, monkeypatch):
+    async def test_a_failed_selected_model_fact_remains_unavailable(self):
         import asyncio
 
         from onboarding import first_run_wake
 
-        async def never(*_args, **_kwargs):
-            await asyncio.sleep(60)
+        failed = asyncio.get_running_loop().create_future()
+        failed.set_exception(OSError("catalog unavailable"))
 
-        monkeypatch.setattr(first_run_wake, "FACTS_TIMEOUT_SECONDS", 0.2)
-        monkeypatch.setattr("onboarding.setup_decisions.setup_plan", never)
+        facts = await first_run_wake._read_facts({"your_model": lambda: failed})
 
-        facts = await asyncio.wait_for(first_run_wake.setup_facts("claude-code/sonnet"), 5)
+        assert facts == {
+            "your_model": {"unavailable": first_run_wake.UNAVAILABLE_READS["your_model"]},
+        }
 
-        assert facts["setup"] == {"unavailable": first_run_wake.UNAVAILABLE_READS["setup"]}
-        assert "unavailable" not in facts["your_model"]
+    @pytest.mark.asyncio
+    async def test_an_unfinished_fact_is_unavailable_after_the_total_bound(self, monkeypatch):
+        import asyncio
+
+        from onboarding import first_run_wake
+
+        async def never():
+            await asyncio.Event().wait()
+
+        ready = asyncio.get_running_loop().create_future()
+        ready.set_result({"display_name": "Sonnet", "local": False})
+        # The completed future makes the successful fact independent of event
+        # loop and DB-pool timing; only the deliberate never-ending read uses
+        # the zero shared budget.
+        monkeypatch.setattr(first_run_wake, "FACTS_TIMEOUT_SECONDS", 0)
+
+        facts = await first_run_wake._read_facts({
+            "your_model": lambda: ready,
+            "setup": never,
+        })
+
+        assert facts == {
+            "your_model": {"display_name": "Sonnet", "local": False},
+            "setup": {"unavailable": first_run_wake.UNAVAILABLE_READS["setup"]},
+        }
 
     @pytest.mark.asyncio
     async def test_no_search_runs_while_the_facts_are_read(self, fresh_install, monkeypatch):
@@ -236,25 +260,137 @@ class TestAppPath:
         assert first_run_wake.app_reference_served() is True
 
     @pytest.mark.asyncio
-    async def test_served_app_path_uses_only_app_facts_and_both_references(self, monkeypatch):
+    async def test_served_app_path_uses_compact_instructions_and_only_first_step(self, monkeypatch):
         from onboarding import first_run_wake
 
         app_facts = {
-            "first_run_path": "app", "harness_ready": ["codex"], "gmail_eligible": True,
-            "web_search_ready": False, "github_ready": False, "own_omlx_source": False,
+            "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
+            "agents_found": ["hermes"], "local_download": {"state": "stopped"},
+            "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
+            "pays_for": [],
+            "bound_model": None,
+            "web_search_ready": False, "web_search_key": False, "github_ready": False,
             "setup": {"setup_decisions": []},
-            "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
+            "user_profile": {"name": "Pat"},
         }
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
-        monkeypatch.setattr(first_run_wake, "setup_facts", AsyncMock(return_value=app_facts))
+        monkeypatch.setattr("onboarding.app_first_run.read_app_facts", AsyncMock(return_value=app_facts))
         monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": f"{path} instructions")
 
         wake = await first_run_wake.render_for("codex/gpt-5.6-terra", "app")
 
         assert first_run_wake.APP_INLINE_SUMMARY in wake
         assert "app instructions" in wake
+        assert "## Your first step" in wake
+        assert "3. **Where your work lives" in wake
+        assert "4. **Web search" not in wake
+        assert "## The opening" not in wake
         assert set(app_facts) == first_run_wake.APP_FACT_KEYS
         assert not any(key in wake for key in ("mcp_sources", "your_model", "model_sources", "host_access_reviewer"))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("source_rows", "expected_missing"), [
+        (({"state": "ready"}, {"state": "ready"}), {}),
+        (({"state": "not_installed"}, {"state": "ready"}), {"claude_code": "not_installed"}),
+        (({"state": "ready"}, {"state": "needs_auth"}), {"codex": "needs_auth"}),
+        (({"state": "unverified"}, {"state": "ready"}), {"claude_code": "unusable"}),
+        (({"state": "ready"}, {"state": "ready", "limited": True}), {"codex": "limited"}),
+    ])
+    @pytest.mark.parametrize(("status", "expected_download"), [
+        ({"state": "downloading", "model": "qwen", "percent": 50}, {"state": "downloading", "model": "qwen", "percent": 50}),
+        ({"state": "ready", "model": "qwen"}, {"state": "ready", "model": "qwen"}),
+        ({"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}, {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}),
+        ({"state": "setup_failed", "cause": "other"}, {"state": "setup_failed", "cause": "other"}),
+        ({"state": "idle", "stage": None, "result": None}, {"state": "stopped"}),
+    ])
+    async def test_app_setup_facts_carry_every_source_and_download_state(
+        self, monkeypatch, source_rows, expected_missing, status, expected_download,
+    ):
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [
+                {"source": "claude-code", **source_rows[0]},
+                {"source": "codex", **source_rows[1]},
+            ],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
+        monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
+            "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
+        })
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: {"claude": False, "chatgpt": True, "key": False})
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        monkeypatch.setattr(first_run_wake, "_app_agents_found", lambda: ["openclaw"])
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        assert facts["sources_missing"] == expected_missing
+        assert facts["local_download"] == expected_download
+        assert facts["tool_attempts"] == {
+            "claude_code": {"attempt": "none"},
+            "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
+        }
+        assert facts["pays_for"] == ["codex"]
+        assert facts["bound_model"] is None
+        assert facts["agents_found"] == ["openclaw"]
+        assert set(facts) == first_run_wake.APP_FACT_KEYS
+
+    @pytest.mark.parametrize("present, expected", [
+        ((), []),
+        (("openclaw",), ["openclaw"]),
+        (("openclaw", "hermes"), ["openclaw", "hermes"]),
+    ])
+    def test_agents_found_checks_presence_without_opening_settings(self, monkeypatch, tmp_path, present, expected):
+        import builtins
+        import io
+        from pathlib import Path
+
+        from onboarding import first_run_wake
+
+        for name in ("OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "HERMES_HOME"):
+            monkeypatch.delenv(name, raising=False)
+        markers = {"openclaw": tmp_path / ".openclaw" / "workspace", "hermes": tmp_path / ".hermes" / "memories"}
+        for source in present:
+            markers[source].mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        opened: list[str] = []
+        for target, name in ((builtins, "open"), (io, "open"), (Path, "open"), (Path, "read_text"), (Path, "read_bytes")):
+            original = getattr(target, name)
+            monkeypatch.setattr(target, name, lambda *a, _original=original, **k: opened.append(str(a[0])) or _original(*a, **k))
+
+        found = first_run_wake._app_agents_found()
+
+        assert found == expected
+        assert not [path for path in opened if str(tmp_path) in path]
+
+    def test_app_user_profile_carries_the_full_name_beside_the_preferred_name(self, monkeypatch, tmp_path):
+        from infra import config, user_profile
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+        (tmp_path / "context").mkdir()
+        (tmp_path / user_profile.PROFILE_RELATIVE_PATH).write_text(
+            user_profile.profile_text("Ada Lovelace", ""), encoding="utf-8",
+        )
+
+        profile = first_run_wake._app_user_profile()
+
+        assert profile["name"] == "Ada" and profile["full_name"] == "Ada Lovelace"
+
+    def test_f8_instructed_routes_remain_open_in_conductor_policy(self):
+        from tools.conductor_api_policy import off_limits
+
+        for method, path in (
+            ("GET", "/api/providers/local/setup"),
+            ("POST", "/api/providers/cli/codex/install"),
+            ("GET", "/api/providers/cli/codex/install"),
+            ("GET", "/api/vendor-accounts"),
+            ("POST", "/api/vendor-accounts/account-id/signin/check"),
+        ):
+            assert not off_limits(path, method), (method, path)
 
     @pytest.mark.asyncio
     async def test_unserved_app_path_falls_back_to_script_facts_and_warns_once(self, monkeypatch, caplog):
@@ -273,19 +409,27 @@ class TestAppPath:
         assert len(warnings) == 1 and first_run_wake.APP_REFERENCE in warnings[0].message
 
     @pytest.mark.asyncio
-    async def test_app_facts_are_private_and_use_an_addressless_github_decision(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("profile_email", ["person@gmail.com", "person@workspace.example", ""])
+    async def test_app_facts_offer_google_setup_without_leaking_profile_email(
+        self, monkeypatch, tmp_path, profile_email,
+    ):
         from infra import config
         from onboarding import first_run_wake
 
         profile = tmp_path / "context" / "50-USER-PROFILE.md"
         profile.parent.mkdir()
-        profile.write_text("- **Preferred name:** Pat\x01 " + "n" * 130 + "\n- **Email:** person@gmail.com\n", encoding="utf-8")
+        profile.write_text(
+            "- **Preferred name:** Pat\x01 " + "n" * 130
+            + (f"\n- **Email:** {profile_email}" if profile_email else "")
+            + "\n",
+            encoding="utf-8",
+        )
         monkeypatch.setattr(config, "WORKSPACE", tmp_path)
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [{"source": "claude-code", "state": "ready"}],
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
-        monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=True))
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
         monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": "safe instructions")
@@ -293,19 +437,26 @@ class TestAppPath:
         facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
         wake = first_run_wake.render(facts, "safe instructions")
 
-        assert facts["gmail_eligible"] is True
-        assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
-        assert "the address you give me in chat" in wake
-        assert not any(value in wake for value in ("person@gmail.com", "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles"))
+        assert facts["tool_attempts"] is None
+        assert facts["bound_model"] is None
+        assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "full_name": None}
+        assert "ask you in chat for an email address not already used on GitHub" in wake
+        assert not any(
+            value in wake
+            for value in (profile_email, "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles")
+            if value
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
-        ("model_sources", ("harness_ready", "github_ready")),
-        ("gmail_eligible", ("gmail_eligible",)),
+        ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
+        ("local_download", ("local_download",)),
+        ("setup_handoff", ("tool_attempts",)),
+        ("setup_picks", ("pays_for",)),
         ("web_search_ready", ("web_search_ready",)),
-        ("own_omlx_source", ("own_omlx_source",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
+        ("agents_found", ("agents_found",)),
     ])
     async def test_each_app_fact_read_names_its_unavailable_recovery(self, monkeypatch, failed, expected):
         from onboarding import first_run_wake
@@ -316,21 +467,25 @@ class TestAppPath:
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
-        monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: None)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
         if failed == "model_sources":
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
-        elif failed == "gmail_eligible":
-            monkeypatch.setattr(first_run_wake, "_gmail_eligible", fail)
+        elif failed == "local_download":
+            monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
         elif failed == "web_search_ready":
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
-        elif failed == "own_omlx_source":
-            monkeypatch.setattr(first_run_wake, "_own_omlx_source", fail)
+        elif failed == "setup_handoff":
+            monkeypatch.setattr(first_run_wake, "_app_setup_handoff", fail)
+        elif failed == "setup_picks":
+            monkeypatch.setattr(first_run_wake, "_app_setup_picks", fail)
         elif failed == "setup":
             monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
+        elif failed == "agents_found":
+            monkeypatch.setattr(first_run_wake, "_app_agents_found", fail)
         else:
             monkeypatch.setattr(first_run_wake, "_app_user_profile", fail)
 
@@ -338,6 +493,49 @@ class TestAppPath:
 
         for name in expected:
             assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+
+    @pytest.mark.parametrize(("record", "expected"), [
+        ({"step": "models", "picks": {"claude": True, "chatgpt": True, "key": False}}, ["claude_code", "codex"]),
+        ({"step": "models", "picks": {"claude": True, "chatgpt": False, "key": False}}, ["claude_code"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": True, "key": False}}, ["codex"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": False, "key": False}}, []),
+        ({"step": "models", "picks": None}, []),
+        ({"step": "models"}, []),
+        (None, []),
+    ])
+    def test_pays_for_comes_from_the_subscriptions_screens_saved_picks(self, monkeypatch, record, expected):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: record)
+
+        assert first_run_wake._pays_for(first_run_wake._app_setup_picks()) == expected
+
+    @pytest.mark.asyncio
+    async def test_a_person_who_pays_for_both_with_only_claude_signed_in_is_offered_codex(self, monkeypatch):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: {
+            "step": "models", "picks": {"claude": True, "chatgpt": True, "key": False},
+            "handoff": {"tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "none"}}},
+        })
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [{"source": "claude-code", "state": "ready"}, {"source": "codex", "state": "not_installed"}],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr("llm.local_setup.setup_status", lambda: {"state": "idle", "stage": None, "result": None})
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        monkeypatch.setattr(first_run_wake, "_app_agents_found", lambda: [])
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        assert facts["sources_missing"] == {"codex": "not_installed"}
+        assert facts["pays_for"] == ["claude_code", "codex"]
+        offered = [tool for tool in facts["sources_missing"] if tool in facts["pays_for"]]
+        assert offered == ["codex"]
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions
@@ -347,20 +545,50 @@ class TestAppPath:
 
         decisions = (await first_run_wake._app_setup())["setup_decisions"]
 
-        assert len(decisions) == 1  # GitHub only; no projects consent
+        assert len(decisions) == 3  # the community card and both GitHub cards; no projects consent
+        assert {d["task_title"] for d in decisions} == {"Set up GitHub"}
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
+    def test_app_reference_covers_reviewed_source_and_local_failure_edges(self):
+        from infra import system_package
+        from onboarding import first_run_wake
+
+        reference = system_package.system_resource_source(first_run_wake.APP_REFERENCE).read_text()
+        local_offer = system_package.system_resource_source(
+            "skills/conductor-bootstrap/references/local-model-offer.md",
+        ).read_text(encoding="utf-8")
+
+        assert "if a local model is connected, make no offer" in local_offer
+        assert "download lands in the person's oMLX" not in local_offer
+        assert "a tool `pays_for` doesn't list is never offered or mentioned" in reference
+        assert "You said you pay for [Claude | ChatGPT]." in reference
+        assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
+        assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in reference
+        assert "[Settings › Providers](/settings/providers), press Sign in on its card" in reference
+        assert "Never initiate or cancel the vendor sign-in yourself" in reference
+        assert "POST /api/vendor-accounts/{id}/signin" not in reference
+        assert "Never read the local download yourself." in reference
+        assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
+        assert "when your question is still unanswered, end your turn: that question stays open" in reference
+        assert "Never write the opening or create the setup plan" in reference
+        assert "mark each done when complete" in reference
+        assert "The tasks steps 3 and 6 make are follow-up work, so do add those" in reference
+        assert "already shows that same outcome, say nothing" in reference
+        assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
+
     # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
     # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
-    @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
     def test_served_app_reference_names_the_app_fact_keys(self):
         import re
 
         from onboarding import first_run_wake
 
-        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
+        from infra.system_package import system_resource_source
+
+        reference = system_resource_source(first_run_wake.APP_REFERENCE).read_text()
+        paragraph = reference.split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
         top_level = re.sub(r"\([^)]*\)", "", paragraph)
         keys = set(re.findall(r"`([a-z_]+)`", top_level))
-        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path", "setup"}
+        assert keys == first_run_wake.APP_PLAN_FACT_KEYS - {"first_run_path", "setup"}
         assert "`setup.setup_decisions`" in paragraph  # setup is named through its nested decisions

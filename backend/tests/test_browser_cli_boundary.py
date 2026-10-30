@@ -29,6 +29,8 @@ async def test_all_script_wrappers_refused_before_any_invocation(synthetic_brows
 
 
 def _chrome_folders(tmp_path, monkeypatch, *, system: bool, user: bool, executable: bool = True):
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli, 'sys', SimpleNamespace(platform='darwin'))
     folders = (tmp_path / 'Applications', tmp_path / 'home' / 'Applications')
     for folder, present in zip(folders, (system, user)):
         if present:
@@ -75,7 +77,7 @@ async def test_actual_unsupported_native_version_is_refused(synthetic_browser, m
     # Use the real client boundary against Python, a native unsupported executable.
     monkeypatch.setenv('AGENT_BROWSER_DAEMON', '1')
     monkeypatch.setattr(owner, '_invoke', sessions.BrowserSessionOwner._invoke.__get__(owner))
-    with pytest.raises(sessions.BrowserSetupError, match='supported native agent-browser'):
+    with pytest.raises(sessions.BrowserSetupError, match='--version.*did not succeed'):
         await owner.run('thread', ['snapshot'])
     assert owner.live_count() == 0
 
@@ -169,6 +171,15 @@ async def test_cancel_after_actual_spawn_reaps_client(monkeypatch, tmp_path):
         await task
     assert caught.value.result.completion == 'interrupted'
     assert processes[0].returncode is not None
+
+
+async def test_client_exit_returns_while_a_descendant_holds_its_pipes(tmp_path):
+    grandchild = "import subprocess,sys;subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);print('opened',flush=True)"
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    result = await cli.invoke((sys.executable, '-c', grandchild), socket_dir=tmp_path, timeout=20)
+    assert loop.time() - started < 6
+    assert (result.returncode, result.stdout, result.timed_out) == (0, 'opened', False)
 
 
 async def test_timeout_reaps_actual_client(tmp_path):

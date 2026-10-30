@@ -123,7 +123,7 @@ def test_nonregular_sidecar_reads_are_bounded(tmp_path, kind):
         path.mkdir()
     start = time.monotonic()
     with pytest.raises(identity.BrowserIdentityError):
-        identity._read_regular_sidecar(path, 64)
+        identity.read_regular_sidecar(path, 64)
     assert time.monotonic() - start < 0.5
 
 

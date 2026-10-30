@@ -2,7 +2,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
-	let { status, streaming, ended, onreconnect, onretry }: {
+	let { status, streaming, ended, onreconnect, onretry, onundo }: {
 		/** What the pane has to say: no browser, opening, an error, or an ended stream; empty when the page is simply there. */
 		status: string;
 		/** A live page is on the canvas, so the status sits over its edge instead of replacing it. */
@@ -11,6 +11,7 @@
 		ended: boolean;
 		onreconnect: () => void;
 		onretry: () => void;
+		onundo?: () => void;
 	} = $props();
 
 	const opening = $derived(status === 'Opening');
@@ -33,7 +34,8 @@
 				<p>{status}</p>
 			{/if}
 			{#if streamEnded}<Button onclick={onreconnect}>Reconnect</Button>{/if}
-			{#if retryable}<Button onclick={unavailable ? onreconnect : onretry}>Try again</Button>{/if}
+			{#if retryable}<Button onclick={unavailable ? onreconnect : onretry}>Retry</Button>{/if}
+			{#if onundo}<Button onclick={onundo}>Undo</Button>{/if}
 		</div>
 	</div>
 {/if}

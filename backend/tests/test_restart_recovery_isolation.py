@@ -36,7 +36,7 @@ async def test_reconcile_releases_ingress_after_durable_fifo_claims(isolated_db,
     finally:
         db.close()
 
-    recovered, _wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, _wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert len(recovered.batches) == 1
     assert self_restart.operation_by_id(operation)["status"] == "complete"
     second = admit_input(
@@ -79,6 +79,7 @@ async def test_startup_broadcasts_committed_admission_failures(monkeypatch):
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", replay)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=(FailedInputBatch("failed", ("input",), "plan admission failed"),),
     )
 
@@ -116,6 +117,7 @@ async def test_stalled_or_failed_recovery_does_not_block_sibling(monkeypatch, fa
     monkeypatch.setattr(restart_startup, "_complete_restart_operation", lambda: None)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t)
                       for t in ("first", "second", "legacy")),
     )
@@ -132,7 +134,7 @@ async def test_stalled_or_failed_recovery_does_not_block_sibling(monkeypatch, fa
 @pytest.mark.asyncio
 async def test_initial_codex_warm_capture_does_not_reacquire_held_transition_lock(monkeypatch):
     """Initial resume keeps warm capture without waiting on its own runtime lock."""
-    from core import checkpoint_codex_fork, checkpoint_render
+    from core import fork_codex, fork_render
     from subagents import harness_checkpoint_resume
     from subagents.codex_runtime_state import _LIVE
 
@@ -151,8 +153,8 @@ async def test_initial_codex_warm_capture_does_not_reacquire_held_transition_loc
     async def prepare(_checkpoint_id, **kwargs):
         return kwargs["warm_source"]
 
-    monkeypatch.setattr(checkpoint_codex_fork, "warm_tool_boundary_prefix_bytes", lambda *_a: 4096)
-    monkeypatch.setattr(checkpoint_render, "capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr(fork_codex, "warm_tool_boundary_prefix_bytes", lambda *_a: 4096)
+    monkeypatch.setattr(fork_render, "capture_warm_fork_source", capture)
     monkeypatch.setattr(harness_checkpoint_resume, "_prepare_external_checkpoint", prepare)
     _LIVE.put(thread_id, live)
     try:
@@ -179,7 +181,7 @@ async def test_warm_capture_discards_source_if_handle_changes_during_io(
 ):
     from loguru import logger
 
-    from core import checkpoint_codex_fork, checkpoint_render
+    from core import fork_codex, fork_render
     from subagents.codex_runtime_state import _LIVE
 
     thread_id = "changing-warm"
@@ -196,8 +198,8 @@ async def test_warm_capture_discards_source_if_handle_changes_during_io(
             live.tool_step_ids["pending"] = "step"
         return object()
 
-    monkeypatch.setattr(checkpoint_codex_fork, "warm_tool_boundary_prefix_bytes", lambda *_a: 4096)
-    monkeypatch.setattr(checkpoint_render, "capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr(fork_codex, "warm_tool_boundary_prefix_bytes", lambda *_a: 4096)
+    monkeypatch.setattr(fork_render, "capture_warm_fork_source", capture)
     refusals: list[str] = []
     sink = logger.add(
         refusals.append, level="INFO", format="{message}",
@@ -205,11 +207,11 @@ async def test_warm_capture_discards_source_if_handle_changes_during_io(
     )
     _LIVE.put(thread_id, live)
     try:
-        assert await checkpoint_codex_fork._capture_tool_boundary_warm_source(
+        assert await fork_codex._capture_tool_boundary_warm_source(
             context, live, thread_id,
         ) is None
         assert [line.strip() for line in refusals] == [
-            f"checkpoint warm capture refused for {thread_id} (codex): {reason}"
+            f"fork warm capture refused for {thread_id} (codex): {reason}"
         ]
     finally:
         logger.remove(sink)
@@ -244,6 +246,7 @@ async def test_shutdown_cancels_all_recovery_children_without_duplicate_wakes(mo
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", no_work)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t) for t in ("cc", "native")),
     )
     task = asyncio.create_task(restart_startup.drive_startup_continuity(
@@ -278,11 +281,12 @@ async def test_independent_recovery_cancellation_is_not_success(monkeypatch):
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", no_work)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t) for t in ("cancelled", "sibling")),
     )
     log = SimpleNamespace(info=lambda *_a: None, error=lambda *a: errors.append(a))
     with pytest.raises(BaseExceptionGroup) as caught:
-        await restart_startup.run_startup_drive(no_work(), recovery, (), log)
+        await restart_startup.run_startup_drive(no_work(), recovery, (), None, log)
     assert len(caught.value.exceptions) == 1
     assert isinstance(caught.value.exceptions[0], asyncio.CancelledError)
     assert completed == ["sibling"]

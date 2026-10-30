@@ -21,13 +21,17 @@
   --ls-cap:    0.08em;
   --ls-title: -0.01em;
 
+  --focus-ring: 0 0 0 3px var(--accent-wash);
+
   --space-1: 4px;
+  --chip-inline-padding: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
   --space-7: 32px;
+  --touch-target: 44px;
   --space-8: 48px;
 
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
@@ -76,10 +80,10 @@
   --text-secondary: #adadb2;
   --text-muted: #adadb2;
   --text-tertiary: #919196;
-  --accent: #60a5fa;
-  --accent-hover: #93c5fd;
-  --accent-subtle: rgba(96, 165, 250, 0.12);
-  --accent-bg-hover: rgba(96, 165, 250, 0.14);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
   --green-border: rgba(52, 211, 153, 0.25);
@@ -102,7 +106,21 @@
   --radius-pill: 999px;
   --radius-circle: 50%;
   --sidebar-width: 280px;
+  --transcript-max-width: 760px;
+  --needs-you-tile-max-width: 480px;
+  --artifact-tile-size: 36px;
+  --plan-state-icon-size: 18px;
   --header-height: 60px;
+  --list-row-min-height: 38px;
+  --button-pad-x-sm: 10px;
+  /* Inset between a segmented radiogroup's track and its options (Settings Theme, Add model Sort). */
+  --segment-inset: 2px;
+  /* Shared notice geometry preserves the established toast treatment without raw component values. */
+  --toast-detail-icon-offset: 3px;
+  --toast-close-inline-padding: 2px;
+  --toast-action-underline-offset: 2px;
+  --project-mark-size: 9px;
+  --project-mark-ring: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --header-bottom: calc(var(--header-height) + var(--safe-top));
@@ -128,13 +146,17 @@
   --purple-bg: rgba(139, 92, 246, 0.10);
   --purple-line: rgba(139, 92, 246, 0.28);
 
-  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA-blue defaults;
-     under a project scope +layout replaces --accent and every role from accentRoles(). */
-  --accent-text: var(--accent);
-  --accent-wash: rgba(96, 165, 250, 0.08);
-  --accent-line: rgba(96, 165, 250, 0.28);
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
+     default *is* a project colour: the corsia project's own accent, #007faa. Every value below is exactly what
+     `accentRoles('#007faa', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
+     a project painted #007faa look the same. Under a project scope +layout replaces --accent and every role from
+     accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
+  --accent-text: #009cd0;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
-  --accent-on-fill: #0a0a0b;
+  --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 45%, transparent);
   --violet-brand: #8b5cf6;
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
@@ -146,12 +168,15 @@
   --amber-bg: rgba(245, 158, 11, 0.10);
   --amber-line: rgba(245, 158, 11, 0.28);
 
-  --glass-blur: blur(40px) saturate(180%);
+  --glass-blur-radius: 40px;
+  /* Three sigma keeps a backdrop blur's sampling edge outside a visible glass card. */
+  --glass-blur-reach: calc(var(--glass-blur-radius) * 3);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(180%);
   --glass-blur-soft: blur(8px) saturate(120%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-scrim: rgba(0, 0, 0, 0.28);
   --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);
@@ -162,6 +187,7 @@
   --lg-row-hover: color-mix(in srgb, var(--text-primary) 6%, transparent);
   --header-gradient-top: var(--glass-thin);
   --shadow-chip: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --shadow-focus: 0 0 0 3px var(--accent-wash);
 }
 
 [data-theme="light"] {
@@ -179,10 +205,10 @@
   --text-secondary: #46464b;
   --text-muted: #46464b;
   --text-tertiary: #636368;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-subtle: rgba(37, 99, 235, 0.08);
-  --accent-bg-hover: rgba(37, 99, 235, 0.16);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: #f0fdf4;
   --green-border: rgba(34, 197, 94, 0.3);
@@ -219,11 +245,12 @@
 }
 
 [data-theme="light"] {
-  --accent-text: #1d4ed8;
-  --accent-wash: rgba(37, 99, 235, 0.10);
-  --accent-line: rgba(37, 99, 235, 0.32);
+  --accent-text: #006a8e;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 35%, transparent);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);
@@ -233,7 +260,7 @@
   --amber: #d97706;
   --amber-bg: rgba(217, 119, 6, 0.08);
   --amber-line: rgba(217, 119, 6, 0.32);
-  --glass-blur: blur(40px) saturate(118%);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(118%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 84%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 89%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
@@ -248,12 +275,12 @@
 }
 
 @supports (color: color(display-p3 1 1 1)) {
+  /* The accent and its roles are deliberately absent here: #007faa is authored as sRGB, and a wider-gamut
+     variant of it would be an invented colour that `accentRoles()` cannot derive. */
   :root {
     --teal: color(display-p3 0.176 0.831 0.749);
     --sky: color(display-p3 0.376 0.647 0.98);
     --amber: color(display-p3 0.961 0.62 0.043);
-    --accent: color(display-p3 0.376 0.647 0.98);
-    --accent-hover: color(display-p3 0.576 0.773 0.992);
     --purple: color(display-p3 0.545 0.361 0.965);
     --purple-2: color(display-p3 0.698 0.608 1);
     --purple-text: color(display-p3 0.733 0.659 1);
@@ -262,18 +289,9 @@
     --teal: color(display-p3 0.051 0.58 0.533);
     --sky: color(display-p3 0.145 0.388 0.922);
     --amber: color(display-p3 0.851 0.467 0.024);
-    --accent: color(display-p3 0.145 0.388 0.922);
-    --accent-hover: color(display-p3 0.114 0.306 0.816);
-    --accent-text: color(display-p3 0.114 0.306 0.816);
     --purple: color(display-p3 0.486 0.361 0.965);
     --purple-2: color(display-p3 0.427 0.298 0.902);
     --purple-text: color(display-p3 0.357 0.247 0.816);
   }
 }
 
-/* Hover and subtle tones keep their own CORSIA-blue shades by default; under a project scope (+layout sets the
-   attribute) they follow its accent through the roles rather than a second derivation. */
-:root[data-project-accent] {
-  --accent-hover: var(--accent);
-  --accent-subtle: var(--accent-wash);
-}

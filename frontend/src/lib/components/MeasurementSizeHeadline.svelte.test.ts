@@ -67,7 +67,7 @@ describe('MeasurementSizeHeadline', () => {
 		const el = mountRows(Array.from({ length: 8 }, (_, i) => at(i, i < 4 ? 40 : 60)), {
 			latest: win(60, 120, { estimated_hours: 96, active_hours: 1.6 }), previous: win(40, 120, { estimated_hours: 64, active_hours: 1.6 }),
 		});
-		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, +50% vs Aug 10 to Sep 6 (n 120)');
+		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, +50% vs Aug 10 to Sep 6 (n 120)');
 		expect([...el.querySelectorAll('.why .kv')].map((n) => n.textContent)).toEqual(['0.8', '0.8']);
 	});
 
@@ -116,13 +116,13 @@ describe('MeasurementSizeHeadline', () => {
 		const el = mountRows(Array.from({ length: 6 }, (_, i) => at(i + 2, i < 2 ? 40 : 60, { data_start: periodAt(2) })), {
 			latest: win(60, 120, { estimated_hours: 96, active_hours: 1.6 }), previous: win(40, 60, { estimated_hours: 32, active_hours: 0.8 }),
 		});
-		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, new vs Aug 10 to Sep 6 (n 60)');
-		expect([...el.querySelectorAll('.why .kc')].map((n) => n.textContent)).toEqual(['new vs Aug 10 to Sep 6', 'new vs Aug 10 to Sep 6']);
+		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, new vs Aug 10 to Sep 6 (n 60)');
+		expect([...el.querySelectorAll('.why .kc')].map((n) => n.textContent)).toEqual(['new vs Aug 10 to Sep 6', 'new vs Aug 10 to Sep 6']);
 	});
 
 	it('prints no rate and n/a when the served window is under the minimum, with its n', () => {
 		const few = mountRows([at(0, 10, { sized: 5 })], { latest: win(null, 5), previous: win(null, 0) });
-		expect(few.querySelector('.stat')?.textContent).toBe('– h of work per hour you spend, Jul 20 to Aug 16, n 5, n/a vs Jun 22 to Jul 19 (n 0)');
+		expect(few.querySelector('.stat')?.textContent).toBe('– h of work per hour you spend, Jul 20 to Aug 16, n 5, n/a vs Jun 22 to Jul 19 (n 0)');
 	});
 
 	it('does not chart weeks served before a comparability break', () => {
@@ -133,7 +133,7 @@ describe('MeasurementSizeHeadline', () => {
 
 	it('shows a non-comparable latest week on its own, with its rate and no chart', () => {
 		const el = mountRows([at(0, 30, {}, { comparable: false }), at(1, 31, {}, { comparable: false })], { latest: win(31, 30), previous: win(null, 0) });
-		expect(el.querySelector('.stat')?.textContent).toContain('31 h of work per hour you spend, Jul 27 to Aug 23');
+		expect(el.querySelector('.stat')?.textContent).toContain('31 h of work per hour you spend, Jul 27 to Aug 23');
 		expect(el.querySelector('.comparability')).not.toBeNull();
 		expect(el.querySelector('.mob')).toBeNull();
 	});
@@ -146,6 +146,9 @@ describe('MeasurementSizeHeadline', () => {
 		const changed = render(coverage({ comparable_reason: 'outcome_definition_changed', comparability_before: '2026-09-14' }), null, false);
 		expect(changed.querySelector('.comparability')?.textContent).toContain('before 14 September 2026');
 		expect(changed.textContent).not.toContain('31 August');
+		unmount(component!); host.remove();
+		const model = render(coverage({ comparable_reason: 'judging_model_changed', comparability_before: '2026-09-21' }), null, false);
+		expect(model.querySelector('.comparability')?.textContent).toContain('sizes were judged by a different model before 21 September 2026');
 	});
 
 	it('takes the served rate reason as authoritative even when the counts suggest another', () => {
@@ -174,7 +177,7 @@ describe('MeasurementSizeHeadline', () => {
 	it('says plainly which outcomes are left out of the hours, and names the comparability reason', () => {
 		const period = render(coverage({ outcomes: 1367, sized: 1283, unsized: 80, unknown: 4, estimated_hours: 3600.4, active_hours: 45.5 }), 79.1, true,
 			{ latest: win(79.1, 1283, { outcomes: 1367, excluded: 84, estimated_hours: 3600.4, active_hours: 45.5 }), previous: win(null, 0) });
-		expect(period.querySelector('.nf')?.textContent).toContain('Hours of work use class midpoints (XS 0.1 h, S 0.5, M 2, L 8, XL 40, XXL 120). 84 of 1,367 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
+		expect(period.querySelector('.nf')?.textContent).toContain('Hours of work use class midpoints (XS 0.1 h, S 0.5, M 2, L 8, XL 40, XXL 120). 84 of 1,367 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
 		unmount(component!); host.remove();
 		const future = render(coverage({ comparable_reason: 'method_retired' }), 10, false);
 		expect(future.querySelector('.comparability')?.textContent).toBe('Not comparable with other weeks.');

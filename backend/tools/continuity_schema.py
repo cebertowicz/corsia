@@ -11,14 +11,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from core import lesson_gate
 from core.continuity_types import ENTRY_FIELD_MODELS, ENTRY_FIELDS
 from core.placement_decide import ANSWER_SCHEMA
 from core.placement_room import OPERATION_SCHEMA
 from infra.continuity_store import ContinuityError, validate_entry_body
 from infra.placement_marks import PLACE_VERDICTS, REVIEW_VERDICTS
+from tools.continuity_learning_schema import (
+    LEARNING_FIELD_SCHEMAS,
+    LEARNING_OPERATION_DESCRIPTION,
+    LEARNING_OPERATION_FIELDS,
+    LEARNING_OPERATIONS,
+    LEARNING_REQUIRED_FIELDS,
+)
 
 
-_OPERATIONS = ("inspect", "add", "replace", "drop", "review", "place")
+_OPERATIONS = ("inspect", "add", "replace", "drop", "review", "place", *LEARNING_OPERATIONS)
 
 #: Which verdicts each placement operation takes.
 VERDICTS = {"review": REVIEW_VERDICTS, "place": PLACE_VERDICTS}
@@ -185,6 +193,7 @@ def _clause(
 
 
 _OPERATION_FIELDS = {
+    **LEARNING_OPERATION_FIELDS,
     "inspect": {"entry_id", "field"},
     "add": {"field", "body"},
     "replace": {"entry_id", "body", "field"},
@@ -192,9 +201,10 @@ _OPERATION_FIELDS = {
     "review": {
         "entry_id", "verdict", "destination", "quote", "placement", "room", "reason",
     },
-    "place": {"entry_id", "verdict", "destination", "quote", "placement"},
+    "place": {"entry_id", "verdict", "destination", "quote", "placement", *lesson_gate.PARAMETERS},
 }
 _REQUIRED_FIELDS = {
+    **LEARNING_REQUIRED_FIELDS,
     "inspect": (),
     "add": ("field", "body"),
     "replace": ("entry_id", "body"),
@@ -262,15 +272,17 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "inspect lists current entries and ids; add records a new entry; "
+            LEARNING_OPERATION_DESCRIPTION
+            + "inspect lists current entries and ids; add records a new entry; "
             "replace rewrites one by id; drop retires one by id. review is "
-            "only for a checkpoint's placement review; place records that you "
-            "placed a lesson yourself: written or already retires the entry "
-            "once destination is read and contains quote; proposed queues "
+            "only for a checkpoint's placement review. place: written with "
+            "placement has CORSIA write and retire it; written or already with "
+            "destination and quote is a receipt; proposed queues "
             "placement for CORSIA to file as a proposal; trial queues it as a "
             "trial skill with a review date."
         ),
     },
+    **LEARNING_FIELD_SCHEMAS,
     "field": {
         "type": "string",
         "enum": list(ENTRY_FIELDS),
@@ -303,7 +315,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "enum": sorted({v for verdicts in VERDICTS.values() for v in verdicts}),
         "description": (
             "review: reaffirm (keep it, with reason), select or already. "
-            "place: written, already, proposed or trial."
+            "place: as in operation."
         ),
     },
     "destination": {
@@ -325,7 +337,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "placement": {
         **ANSWER_SCHEMA,
         "description": (
-            "review select, place proposed or place trial: where the lesson "
+            "review select, place written, proposed or trial: where the lesson "
             "goes, as the placement review asks. trial is only for your own "
             "unproven hypothesis, never for what a person told you."
         ),
@@ -335,6 +347,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "items": OPERATION_SCHEMA,
         "description": "review select only, when the review refuses for the cap: make-room operations.",
     },
+    **lesson_gate.PARAMETERS,
 }
 
 

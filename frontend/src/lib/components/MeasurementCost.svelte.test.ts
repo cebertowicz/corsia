@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import MeasurementCost from './MeasurementCost.svelte';
 import { decodeMeasurementCost, type CostState, type CostPeriod, type CostWindowFigures, type MeasurementCost as CostData, type WorkspaceSubscriptionContext } from '$lib/stores/measurementCost';
-import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+import { settingsNavigation } from '$lib/stores/settingsNavigation';
 
 let component: Record<string, unknown> | null = null;
 let host: HTMLElement | undefined;
@@ -23,7 +23,7 @@ const data = (overrides: Partial<CostData> = {}): CostData => ({
 	period: { grain: 'weeks', timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } },
 	averagePeriods: 4, series: [first, second], latest: pooled(second), previous: pooled(first),
 	coverage: { priced_records: 160, usage_records: 200 }, not_api_priced_records: 7,
-	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40 }],
+	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40, models: [] }],
 	actual: { subscription_records: 12, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: workspace() }, ...overrides,
 });
 const state = (overrides: Partial<CostState> = {}): CostState => ({ loading: false, error: null, scopeKey: 'project:none', grain: 'days', data: data(), ...overrides });
@@ -31,6 +31,14 @@ function render(overrides: Partial<CostState> = {}) { host = document.createElem
 const text = (element: HTMLElement) => element.textContent?.replace(/\s+/g, ' ') ?? '';
 
 describe('MeasurementCost', () => {
+	it('omits the remainder when all usage records are priced', () => {
+		const card = render({ data: data({ coverage: { priced_records: 200, usage_records: 200 }, excluded: [] }) });
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('200 of 200 usage records in Sep 28 to Oct 4 are priced.');
+	});
+	it('explains the remainder when some usage records are unpriced', () => {
+		const card = render();
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
+	});
 	it('labels every figure as a known subtotal and states retained-record coverage and exclusions', () => {
 		const content = text(render());
 		expect(content).not.toContain('API-equivalent: list price of recorded tokens');
@@ -41,6 +49,20 @@ describe('MeasurementCost', () => {
 		expect(content).toContain('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(content).not.toContain('Not priced:');
 		expect(content).not.toContain('Not API-priced:');
+	});
+	it('names up to three models in API order in one sentence per unpriced reason', () => {
+		const markup = render({ data: data({ excluded: [{
+			kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 18,
+			models: [
+				{ label: 'Opus 5.5', records: 12 },
+				{ label: 'GPT-5.6 Terra', records: 3 },
+				{ label: 'Sonnet 5.5', records: 2 },
+				{ label: 'External model', records: 1 },
+			],
+		}] }) });
+		const content = text(markup);
+		expect(content).toContain('Usage records whose token counting format is not proven: Opus 5.5 (12), GPT-5.6 Terra (3), Sonnet 5.5 (2) and 1 more.');
+		expect(content).not.toContain('External model (1)');
 	});
 	const showActual = (actual: Partial<CostData['actual']> & { workspace_subscription?: WorkspaceSubscriptionContext } = {}) => {
 		const markup = render({ data: data({ actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: workspace(), ...actual } }) });
@@ -106,11 +128,11 @@ describe('MeasurementCost', () => {
 		expect(text(markup)).not.toContain('Billing history');
 		expect(text(markup)).not.toContain("Overage isn't recorded");
 		expect(markup.querySelectorAll('.billing-link')).toHaveLength(1);
-		const before = get(settingsOpenRequest);
+		const before = get(settingsNavigation).openRequest;
 		(markup.querySelector('.billing-link') as HTMLButtonElement).click(); flushSync();
-		expect(get(settingsOpenRequest)).toBe(before + 1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsAnchorRequest)).toBe('account-billing');
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).anchor).toBe('account-billing');
 	});
 	it('qualifies the subscription total by the accounts without a price, and never reads $0 for none', () => {
 		const some = text(showActual({ workspace_subscription: workspace({ subscription_dollars: 20, subscription_unrecorded_accounts: 2, subscription_coverage: 'partial' }) }));
@@ -207,7 +229,13 @@ describe('MeasurementCost', () => {
 		expect(markup.querySelector('.billing-link')).toBeNull();
 	});
 	it('says so when no usage record could be priced, and withholds a rate under the minimum n', () => {
-		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No usage records could be priced in this range.');
+		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No accepted work in this range has a size rating.');
+		unmount(component!); host?.remove();
+		expect(text(render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 3 } }) }))).toContain('No usage records could be priced in this range.');
+		unmount(component!); host?.remove();
+		const fresh = render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 0 }, excluded: [] }) });
+		expect(text(fresh)).toContain('No usage was recorded in this range.');
+		expect(fresh.querySelector('.caption')).toBeNull();
 		unmount(component!); host?.remove();
 		const thinPeriod = period('2026-09-28', 5_300, 100, 80, 100, 2120, 19);
 		const thin = text(render({ data: data({ series: [thinPeriod], latest: pooled(thinPeriod), previous: null }) }));
@@ -259,11 +287,11 @@ describe('MeasurementCost', () => {
 		expect(text(one)).toContain('No charge was recorded for 4 pay-per-token usage records. 1 of them is on an External endpoint with no billing set.');
 		const link = [...one.querySelectorAll<HTMLButtonElement>('.billing-link')].find((button) => button.textContent === 'Set billing for External endpoints');
 		expect(link).toBeDefined();
-		const opened = get(settingsOpenRequest);
+		const opened = get(settingsNavigation).openRequest;
 		link!.click();
-		expect(get(settingsOpenRequest)).toBe(opened + 1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsAnchorRequest)).toBeNull();
+		expect(get(settingsNavigation).openRequest).toBe(opened + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).anchor).toBeNull();
 		unmount(component!); host?.remove();
 		const many = text(showActual({ complete: false, unknown_charge_records: 4, external_unset_records: 3 }));
 		expect(many).toContain('3 of them are on External endpoints with no billing set.');

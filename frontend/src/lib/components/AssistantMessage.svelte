@@ -4,8 +4,10 @@
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
 	import { models, type Model } from '$lib/stores/models';
 	import { canonicalName } from '$lib/stores/modelGroups';
+	import { parseBrowserChip } from '$lib/browserChip';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
+	import ChatCommentThreads from './ChatCommentThreads.svelte';
 
 	let {
 		msg,
@@ -33,6 +35,15 @@
 		renderedAsks?: ReadonlySet<string>;
 	} = $props();
 
+	let openingAnnouncement = $state('');
+	$effect(() => {
+		// Populate a stable live region once. Reveal ticks and the final markdown
+		// swap are visual only, and a later mount of history does not announce.
+		if (msg.firstRunOpeningReveal && msg.typewriterPos != null && !openingAnnouncement) {
+			openingAnnouncement = msg.content;
+		}
+	});
+
 	const activityTools = $derived.by(() => {
 		const hints: string[] = msg.toolHints ?? [];
 		const calls: any[] = msg.metadata?.tool_calls ?? [];
@@ -53,6 +64,8 @@
 			status: 'done' as const,
 		}));
 	});
+	// The Step that opened the browser carries the chip the server stored on it as the open settled.
+	const browserChip = $derived(parseBrowserChip(msg.metadata?.browser_chip));
 	const footerLabel = $derived(messageFooterLabel(msg.metadata, $models));
 
 	function modelTail(id: string): string {
@@ -142,17 +155,24 @@
 
 	{#if showContent && msg.content}
 	<div class="md-content long-message-body">
-		{#if msg.typewriterPos != null}
-			<pre class="typewriter-text">{msg.content.slice(0, msg.typewriterPos)}</pre>
-			<span class="typewriter-cursor">&#9613;</span>
-		{:else}
-			{@html renderMarkdown(msg.content)}
+		{#if msg.firstRunOpeningReveal}
+			<span class="sr-only" aria-live="polite" aria-atomic="true">{openingAnnouncement}</span>
 		{/if}
+		<div aria-hidden={openingAnnouncement || (msg.firstRunOpeningReveal && msg.typewriterPos != null) ? 'true' : undefined}>
+			{#if msg.typewriterPos != null}
+				<pre class="typewriter-text">{msg.content.slice(0, msg.typewriterPos)}</pre>
+				<span class="typewriter-cursor" aria-hidden="true">&#9613;</span>
+			{:else}
+				{@html renderMarkdown(msg.content)}
+			{/if}
+		</div>
 	</div>
 	{/if}
 
-	{#if msg.cards?.length || msg.cards_more}
-		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
+	<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={msg.chat_comments ?? []} />
+
+	{#if msg.cards?.length || browserChip}
+		<MessageArtifactCards cards={msg.cards ?? []} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
 	{/if}
 
 		<div class="msg-footer">
@@ -167,6 +187,10 @@
 </div>
 
 <style>
+	.sr-only {
+		position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0;
+		overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+	}
 	.tool-calls {
 		display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;
 		padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--teal) 35%, transparent);

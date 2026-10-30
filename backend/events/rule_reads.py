@@ -1,0 +1,122 @@
+"""The reads rule evaluation makes: the rules for an event, then threads and pause.
+
+Each is one indexed read. The rules read is the one every event pays; the
+others are made only after ``events.rules`` found a matching rule, so an event
+no rule matches never pays them. The artifact's owner and lifecycle are
+routing's, never read again here. A webhook pays its one read before routing's
+ordered preparation (:func:`type_rules`), and none in it when no rule for its
+type is enabled; only with a self-rule of its type are the projects tracking
+its repository read (a policy query and git). Names no connector.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Iterable, Mapping
+from typing import Any
+
+from infra.database import get_db
+from infra.queries import thread_available_sql
+
+
+def enabled_rules(
+    db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
+    thread: str | None, scopes: list[str],
+) -> list[sqlite3.Row]:
+    """The enabled rules for one declared type in ``thread``'s project (scope
+    ``prefix`` + its project), else in ``scopes``: one read through the
+    ``(connector, event_type, enabled, scope, created_at)`` index."""
+    if thread is not None:
+        where, params = "scope=? || (SELECT project_id FROM threads WHERE id=?)", [prefix, thread]
+    elif scopes:
+        where, params = f"scope IN ({','.join('?' * len(scopes))})", list(scopes)
+    else:
+        return []
+    return db.execute(
+        f"SELECT * FROM event_rules WHERE {where} AND connector=? AND event_type=? "
+        "AND enabled=1 ORDER BY created_at, id",
+        [*params, connector, event_type],
+    ).fetchall()
+
+
+_TYPE_RULES = "FROM event_rules WHERE connector=? AND event_type=? AND enabled=1"
+_SELF_RULES = f"{_TYPE_RULES} AND action IN ('deliver','run_script') AND \"to\"='thread:' || created_by"
+
+
+def _manifest(connector: str) -> Any:
+    """The connector's manifest; ``None`` for a namespace an agent declared."""
+    from events.connectors import get_manifest
+
+    try:
+        return get_manifest(connector)
+    except KeyError:
+        return None
+
+
+def self_rules(db: sqlite3.Connection, connector: str, event_type: str) -> list[sqlite3.Row]:
+    """Every enabled deliver or run_script rule to its own writer for one type, in any project."""
+    return db.execute(f"SELECT * {_SELF_RULES} ORDER BY created_at, id",
+                      (connector, event_type)).fetchall()
+
+
+def type_rules(connector: str, event_type: str) -> tuple[bool, bool]:
+    """Whether any rule for one type is enabled, and any self-rule, in any project:
+    one read, two probes of the ``(connector, event_type, enabled, ...)`` index."""
+    db = get_db()
+    try:
+        row = db.execute(f"SELECT EXISTS(SELECT 1 {_TYPE_RULES}), EXISTS(SELECT 1 {_SELF_RULES})",
+                         (connector, event_type) * 2).fetchone()
+    finally:
+        db.close()
+    return bool(row[0]), bool(row[1])
+
+
+def unrouted_projects(
+    connector: str, event_type: str, facts: Mapping[str, Any], self_rule: bool | None = None,
+) -> frozenset[str] | None:
+    """The projects tracking the event's repository, should routing give it no thread.
+
+    Only a writer's deliver rule to itself can fire there, so :func:`type_rules`
+    first asks whether any exists for the type, unless the caller's ``self_rule``
+    already says. With none, the connector's repository lookup (a policy query
+    and git config per registered repository) never runs. ``None``: the lookup
+    failed, which is not the same as an untracked repository. Runs git, so call
+    it outside any write transaction and the preparation gate.
+    """
+    manifest = _manifest(connector)
+    repository = facts.get(manifest.repository_fact or "") if manifest is not None else None
+    if not repository or manifest.repository_projects is None:
+        return frozenset()
+    if not (type_rules(connector, event_type)[1] if self_rule is None else self_rule):
+        return frozenset()
+    return manifest.repository_projects(str(repository))
+
+
+def threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapping[str, Any]]:
+    """Each named thread's project, parent and availability, in one read."""
+    wanted = sorted({thread for thread in ids if thread})
+    if not wanted:
+        return {}
+    rows = db.execute(
+        f"SELECT id, project_id, spawned_by, agent_enabled, lifecycle_state, archived_reason, {thread_available_sql()} AS available "
+        f"FROM threads WHERE id IN ({','.join('?' * len(wanted))})",
+        wanted,
+    ).fetchall()
+    return {row["id"]: row for row in rows}
+
+
+def paused(db: sqlite3.Connection, thread: str) -> bool:
+    """R7: whether the thread's plan is paused (Plans owns the answer)."""
+    from plans.public import thread_paused_since
+
+    return thread_paused_since(db, thread) is not None
+
+
+def explain_summary(event_id: Any, found: int) -> str:
+    """The one-line answer to "why did this event go where it did", rule outcomes counted."""
+    if found:
+        return f"{found} rule outcome(s), newest first."
+    if event_id:
+        return ("No rule acted on an event with this id. If you emitted it, pass the event_id "
+                "from emit's receipt.")
+    return "No rule acted on events for this file."

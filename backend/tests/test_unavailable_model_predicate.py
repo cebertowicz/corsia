@@ -13,6 +13,7 @@ from tests.unavailable_model_support import (
     admit_held_candidate,
     hold_head,
     message_row,
+    mark_model_loaded,
     seed_model,
     set_model_available,
 )
@@ -41,18 +42,17 @@ def _active_cloud(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_available_but_unloaded_network_model_releases_its_held_head(
+async def test_available_but_unloaded_network_model_keeps_its_held_head(
     isolated_db, monkeypatch, driven,
 ) -> None:
-    """Resolution runs an available oMLX model (it loads on demand); the catalog
-    status only says 'available'. Release must follow resolution."""
+    """Disk availability alone cannot release a model the provider requires loaded."""
     import infra.unavailable_model_recovery as recovery
     from llm.model_status import get_model_status_rows
     from llm.resolution import resolve_execution_target
 
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
     set_model_available("omlx@srv/m", 1)
-    monkeypatch.setattr("llm.model_status._network_server_status", lambda: {"srv": "online"})
+    monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "online"})
     monkeypatch.setattr("llm.model_status._loaded_model_ids_fn", lambda: lambda _sid: set())
     assert resolve_execution_target("omlx@srv/m").available is True
     statuses = {row["id"]: row["status"] for row in get_model_status_rows()}
@@ -60,7 +60,8 @@ async def test_available_but_unloaded_network_model_releases_its_held_head(
 
     await recovery._resume_held_heads()
 
-    driven.assert_awaited_once()
+    driven.assert_not_awaited()
+    assert message_row("m1") == HELD
 
 
 @pytest.mark.asyncio
@@ -104,7 +105,7 @@ async def test_unavailable_cloud_row_stays_held(isolated_db, monkeypatch, driven
 async def test_offline_network_server_stays_held(isolated_db, monkeypatch, driven) -> None:
     import infra.unavailable_model_recovery as recovery
 
-    monkeypatch.setattr("llm.model_status._network_server_status", lambda: {"srv": "offline"})
+    monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "offline"})
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
 
     await recovery._resume_held_heads()
@@ -240,6 +241,7 @@ async def test_model_ready_between_resolution_and_hold_still_drains(
     from llm import resolution
 
     seed_model("omlx@srv/m", available=0)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     batch = admit_held_candidate("t", "omlx@srv/m", "m1")
     run = AsyncMock()
     monkeypatch.setattr(execution, "execute_claimed_batch", run)

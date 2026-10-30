@@ -3,15 +3,16 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
-	import { activeModelId, bindActiveThreadModel } from '$lib/stores/models';
+	import { activeModelId } from '$lib/stores/models';
 	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
-	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
-	import { hydrateSubagentThread, subagentMeta } from '$lib/stores/subagents';
+	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
-	import { subscribeChatPanelEvents } from './chatPanelEvents';
-	import { startPresence, stopPresence } from '$lib/ws/presence';
+	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
+	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
+	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
+	import { useChatReplyJumper } from './chatReplyJumper.svelte';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -20,21 +21,26 @@
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { loadRunRange } from '$lib/focusRunLoader';
 	import InputBar from './InputBar.svelte';
+	import type { SendOutcome } from './composerSendReadiness';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
 	import ChatWarmToast from './ChatWarmToast.svelte';
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
-	import MobileScrollFab from './MobileScrollFab.svelte';
+	import ChatScrollControl from './ChatScrollControl.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
+	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
+	import ChatThreadBindings from './ChatThreadBindings.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
-	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
+	import { createPlanDestinations } from './chatPlanDestinations';
+	import { openDocumentOnReplies } from './chatReplyDestination';
 	import {
 		createPager,
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
+		supersedingRead,
 		PAGER_ABORT,
 		type MessagePage,
 		type TurnSummary,
@@ -45,11 +51,14 @@
 		onOpenLightbox,
 		onAutoCreateThread,
 		onOpenDocuments = () => {},
+		visibleDocumentArtifactId = null,
 	}: {
 		isDraggingOver?: boolean;
 		onOpenLightbox: (url: string) => void;
 		/** Where an external review in the attention dock hands off. */
 		onOpenDocuments?: (documentId?: string) => void;
+		/** The document whose own header Send is on screen, so this chat does not offer a second sender for it. */
+		visibleDocumentArtifactId?: string | null;
 		onAutoCreateThread?: () => Promise<void>;
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
@@ -65,6 +74,7 @@
 	 */
 	let leaseAwaitingUser = $state(false);
 	const attentionSuppressed = $derived(!!$activeThreadId && leaseAwaitingUser);
+
 	const MSG_PAGE_SIZE = 50;
 	let pager = $state(createPager());
 	let pagerGeneration = 0;
@@ -87,21 +97,11 @@
 	const hasMoreMessages = $derived(!!$activeThreadId && pager.hasMore); // New chat has no history to page
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
-	export function scrollToBottom() {
-		messageListRef?.scrollToBottom();
-	}
-	function openPlanSubagent(nodeId: string, childThreadId: string, title: string, stepId?: string): void {
-		openPlanSubagentLeaf($activeThreadId, nodeId, childThreadId, title, stepId);
-	}
-	function openPlanDiscussion(artifactId: string, title: string): void {
-		openPlanDiscussionLeaf($activeThreadId, artifactId, title);
-	}
-	export function captureBottomOffset() {
-		messageListRef?.captureBottomOffset();
-	}
-	export function restoreBottomOffset() {
-		messageListRef?.restoreBottomOffset();
-	}
+	export const scrollToBottom = () => messageListRef?.scrollToBottom();
+	const scrollToBottomFromUser = () => messageListRef?.scrollToBottomFromUser();
+	const { openPlanSubagent, openPlanDiscussion } = createPlanDestinations(() => $activeThreadId);
+	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
+	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
 	/** Warm the active thread's cache. Lives in `$lib/chatWarm`. */
 	export const triggerWarm = warmActiveThread;
 	export async function selectThread(
@@ -166,8 +166,8 @@
 			console.error('fetchThreadMessages fetch failed:', e);
 		}
 	}
-	export async function setAndSend(text: string) {
-		await inputBarRef?.setAndSend(text);
+	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
+		return await inputBarRef?.setAndSend(text, preserveDraft) ?? 'not_sent';
 	}
 	const pagerPort: PagerPort = {
 		async fetchPage(cursor: string): Promise<MessagePage | null> {
@@ -198,8 +198,11 @@
 		await loadOlder(pager, {
 			...guardedPort,
 			async fetchPage(cursor) {
+				const threadId = get(activeThreadId) ?? '';
+				const sequence = beginChatReplyAttentionRead();
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
+					setChatReplyAttention(threadId, page.chat_reply_items ?? [], sequence);
 					mergeTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
@@ -207,9 +210,15 @@
 			},
 		}, focusOn() ? 1 : undefined, needsMore); // a Focus page is one request, never a chain
 	}
-	const loadRun = (stub: RunStub) => void loadRunRange(stub, {
+	const runLoader = {
 		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: mergeTurnSummaries,
-		setLoad: (key, load) => { runLoads = { ...runLoads, [key]: load }; },
+		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
+	};
+	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
+	const jumpToChatReply = useChatReplyJumper({
+		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
+		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
+		generation: () => pagerGeneration,
 	});
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {
@@ -224,6 +233,10 @@
 	function isCurrentFirstPageRequest(threadId: string, gen: number): boolean {
 		return pagerGeneration === gen && get(activeThreadId) === threadId;
 	}
+	// A newer first-page read makes the older one stale: abort it, never download both.
+	const firstPageRead = supersedingRead();
+	onDestroy(firstPageRead.abort);
+	$effect(() => watchChatCommentThreads(MSG_PAGE_SIZE));
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -232,15 +245,15 @@
 	}
 	async function loadFirstPage(threadId: string, gen: number): Promise<void> {
 		const t = $token;
-		if (!t) return;
-		const mine = isCurrentFirstPageRequest(threadId, gen);
-		if (mine) {
-			lastFirstPageThreadId = threadId;
-			firstLoadFailed = false;
-			firstLoadPending = true;
-		}
+		// A stale call's page is always discarded: it must not start, and so abort, the current read.
+		if (!t || !isCurrentFirstPageRequest(threadId, gen)) return;
+		lastFirstPageThreadId = threadId;
+		firstLoadFailed = false;
+		firstLoadPending = true;
+		const signal = firstPageRead.start();
+		const sequence = beginChatReplyAttentionRead();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`);
+			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
@@ -249,6 +262,7 @@
 			const data = await res.json() as MessagePage;
 			if (!isCurrentFirstPageRequest(threadId, gen)) return;
 			firstLoadFailed = false;
+			setChatReplyAttention(threadId, data.chat_reply_items ?? [], sequence);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
 			mergeTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);
@@ -258,6 +272,7 @@
 			// The first page is in the DOM now; this is what the user waits for.
 			if (isCurrentFirstPageRequest(threadId, gen)) markFirstPageRendered(threadId, hydrated.length);
 		} catch (e) {
+			if (signal.aborted) return; // replaced by a newer read, not a failure on screen
 			console.error(`loadFirstPage network error for thread ${threadId}:`, e);
 			if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
 		} finally {
@@ -271,23 +286,7 @@
 		await fetchThreadMessages(sid);
 	}
 
-	// The main panel is the sole view that reports its displayed thread.
-	$effect(() => {
-		const threadId = $activeThreadId;
-		if (threadId) startPresence(threadId);
-		else stopPresence();
-	});
-	onDestroy(stopPresence);
-
-	// Every navigation path binds the composer to the opened thread's saved model.
-	$effect(() => {
-		const id = $activeThreadId;
-		if (id) bindActiveThreadModel(id, $threads, $subagentMeta.get(id)?.model);
-	});
-	$effect(() => {
-		if ($activeThreadId && $token)
-			void loadCheckpoints($activeThreadId, $token).catch(() => null);
-	});
+	// Presence, model selection, and checkpoints are chat-wide bindings, outside transcript paging.
 	$effect(() => {
 		const unsubscribeEvents = subscribeChatPanelEvents({
 			activeThreadId,
@@ -304,18 +303,7 @@
 			pagerGeneration++;
 			pager = createPager();
 			const myGen = pagerGeneration;
-			const authToken = get(token);
-			try {
-				await Promise.all([
-					loadFirstPage(sid, myGen),
-					authToken
-						? loadCheckpoints(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
-					authToken
-						? hydrateSubagentThread(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
-				]);
-			} catch { /* ignore */ }
+			await refreshVisibleThread(sid, get(token), loadFirstPage(sid, myGen));
 		};
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
@@ -325,12 +313,14 @@
 	});
 </script>
 <div class="chat-shell">
+	<ChatThreadBindings />
 	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
+			hideScrollFab
 			onOpenLightbox={(url) => onOpenLightbox(url)}
 			{hasMoreMessages}
 			{loadingOlderMessages}
@@ -365,21 +355,22 @@
 			{/if}
 			<AttentionDock
 				suppressed={attentionSuppressed}
-				onOpenDestination={(destination) => {
+				onOpenDestination={(destination, threadId) => {
+					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
-			<MobileScrollFab
-				threadId={$activeThreadId}
-				{userIsNearBottom}
-				onScrollToBottom={scrollToBottom}
-			/>
+			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}
 					onOpenChild={openPlanSubagent}
 					onOpenLegacyDiscussion={openPlanDiscussion}
 				/>
+			{/if}
+			{#if $activeThreadId}
+				<HeldDocFeedbackControl threadId={$activeThreadId} visibleArtifactId={visibleDocumentArtifactId} />
 			{/if}
 		</ChatAttentionStack>
 		<InputBar

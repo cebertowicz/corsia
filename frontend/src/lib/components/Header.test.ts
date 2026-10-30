@@ -4,7 +4,7 @@ import { get } from 'svelte/store';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
-import { projectSettingsOpen } from '$lib/stores/projectSettings';
+import { resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { measurementScope } from '$lib/stores/measurement';
 import { projects } from '$lib/stores/projects';
@@ -20,7 +20,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	canvasHeader.set(null);
 	uiScope.set(null);
-	projectSettingsOpen.set(false);
+	resetSettingsNavigation();
 	threadSettingsOpen.set(false);
 	measurementScope.set({ project: 'all', agent: null });
 	measurementOrigin.set(null);
@@ -42,11 +42,18 @@ afterEach(() => {
 	measurementOrigin.set(null);
 });
 
-function render(activeView: 'activity' | 'chat' | 'measurement' = 'chat', conductorThreadId: string | null = null, onMeasurement = () => {}, hasPane = true): void {
+function render(
+	activeView: 'activity' | 'chat' | 'measurement' = 'chat',
+	conductorThreadId: string | null = null,
+	onMeasurement = () => {},
+	hasPane = true,
+	artifactHeaderInset: number | null = null,
+	onTogglePane = () => {},
+): void {
 	if (component) unmount(component);
 	component = mount(Header, {
 		target: host,
-		props: { onToggleSidebar: () => {}, onTogglePane: () => {}, onMeasurement, activeView, conductorThreadId, hasPane },
+		props: { onToggleSidebar: () => {}, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane, artifactHeaderInset },
 	});
 	flushSync();
 }
@@ -62,7 +69,30 @@ describe('Header', () => {
 	it('keeps exactly one gear in a thread header', () => {
 		render();
 		expect(host.querySelectorAll('[aria-label$="settings"]')).toHaveLength(1);
-		expect(host.querySelector('[aria-label="Thread settings"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Chat settings"]')).not.toBeNull();
+	});
+
+	it('keeps the canvas-open desktop controls in the header', () => {
+		let measuresOpened = 0;
+		let panelToggles = 0;
+		threads.set([{ ...agentThread }]);
+		render('chat', null, () => { measuresOpened += 1; }, true, 600, () => { panelToggles += 1; });
+
+		const right = host.querySelector('.h-right');
+		expect(right).not.toBeNull();
+		const measurement = right?.querySelector('[aria-label^="Measurement for"]') as HTMLButtonElement;
+		const settings = right?.querySelector('[aria-label="Chat settings"]') as HTMLButtonElement;
+		const panel = right?.querySelector('[aria-label="Toggle panel"]') as HTMLButtonElement;
+		expect(measurement).toBeTruthy();
+		expect(settings).toBeTruthy();
+		expect(panel).toBeTruthy();
+
+		measurement.click();
+		settings.click();
+		panel.click();
+		expect(measuresOpened).toBe(1);
+		expect(get(threadSettingsOpen)).toBe(true);
+		expect(panelToggles).toBe(1);
 	});
 
 	it('keeps an active thread chat-first without a Plan takeover action', () => {
@@ -80,19 +110,28 @@ describe('Header', () => {
 		expect(host.textContent).not.toContain('conductor');
 	});
 
-	it('opens project settings from a scoped activity header, not workspace activity', () => {
+	it('opens Settings on the scoped project\'s page from a project activity header', () => {
 		activeThreadId.set(null);
 		uiScope.set({ id: 'project-1', name: 'CORSIA', color: '#d65a87' });
 		canvasHeader.set({ title: 'CORSIA' });
 		render('activity');
-		expect(host.querySelector('[aria-label="Thread settings"]')).toBeNull();
+		expect(host.querySelector('[aria-label="Chat settings"]')).toBeNull();
+		const before = get(settingsNavigation).openRequest;
 		(host.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click();
-		expect(host.querySelector('[aria-label="Project settings"]')).not.toBeNull();
-		let opened = false;
-		projectSettingsOpen.subscribe((value) => { opened = value; })();
-		expect(opened).toBe(true);
-		flushSync();
-		expect(host.querySelector('[aria-label="Project settings"]')).toBeNull();
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('projects');
+		expect(get(settingsNavigation).project).toBe('project-1');
+	});
+
+	it('opens Settings at its first section from the workspace activity header', () => {
+		activeThreadId.set(null);
+		selectSettingsSection('debug');
+		render('activity');
+		const before = get(settingsNavigation).openRequest;
+		(host.querySelector('[aria-label="Workspace settings"]') as HTMLButtonElement).click();
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).project).toBeNull();
 	});
 
 	it('shows conductor settings for the designated hidden thread, not a project gear', () => {
@@ -232,6 +271,16 @@ describe('Header title on the Measurement page', () => {
 		activeThreadId.set('thread-1');
 		render('chat');
 		expect(title()).toContain('Bugs');
+	});
+});
+
+describe('Header title overflow', () => {
+	it('lets a long scope title shrink and ellipsize before it displaces fixed controls', () => {
+		const start = headerSource.indexOf('.h-scope {');
+		const rule = headerSource.slice(start, headerSource.indexOf('}', start));
+		expect(rule).toContain('min-width: 0;');
+		expect(rule).toContain('max-width: 24rem;');
+		expect(rule).toContain('text-overflow: ellipsis;');
 	});
 });
 

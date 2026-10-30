@@ -28,9 +28,10 @@ def chat_state(
 ) -> str:
     """The chat list's one word for a thread: the plan header's lead, renamed.
 
-    A human decision or review, or a host-access request, is the user's move
-    and outranks a pause (pause contract rule 5): beside active
-    work the agent still moves, paused or alone it is blocked on the user.
+    A host-access request, or a human review in a live plan, is the user's move:
+    beside active work the agent still moves, alone it is blocked on the user.
+    A paused plan defers its own asks (``plan_defers_asks``); an access request
+    is not plan-owned, so it still outranks the pause.
     Otherwise ``operator_node_state.leading``, the header's one precedence,
     decides. ``counts`` is None with nothing open. ``stuck`` is the header's
     not-moving parts (``plans.not_moving.read``): a still plan never reads
@@ -51,8 +52,10 @@ def chat_state(
     return _CHAT_WORD.get(operator_node_state.leading(counts), "idle")
 
 
-def _still_word(counts: dict[str, int], stuck: dict) -> str:
-    return "paused" if stuck["paused_by_you"] == not_moving.still_count(counts) else "idle"
+def _still_word(counts: dict[str, int], stuck: dict, wait: dict | None = None) -> str:
+    if stuck["paused_by_you"] == not_moving.still_count(counts):
+        return "paused"
+    return "waiting" if wait is not None else "idle"
 
 
 def _thread_items(rows, kind: str) -> dict[str, list[dict]]:
@@ -159,6 +162,10 @@ def _plan_word(plan_row: dict, plan: dict | None, *, owed: bool) -> tuple[str, s
     state = chat_state(
         plan["plan"], plan["progress"]["distribution"], owed=owed, stuck=display.get("not_moving"),
     )
+    if state == "idle" and display.get("not_moving") is not None:
+        state = _still_word(
+            plan["progress"]["distribution"], display["not_moving"], display.get("wait"),
+        )
     return state, display["label_key"]
 
 
@@ -242,6 +249,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
         states[plan_row["owner_id"]] = {
             "state": state,
             "label_key": label_key,
+            **{
+                key: plan["display"][key] for key in ("wait", "set_aside_until")
+                if plan and plan["display"].get(key)
+            },
             "paused": plan_row["state"] == "paused",
             "attention_items": attention_items,
             "settled": bool(

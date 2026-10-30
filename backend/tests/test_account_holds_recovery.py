@@ -116,9 +116,8 @@ def test_one_map_exact_human_text_and_agent_action_scope(cause, default, phrase,
     human = account_readiness_detail(readiness)
     assert human == f'Its account is not ready: {phrase}. {action}'
     assert cause not in human
-    state, fields = account_wake_fields(readiness, 'untrusted-provider-output')
+    state, fields = account_wake_fields(readiness)
     assert state == 'unready' and fields['cause'] == cause and fields['phrase'] == phrase
-    assert 'untrusted-provider-output' not in str(fields)
     assert fields['action'] == agent_action
     if default and cause != 'account_signed_out':
         assert 'verify' not in fields['action']
@@ -136,12 +135,12 @@ def test_removed_and_turned_off_instructions_are_identical_for_any_other_account
     assert account_readiness_detail(removed) == (
         'Its account is not ready: the account was removed. Choose another permitted account if one is available; '
         'otherwise switch model.')
-    assert account_wake_fields(removed, None)[1]['action'] == (
+    assert account_wake_fields(removed)[1]['action'] == (
         'The user can choose another permitted account if one is available; otherwise switch model.')
     assert account_readiness_detail(denied) == (
         'Its account is not ready: project policy does not permit the account. ' + DENIED_ACTION)
-    assert account_wake_fields(denied, None)[1]['action'] == DENIED_ACTION
-    assert 'cancel' not in account_wake_fields(removed, None)[1]['action'].lower()
+    assert account_wake_fields(denied)[1]['action'] == DENIED_ACTION
+    assert 'cancel' not in account_wake_fields(removed)[1]['action'].lower()
 
 
 @pytest.mark.parametrize('readiness', [None, {'ready': False, 'cause': 'account_signed_out', 'is_default': None},
@@ -149,7 +148,7 @@ def test_removed_and_turned_off_instructions_are_identical_for_any_other_account
 def test_missing_unknown_facts_conservatively_render_unread(readiness):
     from prompts.plan_wakes import ACCOUNT_READINESS_UNREAD, account_readiness_detail, account_wake_fields
     assert account_readiness_detail(readiness) == ACCOUNT_READINESS_UNREAD
-    state, fields = account_wake_fields(readiness, 'untrusted-provider-output')
+    state, fields = account_wake_fields(readiness)
     assert state == 'unready' and fields['cause'] == 'account_readiness_unread'
     assert 'untrusted-provider-output' not in str(fields)
 
@@ -201,8 +200,8 @@ def test_rewording_an_action_keeps_who_can_take_it(monkeypatch):
                         ('the account was removed', 'Use the inbox to cancel the held input.', 'user'))
     monkeypatch.setitem(plan_wakes.ACCOUNT_HOLD_COPY, ('account_login_unverified', True),
                         ("the account's current sign-in could not be verified", 'Refresh the provider source.', 'source'))
-    _, removed = account_wake_fields({'ready': False, 'cause': 'account_removed', 'is_default': False}, None)
-    _, unverified = account_wake_fields({'ready': False, 'cause': 'account_login_unverified', 'is_default': True}, None)
+    _, removed = account_wake_fields({'ready': False, 'cause': 'account_removed', 'is_default': False})
+    _, unverified = account_wake_fields({'ready': False, 'cause': 'account_login_unverified', 'is_default': True})
     assert removed['action'] == 'The user can use the inbox to cancel the held input.'
     assert unverified['action'] == SOURCE_CHECK
 
@@ -756,7 +755,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     before = _row(db)
     close_thread_db()
     db = get_db()
-    down, wakes = await reconcile_startup_continuity(logger)
+    down, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert down.batches == down.settlements == () and wakes == ()
     assert _row(db) == before
     assert db.execute('SELECT COUNT(*) FROM active_turns').fetchone()[0] == 0
@@ -772,7 +771,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     assert _row(db) == before
     close_thread_db()
     db = get_db()
-    ready, wakes = await reconcile_startup_continuity(logger)
+    ready, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert ready.settlements == () and wakes == () and len(ready.batches) == 1
     batch = ready.batches[0]
     assert batch.vendor_receipt == receipt
@@ -792,7 +791,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     assert writes == [batch]
     after = _row(db)
     assert (after['delivery_state'], after['write_outcome']) == ('delivered', 'accepted')
-    repeated, wakes = await reconcile_startup_continuity(logger)
+    repeated, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert repeated.batches == repeated.settlements == () and wakes == ()
     await drive_startup_continuity(repeated, wakes, logger)
     assert writes == [batch] and _row(db) == after

@@ -22,7 +22,7 @@ def _classify(raw: dict[str, Any]) -> str:
     return raw.get("material_event", "")
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     keys = ("plan_id", "node_id", "plan_event_id", "plan_revision")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 

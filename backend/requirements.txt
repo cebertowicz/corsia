@@ -22,8 +22,12 @@ anthropic==0.100.0
 openai==2.30.0
 loguru==0.7.3
 httpx==0.28.1
+# Keyless web search (MIT).
+ddgs==9.16.1
 cryptography==48.0.0
+spake2==0.9
 packaging==26.0
+semver==3.0.4
 readability-lxml==0.8.4.1
 json-repair==0.60.1
 mcp==1.27.2
@@ -32,6 +36,10 @@ python-frontmatter==1.3.0
 # Yjs-compatible live document state and relative positions.
 pycrdt==0.14.8
 psutil==7.2.2
+# CalDAV events for non-Google mail hosts (BSD-2-Clause, pure Python).
+icalendar==7.3.0
+# RFC 6186/6764 SRV discovery for unknown mail hosts (ISC, pure Python).
+dnspython==2.8.0
 # The bundled Public Suffix List names a shared-browser page's registrable domain
 # (host_access/browser_domain.py). Pure Python, no dependencies, MPL-2.0.
 publicsuffixlist==1.1.0.20261010

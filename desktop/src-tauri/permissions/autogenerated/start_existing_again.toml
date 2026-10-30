@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-existing-again"
+description = "Enables the start_existing_again command without any pre-configured scope."
+commands.allow = ["start_existing_again"]
+
+[[permission]]
+identifier = "deny-start-existing-again"
+description = "Denies the start_existing_again command without any pre-configured scope."
+commands.deny = ["start_existing_again"]

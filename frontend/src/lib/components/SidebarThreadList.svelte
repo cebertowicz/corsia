@@ -7,7 +7,9 @@
 	import { pinnedConversations, togglePin } from '$lib/stores/pinnedConversations';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import type { Thread } from '$lib/stores/threads';
-	import { sortThreadsBySidebarPriority } from './agentVisibility';
+	import { createSidebarSortMemo } from './agentVisibility';
+	import { SidebarWindow } from './sidebarWindow.svelte';
+	import { buildWindowItems, shouldWindow } from './sidebarWindow';
 	import { bucketOf, TIME_BUCKETS } from '$lib/time';
 	import { haptic } from '$lib/haptic';
 	import SidebarThreadRow from './SidebarThreadRow.svelte';
@@ -21,12 +23,15 @@
 		onArchiveThread,
 		onOpenAttention,
 		onOpenContextMenu,
+		contextMenuThreadId = null,
 	}: {
 		onSelectThread: (id: string) => void | Promise<void>;
 		onDeleteThread: (id: string) => void;
 		onArchiveThread?: (id: string) => void;
 		onOpenAttention?: (threadId: string, title: string) => void;
 		onOpenContextMenu: (e: MouseEvent, id: string) => void;
+		/** The conversation whose context menu is open; its row stays mounted while the list is windowed. */
+		contextMenuThreadId?: string | null;
 	} = $props();
 
 	let renamingThreadId = $state<string | null>(null);
@@ -65,10 +70,12 @@
 	let scopedThreads = $derived($threads.filter(s =>
 		($uiScope ? s.project_id === $uiScope.id : !s.project_id) && !isNavAgent(s)
 	));
-	let pinnedThreads = $derived(sortThreadsBySidebarPriority(
+	const sortPinnedThreads = createSidebarSortMemo();
+	const sortUnpinnedThreads = createSidebarSortMemo();
+	let pinnedThreads = $derived(sortPinnedThreads(
 		scopedThreads.filter(s => $pinnedConversations.has(s.id)), $threadPlanStates,
 	));
-	let unpinnedThreads = $derived(sortThreadsBySidebarPriority(
+	let unpinnedThreads = $derived(sortUnpinnedThreads(
 		scopedThreads.filter(s => !$pinnedConversations.has(s.id)), $threadPlanStates,
 	));
 
@@ -77,6 +84,19 @@
 		for (const s of unpinnedThreads) (groups[bucketOf(s.updated_at)] ??= []).push(s);
 		return TIME_BUCKETS.filter(b => groups[b]?.length).map(b => ({ label: b, threads: groups[b] }));
 	});
+
+	// Windowing: above WINDOW_THRESHOLD rows only the rows near the viewport are mounted. The focused row
+	// (and its neighbours), a row being renamed, and the row whose swipe or context menu is open stay mounted.
+	const win = new SidebarWindow<Thread>();
+	let rowCount = $derived(pinnedThreads.length + unpinnedThreads.length);
+	let windowed = $derived(shouldWindow(rowCount));
+	$effect.pre(() => {
+		win.setItems(windowed ? buildWindowItems(pinnedThreads, timeGroups) : []);
+	});
+	let windowSegments = $derived(
+		win.segments([renamingThreadId, swipingThreadId, revealedThreadId, contextMenuThreadId]),
+	);
+
 
 	async function handleSelectThread(id: string): Promise<boolean> {
 		if (revealedThreadId) {
@@ -263,77 +283,94 @@
 	}
 </script>
 
+{#snippet row(thread: Thread)}
+	{@const transformX = transformForThread(thread.id)}
+		<SidebarThreadRow
+			thread={thread}
+			isPinned={$pinnedConversations.has(thread.id)}
+			isActive={$activeThreadId === thread.id}
+			activity={$threadActivity[thread.id]}
+			renaming={renamingThreadId === thread.id}
+			bind:renameValue
+			swiping={swipingThreadId === thread.id}
+			{isSwipeGesture}
+			transformX={transformX}
+			leftZoneX={Math.max(0, transformX) - PIN_ZONE_WIDTH}
+			rightZoneX={Math.min(0, transformX) + RIGHT_ZONE_WIDTH}
+			pinArmed={swipingThreadId === thread.id && swipeDelta > PIN_ZONE_WIDTH * ACTIVATION_RATIO}
+			deleteArmed={swipingThreadId === thread.id && swipeDelta < -RIGHT_ZONE_WIDTH * ACTIVATION_RATIO}
+			onTouchStart={onThreadTouchStart}
+			onTouchEnd={onThreadTouchEnd}
+			onSelect={handleSelectThread}
+			{onOpenAttention}
+			{onOpenContextMenu}
+			onPin={onPinTap}
+			onArchive={onArchiveTap}
+			onDelete={onDeleteTap}
+			onStartRename={startRename}
+			onFinishRename={finishRename}
+			onCancelRename={cancelRename}
+		/>
+{/snippet}
+
 	<div class="thread-list" bind:this={threadListEl}>
 	{#key $uiScope?.id ?? 'workspace'}
-		<div class="scope-pane" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
+		{#if windowed}
+			<!-- Windowed above WINDOW_THRESHOLD rows: only the rows near the viewport (and any row that must
+			     stay mounted) are in the DOM; gaps stand in for the rest. A list of list items so each can
+			     announce its place (WAI-ARIA 1.2: listitem supports aria-posinset / aria-setsize over a partial set). -->
+			<div
+				class="scope-pane"
+				role="list"
+				aria-label="Chats"
+				in:fly={{ y: 6, duration: 180, easing: cubicOut }}
+				use:win.attachPane
+				onfocusin={win.onFocusIn}
+				onfocusout={win.onFocusOut}
+			>
+				{#each windowSegments as segment (segment.kind === 'item' ? win.items[segment.index].key : `gap:${segment.before}`)}
+					{#if segment.kind === 'gap'}
+						<div class="win-gap" style:height="{segment.height}px" aria-hidden="true"></div>
+					{:else}
+						{@const item = win.items[segment.index]}
+						{#if item.kind === 'label'}
+							<div class="win-item" data-win-key={item.key} use:win.measure>
+								<div class="list-section-label" role="presentation">{item.text}</div>
+							</div>
+						{:else}
+							<div
+								class="win-item"
+								data-win-key={item.key}
+								role="listitem"
+								aria-posinset={item.position}
+								aria-setsize={rowCount}
+								use:win.measure
+							>
+								{@render row(item.thread)}
+							</div>
+						{/if}
+					{/if}
+				{/each}
+			</div>
+		{:else}
+		<div class="scope-pane" role="list" aria-label="Chats" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
 			{#if pinnedThreads.length > 0}
-				<div class="list-section-label">Pinned</div>
+				<div class="list-section-label" role="presentation">Pinned</div>
 				{#each pinnedThreads as thread (thread.id)}
-					{@const transformX = transformForThread(thread.id)}
-					<SidebarThreadRow
-						thread={thread}
-						isPinned={$pinnedConversations.has(thread.id)}
-						isActive={$activeThreadId === thread.id}
-						activity={$threadActivity[thread.id]}
-						renaming={renamingThreadId === thread.id}
-						bind:renameValue
-						swiping={swipingThreadId === thread.id}
-						{isSwipeGesture}
-						transformX={transformX}
-						leftZoneX={Math.max(0, transformX) - PIN_ZONE_WIDTH}
-						rightZoneX={Math.min(0, transformX) + RIGHT_ZONE_WIDTH}
-						pinArmed={swipingThreadId === thread.id && swipeDelta > PIN_ZONE_WIDTH * ACTIVATION_RATIO}
-						deleteArmed={swipingThreadId === thread.id && swipeDelta < -RIGHT_ZONE_WIDTH * ACTIVATION_RATIO}
-						onTouchStart={onThreadTouchStart}
-						onTouchEnd={onThreadTouchEnd}
-						onSelect={handleSelectThread}
-						{onOpenAttention}
-						{onOpenContextMenu}
-						onPin={onPinTap}
-						onArchive={onArchiveTap}
-						onDelete={onDeleteTap}
-						onStartRename={startRename}
-						onFinishRename={finishRename}
-						onCancelRename={cancelRename}
-					/>
+					<div class="win-item" role="listitem">{@render row(thread)}</div>
 				{/each}
 			{/if}
 			{#each timeGroups as group (group.label)}
-				<div class="list-section-label">{group.label}</div>
+				<div class="list-section-label" role="presentation">{group.label}</div>
 				{#each group.threads as thread (thread.id)}
-					{@const transformX = transformForThread(thread.id)}
-					<SidebarThreadRow
-						thread={thread}
-						isPinned={$pinnedConversations.has(thread.id)}
-						isActive={$activeThreadId === thread.id}
-						activity={$threadActivity[thread.id]}
-						renaming={renamingThreadId === thread.id}
-						bind:renameValue
-						swiping={swipingThreadId === thread.id}
-						{isSwipeGesture}
-						transformX={transformX}
-						leftZoneX={Math.max(0, transformX) - PIN_ZONE_WIDTH}
-						rightZoneX={Math.min(0, transformX) + RIGHT_ZONE_WIDTH}
-						pinArmed={swipingThreadId === thread.id && swipeDelta > PIN_ZONE_WIDTH * ACTIVATION_RATIO}
-						deleteArmed={swipingThreadId === thread.id && swipeDelta < -RIGHT_ZONE_WIDTH * ACTIVATION_RATIO}
-						onTouchStart={onThreadTouchStart}
-						onTouchEnd={onThreadTouchEnd}
-						onSelect={handleSelectThread}
-						{onOpenAttention}
-						{onOpenContextMenu}
-						onPin={onPinTap}
-						onArchive={onArchiveTap}
-						onDelete={onDeleteTap}
-						onStartRename={startRename}
-						onFinishRename={finishRename}
-						onCancelRename={cancelRename}
-					/>
+					<div class="win-item" role="listitem">{@render row(thread)}</div>
 				{/each}
 			{/each}
 			{#if scopedThreads.length === 0}
-				<div class="empty-threads">No conversations here yet</div>
+				<div class="empty-threads">No chats here</div>
 			{/if}
 		</div>
+		{/if}
 	{/key}
 </div>
 
@@ -347,6 +384,7 @@
 		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 		padding: 8px 10px 4px;
 	}
+	.win-item { display: flow-root; }
 	.empty-threads {
 		padding: 24px 16px; text-align: center; color: var(--text-tertiary); font-size: var(--text-subhead);
 	}

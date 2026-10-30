@@ -64,9 +64,11 @@ first needs it, from what that screen gets approved with.
 | Role | Treatment | Drawn by |
 |---|---|---|
 | Pane header | Height `--header-height`. Title `--text-body`, `--fw-semibold`, `--text-primary`. 12px side inset. No bottom line. The chat header is the one glass header over scrolling content: `--header-gradient-top` into `--glass-thin`, `--glass-blur`, `--glass-rim`. | `Header.svelte` `.shell-header`, `.h-title` |
+| Page title | Top of a full-page view's content column (Settings sections). `--text-title2`, `--fw-semibold`, `--text-primary`, the row's `--space-2` side inset, `--space-5` below. Hidden on a phone, where the app header names the page. | `SettingsView.svelte` `.page-title` |
 | Section label | `--text-footnote`, `--fw-semibold`, `--text-tertiary`, sentence case. No fill, border or rule. | `Pane.svelte` cap label; `SidebarThreadList.svelte` group label |
-| List row | Flat on the pane surface: no border or fill at rest. Min height 38px. Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row |
+| List row | Flat on the pane surface: no border or fill at rest. Min height `--list-row-min-height` (38px). Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row; `SettingsRow.svelte` |
 | Second line | `--text-caption`, `--text-tertiary`. When the line states a status, it takes that status's text colour (Needs you `--amber-text`). | `SidebarThreadRow.svelte` update line; `PlanRowFace.svelte` subline |
+| Comment anchor | Text a comment is attached to: 13% --amber wash, 2px 42% --amber underline. While it is being written: 20% wash, dashed 2px --amber. Focused: 26% wash, solid --amber underline. A whole block takes the same amber as an outline. Amber on text means a comment; amber as a dot or text colour stays Needs you. | commentAnchors.css (moved from cm/theme.ts:92-106) |
 | Trailing detail and row action | `--text-caption`, `--text-tertiary`. An action is text that turns `--text-primary` on hover, with no button chrome at rest. | `PlanHeadControls.svelte`, `PlanChildControls.svelte`, `AttentionDock.svelte` Answer |
 | Status | A dot or coloured text, never a filled badge. Needs you: `--amber` mark, `--amber-text` text. Working: `--status-in-progress`. Done: `--green`. Failed: `--red`. | `PlanRowFace.svelte`, `SidebarThreadRow.svelte` |
 | Accent | One accent. The default is project blue (`--accent`). A project's own colour replaces it through `accentRoles`, which steps text to 4.5:1 and picks the ink. Use the role tokens (§2.1): `--accent` for focus and selection marks, `--accent-text` for text, `--accent-fill` with `--accent-on-fill` ink for a solid fill, `--accent-line` for a border, `--accent-wash` for a wash. Never a hex. | `app-tokens.css`; `+layout.svelte`; `utils/projectColors.ts` `accentRoles` |
@@ -74,8 +76,9 @@ first needs it, from what that screen gets approved with.
 | Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
+| Text field | One shape for every free-text control: 1px `--border`, `--radius-lg`, transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-lg` at every height, a capsule only at one line). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
-| Project mark | A 9px dot in the project's colour with an 8% `--text-primary` ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
+| Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
 | Time | Formatted only by `lib/time.ts` (`relLabel` for recency, `formatMoment` for plan times). Never formatted inside a component. | `time.ts` |
 | Spacing | `--space-*` tokens. A raw px value is allowed only where this table names one. | `app-tokens.css` |
@@ -175,9 +178,10 @@ project scope every role is derived from the project's colour
 | `--green-bg` | | `rgba(52,211,153,0.08)` | `#f0fdf4` *(solid!)* | Light-mode value is solid hex, not rgba — known wart, do not "fix" without a sweep. |
 | `--green-border` | | `rgba(52,211,153,0.25)` | `rgba(34,197,94,0.3)` | |
 | `--green-text` | | `#34d399` | `#16a34a` | Use this for green-on-green-bg text. |
-| `--red` | Destructive / error | `#f87171` | `#f87171` | |
+| `--red` | Destructive / error | `#f87171` | `#f87171` | `--red` is for fills, borders and icons; red text uses `--red-text`. |
 | `--red-bg` | | `rgba(248,113,113,0.08)` | `#fef2f2` *(solid)* | |
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
+| `--red-text` | Red text | `var(--red)` | `#b91c1c` | Readable on `--red-bg` and the plain surface in both themes. |
 
 **Anti-patterns:**
 - ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the
@@ -356,7 +360,7 @@ in-line.
 | `--ease-snap` | `cubic-bezier(0.2, 0, 0, 1)` | Button + IconButton state changes (100ms); tight UI feedback. Source: `ui/Button.svelte:59`, `ui/IconButton.svelte:46`. |
 | `--ease-material` | `cubic-bezier(0.4, 0, 0.2, 1)` | Sidebar collapse width transition (250ms). Source: `Sidebar.svelte:189`. |
 | `--ease-ios-sheet` | `cubic-bezier(0.32, 0.72, 0, 1)` | Mobile drawer transform (320ms); swipe-row snap. The iOS sheet curve. Source: `Sidebar.svelte:259`. |
-| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login hero-grow (600ms), fade-rise (380ms); phone `main` slide when the rail or pane opens and closes (`--dur-spring`). Pronounced ease-out with no overshoot. Source: `LoginScreen.svelte:94, 106`, `HomeShell.svelte:339, 374`. |
+| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login fade-rise (380ms); phone `main` slide when the rail or pane opens and closes (`--dur-spring`). Pronounced ease-out with no overshoot. Source: `LoginScreen.svelte`, `HomeShell.svelte:339, 374`. |
 | `--ease-cubic-out` (Svelte built-in) | `cubicOut` ≈ `cubic-bezier(0.33, 1, 0.68, 1)` | Auth gate ↔ app cross-fade (320 / 460ms). Source: `+page.svelte:39, 347–354`. |
 
 **Note on auth-fade curve drift.** `Sidebar.svelte:255` comment claims
@@ -373,7 +377,6 @@ fix the comment — flagged in §8.7.
 | Standard | 200–250ms | Modal fly-in (200ms); sidebar collapse width (250ms) |
 | Drawer | 320ms | Mobile drawer present / dismiss; swipe snap; auth-gate exit |
 | Hero | 380–460ms | Auth gate enter (460ms / 200ms delay); login fade-rise (380ms / 220ms delay) |
-| Hero+ | 600ms | Login hero-grow logo |
 
 Avoid mid-band oddballs (270, 420ms etc.) — pick the class that matches
 the surface's role in the user's attention.
@@ -406,19 +409,17 @@ duration: 320, easing: cubicOut`; app `in:fade duration: 460, delay:
 transition feels like a hand-off rather than a flicker. Source:
 `+page.svelte:347–354`.
 
-**Picker → login hero-grow (Tauri).** Logo `hero-grow` keyframe 600ms
-`--ease-entrance`, `transform-origin: center`: scale 0.4 → 1, opacity 0
-→ 1. The 0.4 floor matches the 96px picker mark to the 240px hero size
-so first paint reads as continuation rather than a swap. The login
-screen background also matches the picker's translucency
-(`color-mix(--bg-primary 55%, transparent)` + `--glass-blur`) when in
-the Tauri shell. Source: `LoginScreen.svelte:68–100`.
+**Picker → login mark.** The login logo is the living mark (`LivingMark.svelte`,
+`entry="none"`): it is drawn at rest, with no grow-in, and moves only through its
+ambient flow and pulse. The login screen background still matches the picker's
+translucency (`color-mix(--bg-primary 55%, transparent)` + `--glass-blur`) when in
+the Tauri shell. Source: `LoginScreen.svelte`.
 
 **Picker → login fade-rise (form).** Card content (h1 / p / input /
 button / error) all share a single `fade-rise` keyframe: 380ms
 `--ease-entrance` with 220ms delay; opacity 0 + translateY(6px) →
-final. The 220ms delay overlaps the hero-grow's tail so the hero
-settles before the form appears. Source: `LoginScreen.svelte:101–111`.
+final. The 220ms delay lets the logo settle before the form appears.
+Source: `LoginScreen.svelte`.
 
 **Login → home (the new-chat reveal).** Same auth-gate cross-fade
 above, terminating in the chat view's `bg-primary` solid surface. No
@@ -488,8 +489,8 @@ reach for it from any component.
 #### 2.7.5 Reduced motion
 
 `@media (prefers-reduced-motion: reduce)` should:
-- Disable `hero-grow` and `fade-rise` (replace with instant
-  opacity-only).
+- Disable `fade-rise` (replace with instant opacity-only). The living mark
+  draws as a still frame.
 - Drop `fly` from modal entrance (keep fade).
 - Replace drawer transform-slide with instant.
 - Hold ambient `pulse` and `blink` at a static frame (not jarring).
@@ -513,6 +514,13 @@ strengthens both border tokens.
 | Cmd palette | 200 (legacy `.dialog-overlay`) | Searchable command surface |
 | Lightbox | 1000+ (legacy) | Image viewer |
 | Toast / haptic feedback | 9999 | Top-of-stack ephemera |
+
+**Every overlay (scrim, dialog, popover, drawer, menu) mounts through
+`use:portal` (`lib/actions/portal.ts`) so it is a child of `document.body`.**
+A `position: fixed` layer left inside the chat column or the open document is
+clipped to that box in the desktop app's WebKit, and a z-index cannot undo it.
+`lib/__tests__/overlay-portal.test.ts` fails on a new fixed layer that neither
+portals nor is listed there as not an overlay.
 
 Several legacy values in `app.css` (`.dialog-overlay { z-index: 200 }`)
 need an audit for collision with newer modal stack. Out of scope this
@@ -643,7 +651,12 @@ Two compensating patterns:
 1. **Body pinned to `--bg-primary` on mobile** (`app.css:218–220`). The
    transparent-body trick that lets desktop vibrancy through becomes a
    non-matching color behind the iOS status bar; pinning to primary keeps
-   the status-bar bg (driven by theme-color meta) seamless.
+   the status-bar bg (driven by theme-color meta) seamless. The installed
+   iOS app uses `apple-mobile-web-app-status-bar-style=default`, so the
+   system draws the status bar above the page and the page starts below
+   it; in that standalone mode `100vh` is the full screen height while
+   the layout viewport is shorter, so the shell sizes to `100dvh` under
+   `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
 2. **3-stop linear gradient on glass headers** (ChatHeader, AppShellBar
    on mobile):
    ```css
@@ -745,8 +758,19 @@ interface Props {
 
 **Behavior:** Escape closes (when enabled), backdrop click closes (when
 enabled), inner click does NOT propagate to backdrop. Body has
-`overflow-y: auto`; modal max-height 86vh desktop / 92vh mobile. Fade
-backdrop 160ms, fly content (y: 8px) 200ms.
+`overflow-y: auto`; modal max-height 86vh on desktop, and on a phone only
+the room inside the safe-area padding, so the footer clears the home
+indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
+
+**Header and footer have no dividers** (§0.2 rule 3); space separates them
+from the body. The footer puts every action together at the trailing edge, by
+proximity: a choice pair sits side by side where every other modal puts its
+commit, so the eye finds the commit in the same place each time. One solid
+`primary` `Button` (or `danger` for a destructive commit) is the commit, and
+every secondary (Cancel, Back, Close) is a `ghost` `Button`, never an
+outlined or secondary-filled one. No `flex: 1` spacer pins Cancel to the
+left, in `foot` or in a body action row. A destructive confirm carries no
+icon tile: its title says what happens.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid
@@ -785,7 +809,7 @@ interface Props {
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
-- `danger` — red tint. Destructive or override-with-caution.
+- `danger` — red tint, `--red-text` label (readable on the tint in both themes). Destructive or override-with-caution.
 - `ghost` — transparent, low-attention. Hovers to `--bg-tertiary`.
 
 **Loading state** shows a 12px circular spinner inside the button and
@@ -850,6 +874,8 @@ interface Props {
   error?: string;             // red text below (suppresses hint)
   required?: boolean;         // shows asterisk
   layout?: 'row' | 'stacked'; // default 'row'; auto-collapses on mobile
+  variant?: 'default' | 'chip' | 'nested'; // see Variants
+  hideLabel?: boolean;        // label stays the accessible name, not drawn
   trailing?: Snippet;         // right-of-control inline annotation
   children: Snippet;          // the control (input/select/textarea)
 }
@@ -858,10 +884,22 @@ interface Props {
 **Desktop layout (row):** 140px label col / 1fr control col / auto
 trailing col. Mobile (≤720px) collapses to single column.
 
-**Native control styling** (provided via `:global()` selectors): inputs/
-selects/textareas get `--bg-tertiary` bg, `--border` border, `--radius-xs`
-(6px), 32px height, 12.5px font. Focus ring is 3px `--accent-wash`
-box-shadow.
+**Native control styling** (provided via `:global()` selectors): in the
+`default` variant, inputs/selects/textareas get `--bg-tertiary` bg,
+`--border` border, `--radius-xs` (6px), 32px height, 12.5px font. Focus ring
+is 3px `--accent-wash` box-shadow.
+
+**Variants.** `chip` and `nested` draw the Text field role of §0.1 from
+`ui/text-field.css`, the one home of its border, radius, focus, error and
+disabled rules. `chip` is for a pane (glass fill); `nested` is for a card or
+sheet (no fill). Use `hideLabel` where the surrounding UI already names the
+field (a comment composer). A control whose own wrapper is a `<label>` (the
+decision drawer's Other and Note fields) cannot nest in Field: give it
+`class="text-field"` and import `text-field.css`. Those two have no row of their
+own: the field spans the option width, a hidden label names it, and a chosen
+Other takes the selected-option border (`--accent`) on the field itself, with no
+fill, so its background stays the chat composer's; the pick-any Note never does. Multi-line fields use the
+`autosize` action.
 
 Native chrome stripped from selects (custom chevron data-URI inside
 `Field`) and number inputs (spinners hidden). If a real number-stepper UI
@@ -955,6 +993,10 @@ For Settings feature flags and other single boolean controls.
 interface Props {
   checked: boolean;
   disabled?: boolean;
+  /** Rule-held: muted, focusable, and click-inert with aria-disabled. */
+  held?: boolean;
+  /** In-flight: full colour and click-inert with aria-disabled. */
+  locked?: boolean;
   size?: 'sm' | 'md';
   ariaLabel: string;
   onchange: (next: boolean) => void;
@@ -1187,6 +1229,8 @@ single source of truth.
 The action sheet that currently expands above the chip uses `--glass-thin`
 on a `--glass-thin` floater — works but is borderline glass-on-glass.
 Consider solid-elevated for nested layers (§7).
+
+**Pinned unread chip.** One chip above the composer, in the standard chip style, for unread activity the person can't see from where they are (first use: replies to their document comments; next, answers to their chat comments further up the chat). Tapping it lands on the first unread item, marked New, and each tap lands on the next until none are left. It carries the blue New dot (`.ct-new-dot`, `--accent`), the same mark the item carries where it lands; amber stays for needs-you, warnings and loading. It clears by itself once every counted item has been fully on screen for about 1.5 s, has no dismiss, and sits above Needs you, never inside it.
 
 ### 5.7 Overlays
 

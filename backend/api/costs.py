@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 
+from connections import fact_memo
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_bulk, run_in_db
 from infra.time import utc_now
-from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
+from core.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.model_groups import group_spend
 from api.measurement_scope import completed_week_window
 from api.measurement_scope import scope_cte, validate_scope
@@ -137,10 +138,11 @@ def _weekly_costs(db, scope: _UsageScope):
     ).fetchall()
 
 
+@fact_memo.fact_reads()
 def _costs_by_model(db, scope: _UsageScope):
     """Stored token and cost totals per model identity, most expensive first.
 
-    Literal selectors resolve through ``api.cost_identity``, the identity Models
+    Literal selectors resolve through ``core.cost_identity``, the identity Models
     uses. A merged identity keeps SQL's SUM semantics: its cost is the known sum,
     None only when none of its calls carried a cost, and its unpriced calls stay
     counted.

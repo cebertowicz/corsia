@@ -1,9 +1,6 @@
 ---
 name: experiment-design
-description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance), and when defining or interpreting a KPI to decide whether a change worked. Run it in stages that each must earn the next, with a confirmation bar matched to consequence. Not for regression tests, passive monitoring or source inspection.
-corsia:
-  handler:
-    kind: instruction
+description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance), and when defining, recording or interpreting a KPI. Run it in stages that each must earn the next, with a confirmation bar matched to consequence. Not for regression tests, passive monitoring or source inspection.
 ---
 
 # Experiment design
@@ -40,7 +37,7 @@ The consequence sets the size. Rewording a grading rubric you can revert tomorro
 - Inputs match what the real actor sees at that moment. Keep answers, labels and later information out of what is being tested.
 - Change one thing between arms. If several things change together, claim only the combined change.
 - Count every cost: setup, failures, retries, helpers and evaluation. Unknown cost is not zero. Set a spend ceiling for the whole experiment before stage one.
-- A measure you define must answer a question its audience acts on. Prefer source data over self-grading, and say what the measure cannot see.
+- A measure you define must answer a question its audience acts on. Prefer source data over self-grading, and say what the measure cannot see. To record measures of your own work, read `references/instrument-measures.md`.
 
 ## 4. Controls for high-consequence claims only
 

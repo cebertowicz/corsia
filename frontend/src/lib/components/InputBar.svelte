@@ -1,10 +1,14 @@
 <script lang="ts">
 	import './InputBar.css';
 	import { tick, onMount } from 'svelte';
+	import { setContentEditableText } from '$lib/inputText';
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, isThreadTurnActive, threads } from '$lib/stores/threads';
+	import { activeThreadId, isThreadTurnActive } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import { turnStates } from '$lib/ws/turnState';
 	import InputBarComposer from './InputBarComposer.svelte';
+	import ChatCommentSelection from './ChatCommentSelection.svelte';
+	import type { ChatComment } from '$lib/chatCommentAnchors';
 	import InputBarControls from './InputBarControls.svelte';
 	import InputBarFileInputs from './InputBarFileInputs.svelte';
 	import {
@@ -14,18 +18,18 @@
 		placeCaretAtEnd,
 		resizeInputBar,
 		uploadThreadAttachment,
-		watchInputBarHeight,
 	} from './inputBarHelpers';
-	import { createComposerDrafts, type ComposerDraft } from './composerDrafts';
-	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination } from './composerSendReadiness';
-	import { activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
-	import { on, sendMessage, stopTurn } from '$lib/ws';
-	import { subagentMeta } from '$lib/stores/subagents';
+	import { createComposerDrafts, sendAndRestoreDraft, type ComposerDraft } from './composerDrafts';
+	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
+	import { findModelById, loadModels, loadThreadCatalog } from '$lib/stores/models';
+	import { sendMessage, stopTurn } from '$lib/ws';
+	import { watchComposer } from './inputBarLifecycle';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import { updateRestarting } from '$lib/update/store';
 
+	import { corsiaAgentId } from '$lib/utils/conductor';
 		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread }: {
 			threadId?: string | null;
 			onSend: () => void;
@@ -46,31 +50,32 @@
 		let isComposing = false;
 	let fileInputsRef: InputBarFileInputs;
 	let pendingAttachments = $state<Attachment[]>([]);
+	let comments = $state<ChatComment[]>([]);
+	let commentSelection: ChatCommentSelection;
 	let uploadError = $state('');
 	let inputAreaEl = $state<HTMLDivElement | undefined>(undefined);
 	let isMultiLine = $state(false);
 
-		const isTouchDevice = typeof window !== 'undefined' &&
-			('ontouchstart' in window || navigator.maxTouchPoints > 0);
+		const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
 		let sheetView = $state<SheetView>(null);
-		function toggleSheet(view: Exclude<SheetView, null>) {
-			sheetView = sheetView === view ? null : view;
-		}
+		let focusLocalOnly = $state(false);
+		function toggleSheet(view: Exclude<SheetView, null>) { sheetView = sheetView === view ? null : view; }
 		function closeSheet() { sheetView = null; }
 
-	// Only the top composer owns requests from another surface.
-	$effect(() => threadId === undefined ? onModelSheetRequest(() => {
-		if (sheetView === 'model') return;
-		void loadModels({ refreshUsage: true });
-		sheetView = 'model';
-	}) : undefined);
+		// The top composer owns the sheet state and focus request for every bound control.
+		$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
+			focusLocalOnly = request.focusLocalOnly;
+			if (sheetView !== 'model') { void loadModels({ refreshUsage: true }); sheetView = 'model'; }
+		}) : undefined);
 
 		const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 
 		const hasImageAttachments = $derived(pendingAttachments.some(a => a.is_image));
-		const activeModel = $derived(findModelById($models, $activeModelId));
-
+		const selection = $derived($composerSelectionFor(threadId));
+		const activeModel = $derived(findModelById(selection.models, selection.modelId));
+		const catalogThreadId = $derived(!selection.isOpen ? selection.threadId : null); // another thread's composer reads its own catalog
+		$effect(() => { if (catalogThreadId) void loadThreadCatalog(catalogThreadId); });
 		$effect(() => {
 		if (!sheetView) return;
 		const onPointerDown = (e: PointerEvent) => {
@@ -90,7 +95,7 @@
 		restore: restoreComposerDraft,
 		reset: resetComposer,
 		boundThreadId: () => boundThreadId,
-		hasText: () => inputText.length > 0,
+		hasText: () => inputText.length > 0 || comments.length > 0,
 	});
 
 	$effect(() => drafts.switchThread(boundThreadId));
@@ -130,28 +135,30 @@
 	}
 
 	function prepareMessage() {
-		if (!inputText.trim() && pendingAttachments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
 		if (!boundThreadId && !onAutoCreateThread) return null;
 		const snapshot = () => boundThreadId ? ({
 			threadId: boundThreadId,
 			content: inputText.trim(),
-			modelId: $activeModelId ?? undefined,
+			modelId: selection.modelId ?? undefined,
 			attachments: [...pendingAttachments],
 		}) : null;
 		return boundThreadId ? snapshot() : ensureThread().then(snapshot);
 	}
 
 	function currentComposerDraft(): ComposerDraft | null {
-		if (!inputText.trim() && pendingAttachments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
 		return {
 			content: inputText,
 			attachments: [...pendingAttachments],
+			comments: [...comments],
 		};
 	}
 
 	function restoreComposerDraft(draft: ComposerDraft | undefined): void {
 		inputText = draft?.content ?? '';
 		pendingAttachments = draft ? [...draft.attachments] : [];
+		comments = draft?.comments ? [...draft.comments] : [];
 		isMultiLine = false;
 		if (inputEl) {
 			inputEl.textContent = inputText;
@@ -167,6 +174,7 @@
 		inputText = '';
 		if (inputEl) inputEl.textContent = '';
 		pendingAttachments = [];
+		comments = [];
 		uploadError = '';
 		if (inputEl) inputEl.style.height = 'auto';
 		isMultiLine = false;
@@ -174,48 +182,47 @@
 
 	type DeliveryIntent = 'apply_now' | 'queue_after_turn';
 
-	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now') {
-		if (!canSendToModel) return;
+	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<SendOutcome> {
+		if (!canSendToModel) return 'not_sent';
 		const prepared = prepareMessage();
 		const message = prepared instanceof Promise ? await prepared : prepared;
-		if (!message || !canSendToModel) return;
+		if (!message || !canSendToModel) return 'not_sent';
 		const { threadId, content, modelId, attachments } = message;
 		const submittedDraft = currentComposerDraft() ?? {
 			content,
 			attachments: [...attachments],
 		};
+		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
 		emitProductEvent('composer', 'sent', {
 			thread_id: threadId,
 			char_count: content.length,
 			attachment_count: attachments.length,
+			comment_count: payloadComments.length,
+			reply_count: payloadComments.filter(comment => !!comment.root_cid).length,
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
-		const inputId = deliveryIntent === 'queue_after_turn'
-			? sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent)
-			: sendMessage(threadId, content, modelId, attachments, undefined);
+		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
-			return;
+			return 'notified';
 		}
 		drafts.trackSubmit(inputId, threadId, submittedDraft);
 		// Save before onSend, which may synchronously switch threads.
 		drafts.saveCurrentDraft(threadId);
 		resetComposer();
 		onSend();
+		return 'sent';
 	}
 
-	const activeThread = $derived(
-		$threads.find(thread => thread.id === boundThreadId),
-	);
-	const isSubagentThread = $derived(
-		boundThreadId ? $subagentMeta.has(boundThreadId) : false,
-	);
-	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	const canSendToModel = $derived(!$updateRestarting && (isSubagentThread || composerCanSend(activeThread, activeModel, $models)));
-	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
+	const activeThread = $derived(selection.thread);
+	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));
+	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
+	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
+	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, selection.models, allowUnlistedNoModelThread));
+	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0 || comments.length > 0);
 
 	function handleSendButtonClick() {
-		if (inputText.trim() || pendingAttachments.length > 0) {
+		if (inputText.trim() || pendingAttachments.length > 0 || comments.length > 0) {
 			handleSend();
 		} else if (isStreamingBoundThread && boundThreadId) {
 			stopTurn(boundThreadId);
@@ -281,58 +288,24 @@
 		resizeInputBar(el, inputAreaEl, (value) => { isMultiLine = value; });
 	}
 
-	onMount(() => {
-		const stopWatchingHeight = watchInputBarHeight(
-			() => inputAreaEl,
-			(fn) => { void tick().then(fn); },
-		);
-		const unsubscribeMessage = on('message_added', data => drafts.settlePendingSubmit(data));
-		const unsubscribeQueued = on('input_queued', data => drafts.settlePendingSubmit(data, 'queued'));
-		const unsubscribeAccepted = on('input_accepted', data => drafts.settlePendingSubmit(data, 'delivered'));
-		const unsubscribeError = on('error', data => drafts.settlePendingSubmit(data, 'failed'));
-		// Every Stop gets an answer the user can read. "Stop worked" and "Stop is
-		// broken" looked identical because the only signal was a control that
-		// kept being offered (USER-REPORTS #6b) — and the outcome names are ours,
-		// not theirs, so none of them reaches the screen.
-		const unsubscribeStopReceipt = on('stop_receipt', data => {
-			if (data?.thread_id !== boundThreadId) return;
-			const receiptText: string | undefined = {
-				stopped: 'Turn stopped',
-				already_terminal: 'That turn had already finished',
-				stale_active: 'That turn had already ended — a newer one is running',
-				no_active_turn: 'Nothing was running to stop',
-			}[data?.outcome as string];
-			if (receiptText) toasts.show(receiptText, data.outcome === 'stopped' ? 'success' : 'info');
-		});
-		return () => {
-			stopWatchingHeight();
-			unsubscribeMessage();
-			unsubscribeQueued();
-			unsubscribeAccepted();
-			unsubscribeError();
-			unsubscribeStopReceipt();
-		};
-	});
+	onMount(() => watchComposer(() => inputAreaEl, () => boundThreadId, drafts));
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
-
-	export async function setAndSend(text: string) {
+	export function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
+		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments], comments: [...comments] } : null;
+		const draftThreadId = boundThreadId;
 		inputText = text;
+		if (preserveDraft) { pendingAttachments = []; comments = []; }
 		if (inputEl) inputEl.textContent = text;
-		await tick();
-		await handleSend();
+		return sendAndRestoreDraft(draft, draftThreadId, tick, handleSend, restoreComposerDraft, drafts.saveCurrentDraft);
 	}
 
 	export async function setText(text: string) {
 		inputText = text;
 		pendingAttachments = [];
-		await tick();
-		if (inputEl) {
-			inputEl.textContent = text;
-			autoResize(inputEl);
-			placeCaretAtEnd(inputEl);
-		}
+		comments = [];
+		await setContentEditableText(inputEl, text, autoResize, placeCaretAtEnd);
 	}
 </script>
 
@@ -356,6 +329,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>
@@ -373,6 +347,8 @@
 		hasMessageToSend={hasMessageToSend}
 		{canSendToModel}
 		queueUntilSwitch={hasReadySwitchDestination}
+		{focusLocalOnly}
+		onfocusconsumed={() => focusLocalOnly = false}
 		onAttachFile={() => fileInputsRef?.openFile()}
 		onAttachCamera={() => fileInputsRef?.openCamera()}
 		onAttachPhotos={() => fileInputsRef?.openPhotos()}
@@ -384,6 +360,9 @@
 		bind:inputEl
 		threadId={boundThreadId}
 		{pendingAttachments}
+		{comments}
+		onEditComment={id => void commentSelection?.edit(id)}
+		onRemoveComment={id => comments = comments.filter(comment => comment.id !== id)}
 		{isMultiLine}
 		{sheetView}
 		{toggleSheet}

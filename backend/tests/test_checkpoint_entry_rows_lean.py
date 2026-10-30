@@ -8,6 +8,8 @@ the checkpoint search tool.
 
 from __future__ import annotations
 
+from infra.thread_confinement import Reader
+
 import pytest
 
 from checkpoint_retrieval_fixtures import (  # noqa: F401
@@ -84,8 +86,8 @@ def _entry(entry_id: int, statement: str, revision: int = 1) -> dict:
 @pytest.fixture
 def corpus(fresh_db):
     """Several threads and epochs; entry 1 of t1 is revised so first != latest."""
-    fresh_db.execute("INSERT INTO threads VALUES ('t2', ?, 'T2', 1)", (OWNER_USER,))
-    fresh_db.execute("INSERT INTO threads VALUES ('t3', ?, 'T3', 0)", (OWNER_USER,))
+    fresh_db.execute("INSERT INTO threads (id,user_id,title,history_epoch) VALUES ('t2', ?, 'T2', 1)", (OWNER_USER,))
+    fresh_db.execute("INSERT INTO threads (id,user_id,title,history_epoch) VALUES ('t3', ?, 'T3', 0)", (OWNER_USER,))
     for revision, tail in enumerate(("alpha", "beta beta", "gamma gamma gamma"), 1):
         _install_checkpoint(
             fresh_db, thread_id="t1", narrative=f"Cache work {revision}.",
@@ -134,35 +136,11 @@ def test_rows_match_the_reference_query(corpus, match, per_thread, limit):
         ) == _reference_rows(corpus, match, OWNER_USER, thread_id, limit, per_thread)
 
 
-def test_node_start_selection_returns_the_reference_hits_in_order(corpus):
-    from memory.checkpoint_entry_rows import entry_hits, entry_hits_matching
-
-    def select(rows):
-        return sorted(rows, key=lambda row: row["entry_id"], reverse=True)[:4]
-
-    match = '"cache"* OR "index"*'
-    new = entry_hits_matching(
-        corpus, match, user_id=OWNER_USER, candidate_limit=100, per_thread=3,
-        select=select,
-    )
-    old = entry_hits(select(_reference_rows(corpus, match, OWNER_USER, None, 100, 3)))
-
-    assert new == old and len(new) == 4
-    revised = entry_hits_matching(
-        corpus, '"eviction"*', user_id=OWNER_USER, candidate_limit=100,
-        per_thread=3,
-    )
-    assert any(
-        hit["first_checkpoint"]["checkpoint_id"] != hit["latest_checkpoint"]["checkpoint_id"]
-        for _relevance, _order, hit in revised
-    )
-
-
 def test_search_tool_returns_the_reference_hits(corpus, monkeypatch):
     import memory.checkpoint_search as search
 
-    new = search.search_checkpoints(corpus, "cache", caller_thread_id="t1", limit=10)
-    monkeypatch.setattr(search, "entry_rows_matching", _reference_rows)
-    old = search.search_checkpoints(corpus, "cache", caller_thread_id="t1", limit=10)
+    new = search.search_checkpoints(corpus, "cache", reader=Reader.agent("t1"), limit=10)
+    monkeypatch.setattr(search, "entry_rows_matching", lambda db, match, user, thread, limit, per_thread, caller: _reference_rows(db, match, user, thread, limit, per_thread))
+    old = search.search_checkpoints(corpus, "cache", reader=Reader.agent("t1"), limit=10)
 
     assert new == old and new

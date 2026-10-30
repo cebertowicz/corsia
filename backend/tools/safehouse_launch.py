@@ -5,6 +5,8 @@ from collections.abc import Callable
 import os
 from pathlib import Path
 
+from tools.private_runtime_files import MCP_ENVELOPE_DIR, private_runtime_dir
+
 
 def direct_safehouse_argv(
     command: str,
@@ -35,10 +37,7 @@ def direct_safehouse_argv(
 
 def mcp_envelope_dir(state_root: Path) -> Path:
     """Return the state-owned, agent-denied directory for MCP profiles."""
-    profile_dir = state_root / "runtime" / "mcp-envelopes"
-    profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    profile_dir.chmod(0o700)
-    return profile_dir
+    return private_runtime_dir(MCP_ENVELOPE_DIR, state_root)
 
 
 _NO_PROCTITLE_SHIM = """const descriptor = Object.getOwnPropertyDescriptor(process, 'title');
@@ -58,24 +57,11 @@ def write_no_proctitle_shim(cache_dir: Path) -> Path:
     return shim_path
 
 
-def _generated_profile_temp_rules() -> tuple[str, ...]:
-    from tools.host_path_policy import (
-        GENERATED_PROFILE_PREFIXES,
-        _sandbox_regex,
-        generated_profile_temp_roots,
-    )
-
-    return tuple(
-        f'(deny file-write* (regex #"^{_sandbox_regex(str(root))}/{prefix}[^/]*\\.sb$"))'
-        for root in generated_profile_temp_roots()
-        for prefix in GENERATED_PROFILE_PREFIXES
-    )
-
-
 def mcp_private_state_profile(
     profile_path: Path,
     safehouse_path: Path,
     state_root: Path,
+    cache_dir: Path,
 ) -> str:
     """Render the allow-default profile from the shared protected-path inventory."""
     # Temporary floor block until a reviewed host-access path for MCP exists (#154).
@@ -96,6 +82,14 @@ def mcp_private_state_profile(
         for path in denied_roots
     ]
     path_rules.append(policy.hard_floor_sandbox_rules())
+    # Local apps execute this cache but can never replace its verified runtime
+    # siblings or parent. Reopen only the launched app's private cache directory.
+    from tools.managed_runtime import application_cache_root
+
+    path_rules.extend((
+        f'(deny file-write* (subpath "{sbpl_path(application_cache_root())}"))',
+        f'(allow file-write* (subpath "{sbpl_path(cache_dir)}"))',
+    ))
     if policy.generated_profile is not None:
         path_rules.append(
             f'(deny file-read* file-write* (literal "{sbpl_path(policy.generated_profile)}"))'
@@ -109,7 +103,6 @@ def mcp_private_state_profile(
             "(allow default)",
             ";; Temporary MCP private-state floor block; remove after #154.",
             *path_rules,
-            *_generated_profile_temp_rules(),
             "(deny process-info*)",
             "(deny signal)",
             "(deny mach-priv-task-port)",

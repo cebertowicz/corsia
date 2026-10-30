@@ -1,11 +1,12 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 /**
  * The comment margin marker: each marker sits inside the rail the content padding reserves (24px for a fine
  * pointer, 44px otherwise; at phone width the 44px hit box reaches 20px into the text's edge, the text keeping
- * the 24px inset), its whole hit box opens its own thread or list, no two markers overlap, and its
+ * the 24px inset), its whole hit box opens its own threads, no two markers overlap, and its
  * glyph, count and focus ring meet contrast in both themes. Everything here reads public DOM geometry (rects, elementFromPoint, selection, computed style);
  * nothing reaches into CodeMirror's private fields.
  */
@@ -96,7 +97,7 @@ async function openDocument(page: Page, info: TestInfo, { comments = true, orpha
 	const add = async (anchor: string, body: string, quoted = anchor) => {
 		const from = text.indexOf(quoted);
 		const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-			params, data: { body, anchor_text: quoted, from_off: from < 0 ? 0 : from, to_off: (from < 0 ? 0 : from) + quoted.length },
+			params, data: { body, anchor_text: quoted, from_off: from < 0 ? 0 : from, to_off: (from < 0 ? 0 : from) + quoted.length, delivery_policy: 'immediate' },
 		});
 		expect(created.ok(), await created.text()).toBeTruthy();
 		const id: string = (await created.json()).comment.id;
@@ -163,7 +164,7 @@ async function settle(page: Page) {
 		const before = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 		const after = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
-		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running').length, steady: before === after };
+		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length, steady: before === after };
 	}), { message: 'setup: the canvas is loaded, still and untransformed' }).toEqual({ transformed: [], running: 0, steady: true });
 }
 
@@ -194,8 +195,8 @@ async function reveal(page: Page, index: number) {
 		const now = marker.getBoundingClientRect();
 		const point = (x: number, y: number) => {
 			const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.cm-comment-marker');
-			// A marker under a bottom sheet is covered by design: only the sheet's own surface may cover one.
-			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('.canvas-comment-drawer.sheet');
+			// A marker under a bottom sheet is covered by design: only the sheet and its scrim over the document column may cover one (RSR-7).
+			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]');
 			return { x, y, hit: hit?.dataset.commentIds ?? null, covered };
 		};
 		const cx = now.left + now.width / 2, cy = now.top + now.height / 2;
@@ -304,9 +305,9 @@ async function probeEveryMarker(page: Page, info: TestInfo, opened: Opened, them
 			const message = `${label} marker ${keys}: ${name} opens something (hit ${point.hit}, at ${fmt(point.x)},${fmt(point.y)})`;
 			await expect.poll(() => surfaceOpen(page, opened.ids).then((s) => s.drawer || s.cards.length > 0), { message }).toBe(true);
 			const surface = await surfaceOpen(page, opened.ids);
-			if (ids.length === 1) expect.soft(surface.cards, `${label} marker ${keys}: ${name} opens its thread`).toContain(ids[0]);
-			else expect.soft(surface.drawer, `${label} marker ${keys}: ${name} opens the list`).toBe(true);
-			opens.push(`${name}:${ids.length === 1 ? surface.cards.includes(ids[0]) : surface.drawer}`);
+			expect.soft(surface.cards.sort(), `${label} marker ${keys}: ${name} opens its threads`).toEqual([...ids].sort());
+			expect.soft(surface.drawer, `${label} marker ${keys}: no drawer`).toBe(false);
+			opens.push(`${name}:${ids.every((id) => surface.cards.includes(id))}`);
 			await closeSurface(page, layerBefore);
 			current = await reveal(page, index);
 		}
@@ -509,19 +510,23 @@ test.describe('@flow:doc-margin-marker', () => {
 		await settle(page);
 		const withDrawer = await markers(page);
 		expect(withDrawer.map((marker) => keysOf(opened, marker)), 'the drawer does not change the clusters').toEqual(before);
-		// A canvas too narrow for a side column gets the drawer as a bottom sheet over its lower part (this viewport is as tall as the
-		// whole document, so it cannot scroll a covered marker clear): a marker is reachable or covered by that sheet, nothing else.
-		let reachable = 0;
+		// A canvas too narrow for a side column gets the drawer as a modal bottom sheet over the document column, scrim included
+		// (RSR-7): a marker is reachable or covered by the sheet and its scrim, nothing else, and none is reachable through the scrim.
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);
 			const centre = seen.points[0];
-			if (centre.hit === seen.ids) reachable += 1;
-			else expect.soft(centre.covered, `drawer open: marker ${index} is reachable or covered by the sheet only`).toBe(true);
+			expect.soft(centre.covered, `drawer open: marker ${index} is covered by the sheet or its scrim`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		expect(reachable, 'with the drawer open the markers above it are still reachable').toBeGreaterThan(0);
 		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+		// With the sheet closed the markers are reachable again.
+		let reachable = 0;
+		for (let index = 0; index < withDrawer.length; index += 1) {
+			const seen = await reveal(page, index);
+			if (seen.points[0].hit === seen.ids) reachable += 1;
+		}
+		expect(reachable, 'with the sheet closed the markers are reachable').toBe(withDrawer.length);
 
 		// Scroll and zoom each get a canvas of their own at that size from the start, as a reload would give, rather than
 		// resizing this one: a mobile page resized mid-test is a harness state no user is ever in.
@@ -544,7 +549,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		expect(await ordinary.fresh.evaluate(() => {
 			const doc = document.querySelector<HTMLElement>('.doc')!;
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth };
+			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) };
 		}), 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 		await ordinary.fresh.close();
 		// Zoom: a 200% zoom of this viewport is half the CSS width; the rail stays 24 or 44 CSS px.
@@ -597,7 +602,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		const count = all.findIndex((marker) => marker.ids.length > 1);
 		await buttons.nth(count).focus();
 		await page.keyboard.press('Enter');
-		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+		await expect.poll(() => surfaceOpen(page, opened.ids).then((s) => s.cards.sort())).toEqual([...all[count].ids].sort());
 		await closeSurface(page);
 		expect(await active(), 'a count marker gets focus back too').toBe(all[count].ids.join(','));
 		// Tab order is document order.
@@ -614,10 +619,15 @@ test.describe('@flow:doc-margin-marker', () => {
 		const nearId = now[nearIndex].ids[0];
 		await buttons.nth(nearIndex).focus();
 		expect(await active(), `the marker holding qmna (${keysOf(opened, now[nearIndex])}) has focus before the regroup`).toBe(now[nearIndex].ids.join(','));
+		// Each step regroups against the grouping the step before settled on: spread to 90px, a fine pointer's markers go
+		// back to the natural grouping (one thread per line), so comparing with the first grouping would never see a change.
+		const grouping = async () => (await markers(page)).map((marker) => marker.ids.length).join(',');
+		let before = all.map((marker) => marker.ids.length).join(',');
 		for (const lineHeight of ['10px', '90px']) {
 			await page.addStyleTag({ content: `.cm-line { line-height: ${lineHeight} !important; }` });
-			await expect.poll(async () => (await markers(page)).map((marker) => marker.ids.length).join(','), { message: `markers regroup at ${lineHeight}` }).not.toBe(all.map((marker) => marker.ids.length).join(','));
+			await expect.poll(grouping, { message: `markers regroup at ${lineHeight}` }).not.toBe(before);
 			await settle(page);
+			before = await grouping();
 			const holder = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.commentIds ?? '');
 			expect(holder.split(','), `after ${lineHeight} lines focus is on the marker holding the thread it was on (${opened.byId[nearId]}; focus is on ${keysOf(opened, { ids: holder.split(',') })}; markers ${(await markers(page)).map((marker) => keysOf(opened, marker).join('+')).join(' | ')})`).toContain(nearId);
 			const labels = (await markers(page)).flatMap((marker) => marker.ids);

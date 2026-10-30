@@ -12,6 +12,7 @@ from __future__ import annotations
 import plans.artifact_links as artifact_links
 import plans.decision_authz as authz
 import plans.decision_projection as decision_projection
+import plans.intent_words as intent_words
 import plans.notifications as notifications
 import plans.receipts as receipts
 import plans.service as service
@@ -152,7 +153,8 @@ def _create(db, plan, source, author, content, actor, provenance) -> dict:
         plan["id"], kind="task", title=content["title"],
         acceptance_criteria=REVIEW_DOD, description=content["context"],
         parent_id=source["parent_id"], assignee="user",
-        actor_id=actor.audit_id, provenance=provenance, db=db,
+        intent_node_id=str(intent_words.canonical(db, source["id"])["id"]),
+        actor_id=actor.audit_id, provenance=provenance, db=db, person_step=False,
     )
     body = {
         "version": 1, "plan_id": plan["id"], "node_id": node.id,

@@ -42,6 +42,29 @@ def test_check_server_handles_missing_host():
 
 
 
+def test_read_models_status_returns_loaded_and_disk_rows(monkeypatch):
+    from llm.providers.omlx_lifecycle import read_models_status
+
+    router = _Router({("GET", "/v1/models/status"): _resp(200, {"models": [
+        {"id": "loaded", "loaded": True, "estimated_size": 42},
+        {"id": "disk", "loaded": False, "estimated_size": 12},
+    ]})})
+    _patch_httpx(monkeypatch, router)
+    assert asyncio.run(read_models_status(CFG_PUBLIC)) == [
+        {"id": "loaded", "loaded": True, "estimated_size": 42},
+        {"id": "disk", "loaded": False, "estimated_size": 12},
+    ]
+    assert len(router.calls) == 1
+
+
+def test_read_models_status_reports_failure_and_invalid_payload(monkeypatch):
+    from llm.providers.omlx_lifecycle import read_models_status
+
+    for response in (_resp(503), _resp(200, {"models": {}})):
+        _patch_httpx(monkeypatch, _Router({("GET", "/v1/models/status"): response}))
+        assert asyncio.run(read_models_status(CFG_PUBLIC)) is None
+
+
 def test_list_loaded_uses_v1_models_status(monkeypatch):
     router = _Router({
         ("GET", "/v1/models/status"): _resp(200, {"models": [

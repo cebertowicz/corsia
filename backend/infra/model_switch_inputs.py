@@ -69,6 +69,14 @@ def adopt_first_model(
     """
     if not db.in_transaction:
         raise RuntimeError("first model selection requires its writer transaction")
+    from infra.local_only import require_local_only_model
+
+    thread = db.execute("SELECT local_only FROM threads WHERE id=?", (thread_id,)).fetchone()
+    if thread is None:
+        raise ValueError("first model selection thread does not exist")
+    require_local_only_model(
+        model, thread_local_only=bool(thread["local_only"]), db=db, thread_id=thread_id,
+    )
     db.execute(
         "UPDATE threads SET model=?,updated_at=? WHERE id=?", (model, now, thread_id),
     )

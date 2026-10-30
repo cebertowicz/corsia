@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from core.checkpoint_fit import BoundaryDecision, ColdFoldInputTooLarge
+from core.fork_fit import BoundaryDecision, ColdFoldInputTooLarge
 from core.checkpoint_resume import (
     CheckpointContinuationError,
     ProviderBoundary,

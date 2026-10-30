@@ -80,6 +80,7 @@ describe('resolveLinkTarget', () => {
 	it.each([
 		['/settings/providers', 'providers', null],
 		['/settings/system#restart', 'system', 'restart'],
+		['/settings/connected-apps', 'connected-apps', null],
 		['http://corsia.test/settings/providers', 'providers', null],
 	])('opens Settings in place for the same-origin link %s', async (href, section, anchor) => {
 		const d = deps();
@@ -203,6 +204,20 @@ describe('delegated rendered-markdown listener', () => {
 		return host.querySelector<HTMLAnchorElement>('a')!;
 	}
 
+	it.each([
+		['target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/conductor/target.md'],
+		['../target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
+		['/workspace/shared/target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
+		['shared/target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/conductor/shared/target.md'],
+		['shared/target.md', null, '/workspace/shared/target.md'],
+	])('routes %s from document path %s', async (href, docPath, expected) => {
+		const d = deps();
+		const anchor = installSurface(`[Open](${href})`, 'comment', d);
+		if (docPath) host!.dataset.docPath = docPath;
+		anchor.click();
+		await vi.waitFor(() => expect(d.fetchRevision).toHaveBeenCalledWith(expected, 'project-1'));
+	});
+
 	it('routes an AssistantMessage chat link through the one root listener', async () => {
 		const d = deps();
 		host = document.createElement('section');
@@ -240,6 +255,40 @@ describe('delegated rendered-markdown listener', () => {
 		expect(d.openExternal).not.toHaveBeenCalled();
 		expect(spy.mock.calls).toEqual([['link', 'open', { target: 'external', outcome: 'succeeded' }]]);
 		spy.mockRestore();
+	});
+
+	it('routes a chat OAuth link through Tauri', async () => {
+		const d = deps({ isTauri: () => true });
+		const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=client&redirect_uri=http%3A%2F%2Flocalhost%3A3000&response_type=code';
+		document.documentElement.dataset.shell = 'tauri';
+		const anchor = installSurface(`[Continue](${url})`, 'chat', d);
+		const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+
+		anchor.dispatchEvent(click);
+
+		await vi.waitFor(() => expect(d.openExternal).toHaveBeenCalledWith(url));
+		expect(click.defaultPrevented).toBe(true);
+	});
+
+	it('preserves and opens the complete Google approval link in an assistant message', async () => {
+		const d = deps();
+		const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=example.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A1956%2Fapi%2Fgoogle%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdocuments+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fspreadsheets+openid&state=example&code_challenge=example&code_challenge_method=S256&access_type=offline&prompt=consent';
+		host = document.createElement('section');
+		document.body.appendChild(host);
+		component = mount(AssistantMessage, {
+			target: host,
+			props: {
+				msg: { id: 'message-1', content: `Ready for your click: [Open this link](${url}). It opens in your usual browser.`, created_at: '2026-10-27T17:11:00Z' },
+				expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
+				onToggleToolBlock: () => {}, onToggleReasoning: () => {},
+			},
+		});
+		flushSync();
+		cleanup = installLinkTargetResolver(document, () => d);
+		const anchor = host.querySelector<HTMLAnchorElement>('a')!;
+		expect(anchor.getAttribute('href')).toBe(url);
+		anchor.click();
+		await vi.waitFor(() => expect(d.openExternal).toHaveBeenCalledWith(url));
 	});
 
 	it.each([

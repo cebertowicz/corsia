@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.media_reads import IMAGE_KIND, MediaReadReference, MediaToolResult
 from doceditor import comments as store, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import create_validated_comment
@@ -14,10 +13,12 @@ from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError, agent_document_writer
 
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_agent_update, decide_all_from_author,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_agent_update,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import decide_all_from_author
 from doceditor.comment_action_errors import decision_only_error
+from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
@@ -30,6 +31,8 @@ from registry import service as registry_service
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
+from tools.document_comment_listing import select_comment_threads
+from tools.document_regions import REGION_SCHEMA, region_result
 
 
 def _json(data: dict[str, Any]) -> str:
@@ -68,52 +71,15 @@ def _resolve_doc_target(
 
 
 def _validate_comment_request(body, parent_id, review, quote, replacement, doc_path, artifact_id, client_id,
-                              region=None):
+                              region=None, insert_after=False):
     """Map shared creation validation to the native-tool error surface."""
     try:
         text = validate_create(body=body, parent_id=parent_id, review=review, quote=quote,
-                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region)
+                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region,
+                               insert_after=insert_after)
         return None, text, validate_client_id(client_id)
     except (CommentActionError, ValueError) as exc:
         return f"Error: {exc}", "", None
-
-
-_REGION_SCHEMA = {
-    "type": ["object", "null"],
-    "properties": {"x": {"type": "number"}, "y": {"type": "number"},
-                   "w": {"type": "number"}, "h": {"type": "number"}},
-    "required": ["x", "y"],
-    "description": ("A box {x, y, w, h} (or point {x, y}) in fractions 0..1 of an image, origin top-left: instead of "
-                    "quote on an image artifact; with quote naming the image (its ![alt](path) or path; near picks "
-                    "among repeats) in a document. The result shows your box drawn, to move with doc_comment_update."),
-}
-
-
-async def _region_result(
-    payload: dict[str, Any], row: dict[str, Any], path: str | None, reader: str,
-) -> str | MediaToolResult:
-    """The JSON result plus the image with this comment's numbered box drawn (DCOL-FR13.7)."""
-    def _render():
-        name = Path(str(image_regions.image_of(row, path))).stem
-        db = get_db()
-        try:
-            image = image_regions.comment_image(db, row, path, image_regions.reader_bases(db, reader))
-            label = f"{name}-region-{row['region_number']}"
-            return image_regions.write_marked_image(
-                db, image=image_regions.require_image(image), rows=[row], reader_thread_id=reader, label=label)
-        finally:
-            db.close()
-
-    try:
-        marked = await run_in_db(_render)
-    except image_regions.RENDER_ERRORS as exc:  # a scope refusal (CommentActionError) is a ValueError too
-        return _json({**payload, "marked_image_error": str(exc)})
-    reference = MediaReadReference(
-        path=str(marked.path), mime_type="image/png", kind=IMAGE_KIND,
-        byte_size=marked.byte_size, sha256=marked.sha256,
-    )
-    text = _json({**payload, "marked_image": str(marked.path)})
-    return MediaToolResult(f"{text}\n{reference.placeholder_text()}", reference)
 
 
 def _resolve_comment_target(db, actor_thread_id, actor, parent_id, kwargs):
@@ -151,16 +117,23 @@ class DocCommentsListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "List comments for a document artifact or registered document path."
+        return ('List a document\'s open comment threads with their replies; closed ones are counted, '
+                'status="all" includes them, comment_id returns one thread.')
 
     @property
     def parameters(self) -> dict[str, Any]:
         return _tool_schema({
             "artifact_id": {"type": ["string", "null"]},
             "doc_path": {"type": ["string", "null"]},
+            "status": {"type": "string", "enum": ["open", "all"], "default": "open"},
+            "comment_id": {"type": ["string", "null"]},
         })
 
     async def execute(self, **kwargs: Any) -> str:
+        status = kwargs.get("status", "open")
+        if status not in ("open", "all"):
+            return "Error: status must be 'open' or 'all'"
+        comment_id = kwargs.get("comment_id")
         context = _require_context(kwargs)
         if isinstance(context, str):
             return context
@@ -184,10 +157,10 @@ class DocCommentsListTool(Tool):
                     allow_register=False,
                 )
                 if aid is None:
-                    return {"found": False, "comments": []}
+                    return {"found": False, "comments": [], "closed_count": 0}
                 comments, anchors_checked = anchored_threads(aid, path, db)
-                return {"found": True, "artifact_id": aid, "comments": comments,
-                        "anchors_checked": anchors_checked}
+                return {"found": True, "artifact_id": aid, "anchors_checked": anchors_checked,
+                        **select_comment_threads(comments, status, comment_id)}
             finally:
                 db.close()
 
@@ -213,7 +186,8 @@ class DocCommentCreateTool(Tool):
     def description(self) -> str:
         return ("Create a document comment as the current agent thread. To suggest an edit, "
                 "pass quote (the exact current text) and replacement (the new text); body is "
-                "an optional note. To retry undelivered feedback, use doc_feedback_send.")
+                "an optional note. To add text without replacing it, quote the preceding text and set insert_after. "
+                "To retry undelivered feedback, use doc_feedback_send.")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -227,7 +201,10 @@ class DocCommentCreateTool(Tool):
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
-            "region": _REGION_SCHEMA,
+            "insert_after": {"type": "boolean", "description": (
+                "Insert replacement after quote rather than replacing it. "
+                "Start replacement with a newline to add it as its own line.")},
+            "region": REGION_SCHEMA,
             "submit": {
                 "type": "boolean",
                 "description": "Send this document's open feedback batch to its owner now.",
@@ -251,6 +228,7 @@ class DocCommentCreateTool(Tool):
             kwargs.get("artifact_id"),
             kwargs.get("client_id"),
             kwargs.get("region"),
+            bool(kwargs.get("insert_after")),
         )
         if error is not None:
             return error
@@ -274,15 +252,17 @@ class DocCommentCreateTool(Tool):
             request = CommentInput(
                 artifact_id=target[0], path=target[1], body=text, author=author, author_kind="agent", user_id=actor["user_id"],
                 author_thread_id=actor_thread_id, parent_id=parent_id, review=review,
-                replacement=kwargs.get("replacement"), quote=kwargs.get("quote"), near=kwargs.get("near"),
+                replacement=kwargs.get("replacement"), insert_after=bool(kwargs.get("insert_after")),
+                quote=kwargs.get("quote"), near=kwargs.get("near"),
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
+                review_request_id=kwargs.get("_review_request_id"),
             )
-            row, registered, feedback = await create_validated_comment(request, client_id)
+            row, registered, feedback, _created = await create_validated_comment(request, client_id)
         except QuoteResolveError as exc:
             return f"Error creating document comment: {dict(error=exc.kind, message=exc.message, candidate_lines=exc.candidate_lines)}"
         except CrossArtifactIdError:
             return "Error: client_id collides with another artifact's comment; re-mint and retry"
-        except PermissionError as e:
+        except (PermissionError, CommentActionError) as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error creating document comment: {e}"
@@ -293,7 +273,7 @@ class DocCommentCreateTool(Tool):
 
             await public.drive_threads(feedback["woken"])
         if region is not None:
-            return await _region_result({"comment": row, **feedback}, row, target[1], actor_thread_id)
+            return await region_result({"comment": row, **feedback}, row, target[1], actor_thread_id)
         return _json({"comment": row, **feedback})
 
 
@@ -306,10 +286,9 @@ class DocCommentUpdateTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent "
-            "thread. You may edit only comments you wrote, and resolve or acknowledge only on a "
-            "document you own or a comment you wrote; otherwise reply with doc_comment_create.")
+        return ("Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent thread. "
+                "You may edit only comments you wrote, and resolve or acknowledge only on a document you own or a "
+                "comment you wrote; otherwise reply with doc_comment_create. " + PERSON_COMMENT_RESOLVE_RULE)
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -321,7 +300,7 @@ class DocCommentUpdateTool(Tool):
             "from_off": {"type": ["integer", "null"]},
             "to_off": {"type": ["integer", "null"]},
             "anchor_text": {"type": ["string", "null"]},
-            "region": {**_REGION_SCHEMA, "description": (
+            "region": {**REGION_SCHEMA, "description": (
                 "Move your own image comment's box or point, in fractions 0..1 of the image. "
                 "The result includes the image with the moved box drawn.")},
             "decision": {"type": ["string", "null"], "enum": ["accept", "reject"]},
@@ -396,5 +375,5 @@ class DocCommentUpdateTool(Tool):
         if row is None:
             return "Error: Comment not found"
         if "region" in fields:
-            return await _region_result({"comment": row}, row, path, actor_thread_id)
+            return await region_result({"comment": row}, row, path, actor_thread_id)
         return _json({"comment": row})

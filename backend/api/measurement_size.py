@@ -56,6 +56,15 @@ _PREPARED_ALL_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_ALL_NODES_SQL)
 _PREPARED_NODES_SQL = (_nodes_sql("o.node_id", "measurement_outcome_nodes", "o.root_id")
                        + " WHERE o.period IN (SELECT value FROM json_each(:periods))")
 _PREPARED_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_NODES_SQL)
+# Every accepted task with any size fact, at its first accepted settlement.
+_RATED_SETTLEMENTS_SQL = f"""(
+    SELECT e.node_id,MIN(e.created_at) AS period FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+    WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
+      AND e.node_id IN (SELECT substr(f.subject_key,{len(SUBJECT_PREFIX) + 1}) FROM outcome_events f
+                        WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key GLOB '{SUBJECT_PREFIX}*')
+    GROUP BY e.node_id)"""
+_RATED_NODES_SQL = _nodes_sql("o.node_id", _RATED_SETTLEMENTS_SQL, "NULL")
+_RATED_FACTS_SQL = "WITH " + _newest_facts_sql(_RATED_NODES_SQL)
 
 
 def _newest_status(facts: list[tuple[str, str | None]], current: tuple[str, int, str]) -> tuple[str, dict | None]:
@@ -109,6 +118,18 @@ def _sized_nodes(db, params: dict[str, Any]) -> list[tuple[str, str, int, str, d
     rows = _classified(db.execute(_PREPARED_ALL_NODES_SQL).fetchall(), db.execute(_PREPARED_ALL_FACTS_SQL).fetchall())
     return [(node_id, period, int(first_try), status, attributes, size_class)
             for node_id, period, first_try, status, attributes, size_class in rows]
+
+
+def counted_raters(db) -> list[tuple[str, str]]:
+    """Each rated accepted task's first settlement instant and the rater of the rating that counts, oldest first.
+
+    The same newest-fact rule the series counts hours by decides, so a superseded, retracted,
+    stale, malformed or conflicting rating names no rater.
+    """
+    rows = _classified(db.execute(_RATED_NODES_SQL).fetchall(), db.execute(_RATED_FACTS_SQL).fetchall())
+    return [(str(period), str(attributes["rater"])) for period, node_id, attributes in sorted(
+        (period, node_id, attributes) for node_id, period, _, _, attributes, _ in rows if attributes
+    )]
 
 
 def outcome_sizes(db, params: dict[str, Any]) -> dict[str, tuple[str | None, int]]:
@@ -190,16 +211,16 @@ def pooled_size_window(pooled: dict[str, Any], measured: bool, minimum_n: int) -
                      "estimated_hours": pooled.get("estimated_hours") or 0.0, "active_hours": active_hours}}
 
 
-def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[str, Any]],
-              comparable: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
+def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str], sources: list[dict[str, Any]],
+              comparability_boundary: Any, measured: Any, *, data_start: str) -> list[dict[str, Any]]:
     """Serve one row per completed period, including periods with no outcomes or time.
 
     The rate is null before the series' data start, when active time is absent
     or zero, or when fewer usable ratings than the registry minimum stand
     behind it; ``size.rate_reason`` names which. The known subtotal and the
     coverage counts are served either way, and a period where any outcome lacks
-    a usable size is marked partial. ``dates`` carries the registry's data start
-    and comparability break, so a reader names them without a second copy.
+    a usable size is marked partial. The one nearest later boundary supplies both
+    an incomparable row's reason and the date that explanation names.
     """
     by_period = {row["period"]: row for row in sources}
     rows = []
@@ -212,12 +233,13 @@ def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[
         # Before the minimum is applied: still a figure when the ratings are few, never when there are none.
         raw_value = source["estimated_hours"] / active_hours if rate_reason in (None, "below_minimum") else None
         n = 0 if rate_reason == "before_data_start" else sized
-        # Who rated an outcome, and whether its author declared the size, is served as coverage, never as a break.
-        reason = None if comparable(metric, period) else "outcome_definition_changed"
+        boundary = comparability_boundary(metric, period)
+        kind = boundary["kind"] if boundary else None
+        reason = "judging_model_changed" if kind == "model" else "outcome_definition_changed" if kind else None
         rows.append({
-            "period": period, "series": metric, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
+            "period": period, "series": metric, "method_version": method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
             "partial": sized < source["outcomes"],
-            "comparable": reason is None, "break": None, "dimension": None, "thin": False,
+            "comparable": boundary is None, "break": None, "dimension": None, "thin": False,
             "size": {
                 "outcomes": source["outcomes"], "sized": sized, "estimated_hours": source["estimated_hours"],
                 "active_hours": active_hours, "unsized": source["unsized"],
@@ -226,7 +248,8 @@ def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[
                 "profiles": [dict(zip(PROFILE_KEYS, item), outcomes=count)
                              for item, count in sorted(source["profiles"].items())],
                 "comparable_reason": reason, "rate_reason": rate_reason,
-                "class_midpoint_hours": CLASS_MIDPOINT_HOURS, **dates,
+                "class_midpoint_hours": CLASS_MIDPOINT_HOURS, "data_start": data_start,
+                "comparability_before": boundary["period"] if boundary else None,
             },
         })
     return rows

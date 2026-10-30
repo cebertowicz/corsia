@@ -13,6 +13,7 @@ import {
 	requestInput,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
+import { takeReplyContext, type ReplyComment } from '../stores/replyContextCapture';
 
 export function hasActiveTurn(threadId: string): boolean {
 	return reducerHasActiveTurn(threadId);
@@ -85,6 +86,7 @@ export function sendMessage(
 	attachments?: any[],
 	extraMeta?: Record<string, any>,
 	deliveryIntent: 'apply_now' | 'queue_after_turn' = 'apply_now',
+	comments: ReplyComment[] = [],
 ): string | null {
 	if (!ws || ws.readyState !== WebSocket.OPEN) return null;
 	const inputId = crypto.randomUUID();
@@ -93,6 +95,8 @@ export function sendMessage(
 
 	const metaObj: Record<string, any> = { input_id: inputId };
 	if (attachments && attachments.length > 0) metaObj.attachments = attachments;
+	// The sending socket gets no message_added for its own input, so the echo shows what was sent.
+	if (comments.length) metaObj.reply_context = { comments };
 	if (extraMeta) {
 		const { delivery_intent: _ignoredDeliveryIntent, ...safeExtraMeta } = extraMeta;
 		Object.assign(metaObj, safeExtraMeta);
@@ -122,6 +126,7 @@ export function sendMessage(
 		ws.send(JSON.stringify({
 			type: 'subagent_feed', thread_id: threadId, content, input_id: inputId,
 			...viewingPayload,
+			...(comments.length ? { reply_context: { comments } } : {}),
 			...(attachments && attachments.length > 0 ? { attachments } : {}),
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		}));
@@ -144,9 +149,14 @@ export function sendMessage(
 	});
 
 	const effort = get(reasoningEffort);
+	// The captured context belongs to this send.
+	const replyContext = takeReplyContext(threadId) ?? {};
+	if (comments.length) replyContext.comments = comments;
+	const hasReplyContext = Object.keys(replyContext).length > 0;
 	ws.send(JSON.stringify({
 		type: 'message',
 		...viewingPayload,
+		...(hasReplyContext ? { reply_context: replyContext } : {}),
 		thread_id: threadId,
 		content,
 		input_id: inputId,

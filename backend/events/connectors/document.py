@@ -25,7 +25,7 @@ def _classify(raw: dict[str, Any]) -> str:
     return "comment.created"
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     keys = ("document_id", "comment_id", "author", "anchor", "version")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 

@@ -37,25 +37,6 @@ class _TestNoOpClose:
             setattr(object.__getattribute__(self, "_conn"), name, value)
 
 
-class _PlanCapturingConnection(_TestNoOpClose):
-    """Capture the provider-step lookup plan without changing its SQL."""
-
-    def __init__(self, conn):
-        super().__init__(conn)
-        object.__setattr__(self, "provider_step_plans", [])
-
-    def execute(self, sql, parameters=()):
-        if (
-            sql.startswith("SELECT id FROM messages")
-            and "json_extract(metadata,'$.provider_turn_id')" in sql
-        ):
-            plan = self._conn.execute(
-                "EXPLAIN QUERY PLAN " + sql, parameters,
-            ).fetchall()
-            self.provider_step_plans.append([row[3] for row in plan])
-        return self._conn.execute(sql, parameters)
-
-
 # Account holds read these queue columns; account admission reads the account tables.
 _ACCOUNT_HOLD_MESSAGE_COLUMNS = (
     "input_order", "delivery_state", "active_turn_id", "write_started_at",
@@ -97,6 +78,7 @@ def child_db(tmp_path, monkeypatch):
             updated_at TEXT NOT NULL,
             parent_thread_id TEXT REFERENCES threads(id),
             spawned_by TEXT REFERENCES threads(id),
+            local_only INTEGER NOT NULL DEFAULT 0,
             history_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1,
             last_context_change_seq INTEGER NOT NULL DEFAULT 0
@@ -118,6 +100,10 @@ def child_db(tmp_path, monkeypatch):
             id TEXT PRIMARY KEY,
             name TEXT,
             path TEXT
+        );
+        CREATE TABLE IF NOT EXISTS project_inference_policies (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1))
         );
         CREATE TABLE IF NOT EXISTS connections (
             id TEXT PRIMARY KEY,
@@ -550,7 +536,7 @@ class TestCanonicalPersistence:
         assert meta["corsia_tool_call_id"].startswith("mtc_")
         assert meta["provider_tool_call_id"] == "provider-tool-1"
 
-    def test_provider_tool_use_seeks_turn_index_and_appends_matching_step(self, child_db):
+    def test_provider_tool_use_appends_only_to_explicit_step(self, child_db):
         from subagents.child_thread import persist_tool_use
 
         cid = self._child(child_db)
@@ -560,44 +546,32 @@ class TestCanonicalPersistence:
             "provider_turn_id": "provider-turn",
             "llm_tool_calls": [],
         })
-        noise_metadata = json.dumps({
-            "turn_id": _TURN_ID,
-            "provider_turn_id": "another-provider-turn",
-            "llm_tool_calls": [],
-        })
         child_db.execute(
             "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
             "VALUES (?,?,?,?,?,?,?)",
             (target_id, cid, "assistant", "", target_metadata, "t", 1),
         )
-        child_db.executemany(
-            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
-            "VALUES (?,?,?,?,?,?,?)",
-            [
-                (f"noise-step-{number}", cid, "assistant", "", noise_metadata, "t", number)
-                for number in range(2, 2_002)
-            ],
-        )
+        child_db.execute("UPDATE threads SET next_message_seq=2 WHERE id=?", (cid,))
         child_db.commit()
-        probe = _PlanCapturingConnection(child_db._conn)
-
         step_id = persist_tool_use(
             cid,
             turn_id=_TURN_ID,
             provider_turn_id="provider-turn",
-            tool_id="long-thread-tool",
+            tool_id="explicit-step-tool",
             name="Read",
             arguments={},
-            db=probe,
+            db=child_db,
+            assistant_step_id=target_id,
         )
 
         assert step_id == target_id
-        assert probe.provider_step_plans
-        plan = "\n".join(probe.provider_step_plans[0])
-        assert "SEARCH messages USING INDEX idx_messages_turn_calls" in plan
-        assert "idx_messages_session_seq" not in plan
         target = next(row for row in _rows(child_db, cid) if row["id"] == target_id)
-        assert _meta(target)["llm_tool_calls"][0]["id"] == "long-thread-tool"
+        assert _meta(target)["llm_tool_calls"][0]["id"] == "explicit-step-tool"
+        new_step_id = persist_tool_use(
+            cid, turn_id=_TURN_ID, provider_turn_id="provider-turn",
+            tool_id="next-tool", name="Read", arguments={}, db=child_db,
+        )
+        assert new_step_id != target_id
 
     def test_tool_result_persistence_is_deduped_by_stable_corsia_id(self, child_db):
         from subagents.child_thread import persist_tool_result

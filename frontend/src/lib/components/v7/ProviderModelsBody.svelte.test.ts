@@ -5,6 +5,7 @@ import ProviderModelsBody from './ProviderModelsBody.svelte';
 import { workspaceModels, type Model } from '$lib/stores/models';
 import { groupModels } from '$lib/stores/modelGroups';
 import { withAccountTurn } from '$lib/stores/modelFixtures';
+import { token } from '$lib/stores/auth';
 import type { HostProvider } from '$lib/stores/providersV7';
 
 vi.mock('$lib/stores/harnessProviders', async (importOriginal) => ({
@@ -61,6 +62,115 @@ describe('Settings model rows and account usage', () => {
 
 		const text = await render();
 
-		expect(text).toContain('this harness isn’t connected');
+		expect(text).toContain('Can’t be used in chats: Claude Code isn’t connected.');
+	});
+
+	it('adds a recorded local download speed and note only to its matching server row', async () => {
+		const localProvider = {
+			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
+			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
+		} as unknown as HostProvider;
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/network-servers/local-test/models')) return {
+				ok: true, json: async () => ({
+					loaded: [],
+					available: [
+						{ id: 'exact-model', model_id: 'exact-model', repo_id: 'renamed-model', display_name: 'Measured model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+						{ id: 'plain', model_id: 'plain', repo_id: 'plain', display_name: 'Plain model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+					],
+				}),
+			};
+			if (url.includes('/providers/local/downloads')) return {
+				ok: true, json: async () => [
+					{ repository: 'org/speedy', model: 'exact-model', status: 'available', server_id: 'local-test', speed: 52 },
+				],
+			};
+			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
+			return { ok: true, json: async () => ({}) };
+		}));
+
+		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
+		flushSync();
+		await tick(); await tick(); await tick();
+
+		expect(document.body.textContent).toContain('52 tokens/s');
+		expect(document.body.textContent).toContain('Settings measured on Macs like this one · omlx.ai');
+		expect(document.body.textContent).toContain('Plain model');
+		expect(document.body.textContent?.match(/Settings measured on Macs like this one · omlx\.ai/g)).toHaveLength(1);
+	});
+
+	it('says why a downloaded model was not loaded, and that it is loading while CORSIA loads it', async () => {
+		const localProvider = {
+			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
+			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
+		} as unknown as HostProvider;
+		token.set('test-token');
+		let finishing = true;
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/network-servers/local-test/models')) return {
+				ok: true, json: async () => ({
+					loaded: [],
+					available: [
+						{ id: 'big-model', model_id: 'big-model', repo_id: 'big-model', display_name: 'Big model', context_length: 262144, size_bytes: 16 * 1024 ** 3, keep_line: 'Not loaded: needs 174 GB of memory, 123 GB free' },
+						{ id: 'plain', model_id: 'plain', repo_id: 'plain', display_name: 'Plain model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+					],
+				}),
+			};
+			if (url.includes('/providers/local/downloads')) return {
+				ok: true, json: async () => [
+					{ repository: 'org/big-model', model: 'big-model', status: 'available', server_id: 'local-test' },
+				],
+			};
+			if (url.includes('/providers/sources')) return {
+				ok: true, json: async () => ({ sources: finishing ? [{ source: 'omlx', settings_download: { name: 'Big model', repository: 'org/big-model', percent: null, failed: false, finishing: true } }] : [] }),
+			};
+			return { ok: true, json: async () => ({}) };
+		}));
+
+		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
+		flushSync();
+		await tick(); await tick(); await tick();
+
+		// While CORSIA finishes: no "Downloading 0%" row, and the model's own row says it is loading.
+		expect(document.body.textContent).not.toContain('Downloading');
+		expect(document.body.textContent).toContain('Loading on this computer…');
+		await unmount(component);
+		finishing = false;
+		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
+		flushSync();
+		await tick(); await tick(); await tick();
+
+		expect(document.body.textContent).toContain('Not loaded: needs 174 GB of memory, 123 GB free');
+		expect(document.body.textContent?.match(/Not loaded:/g)).toHaveLength(1);
+	});
+
+	it('offers download deletion only for an available oMLX model', async () => {
+		const localProvider = {
+			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
+			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
+		} as unknown as HostProvider;
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/network-servers/local-test/models')) return {
+				ok: true, json: async () => ({
+					loaded: [{ id: 'loaded-model', model_id: 'loaded-model', repo_id: 'loaded-model', display_name: 'Loaded model', context_length: 262144, size_bytes: 16 * 1024 ** 3 }],
+					available: [{ id: 'available-model', model_id: 'available-model', repo_id: 'available-model', display_name: 'Available model', context_length: 262144, size_bytes: 16 * 1024 ** 3 }],
+				}),
+			};
+			if (url.includes('/providers/local/downloads')) return { ok: true, json: async () => [] };
+			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
+			return { ok: true, json: async () => ({}) };
+		}));
+
+		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
+		flushSync();
+		await tick(); await tick(); await tick();
+
+		expect(document.querySelector('[role="group"][aria-label="Actions for Loaded model"]')).toBeNull();
+		expect(document.querySelector('[role="group"][aria-label="Actions for Available model"]')).not.toBeNull();
 	});
 });

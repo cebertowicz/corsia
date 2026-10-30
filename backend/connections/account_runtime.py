@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from connections.account_home import missing_home_reason
 from connections.account_policy import AccountAdmissionError, require_inference
 from connections.account_receipts import ReceiptFence, account_receipt, receipt_is_current, unobserved_default
 from connections.vendor_accounts import get_account
@@ -69,7 +70,7 @@ def thread_claude_dir(thread_id: str, *, turn_id: str | None = None, db) -> str:
     return resolve_claude_dir(thread_launch_homes(thread_id, 'claude-code', turn_id=turn_id, db=db).claude_dir)
 
 
-OPERATION_KINDS = ('checkpoint', 'detached')
+OPERATION_KINDS = ('checkpoint', 'artifact_review', 'detached')
 
 
 def is_operation_session(session) -> bool:
@@ -122,14 +123,18 @@ def validate_launch(account: dict | None, *, launch: LaunchHomes, receipt: Recei
     if account['provider'] == 'claude-code':
         if not _same_path(launch.claude_dir, account['source_home']) or launch.codex_source or launch.codex_runtime:
             raise AccountAdmissionError('account_home_mismatch')
-        if not Path(cast(str, launch.claude_dir)).is_dir():
-            raise AccountAdmissionError('account_home_mismatch')
+        if reason := missing_home_reason(account):
+            raise AccountAdmissionError(reason)
         return
     if not _same_path(launch.codex_source, account['source_home']) or launch.codex_runtime is None:
         raise AccountAdmissionError('account_home_mismatch')
     from connections.account_projection import validate_projection
     from subagents.codex_env import _subscription_auth_file
 
+    # The home rule decides first, as readiness does; the projection's own source check
+    # remains only as its write-time guard against a file removed after this point.
+    if reason := missing_home_reason(account):
+        raise AccountAdmissionError(reason)
     validate_projection(receipt, home=Path(launch.codex_runtime), db=db)
     try:
         _subscription_auth_file(Path(cast(str, launch.codex_source)))

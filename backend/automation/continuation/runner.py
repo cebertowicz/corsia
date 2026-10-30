@@ -1,13 +1,13 @@
-"""Single durable admission, delivery, and settlement loop."""
+"""Single durable delivery and settlement loop for continuation triggers."""
 
 from __future__ import annotations
 
-from collections import Counter
+from operator import attrgetter
 from typing import Protocol
 
 from loguru import logger
 
-from automation.continuation import admission, execution, state, triggers
+from automation.continuation import execution, state, triggers
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from automation.continuation.sources.harvest import HarvestSource
 from automation.continuation.sources.liveness import LivenessSource
@@ -149,63 +149,15 @@ def _due_batch(rows, now: str):
     ]
 
 
-def _thread_is_idle(callback, thread_id: str, db) -> bool:
-    if callback is not None:
-        return callback(thread_id)
-    from automation.plan_liveness_delivery import thread_is_idle
+async def _run_batch(batch, by_id, *, db, now_dt, deliver, results) -> None:
+    """Deliver every due trigger, oldest first.
 
-    return thread_is_idle(thread_id, db=db)
-
-
-async def _run_batch(
-    batch,
-    by_id,
-    *,
-    db,
-    now_dt,
-    is_idle,
-    deliver,
-    results,
-) -> None:
-    read_db = db if db is not None else get_db()
-    snapshot = state.admission_snapshot(read_db, batch, now_dt)
-    admitted_by_scope: Counter[str] = Counter()
-    admitted_total = 0
-    for trigger in admission.fair_order(batch, snapshot):
+    A busy owner is not a reason to wait: ``deliver`` queues the wake in the
+    owner's FIFO, which drains at the Turn's next boundary, and the claim
+    re-checks the source first (``validity.is_claimable``).
+    """
+    for trigger in sorted(batch, key=attrgetter("created_at", "id")):
         request, source = by_id[trigger.id]
-        if not _thread_is_idle(is_idle, trigger.thread_id, read_db):
-            await run_in_db_unless_owned(
-                db,
-                execution.defer_trigger,
-                trigger,
-                "thread_unavailable",
-                now_dt,
-                source,
-                db=db,
-                results=results,
-            )
-            continue
-        decision = admission.decide(
-            trigger,
-            snapshot,
-            now_dt,
-            admitted_by_scope=admitted_by_scope,
-            admitted_total=admitted_total,
-        )
-        if decision.action != "admit":
-            await run_in_db_unless_owned(
-                db,
-                execution.defer_trigger,
-                trigger,
-                decision.reason,
-                now_dt,
-                source,
-                db=db,
-                results=results,
-            )
-            continue
-        admitted_by_scope[trigger.scope_id] += 1
-        admitted_total += 1
         await execution.deliver_one(
             trigger,
             request,
@@ -219,10 +171,14 @@ async def _run_batch(
 
 async def _drive_scripts(now_iso: str, db) -> None:
     """System phase: start due model-free script runs, never failing the sweep."""
-    from automation import script_runner
+    from automation import script_runner, worker_runner
+    from events.worker_starts import any_open
 
     try:
         await script_runner.drive(now_iso, db=db)
+        # Rule-started workers: new starts, and a restart's or a missed turn end's leftovers.
+        if await run_in_db_unless_owned(db, any_open, db):
+            worker_runner.poke()
     except Exception:  # noqa: BLE001 - liveness must outlive a script fault
         logger.exception("continuation script phase failed")
 
@@ -232,7 +188,6 @@ async def sweep(
     *,
     db=None,
     sources: list[TriggerSource] | None = None,
-    is_idle=None,
     deliver=None,
     startup_jitter_seconds: int = 0,
 ) -> dict[str, list[str]]:
@@ -273,7 +228,6 @@ async def sweep(
         by_id,
         db=db,
         now_dt=state.parse_iso(now_iso),
-        is_idle=is_idle,
         deliver=deliver,
         results=results,
     )

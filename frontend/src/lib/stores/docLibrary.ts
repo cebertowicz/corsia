@@ -39,7 +39,7 @@ export interface DocSource {
 }
 
 const DIR_DESCRIPTIONS: Record<string, string> = {
-	working: 'Active drafts + investigation notes — unindexed until promoted',
+	working: 'Drafts and working notes',
 	skills: 'Behaviors the agent can load — markdown, editable here',
 	'test-scenarios': 'Canonical YAML scenario library'
 };
@@ -48,7 +48,7 @@ export function dirDescription(dir: string): string {
 }
 
 export function secondaryDocumentText(entry: Pick<DocEntry, 'descState' | 'description' | 'ownerName'>): string {
-	if (entry.descState === 'pending') return `description pending — queued for sweep${entry.ownerName ? ` · Owner: ${entry.ownerName}` : ''}`;
+	if (entry.descState === 'pending') return `No description${entry.ownerName ? ` · Owner: ${entry.ownerName}` : ''}`;
 	return [entry.description, entry.ownerName ? `Owner: ${entry.ownerName}` : ''].filter(Boolean).join(' · ');
 }
 
@@ -119,9 +119,9 @@ export const docActivity = derived(docLibrary, ($d) =>
 		.map((x) => ({
 			id: x.id,
 			kind: (x.descState === 'pending' ? 'added' : 'described') as 'added' | 'described',
-			text: x.descState === 'pending' ? `${x.path} registered — description queued` : `${x.path} — ${x.description}`,
+			text: x.descState === 'pending' ? `${x.path} — no description` : x.description ? `${x.path} — ${x.description}` : x.path,
 			at: x.updatedLabel,
-			actor: x.ownerThread ?? 'unknown thread'
+			actor: x.ownerThread ?? 'unknown chat'
 		}))
 );
 

@@ -22,20 +22,22 @@
 	}
 
 	const overflows = $derived(afterLoadGb < safeReserveGb);
-	const usedPct = $derived(Math.max(0, ((freeGb - estimatedGb) / freeGb) * 100));
+	// Past zero the load needs more memory than is free, so "tight" would understate it.
+	const exceeds = $derived(afterLoadGb < 0);
+	const usedPct = $derived(freeGb > 0 ? Math.min(100, Math.max(0, ((freeGb - estimatedGb) / freeGb) * 100)) : 100);
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
 <Modal
-	title="Tight on memory"
+	title={exceeds ? 'Not enough memory' : 'Tight on memory'}
 	size="sm"
 	role="alertdialog"
 	onClose={onCancel}
 >
 	<p class="lede">
-		Loading <strong>{modelName}</strong> ({estimatedGb.toFixed(0)} GB) would push
-		free memory close to the limit.
+		Loading <strong>{modelName}</strong> ({estimatedGb.toFixed(0)} GB) would
+		{exceeds ? 'need more memory than is free.' : 'push free memory close to the limit.'}
 	</p>
 
 	<div class="bar">
@@ -57,13 +59,12 @@
 	<Message variant="err">{warning}</Message>
 
 	<p class="hint">
-		macOS may swap or kill processes if memory drops too low. Free up RAM
-		by unloading other models, or proceed with caution.
+		macOS may swap or kill processes if memory runs out. Unload other
+		models to free memory, or load anyway.
 	</p>
 
 	{#snippet foot()}
 		<Button variant="ghost" onclick={onCancel}>Cancel</Button>
-		<span style="flex: 1"></span>
 		<Button variant="danger" onclick={onConfirm}>Load anyway</Button>
 	{/snippet}
 </Modal>

@@ -13,6 +13,7 @@ import re
 import sys
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import corrections_asset_download as download  # noqa: E402
-from core import corrections_asset_pins  # noqa: E402
+from core import corrections_asset_files, corrections_asset_pins, corrections_classifier  # noqa: E402
 from core import corrections_asset_signals as signals  # noqa: E402
 from core.onnx_asset import AssetError  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
@@ -33,7 +34,7 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _build_asset(seed: str = "a") -> dict[str, bytes]:
+def _build_asset(seed: str = "a", *, version: str = "v1") -> dict[str, bytes]:
     files = {
         "LICENSE": f"license {seed}".encode(),
         "NOTICE": f"notice {seed}".encode(),
@@ -44,7 +45,7 @@ def _build_asset(seed: str = "a") -> dict[str, bytes]:
     }
     manifest = {
         "asset_id": "corrections-classifier",
-        "version": "v1",
+        "version": version,
         "input_policy_id": "modernbert-owner-context-v2-2048",
         "files": {name: {"bytes": len(data), "sha256": _sha(data)} for name, data in files.items()},
         "heads": [{"name": "correction", "threshold": 0.5, "labels": ["not_correction", "correction"]}],
@@ -128,10 +129,14 @@ def server(assets):
 
 @pytest.fixture
 def pinned(monkeypatch, assets):
+    pins = {"v1": _sha(assets["manifest.json"])}
+    monkeypatch.setattr(corrections_asset_pins, "PINNED_MANIFESTS", pins, raising=True)
+    monkeypatch.setattr(corrections_asset_files, "PINNED_MANIFESTS", pins)
+    monkeypatch.setattr(download, "PINNED_MANIFESTS", pins)
     monkeypatch.setattr(
-        corrections_asset_pins, "PINNED_MANIFESTS", {"v1": _sha(assets["manifest.json"])}, raising=True,
+        corrections_classifier, "CORRECTIONS_SPEC",
+        replace(corrections_classifier.CORRECTIONS_SPEC, pins=pins),
     )
-    monkeypatch.setattr(download, "PINNED_MANIFESTS", corrections_asset_pins.PINNED_MANIFESTS)
 
 
 def _flight(tmp_path, server, *, self_test=None, free_bytes=None, root=None, notifications=None, woken=None, **options):
@@ -204,6 +209,105 @@ def test_staged_partial_survives_a_restart_and_resumes(tmp_path, server, assets,
 
     assert flight.start(wait=True) == {"state": "ready"}
     assert server.requested("model.onnx.data") == ["bytes=1000-"]
+
+
+def _old_install_and_new_pin(tmp_path, monkeypatch):
+    """A verified v1 on disk while the source now pins v2; returns (root, old, new)."""
+    old_assets = _build_asset("old", version="v1")
+    new_assets = _build_asset("new", version="v2")
+    pins = {"v1": _sha(old_assets["manifest.json"]), "v2": _sha(new_assets["manifest.json"])}
+    monkeypatch.setattr(corrections_asset_files, "PINNED_MANIFESTS", pins)
+    monkeypatch.setattr(download, "PINNED_MANIFESTS", pins)
+    monkeypatch.setattr(
+        corrections_classifier, "CORRECTIONS_SPEC",
+        replace(corrections_classifier.CORRECTIONS_SPEC, pins=pins),
+    )
+    root = tmp_path / "asset"
+    root.mkdir()
+    for name, data in old_assets.items():
+        (root / name).write_bytes(data)
+    return root, old_assets, new_assets
+
+
+def test_current_asset_verified_is_true_only_for_the_newest_pin(tmp_path, monkeypatch):
+    root, old_assets, new_assets = _old_install_and_new_pin(tmp_path, monkeypatch)
+
+    assert corrections_asset_files.current_asset_verified(tmp_path / "missing") is False
+    assert corrections_asset_files.current_asset_verified(root) is False  # v1 verifies, v2 is pinned
+
+    for name, data in new_assets.items():
+        (root / name).write_bytes(data)
+    assert corrections_asset_files.current_asset_verified(root) is True
+
+    (root / "model.onnx.data").write_bytes(b"damaged")
+    assert corrections_asset_files.current_asset_verified(root) is False
+
+
+def test_the_newest_pin_is_ordered_by_number_not_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(corrections_asset_files, "PINNED_MANIFESTS", {"v9": "0" * 64, "v10": "1" * 64})
+    root = tmp_path / "asset"
+    root.mkdir()
+
+    assert corrections_asset_files.newest_pin() == "v10"
+    assert corrections_asset_files.staging_dir(root).name == ".asset.staging-v10"
+    (root / "manifest.json").write_text(json.dumps({"version": "v9"}))
+    assert corrections_asset_files.root_is_newest_pin(root) is False
+    (root / "manifest.json").write_text(json.dumps({"version": "v10"}))
+    assert corrections_asset_files.root_is_newest_pin(root) is True
+
+
+def test_an_older_verified_version_is_replaced_and_keeps_serving_until_then(tmp_path, monkeypatch):
+    root, old_assets, new_assets = _old_install_and_new_pin(tmp_path, monkeypatch)
+    server = _Server(new_assets)
+    parked_versions: list[str] = []
+
+    def check(path: Path) -> None:
+        parked = download.previous_dir(root) / "manifest.json"
+        if parked.is_file():
+            parked_versions.append(json.loads(parked.read_text())["version"])
+
+    try:
+        flight, _ = _flight(tmp_path, server, root=root, self_test=check)
+        assert (root / "manifest.json").read_bytes() == old_assets["manifest.json"]
+        assert flight.start(wait=True) == {"state": "ready"}
+    finally:
+        server.close()
+
+    assert (root / "manifest.json").read_bytes() == new_assets["manifest.json"]
+    assert parked_versions == ["v1"]
+    assert not download.previous_dir(root).exists()
+
+
+def test_a_process_killed_mid_download_restarts_cleanly_and_the_old_version_keeps_serving(tmp_path, monkeypatch):
+    root, old_assets, new_assets = _old_install_and_new_pin(tmp_path, monkeypatch)
+    server = _Server(new_assets)
+    server.cut_once["model.onnx.data"] = 50_000
+
+    def killed(_seconds: float) -> None:
+        raise KeyboardInterrupt("process killed")  # not an Exception: nothing cleans up
+
+    try:
+        dying, _ = _flight(tmp_path, server, root=root)
+        dying._sleep = killed
+        with pytest.raises(KeyboardInterrupt):
+            dying._flight()
+
+        staging = download.staging_dir(root)
+        assert (staging / "model.onnx.data").stat().st_size == 50_000
+        for name, data in old_assets.items():  # the old version is untouched and whole
+            assert (root / name).read_bytes() == data
+        assert not download.previous_dir(root).exists()
+        assert {path.name for path in tmp_path.iterdir()} == {"asset", staging.name}
+
+        assert download.recover_interrupted_install(root) is False  # no swap was interrupted
+        restarted, _ = _flight(tmp_path, server, root=root)
+        assert restarted.start(wait=True) == {"state": "ready"}
+    finally:
+        server.close()
+
+    assert server.requested("model.onnx.data")[-1] == "bytes=50000-"
+    assert (root / "manifest.json").read_bytes() == new_assets["manifest.json"]
+    assert {path.name for path in tmp_path.iterdir()} == {"asset"}
 
 
 def test_checksum_mismatch_deletes_the_file_and_is_retryable(tmp_path, server, pinned):
@@ -562,6 +666,36 @@ def test_network_loss_gives_up_with_a_retryable_failure(tmp_path, assets, pinned
     assert state["state"] == "failed" and state["code"] == "network_lost" and state["retryable"] is True
 
 
+def test_only_the_flight_a_start_begins_reports_its_failure_once(tmp_path, assets, pinned):
+    dead = _Server(assets)
+    dead.close()
+    flight, _ = _flight(tmp_path, dead)
+    failures: list[dict] = []
+
+    flight.start(wait=True, on_failure=failures.append)
+
+    assert [state["code"] for state in failures] == ["network_lost"]
+    flight.start(wait=True)  # a retry that names no listener reports to nobody
+    assert len(failures) == 1
+
+
+def test_a_successful_flight_reports_no_failure(tmp_path, server, pinned):
+    flight, _ = _flight(tmp_path, server)
+    failures: list[dict] = []
+
+    assert flight.start(wait=True, on_failure=failures.append) == {"state": "ready"}
+    assert failures == []
+
+
+def test_the_release_location_follows_the_newest_pin_and_the_override_wins(monkeypatch):
+    monkeypatch.delenv(download.BASE_URL_ENV, raising=False)
+    monkeypatch.setattr(corrections_asset_files, "PINNED_MANIFESTS", {"v1": "a", "v2": "b"})
+
+    assert download.base_url().endswith("/asset-corrections-classifier-v2")
+    monkeypatch.setenv(download.BASE_URL_ENV, "http://127.0.0.1:9/")
+    assert download.base_url() == "http://127.0.0.1:9"
+
+
 def test_public_state_hides_internal_fields():
     assert download.public_state({"state": "downloading", "bytes_done": 3, "bytes_total": 9, "x": 1}) == {
         "state": "downloading", "bytes_done": 3, "bytes_total": 9,
@@ -613,6 +747,15 @@ def test_routes_start_and_report_state_and_take_no_path(api_client):
     assert api_client.get("/api/setup/classifier", headers=LOOPBACK_HEADERS).json() == {"state": "ready"}
     again = api_client.post("/api/setup/classifier", json={}, headers=JSON_HEADERS)
     assert again.json() == {"state": "ready"}
+
+
+def test_the_setup_start_route_reports_a_failure_like_the_startup_start(api_client, monkeypatch):
+    import app_startup_runtime
+
+    calls = []
+    monkeypatch.setattr(api_client.flight, "start", lambda **kwargs: calls.append(kwargs) or {"state": "idle"})
+    api_client.post("/api/setup/classifier", json={}, headers=JSON_HEADERS)
+    assert calls == [{"on_failure": app_startup_runtime.report_classifier_download_failure}]
 
 
 def test_an_installed_asset_wakes_the_correction_worker_on_the_app_loop(monkeypatch):

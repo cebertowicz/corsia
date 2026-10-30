@@ -128,6 +128,7 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     from tools.user_presence import UserPresenceTool
     from tools.post_update import PostUpdateTool
     from tools.lesson_report import LessonReportTool
+    from tools.skill_library import SkillLibraryTool
 
     agent.tools.register(SearchHistoryTool())
     agent.tools.register(GetCheckpointsTool())
@@ -137,24 +138,22 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(PostUpdateTool())
     # Lesson evidence is scoped to the process-selected workspace, not a thread cwd.
     agent.tools.register(LessonReportTool(WORKSPACE))
+    agent.tools.register(SkillLibraryTool())
 
 
 def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and consent-gated local project discovery."""
+    """Register project creation and the consent-gated reads of the person's other tools.
+
+    The registry is shared by every thread, so ``agent_import`` refuses at call
+    time anyone but the CORSIA agent and a first-run thread.
+    """
+    from tools.agent_import import AgentImportTool
     from tools.project_discovery import ProjectDiscoveryListTool
     from tools.projects import CreateProjectTool
 
     agent.tools.register(CreateProjectTool())
     agent.tools.register(ProjectDiscoveryListTool())
-
-
-def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and consent-gated local project discovery."""
-    from tools.project_discovery import ProjectDiscoveryListTool
-    from tools.projects import CreateProjectTool
-
-    agent.tools.register(CreateProjectTool())
-    agent.tools.register(ProjectDiscoveryListTool())
+    agent.tools.register(AgentImportTool())
 
 
 def _register_access_tools(agent: CORSIAAgent) -> None:
@@ -167,6 +166,23 @@ def _register_access_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(ReleaseHostAccessTool())
     agent.tools.register(AuditReadTool())
     agent.tools.register(LogReadTool())
+
+
+def _register_measure_tools(agent: CORSIAAgent) -> None:
+    """Register the declared-measure tools: loading a measures.yaml and reading what intake did with it."""
+    from tools.measures import MeasureStatusTool, MeasureSyncTool
+
+    agent.tools.register(MeasureSyncTool())
+    agent.tools.register(MeasureStatusTool())
+
+
+def _register_automation_tools(agent: CORSIAAgent) -> None:
+    """Register this thread's schedules and the event rules it writes."""
+    from tools.automations import AutomationCancelTool, AutomationListTool, AutomationScheduleTool
+    from tools.event_rules import EventRulesTool
+
+    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool()):
+        agent.tools.register(tool)
 
 
 def _register_agent_roster_tools(agent: CORSIAAgent) -> None:
@@ -207,6 +223,7 @@ def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
 
 
 def _register_managed_process_tools(agent: CORSIAAgent) -> None:
+    from tools.host_cpu_top import HostCpuTopTool
     from tools.managed_processes import (
         ManagedProcessListTool,
         ManagedProcessLogsTool,
@@ -218,7 +235,7 @@ def _register_managed_process_tools(agent: CORSIAAgent) -> None:
 
     for tool_type in (
         ManagedProcessStatusTool, ManagedProcessLogsTool, ManagedProcessListTool,
-        ManagedProcessStopTool, ProcessDiscoverTool, ProcessSignalTool,
+        ManagedProcessStopTool, ProcessDiscoverTool, ProcessSignalTool, HostCpuTopTool,
     ):
         agent.tools.register(tool_type())
 
@@ -231,6 +248,7 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     from tools.model_catalog import ModelCatalogTool
     from tools.github_agent_account import GitHubAgentAccountTool
     from tools.model_sources import ModelSourcesTool
+    from tools.register_microsoft import register as register_microsoft_tools
 
     for tool_type in (
         DelegateCreateThreadTool, DelegateSendTool, DelegateStatusTool,
@@ -240,16 +258,18 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(ModelSourcesTool())
     agent.tools.register(GitHubAgentAccountTool())
     _register_google_tools(agent)
+    register_microsoft_tools(agent)
 
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.google_account import GoogleConnectTool, GoogleStatusTool
-    from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
+    from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
-    from tools.google_email_read import EmailReadTool, EmailSearchTool
+    from tools.email_read import EmailReadTool, EmailSearchTool
+    from tools.mail_host_connect import MailHostConnectTool
 
-    agent.tools.register(EmailSearchTool())
-    agent.tools.register(EmailReadTool())
+    for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):
+        agent.tools.register(tool)
     agent.tools.register(GoogleConnectTool())
     agent.tools.register(GoogleStatusTool())
     agent.tools.register(EmailDraftTool())
@@ -322,11 +342,6 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(SetConversationProjectTool())
     _register_agent_roster_tools(agent)
 
-    from tools.automations import (
-        AutomationCancelTool,
-        AutomationListTool,
-        AutomationScheduleTool,
-    )
     from tools.plans import (
         PlanDecisionTool,
         PlanEnsureTool,
@@ -343,29 +358,24 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(PlanEnsureTool())
     agent.tools.register(PlanUpdateTool())
     agent.tools.register(PlanDecisionTool())
-    agent.tools.register(AutomationScheduleTool())
-    agent.tools.register(AutomationCancelTool())
-    agent.tools.register(AutomationListTool())
+    _register_automation_tools(agent)
 
     _register_access_tools(agent)
-
+    _register_measure_tools(agent)
     _register_managed_process_tools(agent)
 
     from tools.knowledge import WriteKnowledgeTool, SearchKnowledgeTool, ListKnowledgeTool
     agent.tools.register(WriteKnowledgeTool())
     agent.tools.register(SearchKnowledgeTool())
     agent.tools.register(ListKnowledgeTool())
-
     from tools.browser import BrowserOpenTool, BrowserScreenshotTool, BrowserCloseTool
     from tools.browser_actions import BrowserSnapshotTool, BrowserClickTool, BrowserFillTool, BrowserEvalTool, BrowserWaitTool
+    from tools.browser_actions import BrowserPersonStepTool
+    from tools.browser_run_steps import BrowserRunStepsTool
     agent.tools.register(BrowserOpenTool(workspace=workspace))
-    agent.tools.register(BrowserSnapshotTool())
-    agent.tools.register(BrowserClickTool())
-    agent.tools.register(BrowserFillTool())
-    agent.tools.register(BrowserScreenshotTool(workspace=workspace))
-    agent.tools.register(BrowserEvalTool())
-    agent.tools.register(BrowserWaitTool())
-    agent.tools.register(BrowserCloseTool())
+    for tool in (BrowserSnapshotTool(), BrowserClickTool(), BrowserFillTool(), BrowserScreenshotTool(workspace=workspace),
+                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserRunStepsTool(), BrowserWaitTool(), BrowserCloseTool()):
+        agent.tools.register(tool)
 
     _register_document_tools(agent, workspace)
 

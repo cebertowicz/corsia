@@ -204,16 +204,17 @@ async def prepare_native_context_payload(
     user_source_content: str | None | object = native_prefix.USER_SOURCE_UNSET,
     agent_envelope=None,
     runtime_context_epoch: int = 0,
+    thread_context: dict[str, Any] | None = None,
 ) -> NativePreparedContext:
     """Render and freeze the exact Native payload used after admission."""
     from core.agent import get_agent
     from infra.context_receipts import ContextReceiptIdentity
-    from tools.catalog import advertised_tool_definitions
+    import tools.confined_reads as confined_reads
 
     agent = await get_agent()
     await agent._connect_mcp()
     frozen_tools = native_prefix._freeze_tool_definitions(
-        advertised_tool_definitions(agent.tools)
+        await confined_reads.advertised(agent.tools, thread_context)
     )
     installed: list[Any] = []
     snapshot: list[Any] = []

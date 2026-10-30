@@ -1,18 +1,20 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ fetchComments: vi.fn(), persistPositions: vi.fn(), postComment: vi.fn(), patchComment: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetchComments: vi.fn(), persistPositions: vi.fn(), postComment: vi.fn(), patchComment: vi.fn(), markCommentThreadViewed: vi.fn() }));
 vi.mock('$lib/api/docs', () => ({
 	fetchComments: mocks.fetchComments,
 	postComment: mocks.postComment,
 	patchComment: mocks.patchComment,
 	persistPositions: mocks.persistPositions,
+	markCommentThreadViewed: mocks.markCommentThreadViewed,
 }));
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, loadComments, flushPositions, remapComments,
+	docComments, commentLoads, fromServer, hasNewReplies, loadComments, flushPositions, markThreadViewed, remapComments,
 } from './docComments';
+import { canvasCommentHighlights } from '$lib/docCanvasComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
 
 afterEach(() => {
@@ -22,6 +24,7 @@ afterEach(() => {
 	mocks.persistPositions.mockReset();
 	mocks.postComment.mockReset();
 	mocks.patchComment.mockReset();
+	mocks.markCommentThreadViewed.mockReset();
 });
 
 describe('comment loading presentation', () => {
@@ -141,6 +144,46 @@ describe('image region comments', () => {
 	});
 });
 
+describe('comment-thread view projection', () => {
+	it('carries the server-named new reply ids and reply timestamps for new-reply presentation', () => {
+		const comment = fromServer({
+			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user', body: 'Root', anchor_text: 'quote', from_off: 0, to_off: 5,
+			review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
+			new_reply_ids: ['new'], replies: [{
+				id: 'new', artifact_id: 'artifact', parent_id: 'root', author: 'Agent', author_kind: 'agent', body: 'Reply', anchor_text: null, from_off: null, to_off: null,
+				review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:02:00Z', updated_at: '2026-10-16T17:02:00Z',
+			}],
+		});
+		expect(comment).toMatchObject({ newReplyIds: ['new'], replies: [{ id: 'new', createdAt: '2026-10-16T17:02:00Z' }] });
+	});
+});
+
+describe('thread reply attention', () => {
+	const thread = (id: string, newReplyIds: string[]) => ({ id, anchor: 'quote', author: 'you', text: id, at: 'now', resolved: false, from: 0, to: 5, replies: [], newReplyIds });
+	const waiting = () => canvasCommentHighlights(get(docComments).artifact, 'quote text', null, () => {}).map((range) => [range.id, range.replyWaiting]);
+
+	it('keeps one copy of reply attention: the marker and the ids agree after a stamp', async () => {
+		docComments.set({ artifact: [thread('a', ['a1', 'a2']), thread('b', ['b1'])] });
+		expect(waiting()).toEqual([['a', true], ['b', true]]);
+		mocks.markCommentThreadViewed.mockResolvedValue({ root_id: 'a', new_reply_ids: [] });
+		await markThreadViewed('artifact', 'a', 'a2');
+		const [a, b] = get(docComments).artifact;
+		expect(a.newReplyIds).toEqual([]);
+		expect(hasNewReplies(a)).toBe(false);
+		expect(Object.keys(a)).not.toContain('replyWaiting');
+		expect(waiting()).toEqual([['a', false], ['b', true]]);
+		expect(b.newReplyIds).toEqual(['b1']);
+	});
+
+	it('stays waiting while another unseen reply remains in the thread', async () => {
+		docComments.set({ artifact: [thread('a', ['a1', 'a2'])] });
+		mocks.markCommentThreadViewed.mockResolvedValue({ root_id: 'a', new_reply_ids: ['a2'] });
+		await markThreadViewed('artifact', 'a', 'a1');
+		expect(get(docComments).artifact[0].newReplyIds).toEqual(['a2']);
+		expect(waiting()).toEqual([['a', true]]);
+	});
+});
+
 describe('prepared comment arrivals', () => {
 	it('holds future comment bodies until each queued reveal', async () => {
 		mocks.fetchComments.mockResolvedValue({
@@ -148,7 +191,7 @@ describe('prepared comment arrivals', () => {
 				{ id: 'first', author: 'Agent', author_kind: 'agent', body: 'First body', anchor_text: 'one', from_off: 0, to_off: 3, resolved: false, replies: [], created_at: '2026-09-30T05:00:00Z' },
 				{ id: 'second', author: 'Agent', author_kind: 'agent', body: 'Second body', anchor_text: 'two', from_off: 4, to_off: 7, resolved: false, replies: [], created_at: '2026-09-30T05:00:01Z' },
 			],
-			feedback: { open_count: 2, owner_label: null, grace_closes_at: null, undelivered_batches: [] },
+			feedback: { open_count: 2, owner_label: null, undelivered_batches: [] },
 		});
 		const arrival = await prepareCommentArrival('artifact', 'first');
 		expect(get(docComments).artifact).toBeUndefined();

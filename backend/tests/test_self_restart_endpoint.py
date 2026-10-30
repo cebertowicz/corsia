@@ -30,6 +30,10 @@ from auth_fixtures import OWNER_TOKEN
 _AUTH_KEY = "to" + "ken"
 _SPAWN = "api.system_admin._spawn_self_restart"
 _FLAG = "CORSIA_AGENT_RESTART_ALLOWED"
+# Ordering waits, not latency bounds: each event is set by work the test has
+# already started and nothing else holds, so the bound only stops a hung test.
+# A loaded CI runner can take well over 0.2 s to run one request's database work.
+_SYNC_TIMEOUT = 5
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +184,9 @@ class TestSelfRestartEndpoint:
 
         assert response.status_code == 200
         assert response.json()["operation_id"] == operation_id
-        run_in_db.assert_awaited_once()
+        from automation import self_restart
+
+        assert sum(call.args[0] is self_restart.try_acquire_steering for call in run_in_db.await_args_list) == 1
         assert _rows(
             "SELECT id, status, phase FROM self_restart_requests WHERE id=?",
             (operation_id,),
@@ -214,8 +220,8 @@ class TestSelfRestartEndpoint:
                 app, operation_id, "cli restart",
             )
             try:
-                await asyncio.wait_for(response_sent.wait(), timeout=0.2)
-                await asyncio.wait_for(entered.wait(), timeout=0.2)
+                await asyncio.wait_for(response_sent.wait(), timeout=_SYNC_TIMEOUT)
+                await asyncio.wait_for(entered.wait(), timeout=_SYNC_TIMEOUT)
                 assert request.done() is False
                 status, payload = _asgi_response(messages)
                 assert status == 200
@@ -264,12 +270,12 @@ class TestSelfRestartEndpoint:
                 app, operation_id, "cli restart",
             )
             try:
-                await asyncio.wait_for(first_sent.wait(), timeout=0.2)
-                await asyncio.wait_for(entered.wait(), timeout=0.2)
+                await asyncio.wait_for(first_sent.wait(), timeout=_SYNC_TIMEOUT)
+                await asyncio.wait_for(entered.wait(), timeout=_SYNC_TIMEOUT)
                 duplicate, duplicate_sent, messages = _drain_request(
                     app, operation_id, "cli restart",
                 )
-                await asyncio.wait_for(duplicate_sent.wait(), timeout=0.2)
+                await asyncio.wait_for(duplicate_sent.wait(), timeout=_SYNC_TIMEOUT)
                 await duplicate
                 assert _asgi_response(messages) == (
                     409,
@@ -642,6 +648,9 @@ def _advance(rid: str, *phases: str) -> None:
 
     current = "holding"
     for phase in phases:
+        if current == "steering" and phase == "ready":
+            assert sr.transition_operation(rid, expected=current, target="draining")
+            current = "draining"
         assert sr.transition_operation(rid, expected=current, target=phase)
         current = phase
 
@@ -738,7 +747,7 @@ async def test_abort_replaced_operation_has_no_effects(isolated_db, monkeypatch)
     drive.assert_not_awaited()
 
 
-async def test_abort_resuming_operation_has_no_effects(isolated_db, monkeypatch):
+async def test_cancel_resuming_operation_has_no_effects(isolated_db, monkeypatch):
     from automation import restart
     from infra import drain, state, thread_execution
 
@@ -760,7 +769,7 @@ async def test_abort_resuming_operation_has_no_effects(isolated_db, monkeypatch)
     drive = AsyncMock()
     monkeypatch.setattr(thread_execution, "drive_thread", drive)
 
-    assert not await restart.abort_restart_control(operation_id, error="late failure")
+    assert not await restart.abort_restart_control(operation_id, error="late failure", cancelled=True)
 
     assert _restart_abort_rows(operation_id) == before
     assert state._drain == {"marker": "successor"}
@@ -905,6 +914,170 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
     assert sr.restart_holds_new_work() is False
 
 
+async def test_interrupted_update_startup_proves_the_previous_version_is_running(
+    isolated_db, monkeypatch, tmp_path
+):
+    """A proven rollback waits for the harness before it schedules its notice."""
+    from automation import restart, restart_startup, update_failure_notice
+    from automation import self_restart as sr
+    from loguru import logger
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        update_failure_notice, "tell_conductor_detached",
+        lambda operation_id, tasks: events.append(f"notice:{operation_id}"),
+    )
+    monkeypatch.setattr(restart_startup, "drive_startup_continuity", AsyncMock())
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: tmp_path / "CORSIA.app"
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2", previous_version="0.4.1",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting", "resuming", "verifying")
+
+    recovered, wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
+
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "rolled_back"
+    assert json.loads(operation["failure_detail"]) == {
+        "reason": "mismatch", "target_version": "0.4.2", "running_version": "0.4.1",
+        "previous_version": "0.4.1",
+    }
+    assert sr.restart_holds_new_work() is False
+    assert events == []
+
+    async def harness_ready() -> None:
+        events.append("harness")
+
+    await restart_startup.run_startup_drive(
+        harness_ready(), recovered, wakes, rolled_back, logger,
+    )
+
+    assert events == ["harness", f"notice:{rid}"]
+    assert restart._RESUME_TASKS == set()
+
+
+async def test_packaged_update_startup_waits_for_shell_even_when_target_is_running(
+    isolated_db, monkeypatch, tmp_path
+):
+    from automation import restart_startup, update_failure_notice
+    from automation import self_restart as sr
+    from loguru import logger
+
+    notice = MagicMock()
+    monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    _recovered, _wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
+
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert sr.restart_holds_new_work() is False
+    assert rolled_back is None
+    notice.assert_not_called()
+
+
+def test_packaged_update_waits_for_the_post_swap_shell_to_confirm_health(
+    isolated_db, monkeypatch, tmp_path,
+):
+    """The new backend cannot complete while the old shell can still roll it back."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    bundle.with_name("CORSIA.app.previous").mkdir()
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+
+    assert restart_startup._complete_restart_operation() is None
+    assert sr.operation_by_id(rid)["status"] == "in_flight"
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert sr.restart_holds_new_work() is False
+    assert sr.complete_operation(rid)
+
+
+@pytest.mark.parametrize(
+    ("target_version", "running_version", "reason"),
+    [
+        ("0.4.2", None, "running_version_unavailable"),
+        ("not-a-version", "0.4.2", "unparseable_version"),
+        ("0.4.2", "not-a-version", "unparseable_version"),
+    ],
+)
+def test_packaged_update_with_an_unverifiable_version_fails_closed(
+    isolated_db, monkeypatch, tmp_path, target_version, running_version, reason,
+):
+    """A packaged bundle must prove its stamped target before it can complete."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: running_version)
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: tmp_path / "CORSIA.app"
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version=target_version,
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    assert restart_startup._complete_restart_operation() is None
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert not sr.restart_holds_new_work()
+    restart_startup.close_out_prior_self_restart()
+    assert restart_startup._complete_restart_operation() == rid
+
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "version_unverified"
+    assert json.loads(operation["failure_detail"])["reason"] == reason
+
+
+def test_source_checkout_update_startup_does_not_compare_release_formats(
+    isolated_db, monkeypatch
+):
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "v0.4.1-12-gabcdef")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: None)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="2026.10.22.1936",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    restart_startup._complete_restart_operation()
+
+    assert sr.operation_by_id(rid)["status"] == "complete"
+
+
 def test_close_out_supersedes_only_legacy_phaseless_rows(isolated_db, monkeypatch):
     """Pre-lifecycle rows still use the TTL; operational holds never do."""
     from datetime import datetime, timedelta, timezone
@@ -951,6 +1124,37 @@ def test_close_out_prior_self_restart_does_not_swallow_failures(isolated_db, mon
     monkeypatch.setattr("automation.self_restart.clear_stale_in_flight", _boom)
     with pytest.raises(RuntimeError, match="db down"):
         restart_startup.close_out_prior_self_restart()
+
+
+async def test_restart_launch_does_not_block_event_loop():
+    """A slow handoff must leave other requests able to run."""
+    import threading
+    import api.system_admin as sa
+
+    started = threading.Event()
+    release = threading.Event()
+    process = MagicMock()
+    process.poll.return_value = None
+
+    def slow_spawn(*_args):
+        started.set()
+        if not release.wait(timeout=3):
+            raise RuntimeError("event loop did not release launch")
+        return process
+
+    with (
+        patch("automation.restart.begin_restart_drain", new_callable=AsyncMock),
+        patch(_SPAWN, side_effect=slow_spawn),
+    ):
+        task = asyncio.create_task(sa._spawn_self_restart_after_response(
+            3001, False, "a" * 32, "test", _valid_token()
+        ))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            assert not task.done()
+        finally:
+            release.set()
+        await task
 
 
 async def test_after_response_launch_failure_releases_the_operation(isolated_db):
@@ -1066,7 +1270,7 @@ async def test_startup_materializes_restart_wake_then_releases_ingress(
 
     from loguru import logger
 
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)
 
     assert _rows(

@@ -69,6 +69,8 @@ def add(
     actor_id: str | None,
     provenance: str,
     db,
+    intent: str | None = None,
+    intent_words: list[dict[str, str]] | None = None,
 ) -> dict:
     """Create required rework while preserving the terminal source as history."""
 
@@ -81,13 +83,15 @@ def add(
         node_id,
         title=title,
         acceptance_criteria=acceptance_criteria,
+        intent=intent,
+        intent_words=intent_words,
         actor_id=actor_id,
         provenance=provenance,
         expected_revision=expected_revision,
         inherit_commitment=True,
         db=db,
     )
-    service._event(
+    event_id = service._event(
         db,
         correction.id,
         "correction_created",
@@ -99,6 +103,9 @@ def add(
             "commitment_id": source["commitment_id"],
         },
     )
+    from core.self_caught_corrections import record_self_caught_correction
+
+    record_self_caught_correction(db, event_id)
     for row in affected:
         dependencies.add_dependency(
             row["id"],

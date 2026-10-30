@@ -71,7 +71,7 @@ describe('HostAccessReviewSetting fallback', () => {
 
 		expect(fallbackToggle()).toBeNull();
 		expect(host.textContent).not.toContain("Fall back to the agent's own model");
-		expect(host.textContent).toContain('Auto-approve leases');
+		expect(host.textContent).toContain('Auto-approve');
 	});
 
 	it('names the chosen reviewer in the fallback row, off by default', () => {
@@ -121,33 +121,44 @@ describe('HostAccessReviewSetting fallback', () => {
 	});
 });
 
-describe('HostAccessReviewSetting status pill', () => {
+describe('HostAccessReviewSetting reviewer status', () => {
 	const outage = {
 		...fixed,
 		host_access_reviewer_status: 'unavailable' as const,
 		host_access_reviewer_message: "Claude Sonnet can't run right now (usage limit).",
 	};
+	const reviewerLine = () => host.querySelector('[data-settings-row="Reviewer model"] .sub');
 
-	it('shows Unavailable, in the error color, when the reviewer is out and fallback is off', () => {
+	it('states the outage in the failed colour when the reviewer is out and fallback is off', () => {
 		coreSettings.set(outage);
 		render();
 
-		expect(host.querySelector('.pill')?.textContent).toBe('Unavailable');
-		expect(host.querySelector('.settings-status.error')?.textContent).toContain("can't run right now");
+		expect(reviewerLine()?.textContent).toContain("can't run right now");
+		expect(reviewerLine()?.classList.contains('failed')).toBe(true);
+		expect(host.querySelector('.pill')).toBeNull();
 	});
 
-	it('shows Using fallback, not an error, when the reviewer is out and fallback is on', () => {
+	it('states the outage in the needs-you colour when fallback is on', () => {
 		coreSettings.set({ ...outage, host_access_reviewer_fallback: true });
 		render();
 
-		expect(host.querySelector('.pill')?.textContent).toBe('Using fallback');
-		expect(host.querySelector('.settings-status')?.classList.contains('error')).toBe(false);
+		expect(reviewerLine()?.textContent).toContain("can't run right now");
+		expect(reviewerLine()?.classList.contains('failed')).toBe(false);
+		expect(reviewerLine()?.classList.contains('attention')).toBe(true);
+	});
+
+	it('names the state when the reviewer gives no message', () => {
+		coreSettings.set({ ...outage, host_access_reviewer_message: null, host_access_reviewer_fallback: true });
+		render();
+		expect(reviewerLine()?.textContent).toBe('Using fallback');
 	});
 
 	it('shows Ready when the reviewer can run, whatever the switch says', () => {
 		coreSettings.set({ ...fixed, host_access_reviewer_fallback: true });
 		render();
 
-		expect(host.querySelector('.pill')?.textContent).toBe('Ready');
+		expect(reviewerLine()?.textContent).toBe('Ready');
+		expect(reviewerLine()?.classList.contains('failed')).toBe(false);
+		expect(reviewerLine()?.classList.contains('attention')).toBe(false);
 	});
 });

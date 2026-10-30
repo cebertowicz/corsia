@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from core.checkpoint_fit import (
+from core.fork_fit import (
     BoundaryDecision, ColdFoldInputTooLarge, ProviderPayload, evaluate_boundary,
 )
 from core.checkpoint_wait import CheckpointWaitScope, await_checkpoint_or_stop
@@ -52,6 +52,7 @@ class ProviderBoundary:
     render_installed: RenderInstalled
     wait_scope: CheckpointWaitScope
     eager_checkpoint_id: str | None = None
+    recovery_input_tokens: int | None = None
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
@@ -101,7 +102,7 @@ async def _start_checkpoint(
             )
         return None
     from core.checkpoint_runtime import (
-        CheckpointNotAdmitted,
+        ForkNotAdmitted,
         CheckpointTargetLimited,
         request_checkpoint,
     )
@@ -110,7 +111,7 @@ async def _start_checkpoint(
     try:
         admission = await boundary.prepare_checkpoint(checkpoint_id, required)
         if admission is None:
-            raise CheckpointNotAdmitted("checkpoint admission is unavailable")
+            raise ForkNotAdmitted("checkpoint admission is unavailable")
         _validate_admission(boundary, checkpoint_id, admission)
         return await request_checkpoint(admission.request, admission.provider_request)
     except OptionalCheckpointSkipped as skipped:
@@ -129,7 +130,7 @@ async def _start_checkpoint(
             boundary.thread_id, error,
         )
         return None
-    except (ColdFoldInputTooLarge, CheckpointNotAdmitted) as error:
+    except (ColdFoldInputTooLarge, ForkNotAdmitted) as error:
         if required:
             raise boundary.unavailable(str(error)) from error
         logger.warning("Optional checkpoint unavailable for {}: {}", boundary.thread_id, error)
@@ -168,6 +169,7 @@ def _payload(
         checkpoint_status=active.status if active is not None else None,
         installed_input_tokens=(installed.input_tokens if installed else None),
         checkpoint_admissible=boundary.prepare_checkpoint is not None,
+        recovery_input_tokens=boundary.recovery_input_tokens,
     )
 
 

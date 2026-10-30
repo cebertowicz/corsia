@@ -27,7 +27,7 @@ def _bundle_with_recording_python(contents: Path) -> Path:
     infra = resources / "backend" / "infra"
     infra.mkdir(parents=True)
     (infra / "__init__.py").write_text("")
-    for module in ("platform_paths.py", "fs_durability.py"):
+    for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
     (contents / "Info.plist").write_text(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -464,6 +464,61 @@ def test_launcher_self_predicate_requires_launchd_parent():
             timeout=5,
         )
         assert (result.returncode == 0) is expected
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"state_dir": "relative/state", "port": 18788},
+        {"state_dir": 3},
+        "{not json",
+        '{"state_dir": "/adopted/bad\\u0007name"}',
+    ],
+)
+def test_launcher_refuses_a_damaged_service_json_instead_of_opening_the_default_state(tmp_path, content):
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    app_dir = _app_dir(state)
+    _service_file(state, content)
+
+    result = subprocess.run(
+        [str(launcher)],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(_home(state)),
+            "CORSIA_TEST_LAUNCHCTL": str(launcher.parent / "launchctl"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    # It stops (exit 0, so launchd does not respawn it) and never creates or opens the default root.
+    assert result.returncode == 0
+    assert "refused to start" in result.stderr and "no other state folder was opened" in result.stderr
+    assert "CORSIA_STATE_DIR" not in result.stdout and "state_dir=" not in result.stdout
+    assert not (app_dir / "state").exists()
+
+
+def test_launcher_refuses_to_start_while_the_app_moves_the_data_folder(tmp_path):
+    """T9: no start between the rename and the service.json rewrite."""
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    legacy = _home(state) / "Library" / "Application Support" / "com.cebertowicz.corsia"
+    _service_file(state, {"state_dir": str(legacy), "workspace": "/w", "port": 18788})
+    (_app_dir(state) / "state-move.json").write_text(json.dumps({"from": str(legacy), "step": "moved"}))
+
+    result = subprocess.run(
+        [str(launcher)],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(_home(state)),
+             "CORSIA_TEST_LAUNCHCTL": str(launcher.parent / "launchctl")},
+        capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == 0
+    assert "refused to start" in result.stderr and "moving its data folder" in result.stderr
+    assert "ARGS=" not in result.stdout
+    assert not legacy.exists()
 
 
 def test_launcher_ignores_invalid_values(tmp_path):

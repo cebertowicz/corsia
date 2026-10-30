@@ -115,6 +115,67 @@ def test_a_refusal_names_each_error_once():
     assert errors == ["params should be object"]
 
 
+class _ScalarTool(_PayloadTool):
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer"},
+                "ratio": {"type": "number"},
+                "flag": {"type": "boolean"},
+                "listed": {"type": ["integer", "null"]},
+            },
+        }
+
+
+def test_scalar_text_decodes_only_when_it_spells_the_declared_type():
+    tool = _ScalarTool()
+
+    assert tool.decode_string_arguments({"count": "52", "ratio": "0.5", "flag": "false"}) == {
+        "count": 52, "ratio": 0.5, "flag": False,
+    }
+    kept = [
+        {"count": "5.0"}, {"count": "true"}, {"count": " 52"}, {"count": "52x"},
+        {"ratio": "NaN"}, {"ratio": "true"},
+        {"flag": "1"}, {"flag": "yes"}, {"flag": "True"},
+        {"listed": "52"},
+    ]
+    for params in kept:
+        assert tool.decode_string_arguments(params) == params
+    assert tool.validate_params({"flag": "yes"}) == ["flag should be boolean"]
+
+
+def test_deferred_automation_schedule_called_by_name_accepts_text_max_runs():
+    """A direct call to the deferred tool with max_runs '52' decodes it to the integer 52."""
+    from tools.automations import AutomationScheduleTool
+
+    tool = AutomationScheduleTool()
+    decoded = tool.decode_string_arguments({"kind": "cadence", "spec": "86400", "max_runs": "52"})
+
+    assert decoded["max_runs"] == 52 and decoded["spec"] == "86400"
+    assert tool.validate_params(decoded) == []
+
+
+@pytest.mark.asyncio
+async def test_registry_passes_a_direct_call_with_text_max_runs_to_the_tool(monkeypatch):
+    from tools.automations import AutomationScheduleTool
+
+    registry = ToolRegistry()
+    registry.register(AutomationScheduleTool())
+
+    async def no_identity():
+        return None, "Error: identity sentinel."
+
+    monkeypatch.setattr(registry, "_load_thread_context", no_identity)
+
+    result = await registry.execute(
+        "automation_schedule", {"kind": "cadence", "spec": "86400", "max_runs": "52"},
+    )
+
+    assert result.startswith("Error: identity sentinel.")
+
+
 @pytest.mark.asyncio
 async def test_registry_decodes_before_it_validates(monkeypatch):
     registry = ToolRegistry()

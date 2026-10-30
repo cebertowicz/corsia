@@ -2,7 +2,7 @@ import { canvasHeader } from '$lib/stores/canvasHeader';
 import type { Thread } from '$lib/stores/threads';
 import type { ContextAttachTarget } from '$lib/stores/contextAttach';
 import type { View } from '$lib/homePaneConfig';
-import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+import type { SettingsDrill } from '$lib/stores/settingsNavigation';
 
 export interface CompactArtifactHeader {
 	title: string;
@@ -13,9 +13,7 @@ export interface CompactArtifactHeader {
 }
 
 interface CanvasHeaderInput {
-	projectSettingsOpen: boolean;
 	threadSettingsOpen: boolean;
-	workspaceSettingsOpen: boolean;
 	/** Present only when the canvas is too narrow to split and an artifact is active. */
 	compactArtifact: CompactArtifactHeader | null;
 	contextAttachTarget: ContextAttachTarget | null;
@@ -24,38 +22,23 @@ interface CanvasHeaderInput {
 	activeThreadId: string | null;
 	conductorThreadId: string | null;
 	threads: Thread[];
-	closeProjectSettings: () => void;
 	closeThreadSettings: () => void;
 	closeSettings: () => void;
 	closeDocuments: () => void;
+	/** A drilled Settings page names itself and goes up one level. */
+	settingsDrill?: SettingsDrill | null;
 }
 
 export function syncCanvasHeader(input: CanvasHeaderInput) {
-	if (input.projectSettingsOpen) {
-		canvasHeader.set({
-			title: 'Project settings',
-			backLabel: input.uiScopeName ?? 'Workspace',
-			onBack: input.closeProjectSettings,
-		});
-		return;
-	}
-	if (input.workspaceSettingsOpen) {
-		canvasHeader.set({
-			title: 'Workspace settings',
-			backLabel: 'Workspace',
-			onBack: () => workspaceSettingsOpen.set(false),
-		});
-		return;
-	}
 	if (input.threadSettingsOpen) {
 		const conductor = input.conductorThreadId != null && input.activeThreadId === input.conductorThreadId;
 		const threadTitle = input.activeThreadId
 			? input.threads.find((thread) => thread.id === input.activeThreadId)?.title
 			: null;
 		// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
-		const designatedName = input.uiScopeName === null ? 'CORSIA' : 'Conductor';
+		const designatedName = threadTitle || (input.uiScopeName === null ? 'CORSIA' : 'Conductor');
 		canvasHeader.set({
-			title: conductor ? `${designatedName} settings` : 'Thread settings',
+			title: conductor ? `${designatedName} settings` : 'Chat settings',
 			backLabel: threadTitle ?? (conductor ? designatedName : 'Thread'),
 			onBack: input.closeThreadSettings,
 		});
@@ -66,15 +49,17 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 		return;
 	}
 	if (input.activeView === 'settings') {
-		canvasHeader.set({ title: 'Settings', onBack: input.closeSettings });
+		const drill = input.settingsDrill;
+		canvasHeader.set(drill
+			? { title: drill.title, backLabel: drill.backLabel, onBack: drill.onBack }
+			: { title: 'Settings', onBack: input.closeSettings });
 		return;
 	}
 	if (input.activeView === 'documents') {
 		const returnTo = input.contextAttachTarget?.returnTo;
 		const backLabel =
-			returnTo === 'thread-settings' ? 'Thread settings'
-			: returnTo === 'project-settings' ? 'Project settings'
-			: returnTo === 'workspace-settings' ? 'Workspace settings'
+			returnTo === 'thread-settings' ? 'Chat settings'
+			: returnTo === 'settings' ? 'Settings'
 			: undefined;
 		canvasHeader.set({ title: 'Documents', backLabel, onBack: input.closeDocuments });
 		return;
@@ -92,8 +77,8 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 			onBack,
 			actions: [{
 				id: 'artifact-tabs',
-				label: `Tabs (${tabCount})`,
-				title: anyChanged ? 'Open artifacts — one has changed' : 'Open artifacts',
+				label: `Files (${tabCount})`,
+				title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
 				onClick: onTabs,
 				active: anyChanged,
 				primary: true,

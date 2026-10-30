@@ -37,13 +37,23 @@ it('shows the external warning and exact launch before Plan on a projectless req
 	show(lease);
 	const section = host.querySelector('.policy-exceptions')!;
 	expect(host.querySelector('.purpose')!.nextElementSibling).toBe(section);
-	expect(section.nextElementSibling).toBe(host.querySelector('.plan'));
-	expect(host.querySelector('.external-warning')!.textContent).toBe('External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.');
+	expect(section.nextElementSibling).toBe(host.querySelector('.explainer'));
+	expect(section.nextElementSibling!.nextElementSibling).toBe(host.querySelector('.plan'));
+	expect(host.querySelector('.external-warning')!.textContent).toBe('This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.');
 	const external = lease.requested_policy_exceptions[0];
 	if (external.policy !== 'external_agent') throw new Error('Invalid fixture');
 	expect(Array.from(section.querySelectorAll('code'), (node) => node.textContent))
 		.toEqual([external.command, external.working_directory]);
 	expect(button('Approve')?.disabled).toBe(false);
+});
+
+it('says what host access is before the request details', () => {
+	const lease = externalLease();
+	lease.requested_policy_exceptions = [];
+	show(lease);
+	const explainer = host.querySelector('.decision-body > .explainer')!;
+	expect(explainer.textContent).toBe("This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.");
+	expect(explainer.nextElementSibling).toBe(host.querySelector('.purpose'));
 });
 
 it('keeps a long requesting-thread title available through the drawer heading', () => {
@@ -104,6 +114,17 @@ it('blocks an incomplete launch and shows plain missing-command copy outside cod
 	expect(missing.textContent).toBe('Command missing');
 	expect(missing.closest('code')).toBeNull();
 	expect(host.querySelector('.approval-blocked')).not.toBeNull();
+});
+
+it('names a missing working folder and prevents approval', () => {
+	const lease = externalLease();
+	const external = lease.requested_policy_exceptions[0];
+	if (external.policy !== 'external_agent') throw new Error('Invalid fixture');
+	external.working_directory = '';
+	expect(approvalReady(lease)).toBe(false);
+	show(lease);
+	expect(host.querySelector('.launch-missing')?.textContent).toBe('Working folder missing');
+	expect(button('Approve')).toBeUndefined();
 });
 
 it('rejects malformed directory, duplicate launch, extra repo field and excessive duration', () => {

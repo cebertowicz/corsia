@@ -1,11 +1,14 @@
 """Confinement and private-cache setup for local MCP stdio transports."""
 
+import asyncio
 import hashlib
 import os
 import re
 import shlex
+import shutil
 import tempfile
 from pathlib import Path
+import sys
 
 from tools.host_path_resolution import denied_paths_in
 from tools.mcp_config import MCPConfigError
@@ -19,6 +22,9 @@ _MCP_DENIED_PATH = re.compile(
     ''',
 )
 _SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
+# Safehouse is a bash script that resolves its own helpers on PATH, so an app's
+# configured PATH keeps these after its own entries.
+_SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
 
 def _mcp_denied_paths_in(text: str) -> tuple[Path, ...]:
@@ -34,17 +40,28 @@ def _mcp_app_id(name: str) -> str:
     return hashlib.sha256(name.encode("utf-8")).hexdigest()
 
 
+def mcp_cache_root(home: Path | None = None) -> Path:
+    """Return the parent of every app-private local-MCP cache."""
+    from tools.managed_runtime import application_cache_root
+
+    return application_cache_root(home) / "mcp"
+
+
 def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     """Return an app-private cache that cannot overlap CORSIA workspace or state."""
-    from infra.platform_paths import APPLICATION_ID
-
-    cache_dir = (Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / name).resolve(strict=False)
+    cache_root = mcp_cache_root().resolve(strict=False)
+    cache_dir = (cache_root / name).resolve(strict=False)
+    # The Safehouse profile reopens this directory for writes, so it must stay a
+    # direct child of the cache root; a name resolving elsewhere would reopen it.
+    if cache_dir.parent != cache_root:
+        raise MCPConfigError("local MCP cache must be one directory inside the MCP cache root")
     if any(
         cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
         for root in (workspace.resolve(strict=False), state_root.resolve(strict=False))
     ):
         raise MCPConfigError("local MCP cache must be outside CORSIA workspace and state")
     return cache_dir
+
 
 
 def _mcp_denial_guidance(text: str) -> str | None:
@@ -76,11 +93,49 @@ def mcp_oserror_detail(error: OSError) -> str:
     return _mcp_denial_guidance(str(error)) or str(error)
 
 
-def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list[str], env: dict[str, str]):
+async def prepare_managed_runtime(config: dict) -> None:
+    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
+    command = config.get("command")
+    if not isinstance(command, str):
+        return
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if path is not None and not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
+
+    plan = runtime_fetch_plan(command, path=path)
+    if plan is not None:
+        kind, _pin = plan
+        await asyncio.to_thread(ensure_runtime, kind)
+
+
+def _uv_runtime_env(command: str, runtime_bin: Path | None) -> dict[str, str]:
+    """Pin uv to an unprotected bundled base interpreter without a managed download."""
+    if command not in {"uv", "uvx"} or runtime_bin is None:
+        return {}
+    from tools.host_path_policy import current_protected_host_path_policy
+
+    base_python = Path(os.path.realpath(getattr(sys, "_base_executable", sys.executable)))
+    policy = current_protected_host_path_policy()
+    env = {"UV_NO_MANAGED_PYTHON": "1"}
+    if not any(base_python.is_relative_to(root) for root in (policy.state_root, *policy.private_roots)):
+        env["UV_PYTHON"] = str(base_python)
+    return env
+
+
+def safehouse_stdio_parameters(
+    name: str,
+    config: dict,
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+):
     """Build a fail-closed direct-exec Safehouse launch for one local app."""
     from mcp import StdioServerParameters
 
     from infra.config import STATE_ROOT, WORKSPACE
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeError, command_bin_dir, command_path
     from tools.safehouse_launch import direct_safehouse_argv, mcp_envelope_dir, mcp_private_state_profile, write_no_proctitle_shim
     from tools.shell_guard import _safehouse_executable, safehouse_version_error
 
@@ -101,14 +156,34 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
     node_options = f"--require {shlex.quote(str(shim_path))}"
     if existing := env.get("NODE_OPTIONS"):
         node_options = f"{node_options} {existing}"
+    inherited_path = os.environ.get("PATH", "")
+    configured_path = env.get("PATH")
+    command_path_value = configured_path if configured_path is not None else inherited_path
+    user_command = shutil.which(command, path=command_path_value)
+    try:
+        resolved_command = user_command or command_path(command, path=command_path_value)
+    except ManagedRuntimeDownloadError:
+        raise
+    except ManagedRuntimeError as error:
+        raise MCPConfigError(_mcp_setup_refusal(str(error))) from None
+    if resolved_command is None:
+        resolved_command = command
+    runtime_bin = command_bin_dir(command) if user_command is None and resolved_command != command else None
+    child_path = command_path_value
+    if runtime_bin is not None:
+        child_path = f"{runtime_bin}{os.pathsep}{child_path}" if child_path else str(runtime_bin)
+    path_entries = child_path.split(os.pathsep) if child_path else []
+    child_path = os.pathsep.join([*path_entries, *(entry for entry in _SYSTEM_PATH if entry not in path_entries)])
     server_env = {
         "npm_config_script_shell": "/bin/sh",
         **env,
+        "PATH": child_path,
         "npm_config_cache": str(cache_dir / "npm"),
         "UV_CACHE_DIR": str(cache_dir / "uv"),
         "XDG_CACHE_HOME": str(cache_dir / "xdg"),
         "NODE_OPTIONS": node_options,
     }
+    server_env.update(_uv_runtime_env(command, runtime_bin))
     descriptor, raw_profile = tempfile.mkstemp(
         dir=mcp_envelope_dir(Path(STATE_ROOT)), prefix="corsia-mcp-envelope-", suffix=".sb",
     )
@@ -116,9 +191,11 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
     try:
         safehouse_path = _safehouse_executable()
         with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
-            profile.write(mcp_private_state_profile(profile_path, safehouse_path, Path(STATE_ROOT)))
+            profile.write(mcp_private_state_profile(
+                profile_path, safehouse_path, Path(STATE_ROOT), cache_dir,
+            ))
         argv = direct_safehouse_argv(
-            command, args, cwd, profile_path,
+            resolved_command, args, cwd, profile_path,
             env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
             executable=lambda: safehouse_path,
         )

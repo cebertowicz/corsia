@@ -41,23 +41,23 @@ def test_owner_message_filter_excludes_agents_and_system_wrappers():
 
 
 def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
-    from jobs import corrections_realtime
+    from jobs import corrections_realtime, corrections_recording
 
     seen = []
-    monkeypatch.setattr(corrections_realtime, "notify", seen.append)
+    monkeypatch.setattr(corrections_realtime, "notify", lambda source_kind, source_id: seen.append((source_kind, source_id)))
 
     def accepted(message_id, duplicate=False):
         from types import SimpleNamespace
 
         return SimpleNamespace(message_id=message_id, duplicate=duplicate)
 
-    corrections_realtime.notify_if_owner(accepted("message"), role="user", content="A correction.", metadata="{}")
-    corrections_realtime.notify_if_owner(accepted("duplicate", True), role="user", content="A correction.", metadata="{}")
-    corrections_realtime.notify_if_owner(
+    corrections_recording.notify_if_owner(accepted("message"), role="user", content="A correction.", metadata="{}")
+    corrections_recording.notify_if_owner(accepted("duplicate", True), role="user", content="A correction.", metadata="{}")
+    corrections_recording.notify_if_owner(
         accepted("agent"), role="user", content="A correction.", metadata={"sender_kind": "agent"},
     )
 
-    assert seen == ["message"]
+    assert seen == [("message", "message")]
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_scan_hydrates_recent_context_and_uses_versioned_dedupe(isolated_d
     keys = pending_candidate_keys(_version(), 20, "owner")
     candidates = hydrate_candidates(keys)
 
-    assert [candidate.message_id for candidate in candidates] == ["owner-message"]
+    assert [candidate.source_id for candidate in candidates] == ["owner-message"]
     assert candidates[0].context == (("Agent", "Prior answer."),)
 
 
@@ -164,7 +164,7 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
     from datetime import datetime, timezone
 
     from core.corrections_recording import ClassifierVersion, CorrectionCandidate
-    from jobs.corrections_recording import _record_fact, unreadable_messages
+    from jobs.corrections_recording import _record_fact, unreadable_facts
 
     db = _db()
     try:
@@ -176,7 +176,7 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
     newer = ClassifierVersion("corrections-classifier", "v2", "correction", 0.5, "modernbert-owner-context-v2-2048")
 
     def candidate(message_id, created_at):
-        return CorrectionCandidate(message_id, "thread", "project", "x", created_at)
+        return CorrectionCandidate("message", message_id, "thread", "project", "x", created_at)
 
     assert _record_fact(candidate("recent", recent), unreadable, _version())
     assert _record_fact(candidate("recent", recent), unreadable, newer)  # re-read by a newer version
@@ -184,8 +184,8 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
 
     db = _db()
     try:
-        assert unreadable_messages(db, _version()) == 1
-        assert unreadable_messages(db, newer) == 1
+        assert unreadable_facts(db, _version()) == 1
+        assert unreadable_facts(db, newer) == 1
     finally:
         db.close()
 
@@ -218,12 +218,41 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     finally:
         db.close()
     assert attributes == {
-        "message_id": "owner-message", "thread_id": "thread", "label": "correction",
+        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "label": "correction",
         "asset_id": "corrections-classifier", "asset_version": "v1", "head": "correction",
         "threshold": "0.595681", "input_policy_id": "modernbert-owner-context-v2-2048",
         "truncated": "false", "original_tokens": 9, "failure_reason": "none",
         "classified_at": attributes["classified_at"],
     }
+
+
+def test_record_fact_keeps_the_committed_fact_when_early_delivery_fails(isolated_db, monkeypatch):
+    from jobs import learning_report
+    from jobs.corrections_recording import _record_fact
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+
+    def delivery_failed(*_args, **_kwargs):
+        raise RuntimeError("delivery unavailable")
+
+    monkeypatch.setattr(learning_report, "maybe_emit_early", delivery_failed)
+
+    assert _record_fact(
+        candidate,
+        {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"},
+        _version(),
+    ) is True
+    db = _db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 1
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio
@@ -245,12 +274,18 @@ async def test_same_message_and_version_is_recorded_once_when_scan_and_notify_ra
 def test_only_send_thread_input_calls_the_corrections_admission_hook():
     """Plan wakes, event delivery, digests and spawn paths cannot enqueue classification."""
     import ast
+    import unicodedata
     from pathlib import Path
 
     backend = Path(__file__).parents[1]
     callers = []
     for path in backend.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+        if "notify_if_owner" not in source:
+            # Python normalizes identifiers to NFKC during parsing.
+            if source.isascii() or "notify_if_owner" not in unicodedata.normalize("NFKC", source):
+                continue
+        tree = ast.parse(source)
         for function in ast.walk(tree):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -263,3 +298,58 @@ def test_only_send_thread_input_calls_the_corrections_admission_hook():
                 callers.append((path.relative_to(backend).as_posix(), function.name))
 
     assert callers == [("infra/send_service.py", "send_thread_input")]
+
+
+def _seed_comment_and_answer_sources(db):
+    db.execute(
+        """INSERT INTO artifact_identities
+           (id,integration,type,external_id,state,metadata,created_at,updated_at)
+           VALUES ('doc','local','document','doc','active','{}','t','t')"""
+    )
+    db.execute(
+        """INSERT INTO artifact_registrations
+           (id,artifact_id,parent_thread_id,relationship_state,created_at,updated_at)
+           VALUES ('doc-owner','doc','thread','owner-active','t','t')"""
+    )
+    db.execute(
+        """INSERT INTO doc_comments
+           (id,artifact_id,author,author_kind,body,anchor_text,created_at,updated_at)
+           VALUES ('comment','doc','owner','user','The date is wrong.','2027 launch','2026-10-01T00:02:00Z','t')"""
+    )
+    decision = {
+        "plan_decision": {
+            "state": "answered", "thread_id": "thread", "revision": 7,
+            "answered_at": "2026-10-01T00:03:00Z", "title": "Which date?",
+            "context": "Release copy", "tradeoff": "Accuracy", "options": [],
+            "answer": {"text": "Use 2027, not 2026."},
+        },
+    }
+    db.execute(
+        """INSERT INTO artifact_identities
+           (id,integration,type,external_id,state,metadata,created_at,updated_at)
+           VALUES ('decision-artifact','local','plan-decision','decision','active',?,'t','t')""",
+        (json.dumps(decision),),
+    )
+    db.commit()
+
+
+@pytest.mark.asyncio
+async def test_scan_batches_messages_comments_and_free_text_answers(isolated_db):
+    from jobs.corrections_recording import next_pending_batch
+
+    db = _db()
+    try:
+        _seed(db)
+        _seed_comment_and_answer_sources(db)
+    finally:
+        db.close()
+
+    batch = await next_pending_batch(_version(), 10, None, since="2026-10-01T00:00:00Z")
+
+    assert [(key.source_kind, key.source_id) for key in batch.selected_keys] == [
+        ("plan_decision_answer", "decision"), ("doc_comment", "comment"), ("message", "owner-message"),
+    ]
+    assert [(candidate.source_kind, candidate.source_id) for candidate in batch.candidates] == [
+        ("plan_decision_answer", "decision:7"), ("doc_comment", "comment"), ("message", "owner-message"),
+    ]
+

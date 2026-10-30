@@ -54,9 +54,9 @@ def _required_harness_capabilities(harness: str) -> dict:
 
 
 def _harness_connection_available(provider: str) -> bool:
-    from connections.models import connection_available
+    from connections.models import provider_may_run
 
-    return connection_available(provider)
+    return provider_may_run(provider)
 
 
 def _harness_discovery_envelope(provider: str) -> dict | None:
@@ -82,16 +82,37 @@ def _cloud_providers_active() -> set[str]:
     return active
 
 
-def _network_server_status() -> dict[str, str]:
-    status: dict[str, str] = {}
+def _network_servers() -> list[dict]:
+    """Read the network servers once for one catalog build."""
     try:
-        from llm.network_discovery import get_servers as _get_net_servers
-        for s in _get_net_servers():
-            status[s["id"]] = s["status"]
-    except Exception as e:
+        from llm.network_discovery import get_servers
+
+        return get_servers()
+    except Exception as error:
         from loguru import logger
-        logger.warning(f"network discovery lookup failed; treating all servers as offline: {e}")
-    return status
+
+        logger.warning(f"network discovery lookup failed; treating all servers as offline and non-local: {error}")
+        return []
+
+
+def _network_server_status(servers: list[dict]) -> dict[str, str]:
+    """Each network server's current status for one catalog build."""
+    return {str(server["id"]): server["status"] for server in servers}
+
+
+def _server_locality(servers: list[dict]) -> tuple[set[str], set[str]]:
+    """Each server's private mark and loopback fact for one catalog build, from the one owner."""
+    from llm.locality import server_locality
+
+    private: set[str] = set()
+    local: set[str] = set()
+    for server in servers:
+        facts = server_locality(server)
+        if facts.private:
+            private.add(str(server["id"]))
+        if facts.on_this_mac:
+            local.add(str(server["id"]))
+    return private, local
 
 
 def _loaded_model_ids_fn():
@@ -237,6 +258,8 @@ def _public_status_entry(
     context_window: int | None,
     status: str,
     status_reason: str | None,
+    private_servers: set[str],
+    local_servers: set[str],
 ) -> dict:
     """Project one catalog row for every public consumer."""
     capabilities = _capabilities_for_row(
@@ -258,6 +281,11 @@ def _public_status_entry(
         "litellm_model": row["litellm_model"], "context_window": context_window,
         "capabilities": capabilities,
     }
+    from llm.locality import row_is_local
+
+    entry["is_local"] = row_is_local(
+        entry, private_servers=private_servers, local_servers=local_servers,
+    )
     if status_reason:
         entry["status_reason"] = status_reason
     if harness in ("claude-code", "codex"):
@@ -289,18 +317,10 @@ def scoped_status_rows(*, thread_id: str | None = None, project_id: str | None =
 @fact_memo.memoized_reader
 def harness_base_row(model: str, *, db) -> dict | None:
     """One harness model's account-independent row, hidden or not, for a single-account decision."""
-    row = db.execute(
-        "SELECT * FROM models WHERE harness IN ('claude-code','codex') AND (id=? OR litellm_model=?) "
-        "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)).fetchone()
-    if row is None:
-        return None
-    from connections.models import connection_available
-    from llm.context_window import resolve_window_for_row
+    from llm.harness_catalog import harness_base_from_row, harness_row
 
-    row = dict(row)
-    status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
-                                     resolve_window_for_row(row, db=db), connection_available(row["harness"], db=db))
-    return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason}
+    row = harness_row(model, db=db)
+    return harness_base_from_row(row, db=db) if row is not None else None
 
 
 def catalog_base_rows() -> list[dict]:
@@ -308,17 +328,23 @@ def catalog_base_rows() -> list[dict]:
     from llm import catalog as model_catalog
 
     cloud_active = _cloud_providers_active()
-    server_status = _network_server_status()
+    servers = _network_servers()
+    server_status = _network_server_status(servers)
+    private_servers, local_servers = _server_locality(servers)
     loaded_ids_fn = _loaded_model_ids_fn()
+    from llm.harness_catalog import catalog_rows
     rows: list[dict] = []
-    for row in model_catalog.get_model_status_catalog_rows():
-        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn)
+    connections: dict[str, bool] = {}
+    for row in catalog_rows(model_catalog.get_model_status_catalog_rows()):
+        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers, local_servers,
+                              harness_connections=connections)
         if entry is not None:
             rows.append(entry)
     return rows
 
 
-def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict | None:
+def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn,
+                  private_servers, local_servers, *, harness_connections=None) -> dict | None:
     """One catalog row's public entry; ``None`` for an inactive cloud provider."""
     from llm.context_window import resolve_window_for_row
 
@@ -332,8 +358,13 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict
         meta = {}
 
     if harness in ("claude-code", "codex"):
-        status, status_reason = _harness_status(harness, row, meta, context_window,
-                                                _harness_connection_available(harness))
+        if harness_connections is None:
+            connected = _harness_connection_available(harness)
+        else:
+            if harness not in harness_connections:
+                harness_connections[harness] = _harness_connection_available(harness)
+            connected = harness_connections[harness]
+        status, status_reason = _harness_status(harness, row, meta, context_window, connected)
     elif backend == "api":
         if provider not in cloud_active:
             return None
@@ -350,7 +381,11 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict
         status = "unavailable"
         status_reason = "missing_context_window"
 
-    return _public_status_entry(
+    entry = _public_status_entry(
         row, harness=harness, provider=provider, backend=backend, meta=meta,
         context_window=context_window, status=status, status_reason=status_reason,
+        private_servers=private_servers, local_servers=local_servers,
     )
+    if row.get('default_listed') is False:
+        entry['default_listed'] = False
+    return entry

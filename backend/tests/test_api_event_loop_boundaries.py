@@ -252,6 +252,7 @@ async def test_bulletin_tool_and_loop_use_the_db_worker(monkeypatch):
 @pytest.mark.asyncio
 async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
     import api.version as api_version
+    from infra import build_info
 
     event_loop_thread = threading.get_ident()
     worker_started = threading.Event()
@@ -263,6 +264,7 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         ("log", "-1", "--format=%cI", "HEAD"): "2026-09-10T15:00:00-07:00",
         ("log", "-1", "--format=%s", "HEAD"): "subject",
         ("status", "--porcelain"): " M backend/api/version.py",
+        ("describe", "--tags", "--match", "v[0-9]*"): "v0.4.1-12-gabc1234",
     }
 
     def _slow_git(args):
@@ -272,8 +274,8 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         assert worker_release.wait(timeout=5), "test did not release the git worker"
         return outputs[tuple(args)]
 
-    # _git_read is the one subprocess seam; _git and the dirty read both go through it.
-    monkeypatch.setattr(api_version, "_git_read", _slow_git)
+    # Both version paths share the build-info git-read seam.
+    monkeypatch.setattr(build_info, "_git_read", _slow_git)
 
     version_task = asyncio.create_task(api_version.get_version())
     try:
@@ -294,6 +296,7 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         "commit_subject": "subject",
         "dirty": True,
     }
+    assert result["app"]["version"] == "0.4.1-12-gabc1234"
 
 
 @pytest.mark.asyncio

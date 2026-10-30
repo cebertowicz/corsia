@@ -14,91 +14,28 @@ from typing import Any
 
 from fastapi import Depends, Query
 
-from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
+from connections import fact_memo
+
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
+from api.measurement_breaks import source_started_period
 from api.measurement_join import joined_read
 from api.measurement_queries import (
     PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods, prepare_scope_threads,
 )
-from api.measurement_registry import REGISTRY, period_measured
+from api.measurement_registry import REGISTRY
 from api.measurement_scope import validate_scope
 from api.measurement_size import size_period_totals
 from api.usage_rollup import usage_params, usage_source
+from core.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
+from core.measurement_pricing import classify_usage_rows, endpoint_listings
 from core.measurement_scope import Grain, Window, query_params
 from infra.database import get_db
 from infra.db_async import run_bulk
-from llm.api_equivalent import (
-    api_equivalent, has_public_long_context_price, has_unpublished_cache_rate, is_not_api_priced, price_identity,
-)
-from llm.list_prices import LIST_PRICES, OPENAI_LONG_CONTEXT_INPUT_TOKENS, listing_for_host
-from llm.network_endpoints import is_cloud_server
 
-CLAUDE_CODE_SOURCE = "external_harness:claude-code"
-CODEX_SOURCE = "external_harness:codex"
 # The size family's minimum n: the same rule that withholds Work per hour of your attention.
 MINIMUM_SIZED = REGISTRY["estimated_human_hours_per_active_hour"].minimum_n
-_BUCKETS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens", "cache_read_tokens")
-# OpenAI's public Standard boundary is based on an individual call's input,
-# not its output or a period's aggregate. A row within the short bound is safe
-# even if it combines usage records; above it, opaque Codex receipts cannot prove tier.
-INPUT_TIER_SQL = (
-    f"CASE WHEN u.prompt_tokens+u.cache_creation_tokens+u.cache_read_tokens>{OPENAI_LONG_CONTEXT_INPUT_TOKENS} "
-    "THEN 'above_short_bound' ELSE 'short_bound' END"
-)
-# Providers with a published idle-hours vector bill by the call's own time, so
-# the hour is read per row, in UTC, before aggregation, against the window of
-# the price entries for the External identity the row served. The row's list is
-# resolved later, so every list carrying an identity must share its window.
-_UTC_HOUR = "CAST(substr(u.created_at,12,2) AS INTEGER)"
-_IDLE_WINDOWS = {price.model: price.idle_utc_hours for price in LIST_PRICES if price.idle_utc_hours is not None}
-if any(price.idle_utc_hours not in (None, _IDLE_WINDOWS.get(price.model)) for price in LIST_PRICES):
-    raise ValueError("one identity has different idle-hours windows on different lists")
-_IDLE_CASES = " ".join(
-    f"WHEN COALESCE(u.model,'') LIKE 'external@%' AND substr(u.model,instr(u.model,'/')+1)='{model}' "
-    f"AND {_UTC_HOUR}>={start} AND {_UTC_HOUR}<{end} THEN 1"
-    for model, (start, end) in _IDLE_WINDOWS.items()
-)
-IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 
-# Which rows may be priced. A row is priceable only when every disjoint bucket was
-# reported (typeof proves non-NULL, whole and not a blob) and any recorded total
-# agrees with them. Cache tokens additionally need the writer's token contract:
-# the ledger keeps no per-row contract marker, so the recorded source is the only
-# evidence, and it must agree with the model's harness prefix. Claude Code rows
-# were always written disjoint (#1215). Codex rows before the 2026-08-20
-# disjoint contract (#1056) may be thread-cumulative or cache-inclusive,
-# which neither a zero cache nor a matching total disproves. A Codex row is
-# priced only when its id is a 24-hex receipt id: ``_receipt_id`` (turn usage,
-# #1626, 2026-09-11) and the checkpoint writer (#1764, 2026-09-15) are the
-# only writers of that shape, both later than the contract, whereas direct writes
-# use ``uuid4()[:12]`` (hyphenated, so never 24 hex). An External conversation row
-# is disjoint from 2026-09-17: the native path normalizes OpenAI-compatible
-# usage into disjoint buckets in ``infra.provider_usage.from_litellm``, present in
-# this repository's first commit, and the later rows carry cache reads larger
-# than their prompt, impossible in the older cache-inclusive shape. Anything else
-# prices only without cache, where the disjoint and cache-inclusive contracts agree.
-_BUCKETS_REPORTED = " AND ".join(f"typeof(u.{bucket})='integer' AND u.{bucket}>=0" for bucket in _BUCKETS)
-_TOTAL_AGREES = (
-    "(u.total_tokens IS NULL OR u.total_tokens=" + "+".join(f"u.{bucket}" for bucket in _BUCKETS) + ")"
-)
-# Evaluated as an explicit 0/1 so a NULL source or model can never reach
-# ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'.
-_CONTRACT_PROVEN = (
-    f"(CASE WHEN COALESCE(u.source,'')='{CLAUDE_CODE_SOURCE}' AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
-    f"WHEN COALESCE(u.source,'')='{CODEX_SOURCE}' AND COALESCE(u.model,'') LIKE 'codex/%' "
-    f"AND length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*' THEN 1 "
-    f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
-    f"AND u.created_at>='2026-09-17' THEN 1 "
-    f"WHEN u.cache_creation_tokens=0 AND u.cache_read_tokens=0 "
-    f"AND COALESCE(u.source,'')<>'{CODEX_SOURCE}' AND COALESCE(u.model,'') NOT LIKE 'codex/%' THEN 1 "
-    f"ELSE 0 END)=1"
-)
-ADMISSION_SQL = (
-    f"CASE WHEN NOT ({_BUCKETS_REPORTED}) THEN 'tokens_unreported' "
-    f"WHEN NOT {_TOTAL_AGREES} THEN 'tokens_inconsistent' "
-    f"WHEN NOT {_CONTRACT_PROVEN} THEN 'contract_unproven' ELSE 'ok' END"
-)
 _EXCLUDED_TEXT = {
     "no_list_price": "usage records without a maintained rate for their recorded model identity",
     "cache_rate_unpublished": "usage records whose provider publishes no rate for their cached tokens",
@@ -166,6 +103,7 @@ def register_cost_route(router, *, require_user, resolve_grain) -> None:
         return await cost_read(project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
+@fact_memo.fact_reads()
 def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     """One grouped ledger read. Counts are retained usage records; token sums include only admitted rows.
 
@@ -192,7 +130,8 @@ def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     resolve = IdentityResolver(db)
     shapes = [dict(row) for row in rows]
     for shape in shapes:
-        shape["model"] = resolve(shape).key
+        identity = resolve(shape)
+        shape["model"], shape["model_label"] = identity.key, identity.label
     return shapes
 
 
@@ -201,67 +140,17 @@ def ledger_shapes(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     return classify_usage_rows(_usage_rows(db, params), endpoint_listings(db))
 
 
-def endpoint_listings(db) -> dict[str, str]:
-    """The regional price list of each External server whose public endpoint is a listed cloud host."""
-    servers: dict[str, tuple[str, list[dict[str, Any]]]] = {}
-    for row in db.execute(
-        "SELECT s.id, s.kind, e.host, e.kind AS endpoint_kind FROM network_servers s "
-        "JOIN network_server_endpoints e ON e.server_id = s.id WHERE s.kind = 'external'"
-    ).fetchall():
-        servers.setdefault(str(row["id"]), (str(row["kind"]), []))[1].append(
-            {"host": str(row["host"]), "kind": row["endpoint_kind"]})
-    listings: dict[str, str] = {}
-    for server_id, (kind, endpoints) in servers.items():
-        found = {listing_for_host(e["host"]) for e in endpoints if e["kind"] == "public"} - {None}
-        if is_cloud_server(kind, endpoints) and len(found) == 1:
-            listings[server_id] = str(found.pop())
-    return listings
-
-
-def _listing(model: str, listings: Mapping[str, str]) -> str | None:
-    harness = model.partition("/")[0]
-    return listings.get(harness.removeprefix("external@")) if harness.startswith("external@") else None
-
-
-def classify_usage_rows(rows: list[dict[str, Any]], listings: Mapping[str, str]) -> list[dict[str, Any]]:
-    """Attach dollars, or the reason there are none, to each grouped ledger shape.
-
-    ``listings`` is ``endpoint_listings``: an External row prices only when its
-    server is a listed cloud endpoint whose regional list carries its served identity.
-    """
-    classified: list[dict[str, Any]] = []
-    for row in rows:
-        model = str(row["model"] or "")
-        listing = _listing(model, listings)
-        if is_not_api_priced(model, listing):
-            classified.append({**row, "outcome": "not_api_priced", "dollars": None})
-            continue
-        reason = "no_list_price" if price_identity(model, listing) is None else (
-            None if row["admission"] == "ok" else row["admission"])
-        if (reason is None and row["input_tier"] == "above_short_bound"
-                and has_public_long_context_price(model, listing)):
-            reason = "context_tier_unproven"
-        idle_hours = bool(row.get("idle_hours"))
-        buckets = tuple(int(row[bucket]) for bucket in _BUCKETS)
-        dollars = None if reason else api_equivalent(model, *buckets, idle_hours=idle_hours, listing=listing)
-        if dollars is None and reason is None:
-            reason = ("cache_rate_unpublished" if has_unpublished_cache_rate(
-                model, buckets[2], buckets[3], idle_hours=idle_hours, listing=listing) else "no_list_price")
-        classified.append({
-            **row, "outcome": reason or "priced", "dollars": dollars,
-        })
-    return classified
-
-
 def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[str, Any]], grain: Grain) -> list[dict[str, Any]]:
     """Weekly known subtotal and retained-usage-record coverage; Unknown only when nothing was priceable.
 
     ``sized`` is the week's size-rated accepted outcomes and their hours of work. All priced
     spend in a period divided by those hours is the all-in cost per hour of delivered work; it
     is withheld, never zero, when fewer than ``MINIMUM_SIZED`` outcomes stand behind it.
-    The series starts at the later of its first priced period and the size-rating instrument's
-    first period, where Work per hour starts, so no leading period reads as no data.
+    The series starts at its first priced period. Work per hour also waits for the first
+    accepted outcome with a size rating, so no leading period reads as no data while a
+    spend-only subtotal remains observable.
     """
+    size_start = source_started_period(db, "estimated_human_hours_per_active_hour", grain)
     outcomes = {row["period"]: int(row["outcomes"]) for row in db.execute(
         f"SELECT period,outcomes FROM {PREPARED_OUTCOMES}"
     ).fetchall()}
@@ -274,7 +163,7 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
         return []
     series: list[dict[str, Any]] = []
     for period in sorted(set(outcomes) | set(by_period)):
-        if period < first_priced or not period_measured("estimated_human_hours_per_active_hour", period, grain):
+        if period < first_priced or (size_start is not None and period < size_start):
             continue
         rows = by_period[period]
         priced = [row for row in rows if row["outcome"] == "priced"]
@@ -319,6 +208,25 @@ def _pooled(series: list[dict[str, Any]], window: Window, grain: Grain) -> dict[
     }
 
 
+def _excluded_models(classified: list[dict[str, Any]], grain: Grain) -> dict[str, list[dict[str, Any]]]:
+    """Name each latest-window exclusion by the label of the resolved identity it retained."""
+    grouped: dict[str, dict[str, int]] = {}
+    for row in classified:
+        kind = str(row["outcome"])
+        if kind not in _EXCLUDED_TEXT or str(row["period"]) not in grain.latest.periods:
+            continue
+        models = grouped.setdefault(kind, {})
+        label = str(row["model_label"])
+        models[label] = models.get(label, 0) + int(row["records"])
+    return {
+        kind: [
+            {"label": label, "records": records}
+            for label, records in sorted(models.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        for kind, models in grouped.items()
+    }
+
+
 def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Cost from Measurement's already prepared scope and outcome periods.
 
@@ -338,6 +246,7 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
     for row in classified:
         if str(row["period"]) in grain.latest.periods:
             records[row["outcome"]] += int(row["records"])
+    excluded_models = _excluded_models(classified, grain)
     return {
         "definition_version": 1,
         "series": series,
@@ -345,6 +254,9 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
         "previous": _pooled(every, grain.previous, grain) if every else None,
         "coverage": {"priced_records": records["priced"], "usage_records": sum(records.values())},
         "not_api_priced_records": records["not_api_priced"],
-        "excluded": [{"kind": kind, "text": text, "records": records[kind]} for kind, text in _EXCLUDED_TEXT.items() if records[kind]],
+        "excluded": [
+            {"kind": kind, "text": text, "records": records[kind], "models": excluded_models[kind]}
+            for kind, text in _EXCLUDED_TEXT.items() if records[kind]
+        ],
         "actual": build_actual(db, params),
     }

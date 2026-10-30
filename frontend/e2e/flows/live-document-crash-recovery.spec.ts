@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { deleteRenderedLine, openLiveDocument, renderedCount, seedLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 import { armLiveFault, beginLiveFaultCase, liveFaultEvidence, liveFaultsEnabled, liveFaultStatus, observeFaultTraffic, prepareHeldDocument, refuseLiveFaultOnce, waitForLiveFaultRestart, type FaultTraffic } from '../support/liveFault';
 

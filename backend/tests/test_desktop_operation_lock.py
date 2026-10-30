@@ -64,3 +64,71 @@ def test_the_real_guard_admits_the_shells_host_and_nothing_portless(monkeypatch,
     assert response.status_code == status
     if status == 200:
         assert response.json() == {"active": False}
+
+
+@pytest.mark.asyncio
+async def test_stop_local_model_stops_only_what_the_supervisor_recorded(monkeypatch):
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fake_stop_all():
+        return [{"ok": True, "pid": 4242}]
+
+    monkeypatch.setattr(system, "_trusted_json_post", lambda request: True)
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fake_stop_all)
+
+    assert await system.system_stop_local_model(object()) == {"stopped": [4242], }
+
+
+@pytest.mark.asyncio
+async def test_stop_local_model_refuses_an_untrusted_caller(monkeypatch):
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fail_stop_all():
+        raise AssertionError("an untrusted caller must not stop the model")
+
+    monkeypatch.setattr(system, "_trusted_json_post", lambda request: False)
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fail_stop_all)
+
+    with pytest.raises(HTTPException) as refused:
+        await system.system_stop_local_model(object())
+    assert refused.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_stop_local_model_reports_a_failed_stop_as_an_error(monkeypatch):
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fake_stop_all():
+        return [{"ok": False, "message": "oMLX failed to stop (pid 4242)"}]
+
+    monkeypatch.setattr(system, "_trusted_json_post", lambda request: True)
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fake_stop_all)
+
+    with pytest.raises(HTTPException) as failed:
+        await system.system_stop_local_model(object())
+    assert failed.value.status_code == 500
+
+
+@pytest.mark.parametrize(("content_type", "status"), [("application/json", 200), ("text/plain", 403)])
+def test_the_real_guard_admits_the_shells_stop_request_and_only_json(monkeypatch, content_type, status):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fake_stop_all():
+        return []
+
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fake_stop_all)
+    app = FastAPI()
+    app.include_router(system.router)
+    with TestClient(app, base_url="http:" + "//127.0.0.1:43123", client=("127.0.0.1", 50101)) as client:
+        response = client.post(
+            "/api/system/stop-local-model", content="{}",
+            headers={"Host": "127.0.0.1:43123", "Content-Type": content_type},
+        )
+    assert response.status_code == status

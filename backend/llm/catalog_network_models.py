@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -7,8 +8,9 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from infra.database import write_transaction
+from llm.local_downloads import settle_listed
 from llm.model_metadata import extract_context_length
-from llm.omlx_capabilities import apply_metadata, capture_configured, capture_reported
+from llm.omlx_capabilities import apply_admin_model, apply_metadata, capture_reported
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +47,10 @@ def _parse_omlx_status(response) -> dict[str, dict]:
             "engine_type": (model.get("engine_type") or "").lower(),
             "context_length": extract_context_length(model),
             "size_bytes": int(model.get("estimated_size") or 0) or None,
+            "pinned": bool(model.get("pinned")),
         }
+        if isinstance(model.get("config_model_type"), str):
+            canonical[provider_model_id]["config_model_type"] = model["config_model_type"]
         status_alias = (model.get("model_alias") or "").strip()
         if status_alias:
             canonical[provider_model_id]["model_alias"] = status_alias
@@ -96,23 +101,6 @@ async def _fetch_omlx_status_data(client, mgmt_base: str, headers: dict) -> dict
         return {}
 
 
-def _apply_admin_model(canonical: dict[str, dict], model: dict) -> None:
-    provider_model_id = model.get("id")
-    if not provider_model_id or provider_model_id not in canonical:
-        return
-    settings = model.get("settings") or {}
-    alias = (settings.get("model_alias") or "").strip()
-    if alias:
-        canonical[provider_model_id]["model_alias"] = alias
-    capture_configured(settings, canonical[provider_model_id])
-    capture_reported(model, canonical[provider_model_id])
-    if canonical[provider_model_id].get("context_length") is not None:
-        return
-    window = extract_context_length(model)
-    if window is not None:
-        canonical[provider_model_id]["context_length"] = window
-
-
 async def _enrich_admin_aliases(cfg: dict, canonical: dict[str, dict]) -> None:
     import httpx
 
@@ -126,7 +114,7 @@ async def _enrich_admin_aliases(cfg: dict, canonical: dict[str, dict]) -> None:
                 data.get("data") or data.get("models") or []
             )
             for model in models:
-                _apply_admin_model(canonical, model)
+                apply_admin_model(canonical, model)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning(f"oMLX /admin/api/models alias enrichment failed: {exc}")
 
@@ -136,24 +124,19 @@ async def _enrich_generation_configs(cfg: dict, canonical: dict[str, dict]) -> N
 
     from llm.providers.omlx_endpoints import admin_request
 
-    for provider_model_id, model in canonical.items():
-        if model.get("context_length") is not None:
-            continue
+    async def read(provider_model_id: str, model: dict) -> None:
         try:
-            response = await admin_request(
-                cfg, "GET", f"/models/{provider_model_id}/generation_config", timeout=5,
-            )
+            response = await admin_request(cfg, "GET", f"/models/{provider_model_id}/generation_config", timeout=5)
             if response.status_code != 200:
-                continue
+                return
             context_length = extract_context_length(response.json() or {})
             if context_length is not None:
                 model["context_length"] = context_length
         except (httpx.HTTPError, ValueError) as exc:
-            log.debug(
-                "oMLX generation_config context enrichment failed for %s: %s",
-                provider_model_id,
-                exc,
-            )
+            log.debug("oMLX generation_config context enrichment failed for %s: %s", provider_model_id, exc)
+
+    # Reads run together: a long list costs the slowest read, not the sum.
+    await asyncio.gather(*(read(i, m) for i, m in canonical.items() if m.get("context_length") is None))
 
 
 async def _enrich_admin_models(cfg: dict, canonical: dict[str, dict]) -> None:
@@ -236,6 +219,8 @@ def _network_model_payload(
         metadata["size_bytes"] = model["size_bytes"]
     if model_alias:
         metadata["model_alias"] = model_alias
+    if model.get("config_model_type"):
+        metadata["config_model_type"] = model["config_model_type"]
     apply_metadata(model, reasoning_shape, metadata)
     engine = model.get("engine_type") or ""
     supports_vision = (
@@ -249,6 +234,7 @@ def _network_model_payload(
         "description": description,
         "context_window": model.get("context_length"),
         "supports_vision": supports_vision,
+        "supports_reasoning": int(reasoning_shape is not None),
         "metadata_json": json.dumps(metadata),
     }
 
@@ -263,10 +249,10 @@ def _upsert_network_model(db, provider: str, payload: dict, now: str) -> str:
             """UPDATE models SET available = 1, litellm_model = ?,
                display_name = ?, description = ?,
                context_window = COALESCE(?, context_window), supports_vision = ?,
-               metadata_json = ?, last_seen_at = ?, updated_at = ? WHERE id = ?""",
+               supports_reasoning = ?, metadata_json = ?, last_seen_at = ?, updated_at = ? WHERE id = ?""",
             (payload["litellm_model"], payload["display_name"],
              payload["description"], payload["context_window"],
-             payload["supports_vision"], payload["metadata_json"], now, now,
+             payload["supports_vision"], payload["supports_reasoning"], payload["metadata_json"], now, now,
              existing["id"]),
         )
         return "updated"
@@ -277,13 +263,13 @@ def _upsert_network_model(db, provider: str, payload: dict, now: str) -> str:
         """INSERT INTO models
            (id, provider, provider_model_id, litellm_model, display_name,
             description, backend, source, enabled, available, context_window,
-            supports_vision, supports_tools, default_temperature, default_max_tokens,
+            supports_vision, supports_reasoning, supports_tools, default_temperature, default_max_tokens,
             metadata_json, discovered_at, last_seen_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,1,1,?,?,1,NULL,NULL,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,1,1,?,?,?,1,NULL,NULL,?,?,?,?,?)""",
         ("vmlx-" + str(uuid.uuid4())[:8], provider,
          payload["provider_model_id"], payload["litellm_model"],
          payload["display_name"], payload["description"], "network", "discovered",
-         payload["context_window"], payload["supports_vision"],
+         payload["context_window"], payload["supports_vision"], payload["supports_reasoning"],
          payload["metadata_json"], now, now, now, now),
     )
     return "discovered"
@@ -328,13 +314,13 @@ def _reconcile_network_models(
     result: dict,
 ) -> dict:
     """Apply one authoritative oMLX snapshot in the DB worker pool."""
+    from llm.local_profiles import managed_reasoning_effort
     from llm.reasoning_config import reasoning_shape_from_discovery
 
     provider = server.get("provider", "omlx")
-    reasoning_by_pmid = {
-        model["id"]: reasoning_shape_from_discovery(model)
-        for model in canonical_models
-    }
+    managed_effort = managed_reasoning_effort(server)
+    reasoning_by_pmid = {model["id"]: reasoning_shape_from_discovery(model, managed_effort=managed_effort)
+                         for model in canonical_models}
     seen_pmids = {model["id"] for model in canonical_models}
     with write_transaction(None, scope="reconcile_network_models") as db:
         for model in canonical_models:
@@ -347,6 +333,7 @@ def _reconcile_network_models(
             db, server_id, provider, seen_pmids, now,
         )
 
+    settle_listed(server_id, seen_pmids)
     result["ok"] = True
     return result
 
@@ -380,9 +367,6 @@ async def discover_network_models(server_id: str) -> dict:
         result["error"] = f"Connection failed: {exc}"
         return result
 
-    from llm.omlx_global_settings import record_observation
-
-    await record_observation(server)
 
     try:
         return await run_in_db(

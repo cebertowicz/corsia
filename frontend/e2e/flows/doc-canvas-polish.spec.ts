@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { deleteRenderedLine, openLiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
@@ -180,16 +181,15 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await saveEvidenceScreenshot(page, testInfo, 'canvas-reply-short-viewport', { fullPage: false });
 		await page.setViewportSize({ width: 393, height: 852 });
 	}
-	// Escape in the editor preserves the nonmodal drawer; Escape inside its controls closes just it.
-	await page.locator('.cm-content').focus();
-	await page.keyboard.press('Shift+ArrowRight');
-	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
-	await page.keyboard.press('Escape');
-	await expect(drawer).toBeVisible();
+	// This canvas is under 900 px, so the list is a modal sheet over the document column (RSR-7): Escape inside its controls
+	// closes it and returns focus to the pill, and the document's selection Comment button works once it has closed.
 	await drawer.getByRole('button', { name: 'Filter comments: Open', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
 	await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeFocused();
+	await page.locator('.cm-content').focus();
+	await page.keyboard.press('Shift+ArrowRight');
+	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
 
 	// Removing a known quote in the real editor produces the recovery row without hiding it in details.
 	const edited = text.replace(quote, 'The selected text has been removed.');
@@ -237,7 +237,8 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	for (const theme of ['light', 'dark'] as const) {
 		await page.emulateMedia({ colorScheme: theme });
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-		const measured = await measurements(page, testInfo, `canvas-${theme}-recovery`);
-		if (mobile) expect(measured.actions!.height).toBeGreaterThanOrEqual(44);
+		await measurements(page, testInfo, `canvas-${theme}-recovery`);
+		// The tools sit in the identity row; at phone width each is 44px tall (DocViewerStatus.svelte, `.doc-tool` min-height).
+		if (mobile) expect((await page.locator('.comment-status').boundingBox())!.height).toBeGreaterThanOrEqual(44);
 	}
 });

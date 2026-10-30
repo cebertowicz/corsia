@@ -9,17 +9,17 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from api.setup import _trusted_request
+from api.setup import _trusted_json_post, _trusted_request
 from api.system_admin import router as system_admin_router
 from api.system_reviewer import (
     host_access_reviewer_status as _host_access_reviewer_status,
     reviewer_save_error,
 )
 from infra import bulletins, config
-from infra import state
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
+from infra.platform_paths import app_bundle_root
 from infra.settings import (
     delete_agent_default,
     get_feature_flags,
@@ -38,12 +38,20 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
+_EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
+
+def _debug_version_overlay_default() -> bool:
+    """Hide the checkout build stamp in an immutable packaged app by default.
+
+    A source checkout has commits a developer can act on, while an app bundle
+    has no checkout (api/version.py likewise reports no disk head there). A
+    saved Settings > Debug value still wins; this supplies only the default.
+    """
+    return app_bundle_root() is None
 
 
 @router.get("/health")
 async def health():
-    if state._thread_driver_failure is not None:
-        raise HTTPException(503, f"thread driver failed: {state._thread_driver_failure}")
     return {"status": "ok"}
 
 
@@ -55,6 +63,22 @@ async def system_operation_active(request: Request):
     from automation import self_restart
 
     return {"active": await run_in_db(self_restart.in_flight_request) is not None}
+
+
+@router.post("/system/stop-local-model")
+async def system_stop_local_model(request: Request):
+    """Stop the oMLX CORSIA spawned; the desktop shell calls it on Quit only, never on restart or update."""
+    if not _trusted_json_post(request):
+        raise HTTPException(403)
+    from loguru import logger as log
+
+    from llm.providers.omlx_supervisor import stop_all_servers
+
+    results = await stop_all_servers()
+    if failed := "; ".join(str(r.get("message")) for r in results if not r.get("ok")):
+        log.warning("stop-local-model: {}", failed)
+        raise HTTPException(500, failed)
+    return {"stopped": [r["pid"] for r in results if r.get("pid")]}
 
 
 def _security_alert_path() -> Path:
@@ -102,7 +126,9 @@ def _features_snapshot(flags: dict | None = None) -> dict:
     """
     resolved = flags if flags is not None else get_feature_flags()
     return {
-        "debug_version_overlay": resolved.get("debug_version_overlay", True),
+        "debug_version_overlay": resolved.get(
+            "debug_version_overlay", _debug_version_overlay_default()
+        ),
         "focus_mode": resolved.get("focus_mode", True),
         # The sampler's real state, not the saved flag: a start that failed reads off.
         "cpu_profiler": cpu_sampler_running(),
@@ -166,18 +192,21 @@ async def get_settings(user: dict = Depends(require_user)):
 
 def _save_exact_model_defaults(body: dict) -> dict:
     """Save the no-fallback model settings in ``body``: exact runnable IDs only."""
-    updated: dict[str, str | None] = {}
-    if "host_access_reviewer_model" in body:
-        reviewer_model = body["host_access_reviewer_model"]
-        if reviewer_model is None:
-            delete_agent_default("host_access_reviewer_model")
-            updated["host_access_reviewer_model"] = None
+    from reviewer.reviewer_runner import reviewer_model_error
+
+    updated = {key: body[key] for key in _EXACT_REVIEWER_MODELS if key in body}
+    for key, value in updated.items():
+        if value is None and key != "reviewer_model":
+            continue
+        error = (reviewer_save_error(value) if key == "host_access_reviewer_model"
+                 else reviewer_model_error(value))
+        if error is not None:
+            raise HTTPException(400, error)
+    for key, value in updated.items():
+        if value is None:
+            delete_agent_default(key)
         else:
-            error = reviewer_save_error(reviewer_model)
-            if error is not None:
-                raise HTTPException(400, error)
-            save_agent_defaults({"host_access_reviewer_model": reviewer_model})
-            updated["host_access_reviewer_model"] = reviewer_model
+            save_agent_defaults({key: value})
     return updated
 
 
@@ -212,7 +241,9 @@ def _conductor_sets_reviewer(user: dict, body: dict) -> bool:
     ``internal`` is the principal corsia_api binds only after its conductor-capability
     check; every other machine credential still needs the signed-in person.
     """
-    return user.get("token_kind") == "internal" and isinstance(body["host_access_reviewer_model"], str)
+    return user.get("token_kind") == "internal" and all(
+        isinstance(body[key], str) for key in _EXACT_REVIEWER_MODELS if key in body
+    )
 
 
 @router.patch("/settings")
@@ -223,14 +254,16 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             400,
             "Core Agent model settings have been removed. Choose a model for each thread.",
         )
+    if "devices" in body:
+        raise HTTPException(400, "Devices must be changed through /api/devices")
 
     if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
         require_human_user(user)
-    if "host_access_reviewer_model" in body and not _conductor_sets_reviewer(user, body):
+    if any(key in body for key in _EXACT_REVIEWER_MODELS) and not _conductor_sets_reviewer(user, body):
         require_human_user(user)
 
     updated = {}
-    if "host_access_reviewer_model" in body:
+    if any(key in body for key in _EXACT_REVIEWER_MODELS):
         updated.update(await run_in_db(_save_exact_model_defaults, body))
 
     if "host_access_auto_approve" in body:
@@ -285,15 +318,9 @@ _SYSTEM_CACHE_TTL = 5  # seconds
 
 def _live_platform_status() -> dict:
     """The non-cached poller state included in each system status response."""
-    from events.connectors.github_notifications import poller_status
-    from events.connectors.github_pr_quiet_watch import quiet_watch_status
-    from events.connectors.gmail_poller import poller_status as gmail_poller_status
+    from events.connectors.poller_status import live_poller_statuses
 
-    return {
-        "github_notifications": poller_status(),
-        "gmail_poller": gmail_poller_status(),
-        "pr_quiet_watch": quiet_watch_status(),
-    }
+    return live_poller_statuses()
 
 
 @router.get("/system")

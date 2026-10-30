@@ -33,6 +33,9 @@ class FakeOmlx:
         self.expire_next = 0  # answer this many authenticated calls with 401
         self.setup_status: int | None = None  # force setup-api-key to answer this
         self.settings_status = 200  # what a global-settings POST answers
+        # Model ids a settings PUT answers 404 "Model not found" for, as 0.7.0's routes.py does at 2745.
+        self.missing_models: set[str] = set()
+        self.no_model_route = False  # an oMLX without the model settings route: FastAPI's 404 "Not Found"
 
     @property
     def paths(self) -> list[str]:
@@ -79,6 +82,13 @@ class FakeOmlx:
             }]
             self.skip = self.skip or body.get("skip_api_key_verification") is True
             return httpx.Response(200, json={"runtime_applied": applied})
+        if request.method == "PUT" and path.startswith("/admin/api/models/") and path.endswith("/settings"):
+            model_id = path.split("/")[4]
+            if self.no_model_route:
+                return httpx.Response(404, json={"detail": "Not Found"})
+            if model_id in self.missing_models:
+                return httpx.Response(404, json={"detail": f"Model not found: {model_id}"})
+            return httpx.Response(200, json={"success": True, "model_id": model_id, "settings": {}})
         if path == "/admin/api/hf/download":
             return httpx.Response(202, json={"success": True, "task": {"task_id": "task-1"}})
         if path == "/admin/api/hf/tasks":

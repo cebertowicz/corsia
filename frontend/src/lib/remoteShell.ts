@@ -1,0 +1,206 @@
+/**
+ * The page's side of the desktop shell's remote-connect contract (corsia#638). The shell injects
+ * `window.__CORSIA_SHELL__` on every page load and registers the commands below; a browser and the phone app have
+ * neither, so every remote-connect surface checks `shellInfo()` first.
+ */
+
+export type DefaultWorkspace = { path: string; display: string };
+export type ShellInfo = { mode: 'local'; default_workspace?: DefaultWorkspace } | { mode: 'remote'; name: string; localConfigured: boolean };
+
+export type PairTarget =
+	| { kind: 'dns_sd'; instance: string }
+	| { kind: 'address'; host: string; port?: number };
+
+export type PairReason =
+	| 'wrong_code' | 'expired' | 'too_many_tries' | 'paused' | 'busy'
+	| 'network' | 'server' | 'incompatible' | 'too_old' | 'local' | 'not_local';
+
+export type PairResult =
+	| { ok: true; name: string }
+	| { ok: false; reason: PairReason; app_version?: string; host_version?: string };
+
+export type DiscoveredResult = { names: string[]; denied?: boolean };
+
+type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+type ShellWindow = Window & { __CORSIA_SHELL__?: unknown; __TAURI_INTERNALS__?: { invoke?: Invoke } };
+
+export function shellInfo(): ShellInfo | null {
+	if (typeof window === 'undefined') return null;
+	const info = (window as ShellWindow).__CORSIA_SHELL__;
+	if (!info || typeof info !== 'object') return null;
+	const shell = info as Record<string, unknown>;
+	if (shell.mode === 'remote' && typeof shell.name === 'string') return { mode: 'remote', name: shell.name, localConfigured: shell.localConfigured === true };
+	if (shell.mode !== 'local') return { mode: 'local' };
+	const workspace = shell.default_workspace;
+	if (!workspace || typeof workspace !== 'object') return { mode: 'local' };
+	const { path, display } = workspace as Record<string, unknown>;
+	return typeof path === 'string' && path && typeof display === 'string' && display
+		? { mode: 'local', default_workspace: { path, display } }
+		: { mode: 'local' };
+}
+
+function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
+	const call = (window as ShellWindow).__TAURI_INTERNALS__?.invoke;
+	if (!call) return Promise.reject(new Error('shell unavailable'));
+	return args === undefined ? call(command) : call(command, args);
+}
+
+let startupShellPage = false;
+
+/** Set only by the shell's bundled update page (update/shellEntry.ts); the app the service serves never sets it. */
+export function markStartupShellPage(): void {
+	startupShellPage = true;
+}
+
+/**
+ * Whether this is the desktop shell's own update page, the only page the shell lets ask for a recovery start. It picks
+ * which path the screen takes and grants nothing: the shell checks the caller itself.
+ */
+export function onStartupShellPage(): boolean {
+	return startupShellPage;
+}
+
+/** Why the update screen asks: its own wait ran long, or the person pressed Start CORSIA. */
+export type RecoveryIntent = 'automatic' | 'manual';
+
+/**
+ * A recovery start's answer. `ready` carries the proven service URL; `deferred` means an update holds the lock and
+ * nothing was done; `manual_available` means the automatic request did nothing but a current manual request may apply;
+ * `unavailable` means no start applies; `not_started` means the one start ran and the service did not come up.
+ */
+export type RecoveryAnswer = { recovery: 'ready'; url: string } | { recovery: 'deferred' | 'manual_available' | 'unavailable' | 'not_started' };
+
+function isRecoveryUrl(value: unknown): value is string {
+	if (typeof value !== 'string' || !value.trim()) return false;
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
+	} catch {
+		return false;
+	}
+}
+
+let recoveryFailureReported = false;
+function unavailableRecovery(): RecoveryAnswer {
+	if (!recoveryFailureReported) {
+		console.warn('[update] recovery start is unavailable');
+		recoveryFailureReported = true;
+	}
+	return { recovery: 'unavailable' };
+}
+
+/** Ask the shell to bring this computer's service back during an update. Only the shell's own page may ask. */
+export async function recoverLocalService(intent: RecoveryIntent): Promise<RecoveryAnswer> {
+	let result: unknown;
+	try {
+		result = await invoke('start_local_service', { recovery: intent });
+	} catch {
+		// A refused invoke proves no narrow admission, so it must not offer another start.
+		return unavailableRecovery();
+	}
+	const answer = result && typeof result === 'object' ? result as { recovery?: unknown; url?: unknown } : {};
+	if (answer.recovery === 'ready') {
+		if (!isRecoveryUrl(answer.url)) return unavailableRecovery();
+		recoveryFailureReported = false;
+		return { recovery: 'ready', url: answer.url };
+	}
+	if (answer.recovery === 'deferred' || answer.recovery === 'manual_available' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') {
+		recoveryFailureReported = false;
+		return { recovery: answer.recovery };
+	}
+	return unavailableRecovery();
+}
+
+/** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */
+export async function readStartupProgress(): Promise<unknown> {
+	return invoke('read_startup_progress');
+}
+
+export async function remoteDiscovered(): Promise<DiscoveredResult> {
+	const result = await invoke('remote_discovered') as DiscoveredResult | null;
+	return { names: Array.isArray(result?.names) ? result.names : [], denied: result?.denied === true };
+}
+
+const REASONS: readonly PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local', 'not_local'];
+
+export async function remotePair(target: PairTarget, code: string): Promise<PairResult> {
+	try {
+		const result = await invoke('remote_pair', { target, code }) as PairResult | null;
+		if (result?.ok === true) return { ok: true, name: result.name };
+		if (result && result.ok === false && REASONS.includes(result.reason)) return result;
+	} catch {
+		// The shell refused, is gone, or failed after the code was used up: this computer could not finish, which
+		// is neither a network failure nor a wrong code.
+		return { ok: false, reason: 'local' };
+	}
+	return { ok: false, reason: 'network' };
+}
+
+export async function disconnectRemote(): Promise<void> {
+	await invoke('disconnect_remote');
+}
+
+/** The typed address as the shell takes it: host, and the port when `host:port` was typed. */
+export function parseAddress(text: string): { host: string; port?: number } | null {
+	const value = text.trim();
+	if (!value || /\s/.test(value)) return null;
+	const bracketed = /^\[([^\]]+)\](?::(\d{1,5}))?$/.exec(value);
+	if (bracketed) return withPort(bracketed[1], bracketed[2]);
+	if ((value.match(/:/g) ?? []).length > 1) return { host: value };
+	const [host, port] = value.split(':');
+	return host ? withPort(host, port) : null;
+}
+
+function withPort(host: string, port: string | undefined): { host: string; port?: number } | null {
+	if (port === undefined) return { host };
+	const number = Number(port);
+	return number >= 1 && number <= 65535 ? { host, port: number } : null;
+}
+
+// "Open CORSIA › Settings › System" never splits across lines: no-break spaces around the chevrons.
+const NB = ' ';
+export const SETTINGS_PATH = `Open${NB}CORSIA${NB}›${NB}Settings${NB}›${NB}System`;
+/** The same path in the middle of a sentence. */
+export const SETTINGS_PATH_IN_SENTENCE = SETTINGS_PATH.replace(/^Open/, 'open');
+
+export type RefusalContext = { name: string; appVersion?: string; hostVersion?: string };
+
+/** The line under the code boxes when a code is refused; null for causes that belong to the choose screen. */
+export function codeRefusalLine(reason: PairReason, name: string): string | null {
+	switch (reason) {
+		case 'wrong_code': return `That code doesn’t match. ${SETTINGS_PATH} on ${name} to check it.`;
+		case 'expired': return `That code expired. ${SETTINGS_PATH} on ${name} to get a new one.`;
+		case 'too_many_tries': return `Too many wrong codes. ${SETTINGS_PATH} on ${name} to get a new one.`;
+		case 'paused': return `Pairing is paused on ${name}. ${SETTINGS_PATH} on it and press New code to start again.`;
+		case 'busy': return `${name} is busy with another computer. Try again in a moment.`;
+		// The main computer pairs only from its own network, whatever address was typed; the line needs no name.
+		case 'not_local': return 'If this computer isn’t on the same network as the main computer, connect it to that network, then try again.';
+		default: return null;
+	}
+}
+
+/** The line under the address field when the computer can't be used (r4, r5 and the too-old host). */
+export function unreachableLine(reason: PairReason, target: string, versions: { app?: string; host?: string }): string | null {
+	switch (reason) {
+		// r4 follows the design's network-or-server rule: no answer at all is the network line, an answer without CORSIA is the server line.
+		case 'network': return `CORSIA can’t reach ${target}. Check that it’s on and on the same network as this computer.`;
+		case 'server': return `${target} answered, but CORSIA isn’t running there.`;
+		case 'incompatible': return `This computer has CORSIA ${versions.app ?? 'a different version'} and ${target} has ${versions.host ?? 'another'}. Update the older one, then try again.`;
+		case 'too_old': return `${target} has an older CORSIA. Update it, then try again.`;
+		case 'local': return `CORSIA couldn’t finish connecting to ${target}. ${SETTINGS_PATH} on ${target} to get a new code and try again.`;
+		default: return null;
+	}
+}
+
+/** Causes that end on the code screen (the person fixes the code) as against the choose screen (the person fixes the target). */
+export function refusesOnCodeScreen(reason: PairReason): boolean {
+	return codeRefusalLine(reason, '') !== null;
+}
+
+export const SYSTEM_SETTINGS_LOCAL_NETWORK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork';
+
+/** Moves CORSIA's work folder before the account is created (the desktop shell only; a browser has no folder to move). */
+export async function applyWorkFolder(path: string): Promise<void> {
+	const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+	if (invoke) await invoke('configure_work_folder', { path });
+}

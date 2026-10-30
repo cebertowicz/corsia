@@ -9,11 +9,13 @@ import pytest
 
 import cli_local_before_start as before_start
 import cli_sources
-from llm import local_setup, local_setup_download, local_setup_ownership
-from llm.local_setup_gates import Eligibility, SubscriptionSource
+from llm import local_setup, local_setup_download, local_setup_executable, local_setup_flow as flow
+from llm.local_model import LocalModel
+from llm.local_setup_gates import SubscriptionSource
 from llm.local_setup_results import DownloadProgress
 
-SIZE = local_setup.format_size(local_setup.DEFAULT_PROFILE.download_size_bytes)
+MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
+SIZE = local_setup.format_size(MODEL.download_size_bytes)
 
 
 @pytest.fixture
@@ -31,12 +33,11 @@ def entry(monkeypatch, tmp_path):
     monkeypatch.setattr(before_start, "_discover", discover)
     monkeypatch.setattr(before_start, "_quiet_logs", lambda: tmp_path / "install.log")
     monkeypatch.setattr("llm.local_setup_gates.limited_subscription_message", no_limit)
-    monkeypatch.setattr("llm.local_setup_gates.profile_eligibility",
-                        lambda *_args: Eligibility(40960, True))
+    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: True)
     for name in ("STREAM_COMMAND_OUTPUT",):
-        monkeypatch.setattr(local_setup_ownership, name, getattr(local_setup_ownership, name))
+        monkeypatch.setattr(local_setup_executable, name, getattr(local_setup_executable, name))
     for name in ("DOWNLOAD_WAIT_SECONDS", "DOWNLOAD_FOLLOW_SECONDS"):
-        monkeypatch.setattr(local_setup, name, getattr(local_setup, name))
+        monkeypatch.setattr(local_setup_download, name, getattr(local_setup_download, name))
     for name in ("STEP", "SECONDS"):
         monkeypatch.setattr(DownloadProgress, name, getattr(DownloadProgress, name))
     return calls
@@ -50,13 +51,15 @@ def _subscription(monkeypatch, source):
 
 
 def _flight(monkeypatch, calls, result, stages=()):
-    async def run_flight(eligibility, *, profile, into_own_omlx=False, on_stage=None):
-        calls.append(f"flight {profile.id}")
+    async def run_flight(*, model=None, into_own_omlx=False, on_stage=None):
+        # The installer never names a model: the flight takes oMLX's pick.
+        assert model is None and not into_own_omlx
+        calls.append("flight")
         for stage in stages:
             on_stage(stage)
         return result
 
-    monkeypatch.setattr(local_setup, "_run_flight", run_flight)
+    monkeypatch.setattr(flow, "_run_flight", run_flight)
 
 
 def test_a_working_subscription_needs_no_local_model(monkeypatch, entry, capsys):
@@ -74,7 +77,7 @@ def test_no_subscription_runs_the_shared_flight_in_installer_mode(monkeypatch, e
             stages=["Installing", "Installing oMLX", f"Downloading m ({SIZE}, 5%)"])
 
     assert before_start.run_before_start(force_local=False) == 0
-    assert entry == ["discover", "flight starter"]
+    assert entry == ["discover", "flight"]
     out = capsys.readouterr().out.splitlines()
     assert out == [
         "     Checking Claude Code and Codex",
@@ -83,11 +86,11 @@ def test_no_subscription_runs_the_shared_flight_in_installer_mode(monkeypatch, e
         f"     Downloading m ({SIZE}, 5%)",
         "     Local model is ready.",
     ]
-    assert local_setup_ownership.STREAM_COMMAND_OUTPUT is True
+    assert local_setup_executable.STREAM_COMMAND_OUTPUT is True
     assert DownloadProgress.STEP == 5
     assert DownloadProgress.SECONDS == 10
     # No background hand-off: the wait and the ceiling are the same 4 hours.
-    assert local_setup.DOWNLOAD_WAIT_SECONDS == local_setup.DOWNLOAD_FOLLOW_SECONDS == 4 * 60 * 60
+    assert local_setup_download.DOWNLOAD_WAIT_SECONDS == local_setup_download.DOWNLOAD_FOLLOW_SECONDS == 4 * 60 * 60
 
 
 def test_local_flag_skips_the_subscription_check(monkeypatch, entry):
@@ -95,7 +98,7 @@ def test_local_flag_skips_the_subscription_check(monkeypatch, entry):
     _flight(monkeypatch, entry, {"ok": True})
 
     assert before_start.run_before_start(force_local=True) == 0
-    assert entry == ["discover", "flight starter"]
+    assert entry == ["discover", "flight"]
 
 
 @pytest.mark.parametrize(("result", "why"), [
@@ -125,8 +128,7 @@ SIGN_IN_LINES = [
 
 
 def _ineligible(monkeypatch):
-    monkeypatch.setattr("llm.local_setup_gates.profile_eligibility",
-                        lambda *_args: Eligibility(0, False))
+    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: False)
 
 
 def test_an_ineligible_mac_without_a_sign_in_says_how_to_get_one(monkeypatch, entry, capsys):
@@ -207,15 +209,15 @@ def test_heartbeat_notes_a_silent_stage_once(monkeypatch):
 def test_streaming_runs_homebrew_without_capturing_its_output(monkeypatch):
     seen: list[dict] = []
     monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: seen.append(kwargs))
-    monkeypatch.setattr(local_setup_ownership, "STREAM_COMMAND_OUTPUT", True)
-    local_setup_ownership.run_command(["brew", "tap"])
-    monkeypatch.setattr(local_setup_ownership, "STREAM_COMMAND_OUTPUT", False)
-    local_setup_ownership.run_command(["brew", "tap"])
+    monkeypatch.setattr(local_setup_executable, "STREAM_COMMAND_OUTPUT", True)
+    local_setup_executable.run_command(["brew", "tap"])
+    monkeypatch.setattr(local_setup_executable, "STREAM_COMMAND_OUTPUT", False)
+    local_setup_executable.run_command(["brew", "tap"])
 
     assert "capture_output" not in seen[0]
     assert seen[1]["capture_output"] is True
     assert all(kwargs["env"]["HOMEBREW_NO_ASK"] == "1" for kwargs in seen)
-    assert not local_setup_ownership.STREAMING.is_set()
+    assert not local_setup_executable.STREAMING.is_set()
 
 
 def test_installer_download_reports_every_five_percent_and_every_ten_seconds(monkeypatch):
@@ -254,9 +256,9 @@ def test_installer_download_reports_every_five_percent_and_every_ten_seconds(mon
     monkeypatch.setattr(DownloadProgress, "STEP", 5)
     monkeypatch.setattr(DownloadProgress, "SECONDS", 10.0)
 
-    asyncio.run(local_setup._wait_for_download("s", reports.append, local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup._wait_for_download("s", reports.append, MODEL))
 
-    model = local_setup.DEFAULT_PROFILE.model
+    model = MODEL.model
     # Polls land every 6 s: 2% (no step yet), 6% (the 5% step), 7% at 6 s (quiet),
     # 7% at 12 s (the 10-second line), 11% (the 10% step), done.
     assert reports == [

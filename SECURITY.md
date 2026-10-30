@@ -1,70 +1,43 @@
 # CORSIA Security Posture
 
-Last reviewed: 2026-03-26
+Last reviewed: 2026-10-28
 
 ## Active Protections
 
 ### Agent Sandbox
-- **Safehouse CLI wrapping** — every `bash` tool call runs through `safehouse` with `--add-dirs` restricted to `~/.corsia/`
-- **File tool path gating** — `read_file`, `write_file`, `edit_file`, `list_dir`, `glob` all check paths against `sandbox_config.py`
-- **Single config source** — `backend/tools/sandbox_config.py` defines allowed directories for both layers
-- **Denial alerting** — blocked commands produce orange system messages in the UI via WebSocket broadcast
-- **What's blocked**: `~/.ssh/` (private keys), `~/.aws/`, `~/Documents/`, `~/.zshrc`, any path outside `~/.corsia/`
-- **What's allowed**: Full access within `~/.corsia/`, SSH `known_hosts`/`config` (git needs them), `/tmp` writes
+
+- **Protected tools** — filesystem tools gate paths using the shared sandbox configuration. Safehouse (macOS) or bubblewrap (Linux) wraps shell calls. On Linux the protected shell runs in separate user, PID, IPC and UTS namespaces, with bind mounts and masked paths built from the same path inventory, and refuses to run without bubblewrap.
+- **Workspace and repositories** — the configured workspace and registered repositories form the ordinary access scope. Protected base checkouts are read-only; their verified `.worktrees` are read/write.
+- **Private state and commands** — protected mode denies access to the CORSIA state root and private roots. A reviewed, time-bounded host-access lease can open the state root for a specific action. The key store (`<state root>/keys`, a 0700 folder of 0600 files) and the saved browser profile are never opened, by a lease or otherwise. Protected mode refuses commands that invoke privileged tools including `sudo`, `su`, `shutdown` and `pmset`; on macOS the Safehouse profile also denies executing those binaries directly.
+- **SSH** — protected mode blocks SSH private material while allowing reads of SSH configuration and reads and writes of `known_hosts`.
 
 ### Dependency Pinning
-- **CORSIA venv** (`~/.corsia/.venv/`) — dedicated, not shared with any other tool
-- **`requirements.txt`** — pins critical packages (litellm==1.81.15)
-- **`requirements.lock`** — pins all 80 transitive dependencies with exact versions
-- **`package-lock.json`** — npm lockfile for frontend
 
-### Automated Auditing
-- **Daily security audit** — `scripts/security-audit.sh` runs via launchd at 6am
-- **Covers**: CORSIA venv (pip-audit), pipx venvs, Homebrew Python site-packages, npm (frontend)
-- **Reports**: `STATE_ROOT/security/audit-YYYY-MM-DD.md` (30-day retention)
-- **Activation**: `cp ~/.corsia/scripts/com.corsia.security-audit.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.corsia.security-audit.plist`
+- **Python** — the installer creates a dedicated virtual environment and installs from `backend/requirements.lock`. The lock pins versions; `litellm` is pinned to a Git commit in `backend/requirements.txt` and the lock.
+- **Frontend** — `frontend/package-lock.json` is the npm lockfile.
+
+### Security Auditing
+
+- **Manual audit** — a maintainer or operator can run `scripts/security-audit.sh`. It audits the CORSIA Python environment, available pipx and Homebrew Python environments, and the frontend npm dependencies when present; it also checks for outdated Homebrew packages.
+- **Effects and reports** — the script attempts npm and Python dependency fixes, writes a dated report and alert state under the selected state root's `security` directory, and removes reports older than 30 days.
 
 ### Authentication
-- **Accounts** — every install has its own accounts; there is no shipped or default credential. A username and a password authenticate a person; a token authenticates a request.
-- **Password storage** — scrypt (N=2^17, r=8, p=1) with a per-account salt, minimum 8 characters. Only the derived hash is stored.
-- **Account creation is CLI-only** — `corsia user add`. The backend binds `0.0.0.0`, so a first-run web form would hand the install to whoever reached the port first; running a command proves local access to the machine.
-- **Token storage** — tokens are random, and only their SHA-256 digest is stored. A token value is shown once at creation and cannot be recovered afterwards.
-- **Token kinds** — `session` (30 days, issued by sign-in), `service` (1 hour, minted by the lifecycle script for its own authenticated calls), `api` (no expiry, for agent tooling). Expired rows are deleted whenever a token is issued, and an expired token is refused regardless.
-- **Sign-in** — `POST /api/auth/login`. Password checks are serialized behind one lock and run off the event loop, and repeated failures for a username get a growing delay answered with 429 + `Retry-After`, so an unauthenticated caller cannot exhaust memory or grind guesses in parallel.
-- **Revocation** — `corsia token revoke <label>`, or `POST /api/auth/logout` for the current session. Changing a password revokes that account's sessions and deliberately keeps its API tokens, which belong to installed tooling rather than to a browser.
-- **Coverage** — HTTP routes, agent tool calls and WebSocket handshakes resolve their caller through one seam. An unknown and an expired credential are answered identically (`Invalid or expired session`).
-- **Network exposure** — the backend listens on `0.0.0.0`, so it is reachable from the local network; authentication, not the bind address, is what protects it. Remote access is intended to go through Tailscale (HTTPS on port 8443, requires Tailscale auth).
 
-## Known Vulnerabilities (as of 2026-03-26)
+- **First account** — create it with `corsia user add` or the pre-auth first-run route, which accepts direct loopback requests only and exists only while no account exists.
+- **Passwords** — new password hashes use scrypt (N=2^17, r=8, p=1) with a fresh salt. Passwords must be at least eight characters.
+- **Tokens** — only SHA-256 digests are stored. Session tokens last 30 days, service tokens one hour, and API tokens have no expiry.
+- **Sign-in and revocation** — password checks are serialized; repeated failures for a username incur a growing delay. Sign-out revokes the presented token, and tokens can also be revoked by label. Unknown and expired tokens receive the same authentication response.
 
-| Package | Version | CVE | Severity | Fix Available | Environment | Action |
-|---------|---------|-----|----------|---------------|-------------|--------|
-| pygments | 2.19.2 | CVE-2026-4539 | Low | No | CORSIA venv | Wait for upstream fix (ReDoS in unused AdlLexer) |
-| cookie | <0.7.0 | GHSA-pxg6-pf52-xh8x | Low | Breaking only | npm (via SvelteKit) | Wait for SvelteKit to update upstream |
-| pdfminer-six | 20251107 | CVE-2025-70559 | — | 20251230 | Homebrew Python 3.14 | `pip3 install --upgrade pdfminer-six` |
-| pymupdf | 1.26.5 | CVE-2026-3029 | — | 1.26.7 | Homebrew Python 3.14 | `pip3 install --upgrade pymupdf` |
+### Network Exposure
 
-### Resolved
-| Date | What | How |
-|------|------|-----|
-| 2026-03-26 | picomatch ReDoS (npm, high) | `npm audit fix` |
-| 2026-03-26 | undici WebSocket overflow/smuggling (npm, high) | `npm audit fix` |
-| 2026-03-26 | devalue prototype pollution (npm, moderate) | `npm audit fix` |
-
-## Pending Actions
-
-- [x] **Uninstall nanobot-ai pipx venv** — 9 CVEs in an unused environment. ✅ Done 2026-03-26
-- [x] **Activate daily audit cron** — Run: `cp ~/.corsia/scripts/com.corsia.security-audit.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.corsia.security-audit.plist`
-- [x] **Upgrade Homebrew Python packages** — pdfminer-six and pymupdf have fixes available
-- [x] **Clean up nanobot references in code** — dead import path in `settings.py`, stale comments in `agent.py`, `main.py`, `state_context.py`. ✅ Done 2026-03-26
+- **Bind address** — setup selects local (`127.0.0.1`) or server (`0.0.0.0`) access. A mismatch between the recorded choice and bind address fails closed. Existing installations without a recorded choice retain the legacy server bind.
+- **Devices** — an opt-in TLS listener (default port 47901) for pairing other devices. It accepts signed-in person sessions only, refuses peers outside private networks unless an outside address is configured, and can be managed only from the main computer itself.
+- **Remote access** — CORSIA includes guidance for setting up a Tailscale Serve mapping to the local service.
 
 ## Gaps / Future Work
 
-- **No container isolation** — agents run as the owner's user. Safehouse is a soft sandbox (filesystem + binary restrictions), not a hard boundary. Full containment would require Docker/Podman or Apple Containers.
-- **No network egress control** — agents can make arbitrary HTTP requests. Could be mitigated with Lulu firewall rules or a proxy.
-- **No integrity verification** — no checksum validation on `requirements.lock` (could detect tampering)
-- **Homebrew audit blocked by sandbox** — `brew outdated` can't run inside Safehouse (needs cache dirs). Must be run manually.
-- **Token rotation** — revocation exists (`corsia token revoke`, sign-out, password change) but rotation is manual: nothing expires an `api` token or prompts for a periodic change.
-- **No multi-factor or lockout** — a failed sign-in is slowed by a growing per-username delay, not locked out, and there is no second factor.
-- **Audit alerting** — daily reports are written to disk but not surfaced proactively (no email/notification on new CVEs)
-- **Code signing** — no verification that backend code hasn't been tampered with between restarts
+- **No container isolation** — Safehouse (macOS) and bubblewrap (Linux) restrict files and commands; neither is a container boundary.
+- **No general network egress control** — agents can make outbound network requests; the sandbox does not restrict general network egress.
+- **No lock integrity check** — `backend/requirements.lock` is installed without `--require-hashes`.
+- **No sign-in lockout or second factor** — repeated failed sign-ins are slowed, not locked out, and there is no multi-factor authentication.
+- **API token expiry** — API tokens do not expire automatically; they can be revoked by token or label.

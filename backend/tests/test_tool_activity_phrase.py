@@ -3,7 +3,7 @@
 import pytest
 
 from tools.catalog import TOOL_CATALOG
-from tools.tool_activity import ToolActivity, tool_activity, tool_display_activity
+from tools.tool_activity import ToolActivity, resolve_display_call, tool_activity
 
 
 def test_every_catalog_tool_declares_its_verb():
@@ -37,6 +37,10 @@ def test_object_is_the_named_argument_unshortened():
     command = "cd /srv/work && grep -rn needle"
     assert tool_activity("Bash", {"command": command}) == ToolActivity("Running grep -rn needle", command)
     assert tool_activity("plan_read", {}).object == ""
+
+
+def tool_display_activity(name, arguments):
+    return tool_activity(*resolve_display_call(name, arguments))
 
 
 def test_bridged_call_gets_the_inner_tool_phrase_live_and_on_reload():

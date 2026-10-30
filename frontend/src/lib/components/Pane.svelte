@@ -14,10 +14,9 @@
 	import { openPlanDiscussionLeaf, openPlanSubagentLeaf } from '$lib/planLeafReturn';
 	import { registerPlanSurface } from '$lib/planNodeFocus';
 
-	let { label = 'Workspace', sections = [] as Section[], conductorThreadId = null, protectArtifactSplit = false, onPickProject, onBrowseDocuments }: {
+	let { label = 'Workspace', sections = [] as Section[], protectArtifactSplit = false, onPickProject, onBrowseDocuments }: {
 		label?: string;
 		sections?: Section[];
-		conductorThreadId?: string | null;
 		protectArtifactSplit?: boolean;
 		onPickProject?: (p: { id: string; name: string }) => void;
 		onBrowseDocuments?: (threadId: string) => void;
@@ -94,10 +93,10 @@
 									onOpenLegacyDiscussion={openLegacyDiscussion}
 								/>
 							{:else}
-								<div class="stub-row">Open a conversation to see its plan</div>
+								<div class="stub-row">Open a chat to see its plan</div>
 							{/if}
 						{:else if s.kind === 'artifacts'}
-							<ArtifactPane threadId={$activeThreadId} {conductorThreadId} {onBrowseDocuments} />
+							<ArtifactPane threadId={$activeThreadId} {onBrowseDocuments} />
 						{:else}
 							<div class="stub-row">{s.empty ?? 'Nothing here yet'}</div>
 						{/if}

@@ -25,7 +25,7 @@ from concurrent.futures import wait as wait_for
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from connections import binary_from_config
+from connections import agent_binary_from_config
 from connections.github_agent_home import (
     BOT_ENV_NAMES,
     GIT_CONFIG_SLOTS,
@@ -175,6 +175,11 @@ def _due(key: tuple, entry: Verified | Failed | None, now: float) -> bool:
     return not entry.definite
 
 
+def _agent_binary(config: dict) -> str | None:
+    """Resolve only the agents' GitHub executable, including their cached CORSIA install."""
+    return agent_binary_from_config(config)
+
+
 def _read(db) -> tuple[list, str | None]:
     connection = db or get_db()
     rows = connection.execute(_ROWS, (PROVIDER,)).fetchall()
@@ -196,7 +201,7 @@ def _resolve(db, *, wait: float | None) -> AgentAccountView:
     row = rows[0]
     account_id, home = str(row["id"]), str(row["source_home"])
     base = AgentAccountView("needs_auth", account_id=account_id, home=home)
-    binary = binary_from_config(PROVIDER, _config(row["config"]))
+    binary = _agent_binary(_config(row["config"]))
     if binary is None:
         return replace(base, state="not_installed", cause="github_executable_missing")
     base = replace(base, binary=binary)

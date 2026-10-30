@@ -17,6 +17,66 @@ from infra.send_target import NO_MODEL_SELECTED
 
 WarmFactory = Callable[[], Awaitable[dict[str, Any]]]
 WarmAdmissionCheck = Callable[[], str | None]
+WarmProgressProbe = Callable[[], Awaitable[dict[str, Any] | None]]
+WarmProgressCallback = Callable[[dict[str, Any]], None]
+WARM_PROGRESS_PROBE_SECONDS = 2.0
+
+
+def _publish_warm_progress(
+    callback: WarmProgressCallback,
+    progress: dict[str, Any],
+) -> None:
+    """Publish best-effort progress without changing the warm's outcome."""
+    try:
+        callback(progress)
+    except Exception as error:
+        logger.warning("Native cache warm progress callback failed: {}", error)
+
+
+def make_provider_warm_operations(
+    provider: Any,
+    cfg: dict[str, Any],
+    model_id: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    prompt_shape: dict[str, Any],
+    progress_from_probe: Callable[[dict[str, Any]], dict[str, Any]],
+) -> tuple[WarmFactory, WarmProgressProbe]:
+    """Build the matching provider warm and progress operations for one owner."""
+    async def warm() -> dict[str, Any]:
+        return await provider.warm_cache(
+            cfg, model_id=model_id, messages=messages, tools=tools, **prompt_shape,
+        )
+
+    async def progress_probe() -> dict[str, Any] | None:
+        probe = await provider.probe_cache(
+            cfg, model_id=model_id, messages=messages, tools=tools, **prompt_shape,
+        )
+        return progress_from_probe(probe) if probe.get("ok") else None
+
+    return warm, progress_probe
+
+
+def make_user_warm_progress_callback(
+    user_id: str | None,
+    thread_id: str,
+    event_model: str,
+) -> WarmProgressCallback | None:
+    """Create the user-scoped websocket publisher for one registered warm."""
+    if user_id is None:
+        return None
+
+    def publish(progress: dict[str, Any]) -> None:
+        from infra.state.ws import broadcast_to_user
+
+        broadcast_to_user(user_id, {
+            "type": "thread_warm_progress",
+            "thread_id": thread_id,
+            "model": event_model,
+            "progress": progress,
+        })
+
+    return publish
 
 
 def warm_suppression_reason(
@@ -102,26 +162,61 @@ async def cancel_thread_warm(
     return was_running
 
 
-async def await_thread_warm(thread_id: str) -> bool:
-    """Await only the warm already registered for this thread.
+async def await_thread_warm(
+    thread_id: str,
+    *,
+    cancel_event: asyncio.Event | None = None,
+) -> bool:
+    """Await only a registered warm, or this Turn's exact cancellation.
 
-    Native delivery never creates provider work here. Shielding keeps Stop
-    immediate: cancelling the delivery stops this waiter without cancelling
-    the independently requested warm.
+    Native delivery never creates provider work here. The shield keeps the
+    warm independently owned: a Turn cancellation ends only its waiter, never
+    the requested warm task.
     """
     task = state._active_warm_tasks.get(thread_id)
     if task is None or task.done():
         return False
-    try:
-        await asyncio.shield(task)
-    except asyncio.CancelledError:
-        waiter = asyncio.current_task()
-        if waiter is not None and waiter.cancelling():
+    if cancel_event is None:
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            waiter = asyncio.current_task()
+            if waiter is not None and waiter.cancelling():
+                raise
+            if task.cancelled():
+                return False
             raise
-        if task.cancelled():
+        return True
+    if cancel_event.is_set():
+        return False
+
+    warm_wait = asyncio.shield(task)
+    cancellation_wait = asyncio.create_task(cancel_event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            (warm_wait, cancellation_wait),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # A concurrently completed cancellation wins: the caller must take the
+        # Native loop's normal pre-set-cancellation terminal path.
+        if cancellation_wait in done:
             return False
-        raise
-    return True
+        try:
+            warm_wait.result()
+        except asyncio.CancelledError:
+            waiter = asyncio.current_task()
+            if waiter is not None and waiter.cancelling():
+                raise
+            if task.cancelled():
+                return False
+            raise
+        return True
+    finally:
+        if not warm_wait.done():
+            warm_wait.cancel()
+        if not cancellation_wait.done():
+            cancellation_wait.cancel()
+        await asyncio.gather(warm_wait, cancellation_wait, return_exceptions=True)
 
 
 async def await_warm_outcome(task: asyncio.Task) -> dict[str, Any]:
@@ -144,8 +239,57 @@ async def await_warm_outcome(task: asyncio.Task) -> dict[str, Any]:
     return {"ok": True, "message": "Warm finished"}
 
 
-async def join_requested_warm_for_delivery(thread_id: str, catalog_id: str) -> bool:
-    """Join an explicit Native warm of this model without blocking on its failure.
+async def _run_warm_with_progress(
+    factory: WarmFactory,
+    progress_probe: WarmProgressProbe | None,
+    progress_callback: WarmProgressCallback | None,
+) -> dict[str, Any]:
+    """Run one provider warm without letting progress work delay or fail it."""
+    warm = asyncio.ensure_future(factory())
+    probe: asyncio.Future[dict[str, Any] | None] | None = None
+    try:
+        while not warm.done():
+            if progress_probe is None or progress_callback is None:
+                await warm
+                break
+            if probe is None:
+                warm_done, _ = await asyncio.wait({warm}, timeout=WARM_PROGRESS_PROBE_SECONDS)
+                if warm in warm_done:
+                    break
+                probe = asyncio.ensure_future(progress_probe())
+            waiting: set[asyncio.Future[Any]] = {warm, probe}
+            done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+            if warm in done:
+                break
+            assert probe in done
+            if probe.cancelled():
+                probe = None
+                continue
+            try:
+                progress = probe.result()
+            except Exception as error:
+                logger.warning("Native cache warm progress probe failed: {}", error)
+            else:
+                if progress is not None:
+                    _publish_warm_progress(progress_callback, progress)
+            probe = None
+        return await warm
+    finally:
+        if probe is not None and not probe.done():
+            probe.cancel()
+            await asyncio.gather(probe, return_exceptions=True)
+        if not warm.done():
+            warm.cancel()
+            await asyncio.gather(warm, return_exceptions=True)
+
+
+async def join_requested_warm_for_delivery(
+    thread_id: str,
+    catalog_id: str,
+    *,
+    cancel_event: asyncio.Event | None = None,
+) -> bool:
+    """Join an explicit matching warm unless this exact Turn is cancelled.
 
     A warm of another model is left running on its own hardware: delivery
     neither waits for it nor cancels it.
@@ -154,7 +298,7 @@ async def join_requested_warm_for_delivery(thread_id: str, catalog_id: str) -> b
     if task is None or getattr(task, "_corsia_warm_model", None) != catalog_id:
         return False
     try:
-        return await await_thread_warm(thread_id)
+        return await await_thread_warm(thread_id, cancel_event=cancel_event)
     except asyncio.CancelledError:
         raise
     except Exception as error:
@@ -173,6 +317,9 @@ async def start_thread_warm(
     *,
     model: str,
     admission_check: WarmAdmissionCheck,
+    progress_probe: WarmProgressProbe | None = None,
+    progress_callback: WarmProgressCallback | None = None,
+    initial_progress: dict[str, Any] | None = None,
 ) -> tuple[asyncio.Task | None, bool, str | None]:
     """Deduplicate or replace one thread warm through the existing owner.
 
@@ -201,7 +348,9 @@ async def start_thread_warm(
     if suppression is not None:
         return None, False, suppression
 
-    task = asyncio.create_task(factory())
+    task = asyncio.create_task(
+        _run_warm_with_progress(factory, progress_probe, progress_callback),
+    )
     setattr(task, "_corsia_warm_key", warm_key)
     setattr(task, "_corsia_warm_model", model)
     state._active_warm_tasks[thread_id] = task
@@ -211,4 +360,6 @@ async def start_thread_warm(
             state._active_warm_tasks.pop(thread_id, None)
 
     task.add_done_callback(_release)
+    if initial_progress is not None and progress_callback is not None:
+        _publish_warm_progress(progress_callback, initial_progress)
     return task, True, None

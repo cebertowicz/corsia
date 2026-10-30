@@ -1,12 +1,10 @@
 
-import { expect, type Locator, test } from '@playwright/test';
-import {
-    captureConsoleErrors,
-    createSession,
-    TEST_TOKEN,
-    waitForWsConnected,
-} from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type Locator } from '@playwright/test';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
+import { setFocusMode } from '../support/focusMode';
+import { settled } from '../support/reviewFixtures';
 
 const LONG_TEXT = Array.from(
     { length: 26 },
@@ -19,6 +17,9 @@ async function expectCollapsedThenExpand(row: Locator) {
 
     await expect(body).toHaveClass(/collapsed/, { timeout: 10_000 });
     await expect(toggle).toBeVisible();
+    // The rows fade in and the opened thread's panel slides in under the toggle; a press that lands mid-slide
+    // goes down on the button and comes up on the text it moved over, so it is no click on the button.
+    await settled(row.page());
 
     await toggle.click();
     await expect(row.getByRole('button', { name: 'Show less' })).toBeVisible();
@@ -26,6 +27,11 @@ async function expectCollapsedThenExpand(row: Locator) {
 }
 
 test.describe('@flow:long-message-collapse @surface:chat long message readability', () => {
+    // Focus is on by default and groups these rows; this spec covers the ordinary row presentation.
+    test.afterEach(async ({ request }) => {
+        await setFocusMode(request, true);
+    });
+
     test(
         'injected long ordinary rows collapse and expand in chat',
         async ({ page, request }, testInfo) => {
@@ -33,6 +39,7 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
 
             const sessionTitle = `e2e long-message-collapse ${Date.now()}`;
             const sessionId = await createSession(request, sessionTitle);
+            await setFocusMode(request, false);
 
             await injectMessage(
                 request,
@@ -61,7 +68,8 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
                     role: 'system',
                     content: LONG_TEXT,
                     metadata: {
-                        type: 'event_chip',
+                        // SystemMessageRow.svelte renders EventChip for `activity_receipt` and `context_event`; `event_chip` is retired.
+                        type: 'activity_receipt',
                         event_type: 'webhook.github.pr_comment',
                         summary: LONG_TEXT,
                         url: 'https://github.com/o/r/pull/42#issuecomment-1',
@@ -70,16 +78,13 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
                 TEST_TOKEN,
             );
 
-            await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-            await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({
-                timeout: 20_000,
-            });
+            await openAppPastLanding(page);
 
             if ((page.viewportSize()?.width ?? 0) <= 768) {
                 await page.getByRole('button', { name: 'Toggle sidebar' }).click();
             }
 
-            await page.getByText(sessionTitle).click({ timeout: 10_000 });
+            await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
             await waitForWsConnected(page);
 
             const assistantRow = page.locator('.message.assistant').first();

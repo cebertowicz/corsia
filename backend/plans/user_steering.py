@@ -81,13 +81,14 @@ def offered(
     whatever holds it (``plans.user_settle``). A task adds Pause, or Resume
     when a pause holds it; a task handed to a live worker offers Pause while the
     worker's plan is active and Resume while it is paused and this plan is not.
-    A question put to the user offers only Won't do: answering it, in the
-    attention queue, is what finishes it.
+    A question put to the user offers Pause (or Resume) and Won't do, never
+    Mark done: answering it, in the attention queue, is what finishes it.
     """
     if node["state"] not in _OPEN_STATES:
         return []
     if review is not None and review["kind"] == "human_decision":
-        return ["close_node"]
+        pause = "resume_node" if placed_pause(causes) is not None else "pause_node"
+        return [pause, "close_node"]
     actions = ["mark_done"]
     control = (
         _pause_control(causes, worker_plan_state, plan_state)

@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Any, Callable
 
 from infra.db_async import run_in_db
-from infra.send_broadcast import broadcast_input_row
+from infra.send_broadcast import broadcast_input_row, broadcast_newest_error
 from infra.send_post_admission import (
     broadcast_passive,
     publish_projection,
@@ -118,7 +118,7 @@ def _require_thread_identity(thread_id: str, thread_row: Any) -> None:
         raise SendRejected(404, "thread does not exist")
 
 
-def broadcast_accepted_input(
+async def broadcast_accepted_input(
     admission: InputAdmission,
     content: str,
     metadata: dict | None,
@@ -126,7 +126,7 @@ def broadcast_accepted_input(
     role: str,
     exclude_ws: Any | None,
 ) -> None:
-    """Project the exact durable pending row, and any hold it took, to subscribed clients."""
+    """Project the exact durable pending row, any hold it took, and the error it now waits behind."""
     accepted = admission.accepted
     broadcast_input_row(
         accepted.thread_id, accepted.message_id, content, metadata, accepted.created_at,
@@ -137,14 +137,15 @@ def broadcast_accepted_input(
         role=role,
         exclude_ws=exclude_ws,
     )
+    await broadcast_newest_error(accepted.thread_id)
 
 
 async def request_safe_boundary(thread_id: str, target_harness: str) -> None:
     """Tell the active harness that an apply-now FIFO prefix is available."""
     if target_harness == "codex":
-        from subagents.codex_inbox_batch import deliver_live_inbox_batch
+        from subagents.codex_runtime_event_delivery import schedule_safe_boundary
 
-        await deliver_live_inbox_batch(thread_id)
+        schedule_safe_boundary(thread_id)
     # Native checks durable FIFO at every provider-safe boundary already.
     # Claude Code writes only while a tool reply is held (#2204).
 
@@ -330,7 +331,9 @@ async def send_thread_input(
     _require_thread_identity(thread_id, thread_row)
     if native_mode == "ws" and ws is None:
         raise SendRejected(500, "Native WebSocket send missing socket context")
-    text = _accepted_text(content, trim_content, allow_empty_content, attachments)
+    from infra.reply_context import RejectedComments, has_comment_candidates
+    comment_candidates = has_comment_candidates((metadata or {}).get("reply_context"))
+    text = _accepted_text(content, trim_content, allow_empty_content, attachments, comment_candidates)
     message_id = input_id or idempotency_key or str(uuid.uuid4())
     admitted_at = utc_now_iso()
     descriptor_attachments = await _bind_image_identity(
@@ -345,20 +348,16 @@ async def send_thread_input(
         broadcast_input=broadcast_input,
         touch_thread_on_insert=touch_thread_on_insert,
     )
-    admission = await admit_prepared_input(
-        thread_id,
-        role=role,
-        content=text,
-        intent=delivery_intent,
-        message_id=message_id,
-        turn_id=str(uuid.uuid4()),
-        boot_epoch=_boot_epoch(),
-        admitted_at=admitted_at,
-        metadata=metadata,
-        delivery_options=options,
-        continuation=continuation,
-    )
-    from jobs.corrections_realtime import notify_if_owner  # best effort; never fails the send
+    try:
+        admission = await admit_prepared_input(
+            thread_id, role=role, content=text, intent=delivery_intent,
+            message_id=message_id, turn_id=str(uuid.uuid4()), boot_epoch=_boot_epoch(),
+            admitted_at=admitted_at, metadata=metadata, delivery_options=options,
+            continuation=continuation,
+        )
+    except RejectedComments as exc:
+        raise SendRejected(400, str(exc)) from exc
+    from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
         admission, thread_row,
@@ -378,6 +377,7 @@ def _accepted_text(
     trim_content: bool,
     allow_empty_content: bool,
     attachments: Any | None,
+    comment_candidates: bool = False,
 ) -> str:
     """Normalize the input text and refuse one that carries nothing.
 
@@ -385,7 +385,7 @@ def _accepted_text(
         SendRejected: The input has neither content nor permitted attachments.
     """
     text = content.strip() if trim_content else content
-    if not text and not (allow_empty_content and attachments):
+    if not text and not (allow_empty_content and attachments) and not comment_candidates:
         raise SendRejected(400, "Message content is empty")
     return text
 

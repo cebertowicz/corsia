@@ -75,6 +75,18 @@ Event names are `<category>.<action>`. Lowercase, dot-separated, no spaces.
 | `model.pin` / `model.unpin` | Per-model pin toggled on the daemon | backend |
 | `model.switched` | Active model for a session changed | backend + frontend |
 
+### Local model server restart
+
+CORSIA restarts a managed oMLX server that exits without being asked to. Properties on each: `provider` (`omlx`) and `server_id`. How often servers crash, and whether restarts work, is read from these.
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `model_server.exit.unexpected` | The server's process ended and CORSIA had not stopped it, and it was not a clean exit 0 that CORSIA could read (a server CORSIA took over, not one it spawned, has no readable status, so any exit counts) (`status`: signal or exit code; `loaded_models`: how many models were loaded) | backend |
+| `model_server.restart.attempted` | CORSIA starts the server again (`attempt`, 1 to 3 within ten minutes; `status`) | backend |
+| `model_server.restart.completed` | The restarted server answered health (`attempt`); its models then load again through `model.load.*` events marked `automatic` | backend |
+| `model_server.restart.gave_up` | Three restarts in ten minutes did not hold, so the server stays stopped (`status`, `restarts`) | backend |
+| `model_server.restart.failed` | The restart raised before it finished, so no further attempt ran (`error`: exception class; `message`: its first 100 characters) | backend |
+
 ### Onboarding
 
 All six onboarding events are backend-only lifecycle observations. They contain no user, project, thread, or model identifiers, decision text, or message content; the backend wrapper keeps them local and non-load-bearing.
@@ -278,7 +290,7 @@ Caller-supplied properties merge with defaults. Caller properties win on key col
 | Category | Additional properties |
 |---|---|
 | `turn.*` | `turn_id`, `model`, `provider`, `token_count` (when known) |
-| `model.*` | `provider`, `model_id`, `reasoning_shape`, `previous_model_id` (on switch), `error` (on failure) |
+| `model.*` | `provider`, `model_id`, `reasoning_shape`, `previous_model_id` (on switch), `error` (on failure), `automatic` (true when CORSIA pinned or loaded a finished download itself) |
 | `onboarding.account_created`, `onboarding.first_run_wake` | No caller properties. |
 | `onboarding.first_model_selected` | `source_kind` (the model dispatch prefix only), `seconds_since_account` (integer or null). |
 | `onboarding.first_turn_completed` | `seconds_since_account` (integer or null). |
@@ -509,9 +521,7 @@ corrections; `verification_result` is non-null on the accepting transition.
 #### stalled duration
 
 From `fired_at`, which `plan_liveness._claim_fire` writes at the moment of the
-stall. Not `window_started_at`: that is the rate-limit window start, is reset
-when the window rolls over, and is NULL for a wake that stalled through
-`deferral_exhausted` without ever delivering.
+stall. Only a failed delivery stalls a wake: no cycle or rate cap ends one.
 
 ```sql
 SELECT thread_id,
@@ -545,8 +555,9 @@ SELECT kind,
 incremented `attempt`, and a wake that was admitted and then failed to land was
 still admitted. Read delivery success as
 `delivered / (delivered + failed WHERE reason='delivery_failed')`.
-`deferred` with `deferrals` is deferral; `stalled` with `cycle_cap_reached`,
-`wake_budget_exhausted` or `deferral_exhausted` is a stall.
+Only a failed delivery stalls a trigger now, and nothing defers one; rows
+written before 2026-10-22 may still carry `deferred`, `deferrals`, or the
+reasons `cycle_cap_reached`, `wake_budget_exhausted` and `deferral_exhausted`.
 
 #### wake cost
 

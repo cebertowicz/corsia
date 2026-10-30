@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 
 from history.projection import in_read_snapshot
+from infra.focus_rows import NEVER_DRAWN_FILTER
+from infra.turn_errors import apply_error_next_steps
 from infra.queries import get_thread_for_user
 from core.message_display import llm_to_display
 from api.thread_turn_summaries import page_turn_summaries
@@ -98,7 +100,7 @@ def _project_delivery_intents(
         metadata = row.get("metadata")
         if isinstance(metadata, dict):
             metadata.pop("delivery_intent", None)
-        if intents.get(row.get("id")) == "queue_after_turn":
+        if intents.get(str(row.get("id"))) == "queue_after_turn":
             if not isinstance(metadata, dict):
                 metadata = row["metadata"] = {}
             metadata["delivery_intent"] = "queue_after_turn"
@@ -128,7 +130,10 @@ def _fetch_display_anchors(
     cursor_ts: str | None,
     cursor_rowid: int | None,
 ) -> list[dict]:
-    """Fetch newest-first display anchors, excluding result-only children."""
+    """Fetch newest-first display anchors, excluding result-only children.
+
+    A row the transcript never draws is not an anchor, so a page never sends one.
+    """
     params: list[object] = [thread_id]
     if (cursor_ts is None or cursor_seq is not None) and not _has_unsequenced_anchors(
         db, thread_id,
@@ -143,7 +148,7 @@ def _fetch_display_anchors(
         params.append(limit + 1)
         return [dict(row) for row in db.execute(
             DISPLAY_ROW_SELECT + "WHERE thread_id = ? "
-            f"{_DISPLAY_ANCHOR_FILTER}{position_clause}"
+            f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}{position_clause}"
             "ORDER BY seq DESC LIMIT ?",
             params,
         ).fetchall()]
@@ -167,7 +172,7 @@ def _fetch_display_anchors(
         params.append(page)
         blocks.append(
             f"SELECT * FROM ({DISPLAY_ROW_SELECT}WHERE thread_id = ? AND seq IS NULL "
-            f"{_DISPLAY_ANCHOR_FILTER}{unpositioned_clause}"
+            f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}{unpositioned_clause}"
             "ORDER BY created_at DESC, rowid DESC LIMIT ?)"
         )
     params.append(thread_id)
@@ -176,7 +181,7 @@ def _fetch_display_anchors(
     params.append(page)
     blocks.append(
         f"SELECT * FROM ({DISPLAY_ROW_SELECT}WHERE thread_id = ? AND seq IS NOT NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}{positioned_clause}"
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}{positioned_clause}"
         "ORDER BY seq DESC LIMIT ?)"
     )
     params.append(page)
@@ -265,6 +270,7 @@ def finish_display(
 ) -> None:
     """Shape projected rows for REST in place."""
     _parse_message_metadata(display)
+    apply_error_next_steps(db, thread_id, display)
     if not include_tool_results:
         _defer_tool_results(display)
     _project_delivery_intents(db, thread_id, display)
@@ -310,7 +316,7 @@ def page_messages(
 
     if limit is None or limit < 1:
         raw = [dict(row) for row in db.execute(
-            DISPLAY_ROW_SELECT + "WHERE thread_id = ? "
+            DISPLAY_ROW_SELECT + f"WHERE thread_id = ? {NEVER_DRAWN_FILTER}"
             "ORDER BY CASE WHEN seq IS NULL THEN 1 ELSE 0 END ASC,"
             "seq ASC,created_at ASC,rowid ASC",
             (thread_id,),

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 import sqlite3
 import uuid
 
 import pytest
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import archival, closure, service
 from plans.boundary import PlanActor, mutate, read_current_plan
@@ -65,9 +68,28 @@ def db():
 
 
 def _add(db, plan_id: str, actor: PlanActor, **params):
+    intent = "Keep lane context current"
+    plan_row = db.execute("SELECT owner_id FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if plan_row is None:
+        return mutate(
+            plan_id, "add", {"kind": "task", "title": "Refresh lane context",
+            "acceptance_criteria": "Current", "size": "unknown", "intent": intent}, actor=actor,
+            provenance="test.conductor_add", mutation_id=uuid.uuid4().hex, db=db,
+        ).result["node"]
+    # A conductor's own consumed input is in the same project scope as its lane;
+    # only the workspace conductor needs the target plan's project-specific source.
+    thread_id = plan_row[0] if actor.thread_id == "workspace-conductor" else actor.thread_id
+    turn_id = f"turn-{uuid.uuid4().hex}"
+    _init_messages_fts(db)
+    accept_thread_input(
+        thread_id, role="user", content=intent, intent="apply_now",
+        message_id=f"authority-{uuid.uuid4().hex}", db=db,
+    )
+    db.execute("UPDATE messages SET active_turn_id=? WHERE thread_id=? AND content=?", (turn_id, thread_id, intent))
     return mutate(
         plan_id, "add", {"kind": "task", "title": "Refresh lane context",
-        "acceptance_criteria": "Current", **params}, actor=actor,
+        "acceptance_criteria": "Current", "size": "unknown", "intent": intent,
+        "intent_words": [{"quote": intent, "role": "authority"}], **params}, actor=replace(actor, turn_id=turn_id),
         provenance="test.conductor_add", mutation_id=uuid.uuid4().hex, db=db,
     ).result["node"]
 
@@ -122,7 +144,9 @@ def test_only_a_conductor_may_append_a_top_level_task_to_a_foreign_plan(
     parent = service.add_node(plan.id, kind="task", title="Parent", acceptance_criteria="Done", db=db)
     db.commit()
     params = {key: parent.id if value == "placeholder" else value for key, value in params.items()}
-    values = {"kind": "task", "title": "No", "acceptance_criteria": "Never", **params}
+    values = {
+        "kind": "task", "title": "No", "acceptance_criteria": "Never", "size": "unknown", **params,
+    }
 
     kind, message = refusal
     with pytest.raises(kind, match=message):

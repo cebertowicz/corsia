@@ -19,6 +19,7 @@ decisions before the user reaches them.
 
 from __future__ import annotations
 
+import plans.artifact_links as artifact_links
 import plans.decision_projection as decision_projection
 
 DECISION = "decision"
@@ -151,6 +152,9 @@ def annotate(items: list[dict], *, db) -> list[dict]:
         identities[key]["artifact_id"]: body["source_node_id"]
         for key, body in bodies.items()
     })
+    deferred = artifact_links.deferred_attention_artifact_ids(
+        [row["artifact_id"] for row in identities.values()], db=db,
+    )
 
     annotated = []
     for item in items:
@@ -164,14 +168,16 @@ def annotate(items: list[dict], *, db) -> list[dict]:
                 row, body, sources.get(body["thread_id"]),
                 answerable.get(row["artifact_id"], False),
             )
-        if detail is None:
+        if row is None or detail is None:
             annotated.append({
                 **item, "renderer": None, "detail": None,
+                "deferred": row is not None and row["artifact_id"] in deferred,
                 "priority": 0, "raised_at": "",
             })
             continue
         annotated.append({
             **item, "renderer": DECISION, "detail": detail,
+            "deferred": row["artifact_id"] in deferred,
             "priority": body["order_key"],
             "raised_at": body.get("raised_at") or row["created_at"],
         })
@@ -180,7 +186,10 @@ def annotate(items: list[dict], *, db) -> list[dict]:
 
 def queue(annotated: list[dict]) -> list[dict]:
     """The canonical order the user works through, across every source."""
-    typed = [row for row in annotated if row["renderer"] is not None]
+    typed = [
+        row for row in annotated
+        if row["renderer"] is not None and not row["deferred"]
+    ]
     return sorted(
         typed,
         key=lambda row: (row["priority"], row["raised_at"], row["external_id"]),
@@ -188,5 +197,5 @@ def queue(annotated: list[dict]) -> list[dict]:
 
 
 def generic(annotated: list[dict]) -> list[dict]:
-    """Rows no typed renderer claims — these stay in the ordinary lists."""
-    return [row for row in annotated if row["renderer"] is None]
+    """Rows no typed renderer claims and whose Needs-you state is not deferred."""
+    return [row for row in annotated if row["renderer"] is None and not row["deferred"]]

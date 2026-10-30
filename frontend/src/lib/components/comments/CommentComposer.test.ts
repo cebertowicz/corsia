@@ -25,8 +25,10 @@ afterEach(() => {
 });
 
 describe('CommentComposer', () => {
-	it('grows to content and then scrolls at the shared composer limit', async () => {
+	it('autosize stops at whatever max-height the field carries and then scrolls', async () => {
 		const textarea = render();
+		// jsdom applies no stylesheet, so this proves the autosize cap logic against an inline 150px, not the real text-field.css cap.
+		textarea.style.maxHeight = '150px';
 		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 240 });
 		textarea.value = 'A long comment';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -55,5 +57,41 @@ describe('CommentComposer', () => {
 			report.mockRestore();
 			log.mockRestore();
 		}
+	});
+
+	it('keeps the draft when the save request is refused', async () => {
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'failure-toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			const post = vi.fn().mockRejectedValue(new Error('refused'));
+			const textarea = render(() => submitDocumentComment(post));
+			textarea.value = 'Keep this refused draft';
+			textarea.dispatchEvent(new Event('input', { bubbles: true }));
+			flushSync();
+			host.querySelector<HTMLButtonElement>('.submit')!.click();
+
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			expect(textarea.value).toBe('Keep this refused draft');
+			expect(post).toHaveBeenCalledOnce();
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it('clears only after the save acknowledgement resolves', async () => {
+		let acknowledge!: () => void;
+		const onSubmit = vi.fn(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+		const textarea = render(onSubmit);
+		textarea.value = 'Wait for saved acknowledgement';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		host.querySelector<HTMLButtonElement>('.submit')!.click();
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Wait for saved acknowledgement'));
+		expect(textarea.value).toBe('Wait for saved acknowledgement');
+
+		acknowledge();
+		await vi.waitFor(() => expect(textarea.value).toBe(''));
 	});
 });

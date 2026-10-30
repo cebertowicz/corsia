@@ -39,7 +39,7 @@ class _Stages:
 
     async def heartbeat(self) -> None:
         """Note a silent stage once; while Homebrew streams, its output is the progress."""
-        from llm.local_setup_ownership import STREAMING
+        from llm.local_setup_executable import STREAMING
 
         while True:
             await asyncio.sleep(1.0)
@@ -68,14 +68,14 @@ def _quiet_logs() -> Path:
 
 def _installer_mode() -> None:
     """Stream Homebrew, report the download often, and wait for it to finish."""
-    from llm import local_setup, local_setup_ownership
+    from llm import local_setup_download, local_setup_executable
     from llm.local_setup_results import DownloadProgress
 
-    local_setup_ownership.STREAM_COMMAND_OUTPUT = True
+    local_setup_executable.STREAM_COMMAND_OUTPUT = True
     DownloadProgress.STEP = 5
     DownloadProgress.SECONDS = HEARTBEAT_SECONDS
-    local_setup.DOWNLOAD_WAIT_SECONDS = DOWNLOAD_CEILING_SECONDS
-    local_setup.DOWNLOAD_FOLLOW_SECONDS = DOWNLOAD_CEILING_SECONDS
+    local_setup_download.DOWNLOAD_WAIT_SECONDS = DOWNLOAD_CEILING_SECONDS
+    local_setup_download.DOWNLOAD_FOLLOW_SECONDS = DOWNLOAD_CEILING_SECONDS
 
 
 def _failed(why: str) -> int:
@@ -107,20 +107,19 @@ async def _discover(stages: _Stages) -> None:
     """The server's startup initialization and harness discovery, without the server."""
     from loguru import logger
 
-    from app_lifecycle import _initialize_startup
+    from app_startup_init import initialize_startup
     from app_startup_runtime import _startup_harness_discovery
 
     # The first run builds the app here, exactly as the server's startup would.
     stages("Preparing CORSIA")
-    await asyncio.to_thread(_initialize_startup, logger)
+    await asyncio.to_thread(initialize_startup, logger)
     stages("Checking Claude Code and Codex")
     await _startup_harness_discovery()
 
 
 async def _setup(force_local: bool) -> int:
-    from llm import local_setup
-    from llm.local_profiles import DEFAULT_PROFILE
-    from llm.local_setup_gates import limited_subscription_message, profile_eligibility, subscription_available
+    from llm import local_setup_flow
+    from llm.local_setup_gates import limited_subscription_message, local_memory_ok, subscription_available
 
     stages = _Stages()
     heartbeat = asyncio.create_task(stages.heartbeat())
@@ -135,11 +134,10 @@ async def _setup(force_local: bool) -> int:
         notice = None if force_local else await limited_subscription_message()
         if notice:
             print(f"     {notice}", flush=True)
-        eligibility = await asyncio.to_thread(profile_eligibility, DEFAULT_PROFILE)
-        if not eligibility.eligible:
+        if not await asyncio.to_thread(local_memory_ok):
             return _needs_provider(limited=bool(notice), forced_local=force_local)
         _installer_mode()
-        result = await local_setup._run_flight(eligibility, on_stage=stages, profile=DEFAULT_PROFILE)
+        result = await local_setup_flow._run_flight(on_stage=stages)
     finally:
         heartbeat.cancel()
     if result.get("downloading"):

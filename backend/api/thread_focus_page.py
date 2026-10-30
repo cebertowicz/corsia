@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import FOCUS_VISIBLE_SQL, focus_kind_sql
+from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, focus_kind_sql
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -37,12 +37,15 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 
 # The anchors the walk may inspect, newest-first: the one definition of the row set,
 # of visibility (`FOCUS_VISIBLE_SQL`) and of a row's Turn, shared by both walk
-# statements. `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
+# statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
+# `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
 _VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
 _RUN_COLUMNS = (
     f"{_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
+    "CASE WHEN role = 'assistant' AND instr(metadata, '\"browser_chip\"') > 0 AND json_valid(metadata) "
+    "THEN json_extract(metadata, '$.browser_chip') END AS chip, "
     "CASE WHEN json_valid(metadata) AND json_type(metadata, '$.turn_id') = 'text' "
     "AND json_extract(metadata, '$.turn_id') != '' "
     "THEN json_extract(metadata, '$.turn_id') END AS turn_id"
@@ -53,7 +56,7 @@ def _anchors_cte(columns: str) -> str:
     return (
         f"anchors AS (SELECT id, seq, {columns} "
         "FROM messages WHERE thread_id = :thread AND seq IS NOT NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}"
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
         "AND (:after IS NULL OR seq < :after) AND (:floor IS NULL OR seq >= :floor) "
         "ORDER BY seq DESC LIMIT :newest_n)"
     )
@@ -71,7 +74,9 @@ _VISIBLE_SQL = (
 # two consecutive rows with a known Turn disagree on whether it is live; a row with no
 # Turn stays with the run above it. `turn_ids` lists a run's Turns oldest-first, a
 # repeat of the Turn just above collapsed. `kinds` is the distinct `row_kind` of a
-# run's rows. One `meta` row reports how many anchors the
+# run's rows. `browser_chip` is the newest chip a run's Steps carry, stored when the open
+# settled (`core.tool_result_delivery`); a zero-padded seq prefix makes MAX pick the newest
+# without another sort. One `meta` row reports how many anchors the
 # CTE held (`count`, up to `:newest_n`) and the oldest one within the cap (`first_id`).
 _RUNS_SQL = f"""
 WITH {_anchors_cte(_RUN_COLUMNS)},
@@ -79,7 +84,7 @@ scanned AS (
     SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
 ),
 bounded AS (
-    SELECT id, seq, vis, weight, row_kind, turn_id, rn,
+    SELECT id, seq, vis, weight, row_kind, turn_id, chip, rn,
         COALESCE(SUM(vis) OVER (ORDER BY seq DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
         CASE WHEN turn_id IS NOT NULL
@@ -121,19 +126,20 @@ SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
     COUNT(*) AS count, SUM(ends.weight) AS weight,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
-    json_group_array(DISTINCT ends.row_kind) AS kinds
+    json_group_array(DISTINCT ends.row_kind) AS kinds,
+    substr(MAX(printf('%020d', ends.seq) || ends.chip), 21) AS browser_chip
 FROM ends LEFT JOIN run_turns USING (seg, run_no)
 GROUP BY ends.seg, ends.run_no
 UNION ALL
 SELECT 'meta', NULL, NULL, (SELECT COUNT(*) FROM anchors), 0,
     (SELECT id FROM scanned WHERE rn = MIN((SELECT COUNT(*) FROM anchors), :cap)),
-    NULL, NULL, '[]'
+    NULL, NULL, '[]', NULL
 ORDER BY first_seq
 """
 
 _OLDER_EXISTS_SQL = (
     "SELECT 1 FROM messages WHERE thread_id = ? AND seq IS NOT NULL AND seq < ? "
-    f"{_DISPLAY_ANCHOR_FILTER}LIMIT 1"
+    f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}LIMIT 1"
 )
 
 
@@ -185,6 +191,7 @@ def _walk(
             "weight": int(row["weight"] or 0),
             "kinds": sorted(json.loads(row["kinds"])),
             "continues_older": False,
+            **({"browser_chip": json.loads(row["browser_chip"])} if row["browser_chip"] else {}),
         })
     # The oldest run is cut off by the cap or budget only if it holds the last row read.
     if walk.runs and walk.runs[0]["first_id"] == walk.oldest_id:
@@ -200,7 +207,7 @@ def _unsequenced(db, thread_id: str) -> list[dict]:
     """
     rows = db.execute(
         DISPLAY_ROW_SELECT + "WHERE thread_id = ? AND seq IS NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}"
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
         "ORDER BY input_order IS NULL, input_order ASC, created_at ASC, rowid ASC",
         (thread_id,),
     ).fetchall()
@@ -297,7 +304,10 @@ def _display_anchor_seq(db, thread_id: str, message_id: str) -> int:
 def page_run_range(
     db, thread_id: str, limit: int, from_id: str, to_id: str, before: str | None,
 ) -> dict:
-    """One page, newest-first, of the display anchors from `from_id` to `to_id`."""
+    """One page, newest-first, of the display anchors from `from_id` to `to_id`.
+
+    Either end may name a row the transcript never draws; the page never holds one.
+    """
     if limit < 1:
         raise ValueError("a range read requires `limit` >= 1")
     low = _display_anchor_seq(db, thread_id, from_id)
@@ -311,7 +321,7 @@ def page_run_range(
             upper = min(upper, cursor)
     rows = db.execute(
         DISPLAY_ROW_SELECT + "WHERE thread_id = ? "
-        f"{_DISPLAY_ANCHOR_FILTER}AND seq >= ? AND seq < ? "
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}AND seq >= ? AND seq < ? "
         "ORDER BY seq DESC LIMIT ?",
         (thread_id, low, upper, limit + 1),
     ).fetchall()

@@ -137,10 +137,16 @@ class GetThreadHistoryTool(Tool):
 
         def _query():
             db = get_db()
-            thread_row = db.execute("SELECT title FROM threads WHERE id = ?", (thread_id,)).fetchone()
+            thread_row = db.execute("SELECT id, title, confinement FROM threads WHERE id = ?", (thread_id,)).fetchone()
             if not thread_row:
                 db.close()
                 return None, None
+            from infra.thread_confinement import Reader, transcript_restriction
+
+            restriction = transcript_restriction(Reader.from_tool(kwargs), thread_row)
+            if restriction is not None:
+                db.close()
+                return thread_row, restriction
             where = ["thread_id = ?", "delivery_state = 'delivered'", "seq IS NOT NULL"]
             params: list[Any] = [thread_id]
             if role:
@@ -167,11 +173,12 @@ class GetThreadHistoryTool(Tool):
 
         if thread_row is None:
             return f"Error: Thread '{thread_id}' not found"
+        from infra.thread_confinement import RestrictedRead
+
+        if isinstance(rows, RestrictedRead):
+            return rows.reason
         if not rows:
             return f"No messages found in thread '{thread_id}'"
-        from memory.node_start_opened import note_opened
-
-        note_opened(kwargs.get("_thread_id"), thread_id)
         if not oldest_first:
             rows = list(reversed(rows))
 

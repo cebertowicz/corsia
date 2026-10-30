@@ -1,0 +1,46 @@
+name: Fixed in dev
+
+# GitHub only auto-closes issues when a PR merges into the default branch
+# (main). Fixes here land on dev, so Closes/Fixes/Resolves keywords in PR
+# bodies never fire. On a merge into dev this labels each named issue
+# `fixed-in-dev` and comments the merge SHA, leaving it open; on a push to
+# main it closes every labeled issue whose merge SHAs are all in main's
+# history. "Refs #N" never labels or closes.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fixed-in-dev-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  fixed-in-dev:
+    name: Label fixed issues on dev merge, close them on main
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      MAIN_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Label on dev merge, close on main
+        run: python3 scripts/fixed_in_dev.py

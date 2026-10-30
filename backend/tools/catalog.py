@@ -24,11 +24,16 @@ TOOL_PACKS: dict[str, str] = {
     "memory": "Knowledge and lessons",
     "projects": "Projects and repositories",
     "coordination": "Coordination setup: CORSIA API and instruction files",
-    "host": "Host access, audit, and processes",
+    "host": "Host access and audit",
+    "processes": "Background and host processes",
     "browser": "Browser",
     "automations": "Automations",
     "web": "Web",
-    "google": "Email and calendar",
+    "email": "Email and calendar",
+    "microsoft": "Microsoft sign-in",
+    "microsoft_mail": "Microsoft mail",
+    "microsoft_calendar": "Microsoft calendar",
+    "microsoft_files": "Microsoft files",
 }
 _CATEGORY_PACKS: dict[str, str] = {
     "plans": "plans",
@@ -40,10 +45,15 @@ _CATEGORY_PACKS: dict[str, str] = {
     "projects": "projects",
     "coordination": "coordination",
     "host_access": "host",
+    "processes": "processes",
     "browser": "browser",
     "automations": "automations",
     "web": "web",
-    "google": "google",
+    "email": "email",
+    "microsoft": "microsoft",
+    "microsoft_mail": "microsoft_mail",
+    "microsoft_calendar": "microsoft_calendar",
+    "microsoft_files": "microsoft_files",
 }
 
 
@@ -106,6 +116,20 @@ def is_reachable(name: str) -> bool:
     return _reachable(TOOL_CATALOG.get(name))
 
 
+def serious_effect_recorded_names() -> tuple[str, ...]:
+    """Return every harness spelling whose catalog effect proposes Serious."""
+    canonical = {name for name, entry in TOOL_CATALOG.items() if entry.serious_effect}
+    recorded = canonical | {f"{MCP_CORSIA_PREFIX}{name}" for name in canonical}
+    recorded.update(alias for alias, name in CC_BUILTIN_ALIASES.items() if name in canonical)
+    return tuple(sorted(recorded))
+
+
+def has_serious_effect(name: str | None) -> bool:
+    """Return whether a harness-recorded tool effect proposes Serious triage."""
+    entry = TOOL_CATALOG.get(normalize_tool_name(name)) if name else None
+    return bool(entry and entry.serious_effect)
+
+
 def tool_pack(name: str) -> str | None:
     """Return the pack id of a reachable non-core tool, else ``None``."""
     entry = TOOL_CATALOG.get(name)
@@ -124,15 +148,27 @@ def pack_members() -> dict[str, tuple[str, ...]]:
     return {pack: tuple(names) for pack, names in members.items()}
 
 
+def pack_index_lines(pack: str, names: tuple[str, ...]) -> list[str]:
+    """One pack's index lines: its header, named tools, then a count of account-bound ones."""
+    if not names:
+        return []
+    named = [name for name in names if not TOOL_CATALOG[name].account_bound]
+    lines = [f"[{pack}] {TOOL_PACKS[pack]}"]
+    lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in named)
+    if bound := len(names) - len(named):
+        lines.append(f'- {bound} more for a connected account: tools_load(pack="{pack}")')
+    return lines
+
+
 def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
     """Return the one provider-facing tool list for every harness.
 
     Native, Claude Code (MCP bridge) and Codex (dynamic tools) all send
     exactly this: registered core tools and explicitly always-loaded configured
     MCP tools, sorted by name, each a detached copy. Other tools stay reachable
-    through ``tools_load`` and
-    ``tool_call``, so the list changes only when the registry does: an MCP
-    approved connected-app runtime changes are the only source of such updates.
+    through ``tools_load`` and ``tool_call``, so the list changes only when the
+    registry does: an MCP approved connected-app runtime changes are the only
+    source of such updates.
     """
     definitions = []
     for definition in registry.get_definitions():
@@ -146,5 +182,19 @@ def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
             if not (tool is not None and tool.user_configured and tool.always_advertised):
                 continue
         definitions.append(deepcopy(definition))
+    definitions.sort(key=lambda definition: definition["function"]["name"])
+    return tuple(definitions)
+
+
+def fork_tool_definitions(
+    registry: ToolRegistry, tool_allowlist: frozenset[str],
+) -> tuple[dict, ...]:
+    """Disclose only a disposable fork's fixed tools through the catalog boundary."""
+    source = registry.get_definitions()
+    definitions = [
+        deepcopy(definition)
+        for definition in source
+        if definition["function"]["name"] in tool_allowlist
+    ]
     definitions.sort(key=lambda definition: definition["function"]["name"])
     return tuple(definitions)

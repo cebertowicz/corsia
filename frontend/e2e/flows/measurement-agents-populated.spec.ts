@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings } from '../support/corsia';
 import { createProject, selectProjectScope } from '../support/measurement-fixture';
 
@@ -101,19 +102,19 @@ async function openMeasurement(page: import('@playwright/test').Page, project: {
 	// Below 768px the rail is a drawer that closed itself when Settings opened.
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
-	// The Agents table belongs to a project's scope, reached from the page's Scope select.
+	// The Agents table belongs to a project's scope, reached from the page's Showing select.
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);
 	await selectProjectScope(page, project.name);
-	await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 	const table = page.getByRole('region', { name: /Agents table/ });
 	await expect(table.locator('tbody tr')).toHaveCount(3);
 }
 
 /** Back to All work through the scope picker: the table gives way. */
 async function backToAllWork(page: import('@playwright/test').Page): Promise<void> {
-	await page.getByRole('button', { name: /Measurement scope:/ }).click();
+	await page.getByRole('button', { name: /Showing:/ }).click();
 	await page.getByRole('option', { name: 'All work' }).click();
-	await expect(page.getByRole('button', { name: 'Measurement scope: All work', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Showing: All work', exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);
 }
 

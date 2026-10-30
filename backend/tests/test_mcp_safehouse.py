@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +37,7 @@ for line in sys.stdin:
             {"name": "read_private_link", "description": "probe linked private files", "inputSchema": {"type": "object", "properties": {}}},
             {"name": "manage_child", "description": "spawn signal and wait", "inputSchema": {"type": "object", "properties": {}}},
             {"name": "write_shell_envelope", "description": "attempt generated profile rewrite", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "write_path", "description": "attempt a configured cache write", "inputSchema": {"type": "object", "properties": {}}},
         ]})
     elif method == "tools/call":
         name = request["params"]["name"]
@@ -44,14 +45,14 @@ for line in sys.stdin:
             child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
             child.send_signal(signal.SIGTERM)
             respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
-        elif name == "write_shell_envelope":
-            target = os.environ["MCP_ENVELOPE_WRITE_TARGET"]
+        elif name in {"write_shell_envelope", "write_path"}:
+            target = os.environ["MCP_ENVELOPE_WRITE_TARGET" if name == "write_shell_envelope" else "MCP_WRITE_TARGET"]
             try:
                 open(target, "w", encoding="utf-8").write("(allow default)")
             except OSError as error:
                 respond(request["id"], text(str(error), is_error=True))
             else:
-                respond(request["id"], text(f"unexpected generated profile write: {target}"))
+                respond(request["id"], text(f"wrote: {target}"))
         else:
             reports = []
             denied = False
@@ -112,18 +113,124 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     _workspace, state = _configure_roots(monkeypatch, tmp_path, symlinked=True)
     lexical = tmp_path / "state-link"
     profile = mcp_private_state_profile(
-        tmp_path / "generated.sb", Path("/usr/local/bin/safehouse"), lexical,
+        tmp_path / "generated.sb", Path("/usr/local/bin/safehouse"), lexical, tmp_path / "mcp-cache" / "app",
     )
 
     assert profile.startswith("(allow default)\n")
     assert f'(subpath "{lexical}")' in profile
     assert f'(subpath "{state}")' in profile
     assert f'(subpath "{state / "keys"}")' in profile
-    for prefix in ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-"):
-        assert f'^/tmp/{prefix}[^/]*\\.sb$' in profile
-        assert f'^/private/tmp/{prefix}[^/]*\\.sb$' in profile
+    from tools.managed_runtime import application_cache_root
+
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
+
+
+def test_mcp_profile_denies_the_cache_parent_but_allows_own_cache(monkeypatch, tmp_path):
+    from tools.managed_runtime import application_cache_root
+    from tools.mcp_local_transport import mcp_cache_root
+    from tools.safehouse_launch import mcp_private_state_profile
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    own_cache = mcp_cache_root() / "app-a"
+    profile = mcp_private_state_profile(
+        tmp_path / "generated.sb", tmp_path / "safehouse", tmp_path / "state", own_cache,
+    )
+
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in profile
+    assert f'(allow file-write* (subpath "{own_cache}"))' in profile
+
+
+@pytest.mark.parametrize("name", ["..", "../..", "app-a/nested", "/tmp/elsewhere"])
+def test_app_cache_must_be_one_directory_inside_the_cache_root(monkeypatch, tmp_path, name):
+    from tools.mcp_config import MCPConfigError
+    from tools.mcp_local_transport import _mcp_cache_dir
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    with pytest.raises(MCPConfigError, match="one directory inside the MCP cache root"):
+        _mcp_cache_dir(name, tmp_path / "workspace", tmp_path / "state")
+
+
+def test_configured_app_path_keeps_system_dirs_after_its_own(monkeypatch, tmp_path):
+    from tools import mcp_local_transport as transport
+
+    _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+    monkeypatch.setattr("tools.safehouse_launch.mcp_private_state_profile", lambda *_args: "(version 1)")
+    own = str(tmp_path / "own-bin")
+
+    params, profile = transport.safehouse_stdio_parameters(
+        "app", {"connected_app_id": "app"}, sys.executable, [], {"PATH": f"{own}:/bin"},
+    )
+    profile.unlink(missing_ok=True)
+
+    assert params.env["PATH"].split(":") == [own, "/bin", "/usr/bin", "/usr/sbin", "/sbin"]
+
+
+@pytest.mark.parametrize("base_in_private_root", (False, True))
+def test_uvx_uses_only_an_unprotected_base_python(monkeypatch, tmp_path, base_in_private_root):
+    from tools import mcp_local_transport as transport
+
+    _configure_roots(monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    venv_python = home / ".corsia" / ".venv" / "bin" / "python"
+    base_python = venv_python if base_in_private_root else tmp_path / "python3.11"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(transport.sys, "executable", str(venv_python))
+    monkeypatch.setattr(transport.sys, "_base_executable", str(base_python), raising=False)
+    monkeypatch.setattr(transport.shutil, "which", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.managed_runtime.command_path", lambda *_args, **_kwargs: "/runtime/uvx")
+    monkeypatch.setattr("tools.managed_runtime.command_bin_dir", lambda *_args, **_kwargs: Path("/runtime"))
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+    monkeypatch.setattr("tools.safehouse_launch.mcp_private_state_profile", lambda *_args: "(version 1)")
+
+    params, profile = transport.safehouse_stdio_parameters(
+        "app", {"connected_app_id": "app"}, "uvx", [], {},
+    )
+    profile.unlink(missing_ok=True)
+
+    assert params.env["UV_NO_MANAGED_PYTHON"] == "1"
+    if base_in_private_root:
+        assert "UV_PYTHON" not in params.env
+    else:
+        assert params.env["UV_PYTHON"] == str(base_python)
+
+
+def test_launch_time_runtime_download_failure_keeps_its_class(monkeypatch, tmp_path):
+    from tools import mcp_local_transport as transport
+    from tools.managed_runtime import ManagedRuntimeDownloadError
+    from tools.mcp import mcp_failure_class
+
+    def fail_download(*_args, **_kwargs):
+        raise ManagedRuntimeDownloadError("download failed: URLError")
+
+    _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(transport.shutil, "which", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.managed_runtime.command_path", fail_download)
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+
+    with pytest.raises(ManagedRuntimeDownloadError) as raised:
+        transport.safehouse_stdio_parameters("app", {"connected_app_id": "app"}, "npx", [], {})
+
+    assert mcp_failure_class(raised.value, {}) == "runtime_download_failed"
+
+
+def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
+    from infra import config
+    from tools.host_path_policy import current_protected_host_path_policy
+    from tools.managed_runtime import application_cache_root
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(config, "STATE_ROOT", tmp_path / "state")
+    policy = current_protected_host_path_policy()
+
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in policy.sandbox_rules()
 
 
 def test_mcp_envelope_dir_is_agent_shell_denied(monkeypatch, tmp_path):
@@ -237,15 +344,15 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
     key_path.write_text(secret, encoding="utf-8")
     db_path = state / "corsia.db"
     db_path.write_text("database-private", encoding="utf-8")
+    envelope_dir = state / "runtime" / "shell-envelopes"
+    envelope_dir.mkdir(parents=True)
     app = tmp_path / "server.py"
     app.write_text(_PYTHON_SERVER, encoding="utf-8")
     config = {"command": sys.executable, "args": [str(app)], "env": {
         "MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path),
         "MCP_KEY_LINK_PATH": str(tmp_path / "state-link" / "keys" / "value"),
         "MCP_DB_LINK_PATH": str(tmp_path / "state-link" / "corsia.db"),
-        "MCP_ENVELOPE_WRITE_TARGET": str(
-            Path(tempfile.gettempdir()) / "corsia-shell-envelope-mcp-test.sb",
-        ),
+        "MCP_ENVELOPE_WRITE_TARGET": str(envelope_dir / "corsia-shell-envelope-mcp-test.sb"),
     }}
 
     registry = ToolRegistry()
@@ -261,7 +368,8 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
     assert "CORSIA private state is blocked for local MCP apps" in read_result or "Stored secrets are closed" in read_result
     assert "CORSIA private state is blocked for local MCP apps" in link_read_result or "Stored secrets are closed" in link_read_result
     assert json.loads(child_result)["returncode"] == -15
-    assert "Operation not permitted" in rewrite_result
+    assert "CORSIA private state is blocked for local MCP apps" in rewrite_result
+    assert not (envelope_dir / "corsia-shell-envelope-mcp-test.sb").exists()
 
 
 @pytest.mark.integration
@@ -300,11 +408,158 @@ async def test_local_mcp_safehouse_real_launches(monkeypatch, tmp_path, name, co
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_local_mcp_safehouse_blocks_cross_app_cache_writes(monkeypatch, tmp_path):
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    from tools.mcp_local_transport import _mcp_app_id, _mcp_cache_dir
+
+    app = tmp_path / "server.py"
+    app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    app_a_cache = _mcp_cache_dir(_mcp_app_id("app_a"), workspace, state)
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        errors = await connect_mcp_servers(
+            {
+                "app_a": {"command": sys.executable, "args": [str(app)], "env": {
+                    "MCP_WRITE_TARGET": str(app_a_cache / "self-write"),
+                }},
+                "app_b": {"command": sys.executable, "args": [str(app)], "env": {
+                    "MCP_WRITE_TARGET": str(app_a_cache / "cross-write"),
+                }},
+            },
+            registry,
+            stack,
+        )
+        assert errors == {}
+        assert "wrote:" in await registry.get("mcp_app_a_write_path").execute()
+        assert "Operation not permitted" in await registry.get("mcp_app_b_write_path").execute()
+    assert (app_a_cache / "self-write").exists()
+    assert not (app_a_cache / "cross-write").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_connects_each_app_separately_but_blocks_all_other_caches(monkeypatch, tmp_path):
+    """Production's one-app-at-a-time path cannot weaken app-cache isolation."""
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    from infra import state as infra_state
+    from tools import mcp_runtime
+    from tools.mcp_local_transport import _mcp_cache_dir
+    from tools.registry import ToolRegistry
+
+    app = tmp_path / "server.py"
+    app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    app_a_cache = _mcp_cache_dir("app-a", workspace, state)
+    never_connected_cache = _mcp_cache_dir("never-connected", workspace, state)
+    # A cache left by an earlier connect: without it the write fails on the
+    # missing directory and never reaches the Safehouse rule under test.
+    never_connected_cache.mkdir(parents=True, exist_ok=True)
+    configs = {
+        "app-a": ("app_a", {"connected_app_id": "app-a", "command": sys.executable, "args": [str(app)], "env": {
+            "MCP_WRITE_TARGET": str(app_a_cache / "self-write"),
+        }}),
+        "app-b": ("app_b", {"connected_app_id": "app-b", "command": sys.executable, "args": [str(app)], "env": {
+            "MCP_WRITE_TARGET": str(app_a_cache / "cross-write"),
+        }}),
+    }
+
+    async def run_in_db(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return configs[args[0]]
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_configs", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(mcp_runtime, "_stopped", False)
+    monkeypatch.setattr(mcp_runtime, "run_in_db", run_in_db)
+    monkeypatch.setattr(infra_state, "_agent", None)
+
+    try:
+        assert (await mcp_runtime.apply_connected_app_runtime("connect", "app-a"))["state"] == "working"
+        assert "wrote:" in await mcp_runtime._registry.get("mcp_app_a_write_path").execute()
+        assert (await mcp_runtime.apply_connected_app_runtime("connect", "app-b"))["state"] == "working"
+        denied_a = await mcp_runtime._registry.get("mcp_app_b_write_path").execute()
+        configs["app-b"][1]["env"]["MCP_WRITE_TARGET"] = str(never_connected_cache / "cross-write")
+        assert (await mcp_runtime.apply_connected_app_runtime("restart", "app-b"))["state"] == "working"
+        denied_never = await mcp_runtime._registry.get("mcp_app_b_write_path").execute()
+    finally:
+        await mcp_runtime.stop_mcp_runtime()
+
+    assert "Operation not permitted" in denied_a
+    assert "Operation not permitted" in denied_never
+    assert (app_a_cache / "self-write").exists()
+    assert not (app_a_cache / "cross-write").exists()
+    assert not (never_connected_cache / "cross-write").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target_name", ("cache-parent", "runtime", "launch-parent", "launch-tree"))
+def test_agent_shell_safehouse_refuses_runtime_and_launch_cache_writes(monkeypatch, tmp_path, target_name):
+    _require_safehouse()
+    from tools.managed_runtime import application_cache_root, runtime_cache_root
+    from tools.mcp_local_transport import mcp_cache_root
+    from tools.shell_guard import _terminal_boundary_profile, safehouse_argv
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    cache_parent = application_cache_root()
+    launch_parent = mcp_cache_root()
+    launch_tree = launch_parent / "app-a"
+    runtime = runtime_cache_root()
+    for directory in (cache_parent, launch_parent, launch_tree, runtime):
+        directory.mkdir(parents=True, exist_ok=True)
+    targets = {
+        "cache-parent": cache_parent / "agent-write",
+        "runtime": runtime / "agent-write",
+        "launch-parent": launch_parent / "agent-write",
+        "launch-tree": launch_tree / "agent-write",
+    }
+    profile_path = tmp_path / "agent.sb"
+    profile_path.write_text(_terminal_boundary_profile(profile_path, workspace, leased=False), encoding="utf-8")
+
+    result = subprocess.run(
+        safehouse_argv(f'printf denied > "{targets[target_name]}"', workspace, profile_path),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Operation not permitted" in result.stdout + result.stderr
+    assert not targets[target_name].exists()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
     _require_safehouse()
-    if shutil.which("uvx") is None:
-        pytest.fail("uvx is required for the L3 Safehouse proof")
+    # Ignore any runner uvx so this launch proves C6 fetches its own pinned,
+    # checksum-verified uv runtime without a test-specific CI installation.
     _configure_roots(monkeypatch, tmp_path)
+    from tools import safehouse_launch
+    from tools.managed_runtime import runtime_cache_root
+
+    launched = []
+    direct_launch = safehouse_launch.direct_safehouse_argv
+
+    def capture_launch(command, *args, **kwargs):
+        launched.append(Path(command).resolve(strict=False))
+        return direct_launch(command, *args, **kwargs)
+
+    monkeypatch.setattr(safehouse_launch, "direct_safehouse_argv", capture_launch)
     package = tmp_path / "uvx-package"
     package.mkdir()
     (package / "pyproject.toml").write_text(
@@ -313,5 +568,12 @@ async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     (package / "mcp_floor_uvx.py").write_text(_PYTHON_SERVER + "\ndef main():\n    pass\n", encoding="utf-8")
-    registry = await _connect("uvx", {"command": "uvx", "args": ["--from", str(package), "mcp-floor-uvx"]})
+    registry = await _connect("uvx", {
+        "command": "uvx",
+        "args": ["--from", str(package), "mcp-floor-uvx"],
+        "env": {"PATH": str(tmp_path / "no-host-uvx")},
+    })
     assert await registry.get("mcp_uvx_manage_child").execute()
+    assert len(launched) == 1
+    assert launched[0].name == "uvx"
+    assert launched[0].is_relative_to(runtime_cache_root())

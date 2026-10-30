@@ -2,9 +2,11 @@ import { writable, derived, get } from 'svelte/store';
 import { token } from './auth';
 import { providers as providersStore, type ProviderEntry } from './providers';
 import { networkServers, loadNetworkServers, type NetworkServer } from './networkServers';
-import { fetchCatalogInventory, harnessSummaries, type HarnessSummary } from './harnessProviders';
+import { fetchCatalogInventory, harnessProviderModels, harnessSummaries, type HarnessSummary } from './harnessProviders';
+import { HARNESSES } from './harnessMembership';
+import { seedProviderModels } from './providerModels';
 import { readWorkspaceModels } from './modelsLoad';
-import { vendorAccounts } from './vendorAccounts';
+import { vendorAccounts, visibleVendorAccounts } from './vendorAccounts';
 
 const BASE = '';
 const t = () => get(token) || '';
@@ -47,17 +49,15 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
-// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
-// canonical display owner and derives the account-sensitive harness card text from it.
+// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the canonical display
+// owner: harness card text follows accounts, and each server row is read live from `networkServers`.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
-export const hostGroups = derived(
-	[hostGroupSnapshot, vendorAccounts],
-	([$snapshot, $accounts]) => $snapshot.map((group) => ({
-		...group,
-		providers: group.providers.map((provider) => provider.type === 'harness' && provider.harnessModelCount != null
-			? { ...provider, subline: _harnessSubline(provider.name, provider.harnessModelCount, $accounts) }
-			: provider),
-	})),
+export const hostGroups = derived([hostGroupSnapshot, vendorAccounts, networkServers], ([$snapshot, $accounts, $servers]) =>
+	$snapshot.map((group) => ({ ...group, providers: group.providers.map((provider) => {
+		const live = provider.server ? { ...provider, server: $servers.find((row) => row.id === provider.server?.id) ?? provider.server } : provider;
+		return live.type === 'harness' && live.harnessModelCount != null
+			? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) } : live;
+	}) })),
 );
 export const hostGroupsLoading = writable(false);
 /** Set when the Claude Code and Codex cards could not load, so an absent card is never read as "no models". */
@@ -81,7 +81,7 @@ function _modelCountLabel(count: number): string {
 }
 
 function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts)): string {
-	const accountCount = accounts.filter((account) => account.provider === name && account.state !== 'removed').length;
+	const accountCount = visibleVendorAccounts(accounts, name, []).length;
 	return accountCount > 0 ? `${accountCount} account${accountCount === 1 ? '' : 's'} · ${_modelCountLabel(modelCount)}` : _modelCountLabel(modelCount);
 }
 
@@ -92,8 +92,8 @@ function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
 	return 'idle';
 }
 
-function _labelForServerProvider(s: NetworkServer, raw: ProviderEntry | undefined): string {
-	if (s.provider === 'omlx') return 'oMLX';
+function _labelForServerProvider(s: NetworkServer, raw?: ProviderEntry, local = false): string {
+	if (s.provider === 'omlx') return (local && s.instance_name) || 'oMLX';
 	if (s.kind === 'external') {
 		return s.dialect === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
 	}
@@ -114,7 +114,7 @@ function _serverProvider(
 	const raw = providers.find(p => p.name === s.provider);
 	return {
 		name: s.provider,
-		label: _labelForServerProvider(s, raw),
+		label: _labelForServerProvider(s, raw, type === 'local'),
 		type,
 		statusDot: _statusDotForServer(s),
 		subline: _networkSubline(s),
@@ -164,7 +164,7 @@ export function groupByHost(
 	const localServerProviders: HostProvider[] = localServers.map(s => _serverProvider(s, providers, 'local'));
 
 	if (localServerProviders.length) {
-		const deviceName = resources?.device_name?.trim() || 'This Mac';
+		const deviceName = resources?.device_name?.trim() || 'This computer';
 		groups.push({
 			key: 'this-mac',
 			name: deviceName,
@@ -219,7 +219,7 @@ export function groupByHost(
 		groups.push({
 			key: 'agent-clis',
 			name: 'Agent CLIs',
-			subname: 'Run by the CLI on this Mac',
+			subname: 'Run by the CLI on this computer',
 			netKind: 'localhost',
 			providers: harnesses.map(h => ({
 				name: h.name,
@@ -238,7 +238,7 @@ export function groupByHost(
 
 function _thisMacSubname(r: HostResources | null): string {
 	if (!r) return 'localhost';
-	return `${r.total_gb.toFixed(0)} GB total · ${r.free_gb.toFixed(0)} GB free`;
+	return `${r.total_gb.toFixed(0)} GB memory`;
 }
 
 function _remoteHostSubname(s: NetworkServer): string {
@@ -280,6 +280,7 @@ export async function loadHostGroups(): Promise<void> {
 				},
 			),
 		]);
+		if (harnessData) HARNESSES.forEach(({ name }) => seedProviderModels(name, undefined, harnessProviderModels(harnessData.inventory, name, harnessData.catalog)));
 		const provs = get(providersStore);
 		const servers = get(networkServers);
 		hostGroupSnapshot.set(groupByHost(provs, servers, resources, harnessData ? harnessSummaries(harnessData.inventory, harnessData.catalog) : []));

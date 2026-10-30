@@ -7,18 +7,204 @@ vi.mock('y-indexeddb', () => ({ IndexeddbPersistence: class {
 	constructor(name: string, doc: unknown) { return factory.create(name, doc); }
 } }));
 
-function persistence() {
-	const transactions: (EventTarget & { mode: string; error: Error | null })[] = [];
-	const db = new EventTarget() as EventTarget & { transaction: (...args: any[]) => any };
+type FakeTransaction = EventTarget & { mode: string; error: Error | null };
+type FakeDb = EventTarget & { transaction: (...args: any[]) => FakeTransaction };
+
+/** Only readwrite transactions are recorded. A readonly one starts after every earlier writer ends, as IndexedDB orders overlapping scopes. */
+function fakeDb(transactions: FakeTransaction[], probe: 'complete' | 'abort' = 'complete'): FakeDb {
+	const db = new EventTarget() as FakeDb;
+	const writers: Promise<void>[] = [];
 	db.transaction = vi.fn((_stores: string[], mode = 'readonly') => {
-		const transaction = Object.assign(new EventTarget(), { mode, error: null });
+		const transaction = Object.assign(new EventTarget(), { mode, error: null as Error | null });
+		if (mode === 'readonly') {
+			void Promise.all(writers).then(() => {
+				if (probe === 'abort') transaction.error = new Error('probe aborted');
+				transaction.dispatchEvent(new Event(probe));
+			});
+			return transaction;
+		}
 		transactions.push(transaction);
+		writers.push(new Promise<void>(resolve => {
+			for (const name of ['complete', 'abort']) transaction.addEventListener(name, () => resolve(), { once: true });
+		}));
 		return transaction;
 	});
+	return db;
+}
+
+function persistence() {
+	const transactions: FakeTransaction[] = [];
+	const db = fakeDb(transactions);
 	const provider = { _db: Promise.resolve(db), whenSynced: Promise.resolve(), destroy: vi.fn(async () => {}), clearData: vi.fn() };
 	factory.create.mockReturnValue(provider);
 	return { db, provider, transactions };
 }
+
+/** Behaves like y-indexeddb: its fetch is a readwrite transaction that stores the doc state and is opened before the DeviceDocument can observe the connection; `synced` fires before it commits. */
+function fakeIndexeddb(stored: Map<string, Uint8Array[]>, transactions: FakeTransaction[], options: { holdFetch?: boolean; probe?: 'complete' | 'abort' } = {}) {
+	return (name: string, doc: Y.Doc) => {
+		const db = fakeDb(transactions, options.probe);
+		const provider: Record<string, unknown> = { destroy: vi.fn(async () => {}), clearData: vi.fn() };
+		provider._db = Promise.resolve(db);
+		provider.whenSynced = (provider._db as Promise<FakeDb>).then(() => {
+			const state = Y.encodeStateAsUpdate(doc);
+			const fetch = db.transaction(['updates'], 'readwrite');
+			fetch.addEventListener('complete', () => stored.set(name, [...(stored.get(name) ?? []), state]), { once: true });
+			if (!options.holdFetch) queueMicrotask(() => fetch.dispatchEvent(new Event('complete')));
+			for (const update of stored.get(name) ?? []) Y.applyUpdate(doc, update, provider);
+		});
+		doc.on('update', (update: Uint8Array, origin: unknown) => {
+			if (origin === provider) return;
+			db.transaction(['updates'], 'readwrite').addEventListener('complete', () => {
+				stored.set(name, [...(stored.get(name) ?? []), update]);
+			});
+		});
+		return provider;
+	};
+}
+
+const settle = () => new Promise<void>(resolve => setTimeout(resolve));
+
+function deferredSync() {
+	let release: () => void = () => {};
+	let reject: (error: Error) => void = () => {};
+	const whenSynced = new Promise<void>((resolve, fail) => { release = resolve; reject = fail; });
+	const { db, provider, transactions } = persistence();
+	provider.whenSynced = whenSynced;
+	return { db, provider, transactions, release, reject };
+}
+
+describe('device copy saved after sync', () => {
+	it('is saved on reopen with unchanged content and no further write', async () => {
+		const stored = new Map<string, Uint8Array[]>();
+		const transactions: FakeTransaction[] = [];
+		factory.create.mockImplementation(fakeIndexeddb(stored, transactions));
+		const firstDoc = new Y.Doc();
+		const first = new DeviceDocument('artifact', 'store', firstDoc);
+		await first.ready;
+		firstDoc.getText('text').insert(0, 'kept text');
+		expect(first.saved).toBe(false);
+		transactions.at(-1)?.dispatchEvent(new Event('complete'));
+		expect(first.saved).toBe(true);
+		await first.destroy();
+
+		const writes = transactions.length;
+		const secondDoc = new Y.Doc();
+		const second = new DeviceDocument('artifact', 'store', secondDoc);
+		await second.ready;
+		expect(secondDoc.getText('text').toString()).toBe('kept text');
+		expect(transactions).toHaveLength(writes + 1); // only the library's own fetch
+		expect(second.saved).toBe(true);
+		expect(second.error).toBe('');
+	});
+
+	it('is saved on a fresh store once the first write completes', async () => {
+		const transactions: FakeTransaction[] = [];
+		factory.create.mockImplementation(fakeIndexeddb(new Map(), transactions));
+		const doc = new Y.Doc();
+		const copy = new DeviceDocument('artifact', 'fresh', doc);
+		await copy.ready;
+		doc.getText('text').insert(0, 'server text');
+		expect(copy.saved).toBe(false);
+		transactions.at(-1)?.dispatchEvent(new Event('complete'));
+		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved while a write began before the sync resolved, until it completes', async () => {
+		const { db, release, transactions } = deferredSync();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await settle();
+		db.transaction(['updates'], 'readwrite');
+		release();
+		await settle();
+		expect(copy.saved).toBe(false);
+		transactions.at(-1)?.dispatchEvent(new Event('complete'));
+		await copy.ready;
+		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved while the library fetch is still writing the in-memory state, then saves', async () => {
+		const stored = new Map<string, Uint8Array[]>();
+		const transactions: FakeTransaction[] = [];
+		factory.create.mockImplementation(fakeIndexeddb(stored, transactions, { holdFetch: true }));
+		const doc = new Y.Doc();
+		doc.getText('text').insert(0, 'only in memory');
+		const copy = new DeviceDocument('artifact', 'store', doc);
+		await settle();
+		expect(transactions).toHaveLength(1);
+		expect(copy.saved).toBe(false);
+		expect(stored.get('corsia-document:artifact:store')).toBeUndefined();
+		transactions[0].dispatchEvent(new Event('complete'));
+		await copy.ready;
+		expect(stored.get('corsia-document:artifact:store')).toHaveLength(1);
+		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved with the error when the storage check aborts', async () => {
+		factory.create.mockImplementation(fakeIndexeddb(new Map(), [], { probe: 'abort' }));
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await copy.ready;
+		expect(copy.error).toBe('probe aborted');
+		expect(copy.saved).toBe(false);
+	});
+
+	it('goes unsaved when a write begins after the sync and saved again when it completes', async () => {
+		const { db, transactions } = persistence();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await copy.ready;
+		expect(copy.saved).toBe(true);
+		db.transaction(['updates'], 'readwrite');
+		expect(copy.saved).toBe(false);
+		transactions.at(-1)?.dispatchEvent(new Event('complete'));
+		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved when a device error precedes a later sync', async () => {
+		const { db, release } = deferredSync();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await settle();
+		const failed = db.transaction(['updates'], 'readwrite');
+		failed.error = new DOMException('quota full', 'QuotaExceededError');
+		failed.dispatchEvent(new Event('abort'));
+		await copy.ready;
+		release();
+		await settle();
+		expect(copy.error).toContain('quota full');
+		expect(copy.saved).toBe(false);
+	});
+
+	it('stays unsaved when the database closed before the sync', async () => {
+		const { db, release } = deferredSync();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await settle();
+		db.dispatchEvent(new Event('close'));
+		release();
+		await copy.ready;
+		await settle();
+		expect(copy.error).toBe('Device storage closed');
+		expect(copy.saved).toBe(false);
+	});
+
+	it('stays unsaved when the sync rejects', async () => {
+		const { reject } = deferredSync();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await settle();
+		reject(new Error('sync failed'));
+		await copy.ready;
+		expect(copy.error).toBe('sync failed');
+		expect(copy.saved).toBe(false);
+	});
+
+	it('stays unsaved when the copy is destroyed before the sync resolves', async () => {
+		const { release } = deferredSync();
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await settle();
+		await copy.destroy();
+		release();
+		await copy.ready;
+		expect(copy.saved).toBe(false);
+	});
+});
 
 describe('device copy durability', () => {
 	it('claims device storage only after every write transaction completes', async () => {

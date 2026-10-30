@@ -295,6 +295,18 @@ def test_the_index_and_the_series_start_coverage_on_the_same_local_day(isolated_
             "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
             "VALUES ('steve','project-level',NULL,'one','2026-09-21T03:00:00Z','2026-09-21T04:00:00Z',3600,1,'hidden')"
         )
+        _seed_thread(db, "size-root")
+        db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('size-plan','thread','size-root','active',1,'t','t')")
+        from tests.plan_writer_authorizer import raw_plan_seed
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,size,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                "VALUES ('size-node','size-plan',NULL,1,'task','task','done','accepted','M','size-node',1,1,'t','t')"
+            )
+            db.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES ('size-event','size-node','test','accepted','active','accepted','2026-09-21T03:00:00Z')"
+            )
         db.commit()
         series_start = first_presence_period(db, "steve", resolve_grain("days", "America/Los_Angeles"))
     finally:

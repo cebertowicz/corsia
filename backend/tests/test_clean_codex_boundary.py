@@ -22,9 +22,9 @@ def _steer_target():
 
 
 def _steer_session(steer, **kwargs):
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    return SimpleNamespace(steer=steer, tool_context=CodexCheckpointContext(_steer_target(), 100),
+    return SimpleNamespace(steer=steer, tool_context=CodexForkContext(_steer_target(), 100),
                            **kwargs)
 
 
@@ -441,7 +441,7 @@ async def test_codex_tool_boundary_updates_widget_with_exact_handle_identity(
         "make_on_event",
         lambda *_args, **_kwargs: AsyncMock(),
     )
-    monkeypatch.setattr(delivery, "_schedule_safe_boundary", lambda _sid: None)
+    monkeypatch.setattr(delivery, "schedule_safe_boundary", lambda _sid: None)
     casts: list[tuple[str, dict]] = []
     on_event = delivery.runtime_event_handler(
         live, "thread-1", lambda *args: casts.append(args),
@@ -501,7 +501,7 @@ async def test_codex_queued_tool_boundary_keeps_ingress_usage_and_turn(
         "make_on_event",
         lambda *_args, **_kwargs: AsyncMock(),
     )
-    monkeypatch.setattr(delivery, "_schedule_safe_boundary", lambda _sid: None)
+    monkeypatch.setattr(delivery, "schedule_safe_boundary", lambda _sid: None)
     release = asyncio.Event()
     prior = asyncio.create_task(release.wait())
     live.delivery_event_gate = asyncio.Event()

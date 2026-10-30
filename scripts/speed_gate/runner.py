@@ -39,6 +39,10 @@ def _env(root: Path) -> dict[str, str]:
     env.update({"CORSIA_WORKSPACE": str(workspace), "CORSIA_STATE_DIR": str(state), "CORSIA_TEST_MODE": "1",
                 "CORSIA_ANALYTICS_DISABLE": "1", "PYTHONPATH": str(PACKAGE_ROOT), "HOME": str(home),
                 "PATH": SYSTEM_PATH,
+                # No repository: the update-status route fetches the serving checkout's remote, so on a branch its
+                # body depends on the network and the remote, while CI's detached checkout never reaches it.
+                # Every run takes the no-branch answer, here as in CI.
+                "GIT_DIR": str(root / "no-repository"),
                 # Measurement-only: one pooled connection per lane, so a call never depends on which one served it.
                 "CORSIA_DB_POOL_WORKERS": "1"})
     return env

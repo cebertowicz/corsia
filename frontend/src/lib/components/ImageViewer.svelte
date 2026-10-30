@@ -9,7 +9,7 @@
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
-	import { holdDocFeedback } from '$lib/docFeedback.svelte';
+	import { holdDocFeedback, leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -40,6 +40,8 @@
 	const artifactId = $derived(resolvedArtifactId ?? target.artifactId ?? null);
 	// The image's own batch is held by its tab, not the lightbox: a reload remounts that, and is not leaving.
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId: target.instanceId }), () => lightbox?.refresh());
+	// Leaving this image (another tab, a collapsed canvas, another thread) sends what its viewer still holds, once.
+	leaveImageOnExit(() => ({ feedback, artifactId, key: target.instanceId }));
 
 	export function reload() {
 		reloadNonce += 1;
@@ -113,11 +115,11 @@
 	{:else if imageState === 'error'}
 		<div class="load-error" role="alert">
 			<p>Couldn't load this image.</p>
-			<button type="button" class="stale-control" onclick={reload}>Try again</button>
+			<button type="button" class="stale-control" onclick={reload}>Retry</button>
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

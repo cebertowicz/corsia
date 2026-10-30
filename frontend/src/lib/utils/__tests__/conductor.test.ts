@@ -17,6 +17,9 @@ import {
 	activeModelId,
 } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
+import { composerSelectionFor } from '$lib/stores/composerSelection';
+import { applyPendingThreadModelSwitch } from '$lib/stores/threadModelSwitch';
+import { handleSessionUpdated } from '$lib/ws/handlersSession';
 
 const originalFetch = globalThis.fetch;
 
@@ -145,6 +148,114 @@ describe('fetchConductor', () => {
 		expect(get(activeModelId)).toBe('claude-code/opus');
 	});
 
+	it('shows the switch the server still holds after a reload, and clears it once it ended', async () => {
+		const read = (fields: Record<string, unknown>) => {
+			globalThis.fetch = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ thread_id: 'cond-1', target: { thread_id: 'cond-1', ...fields } }),
+			})) as unknown as typeof fetch;
+			return fetchCorsiaAgent('tok');
+		};
+		const switching = () => get(composerSelectionFor)('cond-1').switching;
+
+		await read({ pending_model: 'm/b', switch_status: 'preparing', switch_error: null, switch_operation_id: 'op-1' });
+		expect(switching()).toMatchObject({ pending_model: 'm/b', switch_status: 'preparing' });
+
+		await read({ pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room', switch_operation_id: 'op-1' });
+		expect(switching()).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+
+		// The commit landed while the page was disconnected: the read carries no switch.
+		await read({ pending_model: null, switch_status: null });
+		expect(switching()?.pending_model).toBeNull();
+		expect(switching()?.switch_status).toBeNull();
+	});
+
+	describe('a read that straddles a newer write', () => {
+		const switching = () => get(composerSelectionFor)('cond-1').switching;
+		// A read whose response is held until the test releases it.
+		function heldRead(fields: Record<string, unknown>, threadId = 'cond-1') {
+			let release: () => void = () => {};
+			const gate = new Promise<void>((resolve) => { release = resolve; });
+			globalThis.fetch = vi.fn(async () => {
+				await gate;
+				return {
+					ok: true,
+					json: async () => ({ thread_id: threadId, target: { thread_id: threadId, ...fields } }),
+				};
+			}) as unknown as typeof fetch;
+			return { done: fetchCorsiaAgent('tok'), release };
+		}
+
+		// The page has read the target once, so the thread's switch state exists for a 202 or frame to change.
+		async function seed(threadId = 'cond-1', fields: Record<string, unknown> = { pending_model: null, switch_status: null }) {
+			const first = heldRead(fields, threadId);
+			first.release();
+			await first.done;
+		}
+
+		it('does not clear a pending switch that a 202 began after the read started', async () => {
+			await seed();
+			const stale = heldRead({ pending_model: null, switch_status: null });
+			applyPendingThreadModelSwitch('cond-1', {
+				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
+			});
+			stale.release();
+			await stale.done;
+			expect(switching()).toMatchObject({ pending_model: 'm/b', switch_status: 'preparing' });
+		});
+
+		it('does not bring back a switch that a commit frame finished after the read started', async () => {
+			await seed();
+			applyPendingThreadModelSwitch('cond-1', {
+				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
+			});
+			const stale = heldRead({ pending_model: 'm/b', switch_status: 'preparing', switch_operation_id: 'op-1' });
+			handleSessionUpdated({
+				thread_id: 'cond-1', model: 'm/b', updated_at: '2026-10-28T12:00:00Z',
+				pending_model: null, switch_status: null, switch_error: null, switch_operation_id: null,
+			});
+			stale.release();
+			await stale.done;
+			expect(switching()?.pending_model).toBeNull();
+			expect(switching()?.switch_status).toBeNull();
+		});
+
+		it('keeps each thread\'s switch when the user moves between projects', async () => {
+			await seed('cond-a');
+			// Project B's conductor read is in flight while A's conductor gets a 202.
+			const readB = heldRead({ pending_model: null, switch_status: null }, 'cond-b');
+			applyPendingThreadModelSwitch('cond-a', {
+				operation_id: 'op-a', status: 'preparing', pending_model: 'm/a', checkpoint_required: false,
+			});
+			readB.release();
+			await readB.done;
+
+			// B's read landed, so B's later frames count; A kept its own pending switch.
+			handleSessionUpdated({ thread_id: 'cond-b', pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room' });
+			expect(get(composerSelectionFor)('cond-b').switching).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+			expect(get(composerSelectionFor)('cond-a').switching).toMatchObject({ pending_model: 'm/a', switch_status: 'preparing' });
+		});
+
+		it('keeps a conductor\'s switch when the CORSIA agent is read in a project scope', async () => {
+			await seed('cond-1', { pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room' });
+			await seed('agent-1');
+
+			expect(switching()).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+			handleSessionUpdated({ thread_id: 'cond-1', pending_model: null, switch_status: null, switch_error: null });
+			expect(switching()?.pending_model).toBeNull();
+		});
+
+		it('keeps the newer of two reads that finish out of order', async () => {
+			const older = heldRead({ pending_model: 'm/b', switch_status: 'preparing' });
+			const newer = heldRead({ pending_model: null, switch_status: null });
+			newer.release();
+			await newer.done;
+			older.release();
+			await older.done;
+			expect(switching()?.pending_model).toBeNull();
+		});
+	});
+
 	it('reports absent when the API answers with no conductor', async () => {
 		globalThis.fetch = vi.fn(async () => ({
 			ok: true,
@@ -218,12 +329,60 @@ describe('landOnFirstRun', () => {
 
 	afterEach(() => { _resetFirstRunLandingForTests(); });
 
-	it('opens the conductor once per page load', () => {
+	it('opens the conductor once per page load', async () => {
 		const open = vi.fn();
-		landOnFirstRun(pending, null, open);
-		landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
 		expect(open).toHaveBeenCalledTimes(1);
 		expect(open).toHaveBeenCalledWith('cond-w');
+	});
+
+	it('does not mark first run landed until the async opener completes', async () => {
+		let resolveOpen!: () => void;
+		const opening = new Promise<void>((resolve) => { resolveOpen = resolve; });
+		const open = vi.fn(() => opening);
+
+		const first = landOnFirstRun(pending, null, open);
+		await Promise.resolve();
+		const duplicate = landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(1);
+
+		resolveOpen();
+		await Promise.all([first, duplicate]);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(1);
+	});
+
+	it('logs and retries first-run entry after the opener fails', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const open = vi.fn()
+			.mockRejectedValueOnce(new Error('first open canceled'))
+			.mockResolvedValueOnce(undefined);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(warn).toHaveBeenCalledWith('[first run] landing failed; remains retryable');
+		expect(open).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries when the opener reports no mounted chat surface', async () => {
+		const open = vi.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries first-run entry after a synchronous opener failure', async () => {
+		const open = vi.fn()
+			.mockImplementationOnce(() => { throw new Error('first open canceled'); })
+			.mockResolvedValueOnce(undefined);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(2);
 	});
 
 	it('leaves an already open thread alone', () => {

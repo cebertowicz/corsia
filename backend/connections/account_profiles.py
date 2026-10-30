@@ -65,6 +65,9 @@ class AccountProfile:
     single_account: bool = False
     # Run the vendor's logout in the home before a sign-in, so a stale login cannot stay beside the new one.
     logout_before_login: bool = False
+    # A held login is also done once the vendor's status reads signed in, even if the login has not exited:
+    # status, not the login process, is what decides signed in.
+    status_ends_login: bool = False
 
     @property
     def stored_facts(self) -> tuple[str, ...]:
@@ -85,7 +88,7 @@ def home_root() -> Path:
 
 async def _vendor_sign_out(account: dict, source: Path, runtime: Path) -> dict:
     """Run the vendor's own logout for this account's home."""
-    from connections.account_controls import vendor_logout
+    from connections.account_cleanup import vendor_logout
 
     return await vendor_logout(account)
 
@@ -132,7 +135,8 @@ _PROFILES: dict[str, AccountProfile] = {
         identity_facts=_SHOWN_FACTS, comparison_keys=("email", "org_id"),
         status_report_keys={"email": "email", "org_name": "orgName", "org_id": "orgId", "plan": "subscriptionType"},
         clean_env=_claude_env, default_warm_home=_claude_warm_home,
-        validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out),
+        validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
+        status_ends_login=True),
     "codex": AccountProfile(
         provider="codex", label="Codex", home_variable="CODEX_HOME",
         home_root=home_root,

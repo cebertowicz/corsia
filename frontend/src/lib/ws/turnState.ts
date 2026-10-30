@@ -156,6 +156,16 @@ export function hasActiveTurn(threadId: string): boolean {
 	return getTurnState(threadId).phase === 'active';
 }
 
+/**
+ * The visible thread a running descendant Turn rolls up to (its spawned_by
+ * root, named by the server), or null when the Turn is idle or runs on the
+ * visible thread itself. The sidebar spinner and the work block both read this.
+ */
+export function rolledUpRoot(threadId: string, state: ThreadTurnState): string | null {
+	if (state.phase !== 'active' || state.visibleRootThreadId === threadId) return null;
+	return state.visibleRootThreadId;
+}
+
 export function acknowledgedTurnId(threadId: string): string | null {
 	const state = getTurnState(threadId);
 	return state.phase === 'active' ? state.turnId : null;

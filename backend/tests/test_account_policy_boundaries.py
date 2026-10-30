@@ -53,6 +53,13 @@ class _Untouched:
         raise AssertionError(f"reached .{name} after the catalog row was removed")
 
 
+class _ThreadOnly(_Untouched):
+    """A batch whose only readable field is the thread it was claimed for."""
+
+    def __init__(self, thread_id: str):
+        self.thread_id = thread_id
+
+
 @pytest.fixture
 def removed(accounts):
     """Bind each vendor thread, freeze a Turn on its account, then delete the model rows."""
@@ -332,6 +339,21 @@ def test_turn_selection_and_settings_read_one_account_order(accounts):
                                    if p["provider_key"] == "codex")["units"]]
 
     assert selection == full == units == [second["id"], default["id"]]
+
+
+def test_preloaded_accounts_keep_policy_and_removed_filter(accounts):
+    from connections.account_policy import permitted_accounts
+    from connections.provider_policy import set_policy
+    from connections.vendor_accounts import list_accounts, set_account_state
+
+    db, default, second, third = accounts
+    set_account_state(third['id'], 'removed', expected_revision=third['revision'], db=db)
+    set_policy('destination-project', 'codex', rollover=True, order=[], disabled=[second['id']],
+               expected_revision=0, db=db)
+    rows = list_accounts(provider='codex', include_removed=True, db=db)
+    loaded = permitted_accounts('codex', project_ids=['destination-project'], db=db, accounts=rows)
+    fetched = permitted_accounts('codex', project_ids=['destination-project'], db=db)
+    assert [row['id'] for row in loaded] == [row['id'] for row in fetched] == [default['id']]
 
 
 def test_unsaved_policy_skips_disabled_default_and_denies_when_all_are_disabled(accounts):
@@ -632,8 +654,10 @@ async def test_fresh_launch_refuses_as_our_own_missing_catalog_row(removed, prov
 
     db, thread, model = removed.db, THREADS[provider], MODELS[provider]
     before = _bindings(db)
-    # Send admission and the drain driver share one resolver; neither reaches the batch.
-    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, _Untouched())):
+    # Send admission and the drain driver share one resolver; neither reaches the
+    # batch beyond the thread identity its project policy is read from.
+    batch = _ThreadOnly(thread)
+    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, batch)):
         with pytest.raises(send_target.TargetUnavailable) as refused:
             await launch()
         assert refused.value.side is DeliveryFailureSide.OURS
@@ -700,7 +724,7 @@ def test_checkpoint_fork_refuses_without_a_resolved_target(removed, provider):
     # The idle fold is excluded by name and builds no target.
     reason = idle_checkpoint_exclusion_reason(db, thread, model)
     assert reason is not None and reason.name == "UNRESOLVABLE"
-    assert idle_checkpoint._resolved_target(db, model) is None
+    assert idle_checkpoint._resolved_target(db, model, thread).reason.name == "TARGET_UNAVAILABLE"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ import shutil
 import threading
 
 import pytest
+from auth_fixtures import OTHER_USER, OWNER_USER
 from doceditor.document_save import DocumentSaveError
 
 from delegation_docs_fixtures import (
@@ -98,11 +99,15 @@ async def test_overlap_skips_later_suggestion_through_every_adapter(
         quote="A unique tail sentence",
         replacement="A concise sentence",
     )
-    later = await _suggest(
-        author,
-        doc,
-        quote="unique tail sentence anchors",
-        replacement="replacement that overlaps",
+    # An agent can no longer create this overlap (it is refused at creation), but one made before that rule,
+    # or by a person, still reaches the batch, so the row is written at the store.
+    quote = "unique tail sentence anchors"
+    start = doc.read_text().index(quote)
+    from doceditor import comments
+
+    later, _ = comments.create_with_status(
+        earlier["artifact_id"], body="", author="Batch author", author_kind="agent", author_thread_id=author,
+        anchor_text=quote, from_off=start, to_off=start + len(quote), replacement="replacement that overlaps",
     )
     writes = []
     original_write = document_save._write_document
@@ -143,7 +148,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
     _registrable_roots,
     monkeypatch,
 ):
-    from doceditor import comment_actions
+    from doceditor import comment_batch_actions
 
     owner, doc = await _owned_doc(adapter, integration_client, doc)
     author = _mk_thread(integration_client, _OWNER, title="Batch author")
@@ -154,7 +159,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         quote="A unique tail sentence",
         replacement="A new tail sentence",
     )
-    original_read = comment_actions.read_doc_text
+    original_read = comment_batch_actions.read_doc_text
     concurrent_text = doc.read_text() + "\nConcurrent edit.\n"
     read_threads: list[int] = []
 
@@ -164,7 +169,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         doc.write_text(concurrent_text)
         return snapshot
 
-    monkeypatch.setattr(comment_actions, "read_doc_text", read_then_change)
+    monkeypatch.setattr(comment_batch_actions, "read_doc_text", read_then_change)
     status, result = await _decide(
         adapter,
         integration_client,
@@ -328,16 +333,28 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     doc,
     _registrable_roots,
 ):
+    from doceditor import comments
     from doceditor.comment_actions import decide_suggestion
 
-    owner, _ = await _own(integration_client, doc)
-    suggestion = await _suggest(owner, doc)
+    owner, artifact_id = await _own(integration_client, doc)
+    quote = "A unique tail sentence"
+    start = doc.read_text().index(quote)
+    suggestion, _ = comments.create_with_status(
+        artifact_id,
+        body="",
+        author="Person",
+        author_kind="user",
+        anchor_text=quote,
+        from_off=start,
+        to_off=start + len(quote),
+        replacement="A rewritten tail sentence",
+    )
     user_id = _thread_facts(owner)[0]
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
-    hashes = []
+    writes = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None):
-        hashes.append(expected_sha256)
+    async def write(_path, _text, _project, _reason, expected_sha256=None, suggestion_author=None):
+        writes.append((expected_sha256, suggestion_author))
 
     await decide_suggestion(
         suggestion["id"],
@@ -348,7 +365,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert hashes == [expected]
+    assert writes == [(expected, "Person")]
 
 
 @pytest.mark.asyncio
@@ -357,7 +374,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     doc,
     _registrable_roots,
 ):
-    from doceditor.comment_actions import decide_all_from_author
+    from doceditor.comment_batch_actions import decide_all_from_author
 
     owner, _ = await _own(integration_client, doc)
     first = await _suggest(owner, doc, quote="# Design", replacement="# New design")
@@ -371,7 +388,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     hashes = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None):
+    async def write(_path, _text, _project, _reason, expected_sha256=None, _suggestion_author=None):
         hashes.append(expected_sha256)
         return {"revision": "r2"}
 
@@ -386,3 +403,153 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
 
     assert hashes == [expected]
     assert result["revision"] == "r2"
+
+
+async def _accept_all_with_author_rows(integration_client, doc, rows):
+    from doceditor import comments
+    from doceditor.comment_batch_actions import accept_all_open
+
+    owner, artifact_id = await _own(integration_client, doc)
+    text = doc.read_text()
+    for author, author_kind, quote, replacement in rows:
+        start = text.index(quote)
+        comments.create_with_status(
+            artifact_id, body="", author=author, author_kind=author_kind,
+            author_thread_id="reviewer" if author_kind == "agent" else None,
+            anchor_text=quote, from_off=start, to_off=start + len(quote), replacement=replacement,
+        )
+    credited = []
+
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+        credited.append(suggestion_author)
+        return {"revision": "r2"}
+
+    result = await accept_all_open(
+        artifact_id, user_id=_thread_facts(owner)[0], decided_by="Acceptor", actor_thread_id=owner, write=write,
+    )
+    return result, credited
+
+
+def test_closed_batch_has_no_credit_without_accepted_suggestions():
+    from doceditor.comment_batch_actions import _accepted_user_author
+
+    assert _accepted_user_author(
+        [{"id": "skipped", "author": OTHER_USER, "author_kind": "user"}], []
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_closed_batch_credits_a_unanimous_accepted_person(
+    integration_client, doc, _registrable_roots,
+):
+    doc.write_text("# Design\n\nA unique tail sentence\n")
+    result, credited = await _accept_all_with_author_rows(
+        integration_client, doc,
+        [(OTHER_USER, "user", "# Design", "# Revised design")],
+    )
+
+    assert result["accepted"]
+    assert credited == [OTHER_USER]
+    assert OTHER_USER != OWNER_USER
+
+
+@pytest.mark.asyncio
+async def test_closed_batch_credits_the_accepted_person_when_another_row_is_skipped(
+    integration_client, doc, _registrable_roots,
+):
+    from doceditor import comments
+    from doceditor.comment_batch_actions import accept_all_open
+
+    doc.write_text("# Design\n\nA unique tail sentence\n")
+    owner, artifact_id = await _own(integration_client, doc)
+    text = doc.read_text()
+    accepted, _ = comments.create_with_status(
+        artifact_id, body="", author=OTHER_USER, author_kind="user",
+        anchor_text="# Design", from_off=0, to_off=len("# Design"), replacement="# Revised design",
+    )
+    comments.create_with_status(
+        artifact_id, body="", author=OWNER_USER, author_kind="user",
+        anchor_text="missing", from_off=text.index("A unique"), to_off=text.index("A unique") + len("A unique"),
+        replacement="Never applied",
+    )
+    credited = []
+
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+        credited.append(suggestion_author)
+        return {"revision": "r2"}
+
+    result = await accept_all_open(
+        artifact_id, user_id=_thread_facts(owner)[0], decided_by="Acceptor", actor_thread_id=owner, write=write,
+    )
+
+    assert result["accepted"] == [accepted["id"]]
+    assert len(result["skipped"]) == 1
+    assert credited == [OTHER_USER]
+
+
+@pytest.mark.asyncio
+async def test_closed_batch_credits_the_accepted_person_when_another_row_is_rejected(
+    integration_client, doc, _registrable_roots,
+):
+    from doceditor import comments
+    from doceditor.comment_actions import decide_suggestion
+    from doceditor.comment_batch_actions import accept_all_open
+
+    doc.write_text("# Design\n\nA unique tail sentence\n")
+    owner, artifact_id = await _own(integration_client, doc)
+    text = doc.read_text()
+    accepted, _ = comments.create_with_status(
+        artifact_id, body="", author=OTHER_USER, author_kind="user",
+        anchor_text="# Design", from_off=0, to_off=len("# Design"), replacement="# Revised design",
+    )
+    rejected, _ = comments.create_with_status(
+        artifact_id, body="", author=OWNER_USER, author_kind="user",
+        anchor_text="A unique tail sentence", from_off=text.index("A unique tail sentence"),
+        to_off=text.index("A unique tail sentence") + len("A unique tail sentence"),
+        replacement="A rejected tail sentence",
+    )
+
+    async def should_not_write(*_args):
+        pytest.fail("Rejecting a suggestion must not write the document")
+
+    await decide_suggestion(
+        rejected["id"], "reject", user_id=_thread_facts(owner)[0], decided_by="Acceptor",
+        actor_thread_id=owner, write=should_not_write,
+    )
+    credited = []
+
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+        credited.append(suggestion_author)
+        return {"revision": "r2"}
+
+    result = await accept_all_open(
+        artifact_id, user_id=_thread_facts(owner)[0], decided_by="Acceptor", actor_thread_id=owner, write=write,
+    )
+
+    assert result["accepted"] == [accepted["id"]]
+    assert credited == [OTHER_USER]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [
+            (OTHER_USER, "user", "# Design", "# Revised design"),
+            (OWNER_USER, "user", "A unique tail sentence", "A revised tail sentence"),
+        ],
+        [
+            (OTHER_USER, "user", "# Design", "# Revised design"),
+            ("agent-reviewer", "agent", "A unique tail sentence", "A revised tail sentence"),
+        ],
+        [("", "user", "# Design", "# Revised design")],
+    ],
+)
+async def test_closed_batch_falls_back_for_mixed_or_missing_accepted_authors(
+    integration_client, doc, _registrable_roots, rows,
+):
+    doc.write_text("# Design\n\nA unique tail sentence\n")
+    result, credited = await _accept_all_with_author_rows(integration_client, doc, rows)
+
+    assert result["accepted"]
+    assert credited == [None]

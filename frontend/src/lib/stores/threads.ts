@@ -1,4 +1,5 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
+import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -10,6 +11,7 @@ export interface Thread extends ThreadModelSwitchState {
 	account_id?: string;
 	runtime_context_epoch?: number;
 	project_id?: string | null;
+	coordination?: 'corsia' | 'conductor';
 	agent_enabled?: number | boolean | null;
 	agent_responsibility?: string | null;
 	agent_paths?: string[] | string | null;
@@ -24,6 +26,12 @@ export interface Thread extends ThreadModelSwitchState {
 	created_at: string;
 	updated_at: string;
 	last_message?: string;
+	/** Local only payload fields; `threadLocalOnly` is their one reader. */
+	local_only?: number | boolean | null;
+	local_only_effective?: boolean | null;
+	local_only_cause?: 'inherited' | 'own' | 'project' | null;
+	local_only_inherited_from_thread_id?: string | null;
+	local_only_inherited_from_title?: string | null;
 }
 
 /**
@@ -40,6 +48,9 @@ export function isNavAgent(s: Thread): boolean {
 	return enabled && active && hasResponsibility && s.spawned_by == null && !s.archived;
 }
 
+export type { ChatComment } from '../chatCommentTypes';
+import type { ChatComment } from '../chatCommentTypes';
+
 export interface Message {
 	id: string;
 	thread_id: string;
@@ -50,6 +61,8 @@ export interface Message {
 	created_at: string;
 	seq?: number | null;
 	typewriterPos?: number;
+	/** Local presentation only; never persisted or inferred from history. */
+	firstRunOpeningReveal?: boolean;
 	reasoning?: string;
 	_optimistic?: boolean;
 	delivery_state?: import('../messageDelivery').MessageDeliveryState;
@@ -62,7 +75,10 @@ export interface Message {
 	next_attempt_at?: string | null;
 	/** Artifact cards the server computed for this message when it was read (display rows only). */
 	cards?: import('../api/messageCards').MessageCard[];
-	cards_more?: number;
+	/** Server-computed transcript content after placed chat answers are removed. */
+	chat_visible_content?: string;
+	chat_comments?: ChatComment[];
+	chat_answer_cids?: string[];
 }
 
 function validDeliveryRevision(value: unknown): number | null {
@@ -100,6 +116,7 @@ export function mergeMessageDelivery(existing: Message, incoming: Message): Mess
 }
 
 export const threads = writable<Thread[]>([]);
+export const coordinationThreads = writable<Thread[]>([]);
 
 /** Demote locally but keep responsibility, paths, domains and notes so re-promoting prefills them. */
 export function demoteAgentLocally(threadId: string): void {
@@ -107,7 +124,7 @@ export function demoteAgentLocally(threadId: string): void {
 	threads.update((rows) => rows.map((r) => (r.id === threadId ? { ...r, ...off } : r)));
 }
 
-export const activeThreadId = writable<string | null>(null);
+export { activeThreadId, draftAccountId } from './activeThreadId';
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
@@ -233,8 +250,9 @@ export const reasoningEffort = writable<string | null>(null);
 
 /** Optimistically rename a thread and restore its prior title if persistence fails. */
 export async function saveThreadTitle(threadId: string, title: string, token: string): Promise<void> {
+	const target = get(coordinationThreads).some((thread) => thread.id === threadId) ? coordinationThreads : threads;
 	let previousTitle = '';
-	threads.update((rows) => rows.map((thread) => {
+	target.update((rows) => rows.map((thread) => {
 		if (thread.id !== threadId) return thread;
 		previousTitle = thread.title;
 		return { ...thread, title };
@@ -247,23 +265,10 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		});
 		if (!response.ok) throw new Error(`Rename failed (${response.status})`);
 	} catch (error) {
-		threads.update((rows) => rows.map((thread) => (
+		target.update((rows) => rows.map((thread) => (
 			thread.id === threadId ? { ...thread, title: previousTitle } : thread
 		)));
 		throw error;
-	}
-}
-
-export async function saveReasoningEffort(threadId: string, effort: string | null, token: string) {
-	threads.update(ss => ss.map(s => s.id === threadId ? { ...s, reasoning_effort: effort } : s));
-	reasoningEffort.set(effort);
-	try {
-		await fetch(`/api/threads/${threadId}?token=${token}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reasoning_effort: effort }),
-		});
-	} catch {
 	}
 }
 

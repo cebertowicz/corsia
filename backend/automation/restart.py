@@ -7,8 +7,11 @@ import asyncio
 from loguru import logger
 
 from automation.restart_messages import RESTART_DRAIN_REFUSAL, TURN_STOPPED_REFUSAL
-from automation.restart_resumption import idle_threads_with_held_input, resume_threads_detached
-from infra.database import get_db, write_transaction
+from automation.restart_settlement import (
+    abort_restart_control as abort_restart_control,
+    release_restart_control as _release_restart_control,
+)
+from infra.database import get_db
 
 RESTART_PENDING_MESSAGE = (
     "A system restart is pending. Finish at the next safe boundary. If unfinished "
@@ -171,21 +174,29 @@ async def begin_restart_drain(
     """Hold ingress and ask every captured Turn to stop at its safe boundary."""
     from automation import self_restart
     from infra import drain
+    from infra.db_async import run_in_db
 
-    operation_id = _restart_operation(reason, operation_id)
+    acquired: list[str] = []
+
+    def acquire() -> str:
+        owned = _restart_operation(reason, operation_id)
+        acquired.append(owned)
+        return owned
+
     try:
-        _enter_steering(operation_id)
-        drain.start_drain_projection(reason)
+        operation_id = await run_in_db(acquire)
+        await run_in_db(_enter_steering, operation_id)
+        await run_in_db(drain.start_drain_projection, reason)
         excluded = exclude_thread_ids or set()
         turns = [
-            turn for turn in _snapshot_active_turns()
+            turn for turn in await run_in_db(_snapshot_active_turns)
             if turn["thread_id"] not in excluded
             and (
                 include_thread_ids is None
                 or turn["thread_id"] in include_thread_ids
             )
         ]
-        self_restart.record_drain_total(operation_id, len(turns))
+        await run_in_db(self_restart.record_drain_total, operation_id, len(turns))
         outcomes = await _steer_turns(turns)
         controlled = [
             turn["thread_id"] for turn in turns if outcomes[turn["turn_id"]]
@@ -198,12 +209,12 @@ async def begin_restart_drain(
                 "restart control was not accepted by active task(s): "
                 + ",".join(uncontrolled)
             )
-        if not self_restart.transition_operation(
-            operation_id, expected="steering", target="draining",
+        if not await run_in_db(
+            self_restart.transition_operation, operation_id, expected="steering", target="draining",
         ):
             raise RuntimeError("restart operation changed before steering settled")
         return {
-            **drain.get_drain_status(),
+            **await run_in_db(drain.get_drain_status),
             "operation_id": operation_id,
             "controlled": controlled,
             "accounted": [],
@@ -211,97 +222,23 @@ async def begin_restart_drain(
             "excluded_thread_ids": sorted(excluded),
         }
     except asyncio.CancelledError:
-        await abort_restart_control(
-            operation_id,
-            error="restart control cancelled during steering",
-            cancelled=True,
-            failure_code="drain_cancelled",
-        )
+        if acquired:
+            await abort_restart_control(
+                acquired[0],
+                error="restart control cancelled during steering",
+                cancelled=True,
+                failure_code="drain_cancelled",
+            )
         raise
     except Exception as exc:
-        await abort_restart_control(
-            operation_id,
-            error="restart control setup failed",
-            failure_code="drain_failed",
-            failure_detail=f'{{"exception": "{type(exc).__name__}"}}',
-        )
+        if acquired:
+            await abort_restart_control(
+                acquired[0],
+                error="restart control setup failed",
+                failure_code="drain_failed",
+                failure_detail=f'{{"exception": "{type(exc).__name__}"}}',
+            )
         raise
-
-
-async def abort_restart_control(
-    operation_id: str,
-    *,
-    error: str = "restart cancelled",
-    cancelled: bool = False,
-    failure_code: str | None = None,
-    failure_detail: str | None = None,
-) -> bool:
-    """Release ingress and continue every explicitly registered task locally.
-
-    This is itself the compensation for a cancelled restart, so a cancellation
-    that arrives mid-release must not strand the threads the hold kept: the
-    committed release, the projection clear and the resume finish as one
-    unit, and only then does the cancellation reach the caller.
-    """
-    from subagents.runtime_guard import join_task_through_cancellation
-
-    release = asyncio.create_task(
-        _release_and_resume(operation_id, error, cancelled, failure_code, failure_detail)
-    )
-    cancellation = await join_task_through_cancellation(release)
-    released = release.result()
-    if cancellation is not None:
-        raise cancellation
-    return released
-
-
-async def _release_and_resume(
-    operation_id: str,
-    error: str,
-    cancelled: bool,
-    failure_code: str | None,
-    failure_detail: str | None,
-) -> bool:
-    from automation.update_failure_notice import tell_conductor_detached
-    from infra import drain
-    from infra.db_async import run_in_db
-    from infra.thread_execution import drive_thread
-
-    threads = await run_in_db(
-        _release_restart_control, operation_id, error, cancelled, failure_code, failure_detail
-    )
-    if threads is None:
-        return False
-    drain.cancel_drain_projection()
-    resume_threads_detached(threads, drive_thread, _RESUME_TASKS)
-    tell_conductor_detached(operation_id, _RESUME_TASKS)
-    return True
-
-
-def _release_restart_control(
-    operation_id: str,
-    error: str,
-    cancelled: bool,
-    failure_code: str | None,
-    failure_detail: str | None,
-) -> tuple[str, ...] | None:
-    """Release the operation's hold and its wake registrations; None when it was not ours to release."""
-    from automation import self_restart
-    from automation.restart_wakes import cancel_operation_registrations
-
-    with write_transaction(None, scope="abort_restart_control") as connection:
-        released = self_restart.abort_operation(
-            operation_id,
-            error=error,
-            cancelled=cancelled,
-            failure_code=failure_code,
-            failure_detail=failure_detail,
-            db=connection,
-        )
-        if not released:
-            return None
-        woken = cancel_operation_registrations(operation_id, db=connection)
-        return tuple(dict.fromkeys((*woken, *idle_threads_with_held_input(connection))))
 
 
 def advance_restart_readiness(operation_id: str) -> bool:

@@ -23,7 +23,8 @@ from typing import Any, Callable
 import httpx
 
 from core.corrections_asset_files import (
-    asset_root, free_bytes, previous_dir, recover_interrupted_install, sha256, short_of_space, staging_dir,
+    asset_root, free_bytes, newest_pin, previous_dir, recover_interrupted_install, root_is_newest_pin, sha256,
+    short_of_space, staging_dir,
 )
 from core.corrections_classifier import CORRECTIONS_SPEC
 from core.onnx_asset import AssetError, AssetManifest, load_manifest, run_self_test
@@ -32,10 +33,8 @@ from core.corrections_asset_signals import State, broadcast_update, public_state
 
 logger = logging.getLogger(__name__)
 
-# The one place the release location lives; the environment override is for disposable proofs.
-DEFAULT_BASE_URL = (
-    "https://github.com/cebertowicz/corsia/releases/download/asset-corrections-classifier-v1"
-)
+# The one place the release location lives (each pinned version has its own tag); the override is for disposable proofs.
+RELEASE_TAG_URL = "https://github.com/cebertowicz/corsia/releases/download/asset-corrections-classifier-"
 BASE_URL_ENV = "CORSIA_CORRECTIONS_ASSET_BASE_URL"
 
 DISK_MARGIN_BYTES = 256 * 1024**2
@@ -54,7 +53,7 @@ class _Failure(Exception):
 
 
 def base_url() -> str:
-    return (os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).rstrip("/")
+    return (os.environ.get(BASE_URL_ENV) or f"{RELEASE_TAG_URL}{newest_pin()}").rstrip("/")
 
 
 def _reader(error: Exception) -> str:
@@ -116,8 +115,8 @@ class ClassifierDownload:
         if due:
             self._notify()
 
-    def start(self, *, wait: bool = False) -> State:
-        """Begin the flight, or join the running one. Idempotent; also the retry."""
+    def start(self, *, wait: bool = False, on_failure: Callable[[State], None] | None = None) -> State:
+        """Begin the flight, or join the running one. Idempotent; also the retry. ``on_failure`` hears only a flight this call begins."""
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return dict(self._state)
@@ -125,7 +124,7 @@ class ClassifierDownload:
                 return dict(self._state)
             self._state = {"state": "downloading", "bytes_done": 0, "bytes_total": 0}
             self._request()
-            self._thread = threading.Thread(target=self._run, name="classifier-download", daemon=True)
+            self._thread = threading.Thread(target=self._run, args=(on_failure,), name="classifier-download", daemon=True)
             self._thread.start()
             thread = self._thread
         if wait:
@@ -145,10 +144,10 @@ class ClassifierDownload:
         except OSError:
             logger.warning("Could not record the classifier download request", exc_info=True)
 
-    def resume(self) -> None:
+    def resume(self, *, on_failure: Callable[[State], None] | None = None) -> None:
         """At app start: carry on a download that setup asked for and a quit or crash cut short."""
         if self._requested_marker().is_file():
-            self.start()
+            self.start(on_failure=on_failure)
 
     def _finish(self) -> None:
         self._requested_marker().unlink(missing_ok=True)
@@ -157,23 +156,28 @@ class ClassifierDownload:
 
     # -- flight ---------------------------------------------------------------
 
-    def _run(self) -> None:
+    def _run(self, on_failure: Callable[[State], None] | None = None) -> None:
         try:
             self._flight()
         except _Failure as failure:
+            logger.warning(
+                "Corrections classifier download failed (%s); any installed version keeps serving",
+                failure.state.get("code"),
+            )
             self._set(**failure.state)
+            if on_failure is not None:
+                on_failure(failure.state)
             if failure.state.get("code") == "disk_full":
                 self._watch_space()
         except Exception:
             logger.exception("Corrections classifier download failed unexpectedly")
-            self._set(
-                state="failed", code="unexpected", retryable=True,
-                reason="The download couldn’t be set up.",
-            )
+            self._set(state="failed", code="unexpected", retryable=True, reason="The download couldn’t be set up.")
+            if on_failure is not None:
+                on_failure(self.status())
 
     def _flight(self) -> None:
         root = self._root()
-        pin = PINNED_MANIFESTS[max(PINNED_MANIFESTS)]
+        pin = PINNED_MANIFESTS[newest_pin()]
         recover_interrupted_install(root)
         if self._already_installed(root):
             self._finish()
@@ -210,7 +214,10 @@ class ClassifierDownload:
         return damaged
 
     def _already_installed(self, root: Path) -> bool:
-        """A present asset that already passes the runtime's own proof needs no download."""
+        """A present asset that passes the runtime's own proof and is the newest pin needs no download.
+
+        An older version that still passes is left serving; the flight goes on to replace it.
+        """
         if not (root / "manifest.json").is_file():
             return False
         self._set(state="self_testing")
@@ -228,9 +235,9 @@ class ClassifierDownload:
                 self._self_test(root)
             except AssetError:
                 return False
-            return True
+            return root_is_newest_pin(root)
         shutil.rmtree(previous, ignore_errors=True)
-        return True
+        return root_is_newest_pin(root)
 
     def _fetch_manifest(self, client: httpx.Client, staging: Path, pin: str) -> AssetManifest:
         path = staging / "manifest.json"

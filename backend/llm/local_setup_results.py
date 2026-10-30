@@ -2,19 +2,59 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 
 import httpx
 from fastapi import HTTPException
 
-from llm.local_profiles import setup_command
+#: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
+SETUP_COMMAND = "corsia local setup"
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_failed", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
+LOAD_FAILURE_CAUSES = frozenset({"load_refused", "load_failed"})
+# Sentences say "try again"; "Retry" names only the button.
+RETRY_IN_APP = "try again."
+RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
-def local_setup_error(message: str, profile_id: str) -> dict:
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP, *, verdict: object = None, neighbour: object = None) -> str:
+    """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
+    if cause == "damaged_bundle":
+        return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
+    if cause == "disk_full":
+        need = (f"{math.ceil(bytes_to_free / 100_000_000) / 10:.1f} GB more"
+                if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "more")
+        return f"The local model needs {need} free space. Free it up, then {retry}"
+    if cause == "connection":
+        return f"Check your internet connection, then {retry}"
+    if cause == "memory":
+        return "Choose a subscription or API provider instead."
+    if cause == "load_failed":
+        action = "Press Retry." if retry == RETRY_IN_APP else retry[0].upper() + retry[1:]
+        return f"CORSIA couldn’t load the model. {action}"
+    if cause == "load_refused":
+        action = "press Retry." if retry == RETRY_IN_APP else retry
+        if verdict == "no_room":
+            other = neighbour if isinstance(neighbour, str) and neighbour.strip() else "another model"
+            return (f"CORSIA couldn’t load the model while {other} is loaded. "
+                    f"Unload it in oMLX or quit the app using it, then {action}")
+        return f"CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then {action}"
+    if cause == "own_omlx_upgrade_required":
+        # Only a source run without the bundled oMLX reaches this (ensure_omlx).
+        if retry == RETRY_IN_APP:
+            return "The oMLX app already on this computer is out of date or broken. Update it, then press Retry."
+        return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
+    if retry == RETRY_IN_APP:
+        return "CORSIA couldn’t set up the local model."
+    return f"CORSIA couldn’t set up the local model. {retry[0].upper() + retry[1:]}"
+
+
+def local_setup_error(message: str) -> dict:
     return {
         "ok": False,
         "message": message,
-        "next_action": f"Run `{setup_command(profile_id)}` again after fixing this, or add a subscription/API key.",
+        "fix": setup_fix("other"),
+        "next_action": f"Run `{SETUP_COMMAND}` again after fixing this, or add a subscription/API key.",
     }
 
 
@@ -29,8 +69,24 @@ def task_from_payload(payload: object, task_id: str) -> dict | None:
                  if isinstance(task, dict) and task.get("task_id") == task_id), None)
 
 
+class LoadRefused(RuntimeError):
+    """A memory check refused the load, with the catalog line when available."""
+
+    def __init__(self, verdict: str, line: str | None, neighbour: str | None = None) -> None:
+        self.verdict = verdict
+        self.line = line
+        self.neighbour = neighbour
+        super().__init__(line or "")
+
+
+class LoadFailed(RuntimeError):
+    """The model failed to load; detail is logged with the setup reference."""
+
+
 def failure_message(exc: Exception) -> str:
     """A cause the CLI and sources panel can show for any setup failure."""
+    if isinstance(exc, LoadFailed):
+        return ""
     if isinstance(exc, HTTPException):
         return str(exc.detail)
     if isinstance(exc, ValueError):
@@ -38,6 +94,26 @@ def failure_message(exc: Exception) -> str:
     if isinstance(exc, (OSError, subprocess.SubprocessError, httpx.HTTPError, RuntimeError)):
         return str(exc)
     return f"Local model setup failed unexpectedly ({type(exc).__name__}); see the backend log."
+
+
+def failure_cause(exc: Exception) -> str:
+    """Classify local-flight exceptions into stable setup-status cause codes."""
+    from llm.local_setup_disk import DiskSpaceError
+    from llm.local_setup_executable import OwnOmlxUpgradeRequired
+
+    if isinstance(exc, LoadRefused):
+        return "load_refused"
+    if isinstance(exc, LoadFailed):
+        return "load_failed"
+    if isinstance(exc, OwnOmlxUpgradeRequired):
+        return "own_omlx_upgrade_required"
+    if isinstance(exc, DiskSpaceError):
+        return "disk_full"
+    if isinstance(exc, MemoryError):
+        return "memory"
+    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
+        return "connection"
+    return "other"
 
 
 class DownloadProgress:
@@ -54,11 +130,45 @@ class DownloadProgress:
     def __init__(self, now: float) -> None:
         self.step, self.seconds, self.reported_at = self.STEP, self.SECONDS, now
         self.reported_step: int | None = None
+        self.previous_downloaded: float | None = None
+        self.previous_at = now
+        self.bytes_per_second: float | None = None
+        self.last_advance_at = now
+        self.eta_seconds: int | None = None
+        self.stalled = False
 
-    def due(self, downloaded: object, total: object, now: float) -> int | None:
+    def observe(self, downloaded: object, total: object, now: float) -> None:
+        """Smooth a measured transfer rate; never manufacture an ETA before progress."""
+        if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total > 0):
+            self.eta_seconds = None
+            return
+        current = float(downloaded)
+        if self.previous_downloaded is not None:
+            elapsed = now - self.previous_at
+            advanced = current - self.previous_downloaded
+            if elapsed > 0 and advanced > 0:
+                sample = advanced / elapsed
+                self.bytes_per_second = sample if self.bytes_per_second is None else self.bytes_per_second * 0.75 + sample * 0.25
+                self.last_advance_at = now
+                self.stalled = False
+            elif now - self.last_advance_at >= 30:
+                self.stalled = True
+                self.eta_seconds = None
+        self.previous_downloaded, self.previous_at = current, now
+        if self.bytes_per_second and not self.stalled:
+            self.eta_seconds = max(0, round((float(total) - current) / self.bytes_per_second))
+
+    @staticmethod
+    def percent(downloaded: object, total: object) -> int | None:
+        """Return structured bounded download progress, if oMLX reported both sizes."""
         if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total):
             return None
-        percent = min(100, max(0, int(downloaded / total * 100)))
+        return min(100, max(0, int(downloaded / total * 100)))
+
+    def due(self, downloaded: object, total: object, now: float) -> int | None:
+        percent = self.percent(downloaded, total)
+        if percent is None:
+            return None
         step = percent // self.step * self.step
         timed = self.seconds is not None and now - self.reported_at >= self.seconds
         if not ((step and step != self.reported_step) or timed):

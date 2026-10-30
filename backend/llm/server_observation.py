@@ -2,9 +2,12 @@
 
 A server's state is its status, its observed model set (``_LOADED_BY_SERVER``,
 which a row needs before it reports ``ready``) and, through discovery's
-reconcile, each model's ``available`` flag. :func:`record_reachable` and
-:func:`record_unreachable` are the only transitions; the sources differ only in
-what they observed:
+reconcile, each model's ``available`` flag. :func:`record_reachable`,
+:func:`record_unreachable` and, for managed oMLX, :func:`forget_loaded_on_exit`
+are the observation transitions; the sources differ only in what they observed.
+Disabling or removing a server, and the freshness guard's offline flip, also
+clear its observed set without a new generation; a late publish there is
+harmless because a row reports ``ready`` only while its server is online.
 
 - the health sweep probes managed oMLX and LAN External servers every 10s;
 - discovery (add, edit, Test connection, startup) observes a cloud External
@@ -42,7 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 from infra.db_async import run_in_db
@@ -52,18 +55,64 @@ log = logging.getLogger(__name__)
 # Strong references: the loop keeps only weak ones to a running task.
 _PENDING: set[asyncio.Task] = set()
 
+# oMLX servers whose models must be listed again: going offline marks every
+# row unavailable, and only a discovery that lists the models clears the mark.
+# Until then each reach rediscovers, so one failed attempt cannot leave a
+# reachable server's models unavailable. The value is the last failure, logged
+# once per distinct error rather than on every sweep. External servers keep
+# their persisted discovery error and rediscover once per offline-to-online.
+_UNLISTED: dict[str, str | None] = {}
+
+
+# Observation generation per server: an exit or going offline starts a new one. A
+# probe or load captures it before awaiting and publishes only if it is unchanged,
+# so a result begun before the server died never revives what it held.
+_GENERATION: dict[str, int] = {}
+
+
+def observation_generation(server_id: str) -> int:
+    """The current generation, captured before an asynchronous probe or load."""
+    return _GENERATION.get(server_id, 0)
+
+
+def _new_generation(server_id: str) -> None:
+    _GENERATION[server_id] = observation_generation(server_id) + 1
+
+
+def forget_loaded_on_exit(server_id: str) -> set[str]:
+    """Clear the observed set on process exit and return it for reload."""
+    from llm import network_discovery as nd
+
+    _new_generation(server_id)
+    loaded = nd._LOADED_BY_SERVER.get(server_id, set())
+    nd._LOADED_BY_SERVER[server_id] = set()
+    nd._notify_models_changed_safe()
+    return set(loaded)
+
 
 async def record_reachable(
-    server: dict, *, loaded: set[str] | None, rediscover: bool = True, **status: Any,
+    server: dict, *, loaded: set[str] | None, rediscover: bool = True,
+    generation: int | None = None, **status: Any,
 ) -> None:
-    """A source reached ``server``. ``loaded`` replaces its observed model set."""
+    """A source reached ``server``. ``loaded`` replaces its observed model set.
+
+    ``generation``, when given, is the one captured before probing; a newer one
+    means the server exited or went offline meanwhile, so the result is dropped.
+    """
     from llm import network_discovery as nd
 
     sid = server["id"]
+    if generation is not None and observation_generation(sid) != generation:
+        return
     await run_in_db(nd.update_server_status, sid, status="online", **status)
+    if generation is not None and observation_generation(sid) != generation:
+        return
     if loaded is not None:
+        changed = nd._LOADED_BY_SERVER.get(sid, set()) != loaded
         nd._LOADED_BY_SERVER[sid] = set(loaded)
-    if rediscover and server.get("status") == "offline":
+        if changed:
+            nd._notify_models_changed_safe()
+    if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
         _schedule(nd._discover_and_notify(sid))
 
 
@@ -73,9 +122,29 @@ async def record_unreachable(server: dict) -> None:
 
     provider = server.get("provider") or ("external" if server.get("kind") == "external" else "omlx")
     await run_in_db(nd._record_server_offline, server, provider)
+    _new_generation(server["id"])
     nd._LOADED_BY_SERVER.pop(server["id"], None)
+    if server.get("kind") != "external":
+        _UNLISTED.setdefault(server["id"], None)
     if server.get("status") != "offline":
         nd._notify_models_changed_safe()
+
+
+def record_discovery(server_id: str, result: dict) -> bool:
+    """Clear an oMLX server's relist mark when discovery listed it, else keep it.
+
+    True when the outcome is new: it listed, or it failed with a different
+    error. A retry that fails the same way changes nothing anyone sees.
+    """
+    if result.get("ok"):
+        _UNLISTED.pop(server_id, None)
+        return True
+    error = result.get("error")
+    changed = server_id not in _UNLISTED or _UNLISTED[server_id] != error
+    if changed:
+        log.warning("discovery of %s listed no models: %s", server_id, error)
+    _UNLISTED[server_id] = error
+    return changed
 
 
 async def observe_discovery(
@@ -112,29 +181,43 @@ def startup_discovery_targets() -> list[dict]:
 def endpoint_failure_of(error: BaseException) -> str | None:
     """``auth`` when ``error`` proves the endpoint refuses this key, else None.
 
-    Read from the exception's HTTP status only, never its message. A provider
-    SDK wraps the HTTP error, so the chain is walked the way a traceback shows
-    it: ``__cause__``, then ``__context__`` unless ``raise ... from None``
-    suppressed it. The first status found decides: 401/403 is ``auth``; any
-    other (404, 429, 5xx) is not an endpoint failure, nor is a connection loss,
-    a timeout or a stream stall.
+    Read from the exception's HTTP status only, never its message (see
+    :func:`http_status_of`). 401/403 is ``auth``; any other (404, 429, 5xx) is
+    not an endpoint failure, nor is a connection loss, a timeout or a stream
+    stall.
     """
+    return "auth" if http_status_of(error) in (401, 403) else None
+
+
+def http_status_of(error: BaseException) -> int | None:
+    """The first HTTP status on ``error``'s :func:`exception_chain`, else None."""
     import anthropic
     import httpx
     import litellm
     import openai
 
+    for current in exception_chain(error):
+        status = _http_status(current, httpx, openai, anthropic, litellm)
+        if status is not None:
+            return status
+    return None
+
+
+def exception_chain(error: BaseException) -> Iterator[BaseException]:
+    """``error`` and what it wraps, in traceback order.
+
+    A provider SDK wraps the HTTP or transport error, so the chain is walked
+    the way a traceback shows it: ``__cause__``, then ``__context__`` unless
+    ``raise ... from None`` suppressed it.
+    """
     seen: set[int] = set()
     current: BaseException | None = error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        status = _http_status(current, httpx, openai, anthropic, litellm)
-        if status is not None:
-            return "auth" if status in (401, 403) else None
+        yield current
         current = current.__cause__ or (
             None if current.__suppress_context__ else current.__context__
         )
-    return None
 
 
 def _http_status(error, httpx, openai, anthropic, litellm) -> int | None:

@@ -1,10 +1,12 @@
-import { expect, test } from '@playwright/test';
+import { test } from './support/test';
+import { expect } from '@playwright/test';
 import { createSession, openAppByUrl, chatComposer, sendButton, TEST_TOKEN, watchSessionSubscriptions } from './support/corsia';
 import { seedMockResponses } from './support/mock';
 import { focusSetting } from './support/focusOutcomeProof';
+import { setFocusMode } from './support/focusMode';
 
-test.afterEach(async ({ page }) => {
-  await focusSetting(page, true);
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
 });
 
 for (const width of [1280, 393]) {
@@ -37,8 +39,10 @@ for (const width of [1280, 393]) {
     const assertOrder = async () => {
       const text = await transcript.innerText();
       const positions = ['Before the chips', 'Ordering worker', 'After the chips'].map(s => text.indexOf(s));
-      expect(positions.every(p => p >= 0)).toBeTruthy();
-      expect(positions).toEqual([...positions].sort((a, b) => a - b));
+      // Name the transcript in the failure: a missing row and a misordered row need different fixes.
+      const seen = JSON.stringify(text.slice(0, 600));
+      expect(positions.every(p => p >= 0), `a row is missing from the transcript: ${seen}`).toBeTruthy();
+      expect(positions, `rows are out of order in the transcript: ${seen}`).toEqual([...positions].sort((a, b) => a - b));
     };
     await assertOrder();
     await page.screenshot({ path: testInfo.outputPath(`live-${width}.png`), fullPage: true });

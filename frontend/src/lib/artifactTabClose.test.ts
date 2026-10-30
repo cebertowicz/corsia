@@ -32,7 +32,7 @@ const doc = { kind: 'document', instanceId: 'tab-1', artifactId: 'art-1', path: 
 beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.closeTabWithSaveGate.mockResolvedValue({ closed: true });
-	mocks.sendDocFeedback.mockResolvedValue({ woken: [], undelivered_batches: [] });
+	mocks.sendDocFeedback.mockResolvedValue({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
 });
 
 describe('requestArtifactTabClose', () => {

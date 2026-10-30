@@ -1,0 +1,416 @@
+//! Which saved route carries the proxy's next connection, and the proof that
+//! it reaches the paired host. Every record tries its local route first; when
+//! an outside route is saved, the local attempt is bounded by `LOCAL_BUDGET`
+//! before that route is tried. A known identity is proven on every route: a
+//! pinned route by its TLS handshake, a system-trusted route by the host's
+//! signature. Earlier records without an identity retain their saved local
+//! trust. A route that answers with another key ends forwarding (`key_changed`)
+//! and is never a reason to try another route.
+
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
+use hyper::{body::Bytes, client::conn::http1::SendRequest, header::{CONTENT_TYPE, HOST}, Request};
+use hyper_util::rt::TokioIo;
+use ring::{rand::{SecureRandom, SystemRandom}, signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1}};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use x509_parser::prelude::{FromDer, SubjectPublicKeyInfo, X509Certificate};
+
+use crate::{proxy::ProxyBody, remote_config::{OutsideRoute, RemoteRecord}, remote_host::RemoteHost, trust::{self, Trust}};
+
+pub(crate) const KEY_CHANGED_MESSAGE: &str = "the host's key changed, so nothing is forwarded to it";
+const IDENTITY_PATH: &str = "/api/devices/identity";
+const IDENTITY_CONTEXT: &[u8] = b"corsia-identity-v1\0";
+const MAX_PROOF_BYTES: usize = 4096;
+
+/// A TCP connection to the host and port it reached.
+pub(crate) struct Dialed {
+    pub(crate) host: RemoteHost,
+    pub(crate) port: u16,
+    pub(crate) stream: TcpStream,
+}
+
+pub(crate) type LocalDial = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<Dialed, String>> + Send>> + Send + Sync>;
+pub(crate) type TlsConfig = Arc<dyn Fn(&Trust) -> Result<rustls::ClientConfig, rustls::Error> + Send + Sync>;
+
+/// A connection that has proven the paired host, ready for a forwarded request.
+pub(crate) struct Upstream {
+    pub(crate) sender: SendRequest<ProxyBody>,
+    pub(crate) authority: String,
+    pub(crate) connection_spki_sha256: [u8; 32],
+}
+
+#[derive(Debug)]
+pub(crate) enum RouteError {
+    /// The route answered with a key other than the paired one; nothing is forwarded from now on.
+    KeyChanged(String),
+    Unreachable(String),
+}
+
+impl RouteError {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::KeyChanged(message) | Self::Unreachable(message) => message,
+        }
+    }
+}
+
+/// How a proxy reaches its paired host.
+pub(crate) struct RouteConfig {
+    pub(crate) trust: Trust,
+    pub(crate) identity: Option<[u8; 32]>,
+    pub(crate) outside: Option<OutsideRoute>,
+    pub(crate) on_key_changed: Arc<dyn Fn() + Send + Sync>,
+    pub(crate) tls: TlsConfig,
+    pub(crate) reprobe: Duration,
+}
+
+#[derive(Debug)]
+pub(crate) enum RouteConfigError {
+    SavedTrust,
+    SavedIdentity(String),
+}
+
+impl RouteConfig {
+    /// The saved trust alone, as every record had before outside addresses.
+    pub(crate) fn single(trust: Trust, on_key_changed: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            trust,
+            identity: None,
+            outside: None,
+            on_key_changed: Arc::new(on_key_changed),
+            tls: Arc::new(trust::client_config),
+            reprobe: RouteSelector::LOCAL_REPROBE,
+        }
+    }
+
+    pub(crate) fn from_record(record: &RemoteRecord, on_key_changed: impl Fn() + Send + Sync + 'static) -> Result<Self, RouteConfigError> {
+        let trust = Trust::try_from(&record.trust).map_err(|_| RouteConfigError::SavedTrust)?;
+        let identity = record.identity.as_deref().map(decode_identity).transpose().map_err(RouteConfigError::SavedIdentity)?;
+        Ok(Self { identity, outside: record.outside.clone(), ..Self::single(trust, on_key_changed) })
+    }
+}
+
+fn decode_identity(encoded: &str) -> Result<[u8; 32], String> {
+    BASE64
+        .decode(encoded)
+        .map_err(|_| "saved remote identity is not valid base64".to_owned())?
+        .try_into()
+        .map_err(|_| "saved remote identity must contain exactly 32 bytes".to_owned())
+}
+
+struct Outside {
+    host: String,
+    port: u16,
+    trust: Trust,
+}
+
+/// The one owner of opening a proven upstream connection for the proxy.
+pub(crate) struct Routes {
+    local: LocalDial,
+    local_trust: Trust,
+    /// Earlier records have no identity; an outside route requires one.
+    identity: Option<[u8; 32]>,
+    outside: Option<Outside>,
+    tls: TlsConfig,
+    reprobe: Duration,
+    selector: Mutex<RouteSelector>,
+    key_changed: AtomicBool,
+    on_key_changed: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Routes {
+    pub(crate) fn new(config: RouteConfig, local: LocalDial) -> Result<Self, String> {
+        let RouteConfig { trust, identity, outside, on_key_changed, tls, reprobe } = config;
+        let outside = match outside {
+            Some(outside) => {
+                if identity.is_none() {
+                    return Err("an outside route needs the paired host's identity".into());
+                }
+                let (host, port) = crate::remote_host::parse_https_address(&outside.url)?;
+                Some(Outside { host, port, trust: Trust::try_from(&outside.trust)? })
+            }
+            None => None,
+        };
+        Ok(Self {
+            local,
+            local_trust: trust,
+            identity,
+            outside,
+            tls,
+            reprobe,
+            selector: Mutex::new(RouteSelector::new()),
+            key_changed: AtomicBool::new(false),
+            on_key_changed,
+        })
+    }
+
+    pub(crate) fn key_changed(&self) -> bool {
+        self.key_changed.load(Ordering::SeqCst)
+    }
+
+    /// A proven connection for one forwarded request. Once a route has refused the identity, every call refuses.
+    pub(crate) async fn connect(self: &Arc<Self>) -> Result<Upstream, RouteError> {
+        if self.key_changed() {
+            return Err(RouteError::KeyChanged(KEY_CHANGED_MESSAGE.into()));
+        }
+        let connected = self.connect_saved_routes().await;
+        if matches!(connected, Err(RouteError::KeyChanged(_))) {
+            self.refuse();
+        }
+        connected
+    }
+
+    async fn connect_saved_routes(self: &Arc<Self>) -> Result<Upstream, RouteError> {
+        if self.outside.is_some() && self.selector().current() == Route::Outside {
+            self.probe_local();
+        } else if self.outside.is_some() {
+            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, self.connect_local()).await {
+                Ok(Ok(proven)) => return Ok(proven),
+                Ok(Err(RouteError::KeyChanged(error))) => return Err(RouteError::KeyChanged(error)),
+                Ok(Err(RouteError::Unreachable(_))) | Err(_) => self.selector().local_failed(Instant::now()),
+            }
+        } else {
+            return self.connect_local().await;
+        }
+
+        let outside = self.outside.as_ref().expect("outside route selected");
+        let identity = self.identity.as_ref().expect("outside route has an identity");
+        let dialed = dial(&outside.host, outside.port).await.map_err(RouteError::Unreachable)?;
+        self.prove(Route::Outside, &outside.trust, identity, dialed).await
+    }
+
+    async fn connect_local(&self) -> Result<Upstream, RouteError> {
+        let dialed = (self.local)().await.map_err(RouteError::Unreachable)?;
+        match &self.identity {
+            Some(identity) => self.prove(Route::Local, &self.local_trust, identity, dialed).await,
+            None => self.open(&self.local_trust, dialed).await,
+        }
+    }
+
+    /// While on outside, try local in the background at most once per `reprobe`; no request waits for it. Local
+    /// carries requests again only after it has proven the identity.
+    fn probe_local(self: &Arc<Self>) {
+        if !self.selector().should_probe_local(Instant::now(), self.reprobe) {
+            return;
+        }
+        let routes = Arc::clone(self);
+        tokio::spawn(async move {
+            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, routes.connect_local()).await {
+                Ok(Ok(proven)) => routes.selector().local_proven(proven.connection_spki_sha256),
+                Ok(Err(RouteError::KeyChanged(_))) => routes.refuse(),
+                Ok(Err(RouteError::Unreachable(_))) | Err(_) => {}
+            }
+        });
+    }
+
+    /// Bootstrap a legacy record only through its saved, trusted local route.
+    async fn learn_local_identity(&self) -> Result<[u8; 32], RouteError> {
+        let dialed = (self.local)().await.map_err(RouteError::Unreachable)?;
+        let mut upstream = self.open(&self.local_trust, dialed).await?;
+        prove_identity(&mut upstream, None).await
+    }
+
+    async fn prove(&self, route: Route, trust: &Trust, identity: &[u8; 32], dialed: Dialed) -> Result<Upstream, RouteError> {
+        if matches!(trust, Trust::Pinned { spki_sha256 } if spki_sha256 != identity) {
+            return Err(RouteError::KeyChanged("the route's pin is not the paired host's identity".into()));
+        }
+        let mut upstream = self.open(trust, dialed).await?;
+        if *trust == Trust::System && !self.selector().is_proven(route, &upstream.connection_spki_sha256) {
+            prove_identity(&mut upstream, Some(identity)).await?;
+            self.selector().proven(route, upstream.connection_spki_sha256);
+        }
+        Ok(upstream)
+    }
+
+    async fn open(&self, trust: &Trust, dialed: Dialed) -> Result<Upstream, RouteError> {
+        let config = (self.tls)(trust).map_err(|error| RouteError::Unreachable(error.to_string()))?;
+        let name = dialed.host.server_name().map_err(RouteError::Unreachable)?;
+        let tls = TlsConnector::from(Arc::new(config)).connect(name, dialed.stream).await.map_err(|error| {
+            if matches!(trust, Trust::Pinned { .. }) && trust::is_pin_mismatch(&error) {
+                RouteError::KeyChanged(error.to_string())
+            } else {
+                RouteError::Unreachable(error.to_string())
+            }
+        })?;
+        let certificate = tls.get_ref().1.peer_certificates().and_then(|certificates| certificates.first())
+            .ok_or_else(|| RouteError::Unreachable("TLS connection did not present a certificate".into()))?;
+        let (_, certificate) = X509Certificate::from_der(certificate.as_ref())
+            .map_err(|error| RouteError::Unreachable(format!("TLS certificate could not be read: {error}")))?;
+        let connection_spki_sha256: [u8; 32] = Sha256::digest(certificate.tbs_certificate.subject_pki.raw).into();
+        let (sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
+            .await
+            .map_err(|error| RouteError::Unreachable(error.to_string()))?;
+        tokio::spawn(async move { let _ = connection.with_upgrades().await; });
+        Ok(Upstream { sender, authority: dialed.host.authority(dialed.port), connection_spki_sha256 })
+    }
+
+    /// Fail closed: the first refusal ends forwarding, and the owner hears of it once.
+    fn refuse(&self) {
+        if !self.key_changed.swap(true, Ordering::SeqCst) {
+            (self.on_key_changed)();
+        }
+    }
+
+    fn selector(&self) -> std::sync::MutexGuard<'_, RouteSelector> {
+        self.selector.lock().expect("route selector mutex is not poisoned")
+    }
+}
+
+/// Learn a legacy host's stable identity over its saved local TLS trust, never an outside route.
+pub(crate) async fn local_identity(host: &str, port: u16, trust: Trust) -> Result<[u8; 32], RouteError> {
+    let host = host.to_owned();
+    let local: LocalDial = Arc::new(move || {
+        let host = host.clone();
+        Box::pin(async move { dial(&host, port).await })
+    });
+    let routes = Routes::new(RouteConfig::single(trust, || {}), local).map_err(RouteError::Unreachable)?;
+    tokio::time::timeout(Duration::from_secs(15), routes.learn_local_identity()).await
+        .map_err(|_| RouteError::Unreachable("local identity request timed out".into()))?
+}
+
+/// Open a TCP connection to `host`, a name or an address with an optional IPv6 zone.
+pub(crate) async fn dial(host: &str, port: u16) -> Result<Dialed, String> {
+    let remote = RemoteHost::parse(host)?;
+    let stream = match remote.socket_addr(port) {
+        Some(address) => TcpStream::connect(address).await,
+        None => TcpStream::connect((host, port)).await,
+    }
+    .map_err(|error| error.to_string())?;
+    Ok(Dialed { host: remote, port, stream })
+}
+
+#[derive(Deserialize)]
+struct IdentityProof {
+    spki: String,
+    signature: String,
+}
+
+/// Prove a system-trusted route reaches the paired host: the host signs a fresh nonce and the authority this app
+/// dialed with its stable key. The proof is not bound to the TLS connection: system trust ends TLS at a proxy that
+/// forwards to the host, so the connection's key is the proxy's. A successful response with an invalid proof is a
+/// refusal; a non-success response means this route cannot prove the host right now.
+async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) -> Result<[u8; 32], RouteError> {
+    let authority = upstream.authority.to_ascii_lowercase();
+    let mut nonce = [0_u8; 32];
+    SystemRandom::new()
+        .fill(&mut nonce)
+        .map_err(|_| RouteError::Unreachable("could not draw an identity nonce".into()))?;
+    let body = serde_json::json!({ "nonce": BASE64.encode(nonce), "authority": authority }).to_string();
+    let request = Request::post(IDENTITY_PATH)
+        .header(HOST, upstream.authority.as_str())
+        .header(CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from(body)).map_err(|never| match never {}).boxed())
+        .map_err(|error| RouteError::Unreachable(error.to_string()))?;
+    let response = upstream
+        .sender
+        .send_request(request)
+        .await
+        .map_err(|error| RouteError::Unreachable(error.to_string()))?;
+    let refused = |reason: &str| RouteError::KeyChanged(format!("the route did not prove the paired host: {reason}"));
+    if !response.status().is_success() {
+        return Err(RouteError::Unreachable(format!("identity answered HTTP {}", response.status())));
+    }
+    let bytes = match Limited::new(response.into_body(), MAX_PROOF_BYTES).collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(error) if error.is::<LengthLimitError>() => return Err(RouteError::Unreachable("the identity answer is too large".into())),
+        Err(error) => return Err(RouteError::Unreachable(error.to_string())),
+    };
+    let proof: IdentityProof = serde_json::from_slice(&bytes).map_err(|_| RouteError::Unreachable("malformed identity answer".into()))?;
+    let spki = BASE64.decode(proof.spki).map_err(|_| RouteError::Unreachable("the key is not base64".into()))?;
+    let signature = BASE64.decode(proof.signature).map_err(|_| RouteError::Unreachable("the signature is not base64".into()))?;
+    // A legacy record has no pairing fingerprint yet; the saved local TLS trust
+    // authenticates this first key. Subsequent routes must match the persisted key.
+    let fingerprint: [u8; 32] = Sha256::digest(&spki).into();
+    verify_identity_proof(identity.unwrap_or(&fingerprint), &nonce, &authority, &spki, &signature).map_err(refused)?;
+    Ok(fingerprint)
+}
+
+fn verify_identity_proof(identity: &[u8; 32], nonce: &[u8; 32], authority: &str, spki: &[u8], signature: &[u8]) -> Result<(), &'static str> {
+    if Sha256::digest(spki).as_slice() != identity {
+        return Err("the key is not the paired host's");
+    }
+    let (rest, key) = SubjectPublicKeyInfo::from_der(spki).map_err(|_| "the key is not a public key")?;
+    if !rest.is_empty() {
+        return Err("the key has trailing bytes");
+    }
+    let message = [IDENTITY_CONTEXT, nonce.as_slice(), b"\0", authority.as_bytes()].concat();
+    UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, key.subject_public_key.data.as_ref())
+        .verify(&message, signature)
+        .map_err(|_| "the signature does not match this nonce and address")
+}
+
+/// The route a connection uses, proven before it carries a request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    Local,
+    Outside,
+}
+
+/// Route transition policy for a paired local route and its outside fallback. Networking and proof stay with
+/// `Routes`; a refused proof never reaches this policy, so it can never become a retry.
+pub(crate) struct RouteSelector {
+    current: Route,
+    /// TLS SPKI that proved `current`; a changed certificate must prove again.
+    proven: Option<[u8; 32]>,
+    last_local_probe: Option<Instant>,
+}
+
+impl RouteSelector {
+    pub(crate) const LOCAL_BUDGET: Duration = Duration::from_secs(2);
+    pub(crate) const LOCAL_REPROBE: Duration = Duration::from_secs(30);
+
+    pub(crate) fn new() -> Self {
+        Self { current: Route::Local, proven: None, last_local_probe: None }
+    }
+
+    pub(crate) fn current(&self) -> Route {
+        self.current
+    }
+
+    fn is_proven(&self, route: Route, connection_spki_sha256: &[u8; 32]) -> bool {
+        self.current == route && self.proven.as_ref() == Some(connection_spki_sha256)
+    }
+
+    fn proven(&mut self, route: Route, connection_spki_sha256: [u8; 32]) {
+        if self.current == route {
+            self.proven = Some(connection_spki_sha256);
+        }
+    }
+
+    /// Local did not connect in time: switch to outside, which proves itself afresh, and wait a full interval before
+    /// probing local again.
+    pub(crate) fn local_failed(&mut self, now: Instant) {
+        self.current = Route::Outside;
+        self.proven = None;
+        self.last_local_probe = Some(now);
+    }
+
+    /// Whether a background probe of local is due; at most one per `interval`, and only while on outside.
+    pub(crate) fn should_probe_local(&mut self, now: Instant, interval: Duration) -> bool {
+        if self.current != Route::Outside || self.last_local_probe.is_some_and(|last| now.duration_since(last) < interval) {
+            return false;
+        }
+        self.last_local_probe = Some(now);
+        true
+    }
+
+    /// A probe connected to local and proved the identity.
+    pub(crate) fn local_proven(&mut self, connection_spki_sha256: [u8; 32]) {
+        self.current = Route::Local;
+        self.proven = Some(connection_spki_sha256);
+    }
+}
+
+#[cfg(test)]
+#[path = "routes_tests.rs"]
+mod tests;

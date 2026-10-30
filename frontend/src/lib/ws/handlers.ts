@@ -1,17 +1,18 @@
 import { get } from 'svelte/store';
 import {
 	messages,
-	threads,
 	upsertVisibleThread,
 	mergeMessageDelivery,
 } from '../stores/threads';
 import type { Message } from '../stores/threads';
 import { isDisplayedThread } from '../stores/displayedThreads';
-import { readMessageDeliveryState } from '../messageDelivery';
+import { addedMessage, deliveryRevision } from './messageProjection';
 import { emit } from './events';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
+import { startTypewriter } from './typewriter';
+import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
 	handleInputAccepted,
 	handleContextUsageUpdated,
@@ -29,11 +30,8 @@ import {
 	upsertMessageByServerOrder,
 } from './handlersTurns';
 import { recoverInput } from './turnState';
-import { acceptThreadModelTruth } from '../stores/models';
 import { handleCheckpointChanged } from './checkpointInvalidation';
-import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
-
-import { threadSwitchFields } from './threadSwitchFields';
+import { handleSessionUpdated, handleSubagentMeta } from './handlersSession';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
 function reconcileCorrelatedMessage(
@@ -55,41 +53,6 @@ function reconcileCorrelatedMessage(
 		...current.filter(message => message !== existing && message.id !== incoming.id),
 		reconciled,
 	];
-}
-
-function addedMessage(payload: any, threadId: string): Message | null {
-	if (typeof payload?.id !== 'string' || typeof payload?.created_at !== 'string') return null;
-	const revision = deliveryRevision(payload.delivery_revision);
-	const deliveryState = readMessageDeliveryState(payload.delivery_state);
-	const sequence = typeof payload.seq === 'number'
-		&& Number.isInteger(payload.seq) && payload.seq > 0 ? payload.seq : undefined;
-	return {
-		id: payload.id,
-		thread_id: threadId,
-		role: payload.role,
-		content: payload.content,
-		metadata: payload.metadata,
-		created_at: payload.created_at,
-		...(sequence !== undefined ? { seq: sequence } : {}),
-		...(payload.active_turn_id === null || typeof payload.active_turn_id === 'string'
-			? { active_turn_id: payload.active_turn_id } : {}),
-		...(payload.write_outcome === null || ['accepted', 'proved_no_write', 'ambiguous'].includes(payload.write_outcome)
-			? { write_outcome: payload.write_outcome } : {}),
-		...(deliveryState !== null
-			? {
-				delivery_state: deliveryState,
-				delivery_error: typeof payload.delivery_error === 'string'
-					? payload.delivery_error : null,
-				...(revision !== undefined ? { delivery_revision: revision } : {}),
-			}
-			: {}),
-	};
-}
-
-function deliveryRevision(value: unknown): number | undefined {
-	return typeof value === 'number' && Number.isInteger(value) && value >= 1
-		? value
-		: undefined;
 }
 
 function reconcileQueuedInputReceipt(data: any): void {
@@ -137,14 +100,11 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 
 		case 'subagent_init':
-			if (data.thread_id) setSubagentInit(data.thread_id, { model: data.model, cwd: data.cwd });
+			if (data.thread_id) setSubagentInit(data.thread_id, { cwd: data.cwd });
 			break;
 
 		case 'subagent_meta':
-			if (data.thread_id) {
-				registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
-				if (data.model) setSubagentInit(data.thread_id, { model: data.model });
-			}
+			handleSubagentMeta(data);
 			break;
 
 		case 'subagent_closed':
@@ -273,52 +233,11 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 		}
 
-		case 'session_updated': {
-			if (!acceptsThreadAccountFrame(data)) break;
-			const carriesModelTruth = data.model !== undefined;
-			if (carriesModelTruth) {
-				if (
-					typeof data.model !== 'string'
-					|| !data.model
-					|| typeof data.updated_at !== 'string'
-					|| !data.updated_at
-				) {
-					console.warn('Ignoring session_updated without complete model truth');
-					break;
-				}
-				if (!acceptThreadModelTruth(
-					data.thread_id,
-					data.model,
-					data.updated_at,
-				)) break;
-			}
-			threads.update(ss => {
-				const updated = ss.map(s => {
-					if (s.id !== data.thread_id) return s;
-					return {
-						...s,
-						...(data.title !== undefined ? { title: data.title } : {}),
-						...(data.last_message !== undefined ? { last_message: data.last_message } : {}),
-						...threadSwitchFields(data),
-						...threadAccountFields(data),
-						...(!carriesModelTruth && data.updated_at !== undefined
-							? { updated_at: data.updated_at }
-							: {}),
-					};
-				});
-				if (!carriesModelTruth && data.updated_at !== undefined) {
-					updated.sort((a, b) => {
-						const ta = a.updated_at ? new Date(a.updated_at.endsWith('Z') ? a.updated_at : a.updated_at + 'Z').getTime() : 0;
-						const tb = b.updated_at ? new Date(b.updated_at.endsWith('Z') ? b.updated_at : b.updated_at + 'Z').getTime() : 0;
-						return tb - ta;
-					});
-				}
-				return updated;
-			});
+		case 'session_updated':
+			handleSessionUpdated(data);
 			break;
-		}
 
-		case 'models_updated': case 'classifier_updated': {
+		case 'models_updated': case 'classifier_updated': case 'thread_warm_progress': {
 			if (data.type === 'models_updated') import('../stores/models').then(m => m.loadModels());
 			emit(data.type, data);
 			break;
@@ -331,10 +250,16 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			if (!injected) break;
 			const inputId = typeof injected.metadata?.input_id === 'string'
 				? injected.metadata.input_id : null;
+			// Consume even when hidden: switching back is history, never a delayed reveal.
+			const localOpening = consumeFirstRunOpening(threadId, injected);
 			if (isDisplayedThread(threadId)) {
+				const alreadyPresent = get(messages).some(message => message.id === injected.id);
 				messages.update(current =>
 					reconcileCorrelatedMessage(current, injected, inputId).sort(compareMessageOrder)
 				);
+				if (localOpening && !alreadyPresent && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+					startTypewriter(threadId, injected.id, 0, injected.content.length, undefined, 'words');
+				}
 			}
 			emit('message_added', data);
 			break;

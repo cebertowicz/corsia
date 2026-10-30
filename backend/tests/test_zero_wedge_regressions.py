@@ -138,6 +138,54 @@ def _insert_ambiguous_message(
         db.close()
 
 
+@pytest.mark.parametrize("state", ["failed", "ambiguous"])
+def test_retry_accepts_vendor_login_stamped_input(isolated_db, monkeypatch, state) -> None:
+    """Retry passes through the real API and input writer without replaying a private stamp."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import thread_messages
+    from infra.database import get_db
+
+    _insert_session("retry-account")
+    _insert_ambiguous_message("retry-account", "account-input")
+    db = get_db()
+    try:
+        # A model-less thread holds the new input without launching a provider.
+        db.execute("UPDATE threads SET model='' WHERE id='retry-account'")
+        db.execute(
+            "UPDATE messages SET delivery_state=?, metadata=? WHERE id='account-input'",
+            (state, json.dumps({
+                "_corsia_vendor_login": {
+                    "turn_id": "turn-0", "account_revision": 1, "login_seq": 1,
+                },
+                "annotation": "keep",
+            })),
+        )
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(thread_messages, "authenticate", lambda _token: {"id": "user-1"})
+    app = FastAPI()
+    app.include_router(thread_messages.router)
+    with TestClient(app) as client:
+        response = client.post("/api/threads/retry-account/messages/account-input/retry")
+    assert response.status_code == 200, response.text
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT metadata FROM messages WHERE id=?",
+            (response.json()["revived_message_id"],),
+        ).fetchone()
+    finally:
+        db.close()
+    metadata = json.loads(row["metadata"])
+    assert metadata["annotation"] == "keep"
+    assert metadata["retried_from_message_id"] == "account-input"
+    assert "_corsia_vendor_login" not in metadata
+    assert bool(metadata.get("possible_duplicate")) == (state == "ambiguous")
+
+
 def test_retry_drops_the_ended_attempts_turn_and_input_identity() -> None:
     """A retried row must be a new Turn input and a distinct UI message."""
     from api.thread_inbox_actions import _retry_content
@@ -363,3 +411,38 @@ async def test_retry_resends_a_failed_input_verbatim(isolated_db, monkeypatch) -
     assert call is not None
     assert call.args[2] == content
     assert call.kwargs["trim_content"] is False
+
+
+@pytest.mark.asyncio
+async def test_retry_resends_a_comments_only_send(isolated_db, monkeypatch) -> None:
+    """A send of only comments has no text; its Retry resends the comments instead of answering 409."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from api import thread_inbox_actions
+    from infra.database import get_db
+    import infra.send_service as send_service
+
+    _insert_session("comments-thread")
+    comments = [{"cid": "c2.1", "seq": 1, "from_off": 0, "to_off": 4, "quote": "text", "note": "why?"}]
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,created_at,seq,metadata,"
+            "delivery_state,delivery_error,write_outcome) VALUES "
+            "('failed-comments','comments-thread','user','','t1',2,?,'failed','x','proved_no_write')",
+            (json.dumps({"reply_context": {"comments": comments}}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+    sent = AsyncMock(return_value=SimpleNamespace(message_id="retried-1", driver="native"))
+    monkeypatch.setattr(send_service, "send_thread_input", sent)
+
+    response = await thread_inbox_actions.retry_thread_delivery_now("comments-thread", "failed-comments", "user-1")
+
+    assert response["revived_message_id"] == "retried-1"
+    call = sent.await_args
+    assert call is not None
+    assert call.args[2] == ""
+    assert call.kwargs["metadata"]["reply_context"]["comments"] == comments

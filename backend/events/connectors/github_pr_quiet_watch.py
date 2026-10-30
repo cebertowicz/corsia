@@ -17,6 +17,7 @@ reads its status.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import random
@@ -24,10 +25,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE
 from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_notifications_feed as feed
+from events.connectors.github_read_budget import budget
 from infra.db_async import run_in_db
 from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
 
@@ -62,7 +65,7 @@ def quiet_watch_status() -> dict[str, Any]:
     ``fired_count`` counts wakes the owner's FIFO accepted, not wakes delivered
     to a Turn; a later admission failure is reported by the wake's settlement.
     """
-    return dict(_status)
+    return dict(_status)  # the shared read budget is shown with the notifications poller
 
 
 def _now() -> datetime:
@@ -76,7 +79,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception:  # noqa: BLE001 — an unreadable auth state is "not signed in"
@@ -106,7 +109,9 @@ async def _get(runner: feed.GhRunner, path: str) -> Any:
     """One conditional GitHub read in a worker thread; a 304 reuses the cached body."""
     cached = _etags.get(path)
     headers = {"If-None-Match": cached[0]} if cached else None
-    response = await asyncio.to_thread(feed.gh_get, runner, path, headers)
+    response = await asyncio.to_thread(
+        functools.partial(feed.gh_get, runner, path, headers, low_priority=True),
+    )
     if response.status == 304 and cached is not None:
         return cached[1]
     etag = response.headers.get("etag")
@@ -312,8 +317,16 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
 
 
 async def sweep_once(runner: feed.GhRunner) -> None:
-    """Evaluate every candidate once; one PR's failure never stops the others."""
+    """Evaluate every candidate once; one PR's failure never stops the others.
+
+    While the shared read budget keeps the sweep out of its reserve the sweep
+    is skipped, not failed: the budget's own status says why.
+    """
     from events.connectors.github_pr_notice import webhook_configured
+
+    if budget.sweep_paused():
+        _status.update({"state": "enabled", "reason": None})
+        return
 
     candidates = await run_in_db(_candidates)
     webhook = await run_in_db(webhook_configured)
@@ -344,9 +357,9 @@ async def pr_quiet_watch_loop(runner: feed.GhRunner | None = None) -> None:
     the notice and the receipt keep writing them, and it rechecks the reason.
     """
     if runner is None:
-        from reviewer.gh_api import run_gh
+        from connections.github_broker import default_broker
 
-        runner = run_gh
+        runner = default_broker()
     while True:
         reason = await asyncio.to_thread(disabled_reason, runner)
         if reason is not None:

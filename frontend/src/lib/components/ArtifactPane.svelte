@@ -10,38 +10,25 @@
 	import { togglePin } from '$lib/artifactPanePin';
 	import { toasts } from '$lib/stores/toast';
 	import { openBrowserPane } from '$lib/stores/artifactWorkspace';
+	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import ArtifactRow from './ArtifactRow.svelte';
 	import ArtifactWorktreeGroup from './ArtifactWorktreeGroup.svelte';
-	import AttentionCard from './AttentionCard.svelte';
-	import { fetchRaised } from '$lib/api/attention';
-	import type { AttentionItem } from '$lib/api/attention';
 	import { failThreadOpen, markArtifactsLoaded, registerArtifactsPane } from '$lib/openTimingRuntime';
 
-	let { threadId = null, conductorThreadId = null, demo = null, onBrowseDocuments }: {
+	let { threadId = null, demo = null, onBrowseDocuments }: {
 		threadId?: string | null;
-		conductorThreadId?: string | null;
 		demo?: PaneData | null;
 		onBrowseDocuments?: (threadId: string) => void;
 	} = $props();
 
-	// True when this pane is rendering the conductor's own thread.
-	const conductorMode = $derived(conductorThreadId != null && threadId === conductorThreadId);
-
 	let data = $state<PaneData | null>(null);
 	let loaded = $state(false);
 	let fetchError = $state(false);
-	let raisedItems = $state<AttentionItem[]>([]);
-	let raisedError = $state(false);
 	let expandedGroups = $state<Record<string, boolean>>({});
 	let pendingDisplay = $state<Record<string, boolean>>({});
 	let retrying = $state(false);
 	let retryingLoad = $state(false);
 	let paneGeneration = 0;
-	let raisedGeneration = 0;
-
-	// Disposition requests raised to the conductor — a distinct queue from the
-	// artifact pane's own needs_attention repair-failure cluster (never merged).
-	const primaryNeeds = $derived<AttentionItem[]>(conductorMode ? raisedItems : []);
 
 	// Frames join the pane's one read: while it runs, a frame only marks one more read due. Every
 	// other trigger reads at once and becomes the slot's read, so none waits behind a slow or hung
@@ -95,37 +82,7 @@
 			fetchError = true;
 			failThreadOpen(sid);
 		}
-		if (conductorMode && conductorThreadId) {
-			const raisedRequest = ++raisedGeneration;
-			try {
-				const res = await fetchRaised(tok, conductorThreadId);
-				if (requestGeneration !== paneGeneration || raisedRequest !== raisedGeneration) return;
-				raisedItems = res.items.filter((it) => it.attention_state === 'raised');
-				raisedError = false;
-			} catch {
-				if (requestGeneration !== paneGeneration || raisedRequest !== raisedGeneration) return;
-				// Do NOT reset raisedItems — preserve last known state so the conductor
-				// doesn't see an empty queue when the fetch transiently fails.
-				raisedError = true;
-			}
-		}
 		if (requestGeneration === paneGeneration) loaded = true;
-	}
-
-	async function refreshRaised() {
-		const requestGeneration = ++raisedGeneration;
-		const tok = get(token);
-		if (!tok || !conductorMode || !conductorThreadId) return;
-		try {
-			const res = await fetchRaised(tok, conductorThreadId);
-			if (requestGeneration !== raisedGeneration) return;
-			raisedItems = res.items.filter((it) => it.attention_state === 'raised');
-			raisedError = false;
-		} catch {
-			if (requestGeneration !== raisedGeneration) return;
-			// Preserve last known raisedItems — a transient failure must not blank the queue.
-			raisedError = true;
-		}
 	}
 
 	$effect(() => {
@@ -135,7 +92,6 @@
 			return;
 		}
 		threadId;
-		conductorMode;
 		load();
 	});
 
@@ -159,8 +115,6 @@
 			on('artifacts_changed', (d) => artifactMine(d) && loadForFrame()),
 			on('doc_comment_changed', (d) => shown(d) && load()),
 			on('turn_complete', (d) => mine(d) && load()),
-			on('attention_changed', () => conductorMode && refreshRaised()),
-			on('plans_changed', () => conductorMode && refreshRaised()),
 		];
 		return () => offs.forEach((off) => off && off());
 	});
@@ -168,15 +122,10 @@
 	const hasContent = $derived(
 		!!data && (data.nodes.length > 0 || data.needs_attention.length > 0)
 	);
-	const isEmpty = $derived(
-		!!data &&
-		!primaryNeeds.length &&
-		!(conductorMode && raisedError) &&
-		!hasContent
-	);
+	const isEmpty = $derived(!!data && !hasContent);
 	// A failed refresh with nothing already on screen is its own state: never
 	// render "no artifacts yet" for what is actually an unanswered request.
-	const showFetchError = $derived(fetchError && !hasContent && !primaryNeeds.length);
+	const showFetchError = $derived(fetchError && !hasContent);
 
 	// Cross-reference a needs_attention artifact_id against currently-fetched
 	// nodes for a display name — the DTO itself carries id + reason only.
@@ -266,35 +215,32 @@
 			retryingLoad = false;
 		}
 	}
+
+	function openBrowser(threadId: string) {
+		openBrowserPane(threadId);
+		// On narrow canvases this list is the right drawer; leaving it open would
+		// cover the browser the tap just opened.
+		if (isPaneDrawer()) paneOpen.set(false);
+	}
 </script>
 
 {#if !loaded}
 	<div class="muted">Loading…</div>
 {:else if showFetchError}
 	<div class="pane-error" role="status">
-		<span>Couldn't load this thread's files.</span>
+		<span>Couldn’t load this chat’s files.</span>
 		<Button variant="secondary" size="sm" loading={retryingLoad} disabled={retryingLoad} onclick={retryLoad}>
 			Retry
 		</Button>
 	</div>
 {:else if !data || isEmpty}
-	<div class="muted">Files you create, upload, or open in this thread show up here.</div>
+	<div class="muted">Files you create, upload, or open in this chat show up here.</div>
 {:else}
 	{#if fetchError}
 		<div class="stale-notice" role="status">
 			Couldn't refresh — showing the last loaded files.
 			<button type="button" class="inline-retry" disabled={retryingLoad} onclick={retryLoad}>Retry</button>
 		</div>
-	{/if}
-
-	{#if primaryNeeds.length || (conductorMode && raisedError)}
-		<div class="lane-cap needs">Needs you</div>
-		{#if conductorMode && raisedError}
-			<div class="raised-error">Disposition requests unavailable — refresh to retry</div>
-		{/if}
-		{#each primaryNeeds as it (it.external_id)}
-			<AttentionCard item={it} mode="parent" onDone={() => refreshRaised()} />
-		{/each}
 	{/if}
 
 	{#if data.needs_attention.length}
@@ -340,7 +286,7 @@
 		Browse documents…
 	</button>
 {/if}
-	<button class="browse" type="button" onclick={() => openBrowserPane(threadId)}>
+	<button class="browse" type="button" onclick={() => openBrowser(threadId)}>
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
 		Open browser
 	</button>
@@ -354,12 +300,7 @@
 		padding: 8px 8px 3px; font-size: var(--text-footnote); font-weight: 600;
 		color: var(--text-tertiary);
 	}
-	.lane-cap.needs, .lane-cap.needs-attention { color: var(--amber-text); }
-	.raised-error {
-		padding: 6px 10px; margin: 2px 0; border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--amber) 10%, transparent);
-		font-size: var(--text-footnote); color: var(--amber);
-	}
+	.lane-cap.needs-attention { color: var(--amber-text); }
 
 	/* A failed fetch, distinct from a genuinely empty pane. */
 	.pane-error {

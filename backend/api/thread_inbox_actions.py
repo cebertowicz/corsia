@@ -12,6 +12,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from infra.queued_input_settlement import cancel_queued_input
+from infra.vendor_login import public_metadata
 
 
 def _owned_input(thread_id: str, message_id: str, user_id: str):
@@ -89,7 +90,11 @@ async def run_inbox_message_action(
         raise HTTPException(409, str(exc)) from exc
     projected["thread_id"] = thread_id
     _broadcast(projected)
+    from infra.send_broadcast import broadcast_newest_error
     from infra.thread_execution import drive_thread
+
+    # A held error stops being held once nothing waits behind it.
+    await broadcast_newest_error(thread_id)
 
     await drive_thread(thread_id)
     return {"thread_id": thread_id, "message": projected}
@@ -102,6 +107,7 @@ def _retry_content(message: dict) -> tuple[str, dict]:
         metadata = {}
     if not isinstance(metadata, dict):
         metadata = {}
+    metadata = public_metadata(metadata)
     metadata.pop("turn_id", None)
     metadata.pop("input_id", None)
     metadata = {
@@ -138,8 +144,7 @@ async def retry_thread_delivery_now(
     if state not in {"failed", "ambiguous"}:
         raise HTTPException(409, "This message has no retryable delivery outcome.")
     content, metadata = _retry_content(message)
-    if not content.strip():
-        raise HTTPException(409, "This message has no content to retry.")
+    # send_thread_input owns the empty-input rule.
     from infra.send_service import SendRejected, send_thread_input
 
     try:

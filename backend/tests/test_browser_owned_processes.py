@@ -9,7 +9,9 @@ from host_access import browser_sessions as sessions
 from tests.browser_process_fixture import EXIT_TIMEOUT, synthetic_browser  # noqa: F401
 
 
-async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser):
+async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser, monkeypatch):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     assert await fake.owner.run('thread', ['open', 'about:blank']) == 'ok'
     record = fake.owner._sessions['thread'].record
@@ -25,7 +27,7 @@ async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser):
 async def test_failed_navigation_binds_and_reuses_startup_files(synthetic_browser):
     fake = synthetic_browser
     fake.result = sessions.CommandResult(1, '', 'navigation failed')
-    assert 'failed' in await fake.owner.run('thread', ['open', 'bad-url'])
+    assert 'failed' in await fake.owner.run('thread', ['open', 'https://example.test/'])
     record = fake.owner._sessions['thread'].record
     assert record.pid and fake.owner.live_count() == 1
     fake.result = sessions.CommandResult(0, 'ok', '')
@@ -43,12 +45,10 @@ async def test_close_has_no_cli_calls_and_proves_absence(synthetic_browser):
     assert not list(fake.owner.socket_dir.glob(record.session + '.*'))
 
 
-@pytest.mark.parametrize('mode', ['thread', 'lease', 'shutdown', 'timeout'])
+@pytest.mark.parametrize('mode', ['thread', 'lease', 'shutdown'])
 async def test_all_teardown_routes_without_cli(synthetic_browser, mode):
     fake = synthetic_browser
-    if mode == 'timeout':
-        fake.result = sessions.CommandResult(-1, '', '', timed_out=True, completion='interrupted')
-    result = await fake.owner.run('a', ['snapshot'], lease_id='lease-a')
+    await fake.owner.run('a', ['snapshot'], lease_id='lease-a')
     if mode == 'thread':
         await fake.owner.close_thread('a')
     elif mode == 'lease':
@@ -58,10 +58,60 @@ async def test_all_teardown_routes_without_cli(synthetic_browser, mode):
         await fake.owner.shutdown()
     elif mode == 'shutdown':
         await fake.owner.shutdown()
-    else:
-        assert 'timed out' in result
     assert fake.owner.live_count() == 0
     assert len(fake.calls) == (2 if mode == 'lease' else 1)
+
+
+@pytest.mark.parametrize('completion,timed_out', [('interrupted', True), ('interrupted', False)])
+async def test_interrupted_command_preserves_live_session(synthetic_browser, completion, timed_out):
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    record = fake.owner._sessions['thread'].record
+    fake.result = sessions.CommandResult(-1, '', '', timed_out=timed_out, completion=completion)
+    result, unfinished = await fake.owner._run_admitted(fake.owner._sessions['thread'], ['snapshot'],
+                                                        lease_id=None, timeout=30)
+    assert not unfinished and result.completion == completion
+    assert fake.owner._sessions['thread'].record == record
+    fake.result = sessions.CommandResult(0, 'ok', '')
+    assert await fake.owner.run('thread', ['snapshot']) == 'ok'
+    await fake.owner.shutdown()
+
+
+async def test_unsettled_timeout_keeps_owned_session_and_fences_next_command(synthetic_browser):
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    fake.result = sessions.CommandResult(-1, '', '', timed_out=True, completion='unknown')
+    result, unfinished = await fake.owner._run_admitted(fake.owner._sessions['thread'], ['snapshot'],
+                                                        lease_id=None, timeout=30)
+    assert result.timed_out and not unfinished and fake.owner.live_count() == 1
+    with pytest.raises(sessions.BrowserSessionError, match='still running'):
+        await fake.owner.run('thread', ['snapshot'])
+
+
+async def test_recovery_notice_reaches_next_agent_result(synthetic_browser, monkeypatch):
+    from host_access import browser_launch, browser_reporting
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
+    monkeypatch.setattr(browser_reporting, 'report_cleanup', AsyncMock(return_value=('thread', 'notice')))
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    runtime = fake.owner._sessions['thread']
+    await fake.owner._record_failure(runtime, RuntimeError('unverified'))
+    await fake.owner.close_thread('thread')
+    result = await fake.owner.run('thread', ['snapshot'])
+    assert 'browser restarted' in result and 'sign in again' in result
+    assert await fake.owner.run('thread', ['snapshot']) == 'ok'
+    await fake.owner.shutdown()
+
+
+async def test_numeric_wait_is_bounded_and_reports_timeout(synthetic_browser):
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    result, unfinished = await fake.owner._run_admitted(fake.owner._sessions['thread'], ['wait', '45000'],
+                                                        lease_id=None, timeout=30)
+    assert fake.calls[-1][-2:] == ('wait', '29000')
+    assert result.timed_out and not unfinished and fake.owner.live_count() == 1
+    await fake.owner.shutdown()
 
 
 @pytest.mark.parametrize('suffix', ['pid', 'version', 'sock'])
@@ -114,7 +164,9 @@ async def test_replacement_after_command_never_rebinds(synthetic_browser, monkey
     assert fake.children[record.session].poll() is None
 
 
-async def test_slow_close_retains_producer_then_recovers_and_reopens(synthetic_browser):
+async def test_slow_close_retains_producer_then_recovers_and_reopens(synthetic_browser, monkeypatch):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     fake.env_changes = {'TEST_CLOSE_DELAY': '0.3', 'TEST_CHILD': '1'}
     fake.owner.close_timeout = 0.05

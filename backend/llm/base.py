@@ -93,9 +93,10 @@ def sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any
     for msg in messages:
         content = msg.get("content")
 
-        if isinstance(content, str) and not content:
+        assistant_tool_call = msg.get("role") == "assistant" and msg.get("tool_calls")
+        if isinstance(content, str) and (not content or (assistant_tool_call and not content.strip())):
             clean = dict(msg)
-            clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
+            clean["content"] = None if assistant_tool_call else "(empty)"
             result.append(clean)
             continue
 
@@ -242,15 +243,14 @@ async def _omlx_loaded_only_preflight(
         OmlxLoadedStateError,
         require_loaded_model,
     )
-    from llm.router import LLMResponse
+    from llm.router import provider_error_response
 
     try:
         await require_loaded_model(api_base, model, server_id=server_id)
     except OmlxLoadedStateError as error:
         logger.error("oMLX loaded-only preflight failed for {}: {}", model, error)
-        return LLMResponse(
-            content=f"Error calling LLM: {_humanize_error(error, model)}",
-            finish_reason="error",
+        return provider_error_response(
+            error, f"Error calling LLM: {_humanize_error(error, model)}",
         )
     return None
 

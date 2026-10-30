@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import uuid
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def _register(client, path: Path, thread_id: str | None = None) -> str:
 
 
 def _region_comment(client, artifact_id: str, region: dict, body: str = "Fix this.") -> dict:
-    r = client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={"body": body, "region": region})
+    r = client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": body, "region": region})
     assert r.status_code == 200, r.text
     return r.json()["comment"]
 
@@ -89,10 +90,108 @@ def test_numbers_are_per_image_and_never_reused_after_resolve(integration_client
     assert [first["region_number"], second["region_number"], third["region_number"]] == [1, 2, 3]
     assert elsewhere["region_number"] == 1
     reply = integration_client.post(
-        _url(f"/api/artifacts/{artifact_id}/comments"), json={"body": "Agreed.", "parent_id": first["id"]},
+        _url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": "Agreed.", "parent_id": first["id"]},
     ).json()["comment"]
     assert reply["region_number"] is None
     other.unlink(missing_ok=True)
+
+
+def _person_lanes(artifact_id: str) -> list[str]:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [
+            row["delivery_policy"]
+            for row in db.execute(
+                "SELECT delivery_policy FROM doc_feedback_batches WHERE author_kind='user' AND artifact_id=? ORDER BY created_at, id",
+                (artifact_id,),
+            )
+        ]
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("lane", ["immediate", "document-held"])
+def test_a_reopened_region_comment_is_image_held_whatever_lane_the_person_names(integration_client, image_file, lane):
+    artifact_id = _register(integration_client, image_file, _mk_thread(integration_client, _OWNER, title="Owner"))
+    pin = _region_comment(integration_client, artifact_id, {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2})
+    assert _person_lanes(artifact_id) == ["image-held"]
+    assert integration_client.patch(_url(f"/api/comments/{pin['id']}"), json={"resolved": True}).status_code == 200
+
+    r = integration_client.patch(_url(f"/api/comments/{pin['id']}"), json={"resolved": False, "delivery_policy": lane})
+
+    assert r.status_code == 200, r.text
+    # The create and the re-open share one open image-held batch; neither opened a document lane.
+    assert _person_lanes(artifact_id) == ["image-held"]
+
+
+@pytest.mark.parametrize("lane", ["immediate", "document-held"])
+def test_a_reopened_whole_image_comment_from_the_image_view_is_image_held(integration_client, image_file, lane):
+    """The image view posts the whole image as the region {0, 0, 1, 1}; it re-opens like any other pin."""
+    artifact_id = _register(integration_client, image_file, _mk_thread(integration_client, _OWNER, title="Owner"))
+    whole = _region_comment(integration_client, artifact_id, {"x": 0, "y": 0, "w": 1, "h": 1})
+    assert _person_lanes(artifact_id) == ["image-held"]
+    assert integration_client.patch(_url(f"/api/comments/{whole['id']}"), json={"resolved": True}).status_code == 200
+
+    r = integration_client.patch(_url(f"/api/comments/{whole['id']}"), json={"resolved": False, "delivery_policy": lane})
+
+    assert r.status_code == 200, r.text
+    assert _person_lanes(artifact_id) == ["image-held"]
+
+
+@pytest.fixture
+def doc_with_image(integration_workspace):
+    folder = integration_workspace / f"review-{uuid.uuid4().hex[:8]}"
+    (folder / "img").mkdir(parents=True)
+    (folder / "img" / "login.png").write_bytes(_png_bytes())
+    path = folder / "notes.md"
+    path.write_text(f"# Review\n\nThe login screen:\n\n{DOC_IMAGE}\n")
+    yield path
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+DOC_IMAGE = "![Login screen](img/login.png)"
+
+
+@pytest.mark.parametrize("lane", ["immediate", "document-held"])
+def test_a_reopened_document_comment_on_an_image_reference_keeps_its_lane(integration_client, doc_with_image, lane):
+    """Made in the document, the comment has no region, so re-opening it follows the lane named."""
+    artifact_id = _register(integration_client, doc_with_image, _mk_thread(integration_client, _OWNER, title="Owner"))
+    start = doc_with_image.read_text().index(DOC_IMAGE)
+    created = integration_client.post(
+        _url(f"/api/artifacts/{artifact_id}/comments"),
+        json={"delivery_policy": lane, "body": "Wrong screen.", "anchor_text": DOC_IMAGE, "from_off": start, "to_off": start + len(DOC_IMAGE)},
+    )
+    assert created.status_code == 200, created.text
+    comment = created.json()["comment"]
+    assert comment["region_x"] is None
+    assert _person_lanes(artifact_id) == [lane]
+    assert integration_client.patch(_url(f"/api/comments/{comment['id']}"), json={"resolved": True}).status_code == 200
+
+    r = integration_client.patch(_url(f"/api/comments/{comment['id']}"), json={"resolved": False, "delivery_policy": lane})
+
+    assert r.status_code == 200, r.text
+    # An immediate batch ends as it is delivered, so a re-open may open a second one; a document lane never appears.
+    assert set(_person_lanes(artifact_id)) == {lane}
+
+
+@pytest.mark.parametrize("lane", ["immediate", "document-held"])
+def test_a_reopened_text_comment_in_a_region_document_keeps_its_lane(integration_client, image_file, lane):
+    """A reply on a pin has no region of its own, so re-opening it follows the lane named."""
+    artifact_id = _register(integration_client, image_file, _mk_thread(integration_client, _OWNER, title="Owner"))
+    pin = _region_comment(integration_client, artifact_id, {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2})
+    reply = integration_client.post(
+        _url(f"/api/artifacts/{artifact_id}/comments"),
+        json={"delivery_policy": "immediate", "body": "Agreed.", "parent_id": pin["id"]},
+    ).json()["comment"]
+    assert integration_client.patch(_url(f"/api/comments/{reply['id']}"), json={"resolved": True}).status_code == 200
+
+    r = integration_client.patch(_url(f"/api/comments/{reply['id']}"), json={"resolved": False, "delivery_policy": lane})
+
+    assert r.status_code == 200, r.text
+    # The pin and the reply were made image-held and immediate; the re-open adds the lane named, never image-held for a reply.
+    assert set(_person_lanes(artifact_id)) == {"image-held", "immediate", lane}
 
 
 @pytest.mark.parametrize(
@@ -108,7 +207,7 @@ def test_numbers_are_per_image_and_never_reused_after_resolve(integration_client
 def test_malformed_region_requests_are_refused(integration_client, image_file, body, detail):
     artifact_id = _register(integration_client, image_file)
 
-    r = integration_client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json=body)
+    r = integration_client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={**body, "delivery_policy": "immediate"})
 
     assert r.status_code in (400, 422), r.text
     assert detail in r.text.lower()
@@ -120,7 +219,7 @@ def test_region_on_a_text_document_is_refused(integration_client, integration_wo
     artifact_id = _register(integration_client, doc)
 
     r = integration_client.post(
-        _url(f"/api/artifacts/{artifact_id}/comments"), json={"body": "x", "region": {"x": 0.1, "y": 0.1}},
+        _url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": "x", "region": {"x": 0.1, "y": 0.1}},
     )
 
     assert r.status_code == 400

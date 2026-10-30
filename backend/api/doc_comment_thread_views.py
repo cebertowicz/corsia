@@ -34,9 +34,9 @@ async def mark_comment_thread_viewed(
 ):
     """Store the newest reply actually rendered in one disclosed thread."""
     await run_in_db(_check_access, artifact_id, user["id"])
-    cleared = await run_in_db(
+    remaining = await run_in_db(
         comment_thread_views.mark_viewed, user["id"], artifact_id, root_id, body.seen_reply_id,
     )
-    if cleared is None:
+    if remaining is None:
         raise HTTPException(404, "Comment thread or reply not found")
-    return {"root_id": root_id, "reply_waiting": not cleared}
+    return {"root_id": root_id, "new_reply_ids": remaining}

@@ -17,10 +17,9 @@ from core.tool_result_debt import (
     readable_call_id,
 )
 from core.tool_result_binding import quarantine_stranded_tool_results
-from core.tool_result_delivery import TURN_ENDED_WITHOUT_RESULT_REASON
 from core.tool_result_projection import tool_result_integrity_metadata
 from core.turns_steps import MISSING_TOOL_RESULT_TEXT
-from infra.delivery_states import TOOL_RESULT_BOUND
+from infra.delivery_states import TOOL_RESULT_BOUND, TURN_ENDED_WITHOUT_RESULT_REASON
 from infra.queries import insert_message
 
 

@@ -8,7 +8,7 @@ import logging
 from core._tool_result_delivery_support import ToolResultBindingError
 from subagents.codex_app_server_events import dynamic_tool_request
 from subagents.codex_dynamic_tools import (
-    checkpoint_reply_fits,
+    fork_reply_fits,
     dynamic_tool_response,
     dynamic_tool_values,
 )
@@ -30,8 +30,8 @@ class ToolRequests:
 
     @classmethod
     def for_session(cls, session) -> ToolRequests | None:
-        """Attach control queries only to checkpoint or ordinary managed tools."""
-        if session.checkpoint_tool_result_fits or (
+        """Attach control queries only to fork or ordinary managed tools."""
+        if session.fork_tool_result_fits or (
             session.corsia_thread_id and session.tool_registry is not None
         ):
             return cls(session)
@@ -156,8 +156,8 @@ class ToolRequests:
                 from subagents.codex_app_server_notifications import record_usage
 
                 await record_usage(self.session, frame["params"]["turnId"], usage)
-                boundary = self.session.checkpoint_tool_result_fits
-                if boundary is not None and not await checkpoint_reply_fits(self.session, None, usage):
+                boundary = self.session.fork_tool_result_fits
+                if boundary is not None and not await fork_reply_fits(self.session, None, usage):
                     self.session._request_terminate()
                     return
                 if boundary is None:

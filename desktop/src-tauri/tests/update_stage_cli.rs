@@ -3,11 +3,40 @@ use std::{
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    sync::Once,
     thread,
     time::{Duration, Instant},
 };
 
+/// Launch the freshly linked binary once, alone, before any test launches it
+/// concurrently. macOS SIGKILLs a newly linked ad-hoc-signed binary when
+/// several processes first-exec it at once, which killed random tests in this
+/// file before they asserted anything.
+fn warm_up_binary() {
+    static WARM: Once = Once::new();
+    WARM.call_once(|| {
+        let home = tempfile::tempdir().expect("create warm-up home");
+        let output = Command::new(env!("CARGO_BIN_EXE_corsia-desktop"))
+            .arg("--update-swap")
+            .env_clear()
+            .env("HOME", home.path())
+            .env("TMPDIR", home.path())
+            .output()
+            .expect("start app binary for warm-up");
+        // A missing operation id is a usage error, so a healthy launch exits 64.
+        assert_eq!(
+            output.status.code(),
+            Some(64),
+            "warm-up launch of the freshly linked binary exited {:?} (None means it was \
+             killed, signal 9 on macOS first exec of a new ad-hoc-signed binary): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    });
+}
+
 fn run_binary(binary: &Path, home: &Path, args: &[&str]) -> Output {
+    warm_up_binary();
     let mut child = Command::new(binary)
         .args(args)
         .env_clear()

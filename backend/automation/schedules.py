@@ -26,7 +26,7 @@ class Schedule:
     scope_id: str
     kind: str
     spec: str
-    next_run_at: str
+    next_run_at: str | None  # None only for a script only event rules start
     last_run_at: str | None
     runs: int
     max_runs: int
@@ -42,11 +42,22 @@ class Schedule:
     last_status: str | None = None
     last_error: str | None = None
     noted_at: str | None = None
+    last_measures: str | None = None
 
 
 def _parse(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
+    """The first cadence slot after ``now``, anchored on the due time: no replay."""
+    due, current = _parse(due_at), _parse(now)
+    step = timedelta(seconds=cadence_seconds)
+    if due > current:
+        return due.isoformat()
+    missed = int((current - due) / step) + 1
+    return (due + missed * step).isoformat()
 
 
 def _row(row) -> Schedule:
@@ -191,16 +202,13 @@ def settle_run(schedule_id: str, fired_at: str, *, db) -> bool:
     """Advance one settled scheduled occurrence exactly once."""
 
     schedule = get(schedule_id, db=db)
-    if schedule.state != "active" or schedule.next_run_at > fired_at:
+    if schedule.state != "active" or schedule.next_run_at is None or schedule.next_run_at > fired_at:
         return False
     runs = schedule.runs + 1
     exhausted = runs >= schedule.max_runs or schedule.kind == "clock"
     next_run = schedule.next_run_at
     if not exhausted:
-        next_run = (
-            _parse(schedule.next_run_at)
-            + timedelta(seconds=int(schedule.spec))
-        ).isoformat()
+        next_run = next_slot(schedule.next_run_at, int(schedule.spec), fired_at)
     cursor = db.execute(
         """UPDATE automation_schedules
            SET runs=?,last_run_at=?,next_run_at=?,state=?,updated_at=?

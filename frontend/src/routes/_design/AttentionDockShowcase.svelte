@@ -15,13 +15,14 @@
 	import type {
 		AttentionQueue,
 		AttentionQueueItem,
+		CommentReplyDetail, CommentReplyItem,
 		DecisionDetail,
 		ExternalReviewDetail,
 	} from '$lib/api/attentionQueue';
 
 	type Scenario =
 		| 'empty' | 'one' | 'pick-any' | 'no-recommendation' | 'long-rationale' | 'many' | 'root-direct'
-		| 'external' | 'external-many' | 'suppressed' | 'stale';
+		| 'external' | 'external-many' | 'comment-replies' | 'suppressed' | 'stale';
 
 	const SCENARIOS: Array<{ id: Scenario; label: string }> = [
 		{ id: 'empty', label: '0 waiting' },
@@ -31,6 +32,7 @@
 		{ id: 'root-direct', label: 'No parent review' },
 		{ id: 'external', label: 'External review' },
 		{ id: 'external-many', label: 'Review, then decisions' },
+		{ id: 'comment-replies', label: 'Comment replies' },
 		{ id: 'suppressed', label: 'Host lease holds the slot' },
 		{ id: 'stale', label: 'Stale / offline' },
 	];
@@ -124,6 +126,17 @@
 		return { external_id: detail.id, renderer: 'decision', detail };
 	}
 
+	function commentReply(position: number): CommentReplyItem {
+		const detail: CommentReplyDetail = {
+			title: 'delivery-model.md',
+			unread_count: 1,
+			newest_at: `2026-10-24T15:00:0${position}Z`,
+			destination: { pane: 'document-replies', id: 'artifact-comment-delivery', path: '/workspace/delivery-model.md', title: 'delivery-model.md' },
+			source: { thread_id: source.thread_id! },
+		};
+		return { detail };
+	}
+
 	function body(): AttentionQueue {
 		if (scenario === 'empty') return { current: null, count: 0, items: [] };
 		if (scenario === 'pick-any') {
@@ -180,6 +193,10 @@
 				count: 1,
 				items: [{ external_id: 'pr-9', renderer: 'external-review', detail }],
 			};
+		}
+		if (scenario === 'comment-replies') {
+			const items = [commentReply(1), commentReply(2), commentReply(3)];
+			return { current: null, count: 0, items: [], reply_items: items };
 		}
 		if (scenario === 'external-many') {
 			const detail = externalReview();

@@ -1,7 +1,7 @@
 import { derived } from 'svelte/store';
 import { activeThreadId } from './threads';
 import { threadPlanStates } from './threadPlanStates';
-import { turnStates } from '../ws/turnState';
+import { rolledUpRoot, turnStates } from '../ws/turnState';
 
 /**
  * Each thread's motion word: `active` while its own Turn runs, `done` when the
@@ -33,13 +33,8 @@ export const threadActivity = derived(
 export const descendantRunning = derived(turnStates, ($turnStates) => {
 	const running = new Set<string>();
 	for (const [threadId, state] of $turnStates) {
-		if (
-			state.phase === 'active'
-			&& state.visibleRootThreadId !== null
-			&& state.visibleRootThreadId !== threadId
-		) {
-			running.add(state.visibleRootThreadId);
-		}
+		const root = rolledUpRoot(threadId, state);
+		if (root !== null) running.add(root);
 	}
 	return running;
 });

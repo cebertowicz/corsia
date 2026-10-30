@@ -85,7 +85,7 @@ class TestCommentsOwnership:
     def test_B_cannot_post_to_As_artifact(self, integration_client, doc_file):
         _, aid = self._a_owned_artifact(integration_client, doc_file)
         r = integration_client.post(
-            f"/api/artifacts/{aid}/comments?token={_B}", json={"body": "intrusion"})
+            f"/api/artifacts/{aid}/comments?token={_B}", json={"delivery_policy": "immediate", "body": "intrusion"})
         assert r.status_code == 404
 
     def test_B_cannot_persist_positions_on_As_artifact(self, integration_client, doc_file):
@@ -98,7 +98,7 @@ class TestCommentsOwnership:
     def test_B_cannot_patch_As_comment(self, integration_client, doc_file):
         _, aid = self._a_owned_artifact(integration_client, doc_file)
         cid = integration_client.post(
-            f"/api/artifacts/{aid}/comments?token={_A}", json={"body": "A's note"}
+            f"/api/artifacts/{aid}/comments?token={_A}", json={"delivery_policy": "immediate", "body": "A's note"}
         ).json()["comment"]["id"]
         r = integration_client.patch(
             f"/api/comments/{cid}?token={_B}", json={"resolved": True})
@@ -112,7 +112,7 @@ class TestCommentsOwnership:
         assert integration_client.get(
             f"/api/artifacts/{aid}/comments?token={_A}").status_code == 200
         assert integration_client.post(
-            f"/api/artifacts/{aid}/comments?token={_A}", json={"body": "ok"}
+            f"/api/artifacts/{aid}/comments?token={_A}", json={"delivery_policy": "immediate", "body": "ok"}
         ).status_code == 200
 
 

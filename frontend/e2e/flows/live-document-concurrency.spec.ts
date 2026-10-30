@@ -1,5 +1,6 @@
 import { replyField, showAllThreads } from '../support/commentDrawer';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { createComment, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import {
 	agentComment, holdPositionsAnswer, holdRequest, layouts, markTexts, openLivePair, recordMarkTexts, reviewerSession, suggest, textDigest, watchPlacementReports,

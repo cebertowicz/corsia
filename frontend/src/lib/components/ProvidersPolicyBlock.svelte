@@ -1,133 +1,116 @@
 <script lang="ts">
 	import Toggle from './ui/Toggle.svelte';
 	import Button from './ui/Button.svelte';
-	import IconButton from './ui/IconButton.svelte';
+	import ProviderAccountPolicyControls from './v7/ProviderAccountPolicyControls.svelte';
+	import PolicySaveStatus from './v7/PolicySaveStatus.svelte';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
-	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
+	import type { ProviderEntry } from '$lib/api/providerPolicy';
+	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
+	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
+	import { loadThreads } from '$lib/stores/threadsLoad';
 
-	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
-	let policy = $state<ProviderPolicy | null>(null);
-	let error = $state('');
+	const { projectId, onSignIn }: { projectId: string; onSignIn?: (provider: string) => void } = $props();
+	const policyState = createProviderPolicyState(() => projectId);
+	const policy = $derived(policyState.policy);
+	const error = $derived(policyState.error);
+	const loading = $derived(policyState.loading);
+	const scopeTarget = 'scope';
 	let accountsError = $state('');
-	let loading = $state(true);
-	let busy = $state(false);
+	// `null` stays loading until the project's persisted Local models only setting settles.
+	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
+	// Every account provider the policy lists, named by the harness owner.
+	const cloudOffLine = $derived(accountProviders.length
+		? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(accountProviders.map(providerName))} ${accountProviders.length === 1 ? "isn't" : "aren't"} used while Local models only is on.`
+		: '');
 
 	$effect(() => { void load(); });
 	async function load() {
-		loading = true; error = ''; accountsError = '';
-		const [result, accounts] = await Promise.all([loadProviderPolicy(projectId), loadVendorAccounts()]);
-		if (result.ok && Array.isArray(result.value?.providers)) policy = result.value;
-		else error = result.ok ? 'Could not load providers.' : result.error;
-		if (!accounts.ok) accountsError = accounts.error ?? 'Could not load accounts.';
-		loading = false;
+		accountsError = '';
+		const [, accounts] = await Promise.all([policyState.load(), loadVendorAccounts()]);
+		if (!accounts.ok) accountsError = accounts.error ?? 'Couldn’t load your accounts.';
 	}
-	async function toggleScope(useWorkspace: boolean) {
-		if (!projectId || !policy || busy) return;
-		busy = true;
-		try {
-			const result = await saveUseWorkspace(projectId, useWorkspace, policy.override_revision ?? 0);
-			if (result.ok) policy = result.value; else error = result.error;
-		} finally {
-			busy = false;
-		}
-	}
-	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>) {
-		if (busy) return;
-		busy = true; error = '';
-		try {
-			const result = await saveProviderPolicy({ ...entry, ...patch }, projectId);
-			if (result.ok && policy) policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
-			else if (!result.ok) error = result.error;
-		} finally {
-			busy = false;
-		}
-	}
+	async function toggleScope(useWorkspace: boolean) { await policyState.toggleScope(useWorkspace); }
+	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>, target: string) { await policyState.save(entry, patch, target); }
 	function providerName(provider: ProviderEntry) {
-		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
+		return HARNESSES.find((harness) => harness.name === provider.provider_key)?.label ?? provider.provider_key;
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);
 	}
-	function overrideSummary() {
-		const projects = policy?.overriding_projects ?? [];
-		if (!projects.length) return 'Every project uses these settings';
-		return `Overridden in ${projects.length} ${projects.length === 1 ? 'project' : 'projects'}: ${projects.map((project) => project.name).join(', ')}`;
+	// Project policy stays with its project; workspace account policy lives in the provider Accounts tab.
+	function openWorkspaceProviders() {
+		requestSettingsSection('providers');
 	}
-	function openWorkspaceSettings() {
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
-	}
-	function setEnabled(provider: ProviderEntry, unitId: string, enabled: boolean) {
-		void save(provider, { disabled: enabled ? provider.disabled.filter((id) => id !== unitId) : [...provider.disabled, unitId] });
-	}
-	function move(entry: ProviderEntry, unitId: string, direction: -1 | 1) {
-		const order = [...(entry.order ?? entry.units.map((unit) => unit.id))];
-		const index = order.indexOf(unitId);
-		const destination = index + direction;
-		if (index < 0 || destination < 0 || destination >= order.length) return;
-		[order[index], order[destination]] = [order[destination], order[index]];
-		void save(entry, { order });
-	}
+	function setEnabled(provider: ProviderEntry, unitId: string, enabled: boolean) { policyState.setEnabled(provider, unitId, enabled); }
+	function move(entry: ProviderEntry, unitId: string, direction: -1 | 1) { policyState.move(entry, unitId, direction); }
 </script>
 
-<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'}>
-	<h2>Providers</h2>
-	{#if loading}<p role="status">Loading providers…</p>
-	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
+<section class="providers-policy" aria-label="Project providers" data-settings-anchor="project-provider-policy" use:settingsAnchor={'project-provider-policy'}>
+	<h2>Models</h2>
+	<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} onCloudModelsOffSaved={() => { void loadThreads(); }} />
+	<h2>Accounts and rollover</h2>
+	{#if loading || cloudModelsOff === null}<p role="status">Loading providers…</p>
+	{:else if cloudModelsOff === true && policy}
+		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
+	{:else if error && !policy}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Retry</Button>
 	{:else if policy}
-		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
-		{#if projectId}
-			<div class="scope-setting">
+		{#if error}<p class="error" role="alert">{error}</p>{/if}
+		{#if accountsError}<p class="error" role="alert">{accountsError}</p>{/if}
+		{#if error || accountsError}<Button size="sm" onclick={load}>Retry</Button>{/if}
+		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>
 					{#if policy.use_workspace ?? true}
-						<p>Use the workspace's provider order and rollover settings for this project.</p>
+						<p>Use the workspace's account order and rollover.</p>
 					{:else}
 						<p>Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.</p>
 					{/if}
-					<button class="workspace-link" type="button" onclick={openWorkspaceSettings}>Open Workspace settings</button>
+					<span class="workspace-link"><Button variant="ghost" size="sm" onclick={openWorkspaceProviders}>Open workspace providers</Button></span>
 				</div>
-				<Toggle checked={policy.use_workspace ?? true} disabled={busy} ariaLabel="Use workspace settings" onchange={toggleScope} />
+				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} /><PolicySaveStatus id="scope-policy-status" pending={policyState.isPending(scopeTarget)} failure={policyState.failureText(scopeTarget)} /></span>
 			</div>
-		{/if}
-		{#if !projectId || !policy.use_workspace}
+		{#if !policy.use_workspace}
 			{#each accountProviders as provider (provider.provider_key)}
 				<div class="provider">
 					<h3>{providerName(provider)}</h3>
-					{#if !projectId}<p>{overrideSummary()}</p>{/if}
 					{#if provider.units.length === 0}
 						<p>No {providerName(provider)} account signed in</p>
-						{#if onSignIn}<Button size="sm" onclick={() => onSignIn?.(provider.provider_key)}>Sign in</Button>{/if}
+						{#if onSignIn}<Button size="sm" variant="ghost" onclick={() => onSignIn?.(provider.provider_key)}>Sign in</Button>{/if}
 					{:else if provider.units.length === 1}
 						{@const unit = provider.units[0]}
 						{#if accountFor(unit.id)}
 							<AccountUsageRow account={accountFor(unit.id)!} compact>
-								<Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} />
+								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
 							</AccountUsageRow>
 						{:else}
-							<div class="account-row"><span>{unit.label}</span><Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} /></div>
+							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 						{/if}
 					{:else}
 						{#if provider.capabilities.rollover}
-							<div class="line"><span>Roll over when an account hits its limit</span><Toggle checked={provider.rollover} disabled={busy} ariaLabel="Roll over when an account hits its limit" onchange={(value) => save(provider, { rollover: value })} /></div>
+							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} /><PolicySaveStatus id={`rollover-${provider.provider_key}-policy-status`} pending={policyState.isPending(`rollover:${provider.provider_key}`)} failure={policyState.failureText(`rollover:${provider.provider_key}`)} /></span></div>
 						{/if}
 						{#each provider.units as unit, index (unit.id)}
 							{#if accountFor(unit.id)}
 								<AccountUsageRow account={accountFor(unit.id)!} compact order={provider.rollover ? index + 1 : null}>
-									{#if provider.rollover}
-										<span class="order-controls" aria-label={`${unit.label} rollover order`}>
-											<IconButton size="sm" ariaLabel={`Move ${unit.label} up`} disabled={busy || index === 0} onclick={() => move(provider, unit.id, -1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg></IconButton>
-											<IconButton size="sm" ariaLabel={`Move ${unit.label} down`} disabled={busy || index === provider.units.length - 1} onclick={() => move(provider, unit.id, 1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6" /></svg></IconButton>
-										</span>
-									{/if}
-									<Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} />
+									<ProviderAccountPolicyControls
+										accountName={unit.label}
+										enabled={unit.enabled}
+										toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)}
+										moveDisabled={policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
+										pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`) || policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
+										failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`) ?? policyState.failureText(`order:${provider.provider_key}:${unit.id}`)}
+										position={provider.rollover ? index : null}
+										total={provider.units.length}
+										onmove={(direction) => move(provider, unit.id, direction)}
+										ontoggle={(value) => setEnabled(provider, unit.id, value)}
+									/>
 								</AccountUsageRow>
 							{:else}
-								<div class="account-row"><span>{unit.label}</span><Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} /></div>
+								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 							{/if}
 						{/each}
 					{/if}
@@ -138,17 +121,26 @@
 </section>
 
 <style>
-	.providers-policy { border: 1px solid var(--border-subtle); border-radius: var(--lg-card-radius); background: var(--bg-secondary); padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
-	h2 { margin: 0; font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--text-secondary); }
-	h3 { margin: 0; font-size: var(--text-subhead); }
-	.provider { display: flex; flex-direction: column; gap: 10px; }
-	.scope-setting, .line, .account-row, .order-controls { display: flex; align-items: center; gap: 8px; }
-	.scope-setting, .line, .account-row { justify-content: space-between; }
-	.order-controls :global(.ico-btn) { width: 28px; height: 28px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); }
-	.order-controls :global(.ico-btn:hover:not(:disabled)) { border-color: var(--border); }
-	.scope-setting > div { min-width: 0; }
-	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
-	.workspace-link { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accent-text); cursor: pointer; font: inherit; font-size: var(--text-footnote); text-decoration: underline; }
-	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	/* The group label, then one sub-group per vendor: its name, a caption, then its rows. */
+	.providers-policy { display: flex; flex-direction: column; gap: var(--space-4); }
+	/* The project policy is the section; provider names are its subordinate group labels. */
+	h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	h3 { margin: 0; font-size: var(--text-caption); font-weight: var(--fw-regular, 400); color: var(--text-tertiary); }
+	.provider { display: flex; flex-direction: column; gap: var(--space-1); }
+	.provider > p { margin-bottom: var(--space-1); }
+	/* Every project-policy control reserves only its control column; status spans a separate row. */
+	.scope-setting, .line, .account-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); }
+	.line, .account-row { min-height: var(--list-row-min-height); }
+	.scope-setting > div, .line > span:first-child, .account-row > span:first-child { grid-column: 1; min-width: 0; }
+	.account-row > span:first-child { font-size: var(--text-subhead); color: var(--text-primary); }
+	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
+	.scope-setting :global(.tg), .line :global(.tg), .account-row :global(.provider-account-policy-controls) { grid-column: 2; justify-self: end; }
+	.scope-setting :global(.policy-status), .line :global(.policy-status), .account-row :global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
+	.scope-label, .line > span:first-child { color: var(--text-primary); font-size: var(--text-subhead); }
+	/* Going to another Settings page is a text action on the same content column. */
+	.workspace-link { display: block; margin-top: var(--space-1); }
+	.workspace-link :global(.btn.ghost) { padding-inline: 0; }
+	p { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.error { color: var(--red-text); }
+	.policy-control { display: contents; }
 </style>

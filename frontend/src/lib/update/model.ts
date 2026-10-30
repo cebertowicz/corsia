@@ -4,13 +4,17 @@
  * surface (toast, sheet, Settings, composer) shows from it.
  */
 
-export type UpdatePhase = 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming';
+export type UpdatePhase = 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | 'verifying';
 export type UpdateOperationStatus = 'in_flight' | 'complete' | 'failed' | 'cancelled' | 'superseded';
 export type UpdateFailureCode =
 	| 'disk_space'
 	| 'fetch_failed'
 	| 'build_failed'
 	| 'launch_failed'
+	| 'update_refused'
+	| 'rolled_back'
+	| 'version_unverified'
+	| 'wrong_version_running'
 	| 'drain_cancelled'
 	| 'drain_failed'
 	| 'update_timed_out'
@@ -18,6 +22,8 @@ export type UpdateFailureCode =
 	| 'index_locked'
 	| 'checkout_detached'
 	| 'checkout_dirty'
+	| 'checkout_no_upstream'
+	| 'checkout_diverged'
 	| 'restart_pending';
 
 export interface UpdateOperation {
@@ -63,9 +69,9 @@ export function isInFlight(op: UpdateOperation | null | undefined): op is Update
 	return op?.status === 'in_flight';
 }
 
-/** The backend refuses new work once an update has left `holding`. */
+/** Only the restart cutoff phases pause new work; confirmation keeps ingress open. */
 export function holdsNewWork(op: UpdateOperation | null | undefined): boolean {
-	return isInFlight(op) && op.kind === 'update' && op.phase !== 'holding';
+	return isInFlight(op) && op.kind === 'update' && op.phase !== 'holding' && op.phase !== 'verifying';
 }
 
 /**
@@ -89,6 +95,7 @@ export function stepIndex(op: UpdateOperation | null, unreachable: boolean): num
 		case 'restarting':
 			return 2;
 		case 'resuming':
+		case 'verifying':
 			return 3;
 		default:
 			return null;
@@ -129,7 +136,11 @@ export function elapsedSeconds(op: UpdateOperation | null, nowMs: number, server
 
 /** "a minute", "2 minutes", "30 seconds": the way a person says a duration. */
 export function humanDuration(seconds: number): string {
-	if (seconds < 90) return seconds < 45 ? `${Math.max(1, Math.round(seconds))} seconds` : 'a minute';
+	if (seconds < 90) {
+		if (seconds >= 45) return 'a minute';
+		const whole = Math.max(1, Math.round(seconds));
+		return `${whole} second${whole === 1 ? '' : 's'}`;
+	}
 	const minutes = Math.round(seconds / 60);
 	return `${minutes} minutes`;
 }
@@ -148,7 +159,7 @@ function agentsLabel(count: number): string {
 /** What an update costs, in one sentence: the restart, and what working agents do through it. */
 export function costLine(usualSeconds: number | null | undefined, agents: number): string {
 	if (agents <= 0) return 'CORSIA restarts to finish.';
-	const restart = usualSeconds != null ? `CORSIA restarts for about ${humanDuration(usualSeconds)}` : 'CORSIA restarts to finish';
+	const restart = usualSeconds != null ? `The restart usually takes ${humanDuration(usualSeconds)}` : 'CORSIA restarts to finish';
 	return agents === 1
 		? `${restart}; 1 working agent pauses and picks up where it left off.`
 		: `${restart}; ${agents} working agents pause and pick up where they left off.`;
@@ -164,6 +175,7 @@ export function stepMessage(op: UpdateOperation | null, unreachable: boolean): s
 		return counts ? `Pausing agents · ${counts.safe} of ${counts.total}` : 'Pausing agents';
 	}
 	if (step === 2) return 'Restarting CORSIA';
+	if (op?.phase === 'verifying') return 'Checking the new version';
 	const total = op?.drain_total ?? 0;
 	return total > 0 ? `Resuming ${agentsLabel(total)}` : 'Resuming agents';
 }

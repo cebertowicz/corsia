@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse as _ErrorJSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
@@ -37,6 +42,7 @@ from api import (
     project_repos_router,
     fs_browse_router,
     provider_sources_router,
+    provider_local_models_router,
     provider_cli_link_router,
     providers_router,
     provider_policy_router,
@@ -44,11 +50,13 @@ from api import (
     discovered_models_router,
     network_servers_router,
     version_router,
+    devices_router,
     webhooks_router,
     files_router,
     files_revision_router,
     doc_comments_router,
     doc_comment_thread_views_router,
+    chat_comment_views_router,
     cc_attach_router,
     conductor_router,
     corsia_agent_router,
@@ -71,8 +79,11 @@ from api.registry_ownership import router as registry_ownership_router
 from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
 from api.google import router as google_router
+from api.microsoft import router as microsoft_router
 from api.keys import router as keys_router
 
+
+logger = logging.getLogger(__name__)
 
 install_access_log_redaction()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)
@@ -84,27 +95,76 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JsonGZipMiddleware)
 app.add_middleware(RequestTimingMiddleware)
+
+
+def _emit_error_reference(
+    request: Request,
+    exc: Exception,
+    *,
+    status: int,
+    error_message: str,
+) -> str:
+    """Log and instrument an API failure under one opaque reference."""
+    from infra.failure_reference import new_error_reference
+    from infra.internal_principal import current_internal_user
+
+    reference = new_error_reference()
+    logger.error(
+        "API error reference=%s method=%s path=%s status=%s detail=%s",
+        reference,
+        request.method,
+        request.url.path,
+        status,
+        error_message,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    emit_product_event(
+        "error", "api",
+        properties={
+            "error_type": type(exc).__name__,
+            "error_message": "In-process conductor request failed" if current_internal_user() else error_message,
+            "path": str(request.url.path),
+            "method": request.method,
+            "status": status,
+            "reference": reference,
+        },
+    )
+    return reference
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
+    """Attach a reference to server-side HTTP errors only."""
+    if exc.status_code < 500:
+        return await http_exception_handler(request, exc)
+
+    reference = _emit_error_reference(
+        request,
+        exc,
+        status=exc.status_code,
+        error_message=str(exc.detail)[:200],
+    )
+    return _ErrorJSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "reference": reference},
+        headers=exc.headers,
+    )
 
 
 @app.exception_handler(Exception)
 async def _emit_error_api(request: Request, exc: Exception):
     """Emit uncaught HTTP route failures as error.api and return generic 500."""
-    from infra.internal_principal import current_internal_user
-
-    internal = current_internal_user()
-    emit_product_event(
-        "error", "api",
-        properties={
-            "error_type": type(exc).__name__,
-            "error_message": "In-process conductor request failed" if internal else str(exc)[:200],
-            "path": str(request.url.path),
-            "method": request.method,
-        },
+    reference = _emit_error_reference(
+        request,
+        exc,
+        status=500,
+        error_message=str(exc)[:200],
     )
     return _ErrorJSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error"},
+        content={"detail": "Something went wrong in CORSIA. Try again.", "reference": reference},
     )
 
 
@@ -112,6 +172,7 @@ app.include_router(system_router)
 app.include_router(system_perf_router)
 app.include_router(keys_router)
 app.include_router(google_router)
+app.include_router(microsoft_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)
@@ -132,16 +193,19 @@ app.include_router(files_router)
 app.include_router(files_revision_router)
 app.include_router(doc_comments_router)
 app.include_router(doc_comment_thread_views_router)
+app.include_router(chat_comment_views_router)
 app.include_router(doc_reviews_router)
 app.include_router(providers_router)
 app.include_router(vendor_accounts_router)
 app.include_router(provider_policy_router)
 app.include_router(provider_sources_router)
+app.include_router(provider_local_models_router)
 app.include_router(provider_cli_link_router)
 app.include_router(cli_install_router)
 app.include_router(discovered_models_router)
 app.include_router(network_servers_router)
 app.include_router(version_router)
+app.include_router(devices_router)
 app.include_router(registry_router)
 app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
@@ -186,8 +250,14 @@ async def serve_frontend(path: str):
             {"status": "CORSIA UI backend running",
              "frontend": "not built yet — export CORSIA_BACKEND_URL, then use vite dev"},
         )
-    file_path = FRONTEND_DIR / path
-    if file_path.is_file():
+    # Only files inside the build are served; any other path gets the app page.
+    root = FRONTEND_DIR.resolve()
+    try:
+        file_path = (root / path).resolve()
+        servable = file_path.is_relative_to(root) and file_path.is_file()
+    except ValueError:  # an embedded NUL byte; real I/O faults still raise
+        servable = False
+    if servable:
         import mimetypes
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
         content = file_path.read_bytes()

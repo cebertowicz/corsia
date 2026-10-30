@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +150,16 @@ finally:
 `, threadId)) as Claim;
 }
 
+// Accounts sit behind each vendor header and start collapsed (model-first-picker-renders.spec.ts asserts
+// aria-expanded="false"); open every vendor's chooser so its account rows can be picked.
+async function expandAccountChoosers(page: Page): Promise<void> {
+	// The accounts load after the sheet opens, so wait for the first chooser before clicking.
+	await expect(page.locator('.model-sheet button.picker-account-title').first()).toBeVisible();
+	const closed = page.locator('.model-sheet button.picker-account-title[aria-expanded="false"]');
+	// Each click removes a row from this live selector, so always click the first one left.
+	while (await closed.count() > 0) await closed.first().click();
+}
+
 async function openPicker(page: Page, title: string): Promise<void> {
 	await openAppByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -156,6 +167,7 @@ async function openPicker(page: Page, title: string): Promise<void> {
 	await waitForModelListLoaded(page);
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
+	await expandAccountChoosers(page);
 }
 
 async function choose(page: Page, threadId: string, name: string, expectChanged: boolean): Promise<void> {
@@ -213,6 +225,7 @@ for (const bindClaude of [false, true]) {
 			await page.locator('.thread-item').filter({ hasText: title }).click();
 			await waitForModelListLoaded(page);
 			await page.locator('button.model-chip').click();
+			await expandAccountChoosers(page);
 			await expect(page.locator('button.account-usage-row.picker', { hasText: `Claude ${bindClaude ? 'Second' : 'First'} ${suffix}` })).toHaveAttribute('aria-pressed', 'true');
 			expect(snapshot(threadId)).toEqual(before);
 

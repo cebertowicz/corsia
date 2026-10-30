@@ -1,0 +1,26 @@
+/* Comment marks and the selection action are shared by documents and chat. */
+:root { --comment-rail-default: 2px; }
+.quote, .sent-comment-source { --comment-rail-width: var(--comment-rail-default); }
+.cm-comment-anchor {
+	background-color: color-mix(in srgb, var(--amber) 13%, transparent);
+	border-bottom: 2px solid color-mix(in srgb, var(--amber) 42%, transparent);
+	transition: background-color 0.15s;
+}
+.cm-comment-anchor.chat-reply-mark-landed {
+	background-color: color-mix(in srgb, var(--accent) 40%, transparent);
+	outline: 2px solid var(--accent);
+}
+.cm-comment-pending {
+	background-color: color-mix(in srgb, var(--amber) 20%, transparent);
+	border-bottom: 2px dashed var(--amber);
+}
+.cm-comment-focused {
+	background-color: color-mix(in srgb, var(--amber) 26%, transparent);
+	border-bottom-color: var(--amber);
+}
+.sel-comment { position: fixed; z-index: 40; translate: 0 -50%; display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); box-shadow: var(--shadow-chip), var(--glass-rim); cursor: pointer; animation: selpop var(--dur-tight) ease-out; }
+.sel-comment.above { translate: 0 -100%; }
+.sel-comment.below { translate: 0 0; }
+.sel-comment:hover { filter: brightness(1.08); }
+@keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 768px) { .sel-comment { padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3); font-size: var(--text-subhead); gap: var(--space-2); } .sel-comment svg { width: var(--space-4); height: var(--space-4); } }

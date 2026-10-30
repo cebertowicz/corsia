@@ -87,7 +87,7 @@ export function humanCtx(n: number): string {
 	return `${n}`;
 }
 
-function humanBytes(b: number): string {
+export function humanBytes(b: number): string {
 	const gb = b / (1024 * 1024 * 1024);
 	if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
 	const mb = b / (1024 * 1024);

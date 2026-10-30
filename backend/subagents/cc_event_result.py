@@ -12,6 +12,7 @@ from core.turn_core import TurnIdentity, TurnTerminalResult
 from infra.db_async import run_in_db_unless_owned
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
+from llm.error_cause import cause_fields
 import subagents.cc_event_tool_boundary as tool_boundary
 import subagents.cc_trust as cc_trust
 from subagents.cc_event_context import CCEventContext, claim_terminal, event_identity, frame
@@ -25,6 +26,7 @@ from subagents.cc_runtime_errors import (
     is_empty_text_block_rejection,
     reconcile_expired_login,
 )
+from subagents.terminal_marker_writer import insert_terminal_marker
 
 log = logging.getLogger("subagents.cc_runtime_events")
 
@@ -96,6 +98,10 @@ def _result_metadata(
             "cause": "context_window_exceeded",
             "repair_owner": "ctx-stability",
         })
+    if is_error and metadata.get("stop_reason") != "interrupted":
+        metadata.update(cause_fields(
+            "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
+        ))
     return is_error, metadata
 
 
@@ -109,7 +115,7 @@ async def _retire_poisoned_session(ctx: CCEventContext, metadata: dict) -> None:
     from subagents.cc_resume_transition import retire_rejected_provider_session
 
     cc_trust.distrust(ctx.live)
-    metadata["cause"] = "provider_transcript_poisoned"
+    metadata.update(cause_fields("claude-code", "provider_transcript_poisoned"))
     session = ctx.live.session
     session_id = (
         getattr(session, "resume_session_id", None)
@@ -166,8 +172,8 @@ async def _insert_result_marker(
     try:
         await run_in_db_unless_owned(
             ctx.db,
-            insert_message,
-            ctx.child_id, "system", content, metadata,
+            insert_terminal_marker,
+            insert_message, ctx.child_id, content, metadata,
             msg_id=candidate, created_at=created_at, db=ctx.db,
         )
     except Exception as exc:
@@ -261,7 +267,10 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    reconcile_expired_login(ev.get("result"), log)
+    from subagents.turn_account_error import claude_turn_signed_out
+
+    if not await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db):
+        reconcile_expired_login(ev.get("result"), log)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.checkpoint_types import CheckpointRequest, ProviderCheckpointRequest
+from core import fork_runtime
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.checkpoint_types import CheckpointRequest
 from llm.resolution import ExecutionTarget
 
 
@@ -50,7 +52,7 @@ def _request(thread_id: str, checkpoint_id: str) -> CheckpointRequest:
     )
 
 
-def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
+def _provider(thread_id: str, checkpoint_id: str) -> CheckpointProviderForkRequest:
     target = ExecutionTarget(
         catalog_id="openai/test-checkpoint",
         harness="native",
@@ -65,8 +67,8 @@ def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
         supports_reasoning=True,
         preserve_thinking_default=True,
     )
-    return ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+    return CheckpointProviderForkRequest(
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=target,
         instruction="checkpoint",
@@ -222,7 +224,7 @@ def test_manual_request_returns_exact_installed_race_winner(
     assert response.json()["checkpoint"]["id"] == "cp-winner"
     assert response.json()["checkpoint"]["status"] == "installed"
     assert provider_calls == 0
-    assert checkpoint_runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
 
 
 def test_manual_request_reuses_active_row_without_preparing_another_call(

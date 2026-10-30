@@ -1,18 +1,17 @@
 """Entry-level FTS reads over the checkpoint entry index.
 
 Ranking runs on the lean index rows; the large frozen snapshots are joined and
-decoded only for the bounded result. ``checkpoint_search`` and the node-start
-lookup both read through here.
+decoded only for the bounded result. ``checkpoint_search`` reads through here.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
 
 from loguru import logger as log
 
 from infra.checkpoint_entry_index import NO_REVISION
+from infra.thread_confinement import Reader, hidden_clause
 from memory.checkpoint_search_entries import build_entry_hit, continuity_entries
 
 
@@ -32,12 +31,13 @@ def entry_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    reader: Reader = Reader.agent(),
 ) -> list[dict]:
     """Return entry rows for an already-built FTS5 ``match`` expression."""
     return hydrate_entry_rows(
         db,
         entry_rank_rows_matching(
-            db, match, user_id, thread_id, candidate_limit, per_thread
+            db, match, user_id, thread_id, candidate_limit, per_thread, reader
         ),
     )
 
@@ -49,16 +49,18 @@ def entry_rank_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    reader: Reader = Reader.agent(),
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
-    Everything ranking and ``select`` need lives on the lean index and
-    continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
-    the large frozen snapshots for whichever rows survive.
+    Everything ranking needs lives on the lean index and continuity rows;
+    :func:`hydrate_entry_rows` adds the checkpoint pointers and the large
+    frozen snapshots for the bounded result.
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
-    params.extend((user_id, max(1, per_thread) * 20, candidate_limit))
+    visible, identity = hidden_clause(reader, "thread")
+    params.extend((user_id, *identity, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
     # winners. Carrying them through the sorts cost more than the FTS match.
@@ -73,7 +75,7 @@ def entry_rank_rows_matching(
         "  JOIN threads AS thread ON thread.id = entry.thread_id "
         "  WHERE checkpoint_entry_search_fts MATCH ? "
         f"    {scope}"
-        "    AND thread.user_id = ?"
+        f"    AND thread.user_id = ? AND {visible}"
         "), revisions AS ("
         "  SELECT *, ROW_NUMBER() OVER ("
         "      PARTITION BY thread_id, history_epoch, entry_id "
@@ -216,29 +218,3 @@ def entry_hits(rows: list[dict]) -> list[tuple[float, int, dict]]:
             build_entry_hit(row, entry, canonical, pointers),
         ))
     return hits
-
-
-def entry_hits_matching(
-    db: sqlite3.Connection,
-    match: str,
-    *,
-    user_id: str,
-    candidate_limit: int,
-    per_thread: int,
-    select: Callable[[list[dict]], list[dict]] = lambda rows: rows,
-) -> list[tuple[float, int, dict]]:
-    """Return owned entry hits for a caller-built FTS5 expression, best first.
-
-    The node-start lookup builds an any-term expression rather than this
-    module's every-term one, and reads entries only: narrative relevance comes
-    from a different index and does not rank against entry relevance.
-    ``select`` narrows the rows (each carries ``search_text``) before any
-    frozen snapshot is decoded, which is where the time goes.
-    """
-    # Signal that proves this: re-running
-    # shared/context-memory/metrics/node_recall_scan_cost.py on production
-    # (owner runs it), target whole-lookup p95 under 100 ms (#2908). Only the
-    # rows ``select`` keeps are hydrated with checkpoint snapshots.
-    return entry_hits(hydrate_entry_rows(db, select(entry_rank_rows_matching(
-        db, match, user_id, None, candidate_limit, per_thread
-    ))))

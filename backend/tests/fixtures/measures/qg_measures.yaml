@@ -1,0 +1,130 @@
+# .threads/6f2bb478/skills/llm-pr-review/measures.yaml
+schema: corsia.measures/1
+namespace: qa
+workflow: llm-pr-review
+version_attr: reviewer_version          # in-source reviewer only; removed once runs are plan nodes
+events:
+  qa.review.completed:
+    attributes: {pr: id, head_sha: id, model: id, reviewer_version: id, verdict: {enum: [pass, block, stop, error]}, blocks: count, flags: count, cost_usd: num}
+    dedupe: [pr, head_sha, run_id]
+    corroborate: plan_node            # agent-path rows whose run_id is a real plan node; chokepoint rows are already instrumented
+  qa.review.skipped:
+    attributes: {pr: id, head_sha: id, reason: {enum: [override, draft, fork_unapproved, superseded, paused]}}   # terminal outcomes only; override is the structured skip in source today; fork_unapproved = a held fork head superseded or closed without approval
+    dedupe: [pr, head_sha, reason]
+  qa.review.queued:                    # added when QG's emit lands (§4.2)
+    attributes: {pr: id, head_sha: id, reason: {enum: [spawn_cap, usage_limit]}}
+    dedupe: [pr, head_sha, reason]
+  qa.review.stranded:                  # added when QG's emit lands (§4.2)
+    attributes: {pr: id, head_sha: id, age_minutes: count}
+    dedupe: [pr, head_sha]
+  qa.audit.label:
+    attributes: {finding: id, label: {enum: [correct_block, over_block, correct_pass, missed_defect, undeterminable]}, severity: {enum: [low, medium, high]}}
+    dedupe: [run_id, finding]
+  qa.escape.found:
+    attributes: {pr: id, merge_sha: id, head_sha: id, defect: id, severity: {enum: [low, medium, high]}, found_by: {enum: [audit, user, agent, ci]}}   # corsia.run_id: last review run on the merged head
+    dedupe: [merge_sha, defect]
+    corroborate: {platform_event: {event: github.issue.opened, on: defect}}   # defect holds the issue's subject
+kpis:
+  block_precision:
+    title: Block precision
+    unit: percent
+    better: higher
+    formula: ratio
+    num: {event: qa.audit.label, where: {label: correct_block}, match: [{event: qa.review.completed, on: run_id, mode: exists, anchor: true}]}
+    den: {event: qa.audit.label, where: {label: [correct_block, over_block]}, match: [{event: qa.review.completed, on: run_id, mode: exists, anchor: true}]}
+    coverage: {of: {event: qa.review.completed, where: {verdict: [block, stop]}}, by: run_id}
+    target: 0.90
+    review: 0.85
+    min_n: 20
+    settle_days: 3
+    alert: wake
+    can_decide: true                   # decides only on labels from a conductor-commissioned audit (slice 5); QG's own labels show, never decide
+  escapes:
+    title: Medium and high escapes
+    unit: count
+    better: lower
+    formula: count                     # by the week found, so an escape wakes QG whether or not an audit ran; n is reviews that week, so a clean week reads 0
+    num: {event: qa.escape.found, where: {severity: [medium, high]}}
+    coverage: {of: {event: qa.review.completed}, by: run_id, labelled: {event: qa.audit.label}}   # n = reviews, k = reviews with an audit label
+    target: 0
+    review: 0
+    min_n: 1
+    alert: wake
+  escapes_by_version:                  # same rows as a share of reviews, bucketed by the last review run on the merged head; never alerts
+    title: Escape rate by reviewer version
+    unit: percent
+    better: lower
+    formula: ratio
+    num: {event: qa.escape.found, where: {severity: [medium, high]},
+          match: [{event: qa.review.completed, on: run_id, mode: exists, anchor: true}]}
+    den: {event: qa.review.completed, where: {verdict: [pass, block, stop]}, distinct: head_sha}   # one run per head, the last terminal write, errors excluded (verdict design §3.7)
+    target: 0                          # illustrative: QG sets both; the 2-point gap is the verdict's margin
+    review: 0.02
+    min_n: 20
+    settle_days: 14                    # the verdict waits 14 days after a version's last run to catch late escapes
+    alert: off
+    can_decide: true                   # decides only on rows that read Corroborated (slice 5)
+  one_review_per_head:
+    title: Heads with exactly one review
+    unit: percent
+    better: higher
+    formula: ratio
+    num: {event: github.check_suite.completed, where: {app: github-actions}, distinct: head_sha,
+          match: [{event: qa.review.completed, on: head_sha, mode: exactly_one},
+                  {event: qa.review.skipped, on: head_sha, mode: absent},
+                  {event: github.check_suite.completed, on: head_sha, mode: absent, where: {conclusion: [failure, cancelled, timed_out]}}]}
+    den: {event: github.check_suite.completed, where: {app: github-actions}, distinct: head_sha,
+          match: [{event: qa.review.skipped, on: head_sha, mode: absent},
+                  {event: github.check_suite.completed, on: head_sha, mode: absent, where: {conclusion: [failure, cancelled, timed_out]}}]}
+    target: 1.0
+    review: 0.98
+    min_n: 25
+    alert: wake
+  strands:                             # added with qa.review.stranded
+    title: Stranded reviews
+    unit: count
+    better: lower
+    formula: count
+    num: {event: qa.review.stranded}
+    target: 0
+    review: 0
+    min_n: 0
+    alert: wake
+  review_cost_per_pr:
+    title: Review cost per PR
+    unit: usd
+    better: lower
+    formula: ratio
+    can_decide: true                   # Observed, versioned through version_attr
+    decides_as: spend                  # stands in for the built-in cost, which doesn't apply here (no plan tasks)
+    num: {event: qa.review.completed, sum: cost_usd}   # every run on the head, error runs included; a run with no cost is unknown
+    den: {event: qa.review.completed, distinct: pr}
+    target: 0.50                       # illustrative: QG sets both from the first live version's runs (Legacy has no cost)
+    review: 0.75
+    min_n: 20
+    alert: off
+  push_churn:
+    title: CI-triggered pushes per merged PR
+    unit: ratio
+    better: lower
+    formula: ratio
+    num: {event: [github.pr.opened, github.pr.pushed],
+          match: [{event: github.check_suite.completed, on: head_sha, mode: exists, where: {app: github-actions}},
+                  {event: github.pr.merged, on: subject, mode: exists, anchor: true}]}
+    den: {event: github.pr.merged}
+    target: 2.64
+    review: 3.0
+    min_n: 20
+    alert: digest
+views:
+  - {id: precision, chart: number, y: kpi.block_precision, headline: true}
+  - {id: precision_by_version, chart: bars, x: version, y: kpi.block_precision, title: Block precision by version, target_line: true}
+  - {id: precision_trend, chart: bars, x: time, y: kpi.block_precision, title: Block precision, target_line: true}
+  - {id: verdict_mix, chart: stacked_share, x: version, y: count.qa.review.completed, series: verdict, title: Verdicts by version}
+  - {id: versions, chart: table, rows: version, columns: [kpi.block_precision, kpi.escapes_by_version, kpi.review_cost_per_pr], title: Version comparison (shown only after a verdict)}
+  - {id: review_cost, chart: bars, x: version, y: kpi.review_cost_per_pr, title: Review cost per PR by version}
+  - {id: one_review, chart: bars, x: time, y: kpi.one_review_per_head, target_line: true, title: Heads with exactly one review}
+  - {id: one_review_now, chart: number, y: kpi.one_review_per_head, headline: true}
+  - {id: review_cost_now, chart: number, y: kpi.review_cost_per_pr, headline: true}
+  - {id: churn, chart: bars, x: time, y: kpi.push_churn, target_line: true, title: CI-triggered pushes per merged PR}
+  - {id: strands, chart: bars, x: time, y: kpi.strands, title: Stranded reviews}

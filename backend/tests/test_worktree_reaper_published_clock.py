@@ -124,6 +124,18 @@ def test_dirty_worktree_is_kept_at_25_hours(repo):
     assert wt.is_dir()
 
 
+def test_published_untracked_worktree_is_not_salvaged_at_two_days(repo):
+    wt = _worktree(repo, "scratch", pushed=True, age_hours=48)
+    (wt / "notes").write_text("keep")
+    stamp = time.time() - 48 * HOUR
+    os.utime(wt, (stamp, stamp))
+
+    report = _run(repo)
+
+    assert {item.name: item.reason for item in report.skips} == {"scratch": "untracked"}
+    assert wt.is_dir() and not report.salvaged
+
+
 def test_open_pr_branch_is_kept_at_25_hours(repo, monkeypatch):
     monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda repo: {"has-pr"})
     wt = _worktree(repo, "has-pr", pushed=True, age_hours=25)

@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test';
-import { contrastRatio, parseColor } from '../../src/lib/utils/contrast';
-import { ACCENT_ROLE_TOKENS, accentRoles } from '../../src/lib/utils/projectColors';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
+import { apcaLc, parseColor } from '../../src/lib/utils/contrast';
+import { ACCENT_ROLE_TOKENS, accentRoles, FILL_INK_MIN_LC } from '../../src/lib/utils/projectColors';
 import { loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 const tok = encodeURIComponent(TEST_TOKEN);
@@ -32,5 +33,5 @@ test('project scope applies computed accent roles', async ({ page, request }) =>
 	}, ACCENT_ROLE_TOKENS);
 
 	expect(actual).toEqual(expected);
-	expect(contrastRatio(parseColor(actual.fill)!, parseColor(actual.onFill)!)).toBeGreaterThanOrEqual(4.5);
+	expect(Math.abs(apcaLc(parseColor(actual.onFill)!, parseColor(actual.fill)!))).toBeGreaterThanOrEqual(FILL_INK_MIN_LC);
 });

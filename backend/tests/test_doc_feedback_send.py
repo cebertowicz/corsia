@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches
-from infra.database import get_db
+from doceditor import feedback_batch_edits, feedback_batches
+from infra.database import get_db, write_transaction
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,18 +64,19 @@ async def test_send_retries_undelivered_edit_after_owner_is_addressable(isolated
         seed_thread(db, "owner", model="missing/model")
         seed_thread(db, "author")
         artifact_id = seed_document(db, "owner", name="edited.md")
-        feedback_batches.record_edit(
-            db,
-            artifact_id=artifact_id,
-            recipient_id="owner",
-            author_kind="agent",
-            author_id="author",
-            actor_display="Author",
-            path=Path("/workspace/shared/edited.md"),
-            before=b"before\n",
-            after=b"after\n",
-            at="2026-09-30T08:00:00+00:00",
-        )
+        with write_transaction(db, scope="test_record_edit") as connection:
+            feedback_batch_edits.record_edit(
+                connection,
+                artifact_id=artifact_id,
+                recipient_id="owner",
+                author_kind="agent",
+                author_id="author",
+                actor_display="Author",
+                path=Path("/workspace/shared/edited.md"),
+                before=b"before\n",
+                after=b"after\n",
+                at="2026-09-30T08:00:00+00:00",
+            )
         db.commit()
         feedback_batches.close_for_document(
             db, author_kind="agent", author_id="author", artifact_id=artifact_id, reason="submit",

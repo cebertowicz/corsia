@@ -17,7 +17,7 @@ from tools.tool_surface import ToolCallTool, ToolsLoadTool
 
 CORE = [
     "bash", "continuity_edit", "edit_file", "glob", "grep", "list_dir",
-    "multi_edit", "plan_read", "plan_update", "read_file", "tool_call",
+    "multi_edit", "plan_read", "plan_update", "post_update", "read_file", "tool_call",
     "tools_load", "write_file",
 ]
 
@@ -120,7 +120,7 @@ def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
     assert list(members) == list(TOOL_PACKS)
     for name in packed:
         assert TOOL_CATALOG[name].summary
-        assert index.count(f"- {name}: ") == 1
+        assert index.count(f"- {name}: ") == (0 if TOOL_CATALOG[name].account_bound else 1)
     assert registry.get("tools_load").parameters["properties"]["pack"]["enum"] == list(
         TOOL_PACKS
     )
@@ -133,6 +133,8 @@ def test_google_connect_surface_requires_status_before_reconnect():
     assert description.startswith("Call google_status first.")
     assert "needs_action, follow it before calling google_connect" in description
     assert description.index("needs_action") < description.index("returns a URL")
+    assert "With account_id, it returns {reply, link}" in description
+    assert "post its reply verbatim with post_update followed by [Open it in Connected apps](<link>)" in description
     assert "Give the person the link" not in description
 
 
@@ -443,7 +445,7 @@ async def test_connected_app_reach_hides_mcp_index_and_refuses_before_session_or
 
     allowed_context = state._current_thread_id.set("project-a-thread")
     try:
-        assert f"- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
+        assert "- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
         loaded = await registry.execute("tools_load", {"names": [wrapper.name]})
         called = await registry.execute("tool_call", {"name": wrapper.name, "arguments": {}})
     finally:

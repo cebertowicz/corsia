@@ -25,12 +25,17 @@ export function withAdopted(lanes: readonly Lane[], value: AdoptSelect): Lane[] 
 	});
 }
 
+/**
+ * The committed suggestion a preview becomes: the one it was started for, wherever the editor placed it (a
+ * busy document places it away from the server's offsets), or else the one at its own place.
+ */
 const committedOf = (preview: Preview, ranges: readonly CommentRange[]) => ranges.find((range) => range.suggestion
-	&& range.from === preview.from && range.to === preview.to && range.suggestion.insert.startsWith(preview.text));
+	&& (preview.commentId === range.id || (range.from === preview.from && range.to === preview.to))
+	&& range.suggestion.insert.startsWith(preview.text));
 
 /**
- * Claim each streamed suggestion once its committed suggestion is in the editor at the same place with an
- * insert that continues what streamed, whichever of the activity and comments frames came first. A claimed
+ * Claim each streamed suggestion once its committed suggestion is in the editor (the one it was started for, or at
+ * the same place) with an insert that continues what streamed, whichever of the activity and comments frames came first. A claimed
  * preview types the rest of the committed insert and goes once all of it shows, or once the suggestion does.
  */
 export function withClaimedSuggestions(lanes: readonly Lane[], ranges: readonly CommentRange[]): Lane[] {
@@ -50,7 +55,7 @@ export function withClaimedSuggestions(lanes: readonly Lane[], ranges: readonly 
 			const insert = committed.suggestion!.insert;
 			if (preview.typed >= insert.length) return [];
 			grew ||= insert.length > preview.text.length;
-			return [{ ...preview, text: insert, claimId: committed.id }];
+			return [{ ...preview, from: committed.from, to: committed.to, text: insert, claimId: committed.id }];
 		});
 		return changed ? { ...lane, previews, generation: lane.generation + (grew ? 1 : 0) } : lane;
 	});

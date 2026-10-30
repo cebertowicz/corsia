@@ -52,12 +52,22 @@ def _configured_self_authors() -> set[str]:
         return set()
 
 
-def _event_author(payload: dict[str, Any]) -> dict[str, Any]:
-    """The user object that authored the triggering event.
+def event_author(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the content author's user object, never the acting sender."""
+    for key in ("comment", "review", "pull_request", "issue"):
+        item = payload.get(key)
+        if isinstance(item, dict):
+            user = item.get("user")
+            return user if isinstance(user, dict) else {}
+    return {}
 
-    Comment events carry ``comment.user``; the ``sender`` is the actor for
-    PR/check events. Prefer the comment author (it is the thing that would
-    loop), fall back to the sender.
+
+def _acting_author(payload: dict[str, Any]) -> dict[str, Any]:
+    """The user whose action could loop: the comment author, else the sender.
+
+    Not :func:`event_author`: a human merging, closing or pushing to a PR an
+    agent wrote must still wake its owner, so a PR's or issue's author never
+    decides suppression.
     """
     comment = payload.get("comment") or {}
     if comment.get("user"):
@@ -71,7 +81,7 @@ def is_bot_or_self_authored(payload: dict[str, Any]) -> bool:
     Used by the router to SUPPRESS the event before it routes — a suppressed
     event never reaches a thread, so the reviewer/bot cannot trigger itself.
     """
-    user = _event_author(payload)
+    user = _acting_author(payload)
     login = str(user.get("login", "")).lower()
     user_type = str(user.get("type", "")).lower()
 

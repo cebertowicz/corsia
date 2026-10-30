@@ -9,22 +9,15 @@ bundle="$(CDPATH= cd -- "$contents/.." && pwd -P)"
 # test holds the three equal.
 CORSIA_APP_FOLDER=CORSIA
 app_dir="$HOME/Library/Application Support/$CORSIA_APP_FOLDER"
-# Rust app_paths::state_dir_for and Python default_state_root each define the
-# packaged app's state root. This service invokes the Python definition; both
-# follow the CORSIA_STATE_DIR override or CORSIA app-folder/state convention,
-# but no shared implementation or parity test keeps them equal. A pre-release
-# preview folder's flat state moves into it first, once, before
-# anything opens it.
-state_dir="$(PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$resources/python/bin/python3" -I -c '
-import sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import default_state_root, move_preview_layout
-state = default_state_root()
-move_preview_layout(Path(sys.argv[2]), state)
-print(state)
-' "$resources/backend" "$app_dir")" || exit 1
-mkdir -p "$state_dir/logs"
+# The app is moving the data folder: a start now could recreate an empty folder
+# at the old path between the rename and the service.json rewrite. The app
+# starts the service itself once the move is done.
+if [ -e "$app_dir/state-move.json" ]; then
+  printf 'CORSIA bundled backend refused to start: the app is moving its data folder\n' >&2
+  exit 0
+fi
+# Resolve the state root after parsing service.json below, so an adopted
+# in-place install pins its original root before the backend opens anything.
 # The service identity comes from the bundle that launchd started, never an
 # inherited shell environment. This makes a replaced bundle observable.
 info_plist="$contents/Info.plist"
@@ -50,18 +43,19 @@ export GIT_CONFIG_NOSYSTEM=1
 export GIT_TERMINAL_PROMPT=0
 export PYTHONPATH="$resources/python/backend-packages"
 
-# service.json (written once by the app shell) names the workspace and port.
-# It is parsed, never sourced, by the backend's one reader (the bundled
-# lifecycle script uses the same one), and only those two keys are honoured.
-# An explicit CORSIA_WORKSPACE or --port still wins, which is what tests use.
+# service.json (written once by the app shell) names the adopted state root,
+# workspace and port. It is parsed, never sourced, by the backend's one reader.
+# Explicit environment roots, workspace, or --port still win for scripted runs.
+service_file_state_dir=""
 service_file_port=""
 config_notes=""
+config_error=""
 if [ -f "$app_dir/service.json" ]; then
   config_notes="$(PYTHONNOUSERSITE=1 "$resources/python/bin/python3" -I -B -c '
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import service_file_lines
+from infra.service_file import service_file_lines
 print("\n".join(service_file_lines(Path(sys.argv[2]))))
 ' "$resources/backend" "$app_dir/service.json" 2>/dev/null || true)"
   if [ -z "$config_notes" ]; then config_notes="note=service.json: could not be read"; fi
@@ -69,8 +63,12 @@ print("\n".join(service_file_lines(Path(sys.argv[2]))))
   parsed_notes=""
   while IFS= read -r line; do
     case "$line" in
+      state_dir=*) service_file_state_dir="${line#state_dir=}" ;;
       workspace=*) file_workspace="${line#workspace=}" ;;
       port=*) service_file_port="${line#port=}" ;;
+      error=*) config_error="${line#error=}"
+               parsed_notes="${parsed_notes}${line#error=}
+" ;;
       note=*) parsed_notes="${parsed_notes}${line#note=}
 " ;;
     esac
@@ -78,10 +76,33 @@ print("\n".join(service_file_lines(Path(sys.argv[2]))))
 $config_notes
 EOF_NOTES
   config_notes="$parsed_notes"
+  # A damaged service.json or state_dir is refused, never replaced by the default
+  # root: that would open a different, empty state root beside the adopted data.
+  if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$config_error" ]; then
+    printf 'CORSIA bundled backend refused to start: %s, so no other state folder was opened\n' "$config_error" >&2
+    exit 0
+  fi
+  if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$service_file_state_dir" ]; then
+    export CORSIA_STATE_DIR="$service_file_state_dir"
+  fi
   if [ -z "${CORSIA_WORKSPACE:-}" ] && [ -n "$file_workspace" ]; then
     export CORSIA_WORKSPACE="$file_workspace"
   fi
 fi
+
+# Resolve only after service.json can pin an adopted state root. The preview
+# layout migration is a no-op for an adopted root because it is not the app
+# metadata directory.
+state_dir="$(PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$resources/python/bin/python3" -I -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import default_state_root, move_preview_layout
+state = default_state_root()
+move_preview_layout(Path(sys.argv[2]), state)
+print(state)
+' "$resources/backend" "$app_dir")" || exit 1
+mkdir -p "$state_dir/logs"
 
 # launchd starts this launcher with no arguments. Scripted invocations retain
 # their explicit arguments, while the launchd default is always loopback.

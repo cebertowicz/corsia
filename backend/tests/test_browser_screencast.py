@@ -72,12 +72,26 @@ async def test_pane_screencast_acknowledges_each_frame_before_relaying_it(monkey
         ("cdp", "Page.getLayoutMetrics", {}),
         ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80}),
         ("cdp", "Page.enable", {}),
+        ("cdp", "Page.addScriptToEvaluateOnNewDocument", {"source": browser_screencast.PRELOAD, "worldName": browser_screencast.WORLD, "runImmediately": True}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 1}),
         ("pane", {"type": "frame", "data": "jpeg-1", "metadata": {"deviceWidth": 400, "deviceHeight": 600}}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 2}),
         ("pane", {"type": "frame", "data": "jpeg-2", "metadata": {"deviceWidth": 400, "deviceHeight": 600}}),
     ]
     assert socket.closed
+
+
+@pytest.mark.asyncio
+async def test_compact_screencast_uses_the_pane_pixels_and_stable_compact_quality(monkeypatch):
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    cast.capture_at(786, 1704, compact=True)
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(cast.run(), 1)
+    assert log[1] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": 786, "maxHeight": 1704})
+    # Returning to a wider pane restores its normal quality on the existing viewport restart.
+    cast.capture_at(1360, 2060)
+    assert cast._quality() == 80
 
 
 @pytest.mark.asyncio
@@ -95,10 +109,10 @@ async def test_pane_screencast_restarts_at_the_new_device_size(monkeypatch):
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(running, 1)
     assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
-        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.screencastFrameAck", "jpeg-1",
+        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.screencastFrameAck", "jpeg-1",
         "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
     ]
-    assert log[7] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
+    assert log[8] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
 
 
 @pytest.mark.asyncio
@@ -135,7 +149,8 @@ async def test_pane_screencast_sized_before_it_starts_captures_at_that_size(monk
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(cast.run(), 1)
     assert log == [("cdp", "Page.getLayoutMetrics", {}), ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 800, "maxHeight": 600}),
-                   ("cdp", "Page.enable", {})]
+                   ("cdp", "Page.enable", {}),
+                   ("cdp", "Page.addScriptToEvaluateOnNewDocument", {"source": browser_screencast.PRELOAD, "worldName": browser_screencast.WORLD, "runImmediately": True})]
 
 
 @pytest.mark.asyncio
@@ -158,7 +173,7 @@ async def test_pane_screencast_restarts_once_a_new_document_loads_so_its_first_p
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(running, 1)
     assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
-        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.screencastFrameAck", "jpeg-1",
+        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.screencastFrameAck", "jpeg-1",
         "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
     ]
 

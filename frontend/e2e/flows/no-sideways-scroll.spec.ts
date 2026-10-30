@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,8 @@ const EXCLUDED_ROUTES: Record<string, string> = {
 	'/_design/artifacts': 'internal design showcase for the artifact pane, not a reader surface',
 	'/_design/context-chip-probe': 'internal probe for the context chip, not a reader surface',
 	'/_design/focus-outcomes': 'internal design showcase for Focus outcomes, not a reader surface',
+	'/_design/remote-connect': 'internal review frames for remote connect, not a reader surface',
+	'/_design/setup-motion': 'internal motion evidence for setup, not a reader surface',
 };
 
 // ---- Discovery from source ------------------------------------------------
@@ -78,17 +81,16 @@ function discoverViews(): string[] {
 }
 
 /**
- * The tabs a reader can actually reach on a phone: the buttons of the component's
- * own mobile navigation, which SettingsView renders from its canonical `sections`
- * (source `SettingsView.svelte` 67-79). Matching id/label pairs out of the source
- * text was the wrong contract — a section written differently or derived from a
- * list fell out of coverage while the nonempty assertion stayed green. The rendered
- * bar is the same component's output at the width the guard measures, so a new,
- * renamed or derived tab shows up here whether or not the source still matches
- * one regex.
+ * The rows a reader can actually reach on a phone: SettingsView's root list
+ * (source `SettingsView.svelte` 54-67, 158-168). Matching id/label pairs out of
+ * source text was the wrong contract — a section written differently or derived
+ * from a list fell out of coverage while the nonempty assertion stayed green. The
+ * rendered list is the component's output at the width the guard measures, so a
+ * new, renamed or derived row shows up here whether or not the source still
+ * matches one regex.
  */
-const MOBILE_TAB_BAR = '.settings-view .mobile-tab-bar';
-const MOBILE_TAB = `${MOBILE_TAB_BAR} button.mobile-tab`;
+const MOBILE_SETTINGS_ROOT = '.settings-view .mobile-root';
+const MOBILE_SETTINGS_ROW = `${MOBILE_SETTINGS_ROOT} [data-settings-section] button.face`;
 
 /**
  * The contract the labels must satisfy before anything is measured: there is
@@ -111,13 +113,13 @@ function requireMeasuredTabLabels(labels: string[], registered: Record<string, s
 	return trimmed;
 }
 
-/** Discovered from the live navigation, scoped to the phone bar so the hidden desktop copy is never counted. */
+/** Discovered from the live root list, scoped so hidden desktop navigation is never counted. */
 async function discoverSettingTabs(page: Page): Promise<string[]> {
-	const bar = page.locator(MOBILE_TAB_BAR);
-	await expect(bar, 'the settings navigation shows its phone tab bar').toBeVisible({ timeout: 20_000 });
-	const tabs = page.locator(MOBILE_TAB);
-	await expect(tabs, 'the phone tab bar is populated before its tabs are measured').not.toHaveCount(0, { timeout: 20_000 });
-	return requireMeasuredTabLabels(await tabs.allInnerTexts(), SETTINGS_TAB_CONTENT, 'the rendered phone settings navigation');
+	const root = page.locator(MOBILE_SETTINGS_ROOT);
+	await expect(root, 'the settings navigation shows its phone root list').toBeVisible({ timeout: 20_000 });
+	const rows = page.locator(MOBILE_SETTINGS_ROW);
+	await expect(rows, 'the phone root list is populated before its rows are measured').not.toHaveCount(0, { timeout: 20_000 });
+	return requireMeasuredTabLabels(await rows.allInnerTexts(), SETTINGS_TAB_CONTENT, 'the rendered phone settings root list');
 }
 
 // ---- Measuring ------------------------------------------------------------
@@ -225,6 +227,14 @@ const FINDING_AGENT = `lane_${'n'.repeat(60)}`;
 const FINDING_ACTION = `Review ${'a'.repeat(60)}`;
 /** A local model selector as the catalog serves it, about 50 characters with no space to wrap at. */
 const LOCAL_MODEL = 'omlx@ns-f378151a51/Qwen3.8-Flash-Next-MLX-oQ6-MTP';
+/**
+ * The tool calls a real turn stores: a long phrase and the backend's long error line, which the
+ * activity rows must truncate inside the pane instead of widening it.
+ */
+const TOOL_CALLS = [
+	{ id: 'phone-guard-call-1', name: 'Bash', args: { command: 'corsia records recent' }, phrase: `Listed recent records of ${LONG_TOKEN}`, outcome: 'failed', error_line: 'Error: Command timed out after 120 seconds waiting for the host-access supervisor to answer', result_state: 'absent' },
+	{ id: 'phone-guard-call-2', name: 'Bash', args: { command: 'corsia plan update status' }, phrase: 'Updated the plan status', outcome: 'done', result_state: 'absent' },
+];
 const DEBUG_VERSION_HASH = '3e8bac2779e44891e427005349d4f498978e2afb';
 /**
  * The metadata a CI merge build actually shows: `3e8bac2` is the synthetic merge commit,
@@ -337,9 +347,17 @@ async function seed(
 		return route.fulfill({ json: {
 			definition_version: 1, period: mockPeriod(new URL(route.request().url()).searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous),
 			coverage: { priced_records: 1_600, usage_records: 2_000 }, not_api_priced_records: 3,
-			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400 }],
+			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400, models: [] }],
 			actual: { subscription_records: 1_600, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 		} });
+	});
+	// The catalog a person with a local model sees: one more ready row whose option text is the
+	// unbroken selector plus its description, the longest label a model picker has to hold.
+	await page.route(/\/api\/models(\?.*)?$/, async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		const local = { id: LOCAL_MODEL, name: LOCAL_MODEL, desc: 'Local · vision, tools, reasoning · 262k context', size: '', backend: 'local', speed: '', status: 'ready', is_local: true };
+		return route.fulfill({ response, json: { ...body, models: [...body.models, local] } });
 	});
 	await page.route('**/api/version', async (route) => {
 		await versionHold;
@@ -361,13 +379,13 @@ async function seed(
 		} });
 	});
 	await page.route(`**/api/threads/${agentId}/messages**`, async (route) => {
-		const message = (id: string, role: 'user' | 'assistant', content: string, n: number) => ({
-			id, thread_id: agentId, role, content, created_at: `2026-10-01T12:00:00.00000${n}`, metadata: null,
+		const message = (id: string, role: 'user' | 'assistant', content: string, n: number, metadata: object | null = null) => ({
+			id, thread_id: agentId, role, content, created_at: `2026-10-01T12:00:00.00000${n}`, metadata,
 		});
 		return route.fulfill({ json: {
 			messages: [
 				message('phone-guard-1', 'user', `Please check ${LONG_TOKEN} for me`, 1),
-				message('phone-guard-2', 'assistant', `Checked ${LONG_TOKEN}: it resolves.`, 2),
+				message('phone-guard-2', 'assistant', `Checked ${LONG_TOKEN}: it resolves.`, 2, { tool_calls: TOOL_CALLS }),
 			],
 			has_more: false, oldest_id: null,
 		} });
@@ -492,6 +510,10 @@ async function measurementScopedRouteReady(page: Page, data: Seed, timeout = 20_
 /** Settings tabs, each with what proves its own content (not the previous tab's) is showing. */
 const SETTINGS_TAB_CONTENT: Record<string, string> = {
 	Providers: 'Providers',
+	'Connected apps': 'Connected apps',
+	Skills: 'Skills',
+	Context: 'Context',
+	Projects: 'Active',
 	Keys: 'Keys',
 	System: 'Services',
 	Debug: 'Bundle freshness',
@@ -503,7 +525,7 @@ async function settingsTabReady(page: Page, tab: string, timeout = 20_000) {
 	await expect(page.getByRole('heading', { name: heading, exact: true }), `the ${tab} tab shows its content`).toBeVisible({ timeout });
 	await expect(page.locator('.settings-content .loading'), `the ${tab} tab has stopped loading`).toHaveCount(0, { timeout });
 	if (tab === 'Debug') {
-		const versionCards = page.locator('.settings-content .settings-card').filter({ has: page.locator('dl.kv') });
+		const versionCards = page.locator('.settings-content .settings-group').filter({ has: page.locator('dl.kv') });
 		await expect(versionCards, 'all four Debug version cards are populated').toHaveCount(4, { timeout });
 		await expect(versionCards.locator('h3'), 'the four canonical Debug version cards are shown in order').toHaveText([
 			'Frontend — this browser bundle',
@@ -548,10 +570,14 @@ const VIEW_TARGETS: Record<string, Target> = {
 			await resume.click();
 			// The assistant's reply sits under the "Worked" disclosure; a reader opens it to read the answer.
 			await page.getByRole('button', { name: 'Expand Worked' }).click();
+			// The tool chip opens into its rows, each with its phrase and outcome.
+			await page.locator('.ta-summary').first().click();
 		},
 		ready: async (page, _data, timeout = 20_000) => {
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' }), 'the thread is open').toBeVisible({ timeout });
 			await expect(page.locator('.message').filter({ hasText: LONG_TOKEN }), 'the transcript shows both seeded messages').toHaveCount(2, { timeout });
+			await expect(page.locator('.ta-row'), 'the tool chip shows both seeded calls, the failed one with its error line').toHaveCount(TOOL_CALLS.length, { timeout });
+			await expect(page.locator('.ta-outcome.bad'), 'the failed call shows its error line').toContainText('Command timed out', { timeout });
 		},
 	},
 	settings: {
@@ -560,6 +586,10 @@ const VIEW_TARGETS: Record<string, Target> = {
 		},
 		ready: async (page, _data, timeout = 20_000) => {
 			await expect(page.locator('.settings-view'), 'the Settings view is open').toBeVisible({ timeout });
+			if ((page.viewportSize()?.width ?? 0) <= 768) {
+				await expect(page.locator(MOBILE_SETTINGS_ROOT), 'the Settings phone root list is open').toBeVisible({ timeout });
+				return;
+			}
 			await settingsTabReady(page, 'Providers', timeout);
 		},
 	},
@@ -567,9 +597,9 @@ const VIEW_TARGETS: Record<string, Target> = {
 		open: async (page, data) => {
 			await clickRail(page, 'Measurement');
 			await expect(page.locator('.shell-header .h-title')).toHaveText(new RegExp(`^(All work|${data.projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})$`), { timeout: 20_000 });
-			await expect(page.getByRole('button', { name: /Measurement scope:/ }), 'the scope picker is showing').toBeVisible({ timeout: 20_000 });
+			await expect(page.getByRole('button', { name: /Showing:/ }), 'the scope picker is showing').toBeVisible({ timeout: 20_000 });
 			// The seeded project's scope serves the comparable run the ready check reads.
-			if (await page.getByRole('button', { name: `Measurement scope: ${data.projectName}`, exact: true }).isVisible()) return;
+			if (await page.getByRole('button', { name: `Showing: ${data.projectName}`, exact: true }).isVisible()) return;
 			// Earlier runs leave projects whose names share the first 20 characters, so the whole name picks this run's.
 			await selectProjectScope(page, data.projectName);
 		},
@@ -606,11 +636,47 @@ const ROUTE_TARGETS: Record<string, { url: (data: Seed) => string; ready: Target
 
 // ---- Measuring: signed in, on the expected surface, populated, then scrolled ----
 
+/**
+ * The same measurement with the longest data a reader's content can hold put into the elements built to
+ * hold it: every element that truncates with an ellipsis gets a long unbroken token, and every select gets a
+ * long option. Hand-seeded fixtures only cover the content someone thought of; this covers every such element
+ * on a surface, so a new chip, row or select that sizes itself to its content fails here without a new fixture.
+ * The page is restored afterwards, so the next step reads what it expects.
+ */
+async function sidewaysScrollersWithLongData(page: Page): Promise<Offender[]> {
+	await page.evaluate(() => {
+		const undo: Array<() => void> = [];
+		(window as unknown as { __longData: Array<() => void> }).__longData = undo;
+		const long = 'W'.repeat(90);
+		for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+			if (getComputedStyle(el).textOverflow !== 'ellipsis') continue;
+			for (const text of Array.from(el.childNodes).filter((node): node is Text => node instanceof Text && !!node.nodeValue?.trim())) {
+				const original = text.nodeValue;
+				text.nodeValue = `${original}${long}`;
+				undo.push(() => { text.nodeValue = original; });
+			}
+		}
+		for (const select of Array.from(document.querySelectorAll('select'))) {
+			const option = document.createElement('option');
+			option.textContent = long;
+			select.appendChild(option);
+			undo.push(() => option.remove());
+		}
+	});
+	try {
+		return await sidewaysScrollers(page);
+	} finally {
+		await page.evaluate(() => (window as unknown as { __longData: Array<() => void> }).__longData.forEach((undo) => undo()));
+	}
+}
+
 async function measure(page: Page, ready: () => Promise<void>): Promise<Offender[]> {
 	await ready();
 	// Web fonts change line breaks; wait for them to load rather than for a delay.
 	await page.evaluate(() => document.fonts.ready.then(() => true));
-	return sidewaysScrollers(page);
+	const offenders = await sidewaysScrollers(page);
+	if (offenders.length) return offenders;
+	return (await sidewaysScrollersWithLongData(page)).map((offender) => ({ ...offender, element: `${offender.element} (with long data)` }));
 }
 
 /** The readiness proof for a shell view: signed in, then the view's own content. */
@@ -692,8 +758,10 @@ test.describe('@flow:no-sideways-scroll @surface:shell no page scrolls sideways 
 				await check(`view ${view}`, viewReady(page, data, view));
 				if (view === 'settings') {
 					for (const tab of await discoverSettingTabs(page)) {
-						await page.locator(MOBILE_TAB_BAR).getByRole('button', { name: tab, exact: true }).click();
+						await page.locator(MOBILE_SETTINGS_ROOT).getByRole('button', { name: tab, exact: true }).click();
 						await check(`settings ${tab}`, () => settingsTabReady(page, tab));
+						await page.locator('.shell-header .h-back').click();
+						await expect(page.locator(MOBILE_SETTINGS_ROOT), `the ${tab} section returns to the Settings root list`).toBeVisible();
 					}
 				}
 			}

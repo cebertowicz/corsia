@@ -11,6 +11,7 @@ export interface MessagePage {
 	has_more: boolean;
 	oldest_id: string | null;
 	turn_summaries?: Record<string, TurnSummary>;
+	chat_reply_items?: import('./api/attentionQueue').CommentReplyItem[];
 	/** A Focus page: one stub per collapsed run (see `focusRuns`). */
 	runs?: unknown;
 }
@@ -35,6 +36,19 @@ export interface PagerPort {
 	prepend: (older: any[]) => void;
 	getScrollEl: () => ScrollAnchor | null;
 	afterRender: () => Promise<void>;
+}
+
+/** One read at a time: starting the next aborts the one it supersedes. */
+export function supersedingRead(): { start: () => AbortSignal; abort: () => void } {
+	let current: AbortController | null = null;
+	return {
+		start() {
+			current?.abort();
+			current = new AbortController();
+			return current.signal;
+		},
+		abort: () => current?.abort(),
+	};
 }
 
 export const LOAD_OLDER_TRIGGER_PX = 200;

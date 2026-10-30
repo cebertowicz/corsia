@@ -6,7 +6,7 @@ import logging
 from functools import partial
 
 import subagents.cc_trust as cc_trust
-from core.tool_result_delivery import (
+from infra.delivery_states import (
     PROVIDER_MISSING_RESULT_REASON,
     UNDISPATCHED_TOOL_REASON,
 )

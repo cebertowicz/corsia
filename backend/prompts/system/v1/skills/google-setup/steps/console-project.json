@@ -1,0 +1,10 @@
+{
+  "note": "Selectors are unverified against the real Google Cloud console; any miss returns control to the model.",
+  "domains": ["google.com"],
+  "steps": [
+    {"id":"project-page","says":"Open Google Cloud's project page.","action":"goto","url":"https://console.cloud.google.com/projectcreate"},
+    {"id":"project-name","says":"Name the project CORSIA.","action":"type","selector":"role=textbox[name=\"Project name\"]","value":"CORSIA"},
+    {"id":"project-create","says":"Create the CORSIA project.","action":"click","selector":"role=button[name=\"Create\"s]"},
+    {"id":"project-ready","says":"Wait until the CORSIA project is selectable.","action":"wait_for","selector":"text=\"CORSIA\"","timeout":90}
+  ]
+}

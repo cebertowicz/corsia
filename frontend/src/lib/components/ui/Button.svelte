@@ -13,6 +13,8 @@
 		disabled?: boolean;
 		loading?: boolean;
 		ariaLabel?: string;
+		/** A compact visual label for a caller's narrow layout; the accessible name remains ariaLabel. */
+		dataShort?: string;
 		title?: string;
 		/** Extra help a screen reader reads after the name (`aria-description`). */
 		description?: string;
@@ -28,7 +30,7 @@
 	let {
 		variant = 'secondary', size = 'md', type = 'button',
 		disabled = false, loading = false,
-		ariaLabel, title, description, ariaDisabled = false, describedby, el = $bindable(),
+		ariaLabel, dataShort, title, description, ariaDisabled = false, describedby, el = $bindable(),
 		onclick, children,
 	}: Props = $props();
 
@@ -41,6 +43,7 @@
 	class:loading
 	disabled={isDisabled}
 	aria-label={ariaLabel}
+	data-short={dataShort}
 	{...(description ? { 'aria-description': description } : {})}
 	aria-disabled={ariaDisabled ? 'true' : undefined}
 	aria-describedby={describedby}
@@ -78,7 +81,7 @@
 	}
 
 	.btn.md { height: 32px; padding: 0 13px; font-size: var(--text-subhead); }
-	.btn.sm { height: 28px; padding: 0 10px; font-size: var(--text-footnote); }
+	.btn.sm { height: 28px; padding: 0 var(--button-pad-x-sm); font-size: var(--text-footnote); }
 
 	.btn.secondary {
 		background: var(--bg-secondary);
@@ -105,11 +108,12 @@
 	.btn.danger {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.btn.danger:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--red) 18%, transparent);
 		border-color: var(--red);
+		color: var(--red-text);
 	}
 
 	.btn.ghost {

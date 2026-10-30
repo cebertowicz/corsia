@@ -4,6 +4,7 @@
 	import { on, subscribeThread, unsubscribeThread } from '$lib/ws';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { messages } from '$lib/stores/threads';
+	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { adoptThreadSnapshot, claimDisplayedThread } from '$lib/stores/displayedThreads';
 	import MessageList from './MessageList.svelte';
 	import InputBar from './InputBar.svelte';
@@ -80,6 +81,8 @@
 		const subscribed = threadId;
 		const release = claimDisplayedThread(subscribed);
 		void load();
+		// The composer shows this worker's own model and effort, which the server's status carries.
+		if ($token) void hydrateSubagentThread(subscribed, $token);
 		subscribeThread(subscribed);
 		const offConnected = on('connected', () => {
 			subscribeThread(subscribed);
@@ -113,10 +116,10 @@
 	});
 </script>
 
-<div class="subagent-conversation" data-drop-composer-surface aria-label="Subagent conversation">
+<div class="subagent-conversation" data-drop-composer-surface aria-label="Agent chat">
 	{#if failed && !hasRows}
 		<div class="leaf-state" role="alert">
-			<strong>This subagent conversation couldn’t load.</strong>
+			<strong>This agent chat couldn’t load. Try again.</strong>
 			<Button size="sm" variant="secondary" onclick={() => load()}>Retry</Button>
 		</div>
 	{:else}

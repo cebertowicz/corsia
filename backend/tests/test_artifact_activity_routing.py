@@ -25,6 +25,12 @@ def _disable_analytics(monkeypatch):
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
 
 
+@pytest.fixture(autouse=True)
+def _alice_is_inside(monkeypatch):
+    # Mark the author as inside to exercise routing with known origin.
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "alice")
+
+
 def _comment_payload(
     repo: str, pr_number: int, *, body: str = "please review"
 ) -> dict:
@@ -112,7 +118,8 @@ async def test_owner_wake_records_passive_activity_for_subscribers(isolated_db):
     assert len(rows) == 1
     assert rows[0]["internal_event"] == "webhook.github.pr_comment"
     assert rows[0]["external_id"] == "o/r#301"
-    assert "subscriber should digest this later" in rows[0]["summary"]
+    assert rows[0]["summary"] == "o/r#301 comment from alice"
+    assert "subscriber should digest this later" not in rows[0]["summary"]
 
 
 @pytest.mark.asyncio
@@ -241,7 +248,8 @@ async def test_rehome_routes_future_events_to_new_owner_once_and_old_owner_passi
     old_rows = _passive_change_rows(isolated_db, old_owner)
     assert len(old_rows) == 1
     assert old_rows[0]["internal_event"] == "webhook.github.pr_comment"
-    assert "future event follows rescue owner" in old_rows[0]["summary"]
+    assert old_rows[0]["summary"] == "o/r#305 comment from alice"
+    assert "future event follows rescue owner" not in old_rows[0]["summary"]
     assert _passive_change_rows(isolated_db, new_owner) == []
 
 
@@ -389,4 +397,5 @@ async def test_release_with_explicit_triage_routes_future_events_to_triage(
     assert mock_deliver.call_args.args[0] == triage
     old_rows = _passive_change_rows(isolated_db, old_owner)
     assert len(old_rows) == 1
-    assert "triage should repair ownership" in old_rows[0]["summary"]
+    assert old_rows[0]["summary"] == "o/r#307 comment from alice"
+    assert "triage should repair ownership" not in old_rows[0]["summary"]

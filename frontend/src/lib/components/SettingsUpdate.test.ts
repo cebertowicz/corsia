@@ -58,11 +58,28 @@ describe('SettingsUpdate', () => {
 
 		expect(host.textContent).toContain('1.0.0');
 		expect(host.textContent).toContain('1.1.0 available');
-		expect(host.querySelector('.pill.active')?.textContent).toBe('1.1.0 available');
+		expect(host.querySelector('.offer-state')?.textContent).toBe('· 1.1.0 available');
 		expect(host.textContent).toContain('Update');
 	});
 
-	it('uses StatePill and hides the available version while updating', () => {
+	it('shows the offered update notes instead of a completed older update', () => {
+		updateStatus.set(status({
+			available: true, target_version: '1.2.0',
+			changes: { kind: 'changelog', headline: null, items: ['New update notes'], more: 0 },
+			operation: {
+				operation_id: 'update-1', status: 'complete', target_version: '1.1.0',
+				changes: { kind: 'changelog', headline: null, items: ['Old update notes'], more: 0 },
+			},
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.textContent).toContain('1.2.0 available');
+		expect(host.querySelector('.offer')?.textContent).toContain('New update notes');
+		expect(host.querySelector('.offer')?.textContent).not.toContain('Old update notes');
+	});
+
+	it('puts the update in progress on the version line and hides the available version', () => {
 		updateStatus.set(status({
 			available: true, target_version: '1.1.0',
 			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
@@ -70,11 +87,11 @@ describe('SettingsUpdate', () => {
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 
-		expect(host.querySelector('.pill.active')).toBeNull();
+		expect(host.querySelector('.offer-state')).toBeNull();
 		expect(host.textContent).not.toContain('1.1.0 available');
 		// The Version row carries the toast's words and a spinner, not a second phrasing.
 		expect(host.textContent).toContain('Pausing agents');
-		expect(host.querySelector('.updating .spinner')).toBeTruthy();
+		expect(host.querySelector('.version-line .updating .spinner')).toBeTruthy();
 		expect(host.textContent).not.toContain('Updating to');
 		expect(host.querySelector('.offer')).toBeNull();
 	});
@@ -142,7 +159,7 @@ describe('SettingsUpdate', () => {
 		const details = host.querySelector('details')!;
 		expect(details.querySelector('summary')?.textContent?.trim()).toBe('Details');
 		expect(details.querySelector('pre')?.textContent).toBe('network stopped.');
-		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again');
+		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry).toBeDefined();
 		expect(host.querySelector('.offer')).toBeNull();
 	});
@@ -169,7 +186,7 @@ describe('SettingsUpdate', () => {
 		const offer = host.querySelector('.offer')!;
 		expect(offer.querySelector('h4')?.textContent).toBe("What's new");
 		expect(offer.querySelectorAll('li')).toHaveLength(3);
-		expect(offer.textContent).toContain('CORSIA restarts for about a minute; 2 working agents pause and pick up where they left off.');
+		expect(offer.textContent).toContain('The restart usually takes a minute; 2 working agents pause and pick up where they left off.');
 		const labels = Array.from(offer.querySelectorAll('button')).map((button) => button.textContent?.trim());
 		expect(labels).toContain('Update now');
 		expect(labels).toContain('Tonight at 3:00 AM');
@@ -206,6 +223,26 @@ describe('SettingsUpdate', () => {
 		expect(host.querySelector('.notes h4')?.textContent).toBe("What's new in 1.1.0");
 		expect(host.querySelector('.notes li')?.textContent).toBe('Faster search');
 		expect(host.querySelector('.installed')?.textContent).toMatch(/^Updated overnight at /);
+	});
+
+	it('offers an authoritative same-version source update after an earlier update completed', () => {
+		updateStatus.set(status({
+			available: true,
+			target_version: '1.1.0',
+			current_version: '1.1.0',
+			current_sha: 'installed',
+			remote_sha: 'newer',
+			commits_behind: 1,
+			operation: {
+				operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '1.1.0',
+				settled_at: new Date().toISOString(), changes: { kind: 'changelog', headline: null, items: ['Faster search'], more: 0 },
+			},
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.offer')).toBeTruthy();
+		expect(host.querySelector('.notes h4')?.textContent).toBe("What's new in 1.1.0");
 	});
 
 	it('keeps Update now and offers Cancel tonight when tonight is scheduled', () => {
@@ -246,7 +283,7 @@ describe('SettingsUpdate', () => {
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 		expect(host.textContent).not.toContain("Update didn't start");
-		expect(host.textContent).not.toContain('Try again');
+		expect(host.textContent).not.toContain('Retry');
 		expect(host.textContent).not.toContain('Installed');
 	});
 });

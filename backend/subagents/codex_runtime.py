@@ -18,21 +18,22 @@ from llm.resolution import ExecutionTarget, Harness
 from subagents import completed_tool_terminal as _tool_terminal
 from core.turn_core import (
     TerminalSettlement,
-    TurnIdentity,
-    TurnTerminalResult,
+    TurnIdentity, TurnTerminalResult,
     bind_preadmitted_turn,
     commit_turn_terminal,
     persist_turn_start_bound,
     persist_turn_terminal,
-    settle_turn_terminal,
 )
 from core.turn_activity import turn_activity_frame
 from subagents.codex_runtime_errors import (
     CodexLiveTurnBusy,
     CodexPreparedContextStale,
+    cache_error_marker,
     surface_exit_error,
 )
+from subagents.codex_runtime_support import require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
+from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
 from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
@@ -43,11 +44,12 @@ from subagents.codex_runtime_event_delivery import (
     runtime_event_handler as _make_on_event,
 )
 from subagents.codex_runtime_terminal import (
+    UNSETTLED_AT_TERMINAL as _UNSETTLED_AT_TERMINAL,
     CommittedTerminalFailure,
+    claim_live_terminal as _claim_live_terminal,
     finish_interrupted_if_still_owned as _finish_interrupted_if_still_owned,
     preserve_committed_terminal,
     publish_claimed_terminal as _publish_claimed_terminal,
-    turn_has_durable_terminal as _turn_has_durable_terminal,
 )
 from subagents.codex_destination import (
     refresh_prepared_codex_context_after_boundary as _refresh_prepared_codex_context_after_boundary,
@@ -104,6 +106,7 @@ from subagents.codex_runtime_support import (
     request_exact_stop as _request_exact_stop,
     restore_thread_id as _restore_thread_id,
     terminate_app_session as _terminate_app_session,
+    turn_has_durable_terminal as _turn_has_durable_terminal,
     working_dir_for_reconstruction as _working_dir_for_reconstruction,
 )
 
@@ -189,6 +192,7 @@ async def retarget_if_current(
         return True
 
 
+
 def _default_broadcast(thread_id: str, message: dict) -> None:
     from infra import state
 
@@ -220,10 +224,6 @@ def _surface_exit_error(
     )
 
 
-def _require_owned_accept_db(db) -> None:
-    if db is not None:
-        raise RuntimeError("Codex async acceptance requires an owned DB connection")
-
 
 async def _start_live_turn(
     thread_id: str,
@@ -236,10 +236,10 @@ async def _start_live_turn(
     preadmitted_turn: TurnIdentity | None = None,
     transfer_delivery_to_turn: Callable[[], None] | None = None,
 ) -> TurnIdentity:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
 
     def _bind_turn(identity: TurnIdentity) -> None:
-        live.last_assistant_message_id = None
+        live.last_assistant_message_id = live.open_tool_step_id = None
         live.thinking_buf = ""
         live.thinking_provenance = None
         live.last_text = ""
@@ -274,27 +274,6 @@ async def _start_live_turn(
     return identity
 
 
-async def _claim_live_terminal(
-    live: _LiveCodex,
-    outcome: str,
-    error: str | BaseException | None = None,
-    db=None,
-    *,
-    identity: TurnIdentity | None = None,
-) -> TurnTerminalResult:
-    identity = identity or live.corsia_turn
-    if identity is None:
-        return TurnTerminalResult.CONFLICTING_TERMINAL
-    if db is not None:
-        return persist_turn_terminal(
-            identity.turn_id,
-            outcome,
-            error,
-            db=db,
-        )
-    return await settle_turn_terminal(identity.turn_id, outcome, error)
-
-
 async def _end_owned_turn(
     thread_id: str,
     live: _LiveCodex,
@@ -321,11 +300,18 @@ async def _end_owned_turn(
     await _settle_live_tool_debt(thread_id, live, bcast)
     if not defer_drive:
         terminal = await _claim_live_terminal(
-            live, outcome, error, db, identity=identity,
+            live, outcome, error, db,
+            identity=identity,
         )
     else:
         assert db is None, "deferred Codex terminal requires its own transaction"
-        terminal = await commit_turn_terminal(identity.turn_id, outcome, error)
+
+        terminal = await commit_turn_terminal(
+            identity.turn_id, outcome, error,
+            quarantine=_UNSETTLED_AT_TERMINAL if (
+                outcome != "cancelled" or live.input_delivery_unproven
+            ) else None,
+        )
     result = terminal.result if isinstance(terminal, TerminalSettlement) else terminal
     if result is not TurnTerminalResult.APPLIED:
         return terminal
@@ -687,7 +673,7 @@ async def _spawn_turn(
     db=None,
     held_lock: asyncio.Lock,
 ) -> TurnIdentity | None:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     binary = _spawn_binary(binary, db)
     payload = await run_in_db(_resolve_spawn_payload,
         thread_id=thread_id, text=text,
@@ -764,7 +750,7 @@ async def _finish_failed_app_server_spawn(
             terminal = await _end_owned_turn(
                 thread_id, live, live.corsia_turn, outcome,
                 error=detail, bcast=bcast, source="codex-app-server:input-rejected",
-                defer_drive=True,
+                marker=cache_error_marker(exc, thread_id, live.corsia_turn, bcast, db, insert_message, log), defer_drive=True,
             )
         except CommittedTerminalFailure:
             if not live.input_delivery_unproven:
@@ -791,7 +777,7 @@ async def _accept_spec_app_server_input(
 
 
 async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
-    _require_owned_accept_db(spec.db)
+    require_owned_accept_db(spec.db)
     bcast = spec.broadcast or _default_broadcast
     session = _reusable_app_session(spec.thread_id)
     tool_registry, dynamic_tools = _resolve_app_server_tools(
@@ -1345,7 +1331,7 @@ async def _hard_preempt_live_turn(
     held_lock: asyncio.Lock,
 ) -> TurnIdentity | None:
     """Terminalize, quarantine, and replace an uninterruptible turn."""
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     bcast = broadcast or _default_broadcast
     if not await _fence_hard_preempted_live(thread_id, live, bcast, db=db):
         return None
@@ -1557,7 +1543,7 @@ async def _feed_live(
     preadmitted_turn: TurnIdentity | None = None,
     db=None,
 ) -> TurnIdentity | None:
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     bcast = broadcast or _default_broadcast
     live = _LIVE.get(thread_id)
     if live is not None and live.provider_context_untrusted:
@@ -1872,7 +1858,7 @@ async def ensure_live_then_feed(
     db=None,
 ) -> TurnIdentity | None:
     """Steer, resume, or start one Codex turn under its transition lock."""
-    _require_owned_accept_db(db)
+    require_owned_accept_db(db)
     if target.harness != "codex":
         raise ValueError("Codex runtime received a non-Codex execution target")
     lock = _LIVE.lock(thread_id)
@@ -2215,30 +2201,6 @@ async def _force_shutdown_unsettled_app_server(
     )
 
 
-def _record_backend_shutdown_marker(thread_id: str) -> None:
-    try:
-        insert_message(
-            thread_id,
-            "system",
-            "Terminated by backend shutdown.",
-            {
-                "codex": True,
-                "type": "cc_error",
-                "event_type": "harness.error",
-                "harness": "codex",
-                "cause": "backend_shutdown",
-                "shutdown": True,
-            },
-            msg_id=str(uuid.uuid4()),
-        )
-    except Exception as exc:
-        log.warning(
-            "codex_runtime: shutdown marker failed for %s: %s",
-            thread_id,
-            exc,
-        )
-
-
 async def _shutdown_live_owner(
     thread_id: str,
     live: _LiveCodex,
@@ -2246,6 +2208,7 @@ async def _shutdown_live_owner(
 ) -> None:
     from subagents.lifecycle import terminate_and_pop
 
+    turn_id = getattr(live.corsia_turn, "turn_id", None)
     drain_result = await _quiesce_tool_turn(thread_id, live, bcast)
     if _LIVE.get(thread_id) is not live:
         return
@@ -2274,7 +2237,7 @@ async def _shutdown_live_owner(
     if not cleaned:
         raise RuntimeError(f"Codex exact live survived shutdown: {thread_id}")
     if terminal is TurnTerminalResult.APPLIED:
-        await run_in_db(_record_backend_shutdown_marker, thread_id)
+        await run_in_db(_record_backend_shutdown_marker, thread_id, turn_id)
 
 
 async def _shutdown_idle_app_owner(thread_id: str) -> None:

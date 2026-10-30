@@ -213,6 +213,8 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
     assert result["not_api_priced_records"] == 2
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
+    no_list_price = next(item for item in result["excluded"] if item["kind"] == "no_list_price")
+    assert no_list_price["models"] == [{"label": "opus (version not recorded)", "records": 1}]
     assert period["per_outcome"] == pytest.approx(period["dollars"] / 2)
 
 
@@ -337,16 +339,45 @@ def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selec
     assert result["excluded"] == []
 
 
+def test_checkpoint_and_turn_resolve_and_price_the_same_concrete_claude_identity(isolated_db):
+    from core.cost_identity import IdentityResolver
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        resolve = IdentityResolver(db)
+        checkpoint = resolve({"model": "claude-code/claude-sonnet-5-5"})
+        turn = resolve({
+            "model": "claude-code/sonnet", "manifest_harness": "claude-code",
+            "manifest_model": "claude-sonnet-5-5", "manifest_source": "catalog",
+        })
+    finally:
+        db.close()
+    assert checkpoint.key == turn.key == "claude-code/claude-sonnet-5-5"
+    assert price_identity(checkpoint.key) == "claude-sonnet-5-5"
+
+
 RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and checkpoint receipts
 
 
 @pytest.mark.parametrize(
     ("usage_id", "model", "source", "cache_read", "expected"),
     [
-        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract writer, proven by id shape
+        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract turn writer, proven by id shape
         (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 0, "ok"),
-        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # direct uuid4()[:12] write: era unknown
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "checkpoint", 5, "ok"),             # post-contract checkpoint writer
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "ok"),
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),
+        ("direct-id", "external@provider/model", "checkpoint", 0, "ok"),  # zero-cache native checkpoint remains admitted
+        ("direct-id", "claude-sonnet-4-5", "host_access_action_review", 0, "ok"),  # bare Claude identity has no receipt contract
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # old direct writer: format proves nothing
+        ("8f3a9c1e-b2d", "gpt-5", CODEX, 0, "contract_unproven"),  # a Codex-source row stays unproven whatever its model
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),  # reviewer copied disjoint buckets since its first row
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),  # a fully reported Codex reviewer row is from_codex
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "conversation", 5, "contract_unproven"),
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # not a lowercase hex digest
+        ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", "checkpoint", 0, "contract_unproven"),
         ("0123456789abcdef0123456", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),   # wrong length
         (None, "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),
         (RECEIPT_ID, "codex/gpt-6.1-sol", CC, 0, "contract_unproven"),         # contradictory source: still Unknown
@@ -361,7 +392,7 @@ def test_codex_is_priced_only_on_a_receipt_shaped_id(usage_id, model, source, ca
 def _admission(model, source, cache_read, usage_id="direct-id", created_at="2026-09-22T12:00:00Z"):
     import sqlite3
 
-    from api.measurement_cost import ADMISSION_SQL
+    from core.measurement_pricing import ADMISSION_SQL
 
     db = sqlite3.connect(":memory:")  # nullable columns: the ledger's NOT NULL must not be the only guard
     db.execute("CREATE TABLE llm_usage (id TEXT, model TEXT, source TEXT, prompt_tokens, completion_tokens, "
@@ -555,6 +586,7 @@ def test_cost_per_hour_without_any_size_is_unknown(isolated_db, measurement_cloc
 @pytest.mark.parametrize("grain, before, first", [("weeks", "2026-08-30", "2026-08-31"), ("days", "2026-08-30", "2026-08-31")])
 def test_the_cost_series_starts_with_the_size_rating_instrument_not_with_the_first_spend(isolated_db, monkeypatch, grain, before, first):
     from infra.database import get_db
+    from tests.plan_writer_authorizer import raw_plan_seed
     from tests.test_measurement_api import _seed_thread
 
     # Tuesday 2026-09-08: both grains' spines reach back over the size series' start (2026-08-31).
@@ -562,6 +594,19 @@ def test_the_cost_series_starts_with_the_size_rating_instrument_not_with_the_fir
     db = get_db()
     try:
         _seed_thread(db, "root", agent=True)
+        db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('cost-plan','thread','root','active',1,'t','t')")
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
+                "requirements_revision,revision,size,created_at,updated_at) "
+                "VALUES ('cost-size','cost-plan',0,'task','t','t','accepted','cost-size',1,1,'S',?,?)",
+                (f"{first}T12:00:00Z", f"{first}T12:00:00Z"),
+            )
+            db.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES ('cost-size-event','cost-size','test','accepted','active','accepted',?)",
+                (f"{first}T12:00:00Z",),
+            )
         for day in (before, first, "2026-09-02"):
             db.execute(
                 "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,"

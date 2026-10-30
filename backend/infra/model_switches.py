@@ -6,6 +6,7 @@ import sqlite3
 
 from infra.database import write_transaction
 from connections.account_holds import refresh_thread_holds
+from infra.local_only import require_local_only_model
 from connections.account_policy import AccountAdmissionError
 from connections.account_selection import bind_model_account
 from infra.model_switch_inputs import retarget_unwritten_suffix as _retarget_unwritten_suffix
@@ -73,7 +74,7 @@ def request_switch(
     destination = _validated_request(destination_model, operation_id, requested_at, actor_kind, reason, checkpoint_choice)
     with write_transaction(db, scope="request_switch") as connection:
         row = connection.execute(
-            "SELECT id,user_id,model,execution_epoch,next_input_order,pending_model,"
+            "SELECT id,user_id,model,local_only,execution_epoch,next_input_order,pending_model,"
             "pending_execution_epoch,switch_after_input_order,"
             "switch_operation_id,switch_status,switch_actor_kind,switch_actor_id,switch_reason,"
             "switch_checkpoint_choice,switch_requested_at FROM threads WHERE id=?",
@@ -83,6 +84,7 @@ def request_switch(
             raise ValueError("task does not exist")
         if user_id is not None and str(row["user_id"]) != user_id:
             raise ValueError("task is not owned by the requesting user")
+        require_local_only_model(destination, thread_local_only=bool(row["local_only"]), db=connection, thread_id=thread_id)
         source, defer_receipt = _source_and_defer_receipt(row, destination, db=connection)
         bind_model_account(thread_id, destination, account_id=account_id,
                            actor_thread_id=actor_id if actor_kind == "agent" else None,
@@ -296,6 +298,7 @@ def activate_ready_switch(
     operation_id = str(row["switch_operation_id"])
     source_model = str(row["model"])
     destination_model = str(row["pending_model"])
+    # Model bindings are admitted at request time; turn-time resolution rechecks scope.
     try:
         bind_model_account(thread_id, destination_model,
                            actor_thread_id=row["switch_actor_id"] if row["switch_actor_kind"] == "agent" else None,

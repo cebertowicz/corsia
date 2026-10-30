@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { get, writable } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 const removeNetworkServer = vi.fn(async (_id: string) => ({ ok: true }));
 vi.mock('$lib/stores/networkServers', () => ({
@@ -13,7 +13,7 @@ vi.mock('$lib/stores/providersV7', () => ({
 }));
 
 import ProviderSettingsModal from './ProviderSettingsModal.svelte';
-import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+import { resetSettingsNavigation } from '$lib/stores/settingsNavigation';
 
 const server = {
 	id: 'ns-plan', provider: 'external', instance_id: 'token-plan.example/v1',
@@ -42,7 +42,7 @@ describe('ProviderSettingsModal remove', () => {
 		component = null;
 		document.body.innerHTML = '';
 		removeNetworkServer.mockClear();
-		workspaceSettingsOpen.set(false);
+		resetSettingsNavigation();
 		vi.unstubAllGlobals();
 	});
 
@@ -88,27 +88,6 @@ describe('ProviderSettingsModal remove', () => {
 		expect(window.confirm).not.toHaveBeenCalled();
 	});
 
-	it('opens Workspace settings from the Accounts policy pointer', async () => {
-			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
-				id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,
-				state: 'legacy', revision: 1, identity: {},
-				label: { name: 'Plus account 1', email: null, text: 'Plus account 1' },
-			}] })));
-			const onClose = vi.fn();
-			component = mount(ProviderSettingsModal, {
-				target: document.body,
-				props: { provider: {
-					name: 'codex', label: 'Codex', type: 'harness', statusDot: 'online', subline: '1 account · 3 models',
-					raw: { name: 'codex', label: 'Codex', type: 'harness' },
-				} as never, onClose },
-			});
-			await vi.waitFor(() => expect(document.body.textContent).toContain('Plus account 1'));
-			button('Workspace settings').click();
-			flushSync();
-			expect(get(workspaceSettingsOpen)).toBe(true);
-			expect(onClose).toHaveBeenCalledOnce();
-		});
-
 	it('opens a harness provider on Accounts with its canonical name and email label', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
 			id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,
@@ -122,8 +101,9 @@ describe('ProviderSettingsModal remove', () => {
 				raw: { name: 'codex', label: 'Codex', type: 'harness' },
 			} as never, onClose: vi.fn() },
 		});
-		await vi.waitFor(() => expect(document.body.textContent).toContain('Personal · person@example.test'));
-		expect(document.body.textContent).toContain('Rollover and account order are set in Workspace settings.');
+		await vi.waitFor(() => expect(document.querySelector('.account-usage-row .name')?.textContent).toBe('Personal'));
+		expect(document.querySelector('.account-usage-row .email')?.textContent).toBe('person@example.test');
+		expect(document.body.textContent).toContain('Add account');
 	});
 
 	it.each([
@@ -142,5 +122,21 @@ describe('ProviderSettingsModal remove', () => {
 		button('Overview').click();
 		flushSync();
 		expect(document.body.textContent).not.toContain('Remove provider…');
+	});
+
+	it('shows the reference beside a failed model list refresh', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+			ok: false, message: 'Couldn’t refresh the model list. Try again.', ref: 'local-ab12',
+		})));
+		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'network' as const, endpoints: [{ host: '127.0.0.1' }] };
+		component = mount(ProviderSettingsModal, {
+			target: document.body,
+			props: { provider: { ...provider, name: 'omlx', type: 'local', server: local } as never, onClose: vi.fn() },
+		});
+		flushSync();
+		button('Reload models').click();
+		await vi.waitFor(() => expect(document.body.textContent).toContain(
+			'Couldn’t refresh the model list. Try again. Reference: local-ab12',
+		));
 	});
 });

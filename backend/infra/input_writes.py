@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import Awaitable, Callable, TypeVar
 from infra.provider_write_evidence import ProviderWriteEvidence
@@ -11,6 +12,7 @@ from core.stop_causes import PlanLimitStop
 from infra.checkpoint_refusal_settlement import settle_checkpoint_refusal
 from infra.database import write_transaction
 from infra.db_async import run_in_db
+from infra.input_sequencing import sequence_attempt
 from infra.queries import thread_unavailable_reason
 from infra.send_types import SendRejected
 from infra.thread_inputs import ClaimedBatch
@@ -76,6 +78,42 @@ def begin_batch_write(
                 )
 
 
+def lift_batch_fence(
+    batch: ClaimedBatch,
+    *,
+    attempt_id: str,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """Undo a committed begin that never reached dispatch, keeping the Turn's claim."""
+    with write_transaction(db, scope="lift_batch_fence") as connection:
+        lifted = connection.execute(
+            "UPDATE messages SET delivery_attempt_id=NULL,write_started_at=NULL "
+            "WHERE thread_id=? AND active_turn_id=? AND delivery_attempt_id=? "
+            "AND delivery_state='queued' AND write_outcome IS NULL",
+            (batch.thread_id, batch.turn_id, attempt_id),
+        ).rowcount
+        if lifted not in (0, len(batch.items)):
+            raise RuntimeError(f"input write fence changed before lift: {attempt_id}")
+
+
+async def fence_batch_write(
+    batch: ClaimedBatch,
+    *,
+    attempt_id: str,
+    started_at: str,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """Begin a provider write; a cancelled begin leaves the pre-begin state."""
+    try:
+        await _write(begin_batch_write, batch, attempt_id=attempt_id, started_at=started_at, db=db)
+    except asyncio.CancelledError:
+        # run_in_db joins the begin before reporting cancellation, so it may
+        # have committed. No provider bytes left: lift the fence so the Turn's
+        # terminal settles these inputs exactly as if the cancel came first.
+        await _write(lift_batch_fence, batch, attempt_id=attempt_id, db=db)
+        raise
+
+
 def release_batch_before_write(
     batch: ClaimedBatch,
     *,
@@ -136,43 +174,6 @@ def release_batch_after_proved_no_write(
                 raise RuntimeError(
                     f"input write proof changed before release: {item.message_id}"
                 )
-
-
-def sequence_attempt(
-    db: sqlite3.Connection,
-    rows: list[sqlite3.Row],
-    *,
-    state: str,
-    outcome: str,
-    error: str | None,
-) -> tuple[str, ...]:
-    """Give one settled batch its durable order and delivery state.
-
-    Reports each wake it ended ``failed`` in this transaction and returns their
-    ids so the owning frame can drive the report owner after commit.
-    """
-    thread_id = str(rows[0]["thread_id"])
-    next_seq = int(db.execute(
-        "SELECT next_message_seq FROM threads WHERE id=?", (thread_id,),
-    ).fetchone()[0])
-    for offset, row in enumerate(rows):
-        db.execute(
-            "UPDATE messages SET delivery_state=?,write_outcome=?,"
-            "delivery_error=?,next_attempt_at=NULL,seq=?,"
-            "delivery_revision=delivery_revision+1 WHERE id=?",
-            (state, outcome, error, next_seq + offset, row["id"]),
-        )
-    db.execute(
-        "UPDATE threads SET next_message_seq=? WHERE id=?",
-        (next_seq + len(rows), thread_id),
-    )
-    if state != "failed":
-        return ()
-    from infra.failed_wake_surface import record_failed_wakes
-
-    failed = tuple(str(row["id"]) for row in rows)
-    record_failed_wakes(db, failed)
-    return failed
 
 
 def settle_batch_write(
@@ -369,13 +370,7 @@ async def dispatch_fenced_batch(
     db: sqlite3.Connection | None = None,
 ) -> T:
     """Fence, dispatch outside storage, and settle only adapter evidence."""
-    await _write(
-        begin_batch_write,
-        batch,
-        attempt_id=attempt_id,
-        started_at=started_at,
-        db=db,
-    )
+    await fence_batch_write(batch, attempt_id=attempt_id, started_at=started_at, db=db)
     evidence = evidence or ProviderWriteEvidence()
     try:
         result = await dispatcher(evidence)

@@ -5,6 +5,7 @@
 	import type { ProviderModel } from '$lib/stores/providerModels';
 	import { IconButton, Modal, Section, StatePill } from '$lib/components/ui';
 	import CheckpointWindowEditor from './CheckpointWindowEditor.svelte';
+	import { canEditCheckpointWindow } from './modelWarning';
 	import ImageInputEditor from './ImageInputEditor.svelte';
 	import ModelLabelEditor from './ModelLabelEditor.svelte';
 
@@ -23,7 +24,7 @@
 
 	const { model, providerLabel, providerName, serverId, external = false, labelEditable = false, omlxAdminUrl, onChanged, onClose }: Props = $props();
 
-	const showsCheckpointing = $derived(!!model.dbId && (external || labelEditable || providerName === 'omlx'));
+	const showsCheckpointing = $derived(!!model.dbId && canEditCheckpointWindow(external, labelEditable, providerName));
 
 	const capLabels: Record<string, string> = {
 		vision: 'Vision · accepts image inputs',
@@ -43,68 +44,6 @@
 	let cacheStats = $state<CacheEntry[] | null>(null);
 	let cacheLoading = $state(false);
 
-	type RuntimeInfo = {
-		loaded?: boolean;
-		pinned?: boolean | null;
-		last_access?: number | null;
-		engine_type?: string | null;
-		thinking_default?: boolean | null;
-		preserve_thinking_default?: boolean | null;
-	};
-	let runtime = $state<RuntimeInfo | null>(null);
-	let runtimeLoading = $state(false);
-	let pinSaving = $state(false);
-	let pinError = $state<string | null>(null);
-
-	const showsServerState = $derived(
-		providerName === 'omlx' && !!serverId && !!model.id,
-	);
-
-	async function loadRuntime() {
-		if (!showsServerState) return;
-		runtimeLoading = true;
-		try {
-			const t = get(token) || '';
-			const res = await fetch(
-				`/api/settings/network-servers/${serverId}/models/${encodeURIComponent(model.id)}/runtime-info?token=${t}`,
-			);
-			if (res.ok) {
-				runtime = await res.json();
-			}
-		} catch {
-		} finally {
-			runtimeLoading = false;
-		}
-	}
-
-	async function togglePinned() {
-		if (!showsServerState || pinSaving) return;
-		pinError = null;
-		pinSaving = true;
-		const next = !runtime?.pinned;
-		try {
-			const t = get(token) || '';
-			const res = await fetch(
-				`/api/settings/network-servers/${serverId}/models/${encodeURIComponent(model.id)}/settings?token=${t}`,
-				{
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ pinned: next }),
-				},
-			);
-			if (!res.ok) {
-				const errBody = await res.json().catch(() => ({}));
-				pinError = errBody.detail ?? `HTTP ${res.status}`;
-			} else {
-				await loadRuntime();
-			}
-		} catch (e: any) {
-			pinError = e?.message ?? String(e);
-		} finally {
-			pinSaving = false;
-		}
-	}
-
 	onMount(async () => {
 		if (!serverId) return;
 		cacheLoading = true;
@@ -121,7 +60,6 @@
 		} finally {
 			cacheLoading = false;
 		}
-		await loadRuntime();
 	});
 
 	const cacheSummary = $derived.by(() => {
@@ -191,31 +129,6 @@
 		</Section>
 	{/if}
 
-	{#if showsServerState}
-		<Section title="Server-side state">
-			<div class="srv-row">
-				<span class="srv-label" title="Keep this model loaded persistently. Without pinning, oMLX evicts idle models to free memory.">Pinned</span>
-				<button
-					type="button"
-					class="tg sm"
-					class:on={!!runtime?.pinned}
-					disabled={pinSaving || runtimeLoading || !runtime}
-					onclick={togglePinned}
-					aria-label="Toggle pinned"
-					aria-pressed={!!runtime?.pinned}
-					title="Keep this model loaded; oMLX won't evict it on idle"
-				></button>
-			</div>
-			<p class="srv-hint">
-				<strong>Pinned</strong> = the model stays loaded in memory until you unload
-				it or restart the daemon. Use it for models you switch to often so
-				you don't pay reload latency. Unpinned models are evicted by oMLX
-				when idle to free GPU/RAM.
-			</p>
-			{#if pinError}<p class="srv-err">{pinError}</p>{/if}
-		</Section>
-	{/if}
-
 	{#if labelEditable && model.dbId}
 		<ModelLabelEditor
 			dbId={model.dbId}
@@ -269,7 +182,6 @@
 	.head {
 		display: flex; align-items: center; gap: 12px;
 		padding: 18px 22px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.title {
 		flex: 1;
@@ -318,56 +230,6 @@
 	.empty { font-size: var(--text-footnote); color: var(--text-tertiary); padding: 4px 0; margin: 0; }
 	.hint { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 12px 0 0; }
 	.hint a { color: var(--accent-text); }
-
-	.srv-row {
-		display: flex; align-items: center; justify-content: space-between;
-		padding: 6px 0;
-		font-size: var(--text-subhead);
-	}
-	.srv-label { color: var(--text-primary); font-weight: 500; }
-	.srv-hint {
-		font-size: var(--text-footnote); line-height: 1.5;
-		color: var(--text-tertiary);
-		margin: 4px 0 0 0;
-	}
-	.srv-err {
-		font-size: var(--text-footnote);
-		color: var(--red);
-		margin: 4px 0 0 0;
-	}
-
-	.tg {
-		--w: 30px; --h: 17px;
-		width: var(--w); height: var(--h);
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
-		position: relative;
-		transition: all var(--dur-tight) var(--ease-snap);
-		flex-shrink: 0;
-		cursor: pointer;
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.3);
-	}
-	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
-	.tg::after {
-		content: '';
-		position: absolute;
-		width: 12px; height: 12px;
-		border-radius: var(--radius-circle);
-		background: linear-gradient(180deg, #d8d8e0, #b8b8c0);
-		top: 1.5px; left: 1.5px;
-		transition: all var(--dur-tight) var(--ease-snap);
-		box-shadow: 0 1px 2px rgba(0,0,0,0.4);
-	}
-	.tg.on {
-		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
-		border-color: var(--accent);
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
-	}
-	.tg.on::after {
-		left: calc(var(--w) - 14.5px);
-		background: linear-gradient(180deg, #ffffff, #f0f0f5);
-	}
 
 	@media (max-width: 480px) {
 		.head { padding: 14px 16px; }

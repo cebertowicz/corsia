@@ -16,8 +16,6 @@ vi.mock('$lib/api/docs', () => ({
 
 vi.mock('$lib/api/docFeedback', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/docFeedback')>()),
-	returnDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
-	leaveDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
 }));
 vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/liveDocuments')>()),
@@ -127,14 +125,14 @@ describe('artifact leaf renderer choice', () => {
 		expect(get(threadWorkspaces)[THREAD].tabs[0].status).toBe('error');
 	});
 
-	it('loads the image again from the failure state with Try again', async () => {
+	it('loads the image again from the failure state with Retry', async () => {
 		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/broken.png', title: 'broken.png' });
 		await settle();
 		host.querySelector('img')!.dispatchEvent(new Event('error'));
 		await settle();
 
 		const retry = [...host.querySelectorAll<HTMLButtonElement>('.load-error button')].find(
-			(b) => b.textContent === 'Try again'
+			(b) => b.textContent === 'Retry'
 		)!;
 		expect(retry).toBeDefined();
 		retry.click();

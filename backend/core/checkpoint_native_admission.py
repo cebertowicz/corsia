@@ -95,7 +95,7 @@ async def capture_native_checkpoint_source(
     thread_id, state, context, reasoning_effort,
 ):
     """Freeze exact live warmth only when its correlated receipt is present."""
-    from core.checkpoint_native_fork import capture_live_warm_source
+    from core.fork_native import capture_live_warm_source
 
     if has_correlated_receipt(state):
         measured = effective_input_tokens(state.last_measured_call_usage)
@@ -109,7 +109,7 @@ async def capture_native_checkpoint_source(
             provider_input_tokens=measured,
             rendered_input_tokens=rendered,
         )
-    from core.checkpoint_warm_request import warm_capture_refused
+    from core.fork_capture import warm_capture_refused
 
     return warm_capture_refused(thread_id, "native", "no_correlated_receipt")
 
@@ -119,12 +119,12 @@ def build_native_cold_checkpoint_admission(
     trigger="pressure",
 ):
     """Build the existing Native cold request from one frozen DB context."""
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
 
     db = get_db()
     try:
-        return build_cold_checkpoint_admission(
+        return build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=thread_id,
             trigger=trigger,

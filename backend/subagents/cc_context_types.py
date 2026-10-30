@@ -11,6 +11,7 @@ from history.types import HistoryBoundary
 
 if TYPE_CHECKING:
     from core.installed_context import InstalledDelivery
+    from subagents.cc_invocation import LaunchConfinement
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,8 @@ class CCPreparedDestination:
     source_tokens: int
     source_section_tokens: dict[str, int]
     fit_section_tokens: dict[str, int]
+    # Read once when this destination was prepared; the launch uses it as is.
+    confinement: LaunchConfinement
     launch_identity: object = field(default_factory=object, compare=False, repr=False)
 
     @property

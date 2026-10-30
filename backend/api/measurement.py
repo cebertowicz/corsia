@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from api.measurement_agents import AGENTS_SORTS, TABLE_METRICS, build_agents
+from api.measurement_agent_kpis import router as agent_kpis_router
 from api.measurement_average import add_averages
 from api.measurement_cost import register_cost_route
 from api.measurement_findings import derive_findings_state
@@ -17,7 +18,13 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
-from api.measurement_registry import REGISTRY, instrument_period, period_measured
+from api.measurement_corrections import corrections_family
+from api.measurement_breaks import (
+    COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
+    next_comparability_boundary, period_comparable,
+)
+from api.measurement_registry import REGISTRY, period_measured
+from api.measurement_series_selection import metric_spine, requested_series
 from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
@@ -35,6 +42,7 @@ from core.measurement_scope import Grain, ScopeError
 router = APIRouter(prefix="/api/measurement", tags=["measurement"])
 router.include_router(limits_router)
 router.include_router(recent_router)
+router.include_router(agent_kpis_router)
 
 
 async def _monitor_client_disconnect(request: Request, cancellation_event: Event) -> None:
@@ -81,26 +89,10 @@ async def measurement_lessons(
         except asyncio.CancelledError:
             pass
 
-_COMPARABILITY_BREAK = "2026-08-31"
-_ASKS_BREAK = "2026-09-07"
-
-
-def period_comparable(metric: str, period: str) -> bool:
-    """Return whether one served metric may be compared in one completed period.
-
-    Every id except ``outcomes`` and ``fresh_tokens`` measures a per-outcome unit, and
-    that unit changed granularity on ``_COMPARABILITY_BREAK``: a move measured across the
-    boundary is a change in how outcomes are counted, not a change in the work. A token
-    total is not divided by outcomes, so it is comparable in every period it exists.
-    The series marks this on a row for display and the Agents findings gate on it
-    before comparing, so one bound decides both and no second date constant can
-    drift.
-    """
-    return not (metric not in {"outcomes", "fresh_tokens"} and period < _COMPARABILITY_BREAK)
-
 
 def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: bool, partial: bool = False,
-         grain: Grain | None = None, first_presence_period: str | None = None) -> dict[str, Any]:
+         grain: Grain | None = None, first_presence_period: str | None = None, source_start: str | None = None,
+         breaks: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """Apply registry-owned thresholds and presentation flags to one aggregate row.
 
     ``partial`` marks the period still in progress, served for ``fresh_tokens`` and, on Days, for ``outcomes``.
@@ -109,7 +101,9 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     source = source or {}
     n = int(source.get("outcomes", source.get("answered", source.get("n", 0))) or 0)
     if metric == "outcomes":
-        value: float | int | None = source.get("outcomes")
+        # Once the install-wide outcomes instrument exists, an earlier empty
+        # selected scope is an observed zero rather than a missing value.
+        value: float | int | None = source.get("outcomes", 0)
     elif metric == "first_try_acceptance": value = source.get("first_try", 0) / n if n else None
     elif metric == "rejections_per_outcome": value = source.get("rejections", 0) / n if n else None
     elif metric == "active_hours_per_outcome": value = source.get("active_hours", 0) / n if n else None
@@ -119,6 +113,9 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "time_on_platform_h": value, n = source.get("value", 0), int(source.get("n", 0) or 0)
     elif metric == "limit_hits": value, n = int(source.get("hits", 0) or 0), int(source.get("hits", 0) or 0)
     elif metric == "asks_per_outcome": value = (source.get("raised", 0) + source.get("user_holds", 0)) / n if n else None
+    elif metric == "corrections_per_outcome": value = source.get("corrections", 0) / n if n else None
+    elif metric == "asks_plus_corrections_per_outcome":
+        value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
     elif metric == "took_recommendation_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("recommendation", 0) / n if n else None
@@ -136,14 +133,14 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         value = None if not n or (unknown_records and not source.get("tokens")) else int(source.get("tokens") or 0)
     else: value = source.get("tokens", 0) / n if n else None
     thin = scoped_agent and metric in {"took_recommendation_pct", "answered_other_pct", "answered_neither_pct"} and n < 6
-    if not period_measured(metric, period, grain, first_presence_period):
+    if not period_measured(metric, period, first_presence_period, source_start):
         # An instrument measures nothing before it exists. The period is served as not
         # measured -- never as a zero the chart could draw a baseline through.
         value, n = None, 0
     raw_value = value
     if n < definition.minimum_n or thin: value = None
-    comparable = period_comparable(metric, period)
-    result = {"period": period, "series": metric, "value": value, "raw_value": raw_value, "n": n, "proxy": definition.proxy,
+    comparable = period_comparable(period, breaks or [])
+    result = {"period": period, "series": metric, "method_version": definition.method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": definition.proxy,
               "partial": partial, "comparable": comparable, "break": None,
               "dimension": None, "thin": thin}
     if metric == "fresh_tokens":
@@ -163,25 +160,29 @@ async def measurement_series(
     return await series_payload(requested, project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
-def requested_series(ids: str) -> list[str]:
-    """The comma-separated series ids with each one's companion, or the 400 an unknown id is."""
-    requested = list(dict.fromkeys(part for part in ids.split(",") if part))
-    if not requested or any(metric not in REGISTRY or not REGISTRY[metric].available for metric in requested):
-        raise HTTPException(400, "unknown or unavailable series id")
-    for metric in tuple(requested):
-        companion = REGISTRY[metric].companion
-        if companion and companion not in requested:
-            requested.append(companion)
-    return requested
 
-
-def _metric_spine(metric: str, spine: list[str], first_limit_period: str | None,
-                  first_presence_period: str | None, grain: Grain) -> list[str]:
-    """Return only periods the metric can describe for this scope."""
-    if metric == "limit_hits":
-        first = max(first_limit_period, instrument_period(REGISTRY[metric].start, grain)) if first_limit_period else None
-        return [period for period in spine if first and period >= first]
-    return [period for period in spine if period_measured(metric, period, grain, first_presence_period)]
+def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user_id: str) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]]]:
+    db = get_db()
+    try:
+        selected_scope = validate_scope(db, user_id, project, agent)
+        scope_params = selected_scope.params(user_id)
+        params = {**scope_params, "grain": page_grain}
+        so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
+        families = {REGISTRY[metric].family for metric in requested}
+        coverage = presence_coverage(db, user_id, page_grain.zone)
+        first_limit_period = first_recorded_period(db, params) if "limits" in families else None
+        breaks = derive_breaks(db, requested, page_grain)
+        prepare_outcome_periods(db, params)
+        decision_rows = query_family(db, "decisions", params) if families & {"decisions", "corrections"} else []
+        family_rows = {family: (size_family(db, params) if family == "size" else
+                                [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
+                                corrections_family(db, page_grain, decision_rows) if family == "corrections" else
+                                decision_rows if family == "decisions" else
+                                query_family(db, family, params))
+                       for family in families}
+        return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
+    finally:
+        db.close()
 
 
 @joined_read
@@ -196,72 +197,58 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     # total (and, on Days, the outcome count) also shows this one, flagged partial, so a first period is not an empty page.
     current_period = page_grain.current
 
-    def query() -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage]:
-        db = get_db()
-        try:
-            selected_scope = validate_scope(db, user["id"], project, agent)
-            scope_params = selected_scope.params(user["id"])
-            params = {**scope_params, "grain": page_grain}
-            so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
-            families = {REGISTRY[metric].family for metric in requested}
-            coverage = presence_coverage(db, user["id"], page_grain.zone)
-            first_limit_period = first_recorded_period(db, params) if "limits" in families else None
-            prepare_outcome_periods(db, params)
-            return selected_scope.response(), {family: (size_family(db, params) if family == "size" else
-                                                      [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
-                                                      query_family(db, family, params))
-                                               for family in families}, first_limit_period, so_far, coverage
-        finally:
-            db.close()
-
-    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage = await run_bulk(query)
+    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks = await run_bulk(
+        _series_read, requested, project, agent, page_grain, user["id"],
+    )
     first_presence = coverage.start_period(page_grain)
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
     def measured(metric: str, period: str) -> bool:
-        return period_measured(metric, period, page_grain, first_presence)
+        return period_measured(metric, period, first_presence, first_availability_period(breaks[metric]))
 
     for metric in requested:
         family = REGISTRY[metric].family
         by_period = {row["period"]: row for row in family_rows[family]}
         sources = by_period if family != "tokens" else {}
-        metric_spine = _metric_spine(metric, spine, first_limit_period, first_presence, page_grain)
-        eligible, first_row = set(metric_spine), len(rows)
-        drawn = [period for period in metric_spine if period in page_grain.served]
+        source_start = first_availability_period(breaks[metric])
+        eligible_periods = metric_spine(metric, spine, first_limit_period, first_presence, source_start, page_grain)
+        eligible, first_row = set(eligible_periods), len(rows)
+        drawn = [period for period in eligible_periods if period in page_grain.served]
         # Sized hours run from the instrument's start, but the size rate divides them by presence
         # time, which exists only from the first recorded presence. Before that the rate is not
         # measured: no row or window may divide earlier work by later time.
-        rate_start = coverage.rate_start(REGISTRY[metric].start) if family == "size" else REGISTRY[metric].start
-        rate_period = instrument_period(rate_start, page_grain) if family == "size" else ""
+        rate_start = max((start for start in (source_start, first_presence) if start), default=None)
+        rate_period = (rate_start or "") if family == "size" else ""
 
         def rate_measured(name: str, period: str, start: str = rate_period) -> bool:
             return measured(name, period) and period >= start
         if family == "size":
-            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, rate_measured,
-                                   dates={"data_start": rate_period, "comparability_before": _COMPARABILITY_BREAK}))
+            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
+                                  lambda name, period: next_comparability_boundary(period, breaks[name]), rate_measured,
+                                  data_start=rate_period))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
             if metric == "fresh_tokens":
-                started = next((period for period in metric_spine if (by_period.get(period) or {}).get("usage_rows")), None)
-                eligible = {period for period in metric_spine if started and period >= started}
+                started = next((period for period in eligible_periods if (by_period.get(period) or {}).get("usage_rows")), None)
+                eligible = {period for period in eligible_periods if started and period >= started}
                 # The total starts at its first recorded period; no leading gap or uncounted mark precedes it.
                 recorded = [period for period in periods if measured(metric, period) and (by_period.get(period) or {}).get("usage_rows")]
                 periods = [period for period in periods if recorded and period >= recorded[0]]
-            rows.extend(_row(metric, period, by_period.get(period), selected_scope["agent"] is not None, period == current_period and metric == "fresh_tokens", page_grain, first_presence) for period in periods)
+            rows.extend(_row(metric, period, by_period.get(period), selected_scope["agent"] is not None, period == current_period and metric == "fresh_tokens", page_grain, first_presence, source_start, breaks[metric]) for period in periods)
         else:
-            rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence) for period in drawn)
+            rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence, source_start=source_start, breaks=breaks[metric]) for period in drawn)
             if metric == "outcomes" and outcomes_so_far is not None:
-                rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence))
+                rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence, source_start, breaks[metric]))
         pooling = {"measured": rate_measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
-                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence)}
+                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence, source_start=first_availability_period(breaks[name]), breaks=breaks[name])}
         # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
-        windows[metric] = series_windows(metric, page_grain, by_period, periods=set(metric_spine), **pooling)
+        windows[metric] = series_windows(metric, page_grain, by_period, periods=set(eligible_periods), **pooling)
         add_averages(rows[first_row:], metric, page_grain, eligible, by_period, **pooling)
     # The page reads each series' minimum n and the moving average's length from here, never from a copy of its own.
     return {"definition_version": 1, "scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods,
-            "rows": rows, "windows": windows, "minimum_n": {metric: REGISTRY[metric].minimum_n for metric in requested}}
+            "rows": rows, "windows": windows, "breaks": breaks, "minimum_n": {metric: REGISTRY[metric].minimum_n for metric in requested}}
 
 
 @router.get("/series/index")
@@ -273,7 +260,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
     """
     zone = resolve_grain("days", timezone_name).zone
 
-    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage]:
+    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage, dict[str, list[dict[str, str]]]]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
@@ -284,24 +271,28 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
                 FROM llm_usage WHERE thread_id IN (SELECT id FROM scope_threads)
             """, params).fetchone()
             total = int(cost["n"] or 0)
+            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone))
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
-                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone)
+                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks
         finally:
             db.close()
 
-    selected_scope, cost_metadata, coverage = await run_bulk(query)
+    selected_scope, cost_metadata, coverage, breaks = await run_bulk(query)
 
-    def data_start(item: Any) -> str:
+    def data_start(name: str, item: Any) -> str | None:
+        source_start = first_availability_period(breaks[name])
+        if item.family == "size":
+            return max((start for start in (source_start, coverage.start_day) if start), default=None)
         if item.presence_backed:
-            return coverage.start_day or item.start
-        return coverage.rate_start(item.start) if item.family == "size" else item.start
+            return coverage.start_day or source_start
+        return source_start
     definitions = [{"id": name, "display_name": name.replace("_", " ").title(),
                     "definition": f"Weekly aggregate for {name.replace('_', ' ')}.", "unit": item.unit,
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
-                    "data_start": data_start(item), "proxy": item.proxy,
+                    "method_version": item.method_version, "data_start": data_start(name, item), "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
-                    "comparability": {"before": _COMPARABILITY_BREAK, "restricted": name != "outcomes"},
-                    "breaks": [{"period": _ASKS_BREAK, "kind": "definition"}] if name == "asks_per_outcome" else [],
+                    "comparability": {"before": comparability_start(breaks[name]), "restricted": name not in COMPARABILITY_UNRESTRICTED},
+                    "breaks": breaks[name],
                     "availability": "ready" if item.available else "unavailable",
                     "scope_capability": ["project", "agent"], "companion": item.companion}
                    for name, item in REGISTRY.items()]
@@ -353,10 +344,12 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
+            breaks = derive_breaks(db, TABLE_METRICS, page_grain)
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
-                db, params, REGISTRY, metric, sort, page_grain, period_comparable,
-                lambda name, period: period_measured(name, period, page_grain, first_presence), cost_rows, with_dollars=dollars)
+                db, params, REGISTRY, metric, sort, page_grain,
+                lambda name, period: period_comparable(period, breaks[name]),
+                lambda name, period: period_measured(name, period, first_presence, first_availability_period(breaks[name])), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
@@ -370,6 +363,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
                 "overall": overall,
                 "project_summaries": summaries["active"],
                 "inactive_projects": summaries["inactive"],
+                "breaks": breaks[metric],
             }
         finally:
             db.close()

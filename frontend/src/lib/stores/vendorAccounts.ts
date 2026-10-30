@@ -7,7 +7,7 @@ const BASE = '';
 const auth = () => get(token) || '';
 
 export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
-export type SigninStatus = 'waiting' | 'completed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
+export type SigninStatus = 'waiting' | 'completed' | 'already_signed_in' | 'model_refresh_failed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
 
 export interface VendorAccountLabel {
 	name: string;
@@ -39,8 +39,12 @@ export interface VendorAccount {
 	identity: Record<string, string>;
 	label: VendorAccountLabel;
 	duplicate_of?: string | null;
-	/** This account's 'Spend past plan limit' switch; null where no plan limit applies. */
+	/** This account's 'Spend past usage limit' switch; null where no plan limit applies. */
 	allow_overage?: boolean | null;
+	/** Signed in, but none of the vendor's models can run on this account. */
+	no_usable_model?: boolean;
+	/** The Default CLI has definitely reported that it is signed out. */
+	default_signed_out?: boolean;
 	/** Account-owned plan usage, rendered once in its Settings account row. */
 	usage?: VendorAccountUsage;
 	/** The recorded monthly price and charge day; null when no price is recorded. */
@@ -58,6 +62,25 @@ export interface SigninResult {
 	cause: string | null;
 	duplicate_of?: string | null;
 	held_by?: string | null;
+	/** Support reference for a failure the person may report. */
+	ref?: string | null;
+}
+
+export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
+	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !account.default_signed_out && !removed.some((row) => row.id === account.id)), ...removed];
+}
+
+export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
+	// A same-account sign-in removes the added row, so its message moves to the account it reached.
+	const listed = (id: string | null | undefined) => accounts.some((account) => account.id === id);
+	const key = listed(result.account_id) ? result.account_id : result.cause === 'same_account' && listed(result.duplicate_of) ? result.duplicate_of : null;
+	const { [result.account_id]: _, ...rest } = signins;
+	return key ? { ...rest, [key]: result } : rest;
+}
+
+/** A list-reload failure line, with its support reference when the server gave one. */
+export function reloadErrorText(error: string, ref?: string): string {
+	return ref ? `${error} Reference: ${ref}` : error;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
@@ -77,9 +100,10 @@ function url(path: string, query: Record<string, string> = {}): string {
 	return `${BASE}${path}?${params.toString()}`;
 }
 
-async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string }> {
+async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string; ref?: string }> {
 	const body = await response.json().catch(() => null);
-	return { error: plainErrorText(body?.detail, fallback), ...(typeof body?.code === 'string' ? { code: body.code } : {}) };
+	const ref = typeof body?.ref === 'string' ? body.ref : typeof body?.detail?.ref === 'string' ? body.detail.ref : '';
+	return { error: plainErrorText(body?.detail, fallback), ...(typeof body?.code === 'string' ? { code: body.code } : {}), ...(ref ? { ref } : {}) };
 }
 
 function replace(account: VendorAccount): VendorAccount {
@@ -87,7 +111,7 @@ function replace(account: VendorAccount): VendorAccount {
 	return account;
 }
 
-async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string }> {
+async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string; ref?: string }> {
 	try {
 		const response = await fetch(url(path, query), init);
 		if (!response.ok) return { ok: false, ...await detail(response, fallback), status: response.status };
@@ -103,10 +127,10 @@ function json(method: string, body?: object): RequestInit {
 		: { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: boolean; error?: string; superseded?: boolean }> {
+export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: boolean; error?: string; ref?: string; superseded?: boolean }> {
 	const confirmationAtStart = confirmationSequence;
 	const read = ++readSequence;
-	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Could not load accounts.', includeRemoved ? { include_removed: 'true' } : {});
+	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', includeRemoved ? { include_removed: 'true' } : {});
 	if (!result.ok) return result;
 	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	if (confirmationAtStart !== confirmationSequence || read < acceptedRead) {
@@ -119,7 +143,7 @@ export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: 
 
 /** The removed accounts, read without touching the shared list that every other surface renders. */
 export async function fetchRemovedVendorAccounts(): Promise<{ ok: true; accounts: VendorAccount[] } | { ok: false; error: string }> {
-	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Could not load accounts.', { include_removed: 'true' });
+	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', { include_removed: 'true' });
 	if (!result.ok) return result;
 	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	return { ok: true, accounts: result.data.accounts.filter((account) => account.state === 'removed') };
@@ -182,7 +206,7 @@ export async function recordVendorAccountOverage(account: VendorAccount, input: 
 	return { ok: true };
 }
 
-/** Store one account's 'Spend past plan limit' switch; `error` is user-facing text. */
+/** Store one account's 'Spend past usage limit' switch; `error` is user-facing text. */
 export async function setVendorAccountOverage(account: VendorAccount, allow: boolean): Promise<{ ok: boolean; error?: string }> {
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}/usage`, json('PUT', {
 		allow_overage: allow,
@@ -193,19 +217,30 @@ export async function setVendorAccountOverage(account: VendorAccount, allow: boo
 }
 
 export async function startVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
+	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
+	if (wasSignedIn && result.data.status === 'waiting') {
+		const refreshed = await loadVendorAccounts();
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
+	}
 	return reconcileSignin(result.data);
 }
 
 async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; signin: SigninResult; error?: string }> {
-	if (signin.status !== 'completed') return { ok: true, signin };
-	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
-		? { ...account, state: 'signed_in', details_stale: true } : account));
+	if (signin.status === 'superseded' && signin.cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, signin };
+	}
+	const signedIn = signin.status === 'completed' || signin.status === 'already_signed_in';
+	if (!signedIn && signin.status !== 'cancelled' && signin.cause !== 'same_account') return { ok: true, signin };
+	if (signedIn) {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
+			? { ...account, state: 'signed_in', details_stale: true } : account));
+	}
 	const refreshed = await loadVendorAccounts();
-	return refreshed.ok
-		? { ok: true, signin }
-		: { ok: true, signin, error: 'Signed in, but the account list could not be reloaded.' };
+	if (refreshed.ok || refreshed.superseded) return { ok: true, signin };
+	return { ok: true, signin, error: reloadErrorText(signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.', refreshed.ref) };
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {

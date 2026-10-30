@@ -28,14 +28,14 @@ def model_table(monkeypatch):
 
 
 def test_window_comes_from_the_hosts_own_provider_namespace(model_table) -> None:
-    from llm.external_provider import reference_context_window
+    from llm.external_windows import reference_context_window
 
     assert reference_context_window(_ALIBABA_HOST, "qwen-flash") == 997_952
     assert reference_context_window(_ALIBABA_HOST.upper(), "glm-5.1") == 202_745
 
 
 def test_no_window_is_borrowed_across_providers_or_hosts(model_table) -> None:
-    from llm.external_provider import reference_context_window
+    from llm.external_windows import reference_context_window
 
     assert reference_context_window(_ALIBABA_HOST, "qwen-plus") is None
     assert reference_context_window("api.example.com", "qwen-flash") is None
@@ -59,7 +59,7 @@ async def _discover(monkeypatch, *, meta: dict | None = None) -> str:
     monkeypatch.setattr(ne, "build_api_base", lambda _sid: _ALIBABA_BASE)
 
     async def _fetch(api_base, dialect, api_key):
-        return ["qwen-flash", "glm-5.1", "qwen-flash-us"]
+        return dict.fromkeys(["qwen-flash", "glm-5.1", "qwen-flash-us"])
 
     monkeypatch.setattr(ep, "fetch_external_models", _fetch)
     result = await ep.discover_external_models(sid)
@@ -96,7 +96,7 @@ async def test_the_users_window_wins_over_the_published_one(isolated_db, model_t
 async def test_card_lists_the_catalog_rows_and_says_which_cannot_run(
     isolated_db, model_table, monkeypatch,
 ):
-    from api.network_server_helpers import list_daemon_models
+    from api.network_daemon_models import list_daemon_models
     from llm import network_discovery as nd
 
     sid = await _discover(monkeypatch)
@@ -118,7 +118,7 @@ async def test_card_lists_the_catalog_rows_and_says_which_cannot_run(
 async def test_card_counts_a_saved_checkpoint_window_like_dispatch_does(
     isolated_db, model_table, monkeypatch,
 ):
-    from api.network_server_helpers import list_daemon_models
+    from api.network_daemon_models import list_daemon_models
     from infra.database import get_db, init_model_profiles
     from llm import network_discovery as nd
     from llm.context_window import resolve_window_for_row
@@ -151,7 +151,7 @@ async def test_turning_a_model_off_withdraws_it_and_back_on_restores_it(
     isolated_db, model_table, monkeypatch,
 ):
     """The card's toggle is the catalog's own update, by the row id it lists."""
-    from api import network_server_helpers as helpers
+    from api import network_daemon_models as helpers
     from llm import catalog
     from llm import network_discovery as nd
 

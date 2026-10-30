@@ -6,7 +6,8 @@
 // always holds a runnable app. The swapped-out app becomes
 // `CORSIA.app.previous`, which the post-swap handoff deletes once the new
 // version is proven. The service is stopped by the caller first; nothing here
-// touches operational state.
+// touches operational state. The caller's shell holds the update lock across
+// the whole update and passes its descriptor down (`app_paths::lock_update_for_swap`).
 
 use std::{
     fs,
@@ -27,14 +28,14 @@ enum SwapError {
 }
 
 pub fn run(_operation_id: &str) -> i32 {
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update swap failed: {reason}");
             return SWAP_FAILED;
         }
     };
-    let _lock = match app_paths::try_lock_update(&state_dir) {
+    let _lock = match app_paths::lock_update_for_swap(&state_dir) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             eprintln!("update swap refused: another update is in progress");
@@ -73,14 +74,14 @@ pub fn run(_operation_id: &str) -> i32 {
 /// The failed update remains at `.previous` until its caller proves the old
 /// service is healthy and deletes it.
 pub fn rollback(_operation_id: &str) -> i32 {
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update rollback failed: {reason}");
             return SWAP_FAILED;
         }
     };
-    let _lock = match app_paths::try_lock_update(&state_dir) {
+    let _lock = match app_paths::lock_update_for_swap(&state_dir) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             eprintln!("update rollback refused: another update is in progress");

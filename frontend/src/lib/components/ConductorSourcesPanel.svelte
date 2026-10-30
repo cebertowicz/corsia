@@ -9,7 +9,7 @@
 
 	/**
 	 * The CORSIA agent before it has a model: one line pointing at the picker. Nothing is
-	 * preselected; picking in the model picker is what starts the conductor. The install guarantees
+	 * preselected; picking in the model picker is what starts CORSIA. The install guarantees
 	 * a working model, so with none ready the card renders nothing.
 	 */
 	let { threadId }: { threadId: string; pollMs?: number } = $props();
@@ -62,14 +62,14 @@
 		{:else if !sources}
 			Checking which models are ready…
 		{:else}
-			Pick a model from the picker below to start your conductor.
+			Pick a model from the picker below to start CORSIA.
 		{/if}
 	</p>
 	{#if readFailed && !sources}
-		<div class="actions"><Button loading={retrying} onclick={tryAgain}>Try again</Button></div>
+		<div class="actions"><Button loading={retrying} onclick={tryAgain}>Retry</Button></div>
 	{/if}
 	{#if waiting}
-		<p class="note">I'll answer once you start me.</p>
+		<p class="note">Your message sends once you pick a model.</p>
 	{/if}
 </section>
 {/if}

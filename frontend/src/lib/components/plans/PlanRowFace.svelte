@@ -13,7 +13,9 @@
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
 	import { nodeDisplayLabel, nodeDisplayState, nodeStateTone, nodeSublineParts, type ScheduledView } from './planDisplay';
-	import { isScheduledTask } from './planWaits';
+	import { isOutsideWait, isScheduledTask } from './planWaits';
+	import ThreadWaitingMark from '$lib/components/ThreadWaitingMark.svelte';
+	import PlanStateIcon from './PlanStateIcon.svelte';
 	import SnoozeClock from './SnoozeClock.svelte';
 	import { planLiveStep } from './planLiveStep';
 	import { createLiveLine } from './liveLine.svelte';
@@ -21,12 +23,14 @@
 
 	// A branch row in the tree carries its count on its expand control instead.
 	// threads, moves: this row's rolled work (`rolledLive`); carriedBelow: what rows rendered under it already show.
-	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
+	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, owners, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; owners?: ReadonlyMap<string, OperatorNode>; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
 
 	const state = $derived(nodeDisplayState(node));
 	const tone = $derived(nodeStateTone(node));
 	// A task the agent set aside until a date wears the snooze clock; other waits keep the dot.
 	const scheduled = $derived(state === 'waiting' && isScheduledTask(node));
+	// An outside wait wears the hourglass, so it no longer reads as an inside wait's dot (EW11).
+	const outsideWait = $derived(state === 'waiting' && !scheduled && isOutsideWait(node));
 	const label = $derived(nodeDisplayLabel(node, isNext));
 	// A narrow row cuts the reason first; a settled row's time stays whole.
 	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView));
@@ -58,7 +62,7 @@
 	});
 </script>
 
-<span class="state-icon {state} {tone}" class:spinning={moving} title={label} aria-hidden="true">{#if scheduled}<SnoozeClock />{:else}{symbol}{/if}</span>
+<PlanStateIcon {state} {tone} {label} spinning={moving}>{#if scheduled}<SnoozeClock />{:else if outsideWait}<ThreadWaitingMark size={12} />{:else}{symbol}{/if}</PlanStateIcon>
 <span class="row-copy">
 	<span class="row-line">
 		<span class="row-title" class:details-open={detailsOpen} title={node.title}>{node.title}</span>
@@ -66,29 +70,11 @@
 		<span class="row-status sr-only">{label}</span>
 	</span>
 	{#if liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
+		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
 	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>
 
 <style>
-	.state-icon {
-		display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
-		flex: none; border: 1px solid var(--border); border-radius: var(--radius-circle);
-		color: var(--text-secondary); font-size: var(--text-caption); font-weight: var(--fw-bold);
-		line-height: 1;
-	}
-	.state-icon.working {
-		border-color: var(--status-in-progress); color: var(--status-in-progress);
-	}
-	.state-icon.working.spinning { border-top-color: transparent; }
-	.state-icon.needs-you { border-color: var(--amber); color: var(--amber); }
-	.state-icon.waiting { border-color: var(--border); color: var(--text-secondary); }
-	.state-icon.finished.failed { border-color: var(--red); color: var(--red); }
-	.state-icon.finished.complete { border-color: var(--green); background: var(--green); color: var(--bg-primary); }
-	/* Closed is neither success nor failure: quiet, like work that left the plan. */
-	.state-icon.finished.closed { border-color: var(--border); color: var(--text-tertiary); }
-	/* The one motion mechanism: only an actually-advancing row spins. */
-	.state-icon.spinning { animation: plan-spin 1.2s linear infinite; }
 	.row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 	.row-title {
 		overflow: hidden; color: var(--text-primary); font-size: var(--text-subhead);
@@ -117,9 +103,5 @@
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;
-	}
-	@keyframes plan-spin { to { transform: rotate(360deg); } }
-	@media (prefers-reduced-motion: reduce) {
-		.state-icon.spinning { animation: none; }
 	}
 </style>

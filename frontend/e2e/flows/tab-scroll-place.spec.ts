@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
@@ -28,12 +29,25 @@ const link = (page: Page) => page.locator('.cm-md-link-open', { hasText: 'the se
 
 async function selectTab(page: Page, title: string, touch: boolean): Promise<void> {
 	if (touch) {
-		await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+		await page.getByRole('button', { name: /Files \(2\)/ }).click();
 		await page.getByRole('dialog', { name: 'Open side panel items' })
 			.getByRole('button', { name: title, exact: true }).click();
 		return;
 	}
 	await page.getByRole('tab', { name: title, exact: true }).click();
+}
+
+/**
+ * The editor draws estimated line heights until it measures them, and a scroll set from an estimate lands on other text
+ * once they settle (the saved place then records that text, not what the test scrolled to). Scroll only from the
+ * measured height.
+ */
+async function heightSettled(page: Page, scroller: ReturnType<Page['locator']>): Promise<void> {
+	await expect.poll(async () => {
+		const first = await scroller.evaluate((el) => el.scrollHeight);
+		await page.waitForTimeout(250);
+		return first === await scroller.evaluate((el) => el.scrollHeight);
+	}).toBe(true);
 }
 
 type VisiblePlace = { scrollTop: number; line: string; top: number | null };
@@ -207,6 +221,7 @@ for (const width of [1440, 393]) {
 					await page.getByText(sessionTitle).first().click();
 					const scroller = page.locator('.cm-scroller');
 					await expect(scroller).toBeVisible();
+					await heightSettled(page, scroller);
 					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
 					await expect(link(page)).toBeInViewport();
 					const before = await visiblePlace(scroller);
@@ -218,6 +233,7 @@ for (const width of [1440, 393]) {
 					else await link(page).click();
 					await expect(page.getByText('Second filler paragraph 1 keeps this tab long enough to restore.', { exact: true })).toBeVisible();
 					// A different place from INDEX.md's, so a restore that lands on the wrong tab shows.
+					await heightSettled(page, scroller);
 					await scroller.evaluate((el) => {
 						const line = [...el.querySelectorAll<HTMLElement>('.cm-line')]
 							.find((candidate) => candidate.textContent?.startsWith('Second filler paragraph 8 '));
@@ -229,7 +245,7 @@ for (const width of [1440, 393]) {
 					expect(Math.abs(secondBefore.scrollTop - before.scrollTop)).toBeGreaterThan(200);
 					expect(secondBefore.line).toContain('Second filler');
 					if (touch) {
-						await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+						await page.getByRole('button', { name: /Files \(2\)/ }).click();
 						await armReturnSampler(page);
 						await page.getByRole('dialog', { name: 'Open side panel items' })
 							.getByRole('button', { name: 'INDEX.md', exact: true }).click();
@@ -471,17 +487,20 @@ for (const width of [1440, 393]) {
 						last = now;
 						return settled;
 					}, { intervals: [250] }).toBe(true);
+					const narrowLeaf = await leafWidth();
 					if (touch) await docImage.tap();
 					else await docImage.click();
 					await expect(back).toBeVisible();
-					// The canvas has finished easing wider.
+					// The canvas has finished easing wider: its width changed from the one before the image opened (the ease
+					// can start a frame or more after Back shows, and a width read before then is not the settled one) and stopped.
+					// A phone shows the canvas alone, so its width does not change.
 					let lastWidth = -1;
 					await expect.poll(async () => {
 						const now = await leafWidth();
-						const settled = now === lastWidth;
+						const settled = now === lastWidth && (touch || now !== narrowLeaf);
 						lastWidth = now;
 						return settled;
-					}).toBe(true);
+					}, { intervals: [250] }).toBe(true);
 					return last;
 				};
 
@@ -499,12 +518,12 @@ for (const width of [1440, 393]) {
 				report.reopenedTop = reopenedTop;
 				const tabsSheet = () => page.getByRole('dialog', { name: 'Open side panel items' });
 				if (touch) {
-					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await page.getByRole('button', { name: /^Files \(2\)/ }).click();
 					await tabsSheet().getByRole('button', { name: 'OTHER.md', exact: true }).click();
 				} else await page.getByRole('tab', { name: 'OTHER.md', exact: true }).click();
 				await expect(page.locator('.cm-content').first()).toContainText('Other paragraph 1');
 				if (touch) {
-					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await page.getByRole('button', { name: /^Files \(2\)/ }).click();
 					await armImageSampler(page, 1_000);
 					await tabsSheet().getByRole('button', { name: 'walkthrough.md', exact: true }).click();
 				} else {

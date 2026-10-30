@@ -13,10 +13,15 @@ from infra import state
 async def shutdown_owned_tasks(
     startup_tasks: list[asyncio.Task | None], logger,
 ):
-    """Cancel and join exact background and finite startup tasks, and stop held vendor sign-ins."""
+    """Cancel and join exact background and finite startup tasks, and stop held vendor and app sign-ins."""
     from connections.account_controls import stop_all_signins
+    from connections.google.oauth import stop_all_signins as stop_google_signins
+    from connections.microsoft.oauth import stop_all_signins as stop_microsoft_signins
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
+    from llm.local_setup_prepare import prepare_task
+    from tools.agent_shell_tools import prefetch_task as agent_tool_prefetch_task
+    from tools.mcp_oauth_flow import stop_all as stop_app_signins
 
     owned_tasks = [
         *((label, getattr(state, attr, None)) for label, attr in RUNTIME_LOOP_TASKS),
@@ -25,6 +30,8 @@ async def shutdown_owned_tasks(
             getattr(state, "_github_ownership_login_task", None),
         ),
         ("local model setup", flight_task()),
+        ("local model pick", prepare_task()),
+        ("agent tool prefetch", agent_tool_prefetch_task()),
         *zip(
             ("provider auto-start", "cloud discovery", "network discovery",
              "harness discovery", "continuity drive"),
@@ -48,6 +55,13 @@ async def shutdown_owned_tasks(
     # A held vendor login must not outlive the backend: Codex's would keep its one callback port.
     exact_tasks.append(stop_all_signins())
     exact_labels.append("account sign-in")
+    exact_tasks.append(stop_google_signins())
+    exact_labels.append("Google account sign-in")
+    exact_tasks.append(stop_microsoft_signins())
+    exact_labels.append("Microsoft account sign-in")
+    # Likewise a pending connected-app sign-in's loopback listener and its expiry timer.
+    exact_tasks.append(stop_app_signins())
+    exact_labels.append("connected-app sign-in")
     exact_tasks.append(stop_corrections_classifier())
     exact_labels.append("corrections classifier")
     results, pending_cancel = await join_cleanup(exact_tasks)

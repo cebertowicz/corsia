@@ -1,5 +1,12 @@
-import type { OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
+import type { OperatorArtifactLink, OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
 import { formatCost } from '$lib/stores/costs';
+
+/** The linked how-to that replaces a user step's inline details. */
+export function personStepInstructionsDocument(node: OperatorNode): OperatorArtifactLink | undefined {
+	return node.assignee === 'user'
+		? node.artifacts.find((artifact) => artifact.role === 'input' && artifact.type === 'document')
+		: undefined;
+}
 
 /**
  * Who moves a waiting node next, in the reader's words. An agent moving its own
@@ -24,7 +31,7 @@ const TRY_ENDINGS: Record<string, string> = {
 	closed: 'closed',
 	archived: 'archived',
 	requirements_changed: 'requirements changed',
-	executor_changed: 'moved to another worker',
+	executor_changed: 'reassigned to another agent',
 	dependency_blocked: 'stopped for a prerequisite',
 	watch_armed: 'set aside to wait',
 	paused: 'paused',
@@ -34,7 +41,8 @@ const TRY_ENDINGS: Record<string, string> = {
 	turn_terminal: 'run ended',
 };
 
-const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+/** Compact count formatting shared by plan details and finished-work summaries. */
+export const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
 export function nextMove(causes: OperatorExecutionCause[]): string | null {
 	const owners = [...new Set(
@@ -63,7 +71,7 @@ export function duration(totalSeconds: number): string {
 }
 
 export function tokens(value: number): string {
-	return `${compact.format(value)} tokens`;
+	return `${compactNumber.format(value)} tokens`;
 }
 
 /** A measured fact stays visibly partial when any matching usage was not recorded. */
@@ -75,7 +83,7 @@ function lowerBound(value: string, incomplete: boolean): string {
 export function tokenLine(amount: OperatorCostAmount): string | null {
 	if (amount.tokens.known !== null) {
 		return lowerBound(
-			compact.format(amount.tokens.known),
+			compactNumber.format(amount.tokens.known),
 			amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0,
 		);
 	}
@@ -84,14 +92,21 @@ export function tokenLine(amount: OperatorCostAmount): string | null {
 		: null;
 }
 
-/** Dollar cost is omitted when no truthful priced amount exists. */
+/**
+ * Dollars are what the tokens would cost at the provider's public API list
+ * price, so every dollar figure says so. Omitted when no priced amount exists.
+ */
+function apiEquivalent(
+	cost: OperatorCostAmount['model_cost_usd'],
+	recordingFailures: number,
+): string | null {
+	if (cost.known === null || cost.known <= 0) return null;
+	const amount = lowerBound(formatCost(cost.known), cost.unknown_rows > 0 || recordingFailures > 0);
+	return `${amount} API-equivalent`;
+}
+
 export function dollarLine(amount: OperatorCostAmount): string | null {
-	const known = amount.model_cost_usd.known;
-	if (known === null || known <= 0) return null;
-	return lowerBound(
-		formatCost(known),
-		amount.model_cost_usd.unknown_rows > 0 || amount.usage_recording_failures > 0,
-	);
+	return apiEquivalent(amount.model_cost_usd, amount.usage_recording_failures);
 }
 
 /** Compact combined wording retained for revision/follow-up totals. */
@@ -146,12 +161,8 @@ export function withFollowUps(node: OperatorNode): string | null {
 		|| (hasLaterAttempts && incomplete);
 	if (!adds) return null;
 	const parts: string[] = [];
-	if (commitment.model_cost_usd.known !== null && commitment.model_cost_usd.known > 0) {
-		parts.push(lowerBound(
-			formatCost(commitment.model_cost_usd.known),
-			commitment.model_cost_usd.unknown_rows > 0 || commitment.usage_recording_failures > 0,
-		));
-	}
+	const dollars = apiEquivalent(commitment.model_cost_usd, commitment.usage_recording_failures);
+	if (dollars) parts.push(dollars);
 	if (commitment.tokens.known !== null) {
 		parts.push(lowerBound(
 			tokens(commitment.tokens.known),

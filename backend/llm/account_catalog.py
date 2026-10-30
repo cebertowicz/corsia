@@ -1,6 +1,7 @@
 """Scoped subscription projection with a display-only capability fallback."""
 from __future__ import annotations
 
+from connections import fact_memo
 from connections.account_policy import account_reason, pending_account, permitted_accounts, thread_scope, turn_account
 from connections.harness_usage import project_for_model, stored_usage
 from connections.vendor_accounts import get_account
@@ -27,14 +28,18 @@ def account_model_status(account: dict, row: dict, *, project_ids: list, db, mov
     model = row["litellm_model"]
     provider = account["provider"]
     usage = project_for_model(stored_usage(provider=provider, account_id=account["id"], db=db), model=model, provider=provider)
-    if account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
+    reason: str | None
+    if account["source_home"] is None and row.get("default_listed") is False:
+        status, reason = "unavailable", "account_model_not_discovered"
+    elif account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
         status, reason = row["status"], row.get("status_reason")
     else:
         own = discovery_view(account)["discovery"].get("models", {}).get(model, {})
         status = "ready" if own.get("available", True) else "unavailable"
         reason = None if status == "ready" else own.get("availability_reason") or "discovered_model_unavailable"
     policy = account_reason(account, provider=provider, project_ids=project_ids, execution=True, model=model, db=db)
-    if policy == "account_model_not_discovered" and account["source_home"] is None and not move:
+    if (policy == "account_model_not_discovered" and account["source_home"] is None
+            and row.get("default_listed") is not False and not move):
         policy = None
     if policy:
         status, reason = "unavailable", policy
@@ -43,6 +48,7 @@ def account_model_status(account: dict, row: dict, *, project_ids: list, db, mov
     return {"status": status, "status_reason": reason if status != "ready" else None, "usage": usage}
 
 
+@fact_memo.fact_reads()
 def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, db=None):
     """Add ``runs_on`` to each harness row: whether its model runs on each permitted account.
 
@@ -58,14 +64,22 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
     """
     connection = db or get_db()
     try:
-        project = thread_scope(thread_id, db=connection)["project_id"] if thread_id else project_id
+        scope = thread_scope(thread_id, db=connection) if thread_id else None
+        project = scope["project_id"] if scope else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
+        from llm.locality import locality_cause, project_cloud_models_off
+
+        cloud_refusal = locality_cause(
+            thread_local_only=bool(scope and scope["local_only"]),
+            cloud_off=project_cloud_models_off(project, db=connection),
+        )
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
             if provider not in ("codex", "claude-code"):
+                _apply_locality(row, cloud_refusal)
                 result.append(row)
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
@@ -87,11 +101,21 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             elif chosen["source_home"] is not None:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
+            _apply_locality(row, cloud_refusal)
             result.append(row)
         return result
     finally:
         if db is None:
             connection.close()
+
+
+
+def _apply_locality(row: dict, refusal: str | None) -> None:
+    """Overlay project or thread locality policy without deleting scoped catalog rows."""
+    if refusal and not row.get("is_local", False):
+        row.update(status="unavailable", status_reason=refusal)
+        if "runnable" in row:
+            row["runnable"] = {"status": "unavailable", "status_reason": refusal}
 
 
 def _runs_on(account, row, project, selected, db) -> dict:

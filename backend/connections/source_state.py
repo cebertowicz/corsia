@@ -183,7 +183,12 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
     if binary is None:
         await run_in_db(apply_check, provider, NOT_INSTALLED)
     elif provider == "codex":
+        from connections.account_identity import capture_default_observation, observe_discovered_identity
+
+        observation = await run_in_db(capture_default_observation, provider)
         state = await asyncio.to_thread(_codex_sign_in_state, binary)
+        await run_in_db(observe_discovered_identity, provider,
+                        {"_login_status": "signed_out"} if state == NEEDS_AUTH else {}, token=observation)
         await run_in_db(apply_check, provider, state)  # its output is not kept
     else:
         receipt = await refresh_provider(provider, reason="manual", binary=binary)

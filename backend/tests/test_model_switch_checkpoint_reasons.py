@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
-from core.checkpoint_fit import soft_pressure_remaining
+from core.fork_fit import soft_pressure_remaining
 from thread import model_prepare
 from thread.model_state import ModelSwitchCheckpointRequired
 
@@ -168,7 +168,7 @@ async def test_replay_just_under_effective_window_launch_point_commits(
 async def test_replay_at_effective_window_launch_point_requires_checkpoint(
     monkeypatch, log_lines
 ):
-    # Pressure launches at this occupancy (checkpoint_fit.evaluate_boundary),
+    # Pressure launches at this occupancy (fork_fit.evaluate_boundary),
     # so a switch must not land a thread exactly there.
     harness = _Harness(monkeypatch, usage=None)
     harness.rendered_effective_window = 200_000

@@ -18,6 +18,7 @@ from infra.config import WORKSPACE
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.execution_class import provider_label
+from infra.local_only import inherited_local_only, require_local_only_model
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -31,6 +32,7 @@ _SESSION_EVENT_FIELDS = (
     "project_id",
     "parent_session_id",
     "spawned_by",
+    "local_only",
     "reasoning_effort",
     "created_at",
     "updated_at",
@@ -99,23 +101,32 @@ def create_fresh_thread(
     """
     sid = thread_id or str(uuid.uuid4())[:8]
     now = created_at or _now()
-    row = {
-        "id": sid,
-        "user_id": user_id,
-        "profile": profile,
-        "title": title,
-        "model": model,
-        "project_id": project_id,
-        "parent_thread_id": parent_thread_id,
-        "spawned_by": spawned_by,
-        "reasoning_effort": reasoning_effort,
-        "created_at": now,
-        "updated_at": now,
-    }
-    values = {key: value for key, value in row.items() if value is not None}
-
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
+        # Any Local-only parent or creating agent makes the new thread Local only.
+        local_only = inherited_local_only((spawned_by, parent_thread_id, actor_thread_id), db=_db)
+        require_local_only_model(
+            model,
+            thread_local_only=local_only,
+            db=_db,
+            spawn=True,
+            thread_id=actor_thread_id or spawned_by or parent_thread_id,
+        )
+        row = {
+            "id": sid,
+            "user_id": user_id,
+            "profile": profile,
+            "title": title,
+            "model": model,
+            "project_id": project_id,
+            "parent_thread_id": parent_thread_id,
+            "spawned_by": spawned_by,
+            "local_only": int(local_only),
+            "reasoning_effort": reasoning_effort,
+            "created_at": now,
+            "updated_at": now,
+        }
+        values = {key: value for key, value in row.items() if value is not None}
         cols = list(values.keys())
         marks = ", ".join("?" for _ in cols)
         _db.execute(
@@ -160,8 +171,12 @@ async def create_visible_fresh_thread(
     emit_spawn_chip: bool = False,
     account_id: str | None = None,
     actor_thread_id: str | None = None,
+    confined_read_dirs: tuple[str, ...] = (),
 ) -> dict:
     """Create a fresh visible thread and publish its visibility side effects.
+
+    Non-empty ``confined_read_dirs`` makes it an ``untrusted`` worker in the same
+    write (``infra.thread_confinement``), outside any host-access lineage.
 
     This is the shared fresh-create/spawn primitive. It preserves the selected
     ``model`` as dispatch truth and only writes the existing ``spawned_by`` +
@@ -178,7 +193,7 @@ async def create_visible_fresh_thread(
                 raise SpawnVisibilityRejected(
                     "spawned_by: thread not found or not owned by the authenticated user"
                 )
-            return create_fresh_thread(
+            created = create_fresh_thread(
                 user_id=user_id,
                 thread_id=thread_id,
                 profile=profile,
@@ -193,9 +208,15 @@ async def create_visible_fresh_thread(
                 actor_thread_id=actor_thread_id,
                 db=db,
             )
+            if confined_read_dirs:
+                from infra import thread_confinement
+                from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
+
+                thread_confinement.record(db, created["id"], CONFINEMENT_UNTRUSTED, confined_read_dirs)
+            return created
 
     session = await run_in_db(_create)
-    if spawned_by:
+    if spawned_by and not confined_read_dirs:
         from host_access.supervisor import register_host_access_descendant
 
         register_host_access_descendant(

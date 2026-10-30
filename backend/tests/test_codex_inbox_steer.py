@@ -86,9 +86,9 @@ def _enqueue(
 
 def _install_live(thread_id: str, identity, session):
     from subagents import codex_runtime
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    session.tool_context = CodexCheckpointContext(None, 0)
+    session.tool_context = CodexForkContext(None, 0)
     peek = getattr(session, "peek_active_usage", None)
     usage = peek() if callable(peek) else None
     if usage is not None:
@@ -129,6 +129,76 @@ def _input_row(message_id: str):
             "FROM messages WHERE id=?",
             (message_id,),
         ).fetchone()
+
+
+@pytest.mark.asyncio
+async def test_joined_wakes_deliver_message_b_after_a_ack(isolated_db, monkeypatch):
+    import asyncio
+
+    from infra.db_async import run_in_db
+    from infra.send_service import request_safe_boundary
+    from subagents import codex_inbox_batch, codex_runtime_event_delivery as delivery
+
+    thread_id = "codex-joined-wake"
+    identity = await run_in_db(_seed_live_turn, thread_id)
+    receipt_a = await run_in_db(
+        lambda: _enqueue(thread_id, content="message A", message_id="joined-a"),
+    )
+    awaiting_ack = asyncio.Event()
+    release_ack = asyncio.Event()
+    wrote_b = asyncio.Event()
+    calls = []
+    deliveries = []
+
+    class Session:
+        async def steer(self, text, *, on_write_observed, on_drain_confirmed, input_context=None):
+            calls.append(text)
+            on_write_observed()
+            on_drain_confirmed()
+            if len(calls) == 1:
+                awaiting_ack.set()
+                await release_ack.wait()
+            else:
+                wrote_b.set()
+            return True
+
+    async def deliver(sid):
+        deliveries.append(asyncio.current_task())
+        return await deliver_live_inbox_batch(sid)
+
+    monkeypatch.setattr(codex_inbox_batch, "deliver_live_inbox_batch", deliver)
+    _install_live(thread_id, identity, Session())
+    try:
+        await request_safe_boundary(thread_id, "codex")
+        await asyncio.wait_for(awaiting_ack.wait(), 2)
+        first = delivery._SAFE_BOUNDARY_TASKS[thread_id]
+        receipt_b = await run_in_db(
+            lambda: _enqueue(thread_id, content="message B", message_id="joined-b"),
+        )
+        for _ in range(20):
+            await request_safe_boundary(thread_id, "codex")
+        assert delivery._SAFE_BOUNDARY_TASKS[thread_id] is first
+        assert len(deliveries) == 1
+        release_ack.set()
+        assert await asyncio.wait_for(asyncio.shield(first), 2) is True
+        await asyncio.wait_for(wrote_b.wait(), 2)
+        assert len(deliveries) == 2
+        assert deliveries[1] is not first
+        assert await asyncio.wait_for(asyncio.shield(deliveries[1]), 2) is True
+        await asyncio.sleep(0)
+        assert thread_id not in delivery._SAFE_BOUNDARY_TASKS
+        assert len(deliveries) == 2
+        assert len(calls) == 2 and "message A" in calls[0] and "message B" in calls[1]
+        for receipt in (receipt_a, receipt_b):
+            row = await run_in_db(_input_row, receipt.message_id)
+            assert row["delivery_state"] == "delivered"
+    finally:
+        release_ack.set()
+        task = delivery._SAFE_BOUNDARY_TASKS.get(thread_id)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        _clear_live(thread_id)
 
 
 @pytest.mark.asyncio

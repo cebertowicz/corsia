@@ -63,7 +63,9 @@ describe('SystemBulletinsSetting', () => {
 		expect(toggle().disabled).toBe(true);
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 		expect(host.textContent).toContain('System bulletins');
-		expect(host.textContent).toContain('does not stop the notice your conductor gets');
+		expect(host.textContent).toContain('Once a day, CORSIA checks for signed notes from its maintainers about how agents should work.');
+		expect(host.textContent).toContain('The CORSIA agent may update your agents’ instructions to match, and asks you before changing anything you wrote or decided.');
+		expect(host.textContent).toContain('When this is off, the CORSIA agent still hears about updates that change how agents work.');
 
 		coreSettings.set({ live_bulletins: { enabled: true } });
 		flushSync();
@@ -126,13 +128,13 @@ describe('SystemBulletinsSetting', () => {
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
 
-	it('shows the error in its own card when saving fails', async () => {
+	it('shows the save error as its own line when saving fails', async () => {
 		stubSettingsApi(false, () => ({ live_bulletins: { enabled: true } }));
 		render();
 		toggle().click();
 
 		await vi.waitFor(() => {
-			expect(host.querySelector('.settings-error')?.textContent).toContain('Bulletin preference could not be saved.');
+			expect(host.querySelector('.error')?.textContent).toContain('Bulletin preference could not be saved.');
 		});
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
@@ -150,7 +152,7 @@ describe('SystemBulletinsSetting', () => {
 			});
 			expect(toggle().getAttribute('aria-pressed')).toBe(String(to));
 			expect(toggle().disabled).toBe(false);
-			expect(host.querySelector('.settings-error')).toBeNull();
+			expect(host.querySelector('.error')).toBeNull();
 		});
 	}
 

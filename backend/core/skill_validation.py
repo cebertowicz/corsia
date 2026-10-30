@@ -6,12 +6,23 @@ resolution.
 
 from __future__ import annotations
 
+import hashlib
 import re
-from dataclasses import dataclass, field
-from pathlib import Path
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from datetime import datetime
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from core.lesson_trials import LESSON_KEY, lesson_errors
+from core.skill_sidecar import (
+    BLOCK_ONLY_KEYS,
+    SIDECAR_FILE,
+    parse_sidecar,
+    pointer_errors,
+    read_sidecar,
+)
+from core.skill_workflow_validation import text_value, validate_workflow
 
 ALLOWED_HANDLER_KINDS = {
     "instruction",
@@ -21,21 +32,10 @@ ALLOWED_HANDLER_KINDS = {
     "script",
 }
 _HANDLER_KIND_LABEL = "connection_action, cli, instruction, native_tool, script"
-_WORKFLOW_STEP_KEYS = frozenset(
-    {
-        "id",
-        "title",
-        "required",
-        "check",
-        "difficulty",
-        "quality",
-        "after",
-        "replaces",
-    }
-)
-_WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
-# The one frontmatter block key every reader reads. A CORSIA block filed under any
-# other key is a validation error, never silently dropped metadata.
+# The one top-level frontmatter block key readers read, and only for lesson data
+# (``lesson``, ``capture``). Handler and workflow data live in ``corsia.yaml``; a
+# non-lesson block under this key, or any CORSIA block under another key, is a
+# validation error, never silently dropped metadata.
 FRONTMATTER_KEY = "corsia"
 # The CORSIA block shapes that identify one wherever it is filed: each field with the
 # key it always carries (``handler.kind``, ``workflow.steps``).
@@ -51,45 +51,100 @@ class SkillValidation:
     metadata: dict[str, Any]
     body: str
     errors: list[str] = field(default_factory=list)
+    # The CORSIA data (handler, workflow): the sidecar's, or a lesson block's.
+    corsia: dict[str, Any] | None = None
+    raw_sha256: str | None = None
+    source_data: bytes | None = None
 
 
-def _text(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+def _lesson_block(meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The top-level block when it holds lesson data, the only block still read."""
+    block = meta.get(FRONTMATTER_KEY)
+    if isinstance(block, dict) and set(BLOCK_ONLY_KEYS) & set(block):
+        return block
     return None
 
 
-def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
-    """Validate workflow fields whose values have a documented v1 shape."""
+def _validate_corsia(meta: dict[str, Any]) -> list[str]:
+    """Validate the top-level block: a lesson block as data, any other as retired."""
+    corsia = meta.get(FRONTMATTER_KEY)
+    if corsia is None:
+        return []
+    if not isinstance(corsia, dict):
+        return ["corsia must be a mapping"]
+    pointed = pointer_errors(meta.get("metadata"))[0]
+    if _lesson_block(meta) is None:
+        return [_retired_block_error(pointed)]
+    if pointed:
+        return [
+            f"a top-level {FRONTMATTER_KEY} block holding lesson data cannot also have a "
+            f"metadata.corsia-data pointer; a lesson skill keeps its CORSIA data in the block"
+        ]
+    return _validate_corsia_data(corsia)
+
+
+def _retired_block_error(pointed: bool) -> str:
+    if pointed:
+        return (
+            f"a top-level {FRONTMATTER_KEY} block and a metadata.corsia-data pointer both "
+            f"declare CORSIA data; keep only the {SIDECAR_FILE} data"
+        )
+    return (
+        f"the top-level {FRONTMATTER_KEY} block is retired for handler and workflow data; "
+        f"move it to {SIDECAR_FILE} beside SKILL.md and point at it with "
+        "metadata: {corsia-data: corsia.yaml, corsia-format: '1'}"
+    )
+
+
+def _origin_errors(origin: Any) -> list[str]:
+    """Validate provenance for an adopted or imported skill copy."""
+    if not isinstance(origin, dict):
+        return ["corsia.origin must be a mapping"]
     errors: list[str] = []
-    for key in step:
-        if key == "models":
-            errors.append(f"{label}.models is reserved and not allowed in v1")
-        elif key not in _WORKFLOW_STEP_KEYS:
-            errors.append(f"{label}.{key} is an unknown key")
-    difficulty = step.get("difficulty")
-    if difficulty is not None:
-        if not isinstance(difficulty, dict):
-            errors.append(f"{label}.difficulty must be a mapping")
-        elif "default" in difficulty and difficulty["default"] not in _WORKFLOW_DIFFICULTIES:
-            errors.append(
-                f"{label}.difficulty.default must be one of routine, standard, hard"
-            )
-    quality = step.get("quality")
-    if quality is not None and (
-        not isinstance(quality, list) or any(not isinstance(item, dict) for item in quality)
+    source = text_value(origin.get("source"))
+    if not source:
+        errors.append("corsia.origin.source is required")
+    elif Path(source).is_absolute() or PureWindowsPath(source).is_absolute():
+        errors.append("corsia.origin.source must not be an absolute path")
+    sha256 = origin.get("sha256")
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
+        errors.append("corsia.origin.sha256 must be 64 hexadecimal characters")
+    if "installed_digest" in origin and (
+        not isinstance(origin["installed_digest"], str)
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", origin["installed_digest"])
     ):
-        errors.append(f"{label}.quality must be a list of mappings")
+        errors.append("corsia.origin.installed_digest must be 64 hexadecimal characters")
+    adopted_at = origin.get("adopted_at")
+    if adopted_at is None or adopted_at == "":
+        errors.append("corsia.origin.adopted_at is required")
+    else:
+        try:
+            parsed = (
+                adopted_at
+                if isinstance(adopted_at, datetime)
+                else datetime.fromisoformat(str(adopted_at).replace("Z", "+00:00"))
+            )
+            if parsed.tzinfo is None:
+                errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
+        except ValueError:
+            errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
+    if "version" in origin:
+        version = origin["version"]
+        valid_version = (
+            isinstance(version, (str, int, float))
+            and not isinstance(version, bool)
+            and (not isinstance(version, str) or bool(version))
+        )
+        if not valid_version:
+            errors.append("corsia.origin.version must be a non-empty string, integer, or float")
     return errors
 
 
-def _validate_corsia(meta: dict[str, Any]) -> list[str]:
+def _validate_corsia_data(corsia: dict[str, Any]) -> list[str]:
+    """Validate CORSIA data wherever it is filed: a lesson block or the sidecar."""
     errors: list[str] = []
-    corsia = meta.get(FRONTMATTER_KEY)
-    if corsia is None:
-        return errors
-    if not isinstance(corsia, dict):
-        return ["corsia must be a mapping"]
+    if "origin" in corsia:
+        errors.extend(_origin_errors(corsia["origin"]))
     handler = corsia.get("handler")
     if handler is not None:
         if not isinstance(handler, dict):
@@ -103,7 +158,7 @@ def _validate_corsia(meta: dict[str, Any]) -> list[str]:
             errors.append(f"corsia.{key} must be a mapping, list, or string")
     if "timeout" in corsia and not isinstance(corsia["timeout"], (int, float, str)):
         errors.append("corsia.timeout must be a number or duration string")
-    if "model_profile" in corsia and not _text(corsia["model_profile"]):
+    if "model_profile" in corsia and not text_value(corsia["model_profile"]):
         errors.append("corsia.model_profile must be a non-empty string")
     return errors
 
@@ -111,8 +166,8 @@ def _validate_corsia(meta: dict[str, Any]) -> list[str]:
 def _misfiled_block_errors(meta: dict[str, Any]) -> list[str]:
     """Report a CORSIA block under another key, which no reader reads, as an error."""
     return [
-        f"{key}.{block_field} is CORSIA metadata, which is read only under "
-        f"{FRONTMATTER_KEY}; move the block there"
+        f"{key}.{block_field} is CORSIA metadata, which no reader reads under {key}; "
+        f"move it to {SIDECAR_FILE} beside SKILL.md"
         for key, block in meta.items()
         if key != FRONTMATTER_KEY and isinstance(block, dict)
         for block_field, signature in _BLOCK_SIGNATURES
@@ -120,78 +175,51 @@ def _misfiled_block_errors(meta: dict[str, Any]) -> list[str]:
     ]
 
 
-def _validate_workflow(corsia: dict[str, Any]) -> list[str]:
-    """Validate checkable workflow steps without prescribing their full shape."""
-
-    workflow = corsia.get("workflow")
-    if workflow is None:
-        return []
-    if not isinstance(workflow, dict):
-        return ["corsia.workflow must be a mapping"]
-    steps = workflow.get("steps")
-    if steps is None:
-        return []
-    if not isinstance(steps, list):
-        return ["corsia.workflow.steps must be a list"]
-
-    errors: list[str] = []
-    known: set[str] = set()
-    after_by_id: dict[str, list[str]] = {}
-    for index, step in enumerate(steps):
-        prefix = f"corsia.workflow.steps[{index}]"
-        if not isinstance(step, dict):
-            errors.append(f"{prefix} must be a mapping")
-            continue
-        step_id = _text(step.get("id"))
-        step_label = f"{prefix} {step_id!r}" if step_id else prefix
-        errors.extend(_workflow_step_shape_errors(step, step_label))
-        if not step_id:
-            errors.append(f"{prefix}.id is required")
-            continue
-        if step_id in known:
-            errors.append(f"{prefix}.id duplicates {step_id!r}")
-            continue
-        known.add(step_id)
-        if step.get("required") is True and not _text(step.get("check")):
-            errors.append(f"{prefix}.check is required when required is true")
-        after = step.get("after", [])
-        if not isinstance(after, list) or any(not _text(value) for value in after):
-            errors.append(f"{prefix}.after must be a list of step ids")
-            continue
-        after_by_id[step_id] = [str(value).strip() for value in after]
-
-    for step_id, after in after_by_id.items():
-        for dependency in after:
-            if dependency not in known:
-                errors.append(
-                    f"corsia.workflow.steps {step_id!r}.after references unknown "
-                    f"step {dependency!r}"
-                )
-
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(step_id: str, trail: list[str]) -> None:
-        if step_id in visited:
-            return
-        if step_id in visiting:
-            cycle = trail[trail.index(step_id):] + [step_id]
-            errors.append("corsia.workflow.steps has a cycle: " + " -> ".join(cycle))
-            return
-        visiting.add(step_id)
-        for dependency in after_by_id.get(step_id, []):
-            if dependency in known:
-                visit(dependency, [*trail, step_id])
-        visiting.remove(step_id)
-        visited.add(step_id)
-
-    for step_id in after_by_id:
-        visit(step_id, [])
-    return errors
-
-
 def validate_skill_text(text: str) -> SkillValidation:
-    """Validate one ``SKILL.md`` body without touching the filesystem."""
+    """Validate one ``SKILL.md`` body alone: no filesystem, and no sidecar is consulted.
+
+    Use :func:`validate_skill_bundle` or :func:`validate_skill_file` for a skill that may
+    point at a ``corsia.yaml``.
+    """
+    return _validate(text, bundle=False)
+
+
+def validate_skill_bundle(
+    skill_md: str, files: Mapping[str, str] | None, *, sidecar_problem: str | None = None,
+) -> SkillValidation:
+    """Validate a ``SKILL.md`` with the supplied folder files; no filesystem access.
+
+    ``files`` maps folder-relative names to their text; only ``corsia.yaml`` is read.
+    ``sidecar_problem`` is the caller's :func:`read_sidecar` problem, reported only when
+    the skill points at a sidecar, exactly as :func:`validate_skill_file` reports it.
+    """
+    sidecar = (files or {}).get(SIDECAR_FILE)
+    return _validate(skill_md, bundle=True, sidecar=sidecar, problem=sidecar_problem)
+
+
+def _sidecar_corsia(
+    meta: dict[str, Any], sidecar: str | None, problem: str | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Resolve a skill's CORSIA data: the sidecar when pointed at, else a lesson block's."""
+    lesson = _lesson_block(meta)
+    declared, errors = pointer_errors(meta.get("metadata"))
+    if not declared:
+        return lesson, []
+    if errors:
+        return lesson, errors
+    if problem is not None:
+        return lesson, [problem]
+    if sidecar is None:
+        return lesson, [f"metadata.corsia-data names {SIDECAR_FILE}, which is not in the skill folder"]
+    data, errors = parse_sidecar(sidecar)
+    if data is None:
+        return lesson, errors
+    return data, _validate_corsia_data(data) + validate_workflow(data, skill_name=text_value(meta.get("name")))
+
+
+def _validate(
+    text: str, *, bundle: bool, sidecar: str | None = None, problem: str | None = None,
+) -> SkillValidation:
     try:
         meta, body = parse_frontmatter(text)
     except Exception as exc:  # noqa: BLE001 - any parse failure is user-facing.
@@ -205,19 +233,22 @@ def validate_skill_text(text: str) -> SkillValidation:
         )
 
     errors: list[str] = []
-    name = _text(meta.get("name"))
-    description = _text(meta.get("description"))
+    name = text_value(meta.get("name"))
+    description = text_value(meta.get("description"))
     if not name:
         errors.append("name is required")
     if not description:
         errors.append("description is required")
     errors.extend(_validate_corsia(meta))
     errors.extend(_misfiled_block_errors(meta))
-    corsia = meta.get(FRONTMATTER_KEY)
-    if isinstance(corsia, dict):
-        errors.extend(_validate_workflow(corsia))
-        if LESSON_KEY in corsia:
-            errors.extend(lesson_errors(corsia[LESSON_KEY], description, body))
+    data = _lesson_block(meta)
+    if data is not None:
+        errors.extend(validate_workflow(data, skill_name=name))
+        if LESSON_KEY in data:
+            errors.extend(lesson_errors(data[LESSON_KEY], description, body))
+    if bundle:
+        data, sidecar_errors = _sidecar_corsia(meta, sidecar, problem)
+        errors.extend(error for error in sidecar_errors if error not in errors)
     return SkillValidation(
         ok=not errors,
         name=name,
@@ -225,6 +256,7 @@ def validate_skill_text(text: str) -> SkillValidation:
         metadata=meta,
         body=body,
         errors=errors,
+        corsia=data,
     )
 
 
@@ -257,6 +289,16 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return dict(parsed), text[body_start:]
 
 
+def declares_sidecar(skill_md: str) -> bool:
+    """True when the frontmatter declares a ``corsia.yaml`` pointer; unreadable text declares none."""
+    import yaml
+
+    try:
+        return pointer_errors(parse_frontmatter(skill_md)[0].get("metadata"))[0]
+    except (ValueError, yaml.YAMLError):  # validation reports an unparseable frontmatter.
+        return False
+
+
 def is_skill_file(path: Path) -> bool:
     """True when ``path`` is a standard ``skills/<skill>/SKILL.md`` file."""
     parts = path.parts
@@ -264,9 +306,17 @@ def is_skill_file(path: Path) -> bool:
 
 
 def validate_skill_file(path: Path) -> SkillValidation:
-    """Validate a ``SKILL.md`` file and report read/parse errors as validation errors."""
+    """Validate a skill folder's ``SKILL.md`` with the ``corsia.yaml`` beside it.
+
+    Read and parse errors are reported as validation errors.
+    """
     try:
-        return validate_skill_text(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
+        sidecar, problem = read_sidecar(path.parent)
+        return replace(
+            _validate(data.decode("utf-8"), bundle=True, sidecar=sidecar, problem=problem),
+            raw_sha256=hashlib.sha256(data).hexdigest(), source_data=data,
+        )
     except OSError as exc:
         return SkillValidation(
             ok=False,
@@ -292,7 +342,7 @@ def validate_skill_dir_name(name: str) -> str:
 def skill_template(name: str, description: str) -> str:
     """Standards-compatible starting SKILL.md content."""
     safe_name = validate_skill_dir_name(name)
-    desc = _text(description)
+    desc = text_value(description)
     if not desc:
         raise ValueError("description is required")
     import yaml

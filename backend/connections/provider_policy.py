@@ -8,6 +8,18 @@ from connections.vendor_accounts import AccountError, VENDORS, list_account_sele
 from infra.database import write_transaction
 
 
+class PolicyChanged(AccountError):
+    """The policy changed after the caller read it."""
+
+    code = "policy_changed"
+
+
+class ProjectNotFound(AccountError):
+    """The project the caller addressed does not exist."""
+
+    code = "project_not_found"
+
+
 def capabilities(provider_key: str) -> dict:
     """Capabilities supported by this slice; later slices add models and self units."""
     if provider_key not in VENDORS:
@@ -59,7 +71,8 @@ def _provider_policy_entry(project_id: str | None, provider_key: str, *, db) -> 
     }
 
 
-def _validate(provider_key: str, *, rollover, order, disabled, db) -> None:
+def _validate(provider_key: str, *, rollover, order, disabled, db) -> tuple:
+    """Check a write and return its order and disabled lists without this provider's removed accounts."""
     capability = capabilities(provider_key)
     if type(rollover) is not bool:
         raise AccountError("rollover must be a boolean")
@@ -68,12 +81,17 @@ def _validate(provider_key: str, *, rollover, order, disabled, db) -> None:
         raise AccountError("order must be an ordered list of account ids or null")
     if not isinstance(disabled, list) or any(not isinstance(item, str) for item in disabled) or len(disabled) != len(set(disabled)):
         raise AccountError("disabled must be a list of account ids")
-    ids = {account["id"] for account in list_accounts(provider=provider_key, include_removed=True, db=db)
-           if account["state"] != "removed"}
+    accounts = list_accounts(provider=provider_key, include_removed=True, db=db)
+    ids = {account["id"] for account in accounts if account["state"] != "removed"}
+    removed = {account["id"] for account in accounts if account["state"] == "removed"}
+    # Removing an account leaves its id in the stored lists, which every read ignores; drop it here rather than reject a client echoing them.
+    order = None if order is None else [item for item in order if item not in removed]
+    disabled = [item for item in disabled if item not in removed]
     if any(item not in ids for item in (order or []) + disabled):
-        raise AccountError("policy account must belong to this provider and not be removed")
+        raise AccountError("policy account must belong to this provider")
     if rollover and not capability["rollover"]:
         raise AccountError("rollover is not available for this provider")
+    return order, disabled
 
 
 def _upsert(project_id: str | None, provider_key: str, *, rollover: bool, order, disabled: list[str], revision: int, db) -> None:
@@ -98,15 +116,15 @@ def set_policy(project_id: str | None, provider_key: str, *, rollover: bool, ord
     with write_transaction(db, scope="provider_policy") as connection:
         if project_id is not None:
             if not connection.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
-                raise AccountError("project does not exist")
+                raise ProjectNotFound("project does not exist")
             if uses_workspace(project_id, db=connection):
                 connection.execute("INSERT INTO project_policy_overrides(project_id,revision) VALUES (?,0)", (project_id,))
                 _clone_workspace_policies(project_id, db=connection)
         # Canonical callers provide all policy facts explicitly.
         before = effective_policy(project_id, provider_key, db=connection)
         if before["revision"] != expected_revision:
-            raise AccountError("provider policy revision changed; refresh before acting")
-        _validate(provider_key, rollover=rollover, order=order, disabled=disabled, db=connection)
+            raise PolicyChanged("provider policy revision changed; refresh before acting")
+        order, disabled = _validate(provider_key, rollover=rollover, order=order, disabled=disabled, db=connection)
         _upsert(project_id, provider_key, rollover=rollover, order=order, disabled=disabled,
                 revision=expected_revision + 1, db=connection)
         _refresh(project_id, provider_key, db=connection)
@@ -117,11 +135,11 @@ def set_use_workspace(project_id: str, *, use_workspace: bool, expected_revision
     """Toggle a project override; turning it off clones workspace rows, on discards them."""
     with write_transaction(db, scope="project_provider_policy") as connection:
         if not connection.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
-            raise AccountError("project does not exist")
+            raise ProjectNotFound("project does not exist")
         existing = connection.execute("SELECT revision FROM project_policy_overrides WHERE project_id=?", (project_id,)).fetchone()
         revision = existing["revision"] if existing else 0
         if revision != expected_revision:
-            raise AccountError("project provider-policy revision changed; refresh before acting")
+            raise PolicyChanged("project provider-policy revision changed; refresh before acting")
         if use_workspace:
             connection.execute("DELETE FROM provider_policies WHERE project_id=?", (project_id,))
             connection.execute("DELETE FROM project_policy_overrides WHERE project_id=?", (project_id,))
@@ -132,10 +150,13 @@ def set_use_workspace(project_id: str, *, use_workspace: bool, expected_revision
         return policy_payload(project_id, db=connection)
 
 
-def ordered_accounts(provider_key: str, policy: dict, *, selection_only: bool = False, db) -> list[dict]:
-    accounts = (list_account_selection_facts(provider_key, db=db) if selection_only
-                else list_accounts(provider=provider_key, db=db))
-    return _in_saved_order([account for account in accounts if account["id"] not in policy["disabled"]], policy["order"])
+def ordered_accounts(provider_key: str, policy: dict, *, selection_only: bool = False, db,
+                     accounts: list[dict] | None = None) -> list[dict]:
+    if accounts is None:
+        accounts = (list_account_selection_facts(provider_key, db=db) if selection_only
+                    else list_accounts(provider=provider_key, db=db))
+    return _in_saved_order([account for account in accounts if account['provider'] == provider_key
+                            and account['state'] != 'removed' and account['id'] not in policy['disabled']], policy['order'])
 
 
 def _in_saved_order(accounts: list[dict], order) -> list[dict]:

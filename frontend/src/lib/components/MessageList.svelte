@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { firstRunOpeningPresentation } from '$lib/ws/firstRunOpeningReveal';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { loadDeferredToolResult } from '$lib/toolResultLoader';
 	import { messages, activeThreadId, isThreadTurnActive } from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
+	import { threadPlanStates, waitsOutside } from '$lib/stores/threadPlanStates';
 	import EmptyChatState from './EmptyChatState.svelte';
 	import MessageListBody from './MessageListBody.svelte';
 	import { LOAD_OLDER_TRIGGER_PX, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
@@ -17,18 +19,22 @@
 	import { mergeTranscriptUpdates } from './transcriptUpdates';
 	import { endVisit, loadUpdateCards, openAtDivider, threadUpdateCards, visitDividers, watchUpdateCardNudges } from '$lib/stores/threadUpdateCards';
 	import { watchMessageCards } from '$lib/stores/messageCardRefresh';
-	import { DividerLandingIntent, RenderedUpdateCards, scheduleDividerLanding } from './messageListUpdateCards';
+	import { InitialLandingIntent, RenderedUpdateCards, scheduleInitialLanding } from './messageListUpdateCards';
 	import { countVisibleEntries, visibleEntryContinuation } from './transcriptFocusModel';
 	import { planLimitPauseDescriptors } from './planLimitPause';
-	import { hasLandingTarget as hasLandingTargetIn, landOnNewContent, observeLayoutGrowth } from './messageListLayout';
+	import { hasLandingTarget as hasLandingTargetIn, landOnFirstRunOpening, landOnNewContent, observeLayoutGrowth } from './messageListLayout';
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+	import { MessageListScrollControl } from './messageListScrollControl';
+	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
+	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
 
-	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
+	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		userIsNearBottom: boolean;
 		ignoreScrollEvents: boolean;
+		hideScrollFab?: boolean;
 		onOpenLightbox: (url: string) => void;
 		hasMoreMessages?: boolean;
 		loadingOlderMessages?: boolean;
@@ -47,12 +53,17 @@
 		runLoads?: Record<string, RunLoad>;
 		onLoadRun?: (stub: RunStub) => void;
 	} = $props();
+	const scrollControl = new MessageListScrollControl(
+		() => messagesEl,
+		(nearBottom) => { userIsNearBottom = nearBottom; },
+		(ignoring) => { ignoreScrollEvents = ignoring; },
+	);
 	let expandedTools = $state(new Set<string>());
 	let expandedReasoning = $state(new Set<string>());
-	// The shared store can retain a prior selection; filter at this transcript boundary (#1084).
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
-	const messageRows = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
-	const renderedStreaming = $derived(isThreadTurnActive($turnStates, renderedThreadId));
+	const { rows: messageRows, opening: revealingOpening } = $derived(firstRunOpeningPresentation($messages, renderedThreadId));
+	const renderedStreaming = $derived(!revealingOpening && isThreadTurnActive($turnStates, renderedThreadId));
+	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
 		renderedThreadId ? $checkpointsByThread.get(renderedThreadId) : undefined,
 	);
@@ -75,11 +86,12 @@
 		void loadDeferredToolResult(renderedThreadId, messageId, toolCallId, $token);
 	}
 	const pauseDescriptors = $derived(planLimitPauseDescriptors(messageRows, turnSummaries));
-	const presentation = $derived(buildMessageListPresentation(messageRows, pauseDescriptors.map((pause) => pause.source)));
+	const presentation = $derived(buildMessageListPresentation(visibleChatAnswerRows(messageRows), pauseDescriptors.map((pause) => pause.source)));
 	const focusMode = $derived($coreSettings?.features?.focus_mode === true);
 	// G2: in Focus a wake that needs a Retry lives in the pending area, never inside a block.
 	const transcriptMessages = $derived(presentation.visibleMessages.filter(
 		(msg) => !isAwaitingDelivery(msg, renderedStreaming) && !(focusMode && needsWakeRetry(msg))));
+	const firstRunOpening = $derived(transcriptMessages.find((msg) => msg.metadata?.first_run_opening === true) ?? null);
 	// Cards cover the loaded window: from its lowest message, or all once the first page is in.
 	const cardsFromSeq = $derived.by(() => {
 		if (focusMode || !hasMoreMessages) return 0; // Focus reads every card once; the window filters them
@@ -94,6 +106,12 @@
 	// The divider is read once per open; the server freezes its pre-claim boundary.
 	let dividerOpenFor: string | null = null;
 	let landedVisit: string | null = null;
+	let landedDivider: string | null = null;
+	let landedOpening: string | null = null;
+	let holdingOpeningReveal = false;
+	// A gesture can arrive before a deferred divider/opening intent exists; keep
+	// that cancellation for this open rather than treating the later arrival as automatic.
+	let initialLandingCancelledByUserFor: string | null = null;
 	$effect(() => {
 		const id = renderedThreadId;
 		const fromSeq = cardsFromSeq;
@@ -111,19 +129,22 @@
 			if (!id) return;
 			endVisit(id);
 			if (dividerOpenFor === id) dividerOpenFor = null;
-			cancelDividerLanding(id);
+			cancelInitialLanding(id);
 			if (landedVisit === id) landedVisit = null;
+			if (landedDivider === id) landedDivider = null;
+			if (landedOpening === id) landedOpening = null;
+			if (initialLandingCancelledByUserFor === id) initialLandingCancelledByUserFor = null;
 		};
 	});
 	const liveTurn = $derived(
-		renderedStreaming
+		!revealingOpening && focusLive.current.active
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
 		buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
 			focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
-		(renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
+		(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 		{
 			focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
 			pauses: pauseDescriptors, turnSummaries,
@@ -133,33 +154,54 @@
 			} : undefined,
 		},
 	));
-	const dividerLanding = new DividerLandingIntent((threadId) => {
-		landedVisit = threadId;
-		if (get(openAtDivider) === threadId) openAtDivider.set(null);
+	const initialLanding = new InitialLandingIntent((landing) => {
+		if (landing.target === 'divider') {
+			landedVisit = landing.threadId;
+			if (get(openAtDivider) === landing.threadId) openAtDivider.set(null);
+		} else {
+			landedOpening = landing.threadId;
+			holdingOpeningReveal = false;
+		}
 	});
 	const renderedCards = new RenderedUpdateCards();
-	function cancelDividerLanding(threadId: string | null = renderedThreadId): void {
+	function cancelInitialLanding(threadId: string | null = renderedThreadId): void {
 		if (!threadId) return;
-		landedVisit = threadId;
-		dividerLanding.cancel(threadId);
+		initialLanding.cancel(threadId);
 		if (get(openAtDivider) === threadId) openAtDivider.set(null);
 	}
 	$effect(() => {
 		const id = renderedThreadId;
 		const cards = id ? $threadUpdateCards[id]?.cards : undefined;
 		if (!renderedCards.changed(id, cards) || !cards?.length || !userIsNearBottom
-			|| $openAtDivider === id || (focusMode && landedVisit !== id && hasLandingTarget) || dividerLanding.blocksLiveEdge(id)) return;
+			|| $openAtDivider === id || (focusMode && landedVisit !== id && hasLandingTarget) || initialLanding.blocksLiveEdge(id)) return;
 		scrollToBottom();
 	});
 	const hasLandingTarget = $derived(hasLandingTargetIn(transcriptEntries));
 	$effect(() => {
 		const id = renderedThreadId;
 		if (!id || landedVisit === id || firstLoadPending || !(id in $visitDividers) || (!focusMode && $openAtDivider !== id)
-			|| dividerLanding.blocksLiveEdge(id)) return;
+			|| initialLandingCancelledByUserFor === id || initialLanding.blocksLiveEdge(id)) return;
 		if (!hasLandingTarget) { if (!$visitDividers[id].divider) landedVisit = id; openAtDivider.set(null); return; }
-		scheduleDividerLanding(
-			dividerLanding.begin(id), dividerLanding, tick, requestAnimationFrame,
-			beginProgrammaticScroll, () => landOnNewContent(messagesEl),
+		const epoch = scrollControl.userScrollEpoch;
+		scheduleInitialLanding(
+			initialLanding.begin(id, 'divider'), initialLanding, () => scrollControl.userScrollEpoch === epoch, () => false, tick, requestAnimationFrame,
+			scrollControl.beginProgrammaticScroll.bind(scrollControl), () => { landedDivider = id; landOnNewContent(messagesEl); },
+		);
+	});
+	$effect(() => {
+		const id = renderedThreadId;
+		// A requested divider wins immediately; an optional card read must not hold
+		// the first readable opening behind a failed or unavailable update request.
+		if (!id || !firstRunOpening || landedOpening === id || landedDivider === id || firstLoadPending
+			|| $openAtDivider === id || initialLandingCancelledByUserFor === id || initialLanding.blocksLiveEdge(id)) return;
+		const epoch = scrollControl.userScrollEpoch;
+		scheduleInitialLanding(
+			initialLanding.begin(id, 'opening'), initialLanding, () => scrollControl.userScrollEpoch === epoch, () => {
+				const revealIsActive = revealingOpening !== undefined;
+				holdingOpeningReveal = revealIsActive;
+				return revealIsActive;
+			}, tick, requestAnimationFrame,
+			scrollControl.beginProgrammaticScroll.bind(scrollControl), () => landOnFirstRunOpening(messagesEl),
 		);
 	});
 	const pendingDeliveryMessages = $derived(presentation.visibleMessages.filter((msg) => isImminentDelivery(msg, renderedStreaming)));
@@ -169,47 +211,19 @@
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
 		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
-	const NEAR_BOTTOM_PX = 80;
-	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
-	let pendingReleaseFrame: number | null = null;
-	// A deferred pin abandons itself when a newer gesture takes over.
-	let userScrollEpoch = 0;
-	/** Read the live scroll position. Never assert where the user "should" be. */
-	function syncNearBottom() {
-		if (!messagesEl) return;
-		const { scrollTop, scrollHeight, clientHeight } = messagesEl;
-		userIsNearBottom = scrollHeight - scrollTop - clientHeight < NEAR_BOTTOM_PX;
-	}
-	function endProgrammaticScroll() {
-		if (pendingReleaseFrame !== null) {
-			cancelAnimationFrame(pendingReleaseFrame);
-			pendingReleaseFrame = null;
-		}
-		ignoreScrollEvents = false;
-	}
+	$effect(() => {
+		const id = renderedThreadId;
+		if (id && holdingOpeningReveal && !revealingOpening) initialLanding.finishCurrent(id, 'opening');
+	});
 	/** A wheel, a finger, or an arrow key: the user is driving now. */
 	function onUserScrollIntent() {
-		userScrollEpoch++;
-		cancelDividerLanding();
-		endProgrammaticScroll();
-		syncNearBottom();
+		initialLandingCancelledByUserFor = renderedThreadId;
+		cancelInitialLanding();
+		scrollControl.noteUserScroll();
 	}
 	function onWheel(e: WheelEvent) {
 		onUserScrollIntent();
 		if (e.deltaY < 0) loadOlderIfTopInView(); // no scroll event exists at scrollTop 0
-	}
-	function beginProgrammaticScroll(write: () => void) {
-		if (!messagesEl) return;
-		ignoreScrollEvents = true;
-		write();
-		if (pendingReleaseFrame !== null) cancelAnimationFrame(pendingReleaseFrame);
-		pendingReleaseFrame = requestAnimationFrame(() => {
-			pendingReleaseFrame = null;
-			ignoreScrollEvents = false;
-			// Re-read rather than claim: if the user moved during this frame, the
-			// element already says so and that answer is the true one.
-			syncNearBottom();
-		});
 	}
 	function loadOlderIfTopInView(): boolean {
 		if (!messagesEl || !onLoadOlder) return false;
@@ -218,7 +232,7 @@
 	const loadOlderForVisibleEntry = () => onLoadOlder?.(focusMode ? visibleEntryContinuation(() => transcriptEntries) : undefined);
 	function onMessagesScroll() {
 		if (!messagesEl || ignoreScrollEvents) return;
-		syncNearBottom();
+		scrollControl.syncNearBottom();
 		loadOlderIfTopInView();
 	}
 	let autoPaged = false;
@@ -235,20 +249,24 @@
 	});
 	/** Pin to the live edge after the DOM settles (new message, new step). */
 	export function scrollToBottom() {
-		if (dividerLanding.blocksLiveEdge(renderedThreadId)) return;
-		const epoch = userScrollEpoch;
-		tick().then(() => {
-			// The gap between asking and writing belongs to the user too.
-			if (epoch !== userScrollEpoch || dividerLanding.blocksLiveEdge(renderedThreadId)) return;
-			followBottom();
-		});
+		scrollControl.requestBottom(() => initialLanding.blocksLiveEdge(renderedThreadId), followBottom);
+	}
+	/** The explicit control yields an initial opening landing to the reader's requested edge. */
+	export function scrollToBottomFromUser() {
+		if (initialLanding.targetFor(renderedThreadId) === 'divider') return;
+		if (initialLanding.targetFor(renderedThreadId) === 'opening') cancelInitialLanding();
+		scrollToBottom();
 	}
 	/** Pin to the live edge right now — for high-frequency reveal ticks. */
 	export function followBottom() {
-		if (dividerLanding.blocksLiveEdge(renderedThreadId)) return;
-		beginProgrammaticScroll(() => {
-			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-		});
+		// Waiting/optimistic input is a normal live row, never an opening-anchor exception.
+		const landingTarget = initialLanding.targetFor(renderedThreadId);
+		if (landingTarget === 'divider') return;
+		if (landingTarget === 'opening') {
+			if (pendingEntries.length === 0) return;
+			cancelInitialLanding();
+		}
+		scrollControl.writeBottom();
 	}
 	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
@@ -256,23 +274,8 @@
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
 	});
 	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom));
-	let savedBottomOffset = 0;
-	export function captureBottomOffset() {
-		if (!messagesEl) return;
-		const { scrollTop, scrollHeight, clientHeight } = messagesEl;
-		savedBottomOffset = Math.max(0, scrollHeight - scrollTop - clientHeight);
-	}
-	export function restoreBottomOffset() {
-		beginProgrammaticScroll(() => {
-			if (!messagesEl) return;
-			const { scrollHeight, clientHeight } = messagesEl;
-			if (savedBottomOffset === 0) {
-				messagesEl.scrollTop = scrollHeight;
-			} else {
-				messagesEl.scrollTop = Math.max(0, scrollHeight - clientHeight - savedBottomOffset);
-			}
-		});
-	}
+	export const captureBottomOffset = () => scrollControl.captureBottomOffset();
+	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
 </script>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
@@ -285,7 +288,7 @@
 	onkeydown={onUserScrollIntent}
 >
 	<!--
-		Three-way, because "this thread is empty" is a CLAIM about the thread and
+		Three-way, because "this chat is empty" is a CLAIM about the thread and
 		only one of these three states can support it. A first page still in
 		flight, or one that failed, means the transcript is unknown — and after a
 		failure the user needs the same way out the older-pages branch already
@@ -293,15 +296,15 @@
 	-->
 	{#if firstLoadFailed}
 		<div class="first-load-state first-load-error" class:full-canvas={messageRows.length === 0}>
-			<span>Couldn't load this thread.</span>
-			<Button size="sm" variant="secondary" ariaLabel="Retry loading this thread" onclick={() => onRetryFirstLoad?.()}>Retry</Button>
+			<span>Couldn’t load this chat. Try again.</span>
+			<Button size="sm" variant="secondary" ariaLabel="Retry loading this chat" onclick={() => onRetryFirstLoad?.()}>Retry</Button>
 		</div>
 	{:else if firstLoadPending && messageRows.length === 0}
 		<div class="first-load-state full-canvas">
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-			<span>Loading this thread…</span>
+			<span>Loading this chat…</span>
 		</div>
-	{:else if messageRows.length === 0 && !renderedStreaming}
+	{:else if messageRows.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />
@@ -318,7 +321,8 @@
 			{onOpenLightbox}
 			threadId={renderedThreadId}
 			{renderedStreaming}
-			checkpoint={transcriptCheckpoint}
+			liveRollup={revealingOpening ? undefined : focusLive.current}
+			checkpoint={revealingOpening ? null : transcriptCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
 			historyComplete={historyComplete ?? !(hasMoreMessages || firstLoadPending || firstLoadFailed)}
@@ -326,8 +330,8 @@
 			{onLoadRun}
 		/>
 	</div>
-{#if !userIsNearBottom && (renderedStreaming || messageRows.length > 0)}
-	<button class="scroll-fab" onclick={scrollToBottom} aria-label="Scroll to bottom" title="Scroll to bottom">
+{#if !hideScrollFab && !userIsNearBottom && (focusLive.current.active || messageRows.length > 0)}
+	<button class="scroll-fab" onclick={scrollToBottomFromUser} aria-label="Scroll to bottom" title="Scroll to bottom">
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
 	</button>
 {/if}

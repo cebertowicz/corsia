@@ -306,18 +306,14 @@ def get_pull_request_info(repo: str, pr_number: int) -> dict[str, Any] | None:
     if not isinstance(labels, list):
         labels = []
 
-    title = data.get("title")
-    if not isinstance(title, str):
-        title = ""
-
-    body = data.get("body")
-    if not isinstance(body, str):
-        body = ""
+    title = _text_or_empty(data.get("title"))
+    body = _text_or_empty(data.get("body"))
 
     number = data.get("number")
     if not isinstance(number, int):
         number = pr_number
 
+    # A repository name is None when GitHub omits it (a deleted fork).
     return {
         "number": number,
         "mergeable": mergeable_state,
@@ -328,4 +324,17 @@ def get_pull_request_info(repo: str, pr_number: int) -> dict[str, Any] | None:
         "labels": labels,
         "title": title,
         "body": body,
+        "headRepoFullName": repo_full_name(head.get("repo")),
+        "baseRepoFullName": repo_full_name(base.get("repo")),
     }
+
+
+def _text_or_empty(value: Any) -> str:
+    """Return a PR text field, or an empty string when GitHub sent none."""
+    return value if isinstance(value, str) else ""
+
+
+def repo_full_name(repo: Any) -> str | None:
+    """Return one PR side's ``owner/name``, or None when GitHub gives no repository."""
+    name = repo.get("full_name") if isinstance(repo, dict) else None
+    return name if isinstance(name, str) and name else None

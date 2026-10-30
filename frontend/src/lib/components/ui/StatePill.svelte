@@ -11,9 +11,11 @@
 		 * mark under a chat message, with no box. Only setup uses it.
 		 */
 		look?: 'pill' | 'dot';
+		/** `dot` only: let a long label wrap onto a second line instead of staying on one. */
+		wrap?: boolean;
 	}
 
-	const { state, label, size = 'md', look = 'pill' }: Props = $props();
+	const { state, label, size = 'md', look = 'pill', wrap = false }: Props = $props();
 
 	const display = $derived(label ?? humanize(state));
 
@@ -24,7 +26,7 @@
 </script>
 
 {#if look === 'dot'}
-	<span class="dotmark {state}"><i class="dot" aria-hidden="true"></i>{display}</span>
+	<span class="dotmark {state}" class:wrap><i class="dot" aria-hidden="true"></i><span>{display}</span></span>
 {:else}
 	<span class="pill {state} {size}">{display}</span>
 {/if}
@@ -33,6 +35,8 @@
 	/* Approved for setup-only use: dot and word. A shared rollout needs a Product Experience decision. */
 	.dotmark { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
 	.dotmark .dot { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--text-tertiary); flex: none; }
+	.dotmark.wrap { display: flex; align-items: flex-start; white-space: normal; }
+	.dotmark.wrap .dot { margin-top: calc(var(--space-1) * 1.25); }
 	.dotmark.loaded .dot, .dotmark.active .dot { background: var(--accent); }
 	.dotmark.success .dot { background: var(--green); }
 	.dotmark.loading .dot, .dotmark.warning .dot { background: var(--amber); }
@@ -62,7 +66,7 @@
 	}
 	.pill.error {
 		background: var(--red-bg);
-		color: var(--red);
+		color: var(--red-text);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
 	}
 	.pill.available {

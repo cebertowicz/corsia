@@ -101,8 +101,7 @@ def _delegated(db, *titles: str):
 async def _sweep(db, deliver=None):
     deliver = deliver or AsyncMock(return_value=True)
     result = await runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        NOW, db=db, sources=[HarvestSource()], deliver=deliver,
     )
     await asyncio.sleep(0)
     return result, deliver

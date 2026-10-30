@@ -53,11 +53,15 @@ def _append_candidate(db):
     return seq
 
 
-def _bind_provider_turn(db, step_id):
-    row = db.execute("SELECT metadata FROM messages WHERE id=?", (step_id,)).fetchone()
+def _seed_legacy_debt_below_floor(db):
+    # Model debt retained in history from an already-installed legacy checkpoint.
+    row = db.execute("SELECT metadata FROM messages WHERE id='older-step'").fetchone()
     metadata = json.loads(row["metadata"])
-    metadata["provider_turn_id"] = "provider-turn"
-    db.execute("UPDATE messages SET metadata=? WHERE id=?", (json.dumps(metadata), step_id))
+    metadata["llm_tool_calls"].append({
+        "id": "legacy", "type": "function",
+        "function": {"name": "bash", "arguments": "{}"},
+    })
+    db.execute("UPDATE messages SET metadata=? WHERE id='older-step'", (json.dumps(metadata),))
     db.commit()
 
 
@@ -70,11 +74,18 @@ async def _previous_floor(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_prior_floor_excludes_unpaid_legacy_debt_from_clean_candidate(debt_db, monkeypatch):
-    previous, candidate_seq = await _previous_floor(debt_db, monkeypatch)
-    live, on_event = _codex_events(debt_db)
+    from core.tool_result_debt import thread_tool_debt_through
 
-    await on_event(_event("tool_use", "legacy"))
-    assert live.tool_step_ids == {"legacy": "older-step"}
+    previous, candidate_seq = await _previous_floor(debt_db, monkeypatch)
+    _seed_legacy_debt_below_floor(debt_db)
+    all_debt = thread_tool_debt_through("debt", candidate_seq, db=debt_db)
+    assert [(item.call_id, item.assistant_step_id) for item in all_debt.unsettled] == [
+        ("legacy", "older-step"),
+    ]
+    new_debt = thread_tool_debt_through(
+        "debt", candidate_seq, db=debt_db, start_exclusive_seq=previous.through_seq,
+    )
+    assert not new_debt.unsettled and not new_debt.unpayable
 
     candidate = _capture_and_install(
         debt_db,
@@ -88,12 +99,12 @@ async def test_prior_floor_excludes_unpaid_legacy_debt_from_clean_candidate(debt
 
 @pytest.mark.asyncio
 async def test_prior_floor_refuses_unpaid_debt_declared_in_candidate_range(debt_db, monkeypatch):
-    previous, candidate_seq = await _previous_floor(debt_db, monkeypatch)
-    _bind_provider_turn(debt_db, "later-step")
+    previous, _ = await _previous_floor(debt_db, monkeypatch)
     live, on_event = _codex_events(debt_db)
-
     await on_event(_event("tool_use", "in-range"))
-    assert live.tool_step_ids == {"in-range": "later-step"}
+    step = live.tool_step_ids["in-range"]
+    assert debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0] > previous.through_seq
+    candidate_seq = _append_candidate(debt_db)
 
     candidate = _capture_and_install(
         debt_db,
@@ -109,11 +120,11 @@ async def test_prior_floor_refuses_unpaid_debt_declared_in_candidate_range(debt_
 @pytest.mark.asyncio
 async def test_first_cold_install_still_refuses_unpaid_debt(debt_db, monkeypatch):
     _context(debt_db, monkeypatch, "codex", outstanding=False)
-    candidate_seq = _append_candidate(debt_db)
     live, on_event = _codex_events(debt_db)
-
     await on_event(_event("tool_use", "legacy"))
-    assert live.tool_step_ids == {"legacy": "older-step"}
+    step = live.tool_step_ids["legacy"]
+    candidate_seq = _append_candidate(debt_db)
+    assert debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0] < candidate_seq
 
     candidate = _capture_and_install(
         debt_db, _request(checkpoint_id="candidate", through_seq=candidate_seq),

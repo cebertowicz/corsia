@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import errno
+import json
+import logging
 import os
+import select
 import shutil
 import socket
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+import psutil
+
+from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error, omlx_command
+
+
+log = logging.getLogger("llm.providers.omlx.process")
+
+
+class _PortOwnerUnknown:
+    """Sentinel for a port inspection that could not establish ownership."""
+
+
+PORT_OWNER_UNKNOWN = _PortOwnerUnknown()
+PortOwnerPid = int | None | _PortOwnerUnknown
 
 
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
@@ -18,19 +39,41 @@ def log_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.log"
 
 
-def read_pid(runtime_dir: Path, server_id: str) -> int | None:
-    path = pid_path(runtime_dir, server_id)
-    if not path.exists():
-        return None
+def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: PortOwnerPid = PORT_OWNER_UNKNOWN,
+             preserve_legacy: bool = False) -> int | None:
+    """Return a live spawn record, preserving a legacy one unless a probe proves a mismatch."""
     try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
+        record = json.loads(pid_path(runtime_dir, server_id).read_text())
+        if type(record) is int:
+            if preserve_legacy:
+                return None
+            if record > 0 and legacy_port_owner_pid == record:
+                write_pid(runtime_dir, server_id, record)
+                return read_pid(runtime_dir, server_id)
+            if isinstance(legacy_port_owner_pid, int) and legacy_port_owner_pid != record:
+                clear_pid(runtime_dir, server_id)
+            return None
+        pid = record["pid"]
+        if type(pid) is int and pid > 0:
+            proc = psutil.Process(pid)
+            if (proc.create_time() == record["create_time"] and proc.is_running()
+                    and proc.status() != psutil.STATUS_ZOMBIE):
+                return pid
+    except (OSError, ValueError, TypeError, KeyError, psutil.Error):
+        pass
+    clear_pid(runtime_dir, server_id)
+    return None
 
 
 def write_pid(runtime_dir: Path, server_id: str, pid: int) -> None:
+    """Bind the supervisor's spawn record to this process's creation time."""
+    try:
+        created = psutil.Process(pid).create_time()
+    except psutil.Error:
+        clear_pid(runtime_dir, server_id)
+        return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    pid_path(runtime_dir, server_id).write_text(str(pid))
+    pid_path(runtime_dir, server_id).write_text(json.dumps({"pid": pid, "create_time": created}))
 
 
 def clear_pid(runtime_dir: Path, server_id: str) -> None:
@@ -38,6 +81,66 @@ def clear_pid(runtime_dir: Path, server_id: str) -> None:
         pid_path(runtime_dir, server_id).unlink()
     except FileNotFoundError:
         pass
+
+
+def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> Callable[[], None] | None:
+    """Report the OS exit status for a child or an adopted process, without polling.
+
+    macOS supplies NOTE_EXITSTATUS for children and processes we can signal. Reap a child after the
+    exit event before notifying the supervisor, so it cannot mistake a zombie for a running server.
+    """
+    kq: Any = select  # kqueue names exist on macOS/BSD only; Linux type checkers cannot see them
+    if not hasattr(kq, "kqueue"):
+        return None
+    loop = asyncio.get_running_loop()
+    queue = kq.kqueue()
+    exit_status_flag = 0x04000000  # Darwin NOTE_EXITSTATUS; Python's select does not expose it
+    event = kq.kevent(pid, kq.KQ_FILTER_PROC, kq.KQ_EV_ADD | kq.KQ_EV_ONESHOT,
+                      kq.KQ_NOTE_EXIT | exit_status_flag)
+    try:
+        queue.control([event], 0, 0)
+    except ProcessLookupError:
+        queue.close()
+        loop.call_soon(on_exit, reap_status(pid, True))  # it was already gone when we asked
+        return lambda: None
+    except OSError as exc:
+        queue.close()
+        log.warning("oMLX exit watch for pid %s could not start: %s", pid, exc)
+        return None
+
+    def cancel() -> None:
+        if not queue.closed:
+            loop.remove_reader(queue.fileno())
+            queue.close()
+
+    def fired() -> None:
+        events = queue.control(None, 1, 0)
+        if not events:
+            return
+        cancel()
+        raw = events[0].data if events[0].fflags & exit_status_flag else None
+        reaped = reap_status(pid, True)
+        on_exit(_status_from_raw(raw) if raw is not None else reaped)
+
+    loop.add_reader(queue.fileno(), fired)
+    return cancel
+
+
+def reap_status(pid: int, wait: bool = False) -> tuple[str, bool]:
+    """Reap a child and report its status; adopted processes have no waitable status."""
+    try:
+        waited, raw = os.waitpid(pid, 0 if wait else os.WNOHANG)
+    except ChildProcessError:
+        return "unknown (not our child)", False
+    if waited != pid:
+        return "unknown", False
+    return _status_from_raw(raw)
+
+
+def _status_from_raw(raw: int) -> tuple[str, bool]:
+    """Decode the wait status shared by waitpid and Darwin's exit event."""
+    code = os.waitstatus_to_exitcode(raw)
+    return (f"signal {-code}" if code < 0 else f"exit code {code}"), code == 0
 
 
 def process_alive(pid: int) -> bool:
@@ -52,10 +155,11 @@ def process_alive(pid: int) -> bool:
         return True
 
 
-def port_owner_pid(host: str, port: int) -> int | None:
+def port_owner_pid(host: str, port: int) -> PortOwnerPid:
+    """Return a listening PID, no owner, or unknown when the probe is unreadable."""
     lsof = shutil.which("lsof")
     if not lsof:
-        return None
+        return PORT_OWNER_UNKNOWN
     try:
         out = subprocess.run(
             [lsof, "-nPiTCP:" + str(port), "-sTCP:LISTEN"],
@@ -64,8 +168,15 @@ def port_owner_pid(host: str, port: int) -> int | None:
             timeout=2,
         )
     except (subprocess.SubprocessError, OSError):
-        return None
-    if out.returncode != 0 or not out.stdout:
+        return PORT_OWNER_UNKNOWN
+    if out.returncode != 0:
+        # lsof uses exit 1 with no output for its ordinary "no matching
+        # listener" result. Confirm that the port can bind before treating it
+        # as unowned: an unreadable or raced probe must remain unknown.
+        if out.returncode == 1 and not out.stdout and not out.stderr and port_is_free(port):
+            return None
+        return PORT_OWNER_UNKNOWN
+    if not out.stdout:
         return None
     for line in out.stdout.splitlines()[1:]:
         parts = line.split()
@@ -74,7 +185,7 @@ def port_owner_pid(host: str, port: int) -> int | None:
                 return int(parts[1])
             except ValueError:
                 continue
-    return None
+    return PORT_OWNER_UNKNOWN
 
 
 def port_is_free(port: int) -> bool:
@@ -91,8 +202,16 @@ def port_is_free(port: int) -> bool:
         sock.close()
 
 
-def build_argv(host: str, port: int, settings: dict) -> list[str]:
-    argv: list[str] = ["omlx", "serve", "--host", host, "--port", str(port)]
+def build_argv(
+    host: str,
+    port: int,
+    settings: dict,
+    *,
+    executable: str | None = None,
+) -> list[str]:
+    """Build argv for CORSIA's managed oMLX server."""
+    executable = executable or managed_omlx_executable() or "omlx"
+    argv: list[str] = [*omlx_command(executable), "serve", "--host", host, "--port", str(port)]
 
     flag_map: list[tuple[str, str]] = [
         ("model_dir",                "--model-dir"),
@@ -110,6 +229,11 @@ def build_argv(host: str, port: int, settings: dict) -> list[str]:
     for key, flag in flag_map:
         val = settings.get(key)
         if val is None or val == "":
+            continue
+        if key == "api_key":
+            # A generated key can start with '-', which argparse would read
+            # as an option; the joined form always binds it to the flag.
+            argv.append(f"{flag}={val}")
             continue
         argv.extend([flag, str(val)])
 

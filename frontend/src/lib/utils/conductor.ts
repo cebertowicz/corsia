@@ -1,5 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { acceptThreadModelTruth } from '$lib/stores/models';
+import { applySwitchRead, beginSwitchRead } from '$lib/stores/threadModelTruth';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 
@@ -12,6 +13,10 @@ export interface CoordinationTarget {
 	project_id?: string | null;
 	bootloader_files?: string[] | string | null;
 	driver?: string | null;
+	pending_model?: string | null;
+	switch_status?: string | null;
+	switch_error?: string | null;
+	switch_operation_id?: string | null;
 	[key: string]: unknown;
 }
 
@@ -43,23 +48,34 @@ export function firstRunLanding(
 }
 
 let firstRunLanded = false;
+let firstRunOpening: Promise<void> | null = null;
 
-/** Open the CORSIA agent once per page load when `firstRunLanding` says so. */
+/** Open the CORSIA agent once per page load when `firstRunLanding` says so.
+ *
+ * The landing is complete only after its opener settles. Until then the shared
+ * promise suppresses duplicate lookups, while a rejected opener remains
+ * retryable instead of stranding first run on the empty regular composer. */
 export function landOnFirstRun(
 	lookup: CoordinationLookup,
 	scope: UiScope | null,
 	open: (threadId: string) => unknown,
-): void {
+): Promise<void> {
+	if (firstRunOpening) return firstRunOpening;
 	const landing = firstRunLanding(lookup, {
 		scope, activeThreadId: get(activeThreadId), landed: firstRunLanded,
 	});
-	if (!landing) return;
-	firstRunLanded = true;
-	void open(landing);
+	if (!landing) return Promise.resolve();
+	firstRunOpening = Promise.resolve()
+		.then(() => open(landing))
+		.then((opened) => { if (opened !== false) firstRunLanded = true; })
+		.catch(() => { console.warn('[first run] landing failed; remains retryable'); })
+		.finally(() => { firstRunOpening = null; });
+	return firstRunOpening;
 }
 
 export function _resetFirstRunLandingForTests(): void {
 	firstRunLanded = false;
+	firstRunOpening = null;
 }
 
 export function conductorScopeParam(scope: UiScope | null): string {
@@ -68,6 +84,7 @@ export function conductorScopeParam(scope: UiScope | null): string {
 
 async function fetchTarget(token: string | null, url: string): Promise<CoordinationLookup> {
 	if (!token) return { kind: 'unknown' };
+	const startedAt = beginSwitchRead();
 	try {
 		const res = await fetch(url);
 		if (!res.ok) return { kind: 'unknown' };
@@ -80,6 +97,15 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 		if (target.model && target.updated_at) {
 			acceptThreadModelTruth(threadId, target.model, target.updated_at);
 		}
+		// Its switch state is server truth like a listed row's, so each read replaces it, held beside
+		// its model: a switch that ended while the page was away clears, and one still pending or
+		// failed shows. A read that began before a later 202, frame or read of this thread yields to it.
+		applySwitchRead(threadId, startedAt, {
+			pending_model: target.pending_model ?? null,
+			switch_status: target.switch_status ?? null,
+			switch_error: target.switch_error ?? null,
+			switch_operation_id: target.switch_operation_id ?? null,
+		});
 		return { kind: 'target', target, firstRunPending: data?.first_run_pending === true };
 	} catch {
 		return { kind: 'unknown' };

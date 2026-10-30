@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 
@@ -20,7 +21,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-		params, data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13 },
+		params, data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 
@@ -54,8 +55,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 	await (await replyField(written)).fill('Reply from the other canvas.');
 	await written.getByRole('button', { name: 'Send reply' }).click();
 	await expect(written).toContainText('Reply from the other canvas.');
-	// The reply arrives collapsed in the canvas that did not write it.
-	await watched.getByRole('button', { name: '⊕ 1 reply' }).click();
+	// The reply arrives already attached to its thread in the other canvas.
 	await expect(watched).toContainText('Reply from the other canvas.');
 
 	await written.getByRole('button', { name: 'Resolve', exact: true }).click();

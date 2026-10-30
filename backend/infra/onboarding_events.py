@@ -28,7 +28,7 @@ FIRST_RUN_SUMMARY = (
 OUTCOME_OPERATIONS = frozenset({"mark_done", "accept"})
 TASK_START = "Getting started"
 TASK_PROVIDERS = "Additional provider setup"
-TASK_PROJECT = "Set up your first agent or project"
+TASK_PROJECT = "Set up your first project"
 TASK_GITHUB = "Set up GitHub"
 TASK_WEB_SEARCH = "Connect web search"
 TASK_CONFIG = "Configuration checks"
@@ -63,8 +63,7 @@ FIRST_RUN_SETUP_TASKS = (
     ),
     (
         TASK_PROJECT,
-        "the first agent shows its first result or the project's conductor reports back, "
-        "or the user chose not now",
+        "the project's conductor reports back, or the user chose not now",
     ),
 )
 
@@ -147,15 +146,16 @@ def enqueue_first_run_wake(
 ) -> bool:
     """Queue the first-run wake inside the caller's transaction.
 
-    Only a conductor with no messages gets it, so a restored or reused
-    conductor with history is left alone. The deterministic id makes a retry
-    a duplicate. With no model bound the input waits under
-    ``no_model_selected`` until the user's first model choice drives it.
+    Only a conductor with no prior conversation gets it. A restored conductor's
+    real history is left alone. The id makes a retry a duplicate. With no model
+    bound the input waits under ``no_model_selected`` until the user's first
+    model choice drives it.
     """
     from events.delivery import enqueue_event_wake
 
     if db.execute(
-        "SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1", (conductor_id,),
+        "SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1",
+        (conductor_id,),
     ).fetchone():
         return False
     enqueue_event_wake(

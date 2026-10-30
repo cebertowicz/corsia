@@ -14,16 +14,20 @@
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
 	import { onMount } from 'svelte';
+	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
+	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
+	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { emitProductEvent } from '$lib/product_events';
 	import { forgetAutoOpen, holdsDraft, judgeAutoOpen, noteLoad } from '$lib/stores/attentionAutoOpen';
-	import { activeThreadId } from '$lib/stores/threads';
+	import { activeThreadId, messages } from '$lib/stores/threads';
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
+	import { label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -40,7 +44,7 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
@@ -50,11 +54,10 @@
 		writesDisabled?: boolean;
 		/** A higher-precedence control holds this slot right now. */
 		suppressed?: boolean;
-		onOpenDestination?: (destination: { pane: string; id: string }) => void;
+		onOpenDestination?: (destination: AttentionDestination, threadId?: string | null) => void;
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
-	let region = $state<HTMLElement | null>(null);
 	let servedFocusRequest = 0;
 	/** How long after the last keydown the person still counts as typing. */
 	const TYPING_IDLE_MS = 2000;
@@ -64,11 +67,14 @@
 	/** Bumped when focus moves or the typing window ends, so a waiting arrival is re-judged. */
 	let busyTick = $state(0);
 
-	const current = $derived(shownItem($visibleQueue, $activeId));
+	const dockQueue = $derived($visibleQueue);
+	const current = $derived(shownItem(dockQueue, $activeId));
+	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
+		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	const position = $derived(
-		current ? $visibleQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
+		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
-	const canSkip = $derived($visibleQueue.items.length > 1);
+	const canSkip = $derived(dockQueue.items.length > 1);
 	const effectiveWritesDisabled = $derived(
 		writesDisabled || $stale || $connectionState !== 'connected',
 	);
@@ -83,10 +89,6 @@
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
 
-	function decisionMeta(decision: DecisionDetail): string {
-		return `Decision · ${decision.source.thread_label}${decision.source.project_label ? ` · ${decision.source.project_label}` : ''}`;
-	}
-
 	/** Focus returns to the exact control that opened the chip. */
 	async function close() {
 		collapse();
@@ -96,20 +98,9 @@
 		back?.focus();
 	}
 
-
 	const deferredId = 'attention-dock-deferred';
 
-	/**
-	 * The landmark's name carries the state a sighted user reads off the bar, so
-	 * assistive tech gains it on arrival rather than after exploring.
-	 */
-	const regionLabel = $derived(
-		!current
-			? 'Needs you'
-			: $visibleQueue.count > 1
-				? `Needs you — ${label(current)}, ${$visibleQueue.count} waiting`
-				: `Needs you — ${label(current)}`,
-	);
+	const regionLabel = $derived(getRegionLabel(current, dockQueue.count));
 
 	function open() {
 		if (!current || suppressed) return;
@@ -142,16 +133,16 @@
 	});
 
 	$effect(() => {
-		// A decision raised by the viewed thread after the last one judged opens by
-		// itself once the person is not typing and nothing else holds the slot (see
-		// the store). Busy is read from the document here, never stored.
+		// A decision raised by the viewed thread opens by itself once the person is not typing,
+		// nothing holds the slot and they've had time to read what came before it (see the store).
 		void busyTick;
 		const typingLeft = lastKeydown + TYPING_IDLE_MS - Date.now();
-		const outcome = judgeAutoOpen($visibleQueue.items, {
+		const outcome = judgeAutoOpen(dockQueue.items, {
 			viewedThreadId: $activeThreadId,
 			expandedId: $expandedId,
 			suppressed,
 			busy: typingLeft > 0 || holdsDraft(document.activeElement),
+			messages: get(messages), // untracked: a streaming reveal rewrites rows constantly
 		});
 		if (outcome.state === 'open') {
 			const focused = document.activeElement;
@@ -162,8 +153,9 @@
 			emitProductEvent('attention_dock', 'decision_auto_opened', { thread_id: $activeThreadId });
 			return;
 		}
-		if (outcome.state !== 'wait' || typingLeft <= 0) return;
-		const timer = setTimeout(() => { busyTick += 1; }, typingLeft);
+		const holdLeft = outcome.state === 'wait' ? Math.max(typingLeft, outcome.retryInMs ?? 0) : 0;
+		if (holdLeft <= 0) return;
+		const timer = setTimeout(() => { busyTick += 1; }, holdLeft);
 		return () => clearTimeout(timer);
 	});
 
@@ -187,6 +179,7 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
+		const offReplies = subscribeReplyAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -223,16 +216,13 @@
 			document.removeEventListener('focusout', rejudge);
 			forgetAutoOpen();
 			offNudge?.();
+			offReplies();
 			offConnection();
 			offToken();
 		};
 	});
 
-	function label(item: NonNullable<typeof current>): string {
-		return item.renderer === 'decision'
-			? (item.detail as DecisionDetail).title
-			: (item.detail as ExternalReviewDetail).title;
-	}
+
 </script>
 
 {#if recording}
@@ -243,15 +233,14 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current}
+{#if current || hasReplies}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
-		data-attention-dock
-		bind:this={region}
-		role="region"
-		aria-label={regionLabel}
 	>
+		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
+		{#if current}
+		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">
@@ -268,8 +257,8 @@
 					<b>{label(current)}</b>
 					{#if current.detail.source}<small>{current.detail.source.thread_label}</small>{/if}
 				</span>
-				{#if $visibleQueue.count > 1}
-					<span class="dock-count">{position} of {$visibleQueue.count}</span>
+				{#if dockQueue.count > 1}
+					<span class="dock-count">{position} of {dockQueue.count}</span>
 				{/if}
 				<span class="dock-action">
 					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
@@ -289,7 +278,7 @@
 					onClose={close}
 				>
 					<!-- No chrome heading: the decision's own header already carries a
-					     "Decision · thread · project" eyebrow and the decision title. -->
+					     "Decision · chat · project" eyebrow and the decision title. -->
 
 					<DecisionChip
 						decision={current.detail as DecisionDetail}
@@ -318,6 +307,8 @@
 		{#if $stale}
 			<p class="dock-stale" role="status">Showing last known items.</p>
 		{/if}
+		</section>
+		{/if}
 	</div>
 {/if}
 
@@ -332,11 +323,8 @@
 		/* No side inset of its own: the chat column places it, so its content edges are the transcript's. */
 		padding: var(--space-4) var(--dock-gutter) var(--dock-gutter);
 		margin: 0 calc(-1 * var(--dock-gutter)) calc(-1 * var(--dock-gutter));
-		/* Transcript scrolling beneath fades out across that top inset, so the row's edge
-		   reads without a border or a tint. Invisible when nothing is under it. It covers
-		   the band only, never the gutter. */
-		background: linear-gradient(to bottom, transparent, var(--bg-primary) var(--space-4))
-			center top / calc(100% - 2 * var(--dock-gutter)) calc(100% - var(--dock-gutter)) no-repeat;
+		/* Only the controls receive pointer input; empty space stays part of the transcript. */
+		pointer-events: none;
 		/* The chat slot publishes this height budget so an opened row scrolls
 		   inside it instead of growing off the top of the viewport (measured at
 		   320px: heading and close button at y = -91). The bottom gutter is outside it. */
@@ -344,6 +332,9 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
+	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
+	.attention-dock :global(.reply-chip-notice button),
+	.attention-dock [data-attention-dock] { pointer-events: auto; }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {
 		display: flex; align-items: center; gap: var(--space-3); width: 100%;
@@ -351,7 +342,8 @@
 		min-height: 44px; padding: var(--space-2) var(--space-2) var(--space-2) 2px;
 		/* Needs-you is the composer's frosted card: its glass, hairline, corner and soft shadow. */
 		border: 1px solid var(--border); border-radius: var(--radius-xl);
-		background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip);
+		background: linear-gradient(var(--glass-thin), var(--glass-thin)), var(--bg-primary);
+		box-shadow: var(--glass-rim), var(--shadow-chip);
 		color: var(--text-primary);
 		font: inherit; text-align: left; cursor: pointer;
 		transition: background var(--dur-tight) var(--ease-snap);

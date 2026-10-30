@@ -36,8 +36,9 @@ describe('update model', () => {
 
 	it('words the cost as one sentence for 0, 1 and several working agents', () => {
 		expect(costLine(60, 0)).toBe('CORSIA restarts to finish.');
-		expect(costLine(60, 1)).toBe('CORSIA restarts for about a minute; 1 working agent pauses and picks up where it left off.');
-		expect(costLine(120, 40)).toBe('CORSIA restarts for about 2 minutes; 40 working agents pause and pick up where they left off.');
+		expect(costLine(1, 1)).toBe('The restart usually takes 1 second; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(60, 1)).toBe('The restart usually takes a minute; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(120, 40)).toBe('The restart usually takes 2 minutes; 40 working agents pause and pick up where they left off.');
 		expect(costLine(null, 3)).toBe('CORSIA restarts to finish; 3 working agents pause and pick up where they left off.');
 	});
 
@@ -60,22 +61,50 @@ describe('update model', () => {
 	});
 
 	it.each([
-		['drain_failed', "Your agents didn't reach a safe stopping point in time.", 'Try again'],
-		['update_timed_out', 'The update took too long to download and build.', 'Try again'],
-		['prepare_failed', "Couldn't prepare the update.", 'Try again'],
-		['index_locked', "Another program is using CORSIA's files.", 'Try again'],
+		['drain_failed', "Your agents didn't reach a safe stopping point in time.", 'Retry'],
+		['update_timed_out', 'The update took too long to download and build.', 'Retry'],
+		['prepare_failed', "Couldn't prepare the update.", 'Retry'],
+		['index_locked', "Another program is using CORSIA's files.", 'Retry', 'Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. CORSIA kept running and nothing was changed.'],
 		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
-		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
+		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Retry', 'Save or discard them, then select Retry. CORSIA kept running and nothing was changed.'],
+		['checkout_no_upstream', "This branch isn't set to track another branch.", 'Retry', "Ask the CORSIA agent to set the branch it should track, then select Retry. CORSIA kept running and your code wasn't changed."],
+		['checkout_diverged', 'This branch and the branch it tracks have both changed.', 'Retry', "Ask the CORSIA agent to combine their changes, then select Retry. CORSIA kept running and your code wasn't changed."],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
-	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
+		['rolled_back', "Couldn't start the new version.", 'Retry'],
+		['version_unverified', "Couldn't confirm the new version.", 'Retry', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
+		['wrong_version_running', 'CORSIA started a different version.', 'Retry', "It isn't the version this update was for."],
+	] as const)('words %s truthfully and names its action', (code, headline, retryLabel, body) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
 		expect(copy.retryLabel).toBe(retryLabel);
+		if (body) expect(copy.body).toBe(body);
 	});
 
-	it('sends restart_pending to a restart and every other failure to another update', () => {
+	it.each([
+		['checkout_no_upstream', 'has no upstream', "The branch my-feature isn't set to track another branch."],
+		['checkout_diverged', 'and its upstream have diverged', 'The branch my-feature and the branch it tracks have both changed.'],
+	] as const)('names the branch in %s when its log is available', (code, cause, headline) => {
+		const result = failureCopy({ ...failure(code), log: `Redeploy refused: branch my-feature ${cause} — checkout left untouched` });
+		expect(result.headline).toBe(headline);
+	});
+
+	it.each([true, false])('words pre-stop refusal with health=%s', (healthy) => {
+		const copy = failureCopy({ ...failure('update_refused'), detail: JSON.stringify({ backend_healthy: healthy }) });
+		expect(copy.title).toBe("Update didn't finish");
+		expect(copy.body).toBe(healthy ? 'CORSIA is still running the version it had.' : '');
+		expect(copy.retryLabel).toBe('Retry');
+	});
+
+	it('offers a restart when it can recover an unfinished update', () => {
 		expect(failureCopy(failure('restart_pending')).retryAction).toBe('restart');
 		expect(failureCopy(failure('drain_failed')).retryAction).toBeUndefined();
+	});
+
+	it.each(['version_unverified', 'wrong_version_running'] as const)('never claims the previous version is running for %s', (code) => {
+		const copy = failureCopy(failure(code));
+		expect(copy.body).not.toContain('the version it had');
+		expect(copy.body).not.toContain('nothing was changed');
+		expect(copy.headline).not.toMatch(/rollback|verify|come up/);
 	});
 
 	it('claims nothing was changed only for refusals made before anything was touched', () => {
@@ -92,13 +121,13 @@ describe('update model', () => {
 		expect(copy.title).toBe("Update didn't finish");
 		expect(copy.headline).toBe('The update stopped before it finished.');
 		expect(copy.body).toBe('');
-		expect(copy.retryLabel).toBe('Try again');
+		expect(copy.retryLabel).toBe('Retry');
 		expect(copy.headline).not.toContain('Stored failure summary.');
 	});
 
 	it('claims nothing was changed only where nothing was touched', () => {
 		const untouched = ['disk_space', 'fetch_failed'] as const;
-		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', null] as const;
+		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', 'rolled_back', null] as const;
 		for (const code of untouched) expect(failureCopy(failure(code)).body).toContain('nothing was changed');
 		for (const code of touched) expect(failureCopy(failure(code)).body).not.toContain('nothing was changed');
 		expect(failureCopy(failure('build_failed')).body).toBe('CORSIA is still running the version it had.');
@@ -109,6 +138,11 @@ describe('update model', () => {
 		expect(mismatch.title).toBe("The update didn't finish");
 		expect(mismatch.headline).toBe('The update finished, but CORSIA still shows the old version.');
 		expect(mismatch.body).toBe('Versions differ.');
+		const rolledBack = failureCopy(failure('rolled_back'));
+		expect(rolledBack.title).toBe("Update didn't finish");
+		expect(rolledBack.headline).toBe("Couldn't start the new version.");
+		expect(rolledBack.body).toBe('CORSIA is still running the version it had.');
+		expect(rolledBack.retryLabel).toBe('Retry');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
 		expect(refused.title).toBe("Update didn't start");
 		expect(refused.headline).toBe('A restart is already in flight.');
@@ -120,15 +154,23 @@ describe('update model', () => {
 			...failure('disk_space'),
 			detail: JSON.stringify({ needed_bytes: 16_000_000_000, free_bytes: 4_000_000_000 }),
 		});
-		expect(copy.body).toContain('Needs 16 GB free; this Mac has 4 GB.');
+		expect(copy.body).toBe('Needs 16 GB free; this computer has 4 GB. Free up space, then select Retry. CORSIA kept running and nothing was changed.');
 		expect(copy.toastLine).toBe('Needs 12 GB more free space');
-		expect(copy.retryLabel).toBe('Try again after freeing space');
+		expect(copy.retryLabel).toBe('Retry');
+	});
+
+	it('gives the next step when disk figures are unavailable', () => {
+		const copy = failureCopy(failure('disk_space'));
+		expect(copy.body).toBe('Free up space, then select Retry. CORSIA kept running and nothing was changed.');
+		expect(copy.retryLabel).toBe('Retry');
 	});
 
 	it('holds queued input only after an update takes ownership of the drain', () => {
 		const operation: UpdateOperation = { operation_id: 'u1', kind: 'update', status: 'in_flight', phase: 'holding' };
 		expect(holdsNewWork(operation)).toBe(false);
 		expect(holdsNewWork({ ...operation, phase: 'draining' })).toBe(true);
+		expect(holdsNewWork({ ...operation, phase: 'verifying' })).toBe(false);
+		expect(stepMessage({ ...operation, phase: 'verifying' }, false)).toBe('Checking the new version');
 		expect(holdsNewWork({ ...operation, kind: 'restart', phase: 'draining' })).toBe(false);
 	});
 

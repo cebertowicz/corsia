@@ -194,15 +194,13 @@ describe('context sheet preview requests during a multi-step turn', () => {
 		});
 		flushSync();
 
-		// Before this change the four frames above made four overlapping reads
-		// (five GETs including the initial sheet read). The latest frame must win
-		// on screen while the one current request settles.
+		// Four frames share one in-flight read; the prior preview stays visible.
 		expect(fetches.calls()).toBe(2);
-		expect(host.querySelector('.ctx-headline')?.textContent).toContain('74%');
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
 
 		fetches.resolve(1, previewResponse('stale-preview'));
 		await vi.waitFor(() => expect(fetches.calls()).toBe(3));
-		expect(host.querySelector('.ctx-headline')?.textContent).toContain('74%');
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
 		fetches.resolve(2, previewResponse('complete-preview'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
 		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
@@ -214,8 +212,7 @@ describe('context sheet preview requests during a multi-step turn', () => {
 		mountControls();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(1));
 
-		// `stale` is not part of the preview identity. This used to leave the
-		// discarded request's loading entry behind forever.
+		// The unmeasured frame invalidates the in-flight read; it must be replaced.
 		recordMeasuredUsage('session-ctx', {
 			...measuredNoSnapshot,
 			token_usage_available: false,
@@ -256,13 +253,12 @@ describe('context sheet group expansion across a preview refresh', () => {
 		await loadFirstPreview(fetches);
 		await openGroup('Project');
 
-		// A turn completes: a measured reading without a snapshot replaces the
-		// preview until the next one lands.
+		// The previous preview stays visible until the next one lands.
 		setContextUsage('session-ctx', measuredNoSnapshot as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(groups()).toHaveLength(0);
-		expect(host.querySelector('.ctx-headline')?.textContent).toContain('72%');
+		expect(group('Project').open).toBe(true);
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
@@ -273,7 +269,7 @@ describe('context sheet group expansion across a preview refresh', () => {
 	it('renders source groups from a measured live payload without waiting for preview', async () => {
 		const fetches = deferredFetches();
 		mountControls();
-		await loadFirstPreview(fetches);
+		await vi.waitFor(() => expect(fetches.calls()).toBe(1));
 
 		recordMeasuredUsage('session-ctx', {
 			...measuredNoSnapshot,
@@ -292,6 +288,26 @@ describe('context sheet group expansion across a preview refresh', () => {
 		expect(group('Project').textContent).toContain('Live project');
 	});
 
+	it('keeps preview source groups while a live payload refreshes them', async () => {
+		const fetches = deferredFetches();
+		mountControls();
+		await loadFirstPreview(fetches);
+		recordMeasuredUsage('session-ctx', {
+			...measuredNoSnapshot,
+			context_snapshot: {
+				snapshot_id: 'measured-live',
+				source_inventory: [{
+					source_id: 'live-project', origin_section: 'project', label: 'Live project',
+					stable_reference: 'ctx://live', freshness: 'fresh', inclusion: 'included',
+					reason: 'live', owner_surface: 'runtime-details',
+				}],
+			},
+		} as never);
+		flushSync();
+		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
+		expect(group('Project').textContent).toContain('Project note');
+	});
+
 	it('keeps an opened group open when the reading is null and a checkpoint state holds the sheet', async () => {
 		const fetches = deferredFetches();
 		checkpointsByThread.set(new Map([['session-ctx', { checkpoints: [], loading: false, error: null }]]));
@@ -299,12 +315,12 @@ describe('context sheet group expansion across a preview refresh', () => {
 		await loadFirstPreview(fetches);
 		await openGroup('Project');
 
-		// The new owner has no usable reading yet, so the sheet has no usage.
+		// The previous preview remains visible while the new reading loads.
 		setContextUsage('session-ctx', foreignReading as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(host.querySelector('.ctx-headline')).toBeNull();
-		expect(groups()).toHaveLength(0);
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
+		expect(group('Project').open).toBe(true);
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
@@ -320,8 +336,8 @@ describe('context sheet group expansion across a preview refresh', () => {
 		setContextUsage('session-ctx', foreignReading as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(host.textContent).toContain('Loading context');
-		expect(groups()).toHaveLength(0);
+		expect(host.textContent).toContain('Updating');
+		expect(group('Project').open).toBe(true);
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
@@ -361,22 +377,12 @@ describe('context sheet group expansion resets', () => {
 		expect(groups().every((el) => !el.open)).toBe(true);
 	});
 
-	it('starts every group collapsed after a source detail visit', async () => {
+	it('renders a generated history source without a button', async () => {
 		const fetches = deferredFetches();
 		mountControls();
 		await loadFirstPreview(fetches);
-		await openGroup('Project');
 		await openGroup('History');
-
-		// The history row has no owner settings surface, so it opens its detail here.
-		host.querySelector<HTMLButtonElement>('button[aria-label$="for Recent history"]')?.click();
-		flushSync();
-		expect(host.querySelector('.context-source-back')).not.toBeNull();
-		expect(groups()).toHaveLength(0);
-
-		host.querySelector<HTMLButtonElement>('.context-source-back')?.click();
-		flushSync();
-		expect(groups().length).toBeGreaterThan(0);
-		expect(groups().every((el) => !el.open)).toBe(true);
+		expect(group('History').textContent).toContain('Recent history');
+		expect(group('History').querySelector('button.ctx-source-row')).toBeNull();
 	});
 });

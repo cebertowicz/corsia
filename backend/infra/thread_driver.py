@@ -67,7 +67,8 @@ def admit_input(
             intent=intent,
             message_id=message_id,
             metadata=stamped_human_metadata(
-                connection, role, message_id, metadata, viewing_document=viewing_document,
+                connection, role, message_id, metadata,
+                viewing_document=viewing_document, thread_id=thread_id,
             ),
             delivery_options=delivery_options,
             continuation=continuation,
@@ -104,6 +105,10 @@ def _parent_completion(
     ).fetchone()[0]
     if not parent or is_fenced(str(parent)):
         return None
+    from events.worker_starts import started_by
+
+    if started_by(db, child_id) is not None:
+        return None  # a rule-started worker answers its owner only as a worker.* event
     from plans.public import has_open_structured_attachment
 
     if has_open_structured_attachment(child_id, db=db):
@@ -116,18 +121,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    answer = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC,rowid DESC LIMIT 1",
-        (child_id, turn_id),
-    ).fetchone()
+    from infra.thread_confinement import ChildOutput
+
+    answer = ChildOutput.read(db, child_id).final_reply(db, turn_id=turn_id)
     # The wrapper carries the child's result. A Turn that produced none has
     # nothing to deliver, and waking the parent for it is a model call per
     # blank Turn — a legitimately unchanged wait would never be quiet.
     if answer is None:
         return None
-    content = f"{PARENT_COMPLETION_HEADING}\n\n{str(answer['content']).strip()}"
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))
@@ -293,14 +295,19 @@ def _claim_after_terminal(
         successor = None
         held_input = bool(idle_threads_with_held_input(connection, thread_id))
     else:
-        successor = start_idle_turn(
-            thread_id,
-            turn_id=successor_turn_id,
-            boot_epoch=boot_epoch,
-            started_at=ended_at,
-            db=connection,
-            hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-        )
+        from connections.fact_memo import fact_reads
+
+        # The claim updates bindings and holds, but not the shared account,
+        # catalog, or policy facts reused by its admission checks.
+        with fact_reads():
+            successor = start_idle_turn(
+                thread_id,
+                turn_id=successor_turn_id,
+                boot_epoch=boot_epoch,
+                started_at=ended_at,
+                db=connection,
+                hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+            )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,
         successor_claimed=isinstance(successor, ClaimedBatch),

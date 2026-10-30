@@ -85,7 +85,6 @@ async def launch_update(
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
-    await _monitor_restart_process(process, operation_id)
     return operation_id, process
 
 
@@ -190,8 +189,8 @@ async def _spawn_self_restart_after_response(
             operation_id=operation_id,
             allow_hard_cap=True,
         )
-        process = _spawn_self_restart(
-            own_port, redeploy, operation_id, caller_token
+        process = await asyncio.to_thread(
+            _spawn_self_restart, own_port, redeploy, operation_id, caller_token
         )
     except BaseException:
         await abort_restart_control(
@@ -342,7 +341,7 @@ async def system_update_status(
     result["server_time"] = datetime.now(timezone.utc).isoformat()
     from infra.settings import get_update_schedule
 
-    result["schedule"] = await asyncio.to_thread(get_update_schedule)
+    result["schedule"] = await run_in_db(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
         activated = await run_in_db(staged_update_activated, operation)

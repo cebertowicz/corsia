@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import tempfile
 from collections.abc import Mapping
@@ -13,11 +14,17 @@ from uuid import NAMESPACE_URL, uuid5
 
 from infra.fs_durability import fsync_directory as _fsync_directory
 
-APPLICATION_ID = "com.cebertowicz.corsia"
 # The packaged app's folder under Application Support. Held equal to the Rust
 # shell's APP_FOLDER and the launcher's CORSIA_APP_FOLDER by a parity test.
 APP_FOLDER = "CORSIA"
 STATE_DIRECTORY = "state"
+# A source install's state on macOS: a child of the app folder that is never
+# the app's own state root.
+SOURCE_STATE_DIRECTORY = "source-state"
+# The folder the app's state lived in before the move to CORSIA/state. A source
+# install still there is told how to move it; the startup heal repoints account
+# homes stored under it.
+LEGACY_FOLDER = "com.cebertowicz.corsia"
 BOOTSTRAP_VERSION = 2
 _UNSET = object()
 
@@ -121,93 +128,101 @@ def app_metadata_dir(home: Path | None = None) -> Path:
     return _resolved(home_dir / "Library" / "Application Support" / APP_FOLDER)
 
 
-SERVICE_FILE = "service.json"
-_SERVICE_FILE_KEYS = ("workspace", "port")
-
-
-def service_file_lines(path: Path) -> list[str]:
-    """Parse the app's ``service.json`` into ``key=value`` lines for shell callers.
-
-    The file is parsed, never executed. Only ``workspace`` (an absolute,
-    printable path) and ``port`` (1-65535) are honoured; anything else becomes
-    a ``note=`` line that never repeats a value. The bundle's launcher and its
-    lifecycle script both read the file through this one function.
-    """
-
-    def name(value: object) -> str:
-        text = str(value)
-        return text if text.isprintable() and len(text) <= 64 else "<unprintable name>"
-
-    try:
-        with open(path, "rb") as handle:
-            data = json.loads(handle.read(65536).decode("utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-    except Exception as error:
-        return [f"note={SERVICE_FILE} unreadable: {name(type(error).__name__)}"]
-    lines = [
-        f"note={SERVICE_FILE}: ignoring unsupported key {name(key)}"
-        for key in data
-        if key not in _SERVICE_FILE_KEYS
-    ]
-    workspace = data.get("workspace")
-    if isinstance(workspace, str) and workspace.startswith("/") and workspace.isprintable():
-        lines.append(f"workspace={workspace}")
-    elif "workspace" in data:
-        lines.append(f"note={SERVICE_FILE}: ignoring an invalid workspace value")
-    port = data.get("port")
-    if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
-        lines.append(f"port={port}")
-    elif "port" in data:
-        lines.append(f"note={SERVICE_FILE}: ignoring an invalid port value")
-    return lines
-
-
 def default_state_root(
     *,
     env: Mapping[str, str] | None = None,
     platform: str | None = None,
     home: Path | None = None,
-    application_id: str | None = None,
     app_bundle: Path | None | object = _UNSET,
 ) -> Path:
     """Return the configured or platform-default operational state root.
 
-    ``CORSIA_STATE_DIR`` is an exact root override. Otherwise the root is the
-    ``state`` child of an application folder: on macOS
-    ``~/Library/Application Support/<folder>/state``, where the folder is
-    ``CORSIA`` for the packaged app and the application id for a source
-    install, so a missed adoption check never opens the other install's data.
-    Windows and other platforms use LocalAppData and the XDG state directory
-    (falling back to ``~/.local/state``).
+    ``CORSIA_STATE_DIR`` is an exact root override. On macOS the packaged app
+    uses ``~/Library/Application Support/CORSIA/state`` and a source install
+    ``CORSIA/source-state``, so a missed adoption check never opens the other
+    install's data. Windows uses ``LocalAppData/CORSIA/state`` and other
+    platforms ``<XDG state>/corsia/state`` (``~/.local/state`` by default).
+
+    A source install whose new root has no database while the pre-release
+    legacy root has one exits with the command that moves it: starting on an
+    empty root would look like data loss. The check runs here, before anything
+    can create the new root.
     """
     environment = os.environ if env is None else env
     platform_name = sys.platform if platform is None else platform
     home_dir = Path.home() if home is None else Path(home)
-    app_id = (
-        application_id or environment.get("CORSIA_APPLICATION_ID") or APPLICATION_ID
-    )
 
     override = environment.get("CORSIA_STATE_DIR")
     if override:
         return _resolved(override)
 
+    base = _app_data_base(environment, platform_name, home_dir)
     if platform_name == "darwin":
         bundle = app_bundle_root() if app_bundle is _UNSET else app_bundle
-        folder = APP_FOLDER if bundle is not None else app_id
-        return _resolved(
-            home_dir / "Library" / "Application Support" / folder / STATE_DIRECTORY
-        )
+        if bundle is not None:
+            return _resolved(base / APP_FOLDER / STATE_DIRECTORY)
+        root = base / APP_FOLDER / SOURCE_STATE_DIRECTORY
     elif platform_name.startswith("win"):
-        local_app_data = environment.get("LOCALAPPDATA")
-        base = (
-            Path(local_app_data) if local_app_data else home_dir / "AppData" / "Local"
-        )
+        root = base / APP_FOLDER / STATE_DIRECTORY
     else:
-        xdg_state = environment.get("XDG_STATE_HOME")
-        base = Path(xdg_state) if xdg_state else home_dir / ".local" / "state"
+        root = base / APP_FOLDER.lower() / STATE_DIRECTORY
 
-    return _resolved(base / app_id / STATE_DIRECTORY)
+    root = _resolved(root)
+    _refuse_legacy_only(
+        root, legacy_state_root(env=environment, platform=platform_name, home=home_dir),
+        posix=platform_name != "win32",
+    )
+    return root
+
+
+def _app_data_base(environment: Mapping[str, str], platform_name: str, home_dir: Path) -> Path:
+    """Return the platform folder that holds the app folder and the legacy folder."""
+    if platform_name == "darwin":
+        return home_dir / "Library" / "Application Support"
+    if platform_name.startswith("win"):
+        local_app_data = environment.get("LOCALAPPDATA")
+        return Path(local_app_data) if local_app_data else home_dir / "AppData" / "Local"
+    xdg_state = environment.get("XDG_STATE_HOME")
+    return Path(xdg_state) if xdg_state else home_dir / ".local" / "state"
+
+
+def legacy_state_root(
+    *,
+    env: Mapping[str, str] | None = None,
+    platform: str | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Return the pre-release state root a data move leaves behind."""
+    environment = os.environ if env is None else env
+    platform_name = sys.platform if platform is None else platform
+    home_dir = Path.home() if home is None else Path(home)
+    return _resolved(_app_data_base(environment, platform_name, home_dir) / LEGACY_FOLDER / STATE_DIRECTORY)
+
+
+def _refuse_legacy_only(root: Path, legacy: Path, *, posix: bool) -> None:
+    """Exit when a source install's data is still only in the legacy root."""
+    if (root / "corsia.db").exists() or not (legacy / "corsia.db").is_file():
+        return
+    if root.exists() and any(root.iterdir()):
+        raise SystemExit(
+            f"CORSIA found data in two folders, {legacy} and {root}, so it opened neither. "
+            "Keep the folder you want, move the other one somewhere else, "
+            "then start CORSIA again."
+        )
+    if not posix:
+        first = "Remove the empty folder at the new place first, then move" if root.exists() else "Move"
+        raise SystemExit(
+            f"CORSIA's data is still in its old folder, {legacy}. {first} that folder to {root}, "
+            "then start CORSIA again."
+        )
+    # An empty new root would make mv put the old folder inside it.
+    clear = f"rmdir {shlex.quote(str(root))} && " if root.exists() else ""
+    raise SystemExit(
+        f"CORSIA's data is still in its old folder, {legacy}. To move it, run:\n"
+        f"  {clear}mkdir -p {shlex.quote(str(root.parent))} "
+        f"&& mv {shlex.quote(str(legacy))} {shlex.quote(str(root))}\n"
+        "then start CORSIA again."
+    )
 
 
 def runtime_db_paths(state_root: Path) -> tuple[Path, Path, Path]:

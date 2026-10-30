@@ -72,6 +72,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import infra.startup_progress as startup_progress
 from infra.checkpoint_schema import CHECKPOINT_ENTRY_SEARCH_SCHEMA_SQL
 from infra.database import write_transaction
 from infra.checkpoint_entry_index import backfill_checkpoint_entry_search
@@ -179,6 +180,49 @@ from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to
 from infra.migration_120_to_121_action_drafts import migrate_120_to_121
 from infra.migration_121_to_122_email_screens import migrate_121_to_122
 from infra.migration_122_to_123_connected_apps import migrate_122_to_123
+from infra.migration_123_to_124_drop_title_source import migrate_123_to_124
+from infra.migration_124_to_125_reviewer_gate_approval import migrate_124_to_125
+from infra.migration_125_to_126_presence_focus import migrate_125_to_126
+from infra.migration_126_to_127_user_comments_index import migrate_126_to_127
+from infra.migration_127_to_128_measure_registry import migrate_127_to_128
+from infra.migration_128_to_129_connected_accounts import migrate_128_to_129
+from infra.migration_129_to_130_project_inference_policy import migrate_129_to_130
+from infra.migration_130_to_131_local_only_threads import migrate_130_to_131
+from infra.migration_131_to_132_microsoft_accounts import migrate_131_to_132
+from infra.migration_132_to_133_review_forks import migrate_132_to_133
+from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_134
+from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
+from infra.migration_135_to_136_event_rules import migrate_135_to_136
+from infra.migration_136_to_137_event_intake import migrate_136_to_137
+from infra.migration_137_to_138_plan_intent import migrate_137_to_138
+from infra.migration_138_to_139_rule_runs import migrate_138_to_139
+from infra.migration_139_to_140_review_requesting_node import migrate_139_to_140
+from infra.migration_140_to_141_worker_starts import migrate_140_to_141
+from infra.migration_141_to_142_doc_comment_reply_roots import migrate_141_to_142
+from infra.migration_142_to_143_decision_source_index import migrate_142_to_143
+from infra.migration_143_to_144_sent_back_corrections import migrate_143_to_144
+from infra.migration_144_to_145_mail_host_endpoints import migrate_144_to_145
+from infra.migration_145_to_146_doc_feedback_delivery_policy import migrate_145_to_146
+from infra.migration_146_to_147_measure_breaks import migrate_146_to_147
+from infra.migration_147_to_148_correction_learning import migrate_147_to_148
+from infra.migration_148_to_149_chat_comment_answers import migrate_148_to_149
+from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
+from infra.migration_150_to_151_self_caught_corrections import migrate_150_to_151
+from infra.migration_151_to_152_person_step import migrate_151_to_152
+from infra.migration_152_to_153_observe_rules import migrate_152_to_153
+from infra.migration_153_to_154_retired_worker_artifacts import migrate_153_to_154
+from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
+from infra.migration_155_to_156_chat_comments import migrate_155_to_156
+from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
+from infra.migration_157_to_158_error_cause_kinds import migrate_157_to_158
+from infra.migration_158_to_159_unconfine_main_agents import migrate_158_to_159
+from infra.migration_159_to_160_untrusted_confinement import migrate_159_to_160
+from infra.migration_160_to_161_self_caused import migrate_160_to_161
+from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
+from infra.migration_162_to_163_coordination_titles import migrate_162_to_163
+from infra.migration_163_to_164_chat_comment_roots import migrate_163_to_164
+from infra.migration_164_to_165_version_attr import migrate_164_to_165
+from infra.migration_165_to_166_retried_comments import migrate_165_to_166
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -188,6 +232,10 @@ log = logging.getLogger(__name__)
 #: reads committed state alongside the migration's own write lock, so this is a
 #: guard against an unrelated writer, not part of the migration's own timing.
 _BACKUP_TIMEOUT_SECONDS = 30.0
+
+#: Pages the pre-migration backup copies per step, 64 MiB at the default page
+#: size: a fraction of a second each, so its progress stays current.
+_BACKUP_STEP_PAGES = 16_384
 
 #: How much free space the pre-migration backup requires, as a multiple of the
 #: database size. The copy is byte-for-byte, so 1.0 is the floor; the margin
@@ -786,6 +834,49 @@ MIGRATIONS[119] = migrate_119_to_120
 MIGRATIONS[120] = migrate_120_to_121
 MIGRATIONS[121] = migrate_121_to_122
 MIGRATIONS[122] = migrate_122_to_123
+MIGRATIONS[123] = migrate_123_to_124
+MIGRATIONS[124] = migrate_124_to_125
+MIGRATIONS[125] = migrate_125_to_126
+MIGRATIONS[126] = migrate_126_to_127
+MIGRATIONS[127] = migrate_127_to_128
+MIGRATIONS[128] = migrate_128_to_129
+MIGRATIONS[129] = migrate_129_to_130
+MIGRATIONS[130] = migrate_130_to_131
+MIGRATIONS[131] = migrate_131_to_132
+MIGRATIONS[132] = migrate_132_to_133
+MIGRATIONS[133] = migrate_133_to_134
+MIGRATIONS[134] = migrate_134_to_135
+MIGRATIONS[135] = migrate_135_to_136
+MIGRATIONS[136] = migrate_136_to_137
+MIGRATIONS[137] = migrate_137_to_138
+MIGRATIONS[138] = migrate_138_to_139
+MIGRATIONS[139] = migrate_139_to_140
+MIGRATIONS[140] = migrate_140_to_141
+MIGRATIONS[141] = migrate_141_to_142
+MIGRATIONS[142] = migrate_142_to_143
+MIGRATIONS[143] = migrate_143_to_144
+MIGRATIONS[144] = migrate_144_to_145
+MIGRATIONS[145] = migrate_145_to_146
+MIGRATIONS[146] = migrate_146_to_147
+MIGRATIONS[147] = migrate_147_to_148
+MIGRATIONS[148] = migrate_148_to_149
+MIGRATIONS[149] = migrate_149_to_150
+MIGRATIONS[150] = migrate_150_to_151
+MIGRATIONS[151] = migrate_151_to_152
+MIGRATIONS[152] = migrate_152_to_153
+MIGRATIONS[153] = migrate_153_to_154
+MIGRATIONS[154] = migrate_154_to_155
+MIGRATIONS[155] = migrate_155_to_156
+MIGRATIONS[156] = migrate_156_to_157
+MIGRATIONS[157] = migrate_157_to_158
+MIGRATIONS[158] = migrate_158_to_159
+MIGRATIONS[159] = migrate_159_to_160
+MIGRATIONS[160] = migrate_160_to_161
+MIGRATIONS[161] = migrate_161_to_162
+MIGRATIONS[162] = migrate_162_to_163
+MIGRATIONS[163] = migrate_163_to_164
+MIGRATIONS[164] = migrate_164_to_165
+MIGRATIONS[165] = migrate_165_to_166
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -814,7 +905,7 @@ def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
     """Share the preflight and migration room calculation so their decisions agree."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
-    return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
+    return required, shutil.disk_usage(source.parent).free, pre_migration_backups(source)[:-1]
 
 
 def backup_room(source: Path) -> tuple[int, int]:
@@ -854,7 +945,7 @@ def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
     return required, available
 
 
-def _pre_migration_backups(source: Path) -> list[Path]:
+def pre_migration_backups(source: Path) -> list[Path]:
     """This database's pre-migration backups, oldest first.
 
     Matches only ``<db name>.pre-migration-v<digits>-<UTC stamp>.bak`` beside
@@ -896,7 +987,7 @@ def _delete_backups(victims: list[Path], reason: str) -> None:
 
 def _prune_backups(source: Path, keep_path: Path | None) -> None:
     """After a verified migration, keep the newest N backups and drop the rest."""
-    backups = _pre_migration_backups(source)
+    backups = pre_migration_backups(source)
     survivors = backups[-_PRE_MIGRATION_BACKUPS_KEEP:]
     victims = [path for path in backups if path not in survivors and path != keep_path]
     _delete_backups(victims, "retention after migration")
@@ -960,7 +1051,13 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     try:
         backup = sqlite3.connect(target)
         try:
-            reader.backup(backup)
+            # Stepwise so the copy publishes its progress. Each step takes and
+            # drops its own read lock, which would restart the copy if another
+            # connection committed in between; none can, because the caller
+            # holds the write lock, so the result is the same single snapshot.
+            reader.backup(
+                backup, pages=_BACKUP_STEP_PAGES, progress=startup_progress.backup_step,
+            )
         finally:
             backup.close()
     except BaseException:
@@ -1033,16 +1130,17 @@ def _changed_tables(
 def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
     """Check the migrated database inside the transaction, before commit.
 
-    Foreign keys and page structure are checked across the whole database;
+    Foreign keys are checked across the whole database; page structure and
     row-to-index agreement only for tables the migration created or rebuilt.
     Data-only steps rely on SQLite maintaining their indexes.
+
+    No whole-database ``quick_check``: its b-tree walk is one VM operation, so
+    on a 25 GB database it ran 61 s without a progress callback, past the
+    desktop's 60 s startup stall, while checking pages no step touched.
     """
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
-    quick = conn.execute("PRAGMA quick_check").fetchone()[0]
-    if quick != "ok":
-        raise MigrationError(f"quick_check failed after migration: {quick}")
     for table in changed_tables:
         quoted_table = table.replace('"', '""')
         integrity = conn.execute(
@@ -1100,6 +1198,9 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 # bound copies across boots: a crash-restart loop is a fresh
                 # uncontested winner every time, which is why `require_backup_room`
                 # reserves space the copy may not consume.
+                startup_progress.mark(
+                    "backing_up", from_version=locked_version, to_version=target_version,
+                )
                 backup_path = _write_backup(conn, locked_version)
                 log.info(
                     "Migrating schema %d -> %d (backup: %s)",
@@ -1107,11 +1208,20 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 )
                 from plans.public import sanctioned_plan_write  # lazy: plans imports infra
 
+                steps = _plan(locked_version, target_version)
+                startup_progress.mark("migrating", done=0, total=len(steps))
+                # Long statements and loops of short ones both reach the
+                # handler, so a step that is still working keeps publishing.
+                # Pooled connections already carry it; this covers a connection
+                # opened before startup began publishing.
+                startup_progress.watch(conn)
                 before_schema = _schema_snapshot(conn)
-                for version in _plan(locked_version, target_version):
+                for done, version in enumerate(steps, start=1):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
+                    startup_progress.mark("migrating", done=done, total=len(steps))
                 conn.execute(f"PRAGMA user_version={target_version}")
+                startup_progress.mark("validating")
                 _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from

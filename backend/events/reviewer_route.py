@@ -17,6 +17,7 @@ REVIEWER_EVENTS = frozenset(
 GATE_TRIGGER_EVENTS = frozenset({
     "webhook.github.check_suite_completed",
     "webhook.github.pr_ready_for_review",
+    "webhook.github.pr_labeled",
 })
 
 
@@ -66,6 +67,9 @@ def check_gate_on_trigger(
     if internal_event == "webhook.github.pr_ready_for_review":
         return _check_ready_event(internal_event, payload, loop)
 
+    if internal_event == "webhook.github.pr_labeled":
+        return _check_label_event(internal_event, payload, loop)
+
     repo = (payload.get("repository") or {}).get("full_name", "")
     suite = payload.get("check_suite") or {}
     head_sha = suite.get("head_sha", "")
@@ -114,16 +118,8 @@ def check_gate_on_trigger(
     return True
 
 
-def _check_ready_event(
-    internal_event: str,
-    payload: dict[str, Any],
-    loop: asyncio.AbstractEventLoop | None,
-) -> bool:
-    """Validate ready-event identity before invoking the shared gate."""
-    repo = (payload.get("repository") or {}).get("full_name", "")
-    pr = payload.get("pull_request") or {}
-    head_sha = (pr.get("head") or {}).get("sha", "")
-    pr_number = pr.get("number")
+def _missing_identity(repo: Any, pr_number: Any, head_sha: Any) -> list[str]:
+    """Name the identity fields a pull request event lacks."""
     missing_fields = []
     if not isinstance(repo, str) or not repo:
         missing_fields.append("repository.full_name")
@@ -135,7 +131,20 @@ def _check_ready_event(
         missing_fields.append("pull_request.number")
     if not isinstance(head_sha, str) or not head_sha:
         missing_fields.append("pull_request.head.sha")
+    return missing_fields
 
+
+def _check_ready_event(
+    internal_event: str,
+    payload: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None,
+) -> bool:
+    """Validate ready-event identity before invoking the shared gate."""
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    pr = payload.get("pull_request") or {}
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    pr_number = pr.get("number")
+    missing_fields = _missing_identity(repo, pr_number, head_sha)
     action = payload.get("action")
     if missing_fields:
         _report_invalid_ready_event(
@@ -153,6 +162,62 @@ def _check_ready_event(
         loop=loop,
     )
     return True
+
+
+def _check_label_event(
+    internal_event: str,
+    payload: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None,
+) -> bool:
+    """Treat the review label as a request to approve the head named in the payload.
+
+    The label is only the trigger: the fork hold approves the head the label
+    was added on, and only for a sender with write access.
+    """
+    from reviewer.reviewer_categories import LABEL_REVIEW
+
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    pr = payload.get("pull_request") or {}
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    pr_number = pr.get("number")
+    missing_fields = _missing_identity(repo, pr_number, head_sha)
+    if missing_fields:
+        _report_invalid_label_event(repo, pr_number, head_sha, missing_fields)
+        return False
+    if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
+        return True
+
+    from events.connectors.github_reviewer_fork_hold import approve_labeled_head, payload_is_fork
+
+    if not payload_is_fork(payload):
+        return True
+    approve_labeled_head(
+        repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
+        internal_event, loop,
+    )
+    return True
+
+
+def _report_invalid_label_event(
+    repo: str,
+    pr_number: Any,
+    head_sha: Any,
+    missing_fields: list[str],
+) -> None:
+    """Emit a diagnostic for a review-label event with incomplete identity."""
+    logger.warning(
+        "reviewer-route: review label event unusable missing_fields={}", missing_fields,
+    )
+    emit_product_event(
+        "reviewer_gate",
+        "label_event_invalid",
+        properties={
+            "repo": repo or None,
+            "pr_number": pr_number,
+            "head_sha": head_sha[:8] if isinstance(head_sha, str) else None,
+            "missing_fields": missing_fields,
+        },
+    )
 
 
 def _report_invalid_ready_event(

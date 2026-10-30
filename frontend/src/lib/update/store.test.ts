@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
-import { activeThreadId } from '$lib/stores/threads';
-import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest, settingsReturnThread } from '$lib/stores/settingsNavigation';
+import { settingsNavigation } from '$lib/stores/settingsNavigation';
 import {
 	loadUpdateStatus,
 	resetUpdateStoreForTests,
@@ -15,10 +14,11 @@ import {
 	updateStarting,
 	updateProgressMinimized,
 	updateStatus,
+	updateToastSuppressed,
 	updateUnreachable,
 } from './store';
 
-const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming') => ({
+const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | 'verifying') => ({
 	branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1, available: true,
 	checked_at: 1, error: null, current_version: '2026.10.12', target_version: '2026.10.13',
 	drain_cap_seconds: 300, usual_seconds: null, server_time: '2026-10-13T22:00:00Z',
@@ -86,7 +86,7 @@ describe('update store', () => {
 
 		expect(await saveUpdateSchedule({ automatic: true })).toBe(false);
 		const failure = get(toasts).find((toast) => toast.message === "Couldn't save the schedule");
-		expect(failure?.action?.label).toBe('Try again');
+		expect(failure?.action?.label).toBe('Retry');
 	});
 
 	it('adopts the operation while the start request is still pending', async () => {
@@ -98,7 +98,7 @@ describe('update store', () => {
 			}
 			return { ok: true, json: async () => running('holding') };
 		}));
-		const opened = get(settingsOpenRequest);
+		const opened = get(settingsNavigation).openRequest;
 		const started = startUpdate();
 		expect(get(updateStarting)).toBe(true);
 		await vi.advanceTimersByTimeAsync(1_100);
@@ -108,10 +108,68 @@ describe('update store', () => {
 		await started;
 		expect(get(updateStarting)).toBe(false);
 		// Progress is the pinned toast alone: starting opens no sheet, panel or Settings.
-		expect(get(settingsOpenRequest)).toBe(opened);
+		expect(get(settingsNavigation).openRequest).toBe(opened);
 	});
 
-	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming'] as const)(
+	it('adopts a new in-flight update when the start request loses its connection', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => running('holding') };
+		}));
+
+		await startUpdate();
+
+		expect(get(updateOperation)?.operation_id).toBe('update-1');
+		expect(get(updateInFlight)).toBe(true);
+		expect(get(updateFailureVerdict)).toBeNull();
+		expect(pinned().filter((toast) => toast.type === 'error')).toEqual([]);
+	});
+
+	it('keeps the error toast when a failed start has no new operation', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => ({ ...running('holding'), operation: null }) };
+		}));
+
+		await startUpdate();
+
+		expect(get(updateFailureVerdict)?.kind).toBe('refused');
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Update didn't start" })]);
+	});
+
+	it('does not adopt an operation that was already in flight before the click', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => running('holding') };
+		}));
+		await loadUpdateStatus();
+
+		await startUpdate();
+
+		expect(get(updateOperation)?.operation_id).toBe('update-1');
+		expect(get(updateFailureVerdict)?.kind).toBe('refused');
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Update didn't start" })]);
+	});
+
+	it('refreshes a completed update into the restarted server status', async () => {
+		const stale = { ...completed(), available: true, current_sha: 'old', remote_sha: 'installed', commits_behind: 1 };
+		const current = { ...stale, available: false, current_sha: 'installed', remote_sha: 'installed', commits_behind: 0 };
+		let statusReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.startsWith('/api/version')) return { ok: true, json: async () => sameVersions };
+			if (url.includes('/outcome-seen')) return { ok: true, json: async () => ({}) };
+			statusReads += 1;
+			return { ok: true, json: async () => (statusReads === 1 ? stale : current) };
+		}));
+
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+
+		expect(get(updateStatus)?.available).toBe(false);
+	});
+
+
+	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming', 'verifying'] as const)(
 		'adopts the durable %s phase on load', async (phase) => {
 			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running(phase) })));
 			await loadUpdateStatus();
@@ -153,20 +211,45 @@ describe('update store', () => {
 		expect(notice?.pinned).toBeUndefined();
 	});
 
-	it('opens Settings at the Updates card from the notice and remembers the chat to return to', async () => {
+	it('holds the update-ready notice while System Updates is visible, then shows it elsewhere', async () => {
 		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
-		activeThreadId.set('thread-1');
-		const opened = get(settingsOpenRequest);
+		updateToastSuppressed.set(true);
+		await loadUpdateStatus();
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
+		updateToastSuppressed.set(false);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(true);
+	});
+
+	it('restores a ready notice after System hides it, but not after the person opens it', async () => {
+		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
+		await loadUpdateStatus();
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(true);
+
+		updateToastSuppressed.set(true);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
+		updateToastSuppressed.set(false);
+		const restored = get(toasts).find((toast) => toast.message === 'Update ready. Open Updates')!;
+		expect(restored).toBeDefined();
+
+		await toasts.runAction(restored.id);
+		updateToastSuppressed.set(true);
+		updateToastSuppressed.set(false);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
+	});
+
+	it('opens Settings at the Updates card from the notice', async () => {
+		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
+		const opened = get(settingsNavigation).openRequest;
 		await loadUpdateStatus();
 		const notice = get(toasts).find((toast) => toast.button)!;
 		await toasts.runAction(notice.id);
-		expect(get(settingsActiveSection)).toBe('system');
-		expect(get(settingsAnchorRequest)).toBe('update');
-		expect(get(settingsOpenRequest)).toBe(opened + 1);
-		expect(get(settingsReturnThread)).toBe('thread-1');
+		expect(get(settingsNavigation).section).toBe('system');
+		expect(get(settingsNavigation).anchor).toBe('update');
+		expect(get(settingsNavigation).openRequest).toBe(opened + 1);
 		expect(get(toasts).some((toast) => toast.button)).toBe(false);
-		activeThreadId.set(null);
 	});
 
 	it('does not announce a version while an update is already running', async () => {
@@ -187,7 +270,7 @@ describe('update store', () => {
 		expect(toast?.action?.label).toBe('Details');
 		await toasts.runAction(toast!.id);
 		expect(get(toasts)).toEqual([]);
-		expect(get(settingsAnchorRequest)).toBe('update');
+		expect(get(settingsNavigation).anchor).toBe('update');
 
 		await loadUpdateStatus();
 		expect(get(toasts)).toEqual([]);
@@ -359,7 +442,7 @@ describe('update store', () => {
 			await loadUpdateStatus();
 			await vi.advanceTimersByTimeAsync(10);
 			await toasts.runAction(pinned()[0].id);
-			expect(get(settingsAnchorRequest)).toBe('update');
+			expect(get(settingsNavigation).anchor).toBe('update');
 		});
 	});
 

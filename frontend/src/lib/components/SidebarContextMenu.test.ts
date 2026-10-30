@@ -62,10 +62,13 @@ describe('SidebarContextMenu variants', () => {
 		]);
 	});
 
-	it('offers only the valid unread action for the Conductor', () => {
+	it('offers the Conductor the Agent items that apply to it, never an empty menu', () => {
 		render('conductor', true);
+		expect(labels()).toEqual(['Mark read', 'Agent settings']);
 
-		expect(labels()).toEqual(['Mark read']);
+		if (component) unmount(component);
+		render('conductor', false, false);
+		expect(labels()).toEqual(['Agent settings']);
 	});
 
 	it('adds unread control to the existing conversation actions', () => {

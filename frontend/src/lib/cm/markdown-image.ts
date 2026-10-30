@@ -1,6 +1,6 @@
 import { Decoration, type DecorationSet, EditorView, keymap, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, Prec, RangeSet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
+import { Facet, Prec, RangeSet, StateEffect, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
 import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
@@ -12,6 +12,8 @@ export interface ImageContext {
 	docPath: string | null;
 	projectId: string | null;
 	token: string;
+	/** Stable while this document view is open, new on its next mount. */
+	imageCacheKey?: string;
 }
 
 /** Resolves lazily so a widget built later sees the editor's current document and sign-in. */
@@ -62,12 +64,29 @@ export function renderableImage(state: EditorState, node: SyntaxNode): boolean {
 }
 
 /**
+ * Draws a workspace image into `wrap`, as the document does standalone or in a table cell. A failed load shows the
+ * alt text and why, from the server's answer to the same request: the file is missing (404), refused as outside this
+ * scope (400) or not an image (415); any other status, or no answer at all, is a plain failure to load.
+ */
+export function drawImage(wrap: HTMLElement, alt: string, src: string): HTMLElement {
+	const img = document.createElement('img');
+	img.alt = alt;
+	img.decoding = 'async';
+	img.addEventListener('error', async () => {
+		const reason = await imageFailureReason(src);
+		const note = document.createElement('div');
+		note.className = 'cm-md-image-note';
+		note.textContent = alt ? `${alt} · ${reason}` : reason;
+		wrap.replaceChildren(note);
+	});
+	img.src = src;
+	wrap.append(img);
+	return wrap;
+}
+
+/**
  * The image, drawn below its line, or in place of the line when the image is all it holds. It carries the
  * range of its markdown (`data-from`, `data-to`) so a click can select it whole, and shows when it is selected.
- * A failed load shows the alt text and why, from the
- * server's answer to the same request: the file is missing (404), refused as outside this
- * scope (400) or not an image (415); any other status, or no answer at all, is a plain
- * failure to load.
  */
 class ImageWidget extends WidgetType {
 	constructor(readonly alt: string, readonly src: string, readonly from: number, readonly to: number, readonly selected: boolean) { super(); }
@@ -91,20 +110,7 @@ class ImageWidget extends WidgetType {
 		wrap.dataset.src = this.src;
 		wrap.dataset.alt = this.alt;
 		this.mark(wrap);
-		const img = document.createElement('img');
-		img.alt = this.alt;
-		img.decoding = 'async';
-		img.addEventListener('error', () => void this.showFailure(wrap));
-		img.src = this.src;
-		wrap.append(img);
-		return wrap;
-	}
-	private async showFailure(wrap: HTMLElement) {
-		const reason = await imageFailureReason(this.src);
-		const note = document.createElement('div');
-		note.className = 'cm-md-image-note';
-		note.textContent = this.alt ? `${this.alt} · ${reason}` : reason;
-		wrap.replaceChildren(note);
+		return drawImage(wrap, this.alt, this.src);
 	}
 	ignoreEvent() { return false; }
 }
@@ -117,6 +123,8 @@ interface Images {
 
 const NONE: Images = { decorations: Decoration.none, atomic: Decoration.none };
 const UNIT = Decoration.mark({});
+/** Rebuild document-image widgets after their open view receives a file-change hint. */
+export const refreshMarkdownImages = StateEffect.define<void>();
 
 /**
  * An image's markdown never shows. A line holding only the image is replaced by it, so no empty line is left
@@ -135,7 +143,7 @@ function buildImages(state: EditorState): Images {
 			const { alt, path } = imageSource(node.node, doc, context.docPath);
 			if (path === null) return false;
 			const line = doc.lineAt(node.from);
-			const src = imageContentUrl({ path, projectId: context.projectId, token: context.token });
+			const src = imageContentUrl({ path, projectId: context.projectId, token: context.token, imageCacheKey: context.imageCacheKey });
 			const selected = selection.ranges.some((r) => !r.empty && r.from <= node.from && r.to >= node.to);
 			const widget = new ImageWidget(alt, src, node.from, node.to, selected);
 			if (line.text.trim() === doc.sliceString(node.from, node.to)) {
@@ -158,7 +166,8 @@ export const markdownImages = StateField.define<Images>({
 	create: buildImages,
 	update(images, tr) {
 		const selectionMoved = tr.selection !== undefined && images.atomic.size > 0;
-		if (tr.docChanged || selectionMoved || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImages(tr.state);
+		const imageRefresh = tr.effects.some((effect) => effect.is(refreshMarkdownImages));
+		if (tr.docChanged || selectionMoved || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImages(tr.state);
 		return images;
 	},
 	provide: (f) => [

@@ -57,9 +57,10 @@ def _delete_one_thread_rows(
     """Delete one already-quiesced thread and its thread-scoped state.
 
     Delete removes at least what purge removes: the checkpoint narrative, the
-    entry index derived from it, and the continuity store, through the same
-    helpers retention uses (#2291).
+    entry index derived from it, the continuity store, and the chat-comment
+    answer index and read stamps, through the same helpers retention uses (#2291).
     """
+    from infra.chat_comment_answers import delete_thread_chat_comment_index_rows
     from infra.checkpoint_entry_index import delete_thread_checkpoints
     from infra.continuity_store import delete_thread_continuity
     from infra.passive_changes import append_agent_roster_transition
@@ -76,8 +77,17 @@ def _delete_one_thread_rows(
     # claiming runs for a thread that no longer exists, and its row would
     # block the thread's own deletion.
     db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
+    # Its event rules go too, with every outcome naming them or the thread.
+    thread_rules = 'SELECT id FROM event_rules WHERE created_by = ? OR "to" = \'thread:\' || ?'
+    db.execute(
+        f"DELETE FROM event_route_decisions WHERE thread_id = ? OR rule_id IN ({thread_rules})",
+        (thread_id, thread_id, thread_id),
+    )
+    db.execute(f"DELETE FROM event_rules WHERE id IN ({thread_rules})", (thread_id, thread_id))
+    db.execute("DELETE FROM self_caused_events WHERE thread_id = ?", (thread_id,))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
+    delete_thread_chat_comment_index_rows(db, thread_id)
     delete_thread_turns(db, thread_id)
     delete_thread_presence(db, thread_id)
     public.delete_pane_view(db, thread_id)

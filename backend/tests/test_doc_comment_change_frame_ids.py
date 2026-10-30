@@ -69,7 +69,7 @@ async def test_user_comments_replies_suggestions_and_updates_name_nothing(
         body="Reply.", parent_id=root["id"], _thread_id=reviewer,
     ))
     assert reply["comment"]["parent_id"] == root["id"]
-    assert sent == [plain]
+    assert sent == [{**plain, "reply_attention_changed": True}]
 
     del sent[:]
     await _suggest(reviewer, doc, replacement="Another tail sentence")

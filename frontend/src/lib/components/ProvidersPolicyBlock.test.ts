@@ -38,15 +38,16 @@ describe('ProvidersPolicyBlock', () => {
 		let resolve!: (value: unknown) => void;
 		vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
 			if (input.toString().startsWith('/api/vendor-accounts')) return Promise.resolve({ ok: true, json: async () => ({ accounts: [] }) });
+			if (input.toString().startsWith('/api/projects/project/cloud-models-off')) return Promise.resolve({ ok: true, json: async () => ({ cloud_models_off: false }) });
 			return new Promise((done) => { resolve = done; });
 		}));
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 		expect(host.textContent).toContain('Loading providers…');
 
 		resolve({ ok: true, json: async () => ({ scope: 'workspace', providers: [] }) });
 		await vi.waitFor(() => expect(host.textContent).not.toContain('Loading providers…'));
-		expect(host.textContent).toContain('Providers');
+		expect(host.textContent).toContain('Accounts and rollover');
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
 
@@ -63,13 +64,98 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project', onSignIn: openProviders } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values."));
+		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's."));
 		expect(host.textContent).toContain('No Claude Code account signed in');
 		const signIn = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in') as HTMLButtonElement;
 		signIn.click();
 		expect(openProviders).toHaveBeenCalledWith('claude-code');
 		expect(host.textContent).toContain('Pro');
-		expect(host.querySelector('[aria-label="Pro"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Use Pro"]')).not.toBeNull();
+	});
+
+	it('uses the same workspace-setting description while inheriting', async () => {
+		stubPolicy({ scope: 'project', use_workspace: true, override_revision: 1, providers: [] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Use the workspace's account order and rollover."));
+		expect(host.textContent).not.toContain('Turning this on replaces');
+	});
+
+	it('explains what turning workspace settings back on replaces, only while the project has its own', async () => {
+		stubPolicy({ scope: 'project', use_workspace: false, override_revision: 1, providers: [] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values."));
+		expect(host.textContent).not.toContain("Use the workspace's account order and rollover.");
+	});
+
+	it('tells the person to check the connection when an account switch cannot reach the server', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') throw new TypeError('Failed to fetch');
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
+	});
+
+	it('shows both load errors above a single Retry button', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		let policyReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'changed', code: 'policy_changed' }) };
+			if (path.startsWith('/api/vendor-accounts')) return { ok: false, status: 500, json: async () => ({ detail: 'Accounts unavailable' }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (path.startsWith('/api/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
+			if (policyReads++ > 0) throw new TypeError('Failed to fetch');
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelectorAll('p.error[role="alert"]')).toHaveLength(2));
+		expect([...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Retry')).toHaveLength(1);
+	});
+
+	it('keeps the error and a Retry button when the policy cannot be re-read after a failed save', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		let policyReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'provider policy revision changed; refresh before acting', code: 'policy_changed' }) };
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (path.startsWith('/api/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
+			if (policyReads++ > 0 && policyReads < 3) throw new TypeError('Failed to fetch');
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
+		const reload = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Retry');
+		expect(reload).toBeDefined();
+		expect(host.querySelector('p.error[role="alert"]')).not.toBeNull();
+		reload!.click();
+		await vi.waitFor(() => expect(host.querySelector('p.error[role="alert"]')).toBeNull());
+		expect(host.querySelector('[aria-label="Use Account A"]')).not.toBeNull();
 	});
 
 	it('lets a one-account Claude provider be disabled without rollover or order controls', async () => {
@@ -79,8 +165,8 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Personal Max"]')).not.toBeNull());
-		const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Personal Max"]')!;
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Personal Max"]')).not.toBeNull());
+		const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Use Personal Max"]')!;
 		expect(toggle.getAttribute('aria-pressed')).toBe('true');
 		toggle.click();
 		await vi.waitFor(() => {
@@ -100,14 +186,14 @@ describe('ProvidersPolicyBlock', () => {
 			revision: provider.revision + 1,
 			units: provider.units.map((unit) => ({ ...unit, enabled: !body.disabled.includes(unit.id) })),
 		}));
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Account A"]')).not.toBeNull());
-		const accountA = host.querySelector<HTMLButtonElement>('[aria-label="Account A"]')!;
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		const accountA = host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!;
 		accountA.click();
 		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1));
-		const accountB = host.querySelector<HTMLButtonElement>('[aria-label="Account B"]')!;
+		const accountB = host.querySelector<HTMLButtonElement>('[aria-label="Use Account B"]')!;
 		await vi.waitFor(() => expect(accountB.disabled).toBe(false));
 		accountB.click();
 		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2));
@@ -118,20 +204,125 @@ describe('ProvidersPolicyBlock', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => input.toString().startsWith('/api/vendor-accounts')
 			? ({ ok: true, json: async () => ({ accounts: [] }) })
 			: ({ ok: false, status: 500, json: async () => ({ detail: 'Policy unavailable' }) })));
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Policy unavailable'));
-		expect(host.textContent).toContain('Reload providers');
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
+		expect(host.textContent).not.toContain('Policy unavailable');
+		expect(host.textContent).toContain('Retry');
 	});
 
 	it('shows a visible error rather than throwing for a malformed successful response', async () => {
 		stubPolicy({ scope: 'workspace' });
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Could not load providers.'));
-		expect(host.textContent).toContain('Reload providers');
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
+		expect(host.textContent).toContain('Retry');
+	});
+
+	const projectPolicy = {
+		scope: 'project', use_workspace: false, override_revision: 1, providers: [
+			{ provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'personal', label: 'Personal', enabled: true }] },
+			{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [] },
+		],
+	};
+	function stubProjectCloudOff(initial: boolean, save: 'ok' | 'fail' = 'ok', policy: object = projectPolicy) {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/threads?')) return { ok: true, json: async () => ({ threads: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) {
+				if (init?.method === 'PUT') return save === 'ok'
+					? { ok: true, json: async () => ({ cloud_models_off: true }) }
+					: { ok: false, status: 500, json: async () => ({ detail: 'Save denied' }) };
+				return { ok: true, json: async () => ({ cloud_models_off: initial }) };
+			}
+			return { ok: true, json: async () => policy };
+		}));
+	}
+
+	it('names exactly the account providers the policy lists in the Local models only line', async () => {
+		stubProjectCloudOff(true, 'ok', { ...projectPolicy, providers: [projectPolicy.providers[1]] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Codex isn't used while Local models only is on."));
+		expect(host.textContent).not.toContain('Claude Code');
+	});
+
+	it('hides project account controls behind one quiet line only when saved Local models only is on', async () => {
+		stubProjectCloudOff(true);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
+		expect(host.textContent).not.toContain('Use workspace settings');
+		expect(host.querySelector('[aria-label="Use Personal"]')).toBeNull();
+	});
+
+	it('shows project accounts as today when saved Local models only is off', async () => {
+		stubProjectCloudOff(false);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
+		expect(host.textContent).toContain('Use workspace settings');
+	});
+
+	it('swaps account controls only after saving Local models only succeeds', async () => {
+		stubProjectCloudOff(false);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
+
+		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
+		expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).startsWith('/api/threads?'))).toBe(true);
+	});
+
+	it('keeps account controls visible when saving Local models only fails', async () => {
+		stubProjectCloudOff(false, 'fail');
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
+
+		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t save this change.'));
+		expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull();
+	});
+
+	it('keeps account controls visible when loading Local models only fails', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: false, status: 500, json: async () => ({ detail: 'Read denied' }) };
+			return { ok: true, json: async () => projectPolicy };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
+		// The setting's value is unknown, so its switch is hidden rather than shown as off.
+		expect(host.querySelector('[aria-label="Local models only"]')).toBeNull();
+		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Retry');
+	});
+
+	it('keeps the existing loading line until Local models only has loaded', async () => {
+		let resolveCloud!: (value: unknown) => void;
+		vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return Promise.resolve({ ok: true, json: async () => ({ accounts: [] }) });
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return new Promise((resolve) => { resolveCloud = resolve; });
+			return Promise.resolve({ ok: true, json: async () => projectPolicy });
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Loading providers…'));
+		expect(host.querySelector('[aria-label="Use Personal"]')).toBeNull();
+		resolveCloud({ ok: true, json: async () => ({ cloud_models_off: false }) });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 	});
 
 	function account(id: string, windows: object[] = []) {
@@ -146,7 +337,7 @@ describe('ProvidersPolicyBlock', () => {
 
 	it('lists accounts in the order the server sends, not a reordering of its own', async () => {
 		stubPolicy(rollover([{ id: 'b', label: 'b', enabled: true }, { id: 'a', label: 'a', enabled: true }], ['a', 'b']), undefined, [account('a'), account('b')]);
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
 		await vi.waitFor(() => expect(rowNames()).toEqual(['b', 'a']));
@@ -155,7 +346,7 @@ describe('ProvidersPolicyBlock', () => {
 	it('keeps a switched-off account at its saved place in the order, as the approved design shows', async () => {
 		stubPolicy(rollover([{ id: 'a', label: 'a', enabled: true }, { id: 'b', label: 'b', enabled: false }, { id: 'c', label: 'c', enabled: true }], null, ['b']),
 			undefined, [account('a'), account('b'), account('c')]);
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
 		await vi.waitFor(() => expect(host.querySelectorAll('.account-usage-row')).toHaveLength(3));
@@ -168,7 +359,7 @@ describe('ProvidersPolicyBlock', () => {
 			{ kind: 'five_hour', state: 'unknown', used_percent: 40, window_minutes: 300 },
 			{ kind: 'seven_day', state: 'reported', used_percent: 99.5, window_minutes: 10080 },
 		])]);
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
 		await vi.waitFor(() => expect(host.querySelector('.account-usage-row .usage')).not.toBeNull());
@@ -180,11 +371,11 @@ describe('ProvidersPolicyBlock', () => {
 
 	it('says so when account details fail to load instead of showing bare rows', async () => {
 		stubPolicy(rollover([{ id: 'a', label: 'Work', enabled: true }]), undefined, null);
-		component = mount(ProvidersPolicyBlock, { target: host });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
 		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Accounts unavailable'));
-		expect(host.textContent).toContain('Reload providers');
+		expect(host.textContent).toContain('Retry');
 		expect(host.textContent).toContain('Work');
 	});
 });

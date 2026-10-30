@@ -34,10 +34,15 @@ STALE_MESSAGE = (
     "Reject it, or ask its author to suggest again against the current text."
 )
 
+INSERT_STALE_MESSAGE = (
+    "The text this suggestion follows is no longer in the document, so it cannot be applied. "
+    "Reject it, or ask its author to suggest again against the current text."
+)
+
 # Writes ``text`` to the document at ``path`` in scope ``project_id``, recording ``reason``
 # where the save keeps history; raises when refused.
 DocumentWriter = Callable[
-    [str, str, str | None, str, str | None], Awaitable[dict[str, Any] | None]
+    [str, str, str | None, str, str | None, str | None], Awaitable[dict[str, Any] | None]
 ]
 
 
@@ -54,12 +59,40 @@ def suggestion_span(comment: dict[str, Any], document_text: str) -> tuple[int, i
         to16=comment.get("to_off"), prefix=comment.get("anchor_prefix"),
         suffix=comment.get("anchor_suffix"),
     )
+    stale_message = INSERT_STALE_MESSAGE if comment.get("insert_after") else STALE_MESSAGE
     if span is None:
-        raise CommentActionError("stale", STALE_MESSAGE)
+        raise CommentActionError("stale", stale_message)
     start, end = _cp_at_u16(document_text, span[0]), _cp_at_u16(document_text, span[1])
     if start is None or end is None or document_text[start:end] != comment["anchor_text"]:
-        raise CommentActionError("stale", STALE_MESSAGE)
+        raise CommentActionError("stale", stale_message)
     return start, end
+
+
+def suggestion_edit_span(comment: dict[str, Any], span: tuple[int, int]) -> tuple[int, int]:
+    """Map a resolved quoted span to the text the suggestion changes."""
+    return (span[1], span[1]) if comment.get("insert_after") else span
+
+
+def insertion_position(comment: dict[str, Any], document_text: str, point: int) -> int:
+    """Skip accepted older insertions still contiguous after the same quote."""
+    key = (comment.get("created_at", ""), comment["id"])
+    anchor_end = point
+    for sibling in sorted(comment["_accepted_insertions"], key=lambda row: (row.get("created_at", ""), row["id"])):
+        if (sibling.get("created_at", ""), sibling["id"]) >= key:
+            break
+        if sibling.get("anchor_text") != comment.get("anchor_text"):
+            continue
+        try:
+            sibling_span = suggestion_span(sibling, document_text)
+        except CommentActionError:
+            continue
+        if sibling_span[1] != anchor_end:
+            continue
+        replacement = sibling["replacement"]
+        if not document_text.startswith(replacement, point):
+            break
+        point += len(replacement)
+    return point
 
 
 def splice_suggestion(document_text: str, comment: dict[str, Any], span: tuple[int, int]) -> str:
@@ -70,12 +103,15 @@ def splice_suggestion(document_text: str, comment: dict[str, Any], span: tuple[i
 
 def applied_text(comment: dict[str, Any], document_text: str) -> str:
     """Return ``document_text`` with one re-anchored suggestion applied."""
-    return splice_suggestion(document_text, comment, suggestion_span(comment, document_text))
+    start, end = suggestion_edit_span(comment, suggestion_span(comment, document_text))
+    if comment.get("insert_after"):
+        start = end = insertion_position(comment, document_text, start)
+    return splice_suggestion(document_text, comment, (start, end))
 
 
 def _record_decision_row(
     connection, comment_id: str, *, decision: str, decided_by: str,
-    decided_by_thread_id: str | None, decision_event_id: str, decided_at: str,
+    decided_by_thread_id: str | None, decision_event_id: str, decided_at: str, bulk: bool = False,
 ) -> dict[str, Any]:
     row = store.update(comment_id, {
         "decision": DECISIONS[decision],
@@ -83,6 +119,7 @@ def _record_decision_row(
         "decided_by_thread_id": decided_by_thread_id,
         "decided_at": decided_at,
         "decision_event_id": decision_event_id,
+        "decided_in_bulk": bulk,
         "resolved": True,
         "acked": True,
     }, db=connection)
@@ -158,7 +195,8 @@ def reopen_fields(comment: dict[str, Any], fields: dict[str, Any]) -> dict[str, 
             "be re-opened. Suggest again to change the text.",
         )
     return {**fields, "decision": None, "decided_by": None,
-            "decided_by_thread_id": None, "decided_at": None, "decision_event_id": None}
+            "decided_by_thread_id": None, "decided_at": None, "decision_event_id": None,
+            "decided_in_bulk": None}
 
 
 async def decide_suggestion(
@@ -185,6 +223,9 @@ async def decide_suggestion(
                 raise CommentActionError("not_found", "Comment not found")
             owner = owner_row(db, artifact["parent_thread_id"])
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
+            if decision == "accept" and comment.get("insert_after"):
+                comment["_accepted_insertions"] = store.accepted_insertions(
+                    comment["artifact_id"], comment["anchor_text"], db=db)
             return comment, artifact, owner[1] if owner else None
         finally:
             db.close()
@@ -208,6 +249,7 @@ async def decide_suggestion(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
+                str(comment["author"]) if comment["author_kind"] == "user" else None,
             )
 
     def _record():
@@ -233,139 +275,3 @@ async def decide_suggestion(
     if live_receipt is not None and include_document:
         row["_live_receipt"] = live_receipt
     return row
-
-
-def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str | None):
-    """Load the authorized author's open suggestions on this document once."""
-    db = get_db()
-    try:
-        comment = store.get_comment(comment_id, db=db)
-        artifact = registry_models.get_artifact(comment["artifact_id"], db=db) if comment else None
-        if comment is None or artifact is None:
-            raise CommentActionError("not_found", "Comment not found")
-        owner = owner_row(db, artifact["parent_thread_id"])
-        check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
-        rows = store.list_for_artifact(comment["artifact_id"], db=db)
-        open_rows = [row for row in rows if row.get("replacement") is not None and not row.get("decision")
-                     and not row.get("resolved") and row.get("author_thread_id") == comment.get("author_thread_id")]
-        if not open_rows:
-            raise CommentActionError(
-                "no_open_suggestions", f"No open suggestions from {comment['author']} on this document."
-            )
-        return artifact, owner[1] if owner else None, open_rows
-    finally:
-        db.close()
-
-
-def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:
-    """Resolve, de-overlap, and splice a batch against one document snapshot."""
-    candidates: list[tuple[int, int, dict[str, Any]]] = []
-    skipped: list[dict[str, str]] = []
-    for row in rows:
-        try:
-            start, end = suggestion_span(row, document_text)
-        except CommentActionError as exc:
-            skipped.append({"id": row["id"], "reason": exc.message})
-        else:
-            candidates.append((start, end, row))
-    winners: list[tuple[int, int, dict[str, Any]]] = []
-    for candidate in sorted(candidates, key=lambda item: item[:2]):
-        if any(candidate[0] < end and start < candidate[1] for start, end, _row in winners):
-            skipped.append({"id": candidate[2]["id"], "reason": "overlaps an earlier suggestion from the same author"})
-        else:
-            winners.append(candidate)
-    text = document_text
-    for start, end, row in sorted(winners, reverse=True):
-        text = splice_suggestion(text, row, (start, end))
-    return text, [row["id"] for _start, _end, row in winners], skipped
-
-
-async def _accept_batch(
-    artifact: dict[str, Any], project_id: str | None, rows: list[dict[str, Any]],
-    actor_thread_id: str | None, *, user_id: str, write: DocumentWriter,
-) -> tuple[str, list[str], list[dict[str, str]], dict[str, Any] | None]:
-    """Apply an author's batch through the live lane, or write it to disk when none is open."""
-    from doceditor.live_suggestions import accept_live
-    receipt = await accept_live(artifact, project_id, rows, actor_thread_id, user_id=user_id)
-    if receipt is not None:
-        return receipt["text"], receipt["accepted"], receipt["skipped"], receipt
-    source = await run_off_db(read_doc_text, artifact["path"])
-    text, accepted, skipped = _batch_text(rows, source)
-    if accepted:
-        receipt = await write(
-            artifact["path"], text, project_id, f"Accepted {len(accepted)} suggestions from {rows[0]['author']}",
-            hashlib.sha256(source.encode()).hexdigest(),
-        )
-    return text, accepted, skipped, receipt
-
-
-async def decide_all_from_author(
-    comment_id: str, decision: str, *, user_id: str, decided_by: str,
-    actor_thread_id: str | None, write: DocumentWriter, reason: str | None = None,
-) -> dict[str, Any]:
-    """Accept or reject every open suggestion by the selected comment's author."""
-    if decision not in DECISIONS:
-        raise CommentActionError("decision", "decision must be accept or reject")
-    reason = validate_decision_reason(reason)
-    artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id)
-    if decision == "reject":
-        def _reject_all():
-            db = get_db()
-            try:
-                with write_transaction(db, scope="record_suggestion_decisions") as connection:
-                    decided_at = datetime.now(timezone.utc).isoformat()
-                    decision_event_id = uuid.uuid4().hex
-                    decided_rows = [
-                        _record_decision_row(
-                            connection, row["id"], decision=decision, decided_by=decided_by,
-                            decided_by_thread_id=actor_thread_id, decision_event_id=decision_event_id,
-                            decided_at=decided_at,
-                        )
-                        for row in rows
-                    ]
-                    feedback_suggestion_decisions.record_suggestion_decisions(
-                        connection, decided_rows, decision=DECISIONS[decision], decided_by=decided_by,
-                        decided_by_thread_id=actor_thread_id, decision_event_id=decision_event_id,
-                        reason=reason,
-                    )
-            finally:
-                db.close()
-        await run_in_db(_reject_all)
-        return {"accepted": [], "skipped": [], "text": None, "revision": None}
-    text, accepted, skipped, receipt = await _accept_batch(
-        artifact, project_id, rows, actor_thread_id, user_id=user_id, write=write)
-    if accepted:
-        def _record_all():
-            db = get_db()
-            try:
-                with write_transaction(db, scope="record_suggestion_decisions") as connection:
-                    decided_at = datetime.now(timezone.utc).isoformat()
-                    decision_event_id = uuid.uuid4().hex
-                    decided_rows = [
-                        _record_decision_row(
-                            connection, accepted_id, decision=decision, decided_by=decided_by,
-                            decided_by_thread_id=actor_thread_id, decision_event_id=decision_event_id,
-                            decided_at=decided_at,
-                        )
-                        for accepted_id in accepted
-                    ]
-                    feedback_suggestion_decisions.record_suggestion_decisions(
-                        connection, decided_rows, decision=DECISIONS[decision], decided_by=decided_by,
-                        decided_by_thread_id=actor_thread_id, decision_event_id=decision_event_id,
-                        reason=reason,
-                    )
-            finally:
-                db.close()
-        try:
-            await run_in_db(_record_all)
-        except sqlite3.Error as exc:
-            raise CommentActionError(
-                "unrecorded", f"The edit was applied to the document, but the decision could not be recorded ({exc}). "
-                "The suggestions now read as stale; reject them to close them.",
-            ) from exc
-    return {
-        "accepted": accepted,
-        "skipped": skipped,
-        "text": text,
-        "revision": receipt.get("revision") if receipt else None,
-    }

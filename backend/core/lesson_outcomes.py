@@ -52,9 +52,9 @@ CAPTURE_ACCEPTANCE = (
 )
 CAPTURE_STEPS = (
     "This captured hypothesis is not offered as guidance; the file linked to "
-    "this task says what it lacks. Complete it by placing its continuity entry "
-    "with verdict trial and the missing fields, which closes this task, or "
-    "drop the entry with the reason and finish this task."
+    "this task says why it was held. Once resolved (missing fields added or the "
+    "conflicting trial finished), place its continuity entry with verdict trial "
+    "to close this task, or drop the entry with the reason and finish this task."
 )
 
 
@@ -92,7 +92,8 @@ def _save(
     """Commit one step's files; on failure settle or defer the entry and say no."""
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
     from infra.skill_save_validation import REFUSED
 
     trailer = marker(entry["thread_id"], entry["entry_id"], entry["revision"])
@@ -101,6 +102,7 @@ def _save(
         workspace=Path(WORKSPACE), target=GuidanceTarget("placement"),
         expected=expected, atomic=True, author=outcomes._author(place),
         message=outcomes._message(entry, decision, relative, trailer, verb=verb),
+        lesson_gate=False,  # the step's own retire and promote path
     )
     if result.outcome in ("written", "unchanged"):
         return True
@@ -145,7 +147,7 @@ def _activate(
     from infra.guidance_git import digest
     from plans import public as plans
 
-    path, base = destination.path, admission.text
+    path, base = admission.destination_path or destination.path, admission.text
     assert path is not None and base is not None and place.tray is not None
     trial = lesson_files.read_trial(base)
     assert trial is not None
@@ -199,6 +201,8 @@ def _capture(
     from infra.guidance_git import digest
     from plans import public as plans
 
+    from core.lesson_corrections import merge_subjects
+
     trial, reason = decision.trial, admission.hold
     assert trial is not None and reason is not None and place.tray is not None
     path = lesson_files.capture_path(place.tray, admission.capture_id)
@@ -208,11 +212,14 @@ def _capture(
     earlier = lesson_files.read_capture(current) if current else None
     # Evidence accumulates only while the hypothesis itself is unchanged.
     kept = earlier.source_refs if earlier is not None and earlier.hash == version else ()
+    subjects = earlier.originating_subjects if earlier is not None and earlier.hash == version else ()
     text = lesson_files.render_capture(
         capture_id=admission.capture_id, capture_hash=version, owner=entry["thread_id"],
         reason=reason, name=decision.skill_name, description=decision.skill_description,
         text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(kept, entry["body"].get("source_refs") or []),
+        originating_subjects=merge_subjects(subjects, decision.originating_subjects),
+        case_metadata=admission.case_metadata,
     )
     if current != text and not _save(
         entry, place, decision, relative, {path: text}, {path: digest(current)},

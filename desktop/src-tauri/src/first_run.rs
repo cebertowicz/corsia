@@ -8,8 +8,8 @@
 //
 // An existing install (a source install's bootstrap, the legacy state folder,
 // or a folder already holding files at the default workspace path) is never
-// touched: setup refuses before writing anything, and adopting it is a
-// separate journey.
+// touched here: setup refuses before writing anything. Adopting it and
+// setting it aside (`start_fresh`) are separate journeys the person chooses.
 
 use std::{
     fs,
@@ -20,9 +20,11 @@ use std::{
 
 use serde::Serialize;
 
+use crate::adoption;
+
 pub const SERVICE_FILE: &str = "service.json";
-const WORKSPACE_FOLDER: &str = "corsia";
-const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
+pub(crate) const WORKSPACE_FOLDER: &str = "CORSIA";
+pub(crate) const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
 // Finder's view settings do not make a folder someone's data. A `.git`
 // directory is ignored only when it has no branch refs or packed branch refs.
 const IGNORED_ENTRIES: [&str; 1] = [".DS_Store"];
@@ -33,19 +35,36 @@ pub enum FirstRun {
     Configured,
     /// Nothing from an earlier install: create this workspace and record it.
     Fresh { workspace: PathBuf },
-    /// An earlier install is present: write nothing and show this reason.
-    ExistingInstall { reason: String },
+    /// An earlier install is present but does not meet the source-service
+    /// contract required for adoption: write nothing and offer Start fresh with this reason.
+    /// `details` carries the runtime cause, shown only behind Details.
+    ExistingInstall { reason: String, details: String },
+    /// A recognizable source install can be taken over.
+    Adoptable { source: adoption::SourceInstall },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FolderClassification {
-    Ready { path: String, protected_folder: Option<&'static str> },
+    Ready { path: String, folder_warning: Option<FolderWarning> },
     Unwritable { path: String, reason: String },
+    Unreadable { path: String, reason: String },
 }
 
-fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
-    [
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FolderWarning {
+    PersonalFolder { folder: &'static str },
+    ContainsPersonalFolder { folder: &'static str },
+    ContainsFiles,
+}
+
+fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, String> {
+    if path == home {
+        return Ok(Some(FolderWarning::PersonalFolder { folder: "Home" }));
+    }
+
+    for (personal, name) in [
         (home.join("Documents"), "Documents"),
         (home.join("Desktop"), "Desktop"),
         (home.join("Downloads"), "Downloads"),
@@ -55,9 +74,16 @@ fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
                 .join("com~apple~CloudDocs"),
             "iCloud Drive",
         ),
-    ]
-    .into_iter()
-    .find_map(|(protected, name)| path.starts_with(&protected).then_some(name))
+    ] {
+        if path == personal {
+            return Ok(Some(FolderWarning::PersonalFolder { folder: name }));
+        }
+        if personal.starts_with(path) {
+            return Ok(Some(FolderWarning::ContainsPersonalFolder { folder: name }));
+        }
+    }
+
+    workspace_is_fresh(path).map(|fresh| (!fresh).then_some(FolderWarning::ContainsFiles))
 }
 
 pub fn classify_folder(
@@ -66,10 +92,12 @@ pub fn classify_folder(
     check_writable: impl FnOnce(&Path) -> Result<(), String>,
 ) -> FolderClassification {
     let shown = path.display().to_string();
+    let resolved_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let resolved_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     match check_writable(path) {
-        Ok(()) => FolderClassification::Ready {
-            path: shown,
-            protected_folder: protected_folder(path, home),
+        Ok(()) => match folder_warning(&resolved_path, &resolved_home) {
+            Ok(folder_warning) => FolderClassification::Ready { path: shown, folder_warning },
+            Err(reason) => FolderClassification::Unreadable { path: shown, reason },
         },
         Err(reason) => FolderClassification::Unwritable { path: shown, reason },
     }
@@ -128,7 +156,7 @@ fn git_has_no_commits(git_dir: &Path) -> Result<bool, String> {
         .any(|reference| reference.starts_with("refs/heads/")))
 }
 
-fn workspace_is_fresh(path: &Path) -> Result<bool, String> {
+pub(crate) fn workspace_is_fresh(path: &Path) -> Result<bool, String> {
     for entry in fs::read_dir(path)
         .map_err(|error| format!("could not read {}: {error}", path.display()))?
     {
@@ -183,7 +211,7 @@ pub fn environment_names_the_roots() -> bool {
         .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
 }
 
-fn present(path: &Path) -> Result<bool, String> {
+pub(crate) fn present(path: &Path) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
@@ -199,23 +227,42 @@ pub fn default_workspace(home: &Path) -> PathBuf {
 }
 
 fn existing_install(reason: String) -> Result<FirstRun, String> {
-    Ok(FirstRun::ExistingInstall {
-        reason: format!("{reason} Nothing was changed."),
-    })
+    Ok(FirstRun::ExistingInstall { reason, details: String::new() })
 }
 
 /// Decide what a launch must do about the workspace, reading only.
 pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
+    plan_trusting(home, app_dir, None)
+}
+
+/// `plan`, for a launch that just started an unfinished setup over: `trusted` is the work folder that setup
+/// made, and a default folder at exactly that path is reused even though the backend left files in it. Nothing
+/// else about the refusal rules changes.
+pub fn plan_trusting(home: &Path, app_dir: &Path, trusted: Option<&Path>) -> Result<FirstRun, String> {
     if present(&app_dir.join(SERVICE_FILE))? {
         return Ok(FirstRun::Configured);
     }
 
+    let source_plist = home.join("Library").join("LaunchAgents").join("com.corsia.prod.plist");
+    if present(&source_plist)? {
+        // A plist this app cannot trust is not adopted, and no other path is tried.
+        return match adoption::source_from_plist(home, &source_plist) {
+            Ok(source) => Ok(FirstRun::Adoptable { source }),
+            Err(details) => Ok(FirstRun::ExistingInstall {
+                reason: "CORSIA found an existing install on this computer, and this app can’t take it over.".into(),
+                details,
+            }),
+        };
+    }
+
     if present(&home.join(".corsia").join("config.json"))? {
-        return existing_install(
-            "CORSIA found an existing install on this computer (~/.corsia). \
-             This app can't open it yet."
-                .into(),
-        );
+        return match adoption::source_from_bootstrap(home) {
+            Ok(source) => Ok(FirstRun::Adoptable { source }),
+            Err(details) => Ok(FirstRun::ExistingInstall {
+                reason: "CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it.".into(),
+                details,
+            }),
+        };
     }
     let legacy = home
         .join("Library")
@@ -223,8 +270,8 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         .join(LEGACY_STATE_FOLDER);
     if present(&legacy)? {
         return existing_install(format!(
-            "CORSIA found data from an earlier version (~/Library/Application Support/{LEGACY_STATE_FOLDER}). \
-             This app can't open it yet."
+            "CORSIA found data from an earlier version (~/Library/Application Support/{LEGACY_STATE_FOLDER}), \
+             and this app can’t open it."
         ));
     }
 
@@ -246,7 +293,7 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
                 "A file named {shown} is in the way of CORSIA's default workspace folder."
             ));
         }
-        if !workspace_is_fresh(&path)? {
+        if trusted != Some(path.as_path()) && !workspace_is_fresh(&path)? {
             return existing_install(format!(
                 "The folder {shown} already has files in it, so CORSIA left it alone."
             ));
@@ -326,7 +373,9 @@ fn write_service_file(app_dir: &Path, workspace: &Path, port: u16) -> Result<(),
     let workspace = workspace
         .to_str()
         .ok_or("the workspace path is not valid UTF-8")?;
+    let state_dir = app_dir.join("state").to_str().ok_or("the state path is not valid UTF-8")?.to_owned();
     let body = serde_json::to_vec_pretty(&serde_json::json!({
+        "state_dir": state_dir,
         "workspace": workspace,
         "port": port,
     }))
@@ -453,9 +502,9 @@ mod tests {
     fn assert_refused(home: &Home, marker: &str) {
         let before = home.listing();
         match plan(&home.0, &home.app_dir()).expect("plan") {
-            FirstRun::ExistingInstall { reason } => {
+            FirstRun::ExistingInstall { reason, .. } => {
                 assert!(reason.contains(marker), "reason names the marker: {reason}");
-                assert!(reason.ends_with("Nothing was changed."));
+                assert!(reason.ends_with('.') && !reason.contains("Nothing was changed"), "{reason}");
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -468,12 +517,12 @@ mod tests {
         assert_eq!(
             plan(&home.0, &home.app_dir()).unwrap(),
             FirstRun::Fresh {
-                workspace: home.0.join("corsia")
+                workspace: home.0.join("CORSIA")
             }
         );
         assert!(home.listing().is_empty(), "planning writes nothing");
 
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
         let mut initialised = None;
         apply(&workspace, &home.app_dir(), 47_895, |path| {
             initialised = Some(path.to_path_buf());
@@ -485,12 +534,13 @@ mod tests {
         assert!(workspace.is_dir());
         let recorded: serde_json::Value =
             serde_json::from_slice(&fs::read(home.app_dir().join(SERVICE_FILE)).unwrap()).unwrap();
+        assert_eq!(recorded["state_dir"], home.app_dir().join("state").to_str().unwrap());
         assert_eq!(recorded["workspace"], workspace.to_str().unwrap());
         assert_eq!(recorded["port"], 47_895);
         assert_eq!(
             recorded.as_object().unwrap().len(),
-            2,
-            "only workspace and port are recorded"
+            3,
+            "only state_dir, workspace and port are recorded"
         );
         assert_eq!(recorded_port(&home.app_dir()), Some(47_895));
         assert!(!home.app_dir().join("service.json.tmp").exists());
@@ -508,7 +558,7 @@ mod tests {
     #[test]
     fn a_failed_git_init_still_records_the_workspace() {
         let home = Home::new("nogit");
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
 
         apply(&workspace, &home.app_dir(), 47_895, |_| {
             Err("git is not installed".into())
@@ -521,7 +571,7 @@ mod tests {
     #[test]
     fn git_is_not_spawned_without_a_bundled_git_or_command_line_tools() {
         let home = Home::new("nogit-skip");
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
         fs::create_dir_all(&workspace).unwrap();
         let resources = home.0.join("Resources");
         fs::create_dir_all(resources.join("bin")).unwrap();
@@ -570,6 +620,83 @@ mod tests {
         fs::write(home.0.join(".corsia").join("config.json"), "{}").unwrap();
 
         assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn canonical_bootstrap_without_plist_is_adoptable_for_both_formats() {
+        let home = Home::new("unmanaged-bootstrap");
+        let checkout = home.0.join(".corsia");
+        fs::create_dir_all(checkout.join("scripts")).unwrap();
+        fs::write(checkout.join("scripts/corsia"), "cli").unwrap();
+        let workspace = home.0.join("work");
+        let state = home.0.join("state");
+        for (config, expected_state) in [
+            (serde_json::json!({"workspace": {"root": workspace}, "state_root": state}), state.clone()),
+            (serde_json::json!({"workspace": workspace}), workspace.join(".corsia")),
+        ] {
+            fs::write(checkout.join("config.json"), config.to_string()).unwrap();
+            let FirstRun::Adoptable { source } = plan(&home.0, &home.app_dir()).unwrap() else {
+                panic!("expected unmanaged source");
+            };
+            assert_eq!(source.workspace, workspace);
+            assert_eq!(source.state, expected_state);
+            assert_eq!(source.cli, checkout.join("scripts/corsia"));
+            assert!(source.plist.is_none() && source.port.is_none());
+        }
+        fs::write(checkout.join("config.json"), r#"{"workspace":"relative"}"#).unwrap();
+        assert_refused(&home, "~/.corsia");
+        fs::write(checkout.join("config.json"), serde_json::json!({"workspace": workspace}).to_string()).unwrap();
+        fs::remove_file(checkout.join("scripts/corsia")).unwrap();
+        assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn managed_source_plist_remains_adoptable() {
+        let home = Home::new("managed-plist");
+        let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
+        let checkout = home.0.join("checkout");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::create_dir_all(checkout.join("scripts")).unwrap();
+        fs::write(checkout.join("scripts/corsia"), "cli").unwrap();
+        fs::write(&plist, format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>{}</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>1956</string></dict></dict></plist>"#,
+            checkout.join("backend").display()
+        )).unwrap();
+        let FirstRun::Adoptable { source } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected managed source");
+        };
+        assert_eq!(source.plist, Some(plist));
+        assert_eq!(source.port, Some(1956));
+    }
+
+    #[test]
+    fn a_source_plist_that_cannot_be_adopted_is_refused_with_nothing_changed() {
+        let home = Home::new("bad-plist");
+        let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::write(&plist, "not a plist").unwrap();
+        assert_refused(&home, "can’t take it over");
+        // The parser's own words stay behind Details, never in the line.
+        let FirstRun::ExistingInstall { reason, details } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(!reason.contains('(') && !reason.contains("plist"), "{reason}");
+        assert!(details.contains("plist"), "{details}");
+
+        // A readable plist whose checkout has no lifecycle owner is refused the same way.
+        fs::write(
+            &plist,
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>{}</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>47895</string></dict></dict></plist>"#,
+                home.0.join("checkout/backend").display()
+            ),
+        )
+        .unwrap();
+        assert_refused(&home, "can’t take it over");
+        let FirstRun::ExistingInstall { details, .. } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(details.contains("scripts/corsia"), "{details}");
     }
 
     #[test]
@@ -726,14 +853,67 @@ mod tests {
     }
 
     #[test]
-    fn protected_and_unwritable_folder_choices_are_classified() {
+    fn folder_warnings_and_unavailable_folder_choices_are_classified() {
         let home = Home::new("folder-classification");
-        let documents = home.0.join("Documents").join("corsia");
+        let documents = home.0.join("Documents");
+        let empty_in_documents = documents.join("corsia");
+        let desktop = home.0.join("Desktop");
+        let downloads = home.0.join("Downloads");
+        let library = home.0.join("Library");
+        let cloud_docs = library
+            .join("Mobile Documents")
+            .join("com~apple~CloudDocs");
+        for path in [&empty_in_documents, &desktop, &downloads, &cloud_docs] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
+        let home_parent = home.0.parent().unwrap().to_path_buf();
+
+        for (path, folder_warning) in [
+            (&home.0, FolderWarning::PersonalFolder { folder: "Home" }),
+            (&documents, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&documents_with_trailing_separator, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&desktop, FolderWarning::PersonalFolder { folder: "Desktop" }),
+            (&downloads, FolderWarning::PersonalFolder { folder: "Downloads" }),
+            (&cloud_docs, FolderWarning::PersonalFolder { folder: "iCloud Drive" }),
+            (&library, FolderWarning::ContainsPersonalFolder { folder: "iCloud Drive" }),
+            (
+                &home_parent,
+                FolderWarning::ContainsPersonalFolder { folder: "Documents" },
+            ),
+        ] {
+            assert_eq!(
+                classify_folder(path, &home.0, |_| Ok(())),
+                FolderClassification::Ready {
+                    path: path.display().to_string(),
+                    folder_warning: Some(folder_warning),
+                }
+            );
+        }
+
         assert_eq!(
-            classify_folder(&documents, &home.0, |_| Ok(())),
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
             FolderClassification::Ready {
-                path: documents.display().to_string(),
-                protected_folder: Some("Documents"),
+                path: empty_in_documents.display().to_string(),
+                folder_warning: None,
+            }
+        );
+        fs::write(empty_in_documents.join(".DS_Store"), "").unwrap();
+        fs::create_dir_all(empty_in_documents.join(".git")).unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                folder_warning: None,
+            }
+        );
+
+        fs::write(empty_in_documents.join("personal-note.txt"), "private").unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                folder_warning: Some(FolderWarning::ContainsFiles),
             }
         );
 
@@ -743,6 +923,32 @@ mod tests {
             FolderClassification::Unwritable {
                 path: unwritable.display().to_string(),
                 reason: "the disk is read-only".into(),
+            }
+        );
+
+        let unreadable = home.0.join("not-a-folder");
+        fs::write(&unreadable, "not a folder").unwrap();
+        let FolderClassification::Unreadable { path, reason } = classify_folder(&unreadable, &home.0, |_| Ok(())) else {
+            panic!("a folder that cannot be inspected must not look ready");
+        };
+        assert_eq!(path, unreadable.display().to_string());
+        assert!(reason.contains("could not read"), "{reason}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_warning_classification_resolves_symlinks() {
+        let home = Home::new("folder-classification-symlink");
+        let documents = home.0.join("Documents");
+        fs::create_dir_all(&documents).unwrap();
+        let alias = home.0.join("documents-alias");
+        std::os::unix::fs::symlink(&documents, &alias).unwrap();
+
+        assert_eq!(
+            classify_folder(&alias, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: alias.display().to_string(),
+                folder_warning: Some(FolderWarning::PersonalFolder { folder: "Documents" }),
             }
         );
     }

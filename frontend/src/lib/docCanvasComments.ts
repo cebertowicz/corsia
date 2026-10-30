@@ -1,4 +1,4 @@
-import { rangeFor, type DocComment } from '$lib/stores/docComments';
+import { hasNewReplies, rangeFor, type DocComment } from '$lib/stores/docComments';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -16,6 +16,10 @@ export function canvasCommentRange(comment: DocComment, text: string): { from: n
 export function unplaced(comment: DocComment): boolean {
 	return (comment.placement === 'placing' || comment.placement === 'not_placed') && !comment.drawn;
 }
+
+/** Whether a just-posted comment may still get its first drawn mark: it exists, is not orphaned or refused placement, and is not drawn yet. */
+export const awaitsFirstMark = (comment: DocComment | undefined, drawn: boolean) =>
+	!!comment && !comment.orphaned && comment.placement !== 'not_placed' && !drawn;
 
 /** Build the editor's immutable target from the canonical comment range. */
 export function canvasCommentScrollTarget(comments: DocComment[], text: string, id: string, focus: boolean, origin: ScrollOrigin): CanvasScrollTarget | null {
@@ -44,27 +48,31 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
 export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
 	let inlineEnd = -1;
 	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision)).flatMap((comment) => {
-		const range = canvasCommentRange(comment, text);
-		if (!range) return [];
+		const anchorRange = canvasCommentRange(comment, text);
+		if (!anchorRange) return [];
+		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
 		if (openSuggestion(comment)) {
 			const inline = range.from >= inlineEnd;
 			if (inline) inlineEnd = range.to;
-			suggestion = { quote: comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
+			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: comment.replyWaiting, onMarkerFocus, suggestion }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasNewReplies(comment), onMarkerFocus, suggestion }];
 	});
 }
 
 /**
  * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
  * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
- * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design.
+ * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design. The
+ * recovery's count is the part of that group Place again can attempt: an orphaned unresolved comment whose quote
+ * remains in the text.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved).length,
 		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
+		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
@@ -82,6 +90,9 @@ export function commentSurfaceStatus(comments: DocComment[]) {
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
-	return comments.map((comment) => ({ ...comment, orphaned: !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null) }))
-		.sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
+	return comments.map((comment) => {
+		const orphaned = !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null);
+		const detached = orphaned && (!comment.anchor || !text.includes(comment.anchor));
+		return { ...comment, orphaned, detached };
+	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

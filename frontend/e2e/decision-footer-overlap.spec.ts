@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { test } from "./support/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 import path from "node:path";
 
 async function waitForDrawerToSettle(page: Page) {
@@ -83,5 +84,39 @@ for (const [name, width, height, colorScheme] of [
     expect(geometry.footerBottom, JSON.stringify(geometry)).toBeCloseTo(geometry.scrollBottom, 0);
     expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.sheetBottom);
     expect(geometry.coveredOptions).toEqual([]);
+  });
+}
+
+// 336px is a phone keyboard; 60px is the accessory-bar inset the app sets on focus.
+for (const [name, keyboard] of [
+  ["keyboard-closed", 0],
+  ["keyboard-open", 336],
+] as const) {
+  test(`@surface:attention typing in Other keeps the whole box above the actions row (${name})`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Frames set their exact viewport directly.");
+    await page.setViewportSize({ width: 393, height: 852 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openDecision(page);
+    if (keyboard) {
+      await page.setViewportSize({ width: 393, height: 852 - keyboard });
+      await page.evaluate(() => document.documentElement.style.setProperty("--kb-toolbar-inset", "60px"));
+    }
+
+    const other = page.locator(".other-option textarea");
+    // Focus and type like a phone does: Playwright's click would scroll the box clear of the row on its own.
+    await other.focus();
+    await page.keyboard.type(
+      "Move it to the bottom, A, but also note this problem should go to the owner and be fixed properly so it does not come back next week.",
+    );
+    const geometry = await page.evaluate(() => {
+      const box = document.querySelector<HTMLElement>(".other-option textarea")?.getBoundingClientRect();
+      const footer = document.querySelector<HTMLElement>(".decision-actions")?.getBoundingClientRect();
+      if (!box || !footer) throw new Error("Decision drawer geometry is incomplete");
+      return { boxTop: box.top, boxBottom: box.bottom, footerTop: footer.top };
+    });
+
+    await capture(page, testInfo, `decision-other-${name}`);
+    expect(geometry.boxBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry.footerTop);
+    expect(geometry.boxTop, JSON.stringify(geometry)).toBeGreaterThanOrEqual(0);
   });
 }

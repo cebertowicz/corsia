@@ -147,17 +147,22 @@ def list_for_thread(
             conn.close()
 
 
+# Every record one thread registered for one integration and type.
+_THREAD_RECORDS = """FROM artifact_identities i
+                JOIN artifact_registrations r ON r.artifact_id=i.id
+                WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?"""
+
+
 def find_for_thread(
     parent_thread_id: str, integration: str, type: str, db=None
 ) -> dict | None:
+    """The thread's current record of one kind: active and still owned, newest first."""
     conn = db or get_db()
     try:
         owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
         row = conn.execute(
             f"""{_projection()}
-                FROM artifact_identities i
-                JOIN artifact_registrations r ON r.artifact_id=i.id
-                WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?
+                {_THREAD_RECORDS}
                   AND i.state='active'
                   AND r.relationship_state IN ({owner_states})
                 ORDER BY i.updated_at DESC, i.id ASC LIMIT 1""",

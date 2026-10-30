@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from infra.chat_comment_answers import place_answers
 from infra.delivery_states import INPUT_DELIVERY_ENDED, INPUT_DELIVERY_STATE_SET
 from infra.time import utc_now_iso
 from infra.turn_provenance import refuse_reader_only_reason, turn_provenance
@@ -55,8 +56,18 @@ def thread_unavailable_reason(session: Any | None) -> str | None:
     return None
 
 
+def thread_gone_for_good(session: Any | None) -> bool:
+    """Whether a missing or purged thread cannot return from archive."""
+    return session is None or _row_value(session, "lifecycle_state") == "purged"
+
+
 def thread_is_available(session: Any | None) -> bool:
     return thread_unavailable_reason(session) is None
+
+
+def thread_is_temporary(session: Any) -> bool:
+    """Whether a spawned thread remains a temporary worker rather than an agent."""
+    return _row_value(session, "spawned_by") is not None and not _row_value(session, "agent_enabled")
 
 
 def thread_is_explicitly_archived(session: Any | None) -> bool:
@@ -129,6 +140,18 @@ def user_in_project(project_id: str, user_id: str, db=None) -> bool:
         "SELECT 1 FROM threads WHERE project_id=? AND user_id=? LIMIT 1",
         (project_id, user_id),
     ).fetchone() is not None
+
+
+def get_native_turn_thread_context(thread_id: str, db=None) -> Any | None:
+    """Read only the thread fields needed to prepare a native turn."""
+    conn = db if db is not None else get_db()
+    try:
+        return conn.execute(
+            "SELECT project_id, confinement, confined_read_dirs FROM threads WHERE id=?", (thread_id,)
+        ).fetchone()
+    finally:
+        if db is None:
+            conn.close()
 
 
 def get_thread_project_id(thread_id: str, db=None) -> str | None:
@@ -214,6 +237,7 @@ def _insert_delivered_message(
     from thread.transcript_order import draw_transcript_position
 
     sequence = draw_transcript_position(db, thread_id)
+    created_at = created_at or utc_now_iso()
     db.execute(
         "INSERT INTO messages "
         "(id,thread_id,role,content,metadata,created_at,seq) "
@@ -224,10 +248,11 @@ def _insert_delivered_message(
             role,
             content,
             json.dumps(metadata) if metadata else None,
-            created_at or utc_now_iso(),
+            created_at,
             sequence,
         ),
     )
+    place_answers(db, message_id, thread_id, role, content, sequence, created_at)
 
 
 def _require_turn_provenance(message_id: str, role: str, metadata: dict | None) -> None:

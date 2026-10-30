@@ -1,9 +1,6 @@
 ---
 name: coordination-api
 description: Use when the CORSIA agent or a project conductor needs to inspect or change CORSIA through corsia_api, create or promote an agent, install its responsibility file, thread skill or supporting scripts, or add, fix or remove connected apps (tool servers, MCP servers, connected tools). Covers route boundaries, retry safety and next-turn delivery. Not for human authentication or host-access authority.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Coordination API and agent setup
@@ -19,6 +16,8 @@ If refused, name the operation and direct the person to the CORSIA surface where
 Responses and requests are bounded. Ask for a smaller page or summary when the output is too large. A timeout or handler failure can follow a successful write: read the destination before retrying. An API error reports its status without exposing handler exception text.
 
 ## Connected apps (MCP servers)
+
+To connect a tool for the person's work, start with skill `connect-tools`.
 
 **Talk to the person in their words.** Call these "connected apps" and name the app ("GitHub"). Say "key", never token or a variable name; "Connected apps", never "tool servers" or "MCP" unless the person said it first.
 
@@ -52,7 +51,8 @@ Agents use these keys but never read them. `GET /api/keys` returns each entry's 
 
 1. Read `model_catalog`; use an exact ready selector and respect local concurrency and user model-control policy.
 2. Create a visible thread with `delegate_create_thread`, or read the existing target with `agent_roster_entry`.
-3. Use `agent_roster_update` with the target's fresh `expected_updated_at`, `agent_enabled=true` and the approved responsibility. A same-state retry changes nothing.
+3. Use `agent_roster_update` with the target's fresh `expected_updated_at`, `agent_enabled=true` and the approved responsibility (and `name` to rename it). A same-state retry changes nothing.
 4. Load `coordination_instruction_file_create` from the `coordination` pack. With `kind="responsibility"`, `target_thread_id`, `expected_revision="absent"` and approved `content`, create and attach `RESPONSIBILITY.md`. Require `delivery.next_turn=true` before calling setup complete.
-5. For a thread skill, use `kind="skill"`, a unique lowercase `name`, valid `SKILL.md` frontmatter and `content`. Optional `supporting_files` maps one-level `scripts/` or `references/` paths to text. Scripts are installed, never run by this tool. The receipt proves the skill appears in the target's next-turn skills list; a shadowed skill is an incomplete install.
-6. Keep the returned bundle `revision` for later edits; `absent` protects creation. Retrying the same desired bytes is idempotent. For stale revisions, read current files before changing them. Verify roster, attached responsibility and skill delivery through the target's fresh turn.
+5. Give the agent its home before its first turn. If its domain is an existing category in `shared/INDEX.md`, reuse it and leave that index as it is. Otherwise write `shared/<domain>/INDEX.md` with `write_file`, holding one line on what the folder is for, add the category's line to `shared/INDEX.md`, then hand the new index over with `artifact_rehome` (pack `artifacts`; find the artifact's `integration`, `type` and `external_id` with `artifact_resolve`) to the agent's thread id. The agent's writes to its own folder are refused until that file exists, and it can't edit an index someone else owns.
+6. For a thread skill, use `kind="skill"`, a unique lowercase `name`, valid `SKILL.md` frontmatter and `content`. Optional `supporting_files` maps one-level `scripts/` or `references/` paths to text; a skill with CORSIA data (see skill `skill-creator`) also includes `corsia.yaml`. Scripts are installed, never run by this tool. The receipt proves the skill appears in the target's next-turn skills list; a shadowed skill is an incomplete install.
+7. Keep the returned bundle `revision` for later edits; `absent` protects creation. Retrying the same desired bytes is idempotent. For stale revisions, read current files before changing them. Verify roster, attached responsibility and skill delivery through the target's fresh turn, and that `GET /api/agents` lists it as a visible thread (not a subagent), which is what puts it under Agents in the person's app.

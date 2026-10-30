@@ -47,7 +47,11 @@ def test_published_details_parse_changelog_and_cap_items(tmp_path):
 
     seed, clone = _repo_with_remote(tmp_path, "main")
     items = "\n".join(f"- Item {index}" for index in range(51))
-    (seed / "CHANGELOG.md").write_text(f"## v1.1.0 — Useful release\n\n### Added\n{items}\n")
+    (seed / "CHANGELOG.md").write_text(
+        f"## Unreleased\n\n_Changes merged since the last release._\n\n"
+        f"- Upcoming change\n\n"
+        f"## v1.1.0 — Useful release\n\n### Added\n{items}\n"
+    )
     _git(seed, "add", "CHANGELOG.md")
     _git(seed, "commit", "-m", "release notes")
     _git(seed, "tag", "v1.1.0")
@@ -175,13 +179,17 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
     from api.system_admin import system_update_status
     from automation import self_restart
     from core.turn_core import active_turn_count
-    from infra import db_async, drain, update_status
+    from infra import db_async, drain, settings, update_status
 
     class Status:
         def to_dict(self):
             return {"available": False}
 
+    schedule = {"automatic": True, "time": "04:05", "tonight_at": None}
+
     async def run_in_db(function):
+        if function is settings.get_update_schedule:
+            return schedule
         if function is self_restart.usual_update_seconds:
             return None
         if function is self_restart.latest_update_operation:
@@ -199,6 +207,7 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
     assert result["drain_cap_seconds"] == 17
     assert result["usual_seconds"] is None
     assert result["agents_working"] == 3
+    assert result["schedule"] == schedule
     assert datetime.fromisoformat(result["server_time"]).tzinfo == timezone.utc
 
 

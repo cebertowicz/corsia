@@ -55,7 +55,7 @@ _KV = re.compile(
 _BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}")
 _KNOWN = re.compile(
     r"\b(sk-[A-Za-z0-9_-]{16,}|sk-ant-[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}"
+    r"|(?:xox[a-z]-|xoxe\.xox[a-z]-|xapp-)[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}"
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
 )
 _LONG = re.compile(r"\b(?=[A-Za-z0-9+/_=-]*\d)(?=[A-Za-z0-9+/_=-]*[A-Za-z])[A-Za-z0-9+/_=-]{32,}\b")
@@ -88,6 +88,17 @@ def shape_context(rows: Iterable[tuple[str, str, str, Any]]) -> tuple[tuple[str,
         if len(kept) == CONTEXT_MESSAGES:
             break
     return tuple(reversed(kept))
+
+
+def agent_context(text: str) -> tuple[tuple[str, str], ...]:
+    """What the agent put to the person (a commented excerpt, a decision's question) as one ``Agent`` row.
+
+    A comment or decision answer has no chat turn before it; this row stands in
+    for it, cut and masked as a context message is, so the input keeps the
+    trained shape: the agent's turn first, the person's words last.
+    """
+    kept = mask(text.strip()[-CONTEXT_MESSAGE_CHARS:])
+    return (("Agent", kept),) if kept else ()
 
 
 def owner_text(owner: str) -> str:

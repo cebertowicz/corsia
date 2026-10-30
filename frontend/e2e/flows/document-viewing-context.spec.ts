@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 const authenticated = (route: string) => `${route}?${new URLSearchParams({ token: TEST_TOKEN })}`;
@@ -49,7 +50,7 @@ test('@flow:document-viewing-context @surface:chat @surface:documents sends the 
 	await expect.poll(() => inputs.length).toBe(1);
 	expect(inputs[0]).toMatchObject({ thread_id: threadId,
 		viewing_document: { artifact_id: artifactId, heading_anchor: secondLine, heading_line: '## Second' } });
-	await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+	await page.getByRole('button', { name: 'Collapse Files' }).click();
 	await composer.fill('Now without a document.');
 	await composer.press('Enter');
 	await expect.poll(() => inputs.length).toBe(2);

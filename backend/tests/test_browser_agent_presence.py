@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane
+from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane, browser_pane_state
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -13,10 +13,10 @@ from tools import browser_runtime
 
 @pytest.fixture(autouse=True)
 def _no_presence_state():
-    for registry in (browser_control._panes, browser_control._pane_reports, browser_control._agent_seen):
+    for registry in (browser_pane_state._panes, browser_pane_state._pane_reports, browser_pane_state._agent_seen):
         registry.clear()
     yield
-    for registry in (browser_control._panes, browser_control._pane_reports, browser_control._agent_seen):
+    for registry in (browser_pane_state._panes, browser_pane_state._pane_reports, browser_pane_state._agent_seen):
         registry.clear()
 
 
@@ -65,6 +65,31 @@ async def test_only_an_agent_command_the_guard_lets_through_puts_the_agent_in_th
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await owner.run("thread-1", ("snapshot",), session="existing")
     assert len(_agent_messages(messages)) == 1
+
+
+@pytest.mark.asyncio
+async def test_ref_click_is_refused_before_input_when_person_has_control(monkeypatch):
+    owner = _owner(monkeypatch, {"shown": False})
+    browser_control.pane_connected("thread-1", "pane-1")
+    input_calls = []
+
+    async def refuse_person_step(_thread_id, _probe, _args, **_kwargs):
+        raise BrowserSessionError(browser_control.PERSON_STEP)
+
+    async def native_input(_runtime, args, **_kwargs):
+        input_calls.append(args)
+        return CommandResult(0, "{}", ""), False
+
+    async def shared_input(*args):
+        input_calls.append(args)
+        return "ok"
+
+    monkeypatch.setattr(browser_control, "require_page_access", refuse_person_step)
+    monkeypatch.setattr(owner, "_run_admitted", native_input)
+    monkeypatch.setattr(browser_dom_write, "shared_action", shared_input)
+    with pytest.raises(BrowserSessionError, match=browser_control.PERSON_STEP):
+        await owner.run("thread-1", ("click", "@e1"), session="existing")
+    assert input_calls == []
 
 
 @pytest.mark.asyncio
@@ -188,6 +213,58 @@ async def test_a_read_target_outside_the_viewport_is_not_located_and_the_page_is
     assert ("scrollintoview", "@e2") not in commands
     cdp.viewport = (800, 600)
     assert await browser_dom_write.target_node(_run, "ws://page.test", "@e2") == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("uncovered", "expected"), [(True, 7), (False, None)])
+async def test_css_target_uses_hit_identity(uncovered, expected):
+    class Target(FakeCdp):
+        async def call(self, method, **params):
+            if method == "Runtime.evaluate":
+                return {"result": {"objectId": "target"}}
+            if method == "Runtime.callFunctionOn" and params.get("objectId") == "target":
+                return {"result": {"value": uncovered}}
+            if method == "DOM.describeNode" and params.get("objectId") == "target":
+                return {"node": {"backendNodeId": 7}}
+            return await super().call(method, **params)
+
+    cdp = Target(labelled=False)
+    found, node = await browser_dom_write._css_target(cdp, "#button", {"x": 20, "y": 60, "width": 200, "height": 30})
+    assert found and node == expected
+
+
+@pytest.mark.asyncio
+async def test_an_extended_selector_that_throws_keeps_the_existing_resolver():
+    class Throws(FakeCdp):
+        async def call(self, method, **params):
+            if method == "Runtime.evaluate":
+                # A thrown SyntaxError still arrives as an object with an id, beside exceptionDetails.
+                return {"result": {"type": "object", "subtype": "error", "objectId": "error"},
+                        "exceptionDetails": {"text": "Uncaught"}}
+            assert method != "DOM.describeNode"
+            return await super().call(method, **params)
+
+    found, node = await browser_dom_write._css_target(Throws(labelled=False), "text=Sign in",
+                                                      {"x": 20, "y": 60, "width": 200, "height": 30})
+    assert (found, node) == (False, None)
+
+
+@pytest.mark.asyncio
+async def test_ref_hit_walks_to_the_matching_ancestor(monkeypatch):
+    class AncestorCdp(FakeCdp):
+        async def call(self, method, **params):
+            if method == "DOM.getNodeForLocation":
+                return {"backendNodeId": 8}
+            if method == "DOM.getBoxModel" and params.get("backendNodeId") == 8:
+                return {"model": {"border": [70, 65, 120, 65, 120, 85, 70, 85]}}
+            if method == "Runtime.callFunctionOn" and "getRootNode" in params.get("functionDeclaration", ""):
+                return {"result": {"objectId": "parent"}}
+            return await super().call(method, **params)
+
+    cdp = AncestorCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert "DOM.resolveNode" in cdp.calls
 
 
 @pytest.mark.asyncio

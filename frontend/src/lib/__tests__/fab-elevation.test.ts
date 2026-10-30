@@ -169,12 +169,12 @@ describe('every floating control carries one elevation', () => {
 
 	/**
 	 * One elevation level for one kind of control, borrowed rather than invented.
-	 * The rail peers this FAB must match are MobileScrollFab and PlanDrawerControl.
+	 * The rail peers this FAB must match are ChatScrollControl and PlanDrawerControl.
 	 */
 	it('matches the elevation its rail peers already use', () => {
 		const shared = declarations(NEW_CHAT, '.rail-newchat').match(/box-shadow:\s*([^;]+);/)![1].trim();
 		expect(shared).toBe('var(--glass-elevation-1), var(--glass-rim)');
-		for (const peer of ['lib/components/MobileScrollFab.svelte', 'lib/components/plans/PlanDrawerControl.svelte']) {
+		for (const peer of ['lib/components/ChatScrollControl.svelte', 'lib/components/plans/PlanDrawerControl.svelte']) {
 			expect(read(peer), `${peer} no longer carries the shared pair`).toMatch(
 				/box-shadow:\s*var\(--glass-elevation-1\)\s*,\s*var\(--glass-rim\)/,
 			);

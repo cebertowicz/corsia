@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPanel from './ChatPanel.svelte';
 import { withEmptyAttentionQueue } from '../__tests__/fixtures/attentionQueue';
+import { withOpenTime } from '../__tests__/fixtures/openTimeServer';
+import type { TurnSummary } from './transcriptRunLabel';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages, reasoningEffort, threads } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
@@ -21,11 +23,13 @@ import { coreSettings } from '$lib/stores/settings';
 
 const originalFetch = globalThis.fetch;
 
+/** What the server holds for the open-time read: the Turns the test's message responses name. */
+let served: Record<string, TurnSummary> = {};
 let host: HTMLElement;
 let component: Record<string, any> | null = null;
 
 function mountChatPanel() {
-	globalThis.fetch = withEmptyAttentionQueue(globalThis.fetch);
+	globalThis.fetch = withOpenTime(withEmptyAttentionQueue(globalThis.fetch), () => served);
 	component = mount(ChatPanel, {
 		target: host,
 		props: { onOpenLightbox: () => {} },
@@ -49,6 +53,7 @@ beforeEach(() => {
 	}
 	vi.spyOn(console, 'error').mockImplementation(() => {});
 	token.set('tok');
+	served = {};
 	threads.set([{ id: 'thread-b', title: 'Thread B' } as never]);
 	activeThreadId.set(null);
 	messages.set([]);
@@ -78,6 +83,25 @@ afterEach(() => {
 });
 
 describe('ChatPanel first-page failure', () => {
+	it('shows the answer after reloading a page when comment refresh fails', async () => {
+		const comment = { id: 'comment', cid: 'c1.1', user_message_id: 'sender', quote: 'target', note: 'why', from_off: 0, to_off: 6, created_at: 't', answers: [] as object[] };
+		let answered = false;
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/chat-comment-threads')) return { ok: false, status: 503 };
+			if (url.includes('/messages?')) return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'target', thread_id: 'thread-b', role: 'assistant', content: 'target', created_at: 't', seq: 1, metadata: { for_user: true }, chat_comments: [{ ...comment, answers: answered ? [{ assistant_message_id: 'answer', text: 'recovered answer', created_at: 't', unread: true }] : [] }] }], has_more: false, oldest_id: 'target' }) };
+			return { ok: true, status: 200, json: async () => ({}) };
+		}) as unknown as typeof fetch;
+		mountChatPanel();
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		answered = true;
+		emit('message_added', { thread_id: 'thread-b', message: { metadata: { reply_context: { comments: [{ seq: 1, cid: 'c1.1' }] } } } });
+		await vi.waitFor(() => expect(console.error).toHaveBeenCalledWith('Could not refresh chat comment threads', expect.any(Error)));
+		expect(host.textContent).not.toContain('recovered answer');
+		await (component as Record<string, any>).fetchThreadMessages('thread-b');
+		await vi.waitFor(() => expect(host.textContent).toContain('recovered answer'));
+	});
 	it('drops the previous thread rows instead of passing them off as this one', async () => {
 		messages.set([
 			{
@@ -94,7 +118,7 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		expect(get(messages)).toEqual([]);
-		expect(host.textContent).toContain("Couldn't load this thread");
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
 		expect(host.querySelector('.empty-chat')).toBeNull();
 	});
 
@@ -102,6 +126,7 @@ describe('ChatPanel first-page failure', () => {
 		activeThreadId.set('thread-b');
 		coreSettings.set({ features: { focus_mode: true } } as never);
 		let messageLoads = 0;
+		served = { 'turn-2': { started_at: '2026-09-30T12:00:00Z', ended_at: '2026-09-30T12:04:00Z', status: 'completed', activity_count: 1 } };
 		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
 			if (url.includes('/messages?')) {
@@ -152,11 +177,13 @@ describe('ChatPanel first-page failure', () => {
 		coreSettings.set({ features: { focus_mode: true } } as never);
 		const summary = (turnId: string) => ({
 			[turnId]: {
-				started_at: '2026-09-30T12:00:00Z', ended_at: '2026-09-30T12:04:00Z',
+				started_at: turnId === 'new-turn' ? '2026-09-30T12:05:00Z' : '2026-09-30T12:00:00Z',
+				ended_at: turnId === 'new-turn' ? '2026-09-30T12:09:00Z' : '2026-09-30T12:04:00Z',
 				status: 'completed', activity_count: 1,
 			},
 		});
 		let messageLoads = 0;
+		served = { ...summary('older-turn'), ...summary('new-turn') };
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			if (!String(input).includes('/messages?')) return { ok: true, status: 200, json: async () => ({}) };
 			messageLoads += 1;
@@ -179,6 +206,79 @@ describe('ChatPanel first-page failure', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'));
 	});
 
+	it('aborts the first page of the thread the user left, without an error state', async () => {
+		threads.set([{ id: 'thread-a', title: 'Thread A' }, { id: 'thread-b', title: 'Thread B' }] as never);
+		const signals = new Map<string, AbortSignal>();
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.includes('/thread-a/messages?')) {
+				const signal = init?.signal as AbortSignal;
+				signals.set('thread-a', signal);
+				// A slow link: nothing arrives until the read is abandoned.
+				return new Promise((_, reject) => signal.addEventListener('abort', () => (
+					reject(new DOMException('The operation was aborted.', 'AbortError'))
+				)));
+			}
+			if (url.includes('/thread-b/messages?')) {
+				signals.set('thread-b', init?.signal as AbortSignal);
+				return { ok: true, status: 200, json: async () => ({
+					messages: [{ id: 'b1', thread_id: 'thread-b', role: 'user', content: 'hello b', created_at: '2026-08-01T00:00:00Z' }],
+					has_more: false, oldest_id: 'b1', turn_summaries: {},
+				}) };
+			}
+			return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) };
+		}) as unknown as typeof fetch;
+
+		mountChatPanel();
+		flushSync();
+		const leaving = (component as Record<string, any>).selectThread('thread-a');
+		await vi.waitFor(() => expect(signals.has('thread-a')).toBe(true));
+		await (component as Record<string, any>).selectThread('thread-b');
+		await leaving;
+		flushSync();
+
+		expect(signals.get('thread-a')?.aborted).toBe(true);
+		expect(signals.get('thread-b')?.aborted).toBe(false);
+		expect(host.textContent).toContain('hello b');
+		expect(host.textContent).not.toContain("Couldn’t load this chat. Try again.");
+		expect(vi.mocked(console.error).mock.calls.some(([text]) => String(text).includes('thread-a'))).toBe(false);
+	});
+
+	it('a stale open resuming after a newer read never aborts it, and the first page paints', async () => {
+		threads.set([{ id: 'thread-a', title: 'Thread A' }] as never);
+		activeThreadId.set('thread-a');
+		const signals: AbortSignal[] = [];
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (!String(input).includes('/thread-a/messages?')) {
+				return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) };
+			}
+			const signal = init?.signal as AbortSignal;
+			signals.push(signal);
+			// Both reads are still in flight when the stale open resumes.
+			return new Promise((resolve, reject) => {
+				signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+				setTimeout(() => resolve({ ok: true, status: 200, json: async () => ({
+					messages: [{ id: 'a1', thread_id: 'thread-a', role: 'user', content: 'hello a', created_at: '2026-08-01T00:00:00Z' }],
+					has_more: false, oldest_id: 'a1', turn_summaries: {},
+				}) }), 20);
+			});
+		}) as unknown as typeof fetch;
+
+		mountChatPanel();
+		flushSync();
+		const panel = component as Record<string, any>;
+		// selectThread takes its generation, then suspends at its first await;
+		// a refresh starts the current read in that gap.
+		const opening = panel.selectThread('thread-a');
+		const refreshing = panel.fetchThreadMessages('thread-a');
+		await Promise.all([opening, refreshing]);
+		flushSync();
+
+		expect(signals[0]?.aborted).toBe(false);
+		await vi.waitFor(() => expect(host.textContent).toContain('hello a'));
+		expect(host.textContent).not.toContain("Couldn’t load this chat. Try again.");
+	});
+
 	it('keeps this thread rows when a refresh of the SAME thread fails', async () => {
 		messages.set([
 			{
@@ -195,6 +295,6 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		expect(get(messages).map((m) => m.id)).toEqual(['b1']);
-		expect(host.textContent).toContain("Couldn't load this thread");
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
 	});
 });

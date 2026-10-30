@@ -1,9 +1,6 @@
 ---
 name: decide-or-raise
 description: Use whenever a choice, tradeoff, conflicting finding, or possible re-scope arises mid-work, and before raising any decision to the user — trace the choice to its objective, widen to the product, other objectives, and past decisions, test whether the objective itself needs reframing, then decide or raise with a recommendation. Not for message shape (skill `decision-brief`).
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Decide or raise
@@ -30,11 +27,11 @@ Sometimes the choice exists only because the objective is wrong: acceptance crit
 
 ## 5. Decide or raise
 
-Apply the core authority and material-choice threshold to what remains unresolved. Decide inside established decision rights when the evidence is sufficient, and record the meaningful trade-off. A behavior change, external effect or costly operation already explicitly authorized does not need a second approval merely for having that effect.
+For what remains unresolved, apply "You didn't think about consequences" and "You overstepped" in the always-loaded "How to work here". Decide inside established decision rights when the evidence is sufficient, and record the meaningful trade-off. A behavior change, external effect or costly operation already explicitly authorized does not need a second approval merely for having that effect.
 
 Raise the unresolved choice when it exceeds the grant, changes accepted risk or commitments, conflicts with an invariant, reframes the objective, or belongs to another decision authority. Complete the evidence gathering and safe preparation first so the approver receives a concrete choice.
 
-Investigate ambiguity before raising it. Distinguish an implementation choice within authority from a factual assumption: choose acceptable reversible details yourself, but apply the core groundwork gate before relying on an assumption. A needed assumption that cannot feasibly be checked goes to the user with the verification limit, consequence if wrong and recommendation; hold dependent work until confirmed. Existing explicit confirmation need not be requested again.
+Investigate ambiguity before raising it. Distinguish an implementation choice within authority from a factual assumption: choose acceptable reversible details yourself, but check an assumption before relying on it. A needed assumption that cannot feasibly be checked goes to the user with the verification limit, consequence if wrong and recommendation; hold dependent work until confirmed. Existing explicit confirmation need not be requested again.
 
 ## 6. Raise well
 

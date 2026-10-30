@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from infra.packed_rows import fetch_all
-from plans import aggregates, hierarchy, node_states
+from plans import aggregates, hierarchy, node_states, operator_display_state
 from plans.decision_fields import pick_of
 
 DECISION_TYPE = "plan-decision"
@@ -42,7 +42,10 @@ def _rows_sql(marks: str, *, compact: bool = False, open_nodes: bool = False) ->
     identity ever created and runs the retired-branch walk on each pairing,
     which made this read grow with all decisions instead of one plan's nodes.
     """
-    columns = "i.id AS artifact_id,i.metadata,n.plan_id,l.node_id"
+    columns = (
+        "i.id AS artifact_id,i.metadata,n.plan_id,l.node_id,"
+        f"{operator_display_state.node_paused_sql('n.id')} AS node_paused"
+    )
     columns += ",p.owner_id,t.spawned_by" if compact else ",i.external_id,i.created_at"
     open_clause = _OPEN_NODES if open_nodes else ""
     owners = "JOIN plans p ON p.id=n.plan_id LEFT JOIN threads t ON t.id=p.owner_id" if compact else ""
@@ -152,7 +155,8 @@ def rows_for_plans(plan_ids, *, db, open_nodes: bool = False) -> list[dict]:
     for row in rows:
         body = _body(row)
         if body is not None:
-            projected.append(project(row, body))
+            # Not on the wire: the person paused this decision, which defers it.
+            projected.append(project(row, body) | {"node_paused": bool(row["node_paused"])})
     return projected
 
 
@@ -161,6 +165,37 @@ def canonical_order(decisions: list[dict]) -> list[dict]:
     return sorted(
         decisions, key=lambda item: (item["order_key"], item["created_at"], item["id"]),
     )
+
+
+def review_steps(source_ids, *, db) -> dict[str, list[str]]:
+    """Return each source task's decision-review node ids: identity only.
+
+    Maps a source task to the review node of every well-formed decision drafted
+    from it, answered, withdrawn or still open. It decides no eligibility: the
+    review node's own state history says when the user owed an answer, so a
+    past decision stays in the task's history. The read pins the source-task
+    partial index, which SQLite otherwise skips for its broader
+    ``(integration,type)`` key.
+    """
+    unique = list(dict.fromkeys(str(source_id) for source_id in source_ids))
+    found: dict[str, list[str]] = {}
+    for start in range(0, len(unique), hierarchy._ID_CHUNK):
+        chunk = unique[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows = fetch_all(
+            db,
+            f"""SELECT i.metadata FROM artifact_identities i
+                  INDEXED BY idx_artifact_identities_decision_source
+                 WHERE i.integration='local' AND i.type='plan-decision'
+                   AND json_valid(i.metadata)
+                   AND json_extract(i.metadata,'$.plan_decision.source_node_id') IN ({marks})""",
+            tuple(chunk),
+        )
+        for row in rows:
+            body = _body(row)
+            if body is not None and str(body["source_node_id"]) in chunk:
+                found.setdefault(str(body["source_node_id"]), []).append(str(body["node_id"]))
+    return {source_id: list(dict.fromkeys(node_ids)) for source_id, node_ids in found.items()}
 
 
 def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
@@ -251,7 +286,7 @@ def activity_facts(plan_ids, *, db) -> list[dict]:
                 key: row[key] for key in ("artifact_id", "plan_id", "node_id", "owner_id", "spawned_by")
             } | {
                 "decision_state": body["state"], "source_node_id": body["source_node_id"],
-                "attention_state": _attention_state(row),
+                "attention_state": _attention_state(row), "node_paused": bool(row["node_paused"]),
             })
     raised = {
         item["artifact_id"]: item["source_node_id"]
@@ -292,9 +327,20 @@ def awaiting_count(plan_ids, *, db) -> int:
     A decision is held by a node in work, and a node in work is never folded, so
     the read asks for the open rows alone (``idx_plan_nodes_open``) and costs the
     open work, not the plan's history.
+
+    A paused plan or a paused decision defers its ask until resume
+    (``operator_display_state.ask_deferred``), so it contributes none; the
+    decision stays raised and answerable meanwhile.
     """
     rows = hierarchy.descendants(db, plan_ids)
-    return len(raised_decisions([row["id"] for row in rows], db=db, open_nodes=True))
+    live = [
+        row["id"] for row in rows
+        if not operator_display_state.plan_defers_asks(row["state"])
+    ]
+    return sum(
+        not operator_display_state.ask_deferred(node_paused=item["node_paused"])
+        for item in raised_decisions(live, db=db, open_nodes=True)
+    )
 
 
 def next_order_key(plan_id: str, *, db) -> int:

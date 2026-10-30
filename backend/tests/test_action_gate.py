@@ -38,7 +38,7 @@ CALL = "call-1"
 
 def _deliver(db, turn_id):
     """Give the turn's claimed inputs their transcript position, as the provider write does."""
-    from infra.input_writes import sequence_attempt
+    from infra.input_sequencing import sequence_attempt
 
     rows = db.execute(
         "SELECT id, thread_id FROM messages WHERE active_turn_id=? AND delivery_state='queued'"

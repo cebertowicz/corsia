@@ -35,8 +35,11 @@ class Message:
     body: str = ""
 
 
-def check_message_id(value: object) -> str:
-    """The id as Gmail issues them, or a fixed refusal; keeps a model-supplied value out of the URL path."""
+def check_message_id(value: object, _account_id: str | None = None) -> str:
+    """The id as Gmail issues them, or a fixed refusal; keeps a model-supplied value out of the URL path.
+
+    Gmail's ids are already unique to a mailbox; the account is taken so every mail backend answers one call.
+    """
     if not isinstance(value, str) or not _ID.match(value.strip()):
         raise GmailRequestError("That message can't be found.")
     return value.strip()
@@ -52,19 +55,19 @@ def headers_from_payload(payload: dict[str, Any]) -> dict[str, str]:
     return found
 
 
-async def search(query: str, max_results: int) -> list[Message]:
-    """Matching messages' ids and headers only, newest first (Gmail's order)."""
+async def search(account_id: str, query: str, max_results: int) -> list[Message]:
+    """One account's matching messages' ids and headers only, newest first (Gmail's order)."""
     limit = max(1, min(int(max_results), MAX_RESULTS))
-    token = await client.access_token()
+    token = await client.access_token(account_id)
     listed = await client.request_json(
-        "GET", API, token=token,
+        "GET", API, account_id=account_id, token=token,
         params={"q": query, "maxResults": limit, "fields": "messages(id,threadId)"},
     )
     refs = [m for m in (listed.get("messages") or []) if _ID.match(str(m.get("id", "")))][:limit]
 
     async def one(ref: dict[str, Any]) -> Message:
         data = await client.request_json(
-            "GET", f"{API}/{ref['id']}", token=token,
+            "GET", f"{API}/{ref['id']}", account_id=account_id, token=token,
             params={
                 "format": "metadata", "metadataHeaders": ["From", "Date", "Subject"],
                 "fields": "id,threadId,payload(headers)",
@@ -81,29 +84,30 @@ def _decode(data: str) -> str:
     return base64.urlsafe_b64decode(padded).decode("utf-8", "replace")
 
 
-def _parts(payload: dict[str, Any], mime: str) -> list[str]:
+def parts(payload: dict[str, Any], mime: str) -> list[str]:
     out: list[str] = []
     if payload.get("mimeType") == mime and (payload.get("body") or {}).get("data"):
         out.append(_decode(payload["body"]["data"]))
     for part in payload.get("parts") or []:
-        out.extend(_parts(part, mime))
+        out.extend(parts(part, mime))
     return out
 
 
 def body_text(payload: dict[str, Any]) -> str:
     """The message's plain text, or its HTML with tags removed when there is no plain part."""
-    plain = _parts(payload, "text/plain")
+    plain = parts(payload, "text/plain")
     if plain:
         return "\n".join(plain).strip()
-    rendered = [html.unescape(_TAGS.sub(" ", chunk)) for chunk in _parts(payload, "text/html")]
+    rendered = [html.unescape(_TAGS.sub(" ", chunk)) for chunk in parts(payload, "text/html")]
     return _BLANKS.sub("\n\n", "\n".join(rendered)).strip()
 
 
-async def fetch(message_id: str) -> Message:
-    """One message with its headers and decoded body."""
+async def fetch(account_id: str, message_id: str) -> Message:
+    """One message of one account, with its headers and decoded body."""
     mid = check_message_id(message_id)
     data = await client.request_json(
-        "GET", f"{API}/{mid}", params={"format": "full", "fields": "id,threadId,payload"},
+        "GET", f"{API}/{mid}", account_id=account_id,
+        params={"format": "full", "fields": "id,threadId,payload"},
     )
     payload = data.get("payload") or {}
     return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload))

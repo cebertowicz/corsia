@@ -2,7 +2,8 @@
 	import { onDestroy } from 'svelte';
 	import { toasts } from '$lib/stores/toast';
 	import { elapsedSeconds, formatElapsed, isInFlight, stepMessage } from './model';
-	import { updateOperation, updateProgressMinimized, updateServerClockOffsetMs, updateStarting, updateUnreachable } from './store';
+	import { updateScreenVisible } from './screenStore';
+	import { updateOperation, updateProgressMinimized, updateServerClockOffsetMs, updateStarting, updateToastSuppressed, updateUnreachable } from './store';
 
 	/**
 	 * Headless: pins the update's one progress toast while an update runs (or its request is
@@ -19,6 +20,11 @@
 
 	$effect(() => {
 		if (!running) return;
+		// The full-window screen and visible System Updates row are the two places that already carry this state.
+		if ($updateScreenVisible || $updateToastSuppressed) {
+			toasts.unpin('update');
+			return;
+		}
 		if ($updateProgressMinimized) {
 			toasts.pin('update', {
 				type: 'progress', message: 'Updating', compact: true,

@@ -128,6 +128,10 @@ async def handle_native_tool_complete(
     settled = SettledResult.from_row(full_result, tool_meta)
     display = project_tool_display(payload["name"], declared.get("args"), settled)
     declared.update(display.fields())
+    # The same projection of the row the result write just stored on the Step, so the finalized
+    # frame carries what a reload reads without reading it back; a later open replaces it.
+    if display.browser_chip is not None:
+        handler.tool_step_browser_chip = {"browser_chip": display.browser_chip}
     await handler._emit(tool_done_frame(
         handler.thread_id, payload["id"], payload["name"], settled, full_result, display,
     ))

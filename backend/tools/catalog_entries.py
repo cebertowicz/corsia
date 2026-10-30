@@ -1,13 +1,15 @@
-"""The tool catalog's data: one declaration per registry tool.
-
-``tools.catalog`` is the public import path; it re-exports these names with
-the packs and lookups that read them.
-"""
+"""Tool-catalog declarations, re-exported through ``tools.catalog``."""
 
 from __future__ import annotations
 
+from tools.catalog_automation_entries import AUTOMATION_CATALOG_ENTRIES
+from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
+from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
+from tools.catalog_mailhost_entries import MAILHOST_CATALOG_ENTRIES
+from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
+from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -125,7 +127,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking presence",
     ),
     "post_update": _Entry(
-        "history",
+        "history", core=True,
         summary=POST_UPDATE_SUMMARY,
         activity="Posting update",
     ),
@@ -153,11 +155,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Create a new project workspace",
         activity="Creating project",
     ),
-    "project_discovery_list": _Entry(
-        "projects", authority="consented-history-read",
-        summary="List the folders the user works in, after their consent decision",
-        activity="Finding projects",
-    ),
     "worktree_create": _Entry(
         "projects", status="substrate", authority="repository-worktree-write",
         summary="Create a Git worktree and branch for a project repository",
@@ -180,19 +177,23 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Open a URL in the browser", activity="Opening",
     ),
     "browser_snapshot": _Entry(
-        "browser", summary="Read the page's accessibility tree and element refs",
+        "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
     "browser_click": _Entry(
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
+    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
     "browser_eval": _Entry(
         "browser", authority="browser-script", summary="Run JavaScript in the page",
         activity="Running script",
+    ),
+    "browser_person_step": _Entry(
+        "browser", summary="Let the person complete the current browser page", activity="Your turn in the shared browser",
     ),
     "browser_wait": _Entry(
         "browser", summary="Wait for an element or a delay", activity="Waiting",
@@ -241,46 +242,47 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking the agents' GitHub account",
     ),
     "email_search": _Entry(
-        "google", status="active", authority="conductor-api",
-        summary="Search the person's Gmail: headers only, no body text",
+        "email", status="active", authority="conductor-api", account_bound=True,
+        summary="Search the person's Gmail or other-host email: headers only, no body text",
         activity="Searching mail",
     ),
     "email_read": _Entry(
-        "google", status="active", authority="conductor-api",
-        summary="Read one email after the local screen; a flagged message returns no body",
+        "email", status="active", authority="conductor-api", account_bound=True,
+        summary="Read one email as untrusted data, with a notice if flagged or unscreened",
         activity="Reading mail",
     ),
     "google_connect": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api",
         summary="Start the person's Google sign-in and get the link they open",
         activity="Starting Google sign-in",
     ),
     "google_status": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api",
         summary="Read the Google sign-in's email, scopes and status",
         activity="Checking Google sign-in",
     ),
     "email_draft": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Save an email as a draft document for the person to review; nothing is sent",
         activity="Drafting email",
     ),
     "email_send": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
     "calendar_list": _Entry(
-        "google", status="active", authority="conductor-api",
-        summary="List the person's Google Calendar events, up to 31 days at a time", activity="Reading calendar",
+        "email", status="active", authority="conductor-api", account_bound=True,
+        summary="List the person's Google or other-host calendar events, up to 31 days at a time",
+        activity="Reading calendar",
     ),
     "calendar_draft_invite": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Save a calendar invite as a draft document for the person to review; nothing is sent",
         activity="Drafting invite",
     ),
     "calendar_send_invite": _Entry(
-        "google", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),
@@ -302,21 +304,8 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Draft, review and raise a plan decision for the user",
         activity="Drafting decision",
     ),
-    "automation_schedule": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Schedule a clock or cadence wake for this thread",
-        activity="Scheduling",
-    ),
-    "automation_cancel": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Cancel one of this thread's schedules",
-        activity="Cancelling automation",
-    ),
-    "automation_list": _Entry(
-        "automations", status="substrate", authority="automation-read",
-        summary="List this thread's schedules",
-        activity="Listing automations",
-    ),
+    **AUTOMATION_CATALOG_ENTRIES,
+    **MEASUREMENT_CATALOG_ENTRIES,
     "restart_resume": _Entry(
         "delegation", status="substrate", authority="restart-continuity",
         summary="Resume this turn after the pending system restart",
@@ -397,4 +386,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
+    **MICROSOFT_CATALOG_ENTRIES, **MAILHOST_CATALOG_ENTRIES,
+    **LIBRARY_CATALOG_ENTRIES,
+    **CONSENT_CATALOG_ENTRIES,
 }

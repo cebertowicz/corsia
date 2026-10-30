@@ -28,6 +28,8 @@ class PlanNode:
     kind: str
     title: str
     description: str | None
+    intent: str | None
+    intent_node_id: str | None
     workflow_ref: str | None
     workflow_version: str | None
     workflow_step: str | None
@@ -84,10 +86,12 @@ class PlanState:
     ``moving`` answers a different question from ``progress.liveness``: liveness
     ranks review above motion for attention, so a plan can read ``needs-review``
     while one of its steps, or a plan delegated below it, is still running.
+    ``delegated_moving`` identifies the part of motion delegated to children.
     """
 
     progress: Progress
     moving: bool
+    delegated_moving: bool = False
 
 
 @dataclass(frozen=True)

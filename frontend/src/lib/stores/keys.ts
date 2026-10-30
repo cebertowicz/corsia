@@ -17,6 +17,10 @@ export interface KeyEntry {
 	checkable: boolean;
 	/** An environment variable CORSIA found and ignores for this key. */
 	ignored_env_var: string | null;
+	/** False for a key whose account row still needs it: Clear stays, Remove hides (the account's own Remove deletes it). */
+	removable?: boolean;
+	/** Hosts that receive this account password, disclosed before Set or Replace. */
+	destination_hosts?: string[];
 }
 
 /** A provider's key status. The API never returns a value. */
@@ -110,7 +114,8 @@ export function ignoredEnvironmentNote(variable: string): string {
 	return `${ignoredEnvironmentFact(variable)} Change the key here.`;
 }
 
-async function write(path: string, method: 'PUT' | 'POST', body: Record<string, string>): Promise<void> {
+/** A person-only write behind the CORSIA password (the same guard as the key writes). Throws `KeyWriteError`. */
+export async function write(path: string, method: 'PUT' | 'POST', body: Record<string, string>): Promise<void> {
 	const res = await fetch(path, { method, headers: headers(true), body: JSON.stringify(body) });
 	if (!res.ok) throw await refusal(res);
 }

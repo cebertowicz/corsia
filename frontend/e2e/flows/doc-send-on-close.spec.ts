@@ -1,36 +1,23 @@
-import path from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { createSession, TEST_TOKEN } from '../support/corsia';
+import {
+	deliveredBatches, headerSend, heldIn, installWorkspace, leaveUnsent, openThread, seedTextDocument, expectSenders, watchSendRequests, turnOffDocumentComments,
+	type TextDocument,
+} from '../support/heldComments';
 
-type SeededDocument = { artifactId: string; path: string; fileName: string };
-
-async function seedDocument(request: Parameters<typeof createSession>[0], threadId: string, title: string, suffix: string): Promise<SeededDocument> {
-	const rootsResponse = await request.get(`/api/files/tree?token=${TEST_TOKEN}`);
-	expect(rootsResponse.ok()).toBeTruthy();
-	const roots: Array<{ kind: string; path: string }> = (await rootsResponse.json()).roots;
-	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
-	expect(workspace).toEqual(expect.any(String));
-	const fileName = `${title}-${suffix}.md`;
-	const docPath = path.join(workspace!, fileName);
-	const seeded = await request.put(`/api/files/content?token=${TEST_TOKEN}`, {
-		data: { path: docPath, text: 'A commentable document.\n', thread_id: threadId, create: true },
-	});
-	expect(seeded.ok(), await seeded.text()).toBeTruthy();
-	return { artifactId: (await seeded.json()).artifact.id as string, path: docPath, fileName };
-}
-
-async function addUserComment(request: Parameters<typeof createSession>[0], artifactId: string): Promise<void> {
-	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, {
-		data: { body: 'Deliver this as document feedback.', anchor_text: 'commentable', from_off: 2, to_off: 13 },
+async function addUserComment(request: Parameters<typeof createSession>[0], artifactId: string): Promise<string> {
+	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${encodeURIComponent(TEST_TOKEN)}`, {
+		data: { body: 'Deliver this as document feedback.', anchor_text: 'commentable', from_off: 2, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
+	return (await created.json()).comment.id as string;
 }
 
 // Narrow viewports keep tabs in the compact sheet; its close uses the same path.
 async function tabControl(page: Page, fileName: string, action: 'close' | 'select'): Promise<Locator> {
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: /^Tabs \(/ }).click();
+		await page.getByRole('button', { name: /^Files \(/ }).click();
 		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		return action === 'close'
 			? sheet.getByRole('button', { name: `Close ${fileName}` })
@@ -41,140 +28,85 @@ async function tabControl(page: Page, fileName: string, action: 'close' | 'selec
 		: page.getByRole('tab', { name: fileName });
 }
 
-function workspaceState(threadId: string, documents: SeededDocument[], activeTabId: string) {
-	return {
-		threads: { [threadId]: {
-			tabs: documents.map((document, index) => ({
-				instanceId: `doc-${index}`,
-				artifactId: document.artifactId,
-				path: document.path,
-				title: document.fileName,
-				loadedRevision: null,
-				latestRevision: null,
-				status: 'loading',
-			})),
-			activeTabId,
-			visible: true,
-			activeSurface: 'artifact',
-		} },
-		splitWidth: 420,
-	};
+async function seedHeldDocument(request: Parameters<typeof createSession>[0], title: string, suffix: string, comments = 1) {
+	const threadId = await createSession(request, title);
+	const document: TextDocument = await seedTextDocument(request, threadId, title, suffix);
+	for (let index = 0; index < comments; index++) await leaveUnsent(request, await addUserComment(request, document.artifactId));
+	return { threadId, document };
 }
 
-test('@surface:doc-send-on-close sends an open user batch exactly once before the explicit tab close', async ({ page, request }) => {
+test('@surface:doc-send-on-close sends an unsent user batch exactly once before the explicit tab close', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `send-on-close-${Date.now()}`;
-	const threadId = await createSession(request, title);
-	const document = await seedDocument(request, threadId, title, 'close');
-	await addUserComment(request, document.artifactId);
-	const sends: string[] = [];
-	page.on('request', (outgoing) => {
-		if (new URL(outgoing.url()).pathname === '/api/doc-feedback/send') sends.push(outgoing.url());
-	});
-	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [document], 'doc-0'));
-	await loginByUrl(page);
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.getByText(title, { exact: true }).first().click();
-	// Send now is in the comments drawer's footer, which says leaving sends the batch; the header has none.
-	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} when you leave.`);
-	await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
-	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
+	const { threadId, document } = await seedHeldDocument(request, title, 'close');
+	const sends = watchSendRequests(page);
+	await installWorkspace(page, threadId, [document], 0);
+	await openThread(page, threadId, title);
+	await turnOffDocumentComments(page);
+	// The open document's header is the one sender; a held comment waits for it, with no drawer footer and no Send now.
+	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expectSenders(page, ['header: Send 1 comment']);
+	expect(heldIn(document.artifactId, 'document-held')).toBe(1);
+	expect(sends.document, 'looking at the header sends nothing').toHaveLength(0);
 
-	// Leaving delivers: closing the tab sends the batch once, without Send now.
+	// Closing the tab sends what is still held, once, without the header Send.
 	await (await tabControl(page, document.fileName, 'close')).click();
-	await expect.poll(() => sends).toHaveLength(1);
+	await expect.poll(() => sends.document).toHaveLength(1);
 	await expect(page.getByRole('tab', { name: document.fileName })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: `Close ${document.fileName}` })).toHaveCount(0);
+	await expect.poll(() => heldIn(document.artifactId, 'document-held')).toBe(0);
+	expect(deliveredBatches(document.artifactId, 'document-held'), 'delivered once').toBe(1);
 });
 
-test('@surface:doc-send-on-close keeps a switch-away grace and shows its server deadline on return', async ({ page, request }) => {
+test('@surface:doc-send-on-close keeps its header whole beside a long owner name and sends from it once', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `switch-away-with-a-long-owner-name-${Date.now()}`;
-	const threadId = await createSession(request, title);
-	const first = await seedDocument(request, threadId, title, 'first');
-	const second = await seedDocument(request, threadId, title, 'second');
-	await addUserComment(request, first.artifactId);
-	const leaves: string[] = [];
-	const sends: string[] = [];
-	page.on('request', (outgoing) => {
-		const pathname = new URL(outgoing.url()).pathname;
-		if (pathname === '/api/doc-feedback/leave') leaves.push(outgoing.url());
-		if (pathname === '/api/doc-feedback/send') sends.push(outgoing.url());
-	});
-	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [first, second], 'doc-0'));
-	await loginByUrl(page);
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.getByText(title, { exact: true }).first().click();
+	const { threadId, document } = await seedHeldDocument(request, title, 'first');
+	const sends = watchSendRequests(page);
+	await installWorkspace(page, threadId, [document], 0);
+	await openThread(page, threadId, title);
+	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^1 open thread, 1 message not sent yet$/ })).toBeVisible();
+	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
 
-	// Leaving delivers: switching away starts the batch's grace.
-	await (await tabControl(page, second.fileName, 'select')).click();
-	await expect.poll(() => leaves).toHaveLength(1);
-	await (await tabControl(page, first.fileName, 'select')).click();
-	const footer = await openUnsentFooter(page);
-	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · sending to ${title} in`);
-	const sendNow = footer.getByRole('button', { name: 'Send now', exact: true });
-	await expect(sendNow).toBeVisible();
-	expect(await visibleHeaderSends(page), 'neither Send nor its countdown shows in the header').toEqual([]);
-	const tops = await page.evaluate(() => ({
-		count: document.querySelector<HTMLElement>('.document-header .comment-status')!.getBoundingClientRect().top,
-		review: document.querySelector<HTMLElement>('.document-header .review-request')!.getBoundingClientRect().top,
-	}));
-	expect(Math.abs(tops.review - tops.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
-
-	// The footer is pinned at the drawer's foot and opaque; its whole text (the long owner name and the countdown) wraps, never clips.
-	const fit = await footer.evaluate((element) => {
-		const drawer = element.closest<HTMLElement>('[data-doc-comments-drawer]')!;
-		const list = drawer.querySelector<HTMLElement>('.drawer-comments')!;
-		const text = element.querySelector<HTMLElement>('[role="status"]')!;
-		const send = element.querySelector<HTMLElement>('.btn')!;
+	// Request review shares a row with the comment count and the header Send, whatever the owner's name.
+	const layout = await page.evaluate(() => {
+		const row = (selector: string) => document.querySelector<HTMLElement>(`.document-header ${selector}`)!.getBoundingClientRect();
+		const send = [...document.querySelectorAll<HTMLElement>('.document-header button')].find((button) => /^Send \d+ comments?$/.test(button.textContent?.trim() ?? ''))!;
 		const label = document.createRange();
 		label.selectNodeContents(send);
-		const style = getComputedStyle(send);
-		const probe = document.createElement('div');
-		probe.style.background = 'var(--bg-secondary)';
-		drawer.append(probe);
-		const token = getComputedStyle(probe).backgroundColor;
-		probe.remove();
-		const box = element.getBoundingClientRect(), frame = drawer.getBoundingClientRect();
 		return {
-			labelClipped: label.getBoundingClientRect().right - (send.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth)),
-			textClipped: Math.max(text.scrollWidth - text.clientWidth, text.scrollHeight - text.clientHeight),
-			bottomGap: frame.bottom - box.bottom, insideX: box.left >= frame.left - 0.5 && box.right <= frame.right + 0.5,
-			belowList: box.top >= list.getBoundingClientRect().bottom - 0.5,
-			background: getComputedStyle(element).backgroundColor, token,
+			count: row('.comment-status').top,
+			review: row('.review-request').top,
+			sendTop: send.getBoundingClientRect().top,
+			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
 		};
 	});
-	expect(fit.labelClipped, 'Send now label is not truncated').toBeLessThanOrEqual(0.5);
-	expect(fit.textClipped, 'the owner name and the "in N min" countdown are whole').toBeLessThanOrEqual(0);
-	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
-	expect(fit.insideX, 'the footer stays inside the drawer').toBe(true);
-	expect(fit.belowList, 'the comment list scrolls above the footer, not under it').toBe(true);
-	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
+	expect(Math.abs(layout.review - layout.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
+	expect(layout.lines, 'the header Send reads on one line').toBe(1);
 
-	// Send now uses the batch's own Send: one send, then the footer goes.
-	await sendNow.click();
-	await expect.poll(() => sends).toHaveLength(1);
-	await expect(footer).toHaveCount(0);
+	// The header Send is the batch's own Send: one send, then it goes.
+	await headerSend(page).click();
+	await expect.poll(() => sends.document).toHaveLength(1);
+	await expect(headerSend(page)).toHaveCount(0);
+	expect(deliveredBatches(document.artifactId, 'document-held')).toBe(1);
 });
 
-// The pinned header once widened the canvas at phone width: its "Send N comments to <owner>" button pushed the editor sideways.
+// The pinned header once widened the canvas at phone width: a long Send button pushed the editor sideways.
 test('@surface:doc-send-on-close at 393 px the pinned header with a pending send fits inside the canvas', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `header-fits-a-long-owner-thread-title-${Date.now()}`;
-	const threadId = await createSession(request, title);
-	const narrow = await seedDocument(request, threadId, title, 'narrow');
-	await addUserComment(request, narrow.artifactId);
-	await addUserComment(request, narrow.artifactId);
+	const { threadId, document: narrow } = await seedHeldDocument(request, title, 'narrow', 2);
 	await page.setViewportSize({ width: 393, height: 852 });
-	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [narrow], 'doc-0'));
-	await loginByUrl(page);
-	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.getByText(title, { exact: true }).first().click();
+	await installWorkspace(page, threadId, [narrow], 0);
+	await openThread(page, threadId, title);
+	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^2 open threads, 2 messages not sent yet$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
+	await expect(headerSend(page)).toHaveText('Send 2 comments');
+	await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
+	await expectSenders(page, ['header: Send 2 comments']);
 
 	const layout = await page.evaluate(() => {
 		const doc = document.querySelector<HTMLElement>('.doc')!;
@@ -186,20 +118,28 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 			.filter(({ rect }) => rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5)
 			.map(({ name, rect }) => `${name}: ${Math.round(rect.left)}..${Math.round(rect.right)} outside ${Math.round(bounds.left)}..${Math.round(bounds.right)}`);
 		return {
-			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth },
+			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) },
 			outside,
 		};
 	});
 	expect(layout.overflow, 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 	expect(layout.outside, 'every header button lies inside the canvas').toEqual([]);
 
-	// The phone drawer ends in the footer: inside the canvas, a 44 px Send now under a coarse pointer.
-	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} when you leave.`);
-	const send = footer.getByRole('button', { name: 'Send now', exact: true });
-	const footerBox = (await footer.boundingBox())!, sendBox = (await send.boundingBox())!;
-	expect(footerBox.x).toBeGreaterThanOrEqual(0);
-	expect(footerBox.x + footerBox.width).toBeLessThanOrEqual(393);
-	if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) expect(sendBox.height, 'touch target').toBeGreaterThanOrEqual(44);
-	expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 'nothing scrolls sideways').toBe(0);
+	// A near-44 px target under a coarse pointer, inside the canvas: the small button's own box is 28 px and the design
+	// system's tap area (its ::after) reaches 8 px past each edge. The header's last row sits against the document, which
+	// covers the last pixel of the lower edge (43 px measured), so the hit test above and below the box must reach 42.
+	const sendBox = (await headerSend(page).boundingBox())!;
+	expect(sendBox.x).toBeGreaterThanOrEqual(0);
+	expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(393);
+	if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) {
+		const reach = await headerSend(page).evaluate((button) => {
+			const box = button.getBoundingClientRect();
+			const x = box.left + box.width / 2;
+			const hits = (y: number) => { const el = document.elementFromPoint(x, y); return !!el && button.contains(el); };
+			let up = 0; while (up < 20 && hits(box.top - up - 0.5)) up++;
+			let down = 0; while (down < 20 && hits(box.bottom + down + 0.5)) down++;
+			return box.height + up + down;
+		});
+		expect(reach, 'touch target (the box and its tap area)').toBeGreaterThanOrEqual(42);
+	}
 });

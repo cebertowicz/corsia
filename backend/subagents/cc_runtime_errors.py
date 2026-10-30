@@ -4,7 +4,9 @@ import asyncio
 import uuid
 from typing import Callable
 
+from infra.turn_errors import insert_turn_error
 from infra.send_broadcast import broadcast_stored_message
+from llm.error_cause import cause_fields
 
 
 _EXPIRED_LOGIN_RECONCILIATION_TASKS: set[asyncio.Task] = set()
@@ -74,6 +76,8 @@ def surface_exit_error(
     *,
     insert_message_fn: Callable,
     logger,
+    added_signed_out: bool = False,
+    added_account=None,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -81,18 +85,24 @@ def surface_exit_error(
         (line for line in reversed((stderr or "").splitlines()) if line.strip()),
         f"Claude Code exited with code {code}.",
     )
-    reconcile_expired_login(stderr, logger)
+    if not added_signed_out:
+        reconcile_expired_login(stderr, logger)
     text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
+    if added_account and added_account["state"] == "signed_out":
+        text = f'{added_account["name"]} is signed out of Claude Code. Sign it in again under Settings › Providers.'
     try:
         meta = {
             "cc": True,
             "type": "cc_error",
             "event_type": "harness.error",
             "harness": "claude-code",
-            "cause": "process_exited",
+            **cause_fields("claude-code", "process_exited", stderr),
         }
-        mid = insert_message_fn(
-            thread_id, "system", text, meta,
+        if added_account and added_account["state"] == "signed_out":
+            meta["account_id"] = added_account["id"]
+        mid = insert_turn_error(
+            insert_message_fn, thread_id, text, meta,
+            turn_id=getattr(turn_identity, "turn_id", None),
             msg_id=str(uuid.uuid4()), db=db,
         )
         broadcast_stored_message(thread_id, mid, db=db, broadcast=bcast)

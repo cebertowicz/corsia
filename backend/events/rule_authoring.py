@@ -1,0 +1,345 @@
+"""Writing and reading agent event rules: create, disable, list, test, explain.
+
+The writer limits live here, checked when a rule is written:
+
+- an agent's rule covers events in its own project, and delivers only to itself
+  or to the registered owner of the file the event is about;
+- a test naming a repository names one the writer's project tracks;
+- an agent's ``drop`` removes only deliveries to itself;
+- the project's conductor may also send another agent in its project a digest;
+- anything else is refused with the reason and who can set it up.
+
+No approval step. Names no connector.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from collections.abc import Mapping
+from typing import Any
+
+from events import observe_rules, rule_declarations, rule_explain, rule_reads, rules
+from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, shape as _shape
+from events.rule_actions import RuleRefused, check_script, check_worker
+from events.connectors import EventTypeDecl, get_manifest
+from events.rule_match import matches
+from infra.queries import thread_available_sql, thread_is_temporary
+
+_EXPLAIN_LIMIT = 50
+
+
+def _thread(db: sqlite3.Connection, thread_id: str) -> Mapping[str, Any] | None:
+    return db.execute(
+        f"SELECT id, project_id, spawned_by, agent_enabled, {thread_available_sql()} AS available "
+        "FROM threads WHERE id=?",
+        (thread_id,),
+    ).fetchone()
+
+
+
+def _conductor(db: sqlite3.Connection, project_id: str) -> str | None:
+    from infra.conductor import get_project_conductor
+
+    return get_project_conductor(project_id, db=db)
+
+
+def _decl(db: sqlite3.Connection, connector: Any, event_type: Any) -> EventTypeDecl:
+    if not isinstance(connector, str) or not isinstance(event_type, str):
+        raise RuleRefused("connector and event_type are required")
+    declared = rule_declarations.declared_event(db, connector, event_type)
+    if declared is not None:
+        return declared[0]
+    try:
+        return get_manifest(connector).decl(event_type)
+    except KeyError as exc:
+        raise RuleRefused(str(exc.args[0]) if exc.args else str(exc)) from None
+
+
+def _match(raw: Any, decl: EventTypeDecl) -> list[dict[str, Any]]:
+    tests = [] if raw is None else raw
+    if not isinstance(tests, list) or len(tests) > rules.MAX_TESTS:
+        raise RuleRefused(f"match is a list of at most {rules.MAX_TESTS} tests")
+    clean = []
+    for test in tests:
+        if not isinstance(test, Mapping):
+            raise RuleRefused("each test is an object with field, op and value")
+        field, op = test.get("field"), test.get("op", "eq")
+        if field not in decl.filterable_fields:
+            raise RuleRefused(
+                f"{decl.event_type} has no field {field!r}; use one of {list(decl.filterable_fields)}")
+        if op not in rules.OPERATORS:
+            raise RuleRefused(f"op must be one of {list(rules.OPERATORS)}")
+        item: dict[str, Any] = {"field": field, "op": op}
+        if op != "present":
+            value = test.get("value")
+            if value is None:
+                raise RuleRefused(f"the {op} test on {field} needs a value")
+            if op == "in" and not isinstance(value, list):
+                raise RuleRefused(f"the in test on {field} needs a list")
+            if op == "prefix" and not isinstance(value, str):
+                raise RuleRefused(f"the prefix test on {field} needs text")
+            item["value"] = value
+        clean.append(item)
+    return clean
+
+
+_UNREADABLE = "This project's repositories can't be read right now; try again."
+
+
+def tracked_repositories(connector: Any, match: Any, project_id: str | None) -> frozenset[str] | None:
+    """The project's repositories when a test names the event's repository, else ``None``.
+
+    Resolving them runs git, so call this before opening the write transaction.
+    """
+    try:
+        manifest = get_manifest(connector) if isinstance(connector, str) else None
+    except KeyError:
+        return None  # create refuses the connector
+    if manifest is None or manifest.project_repositories is None or not project_id:
+        return None
+    if not any(isinstance(test, Mapping) and test.get("field") == manifest.repository_fact
+               for test in (match if isinstance(match, list) else ())):
+        return None
+    tracked = manifest.project_repositories(project_id)
+    if tracked is None:
+        raise RuleRefused(_UNREADABLE)
+    return tracked
+
+
+def _repositories(connector: str, tests: list[dict[str, Any]], tracked: frozenset[str] | None) -> None:
+    """A test naming the event's repository must name one this project tracks."""
+    try:
+        manifest = get_manifest(connector)
+    except KeyError:
+        return  # a declared namespace has no repository
+    fact = manifest.repository_fact if manifest.project_repositories else None
+    named = [value for test in tests if test["field"] == fact and test["op"] in rules.NAMING
+             for value in (test["value"] if test["op"] == "in" else [test["value"]])]
+    if not named:
+        return
+    if tracked is None:
+        raise RuleRefused(_UNREADABLE)  # fails closed when no list was read for this create
+    known = {repo.casefold() for repo in tracked}
+    for value in named:
+        if str(value).casefold() not in known:
+            raise RuleRefused(
+                f"{value} isn't one of this project's repositories "
+                f"({', '.join(sorted(tracked)) or 'it tracks none'}).")
+
+
+def _who_sets_it_up(db: sqlite3.Connection, project_id: str) -> str:
+    conductor = _conductor(db, project_id)
+    if conductor:
+        return f"Ask the project's conductor ({conductor}) to set up a digest for that agent."
+    return "This project has no conductor; ask the person to set it up."
+
+
+def _recipient(
+    db: sqlite3.Connection, writer: str, project_id: str, to: Any, action: str, mode: str | None,
+) -> tuple[str, str]:
+    """The stored ``to`` and the writer limit that allows it."""
+    if to in (None, "self", rules.THREAD_PREFIX + writer):
+        return rules.THREAD_PREFIX + writer, "self"
+    if action == rules.DROP:
+        raise RuleRefused("A drop removes only deliveries to you; leave `to` out or set it to self.")
+    if to == rules.REGISTERED_OWNER:
+        return to, "registered_owner"
+    target = rules.thread_target(to) if isinstance(to, str) else None
+    if not target:
+        raise RuleRefused("to is self, registered_owner or thread:<agent id>")
+    if _conductor(db, project_id) != writer:
+        raise RuleRefused(
+            "Your rules deliver only to you or to the registered owner of the file the event "
+            f"is about. {_who_sets_it_up(db, project_id)}")
+    row = _thread(db, target)
+    if row is None or row["project_id"] != project_id or not row["available"]:
+        raise RuleRefused(f"{target} is not an agent in this project")
+    if thread_is_temporary(row):
+        raise RuleRefused("A temporary agent can't receive rules; it ends with its task.")
+    if mode != rules.DIGEST:
+        raise RuleRefused("A conductor's rule for another agent delivers as a digest only.")
+    return rules.THREAD_PREFIX + target, "conductor"
+
+
+def create(
+    db: sqlite3.Connection, *, writer: str, project_id: str | None, connector: Any,
+    event_type: Any, match: Any = None, action: Any = None, to: Any = None,
+    mode: Any = None, note: Any = None, scope: Any = None, now: str,
+    tracked: frozenset[str] | None = None, script_id: Any = None, workflow_id: Any = None,
+    request_identity_fact: Any = None, workflows: Mapping[str, Any] | None = None,
+    kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None,
+) -> dict[str, Any]:
+    """Write one rule within the writer limits, or raise :class:`RuleRefused`.
+
+    ``kind: observe`` writes an observe row from ``tool``, ``argv_prefix`` and ``item_type``
+    (``events.observe_rules``); every other argument is a route rule's.
+
+    ``tracked`` is :func:`tracked_repositories` and ``workflows`` is
+    :func:`events.rule_actions.reachable_workflows`, both read before the transaction.
+    """
+    row = _thread(db, writer)
+    if row is None:
+        raise RuleRefused("this chat was not found")
+    if thread_is_temporary(row):
+        raise RuleRefused("A temporary agent can't write rules; they would outlive its task. "
+                          "Ask the agent that started you.")
+    if not project_id:
+        raise RuleRefused("Rules cover a project's events; this chat is in no project.")
+    own_scope = rules.project_scope(project_id)
+    if scope is not None and scope != own_scope:
+        raise RuleRefused(
+            f"You can only write rules about events you can already read: those in your own "
+            f"project ({own_scope}). {_who_sets_it_up(db, project_id)}")
+    if kind not in (None, rules.ROUTE, observe_rules.OBSERVE):
+        raise RuleRefused("kind is route or observe")
+    if kind == observe_rules.OBSERVE:
+        strays = dict(event_type=event_type, match=match, action=action, to=to, mode=mode, note=note,
+                      script_id=script_id, workflow_id=workflow_id, request_identity_fact=request_identity_fact)
+        return observe_rules.create(db, writer=row, scope=own_scope, now=now, tool=tool, argv_prefix=argv_prefix,
+                                    item_type=item_type, connector=connector, strays=strays)
+    action = rules.DELIVER if action is None else action
+    decl = _decl(db, connector, event_type)
+    tests = _match(match, decl)
+    declared = rule_declarations.declared_event(db, connector, event_type)
+    problem = rule_declarations.match_problem(declared[1], event_type, tests) if declared else None
+    if problem:
+        raise RuleRefused(problem)
+    _repositories(connector, tests, tracked)
+    if action not in (rules.DELIVER, rules.DROP, rules.RUN_SCRIPT, rules.START_WORKER):
+        raise RuleRefused("action is deliver, drop, run_script or start_worker")
+    if action != rules.START_WORKER and (workflow_id, request_identity_fact) != (None, None):
+        raise RuleRefused("workflow_id and request_identity_fact go only with action start_worker.")
+    if action == rules.START_WORKER:
+        # Refuses to, mode, note and script_id; the worker is its writer's own, so it stores to: self.
+        workflow_id, request_identity_fact = check_worker(
+            workflows or {}, workflow_id, request_identity_fact, decl,
+            {"to": to, "mode": mode, "note": note, "script_id": script_id})
+    elif script_id is not None and action != rules.RUN_SCRIPT:
+        raise RuleRefused("script_id goes only with action run_script.")
+    elif action == rules.RUN_SCRIPT:
+        # Refuses to, mode and note; the run is its writer's own, so it stores to: self.
+        script_id = check_script(db, writer, script_id, {"to": to, "mode": mode, "note": note})
+    elif action == rules.DROP:
+        if mode is not None or note is not None:
+            raise RuleRefused("A drop takes no mode or note.")
+    else:
+        mode = rules.WAKE if mode is None else mode
+        if mode not in (rules.WAKE, rules.DIGEST):
+            raise RuleRefused("mode is wake or digest")
+        if note is not None and (not isinstance(note, str) or len(note) > rules.NOTE_LIMIT):
+            raise RuleRefused(f"note is text of at most {rules.NOTE_LIMIT} characters")
+    stored_to, authority = _recipient(db, writer, project_id, to, action, mode)
+    rule_id = "rule_" + uuid.uuid4().hex[:12]
+    db.execute(
+        'INSERT INTO event_rules (id, created_at, updated_at, enabled, scope, connector, event_type, '
+        '"match", action, "to", mode, note, origin, created_by, authority_ref, script_id, '
+        "workflow_id, request_identity_fact) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (rule_id, now, now, own_scope, connector, event_type, json.dumps(tests), action,
+         stored_to, mode, note, f"agent:{writer}", writer, authority, script_id,
+         workflow_id, request_identity_fact),
+    )
+    rules.prune_disabled(db, own_scope, now)
+    return _shape(rules.from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
+
+
+def disable(
+    db: sqlite3.Connection, *, caller: str, project_id: str | None, rule_id: Any, now: str,
+) -> dict[str, Any]:
+    """Turn one rule off: its writer, its recipient or the project's conductor may."""
+    row = db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()
+    if row is None or not project_id or row["scope"] not in (
+            rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE):
+        raise RuleRefused(f"no rule {rule_id!r} in this project")
+    if row["kind"] == observe_rules.OBSERVE:
+        observe_rule = observe_rules.from_row(row)
+        observe_rules.check_disable(observe_rule, caller)
+        rules.turn_off(db, observe_rule.id, row["scope"], now)
+        return {**observe_rules.shape(observe_rule), "enabled": False}
+    rule = rules.from_row(row)
+    delivered_to_caller = db.execute(
+        "SELECT 1 FROM event_route_decisions WHERE rule_id=? AND thread_id=? "
+        "AND outcome IN ('woke', 'digested') LIMIT 1",
+        (rule.id, caller),
+    ).fetchone() is not None
+    if (caller not in (rule.created_by, rules.thread_target(rule.to))
+            and not delivered_to_caller and _conductor(db, project_id) != caller):
+        raise RuleRefused(
+            "Only the rule's writer, its named recipient, a recipient it has delivered to or "
+            "the project's conductor can turn it off.")
+    rules.turn_off(db, rule.id, row["scope"], now)
+    return {**_shape(rule), "enabled": False}
+
+
+def dry_run(
+    db: sqlite3.Connection, *, caller: str, project_id: str | None, connector: Any,
+    event_type: Any, facts: Any,
+) -> list[dict[str, Any]]:
+    """Which of the caller's project's enabled rules these facts match, and what each would do.
+
+    Matching only: it reads no thread, owner or tag, so it reveals nothing the
+    caller could not already see in ``list``.
+    """
+    decl = _decl(db, connector, event_type)
+    if not isinstance(facts, Mapping):
+        raise RuleRefused("facts is an object of the event's fields")
+    if not project_id:
+        return []
+    return [
+        {**_shape(rule), "would": _would(rule)}
+        for rule in rules.lookup(db, connector, decl.event_type, caller)
+        if matches(rule, facts)
+    ]
+
+
+def _would(rule: rules.Rule) -> str:
+    if rule.action == rules.DROP:
+        return f"drop deliveries to {rules.thread_target(rule.to)}"
+    if rule.action == rules.RUN_SCRIPT:
+        return f"run {rules.thread_target(rule.to)}'s script {rule.script_id} with the event"
+    if rule.action == rules.START_WORKER:
+        return (f"start one {rule.workflow_id} worker for {rules.thread_target(rule.to)} per "
+                f"{rule.request_identity_fact}")
+    who = "the registered owner" if rule.to == rules.REGISTERED_OWNER else rules.thread_target(rule.to)
+    return f"{rule.mode} {who}"
+
+
+def explain(
+    db: sqlite3.Connection, *, project_id: str | None, event_id: Any = None, artifact: Any = None,
+    thread: Any = None, event_type: Any = None,
+) -> dict[str, Any]:
+    """Why an event did or didn't reach a chat through a rule: the rule, hold or budget.
+
+    ``event_type`` instead lists that type's recent intake refusals.
+
+    A drop also names any armed watch it left waiting, since a dropped event
+    doesn't end a wait.
+    """
+    if event_type:
+        found = rule_declarations.intake_refusals(db, project_id=project_id, event_type=event_type)
+        return {"refusals": found, "summary": f"{len(found)} recent refusal(s) of {event_type}, newest first."}
+    if not event_id and not artifact:
+        raise RuleRefused("give event_id, event_type, or artifact (the file's external id)")
+    if not project_id:
+        return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
+    # A shipped rule set's rule is global: its outcomes show here only for this project's chats.
+    where = [OUTCOME_SCOPE]
+    args: list[Any] = [rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
+    if event_id:
+        where.append("d.event_id=?")
+        args.append(event_id)
+    if artifact:
+        where.append("d.artifact_external_id=?")
+        args.append(artifact)
+    if thread:
+        where.append("d.thread_id=?")
+        args.append(thread)
+    rows = db.execute(
+        f"SELECT d.*, r.action FROM event_route_decisions d {OUTCOME_JOINS} "
+        f"WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
+        (*args, _EXPLAIN_LIMIT),
+    ).fetchall()
+    decisions = [rule_explain.decision(db, row) for row in rows]
+    return {"decisions": decisions, "summary": rule_reads.explain_summary(event_id, len(decisions))}
+

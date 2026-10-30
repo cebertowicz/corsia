@@ -2,7 +2,7 @@
 export interface MessageCard {
 	/** An ask is a user ask the agent raised (it has a round state); an artifact is a file the message names. */
 	kind: 'ask' | 'artifact';
-	artifact_id: string;
+	artifact_id: string | null;
 	title: string;
 	type: string | null;
 	icon: string;
@@ -36,7 +36,7 @@ export const CARD_STATE_LABELS: Record<MessageCardState, string> = {
 	replaced: 'Replaced',
 	revision_requested: 'Revision requested',
 	withdrawn: 'Withdrawn',
-	unavailable: 'No longer available',
+	unavailable: 'Unavailable',
 };
 
 /** "2 comments, 1 suggestion": the round named by kind, leaving out kinds with no items. */

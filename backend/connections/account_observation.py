@@ -68,6 +68,34 @@ def _invalidate(account: dict, *, comparison: dict, previous: dict, generation: 
     refresh_account_holds(account['id'], db=db)
 
 
+def _set_default_visibility(previous: dict, identity: dict, facts: dict) -> bool:
+    """Preserve visibility only for an identity-only read without facts."""
+    before = bool(previous.get('definitely_signed_out'))
+    status = identity.get('_login_status', 'unknown')
+    if status == 'not_read' and not facts:
+        return False
+    value = status == 'signed_out'
+    previous['definitely_signed_out'] = value
+    return value != before
+
+
+def commit_default_visibility(provider: str, identity: dict, *, token: ObservationToken, db) -> bool:
+    """Publish status from an incomplete discovery without replacing comparison facts."""
+    with write_transaction(db, scope='vendor_default_visibility') as connection:
+        if token != begin_default_observation(provider, db=connection):
+            return False
+        account = default_account(provider, db=connection)
+        stored = dict(account['identity'])
+        previous = dict(stored.get(DEFAULT_COMPARISON) or {})
+        if not _set_default_visibility(previous, identity, _facts(provider, identity)):
+            return True
+        previous['observation_seq'] = token.observation_seq + 1
+        stored[DEFAULT_COMPARISON] = previous
+        connection.execute('UPDATE vendor_accounts SET identity_json=? WHERE id=?',
+                           (json.dumps(stored, sort_keys=True), account['id']))
+        return True
+
+
 def commit_default_observation(provider: str, identity: dict, *, token: ObservationToken,
                                schedule_usage_check: bool = True, db) -> ObservationResult:
     with write_transaction(db, scope='vendor_default_identity') as connection:
@@ -84,8 +112,10 @@ def commit_default_observation(provider: str, identity: dict, *, token: Observat
         changed = prior_state != state or (bool(facts) and comparison != previous_comparison)
         generation = token.login_seq + int(changed)
         last_known = facts or previous.get('last_known') or previous.get('facts') or None
+        visibility = {'definitely_signed_out': bool(previous.get('definitely_signed_out'))}
+        _set_default_visibility(visibility, identity, facts)
         stored[DEFAULT_COMPARISON] = {'facts': facts, 'last_known': last_known,
-            'auth_state': state, 'at': utc_now_iso(),
+            'auth_state': state, 'at': utc_now_iso(), **visibility,
             'observation_seq': token.observation_seq + 1, 'login_seq': generation}
         connection.execute('UPDATE vendor_accounts SET identity_json=? WHERE id=?',
                            (json.dumps(stored, sort_keys=True), account['id']))

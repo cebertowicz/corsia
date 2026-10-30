@@ -1,9 +1,11 @@
 import fs from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
+import { imageBarSend, sendByKeyboard } from '../support/heldComments';
 import {
 	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,
-	sendFromDrawerByKeyboard, sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
+	sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
 } from '../support/imageRegionComments';
 
 /** The card is wholly on screen and on top at each corner, so no ancestor clips or covers it. */
@@ -147,11 +149,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.keyboard.press('Escape');
 			await expect(tag(page, 2)).toBeFocused();
 
-			// The person's comments are delivered as one batch carrying each region and one marked-up copy.
-			isolatedDb([
-				'changed = connection.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state=\'open\' AND author_kind=\'user\' AND artifact_id=?", ("2000-01-01T00:00:00+00:00", sys.argv[2])).rowcount',
-				'assert changed == 1, changed',
-			], seeded.artifactId);
+			// The viewer bar sends the held image batch by keyboard; focus returns to its durable Comment control.
+			await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+			await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
+			// All three regions reach one task carrying each region and one marked-up copy.
 			let delivered: { title: string; description: string } | null = null;
 			await expect.poll(() => {
 				delivered = JSON.parse(isolatedDb([
@@ -172,7 +173,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			// An agent's comment carries its name beside the number.
 			const tok = encodeURIComponent(TEST_TOKEN);
 			const agentComment = await request.post(`/api/artifacts/${seeded.artifactId}/comments?token=${tok}`, {
-				data: { body: 'The call-to-action is clipped at this width.', region: { x: 0.55, y: 0.6, w: 0.3, h: 0.25 } },
+				data: { body: 'The call-to-action is clipped at this width.', region: { x: 0.55, y: 0.6, w: 0.3, h: 0.25 }, delivery_policy: 'immediate' },
 			});
 			expect(agentComment.ok(), await agentComment.text()).toBeTruthy();
 			const agentId = (await agentComment.json()).comment.id as string;
@@ -240,11 +241,11 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expectUnclipped(page, card);
 			await shoot(page, testInfo, '1440-14-wide-card-beside-box', true);
 
-			// R2: Send now in the drawer's footer, from the keyboard, leaves focus in the drawer; Escape then closes only it.
+			// The viewer bar's one Send is keyboard-operated; focus returns to Comment after it disappears.
 			await page.keyboard.press('Escape');
-			await pill(page).click();
-			await expect(drawer(page)).toBeVisible();
-			await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '1440-15-drawer-sent-focus');
+			await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+			await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
+			await shoot(page, testInfo, '1440-15-bar-sent', true);
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}
@@ -299,14 +300,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(overlap((await tag(page, 1).boundingBox())!, (await sheet(page).boundingBox())!)).toBe(false);
 			await shoot(page, testInfo, '393-05-tag-opens-sheet', true);
 
-			// R2: Send now in the drawer sheet's footer, from the keyboard, leaves focus in the sheet; Escape then closes only it.
+			// The viewer bar's one Send is keyboard-operated; focus returns to Comment after it disappears.
 			// (Sending delivers to the thread's owner, so only against the isolated mock state.)
 			if (process.env.CORSIA_E2E_MOCK === '1') {
 				await page.keyboard.press('Escape');
 				await expect(sheet(page)).toHaveCount(0);
-				await pill(page).tap();
-				await expect(sheet(page)).toBeVisible();
-				await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '393-06-drawer-sent-focus');
+				await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+				await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
+				await shoot(page, testInfo, '393-06-bar-sent', true);
 			}
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });

@@ -2,20 +2,23 @@
 	// The artifacts a message carries. An ask is a flat row under the message; a file the message names is a
 	// chip in a wrapping strip (a scrolling one on a phone). Both open the artifact in the canvas; neither has
 	// answer buttons, because the review bar in the opened document is the one place to answer an ask.
+	// A message that opened the shared browser in front of the person adds its own chip to that strip; it is not an
+	// artifact and takes no part in the cards.
 	import { visibleCards, type MessageCard } from '$lib/api/messageCards';
-	import { paneOpen } from '$lib/stores/paneOpen';
+	import type { BrowserChip as BrowserChipData } from '$lib/browserChip';
 	import AttachmentRow from './AttachmentRow.svelte';
+	import BrowserChip from './BrowserChip.svelte';
 
 	let {
 		cards,
-		more = 0,
+		browser = null,
 		threadId,
 		hiddenHolds,
 		renderedAsks,
 	}: {
 		cards: MessageCard[];
-		/** Cards past the cap; the last chip opens the artifact pane. */
-		more?: number;
+		/** The message's shared-browser chip, if it opened one in front of the person. */
+		browser?: BrowserChipData | null;
 		threadId: string | null | undefined;
 		/** Holds whose card renders on their blocked update row instead. */
 		hiddenHolds?: ReadonlySet<string>;
@@ -26,6 +29,12 @@
 	const shown = $derived(visibleCards(cards, hiddenHolds, renderedAsks));
 	const asks = $derived(shown.filter((card) => card.kind === 'ask'));
 	const files = $derived(shown.filter((card) => card.kind !== 'ask'));
+	const browserChip = $derived(browser && threadId ? { chip: browser, threadId } : null);
+	const stripLabel = $derived(
+		browserChip
+			? (files.length > 0 ? 'Files and shared browser' : 'Shared browser')
+			: 'Files',
+	);
 
 	/** The least of the next chip that must show past the last whole chip for the scroll cue to read. */
 	const PEEK = 12;
@@ -85,22 +94,22 @@
 	}
 </script>
 
-{#if shown.length > 0 || more > 0}
+{#if shown.length > 0 || browserChip}
 	<div class="cards">
 		{#if asks.length > 0}
-			<ul class="asks" aria-label="Artifacts">
+			<ul class="asks" aria-label="Files to review">
 				{#each asks as card (card.hold_id ?? card.artifact_id)}
 					<li><AttachmentRow {card} {threadId} /></li>
 				{/each}
 			</ul>
 		{/if}
-		{#if files.length > 0 || more > 0}
-			<ul class="chips" aria-label={asks.length > 0 ? 'Files' : 'Artifacts'} use:peek={files.length + more}>
-				{#each files as card (card.hold_id ?? card.artifact_id)}
+		{#if files.length > 0 || browserChip}
+			<ul class="chips" aria-label={stripLabel} use:peek={files.length + (browserChip ? 1 : 0)}>
+				{#each files as card (card.artifact_id ?? card.path)}
 					<li><AttachmentRow {card} {threadId} variant="chip" /></li>
 				{/each}
-				{#if more > 0}
-					<li><button type="button" class="tile more press-tint" onclick={() => paneOpen.set(true)}>+{more} more</button></li>
+				{#if browserChip}
+					<li><BrowserChip {...browserChip} /></li>
 				{/if}
 			</ul>
 		{/if}
@@ -112,23 +121,8 @@
 	ul { list-style: none; }
 	.chips { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 	li { display: flex; min-width: 0; }
-	.asks { max-width: 480px; }
+	.asks { max-width: var(--needs-you-tile-max-width); }
 	.asks li { display: block; }
-	.more {
-		display: inline-flex;
-		align-items: center;
-		min-height: 32px;
-		padding: 0 var(--space-3);
-		border: 0;
-		border-radius: var(--radius-pill);
-		background: transparent;
-		color: var(--text-secondary);
-		font: inherit;
-		font-size: var(--text-subhead);
-		cursor: pointer;
-	}
-	.more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .more { min-height: 36px; } }
 	/* A phone scrolls the strip instead of wrapping it; while more lies to the right, the next chip peeks under the
 	   edge fade as the cue, and once scrolled the leading edge fades the same way. A chip's focus ring is inset, so the scroller has nothing to clip. */
 	@media (max-width: 480px) {

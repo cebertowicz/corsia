@@ -299,7 +299,7 @@ def _publish_review(findings, *, poster, summary_ok=True, resolve_replies=()):
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="sha123",
             findings=list(findings), new_threads=list(findings),
-            resolve_replies=list(resolve_replies), unchanged_count=0,
+            resolve_replies=list(resolve_replies), still_raised=[],
             model_label="codex", existing_issue_comments=[],
         )
     return publication, summary
@@ -354,7 +354,7 @@ def test_summary_is_composed_after_publication_with_the_fallback_count():
         publish_review(
             pr_number=42, repo="owner/repo", head_sha="sha123",
             findings=[_finding()], new_threads=[_finding()],
-            resolve_replies=[], unchanged_count=0,
+            resolve_replies=[], still_raised=[],
             model_label="codex", existing_issue_comments=[],
         )
 
@@ -375,7 +375,7 @@ def test_reappeared_finding_reopens_and_republishes_in_original_thread():
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="a" * 40,
             findings=[finding], new_threads=[finding], resolve_replies=[],
-            unchanged_count=0, model_label="claude", existing_issue_comments=[],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
         )
 
     set_resolved.assert_called_once_with("PRRT_1", resolved=False)
@@ -399,7 +399,7 @@ def test_reappeared_finding_falls_back_to_new_publication_if_reopen_fails():
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="a" * 40,
             findings=[finding], new_threads=[finding], resolve_replies=[],
-            unchanged_count=0, model_label="claude", existing_issue_comments=[],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
         )
 
     post_reply.assert_not_called()
@@ -407,25 +407,48 @@ def test_reappeared_finding_falls_back_to_new_publication_if_reopen_fails():
     assert publication.deliveries[0].channel == CHANNEL_LINE
 
 
-def test_resolution_mutation_failure_is_reported_after_truthful_reply():
-    action = ReviewThreadAction("PRRT_1", 123, False)
+def _publish_resolution(*, reply_ok, resolve_ok, reply_needed=True):
+    action = ReviewThreadAction("PRRT_1", 123, False, reply_needed=reply_needed)
     comment = {"id": 123, THREAD_ACTION_KEY: action}
     with patch(
-        "reviewer.review_thread_publication.post_resolve_reply", return_value=True,
+        "reviewer.review_thread_publication.post_resolve_reply", return_value=reply_ok,
     ) as post_reply, patch(
-        "reviewer.review_thread_publication.set_review_thread_resolved", return_value=False,
+        "reviewer.review_thread_publication.set_review_thread_resolved",
+        return_value=resolve_ok,
     ) as set_resolved, patch(
         "reviewer.review_thread_publication._emit_lifecycle",
     ) as emit_event, patch(
         "reviewer.review_publication.post_review_summary", return_value=True,
     ), patch("reviewer.review_publication.format_summary_body", return_value="summary"):
-        with pytest.raises(ReviewPublicationError, match="1 of 1 declared resolution"):
-            publish_review(
-                pr_number=42, repo="owner/repo", head_sha="a" * 40,
-                findings=[], new_threads=[], resolve_replies=[comment],
-                unchanged_count=0, model_label="claude", existing_issue_comments=[],
-            )
+        publish_review(
+            pr_number=42, repo="owner/repo", head_sha="a" * 40,
+            findings=[], new_threads=[], resolve_replies=[comment],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
+        )
+    return post_reply, set_resolved, emit_event
+
+
+def test_failed_resolve_after_a_landed_reply_keeps_the_verdict_and_stays_visible():
+    """The reply is the declared item; a failed resolve leaves the thread open."""
+    post_reply, set_resolved, emit_event = _publish_resolution(
+        reply_ok=True, resolve_ok=False,
+    )
 
     post_reply.assert_called_once()
     set_resolved.assert_called_once_with("PRRT_1", resolved=True)
     emit_event.assert_called_once_with(42, "a" * 40, "PRRT_1", "resolve", False)
+
+
+def test_retried_resolve_on_an_already_replied_thread_keeps_the_verdict():
+    post_reply, set_resolved, emit_event = _publish_resolution(
+        reply_ok=True, resolve_ok=False, reply_needed=False,
+    )
+
+    post_reply.assert_not_called()
+    set_resolved.assert_called_once_with("PRRT_1", resolved=True)
+    emit_event.assert_called_once_with(42, "a" * 40, "PRRT_1", "resolve", False)
+
+
+def test_resolution_reply_that_did_not_land_is_still_counted_missing():
+    with pytest.raises(ReviewPublicationError, match="1 of 1 declared resolution"):
+        _publish_resolution(reply_ok=False, resolve_ok=True)

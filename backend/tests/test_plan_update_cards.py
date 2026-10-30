@@ -76,6 +76,7 @@ def _review_then_accept_followup(db, node_id: str) -> None:
             "expected_revision": _row(db, node_id)["revision"],
             "title": "Follow up",
             "acceptance_criteria": "Follow up DOD",
+            "size": "unknown",
         },
         actor=OWNER,
         provenance="test.plan_update_cards",
@@ -172,6 +173,7 @@ def test_nested_nodes_are_quiet_unless_they_are_assigned_to_the_user(db):
     service.transition_node(user_nested.id, "failed", db=db)
 
     assert [(card["kind"], card["node_id"]) for card in _cards(db)] == [
+        ("person_step", user_nested.id),
         ("failed", user_nested.id),
     ]
 

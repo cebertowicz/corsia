@@ -62,7 +62,8 @@ class Harness:
     def run(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["bash", str(self.repo / "scripts" / "e2e-local"), *args],
-            env=self.env(**extra), capture_output=True, text=True, timeout=60,
+            env=self.env(**extra), stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=60,
         )
 
     def default_root(self, name: str) -> Path:
@@ -229,7 +230,10 @@ def test_reuse_neither_deletes_nor_demands_fresh_roots(harness: Harness):
     state.mkdir()
     sentinel = state / "corsia.db"
     sentinel.write_text("existing run", encoding="utf-8")
-    python = harness.shim("fake-python", "echo token-for-reuse")
+    # Drain stdin like the real CLI's --password-stdin: a shim that exits
+    # unread can SIGPIPE the password writer, which pipefail turns into a
+    # failed provision depending on scheduling.
+    python = harness.shim("fake-python", "cat > /dev/null\necho token-for-reuse")
 
     result = harness.run(
         "--reuse", CORSIA_E2E_PYTHON=str(python),

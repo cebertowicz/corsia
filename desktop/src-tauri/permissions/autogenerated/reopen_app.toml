@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reopen-app"
+description = "Enables the reopen_app command without any pre-configured scope."
+commands.allow = ["reopen_app"]
+
+[[permission]]
+identifier = "deny-reopen-app"
+description = "Denies the reopen_app command without any pre-configured scope."
+commands.deny = ["reopen_app"]

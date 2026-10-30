@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -274,6 +275,10 @@ def accounts(isolated_db):
     second = set_account_state(second["id"], "signed_in", expected_revision=0)
     third = add_account("codex", "Third")
     third = set_account_state(third["id"], "signed_in", expected_revision=0)
+    for account in (second, third):
+        (Path(account['source_home']) / 'auth.json').write_text(json.dumps({
+            'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'},
+        }))
     db = get_db()
     for project in ("actor-project", "destination-project"):
         db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,'t','t')",

@@ -3,8 +3,8 @@
  *
  * Coverage for the artifact-pane-hierarchy cutover's client projection:
  * node kinds (artifact / worktree-group), grouping disclosure, capability-driven
- * row actions and disabled states, the needs_attention repair-failure cluster
- * (distinct from the conductor "Needs you" queue), pane removal, and hide.
+ * row actions and disabled states, the needs_attention repair-failure cluster,
+ * pane removal, and hide.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -14,7 +14,7 @@ import ArtifactPane from './ArtifactPane.svelte';
 
 vi.mock('$lib/stores/artifactWorkspace', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/stores/artifactWorkspace')>();
-	return { ...original, openArtifactTab: vi.fn() };
+	return { ...original, openArtifactTab: vi.fn(), openBrowserPane: vi.fn() };
 });
 vi.mock('$lib/api/docs', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/api/docs')>();
@@ -26,7 +26,9 @@ vi.mock('$lib/api/docs', async (importOriginal) => {
 	};
 });
 
-import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { get } from 'svelte/store';
+import { openArtifactTab, openBrowserPane } from '$lib/stores/artifactWorkspace';
+import { paneOpen } from '$lib/stores/paneOpen';
 import { setArtifactDisplay, reconcileArtifactsApply, fetchArtifactPane } from '$lib/api/docs';
 
 function docNode(overrides: Record<string, unknown> = {}) {
@@ -94,6 +96,30 @@ describe('ArtifactPane — node kinds', () => {
 	it('never renders a subagent/session row — no session-derived rows exist in the DTO', () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 		expect(host.querySelector('.ic.subagent')).toBeNull();
+	});
+});
+
+describe('ArtifactPane — Open browser', () => {
+	function openBrowserButton() {
+		return [...host.querySelectorAll<HTMLButtonElement>('button.browse')].find((b) => b.textContent?.includes('Open browser'))!;
+	}
+
+	it('closes the drawer on a narrow canvas so the browser it opened is visible', () => {
+		vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(393);
+		paneOpen.set(true);
+		mountPane({ nodes: [], needs_attention: [] });
+		openBrowserButton().click();
+		expect(openBrowserPane).toHaveBeenCalledWith('sess-1');
+		expect(get(paneOpen)).toBe(false);
+	});
+
+	it('leaves the side pane open on a wide canvas', () => {
+		vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1440);
+		paneOpen.set(true);
+		mountPane({ nodes: [], needs_attention: [] });
+		openBrowserButton().click();
+		expect(get(paneOpen)).toBe(true);
+		paneOpen.set(false);
 	});
 });
 
@@ -171,7 +197,7 @@ describe('ArtifactPane — capability-driven actions', () => {
 
 		expect(host.querySelector('button.row.openable')).toBeNull();
 		expect(host.querySelector('.row.disabled')).toBeTruthy();
-		expect(host.textContent).toContain('Could not determine the linked destination.');
+		expect(host.textContent).toContain('This link has no address to open.');
 	});
 
 	function uploadNode() {
@@ -250,7 +276,7 @@ describe('ArtifactPane — hide (remove from pane)', () => {
 });
 
 describe('ArtifactPane — needs_attention cluster', () => {
-	it('renders a distinct "Needs attention" header separate from any "Needs you" header', () => {
+	it('renders its repair-failure header', () => {
 		mountPane({
 			nodes: [docNode()],
 			needs_attention: [{ kind: 'repair-failure', artifact_id: 'a1', reason: 'permission denied reading file', retryable: true }],
@@ -259,8 +285,7 @@ describe('ArtifactPane — needs_attention cluster', () => {
 
 		expect(host.textContent).toContain('Needs attention');
 		expect(host.textContent).toContain('permission denied reading file');
-		const needsYou = [...host.querySelectorAll('.lane-cap')].filter((el) => el.textContent?.trim().toLowerCase() === 'needs you');
-		expect(needsYou).toHaveLength(0);
+		expect(host.querySelector('.lane-cap.needs-attention')).toBeTruthy();
 	});
 
 	it('cross-references the artifact name from nodes[] for a needs_attention row', () => {
@@ -311,12 +336,12 @@ describe('ArtifactPane — needs_attention cluster', () => {
 describe('ArtifactPane — empty state', () => {
 	it('shows the empty message when nodes and needs_attention are empty', () => {
 		mountPane({ nodes: [], needs_attention: [] });
-		expect(host.textContent).toContain('Files you create, upload, or open in this thread show up here.');
+		expect(host.textContent).toContain('Files you create, upload, or open in this chat show up here.');
 	});
 });
 
 describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
-	const EMPTY_COPY = 'Files you create, upload, or open in this thread show up here.';
+	const EMPTY_COPY = 'Files you create, upload, or open in this chat show up here.';
 
 	function mountLive() {
 		component = mount(ArtifactPane, { target: host, props: { threadId: 'sess-1' } });
@@ -331,7 +356,8 @@ describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
 		await vi.waitFor(() => {
 			expect(host.querySelector('.pane-error')).toBeTruthy();
 		});
-		expect(host.textContent).toContain("Couldn't load this thread's files.");
+		expect(host.textContent).toContain("Couldn’t load this chat’s files.");
+		expect(host.textContent).not.toContain('Try again');
 		expect(host.textContent).not.toContain(EMPTY_COPY);
 		expect([...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Retry')).toBe(true);
 	});

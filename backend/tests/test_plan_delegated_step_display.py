@@ -12,7 +12,9 @@ and a child plan with nothing running leaves the step's usual label (a ready
 step in a free slot reads `next`). Motion is not masked by attention: a child
 plan that reads needs-review because one step awaits review still moves the
 parent while another of its steps runs. A step delegated again below the child
-reads in progress at every level above the running work.
+reads in progress at every level above the running work. "Runs" means its
+worker's Turn is running: a selected step whose worker has no Turn and no
+queued input is between turns, and the step waits on it instead.
 """
 
 from __future__ import annotations
@@ -65,11 +67,17 @@ def _task(plan_id: str, title: str, *, db, **kwargs):
 
 
 def _run(db, node_id: str, actor_id: str) -> None:
-    """Select a step for its plan owner, as activate does."""
+    """Select a step for its worker, as activate does, while the worker's Turn runs."""
     row = service._node_row(db, node_id)
     admission.activate(
         node_id, expected_revision=row["revision"],
         actor_id=actor_id, provenance="test.delegated_display", db=db,
+    )
+    db.execute(
+        """INSERT OR IGNORE INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+           VALUES (?,?,0,'native/model','running','2000-01-01T00:00:00','boot-1')""",
+        (f"turn-{actor_id}", actor_id),
     )
 
 
@@ -185,7 +193,30 @@ def test_a_delegated_step_its_own_agent_holds_reads_as_a_neutral_wait():
         # Only the user's blocker reads red (#2213): the agent's own is a wait.
         assert node["display"] == {"label_key": "waiting", "tone_key": "waiting"}
         assert entry["progress"]["liveness"] == "waiting"
-        assert entry["display"] == {"label_key": "waiting", "tone_key": "waiting"}
+        assert entry["display"]["label_key"] == "waiting"
+        assert entry["display"]["tone_key"] == "waiting"
+        # EW3: the plan says what it waits for, in the reason's own words.
+        assert entry["display"]["wait"]["label"] == "the launch brief"
+    finally:
+        db.close()
+
+
+def test_a_waiting_child_tells_its_parent_what_it_waits_for():
+    """EW4: the parent's child summary carries the child's wait; its state stays liveness."""
+    db = _db()
+    try:
+        step, child_step = _delegated_step(db, child_running=False)
+        wait_on(
+            db, child_step.id, reason="Waiting for the vendor reply", owner_kind="external",
+            reason_key="vendor_reply", actor=PlanActor("child", "user", "project"),
+        )
+        db.commit()
+
+        child = _node(db, "owner", step.id)["child"]
+
+        assert child["progress"]["liveness"] == "waiting"
+        assert child["wait"]["label"] == "the vendor reply"
+        assert child["wait"]["more"] == 0
     finally:
         db.close()
 

@@ -234,6 +234,8 @@ def isolated_db(tmp_path, monkeypatch):
         # thread's write would fail instantly with "database is locked".
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA_SQL)
+        from events.observe_rules import sync_shipped_rules
+        sync_shipped_rules(conn)
         _seed_model_profiles(conn)
         _seed_test_model_catalog(conn)
         seed_test_accounts(conn)
@@ -349,9 +351,9 @@ async def _wait(pred, tries: int = 400, delay: float = 0.02) -> bool:
 @pytest.fixture(autouse=True)
 def _omlx_leftover_probe_never_runs_a_binary(monkeypatch):
     """Tests fake `shutil.which("omlx")` paths; none of them may be executed to probe."""
-    from llm import local_setup_ownership
+    from llm import local_setup_executable
 
-    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: False)
+    monkeypatch.setattr(local_setup_executable, "_is_broken_leftover", lambda _path: False)
 
 
 @pytest.fixture(autouse=True)
@@ -370,24 +372,32 @@ def _no_held_usage_between_tests():
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _omlx_admin_request_bound_before_any_patch():
-    """Import the modules that bind ``omlx_endpoints.admin_request`` by name up front.
+def _imported_bindings_bound_before_any_patch():
+    """Load modules that bind patched dependencies by name before test fixtures run.
 
-    Tests patch that attribute; a lazy first import inside the patch would bind the
-    fake for the rest of the process and fail later tests in that worker.
+    Tests replace these source-module attributes. A lazy first import inside a
+    replacement would retain that fake for the rest of the worker after the patch
+    restores, so every such consumer is bound here once against the normal getter.
     """
+    import infra.checkpoint_install_preflight  # noqa: F401
+    import infra.checkpoint_queries  # noqa: F401
     import llm.providers.omlx_lifecycle  # noqa: F401
     import llm.providers.omlx_settings  # noqa: F401
     yield
 
 
+
 @pytest.fixture(autouse=True)
-def _no_cached_omlx_ownership_between_tests():
-    """The foreign-oMLX answer is cached process-wide; each test decides it afresh."""
-    ownership = sys.modules.get("llm.local_setup_ownership")
-    if ownership is not None:
-        ownership._foreign_cache.clear()
-    yield
+def _no_local_model_between_tests(monkeypatch, tmp_path_factory):
+    """The set-up model record and Welcome's pick outlive a test; each test starts with neither."""
+    from llm import local_model
+
+    record = tmp_path_factory.mktemp("local-model") / "local-model.json"
+    monkeypatch.setattr(local_model, "_record_path", lambda: record)
+    prepare = sys.modules.get("llm.local_setup_prepare")
+    if prepare is not None:
+        monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
+
 
 
 @pytest.fixture(autouse=True)
@@ -592,3 +602,12 @@ def _system_projection_readable(monkeypatch):
     monkeypatch.setattr(
         "core.system_projection._agent_readable", lambda _projection: True,
     )
+
+
+@pytest.fixture(autouse=True)
+def _github_read_budget_starts_empty():
+    """The GitHub read budget is process-wide; each test starts with none learned."""
+    budget = sys.modules.get("events.connectors.github_read_budget")
+    if budget is not None:
+        budget.budget.clear()
+    yield

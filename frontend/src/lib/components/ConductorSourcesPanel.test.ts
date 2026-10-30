@@ -81,7 +81,7 @@ describe('first-run line', () => {
 	it('with a ready model: points at the picker and shows no button or link', async () => {
 		listed = [claude('ready', [account('ready')])];
 		await render();
-		expect(text()).toBe('Pick a model from the picker below to start your conductor.');
+		expect(text()).toBe('Pick a model from the picker below to start CORSIA.');
 		expect(host.querySelectorAll('button')).toHaveLength(0);
 		expect(saveThreadModel).not.toHaveBeenCalled();
 	});
@@ -115,22 +115,22 @@ describe('first-run line', () => {
 		listed = [claude('ready', [account('ready')])];
 		messages.set([{ id: 'm1', role: 'user', content: 'hello' }] as never);
 		await render();
-		expect(text()).toContain("I'll answer once you start me.");
+		expect(text()).toContain("Your message sends once you pick a model.");
 	});
 
-	it('shows an initial read failure until Try again succeeds', async () => {
+	it('shows an initial read failure until Retry succeeds', async () => {
 		readFails = true;
 		component = mount(ConductorSourcesPanel, { target: host, props: { threadId: 'cond-1' } });
 		await vi.waitFor(() => expect(text()).toContain("Couldn't read your model sources."));
 		listed = [claude('ready', [account('ready')])];
 		readFails = false;
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(text()).toContain('Pick a model from the picker below'));
 		expect(text()).not.toContain("Couldn't read your model sources.");
 	});
 
 	it('flips the line on models_updated, such as a download finishing', async () => {
-		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, setup_stage: 'Downloading', download_percent: 40 }];
+		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, local_state: 'downloading', download_percent: 40 }];
 		await render();
 		await vi.waitFor(() => expect(host.querySelector('section')).toBeNull());
 		listed = [{ source: 'omlx', name: 'Local model', state: 'ready' }];

@@ -10,8 +10,9 @@
 	/** A served ISO date as the reader sees it; the server owns which date it is. */
 	const day = (iso: string) => dayFormat.format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
 	/** Copy for each served ``size.comparable_reason``; the server alone decides whether a week compares. */
-	const reasons = (size: SizeCoverage): Record<string, string> => ({
-		outcome_definition_changed: `outcomes were counted differently before ${day(size.comparability_before)}`,
+	const reasons = (before: string): Record<string, string> => ({
+		outcome_definition_changed: `outcomes were counted differently before ${day(before)}`,
+		judging_model_changed: `sizes were judged by a different model before ${day(before)}`,
 	});
 	/** Copy for each served ``size.rate_reason``; the code, not the counts, says why a rate is withheld. */
 	const rateStatus = (size: SizeCoverage): Record<string, string> => ({
@@ -45,7 +46,9 @@
 	/** The week's comparability is the server's ``comparable``; a reason this client does not know still says so. */
 	const comparability = $derived.by(() => {
 		if (!latest || latest.comparable) return '';
-		const reason = size?.comparable_reason ? reasons(size)[size.comparable_reason] : undefined;
+		const reason = size?.comparable_reason && size.comparability_before
+			? reasons(size.comparability_before)[size.comparable_reason]
+			: undefined;
 		return reason ? `Not comparable with other weeks: ${reason}.` : 'Not comparable with other weeks.';
 	});
 	const midpoints = $derived(size ? Object.entries(size.class_midpoint_hours).map(([name, hours], i) => `${name} ${hours}${i ? '' : ' h'}`).join(', ') : '');
@@ -58,7 +61,7 @@
 	{:else if !latest || !size}<p class="empty">No completed weeks in this range.</p>
 	{:else}
 		{#if view.periods.length}
-			<p class="stat"><b>{rate === null ? '–' : rate.toFixed(0)}</b> h of work per hour you spend, {nowText}, n {group(current.n)}, {vsPrevious((w) => w.value, true)}</p>
+			<p class="stat"><b>{rate === null ? '–' : rate.toFixed(0)}</b> h of work per hour you spend, {nowText}, n&nbsp;{group(current.n)}, {vsPrevious((w) => w.value, true)}</p>
 		{:else}
 			<p class="stat"><b>–</b> h of work per hour you spend</p>
 		{/if}

@@ -54,7 +54,7 @@ describe('scope grouping', () => {
 	});
 
 	it('shows the Agent group only for threads with roles', () => {
-		expect(sourceScope('thread', {}, false)).toBe('This thread');
+		expect(sourceScope('thread', {}, false)).toBe('This chat');
 		expect(sourceScope('thread', {}, true)).toBe('Agent');
 		expect(sourceScope('dynamic', { provider: 'agent_owner_map' }, false)).toBe('System');
 		expect(sourceScope('dynamic', { provider: 'agent_owner_map' }, true)).toBe('Agent');
@@ -73,6 +73,35 @@ describe('scope grouping', () => {
 		expect(project?.skills.map((row) => row.label)).toEqual(['alpha']);
 		expect(project?.skillsTokenLabel).toBe('30 tokens');
 		expect(rows.reduce((sum, row) => sum + (row.tokenCount ?? 0), 0)).toBe(60);
+	});
+
+	it('opens a listed skill file while leaving the index inert', () => {
+		const model = contextSheetSnapshotModel(usage([source('skills', 'dynamic', 10, {
+			provider: 'skills', skills: [{ name: 'alpha', scope: 'workspace', scope_id: 'w', path: '/workspace/skills/alpha/SKILL.md', prompt_tokens: 5 }],
+		})]));
+		const skill = model!.sources.find((row) => row.label === 'alpha')!;
+		expect(skill.filePath).toBe('/workspace/skills/alpha/SKILL.md');
+		expect(skill.actionLabel).toBe('Open Document');
+		expect(model!.sources.find((row) => row.label === 'Skills index')?.actionLabel).toBe('');
+	});
+
+	it('keeps 41 skill rows reconciled with a name-only overflow tag', () => {
+		const skills = Array.from({ length: 41 }, (_, index) => ({
+			name: `skill-${index}`,
+			scope: 'workspace',
+			scope_id: 'workspace',
+			role: '',
+			listed: index === 40 ? 'name' : 'full',
+			prompt_tokens: 1,
+		}));
+		const model = contextSheetSnapshotModel(usage([
+			source('skills', 'dynamic', 100, { provider: 'skills', skills }),
+		]));
+		const rows = model!.sources.filter((row) => row.kind === 'skill');
+
+		expect(rows.reduce((sum, row) => sum + (row.tokenCount ?? 0), 0)).toBe(100);
+		expect(rows.some((row) => row.tokenCount !== null && row.tokenCount < 0)).toBe(false);
+		expect(rows.find((row) => row.label === 'skill-40')?.tags).toContain('name only');
 	});
 
 	it('keeps one skills row when the install did not record its skills', () => {

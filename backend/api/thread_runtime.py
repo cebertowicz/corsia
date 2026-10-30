@@ -21,12 +21,14 @@ from core.turn_core import TurnIdentity
 from core.turn_core import active_turns_for_owner
 from api.thread_cache_warm import router as cache_warm_router
 from api.checkpoints import router as checkpoints_router
+from api.open_time import router as open_time_router
 from api.thread_seen import router as thread_seen_router
 from api.thread_update_cards import router as thread_update_cards_router
 
 router = APIRouter(prefix="/api", tags=["threads"])
 router.include_router(cache_warm_router)
 router.include_router(checkpoints_router)
+router.include_router(open_time_router)
 router.include_router(thread_seen_router)
 router.include_router(thread_update_cards_router)
 
@@ -167,12 +169,12 @@ async def next_turn_context_snapshot(
     if provider == "native":
         from core.agent import get_agent
         from core.native_context_prefix import _freeze_tool_definitions
-        from tools.catalog import advertised_tool_definitions
+        import tools.confined_reads as confined_reads
 
         agent = await get_agent()
         await agent._connect_mcp()
         tool_definitions = _freeze_tool_definitions(
-            advertised_tool_definitions(agent.tools)
+            await confined_reads.advertised(agent.tools, dict(selected_thread_row))
         )
     elif provider in {"cc", "codex"}:
         # Same catalog-filtered ledger Native uses, built from a throwaway

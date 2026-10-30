@@ -1,16 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from './test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 import { syntheticPng } from './syntheticImages';
 
 /** Seeded documents, images and comments for the review bar and the comments drawer, shared by their specs. */
 /** The desktop and mobile projects share one database, so every seeded thread needs a title no other run reuses. */
 export const uniqueTitle = (title: string) => `${title} ${Math.random().toString(36).slice(2, 7)}`;
+const seededThreadIds: string[] = [];
 
 export async function seed(request: APIRequestContext, baseTitle: string, options: { sharedAsOf?: string } = {}) {
 	const title = uniqueTitle(baseTitle);
 	const threadId = await createSession(request, title);
+	seededThreadIds.push(threadId);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
 	const name = `${options.sharedAsOf ? `${options.sharedAsOf}-` : ''}${title} ${Date.now()}.md`;
@@ -34,6 +37,7 @@ export type Doc = Awaited<ReturnType<typeof seed>>;
 export async function seedImage(request: APIRequestContext, baseTitle: string): Promise<Doc> {
 	const title = uniqueTitle(baseTitle);
 	const threadId = await createSession(request, title);
+	seededThreadIds.push(threadId);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
 	const name = `${title} ${Date.now()}.png`, docPath = path.join(workspace, name);
@@ -50,7 +54,7 @@ export async function comment(request: APIRequestContext, doc: Doc, body: string
 	const from = doc.text.indexOf(`Step ${step}:`), to = from + 'Step'.length;
 	expect(from).toBeGreaterThan(-1);
 	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, {
-		params: { token: TEST_TOKEN }, data: { body, anchor_text: 'Step', from_off: from, to_off: to },
+		params: { token: TEST_TOKEN }, data: { body, anchor_text: 'Step', from_off: from, to_off: to, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	return (await created.json()).comment.id as string;
@@ -105,6 +109,14 @@ export const settled = (page: Page) => page.evaluate(() => Promise.all(document.
 
 export type Case = readonly [label: string, mode: Mode, theme: 'light' | 'dark'];
 export type Run = (args: { page: Page; request: APIRequestContext; info: TestInfo; mode: Mode; theme: 'light' | 'dark' }) => Promise<void>;
+/** Deletes the threads seeded since the last call, for a spec that needs a clean database between its cases. */
+export async function deleteSeededThreads(request: APIRequestContext) {
+	for (const threadId of seededThreadIds.splice(0)) {
+		const deleted = await request.delete(`/api/threads/${threadId}?token=${TEST_TOKEN}`);
+		expect(deleted.ok(), `delete seeded thread ${threadId}`).toBeTruthy();
+	}
+}
+
 /** One test per case; a phone case runs with a touch screen so `(pointer: coarse)` applies. */
 export function journey(name: string, cases: readonly Case[], run: Run) {
 	for (const [label, mode, theme] of cases) {

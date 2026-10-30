@@ -281,3 +281,69 @@ def test_add_correction_preserves_terminal_source_and_blocks_affected_work(db):
     assert db.execute(
         "SELECT COUNT(*) FROM plan_nodes WHERE follow_up_of=?", (source.id,),
     ).fetchone()[0] == before
+
+
+def test_correction_inherits_the_source_canonical_intent_unless_overridden(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    canonical = _task(db, plan.id, "Canonical intent", intent="Preserve the stated outcome")
+    source = _task(
+        db, plan.id, "Inherited source", intent_node_id=canonical.id,
+    )
+    active_source = _activate(db, plan.id, source, "activate-inherited-source")
+    reviewed_source = _review(
+        db, plan.id, active_source["node"], "review-inherited-source",
+    )
+    accepted_source = _accept(
+        db, plan.id, reviewed_source["node"], "accept-inherited-source")["node"]
+    affected = _task(db, plan.id, "Affected work")
+    active_affected = _activate(db, plan.id, affected, "activate-affected-work")
+
+    inherited = _mutate(
+        db,
+        plan.id,
+        "add_correction",
+        {
+            "node_id": source.id,
+            "title": "Correct inherited work",
+            "acceptance_criteria": "The correction is proved",
+            "affected_nodes": [{
+                "node_id": affected.id,
+                "expected_revision": active_affected["node"]["revision"],
+            }],
+            "expected_revision": accepted_source["revision"],
+        },
+        "add-inherited-correction",
+    )["correction"]
+
+    assert service.get_node(inherited["id"], db=db).intent_node_id == canonical.id
+
+    override_source = _task(db, plan.id, "Independent source", intent="Original reading")
+    active_override = _activate(db, plan.id, override_source, "activate-override-source")
+    reviewed_override = _review(
+        db, plan.id, active_override["node"], "review-override-source",
+    )
+    accepted_override = _accept(
+        db, plan.id, reviewed_override["node"], "accept-override-source")["node"]
+    other = _task(db, plan.id, "Other affected work")
+    active_other = _activate(db, plan.id, other, "activate-other-affected")
+
+    overridden = _mutate(
+        db,
+        plan.id,
+        "add_correction",
+        {
+            "node_id": override_source.id,
+            "title": "Correct with a new reading",
+            "acceptance_criteria": "The new correction is proved",
+            "intent": "Supersede the original reading",
+            "affected_nodes": [{
+                "node_id": other.id,
+                "expected_revision": active_other["node"]["revision"],
+            }],
+            "expected_revision": accepted_override["revision"],
+        },
+        "add-overridden-correction",
+    )["correction"]
+
+    node = service.get_node(overridden["id"], db=db)
+    assert (node.intent, node.intent_node_id) == ("Supersede the original reading", None)

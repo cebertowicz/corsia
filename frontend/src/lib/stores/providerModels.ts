@@ -2,10 +2,7 @@ import { writable, get } from 'svelte/store';
 import { token } from './auth';
 import type { ProviderEntry } from './providers';
 import type { NetworkServer } from './networkServers';
-import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
-import {
-	preserveTransitional,
-} from './providerModelUtils';
+import { preserveTransitional } from './providerModelUtils';
 import {
 	cloudProviderModels,
 	fallbackCloudModels,
@@ -30,6 +27,14 @@ export interface ProviderModel {
 	lastError?: string;
 	jobId?: string;
 	dbId?: string;
+	/** oMLX rows: loads at start and is never unloaded for room. */
+	pinned?: boolean;
+	/** oMLX rows: a pinned model still in oMLX's start preload. */
+	starting?: boolean;
+	/** oMLX rows: whether the backend says pinning this model keeps the pins within the room for pins. */
+	pinFits?: boolean;
+	/** oMLX rows: the backend's sentence for why the model isn't kept loaded or didn't load; absent when nothing needs saying. */
+	keepLine?: string;
 	/** External rows: how image support was settled; null until first checked. */
 	imageInput?: ImageInput | null;
 	/** Harness rows: the user's label, and the name discovery reported. */
@@ -65,6 +70,18 @@ function _setState(key: string, patch: Partial<ProviderModelsState>) {
 		const prev = s[key] ?? { loading: false, models: [] };
 		return { ...s, [key]: { ...prev, ...patch } };
 	});
+}
+
+/**
+ * Puts a list the caller already holds into the store before its card opens: the open
+ * paints it at once while its own read refreshes behind it. Only fills a card the store holds
+ * nothing for, so an older snapshot can never overwrite a newer read.
+ */
+export function seedProviderModels(providerName: string, serverId: string | undefined, models: ProviderModel[]): void {
+	const k = _key(providerName, serverId);
+	const current = get(_models)[k];
+	if (current?.loading || current?.models.length) return;
+	_setState(k, { models, lastError: undefined });
 }
 
 export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkServer): Promise<void> {
@@ -179,118 +196,6 @@ export function markModelOptimistic(
 			},
 		};
 	});
-}
-
-// Cloud, External and harness models are catalog rows something else runs: offering
-// one is the catalog's enabled flag, written by row id. Only managed servers load.
-async function _setCatalogModelEnabled(modelDbId: string, enable: boolean): Promise<{ ok: boolean; message?: string }> {
-	try {
-		const res = await fetch(`${BASE}/api/settings/models/${encodeURIComponent(modelDbId)}?token=${t()}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ enabled: enable }),
-		});
-		const data = await res.json().catch(() => null);
-		if (res.ok) return { ok: true };
-		console.error('[models] enable/disable rejected', data?.error ?? data?.detail);
-		return {
-			ok: false,
-			message: plainErrorText(
-				data?.error ?? data?.detail,
-				enable ? 'Could not enable this model. Try again.' : 'Could not disable this model. Try again.',
-			),
-		};
-	} catch (e) {
-		console.error('[models] enable/disable request failed', e);
-		return { ok: false, message: SERVER_UNREACHABLE };
-	}
-}
-
-function _catalogRowToggle(
-	p: ProviderEntry,
-	server: NetworkServer | undefined,
-	modelId: string,
-	dbId: string | undefined,
-	enable: boolean,
-): Promise<{ ok: boolean; message?: string }> | null {
-	if (p.type === 'cloud' || p.type === 'harness') return _setCatalogModelEnabled(modelId, enable);
-	if (server?.kind !== 'external') return null;
-	if (!dbId) return Promise.resolve({ ok: false, message: 'This model is not in the catalog yet. Refresh and try again.' });
-	return _setCatalogModelEnabled(dbId, enable);
-}
-
-export async function loadModel(
-	p: ProviderEntry,
-	server: NetworkServer | undefined,
-	modelId: string,
-	dbId?: string,
-): Promise<{ ok: boolean; message?: string }> {
-	const toggled = _catalogRowToggle(p, server, modelId, dbId, true);
-	if (toggled) return toggled;
-	if (server) {
-		try {
-			const res = await fetch(`${BASE}/api/settings/network-servers/${server.id}/models/load?token=${t()}`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model: modelId }),
-			});
-			const data = await res.json().catch(() => ({}));
-			return { ok: res.ok, message: data.message };
-		} catch (e) {
-			return { ok: false, message: String(e) };
-		}
-	}
-	return { ok: false, message: 'no server' };
-}
-
-export async function cancelJob(
-	server: NetworkServer | undefined,
-	jobId: string,
-): Promise<{ ok: boolean; message?: string }> {
-	if (!server) return { ok: false, message: 'no server' };
-	try {
-		const res = await fetch(
-			`${BASE}/api/settings/network-servers/${server.id}/jobs/${jobId}?token=${t()}`,
-			{ method: 'DELETE' },
-		);
-		const data = await res.json().catch(() => null);
-		if (res.ok) return { ok: true, message: data?.message };
-		console.error('[models] cancel job rejected', data?.message ?? data?.detail);
-		return {
-			ok: false,
-			message: plainErrorText(
-				data?.message ?? data?.detail,
-				'Could not cancel this download. Try again.',
-			),
-		};
-	} catch (e) {
-		console.error('[models] cancel job request failed', e);
-		return { ok: false, message: SERVER_UNREACHABLE };
-	}
-}
-
-export async function unloadModel(
-	p: ProviderEntry,
-	server: NetworkServer | undefined,
-	modelId: string,
-	dbId?: string,
-): Promise<{ ok: boolean; message?: string }> {
-	const toggled = _catalogRowToggle(p, server, modelId, dbId, false);
-	if (toggled) return toggled;
-	if (server) {
-		try {
-			const res = await fetch(`${BASE}/api/settings/network-servers/${server.id}/models/unload?token=${t()}`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model: modelId }),
-			});
-			const data = await res.json().catch(() => ({}));
-			return { ok: res.ok, message: data.message };
-		} catch (e) {
-			return { ok: false, message: String(e) };
-		}
-	}
-	return { ok: false, message: 'no server' };
 }
 
 export function modelsForProvider(state: Record<string, ProviderModelsState>, p: ProviderEntry, server?: NetworkServer): ProviderModelsState {

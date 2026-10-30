@@ -20,6 +20,17 @@ class SameAccount(Exception):
     """A completed login repeats an account that is already signed in."""
 
 
+def unchecked_repeat_receipt(account_id: str):
+    """Capture an unchecked added account's current login for a rediscovery."""
+    from connections.account_evidence import current_ready_discovery
+
+    with write_transaction(None, scope='unchecked_repeat_signin') as connection:
+        account = get_account(account_id, db=connection)
+        if account['is_default'] or account['state'] != 'signed_in' or current_ready_discovery(account):
+            return None
+        return account_receipt(account)
+
+
 def commit_signed_in(account_id: str, revision: int, identity: dict[str, str]):
     """Identity and state land together, only on the revision the sign-in started from.
 

@@ -3,27 +3,27 @@
 from __future__ import annotations
 
 import json
-import shlex
 
 from loguru import logger
 
 from doceditor.presence import is_document_activity_tool, observe_document_activity
 
-from events.connectors import (
-    CommandTriggerDecl,
-    ObservedArtifactDecl,
-    registered_command_triggers,
-)
+from events import connectors, observe_rules
+from events.connectors import ObservedArtifactDecl
 from infra.database import get_db
+from infra.product_events import emit_product_event
 from registry.observation_result import (
     ObservationResult,
     observation_result,
     observe_settled_tool_result,
 )
+from registry import models
+from registry.command_match import command_matches_rule
 from registry.observed_write import register_observed_write
 from registry.registration_writer import RegistrationOrigin
 from registry.service import register_observed_artifact
 from tools.catalog import CC_BUILTIN_ALIASES, normalize_tool_name
+from tools.mcp_stamp import APP_FIELD, TOOL_FIELD
 from tools.tool_surface import resolve_dispatch
 
 # Canonical-name-keyed: harness-name variance is resolved once by
@@ -40,8 +40,6 @@ _NATIVE_TOOLS = {"write_file", "edit_file", "multi_edit"}
 _CANCELLED = "[Tool execution was cancelled]"
 
 _CALL_SCAN_LIMIT = 30
-_SHELL_PUNCTUATION = ";&|<>()"
-_PARAMETER_START = frozenset("{([*@$#?!-$")
 
 
 def observe_record(
@@ -63,21 +61,12 @@ def observe_record(
 
 
 def _artifact_from_result(
-    thread_id, raw_name, name, args, text, meta, arg_keys, command_triggers,
+    thread_id, name, args, text, meta, arg_keys,
     *, is_cc_builtin, origin, db,
 ) -> dict | None:
     """Preserve existing registration behavior beside activity observation."""
     if arg_keys is None:
-        return observe_command_result(
-            thread_id,
-            raw_name,
-            args,
-            text,
-            is_error=bool(meta.get("is_error")),
-            origin=origin,
-            db=db,
-            notify=False,
-        ) if command_triggers else None
+        return None
     if meta.get("is_error"):
         return None
     if name in _NATIVE_TOOLS and not is_cc_builtin and text.startswith("{"):
@@ -112,12 +101,7 @@ def _observe(
     name = normalize_tool_name(raw_name)
 
     arg_keys = _WRITERS.get(name)
-    command_triggers = registered_command_triggers(name)
-    if (
-        arg_keys is None
-        and not command_triggers
-        and not is_document_activity_tool(name)
-    ):
+    if arg_keys is None and not is_document_activity_tool(name):
         return None
 
     text = content or ""
@@ -158,8 +142,8 @@ def _observe(
             activity = None
 
         artifact = _artifact_from_result(
-            thread_id, raw_name, name, args, text, meta, arg_keys,
-            command_triggers, is_cc_builtin=is_cc_builtin, origin=origin, db=_db,
+            thread_id, name, args, text, meta, arg_keys,
+            is_cc_builtin=is_cc_builtin, origin=origin, db=_db,
         )
         return observation_result(artifact, activity)
     finally:
@@ -167,8 +151,8 @@ def _observe(
             _db.close()
 
 
-class CommandArtifactRegistrationError(RuntimeError):
-    """A confirmed command artifact could not be bound to its thread."""
+class ToolResultArtifactRegistrationError(RuntimeError):
+    """An artifact from a confirmed tool result could not be bound to its thread."""
 
     def __init__(self, artifact: ObservedArtifactDecl, error: Exception) -> None:
         self.artifact = artifact
@@ -176,65 +160,50 @@ class CommandArtifactRegistrationError(RuntimeError):
         super().__init__(str(error))
 
 
-def _has_active_shell_syntax(command: str) -> bool:
-    """Detect top-level operators and active expansion without running a shell."""
-    quote: str | None = None
-    index = 0
-    while index < len(command):
-        char = command[index]
-        if quote == "'":
-            if char == "'":
-                quote = None
-            index += 1
-            continue
-        if char == "\\":
-            if index + 1 >= len(command):
-                index += 1
-            elif quote == '"' and command[index + 1] not in '$`"\\':
-                index += 1
-            else:
-                index += 2
-            continue
-        if char == "'" and quote is None:
-            quote = "'"
-            index += 1
-            continue
-        if char == '"':
-            quote = None if quote == '"' else '"'
-            index += 1
-            continue
-        if char == "`":
-            return True
-        if char == "$" and index + 1 < len(command):
-            next_char = command[index + 1]
-            if (
-                next_char.isalpha()
-                or next_char.isdigit()
-                or next_char == "_"
-                or next_char in _PARAMETER_START
-            ):
-                return True
-        if quote is None and char in _SHELL_PUNCTUATION:
-            return True
-        index += 1
-    return False
+def _record(db, thread_id, rule, outcome, artifact, reason, told) -> None:
+    saved = observe_rules.record(db, thread_id, rule, outcome, artifact and {
+        "integration": artifact.integration, "type": artifact.type,
+        "external_id": artifact.external_id}, reason)
+    if not saved and told is not None:
+        told.append("Couldn't save this result to the rule's history, so `explain` won't show this run.")
+    emit_product_event("event_rule", outcome, thread_id=thread_id, properties={
+        "rule_id": rule.id, "kind": observe_rules.OBSERVE, "connector": rule.connector,
+        "shipped": rule.origin.startswith(observe_rules.RULE_SET_ORIGIN), "reason": reason})
 
 
-def command_matches_trigger(command: object, trigger: CommandTriggerDecl) -> bool:
-    """Match one literal top-level command against a connector declaration."""
-    if not isinstance(command, str) or "\n" in command or "\r" in command:
-        return False
-    if _has_active_shell_syntax(command):
-        return False
-    try:
-        argv = shlex.split(command, comments=False, posix=True)
-    except ValueError:
-        return False
-    prefix = trigger.argv_prefix
-    return bool(prefix) and tuple(argv[: len(prefix)]) == prefix
+def _extractor(rule, db, thread_id, told):
+    extract = connectors.artifact_extractor(rule.connector, rule.item_type)
+    if extract is None:
+        reason = f"connector {rule.connector} cannot read {rule.item_type.replace('-', ' ')} from command output"
+        logger.error("registry observer: rule {}: {}", rule.id, reason)
+        if told is not None:
+            told.append(f"Not registered: {reason}.")
+        _record(db, thread_id, rule, "not_registered", None, reason, told)
+    return extract
 
 
-def observe_command_result(
+def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
+    current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)
+    owns = bool(current) and current["parent_thread_id"] == thread_id
+    if told is not None:
+        told.append(f"{label} is already registered to you." if owns else
+                    f"Not registered to you: {label} belongs to another chat; you already follow it.")
+    _record(db, thread_id, rule, "registered" if owns else "not_registered", artifact,
+            "it was already registered to you" if owns else "you already follow it", told)
+
+
+def _extract_observation(rule, args, content, app, db, thread_id, told):
+    if app is not None:
+        matches = connectors.app_matches(app, rule.connector)
+    else:
+        matches = command_matches_rule(args.get(rule.command_arg), rule)
+    if not matches:
+        return False, None
+    extract = _extractor(rule, db, thread_id, told)
+    return (True, extract(content)) if extract else (False, None)
+
+
+def observe_tool_result(
     thread_id: str,
     raw_tool_name: str | None,
     args: dict,
@@ -244,52 +213,74 @@ def observe_command_result(
     origin: RegistrationOrigin | None = None,
     db=None,
     notify: bool = False,
+    told: list[str] | None = None,
+    changed: list[dict] | None = None,
+    metadata: dict | None = None,
 ) -> dict | None:
-    """Run connector-declared command triggers against one confirmed result."""
-    if not thread_id or is_error:
-        return None
-    name = normalize_tool_name(raw_tool_name)
-    observations: list[tuple[str, CommandTriggerDecl, ObservedArtifactDecl]] = []
-    for connector, trigger in registered_command_triggers(name):
-        command = args.get(trigger.command_arg)
-        if not command_matches_trigger(command, trigger):
-            continue
-        artifact = trigger.extract_artifact(content)
-        if artifact is not None:
-            observations.append((connector, trigger, artifact))
-    if not observations:
-        return None
-    if len(observations) != 1:
-        names = ", ".join(
-            f"{connector}:{trigger.name}" for connector, trigger, _ in observations
-        )
-        raise ValueError(f"ambiguous command artifact triggers: {names}")
+    """Apply observe rules to a confirmed shell or stamped connected-app result.
 
-    connector, trigger, artifact = observations[0]
+    Returns the artifact or ``None``; appends what happened to ``told`` and records it for ``explain``.
+    """
+    metadata = metadata or {}
+    app, upstream = metadata.get(APP_FIELD), metadata.get(TOOL_FIELD)
+    connected = isinstance(app, str) and bool(app) and isinstance(upstream, str) and bool(upstream)
+    name = upstream if connected else normalize_tool_name(raw_tool_name)
+    if not thread_id or is_error or (not connected and name not in observe_rules.SHELL_TOOLS):
+        return None
+    rule_db = db or get_db()
     try:
-        registered = register_observed_artifact(
-            thread_id,
-            integration=artifact.integration,
-            type=artifact.type,
-            external_id=artifact.external_id,
-            title=artifact.title,
-            path=artifact.path,
-            metadata=artifact.metadata,
-            origin=origin,
-            db=db,
-            notify=notify,
-        )
-    except Exception as error:
-        raise CommandArtifactRegistrationError(artifact, error) from error
-    if registered is not None:
-        logger.info(
-            "registry observer: {} trigger {} registered {} to {}",
-            connector,
-            trigger.name,
-            artifact.external_id,
-            thread_id,
-        )
-    return registered
+        project_id = observe_rules.project_of(rule_db, thread_id)
+        covering = observe_rules.applicable(rule_db, project_id, thread_id, name)
+    finally:
+        if not db:
+            rule_db.close()
+    owned, followed = None, None  # the owner's registration first, else a follower's
+    seen: set[tuple[str, str, str]] = set()
+    for rule in covering:
+        matched, artifact = _extract_observation(
+            rule, args, content, app if connected else None, db, thread_id, told)
+        if not matched:
+            continue
+        item_name = rule.item_type.replace("-", " ")
+        if artifact is None:
+            if told is not None:
+                source = "app result" if connected else "command's output"
+                told.append(f"Not registered: the {source} named no {item_name}.")
+            _record(db, thread_id, rule, "not_registered", None, f"the output named no {item_name}", told)
+            continue
+        key = (artifact.integration, artifact.type, artifact.external_id)
+        if key in seen:
+            _record(db, thread_id, rule, "not_registered", artifact,
+                    f"another rule handled this {item_name} in the same run", told)
+            continue
+        seen.add(key)
+        try:
+            registered = register_observed_artifact(
+                thread_id, integration=artifact.integration, type=artifact.type,
+                external_id=artifact.external_id, title=artifact.title, path=artifact.path,
+                metadata=artifact.metadata, origin=origin, db=db, notify=notify,
+            )
+        except Exception as error:
+            _record(db, thread_id, rule, "not_registered", artifact, str(error), None)
+            raise ToolResultArtifactRegistrationError(artifact, error) from error
+        if registered is not None and changed is not None:
+            changed.append(registered)
+        label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
+        if registered is None:  # this thread already has a current registration: owner or follower
+            _already_registered(db, thread_id, rule, artifact, label, told)
+        elif registered.get("parent_thread_id") == thread_id:
+            if told is not None:
+                told.append(f"Registered {label} to you.")
+            _record(db, thread_id, rule, "registered", artifact, None, told)
+            owned = owned or registered
+            logger.info("registry observer: rule {} registered {} to {}", rule.id, artifact.external_id, thread_id)
+        else:
+            if told is not None:
+                told.append(f"Not registered to you: {label} already belongs to another chat, "
+                            f"which keeps it; you follow it.")
+            _record(db, thread_id, rule, "not_registered", artifact, "it already belongs to another chat", told)
+            followed = followed or registered
+    return owned or followed
 
 
 def _call_args_from_metadata(

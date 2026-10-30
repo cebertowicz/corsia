@@ -55,38 +55,58 @@ export async function linkCli(t: string, vendor: string): Promise<{ ok: boolean;
 	return { ok: response.ok && body?.ok === true, outcome: body?.outcome ?? null };
 }
 
-export type CliInstallState = 'idle' | 'running' | 'done' | 'failed';
-export interface CliInstall { state: CliInstallState; reason: string | null }
+export type CliInstallState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+export interface CliInstall { state: CliInstallState; reason: string | null; cause: 'connection' | 'site_refused' | 'download_unverified' | 'installer_failed' | null; ref: string | null; path_shadowed_by: string | null }
 
 function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	return {
 		state: (body?.state as CliInstallState) ?? 'failed',
 		reason: (body?.reason as string | null) ?? null,
+		cause: ['connection', 'site_refused', 'download_unverified', 'installer_failed'].includes(String(body?.cause)) ? body?.cause as CliInstall['cause'] : null,
+		ref: (body?.ref as string | null) ?? null,
+		path_shadowed_by: (body?.path_shadowed_by as string | null) ?? null,
 	};
 }
 
-export type CliInstallRefusal = 'already_installed' | 'invisible_binary';
+export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_installed' | 'package_managed';
 
 /**
  * Start one vendor CLI installation; callers poll its bounded per-vendor flight. A CLI that is
  * already there is not a failure: the refusal says which, and the card's state is what's stale.
  */
-export async function startCliInstall(t: string, vendor: string): Promise<CliInstallRefusal | null> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, {
+async function startCliJob(t: string, vendor: string, operation: 'install' | 'update'): Promise<CliInstallRefusal | null> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/${operation}`, {
 		method: 'POST', headers: headers(t),
 	});
 	if (response.status === 409) {
 		const reason = (await response.json().catch(() => null))?.reason;
-		if (reason === 'already_installed' || reason === 'invisible_binary') return reason;
+		if (reason === 'already_installed' || reason === 'invisible_binary' || reason === 'not_installed' || reason === 'package_managed') return reason;
 	}
-	if (!response.ok) throw new Error(`CLI install ${response.status}`);
+	if (!response.ok) throw new Error(`CLI ${operation} ${response.status}`);
 	return null;
+}
+
+/** Start one vendor CLI installation; callers poll its bounded per-vendor flight. */
+export function startCliInstall(t: string, vendor: string): Promise<CliInstallRefusal | null> {
+	return startCliJob(t, vendor, 'install');
+}
+
+/** Rerun a vendor's official installer for a discovered-but-unusable CLI. */
+export function startCliUpdate(t: string, vendor: string): Promise<CliInstallRefusal | null> {
+	return startCliJob(t, vendor, 'update');
 }
 
 /** Read a vendor CLI installation's current state without starting another installer. */
 export async function getCliInstall(t: string, vendor: string): Promise<CliInstall> {
 	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { headers: headers(t) });
 	if (!response.ok) throw new Error(`CLI install ${response.status}`);
+	return cliInstallOf(await response.json().catch(() => null));
+}
+
+/** Stop a running vendor CLI installation; the answer is the state it settled in ('done' when it had just finished). */
+export async function cancelCliInstall(t: string, vendor: string): Promise<CliInstall> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { method: 'DELETE', headers: headers(t) });
+	if (!response.ok) throw new Error(`CLI install cancel ${response.status}`);
 	return cliInstallOf(await response.json().catch(() => null));
 }
 
@@ -98,6 +118,8 @@ export interface Signin {
 	cause: string | null;
 	outcome: SigninOutcome | null;
 	bind_reason: string | null;
+	/** A failed sign-in's public reference, matching its service-log line. */
+	ref?: string | null;
 }
 
 function signinOf(body: Record<string, unknown> | null, accountId: string): Signin {
@@ -107,6 +129,7 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
 		cause: (body?.cause as string | null) ?? null,
 		outcome: (body?.outcome as SigninOutcome | null) ?? null,
 		bind_reason: (body?.bind_reason as string | null) ?? null,
+		ref: typeof body?.ref === 'string' ? body.ref : null,
 	};
 }
 
@@ -138,12 +161,14 @@ export async function startSignin(t: string, accountId: string, bindThreadId: st
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-export async function checkSignin(t: string, accountId: string): Promise<Signin> {
+export async function checkSignin(t: string, accountId: string): Promise<Signin | null> {
 	const response = await fetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, {
 		method: 'POST', headers: headers(t),
 	});
+	const body = await response.json().catch(() => null);
+	if (response.status === 409 && body?.detail === 'no sign-in is in progress for this account') return null;
 	if (!response.ok) throw new Error(`signin check ${response.status}`);
-	return signinOf(await response.json().catch(() => null), accountId);
+	return signinOf(body, accountId);
 }
 
 export async function cancelSignin(t: string, accountId: string): Promise<Signin> {
@@ -154,17 +179,32 @@ export async function cancelSignin(t: string, accountId: string): Promise<Signin
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-/** Start the person's stopped local server through the existing lifecycle route. */
-export async function startLocalServer(t: string): Promise<boolean> {
+/** A lifecycle action's outcome; a failure the service logged carries its reference. */
+export type LifecycleResult = { ok: boolean; ref?: string };
+
+/** Start or stop the person's own local server through the existing lifecycle route. */
+async function localServerLifecycle(t: string, action: 'start' | 'stop'): Promise<LifecycleResult> {
 	const listed = await fetch('/api/settings/network-servers', { headers: headers(t) });
-	if (!listed.ok) return false;
+	if (!listed.ok) return { ok: false };
 	const servers: { id: string; provider: string; kind?: string | null; status: string }[] = (await listed.json())?.servers ?? [];
 	const server = servers.find((row) => row.provider === 'omlx' && row.kind !== 'external' && row.status !== 'disabled');
-	if (!server) return false;
-	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/start`, {
+	if (!server) return { ok: false };
+	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/${action}`, {
 		method: 'POST', headers: headers(t),
 	});
-	return response.ok;
+	if (!response.ok) return { ok: false };
+	const body = await response.json().catch(() => null);
+	return { ok: body?.ok !== false, ref: typeof body?.ref === 'string' ? body.ref : undefined };
+}
+
+/** Start the person's stopped local server through the existing lifecycle route. */
+export async function startLocalServer(t: string): Promise<boolean> {
+	return (await localServerLifecycle(t, 'start')).ok;
+}
+
+/** Turn the person's local server off: the setup toggle's off once the local model is Ready. */
+export async function stopLocalServer(t: string): Promise<LifecycleResult> {
+	return localServerLifecycle(t, 'stop');
 }
 
 export interface StarterResult { ok: boolean; in_progress?: boolean; reason?: 'not_your_omlx' | 'mac_cannot_run'; message?: string }

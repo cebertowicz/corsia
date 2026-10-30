@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import fcntl
 import os
+import shutil
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 
 import pytest
@@ -107,7 +109,8 @@ def _enable_history_context() -> None:
 
 
 def _save(workspace: Path, path: Path, text: str, **kwargs):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     target = guidance_target(path, workspace)
     assert target is not None
@@ -123,6 +126,7 @@ def _save(workspace: Path, path: Path, text: str, **kwargs):
 @pytest.mark.parametrize(("relative", "scope"), [
     ("skills/demo/SKILL.md", "skill, workspace scope"),
     ("skills/demo/evals/cases.json", "skill, workspace scope"),
+    ("skills/demo/corsia.yaml", "skill, workspace scope"),
     ("projects/alpha/skills/demo/SKILL.md", "skill, project scope"),
     (".threads/t1/skills/demo/SKILL.md", "skill, agent scope"),
     ("projects/alpha/.threads/t2/skills/demo/evals/a.json", "skill, agent scope"),
@@ -139,7 +143,8 @@ def test_system_and_ordinary_paths_are_not_guidance(isolated_db, tmp_path):
 
     cases = [
         ".corsia/skills/demo/SKILL.md", ".corsia/context/10-INTENT-AUTHORITY.md",
-        "skills/demo/NOTES.md", "skills/demo/assets/draft.md", "shared/planning/plan.md",
+        "skills/demo/NOTES.md", "skills/demo/assets/draft.md", "skills/demo/scripts/corsia.yaml",
+        "shared/planning/plan.md",
         ".threads/t1/working/scratch.md", "README.md", "../outside/skills/demo/SKILL.md",
     ]
     db = get_db()
@@ -243,6 +248,112 @@ async def test_write_file_commits_the_saved_bytes_as_the_saver(history_scope):
     assert "Reason: unrecorded" in _body(workspace)
 
 
+def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("before\n")
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
+        deletes={path: digest("before\n")}, atomic=True,
+    )
+
+    assert result.outcome == "written"
+    assert not path.exists()
+    assert path.relative_to(workspace).as_posix() not in _git(["ls-tree", "-r", "--name-only", "HEAD"], cwd=workspace)
+
+
+def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("newer\n")
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
+        deletes={path: digest("before\n")}, atomic=True,
+    )
+
+    assert result.outcome == "stale"
+    assert path.read_text() == "newer\n"
+
+
+def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch):
+    from infra import guidance_git
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("keep\n")
+    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, "off"))
+
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", deletes={path: digest("keep\n")}, atomic=True,
+    )
+
+    assert result.outcome == "history-off"
+    assert path.read_text() == "keep\n"
+
+
+def test_atomic_delete_with_a_target_fault_says_nothing_changed(history_scope):
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("keep\n")
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("unknown", "classifier fault"),
+        author="Tester <t@agents.corsia.local>", deletes={path: digest("keep\n")}, atomic=True,
+    )
+
+    assert (result.outcome, result.line) == ("failed", "Not saved: classifier fault.")
+    assert path.read_text() == "keep\n"
+
+
+def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_scope):
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "large.bin"
+    result = save_guidance(
+        {path: b"\0" * (1024 * 1024 + 1)}, workspace=workspace,
+        target=GuidanceTarget("context, workspace scope"), author="Tester <t@agents.corsia.local>",
+        binary_safe_history=True,
+    )
+
+    assert (result.outcome, result.reason) == ("refused", "binary-too-large")
+    assert not path.exists()
+
+
+def test_binary_safe_history_refuses_an_oversized_file_before_a_non_atomic_target_fault(history_scope):
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "large.bin"
+    result = save_guidance(
+        {path: b"\0" * (1024 * 1024 + 1)}, workspace=workspace,
+        target=GuidanceTarget("unknown", "classifier fault"), author="Tester <t@agents.corsia.local>",
+        binary_safe_history=True,
+    )
+
+    assert (result.outcome, result.reason) == ("refused", "binary-too-large")
+    assert not path.exists()
+
+
 @pytest.mark.asyncio
 async def test_edit_and_multi_edit_commit_on_a_recorded_base(history_scope):
     from tools.filesystem_edit import EditFileTool, MultiEditTool
@@ -326,7 +437,8 @@ def test_identical_save_adds_no_commit(history_scope):
 
 
 def test_outside_write_after_the_write_stays_dirty_and_out_of_the_commit(history_scope):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     workspace, _ = history_scope
     skill = _history(workspace)
@@ -409,6 +521,28 @@ def test_a_commit_fault_retries_once_then_saves_with_the_failure(history_scope, 
     assert _count(workspace) == 1
 
 
+def test_commit_fault_restores_a_deleted_file(history_scope, monkeypatch):
+    from infra import guidance_git
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("restore me\n")
+    monkeypatch.setattr(
+        guidance_git, "_commit", lambda *_args, **_kwargs: (_ for _ in ()).throw(guidance_git.GitFault("disk full")),
+    )
+
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", deletes={path: digest("restore me\n")}, atomic=True,
+    )
+
+    assert result.outcome == "failed"
+    assert path.read_text() == "restore me\n"
+
+
 def test_a_status_fault_is_visible_never_clean(history_scope, monkeypatch):
     from infra import guidance_git
 
@@ -474,7 +608,8 @@ def test_file_version_reads_a_status_fault_as_a_fault_never_clean(history_scope,
 
 
 def test_a_classifier_fault_saves_and_says_history_may_be_missing(history_scope, monkeypatch):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     workspace, _ = history_scope
 
@@ -632,21 +767,30 @@ def test_editor_save_of_a_guidance_file_commits_as_the_user(integration_client, 
 
 
 @pytest.mark.integration
-def test_a_rejected_editor_save_makes_no_repository_or_commit(integration_client, integration_workspace):
-    """Every editor rejection comes before Git: no commit, no sweep of other dirty guidance."""
+def test_a_rejected_editor_save_never_reaches_guidance_history(integration_client, integration_workspace, monkeypatch):
+    """Every editor rejection occurs before the history/Git path, without depending on shared root state."""
     from auth_fixtures import OWNER_TOKEN
+    import infra.guidance_git as guidance_git
 
-    workspace = integration_workspace  # shared by the session's integration tests
-    if not (workspace / ".git").exists():
-        _git(["init", "--quiet"], cwd=workspace)
-    _git([*_IDENTITY, "commit", "--allow-empty", "-qm", "before"], cwd=workspace)
-    head = _git(["rev-parse", "HEAD"], cwd=workspace)
+    def history_reached(*_args, **_kwargs):
+        pytest.fail("rejected editor save reached guidance history")
+
+    monkeypatch.setattr(guidance_git, "workspace_repository", history_reached)
+    workspace = integration_workspace
+    nonce = uuid.uuid4().hex
+    existing = _skill(workspace, f"rejected-{nonce}")
+    invalid = _skill(workspace, f"invalid-{nonce}")
+    existing.parent.mkdir(parents=True)
+    existing.write_text(SKILL_BODY)
     auth = "?" + "token=" + OWNER_TOKEN
-    for name, text in (("shell", "outside\n"), ("demo", SKILL_BODY)):
-        _skill(workspace, name).parent.mkdir(parents=True)
-        _skill(workspace, name).write_text(text)
-    for path, text, status in ((_skill(workspace), SKILL_BODY, 409), (_skill(workspace, "new"), "no front matter\n", 422)):
-        saved = integration_client.put("/api/files/content" + auth, json={"path": str(path), "text": text, "create": True})
-        assert saved.status_code == status, saved.text
-    assert _git(["rev-parse", "HEAD"], cwd=workspace) == head
+    try:
+        for path, text, status in ((existing, SKILL_BODY, 409), (invalid, "no front matter\n", 422)):
+            saved = integration_client.put(
+                "/api/files/content" + auth,
+                json={"path": str(path), "text": text, "create": True},
+            )
+            assert saved.status_code == status, saved.text
+    finally:
+        shutil.rmtree(existing.parent, ignore_errors=True)
+        shutil.rmtree(invalid.parent, ignore_errors=True)
 

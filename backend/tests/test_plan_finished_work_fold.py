@@ -147,7 +147,7 @@ def test_a_container_and_the_header_share_one_precedence(counts, lead, display_l
     needs_user = counts["review_human"] > 0
     working = any(counts[key] for key in ("review_parent_agent", "active", "pending_ready"))
     branch = operator_nodes.branch_display(
-        counts, needs_user=needs_user, working=working,
+        counts, asks_user=needs_user, working=working,
     )
     assert branch["label_key"] == display_label
     node = {
@@ -164,7 +164,7 @@ def test_moving_work_outranks_a_block_on_a_container_row_too():
     """#2190 review: the row read Blocked while the header read Advancing."""
     counts = _counts(active=1, blocked=1)
     assert operator_nodes.branch_display(
-        counts, needs_user=False, working=True,
+        counts, asks_user=False, working=True,
     )["tone_key"] == "active"
     row = {
         "id": "moving", "parent_id": None, "state": "active", "branch_progress": None,

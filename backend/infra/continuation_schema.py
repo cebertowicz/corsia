@@ -1,5 +1,39 @@
 """Continuation trigger DDL, split out of ``infra.schema``."""
 
+# Shared by fresh installs and migration 139, which made next_run_at nullable:
+# a script only event rules start has no next run (no semicolon in this comment either).
+AUTOMATION_SCHEDULES_SQL = """
+    CREATE TABLE IF NOT EXISTS automation_schedules (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL REFERENCES threads(id),
+        scope_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('clock', 'cadence', 'script')),
+        spec TEXT NOT NULL,
+        next_run_at TEXT CHECK (next_run_at IS NOT NULL OR kind = 'script'),
+        last_run_at TEXT,
+        runs INTEGER NOT NULL DEFAULT 0,
+        max_runs INTEGER NOT NULL CHECK (max_runs > 0),
+        state TEXT NOT NULL DEFAULT 'active'
+            CHECK (state IN ('active', 'paused', 'cancelled', 'exhausted')),
+        payload_json TEXT,
+        created_by_actor TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        script_path TEXT,
+        script_sha256 TEXT,
+        timeout_seconds INTEGER,
+        running_since TEXT,
+        last_status TEXT,
+        last_error TEXT,
+        noted_at TEXT,
+        last_measures TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_automation_schedules_due
+        ON automation_schedules(state, next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_automation_schedules_scope
+        ON automation_schedules(scope_id, next_run_at);
+"""
+
 CONTINUATION_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS continuation_triggers (
         id TEXT PRIMARY KEY,
@@ -33,33 +67,4 @@ CONTINUATION_SCHEMA_SQL = """
         ON continuation_triggers(state, next_attempt_at);
     CREATE INDEX IF NOT EXISTS idx_continuation_triggers_scope
         ON continuation_triggers(scope_id, created_at);
-
-    CREATE TABLE IF NOT EXISTS automation_schedules (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL REFERENCES threads(id),
-        scope_id TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('clock', 'cadence', 'script')),
-        spec TEXT NOT NULL,
-        next_run_at TEXT NOT NULL,
-        last_run_at TEXT,
-        runs INTEGER NOT NULL DEFAULT 0,
-        max_runs INTEGER NOT NULL CHECK (max_runs > 0),
-        state TEXT NOT NULL DEFAULT 'active'
-            CHECK (state IN ('active', 'paused', 'cancelled', 'exhausted')),
-        payload_json TEXT,
-        created_by_actor TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        script_path TEXT,
-        script_sha256 TEXT,
-        timeout_seconds INTEGER,
-        running_since TEXT,
-        last_status TEXT,
-        last_error TEXT,
-        noted_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_automation_schedules_due
-        ON automation_schedules(state, next_run_at);
-    CREATE INDEX IF NOT EXISTS idx_automation_schedules_scope
-        ON automation_schedules(scope_id, next_run_at);
-"""
+""" + AUTOMATION_SCHEDULES_SQL

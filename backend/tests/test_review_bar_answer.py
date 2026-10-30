@@ -8,8 +8,8 @@ import uuid
 import pytest
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
-from infra.database import get_db
-from doceditor import review_bar
+from infra.database import get_db, write_transaction
+from doceditor import feedback_batch_edits, review_bar
 from plans import holds, service, user_ask
 from plans.boundary import PlanActor, mutate
 from registry import attention, models
@@ -424,12 +424,12 @@ def test_an_edit_sent_before_the_answer_still_counts_in_the_round(db):
     artifact = seed_document(db, "owner", name="edited.md")
     _ask(db, artifact)
     later = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
-    batch = feedback_batches.record_edit(
-        db, artifact_id=artifact, recipient_id="owner", author_kind="user",
-        author_id=USER_AUTHOR_ID, actor_display="Steve", path=Path("/workspace/shared/edited.md"),
-        before=b"before\n", after=b"after\n", at=later,
-    )
-    db.commit()
+    with write_transaction(db, scope="test_record_edit") as connection:
+        batch = feedback_batch_edits.record_edit(
+            connection, artifact_id=artifact, recipient_id="owner", author_kind="user",
+            author_id=USER_AUTHOR_ID, actor_display="Steve", path=Path("/workspace/shared/edited.md"),
+            before=b"before\n", after=b"after\n", at=later,
+        )
     assert review_bar.round_state(db, artifact)["round_feedback_counts"]["edits"] == 1
     delivered, _ = feedback_batches.close_batch(db, batch, "send")
     db.commit()

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
 		harnessInventoryError,
@@ -12,22 +13,82 @@
 	} from '$lib/stores/providersV7';
 	import { providers, loadProviders, updateProvider } from '$lib/stores/providers';
 	import { loadNetworkServers, setNetworkServerEnabled } from '$lib/stores/networkServers';
-	import { Message } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { providerCardRequest, settingsAnchorRequest } from '$lib/stores/settingsNavigation';
+	import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import HostSection from './HostSection.svelte';
 	import ProviderRow from './ProviderRow.svelte';
 	import ProviderModelsBody from './ProviderModelsBody.svelte';
 	import ProviderSettingsModal from './ProviderSettingsModal.svelte';
 	import AddProviderModal from './AddProviderModal.svelte';
-	import type { HostProvider } from '$lib/stores/providersV7';
+	import type { HostGroup, HostProvider } from '$lib/stores/providersV7';
 	import type { ProviderEntry } from '$lib/stores/providers';
+	import { token } from '$lib/stores/auth';
+	import { fetchSources, recheckSources, localPickerStatus, localSetupFailed, type ModelSource } from '$lib/conductorSources';
+	import { retryLocalSetup } from '$lib/stores/localPickerStatus';
+	import { LOW_MEMORY_LOCAL_MODEL_SENTENCE } from '$lib/setupLocalPick.svelte';
+	import { on } from '$lib/ws/events';
+	import SetupAiRows from '../SetupAiRows.svelte';
+	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
+	import { withReportAction } from '$lib/setupReport';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
 
 	const expanded = new SvelteSet<string>();
 	let openProvider = $state<HostProvider | null>(null);
 	let showAdd = $state(false);
 	let toggleError = $state('');
+	let sources = $state<ModelSource[]>([]);
+	// Cards are known once the first host-group read has finished; until then a tool may already have one.
+	let groupsRead = $state(false);
+	const localSource = $derived(sources.find((source) => source.source === 'omlx'));
+	let localSetupBusy = $state(false);
+	let stopLocalSourceUpdates: (() => void) | null = null;
+
+	async function refreshSources(strict = false) {
+		const current = get(token);
+		if (!current) return;
+		try {
+			const existed = localSource?.corsia_omlx === true;
+			sources = await (strict ? recheckSources(current) : fetchSources(current));
+			// CORSIA's oMLX registers while setup runs: its row replaces Set up the moment it exists.
+			if (!existed && localSource?.corsia_omlx === true) void loadHostGroups();
+		} catch { /* Keep the last projected state; a failed read must not invent a setup action. */ }
+	}
+
+	/** Set up: CORSIA starts its own oMLX; memory, not another oMLX, decides what loads. */
+	async function startLocalSetup() {
+		if (localSetupBusy || localSource?.eligible === false) return;
+		localSetupBusy = true;
+		toggleError = '';
+		try {
+			const result = await retryLocalSetup('setup');
+			if (!result.ok) toggleError = result.neverLocalHost ? result.message ?? "Couldn’t set up the local model. Try again." : "Couldn’t set up the local model. Try again.";
+		} finally {
+			await Promise.all([refreshSources(), loadHostGroups()]);
+			loadModels();
+			localSetupBusy = false;
+		}
+	}
+
+	/** Setup runs after the click returns, so the row reads the source for its progress or its failure. */
+	const setupFailed = $derived(localSetupFailed(localSource));
+	const setupRunning = $derived(['starting', 'downloading'].includes(localSource?.local_state ?? ''));
+	const setupLine = $derived.by(() => {
+		if (setupFailed) return localSource?.fix || "CORSIA couldn’t set up the local model. Press Retry.";
+		if (setupRunning) return localPickerStatus(localSource)?.line ?? 'Setting up…';
+		return 'This computer';
+	});
+
+	const baseGroups = $derived($hostGroups.length > 0 ? $hostGroups : $liveHostGroups);
+	// CORSIA's own oMLX, online or offline, is the local model: Set up shows only without one, and never on a server that cannot run it.
+	const localSetupRow = $derived.by<HostProvider | null>(() => {
+		if (!localSource || localSource.corsia_omlx === true || localSource.never_local === true) return null;
+		return {
+			name: 'local-setup', label: 'Local model', type: 'local', statusDot: setupFailed ? 'error' : 'disabled', subline: setupLine,
+			raw: { name: 'local-setup', label: 'Local model' } as ProviderEntry,
+		};
+	});
 
 	function _hostProviderForRaw(p: ProviderEntry): HostProvider {
 		return {
@@ -78,18 +139,41 @@
 	}
 
 	onMount(async () => {
-		await Promise.all([loadProviders(), loadNetworkServers(), loadVendorAccounts()]);
+		await Promise.all([loadProviders(), loadNetworkServers(), loadVendorAccounts(), refreshSources()]);
 		await loadHostGroups();
+		groupsRead = true;
 		loadModels();
+		stopLocalSourceUpdates = on('models_updated', () => { void refreshSources(); if (cliRows.length) void loadHostGroups(); });
+	});
+	onDestroy(() => stopLocalSourceUpdates?.());
+
+	// Claude Code and Codex get a card only once they have models. Until then the setup flow's own row
+	// installs and signs them in, so a tool skipped or failed in setup is finished here.
+	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: async (strict) => { await refreshSources(strict); void loadHostGroups(); } });
+	const cliRows = $derived(HARNESSES.flatMap(({ name }) => {
+		const source = sources.find((candidate) => candidate.source === name);
+		if (!groupsRead || $harnessInventoryError || !source || baseGroups.some((group) => group.providers.some((provider) => provider.name === name))) return [];
+		const { cli } = VENDOR_COPY[name], view = connectFlow.row(source);
+		return [withReportAction({ key: name, name: cli, ...view }, () => [{ key: name as 'claude-code' | 'codex', name: cli, reference: view.reference, cause: connectFlow.attempts[name]?.cause }])];
+	}));
+	$effect(() => {
+		if (!connectFlow.active) return;
+		const timer = setInterval(() => void connectFlow.tick(), POLL_MS);
+		return () => clearInterval(timer);
 	});
 
-	const groups = $derived(
-		$hostGroups.length > 0
-			? $hostGroups
-			: $liveHostGroups,
-	);
+	const groups = $derived.by<HostGroup[]>(() => {
+		const base = baseGroups;
+		if (!localSetupRow) return base;
+		const local = base.find((group) => group.key === 'this-mac');
+		if (local) return base.map((group) => group.key === 'this-mac'
+			? { ...group, providers: [...group.providers, localSetupRow] }
+			: group,
+		);
+		return [{ key: 'this-mac', name: 'This computer', subname: '', netKind: 'localhost', providers: [localSetupRow] }, ...base];
+	});
 
-	// The chat held line's "Spend past plan limit" and Settings › Keys land here: open
+	// The chat held line's "Spend past usage limit" and Settings › Keys land here: open
 	// that card (a harness account or a cloud provider), then bring it into view. It never toggles.
 	$effect(() => {
 		const connection = $providerCardRequest;
@@ -106,41 +190,41 @@
 	// A link to an account's billing row opens the settings of the provider that holds it
 	// (the first account without a price, else the first account), then focuses the row.
 	$effect(() => {
-		if ($settingsAnchorRequest !== 'account-billing') return;
-		const live = $vendorAccounts.filter((account) => account.state !== 'removed');
+		if ($settingsNavigation.anchor !== 'account-billing') return;
+		const live = $vendorAccounts.filter((account) => account.state !== 'removed' && !account.default_signed_out);
 		const target = live.find((account) => !account.billing) ?? live[0];
 		const provider = target && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === target.provider);
 		if (!target || !provider) return;
 		openProvider = provider;
 		void tick().then(tick).then(() => document.querySelector<HTMLElement>(`[data-billing-account="${target.id}"] [data-settings-anchor]`)?.focus());
 	});
+
+	// A link to one account (`#account-<id>`, as an error in chat writes it) opens the settings of the provider
+	// that holds it; that provider's account list lands on the row and clears the request.
+	$effect(() => {
+		const anchor = $settingsNavigation.anchor;
+		if (!anchor?.startsWith('account-')) return;
+		const account = $vendorAccounts.find((entry) => `account-${entry.id}` === anchor && entry.state !== 'removed');
+		const provider = account && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === account.provider);
+		if (provider && openProvider?.name !== provider.name) openProvider = provider;
+	});
 </script>
 
 <header class="page-head">
-	<h2>Providers</h2>
-	<button type="button" class="add-btn" onclick={() => showAdd = true}>
-		<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-			<path d="M12 5v14M5 12h14"/>
-		</svg>
-		Add provider
-	</button>
+	<h2 class="page-title">Providers</h2>
+	<Button variant="ghost" size="sm" onclick={() => showAdd = true}>Add provider</Button>
 </header>
 
-{#if toggleError}<Message variant="err">{toggleError}</Message>{/if}
-{#if $harnessInventoryError}<Message variant="err">{$harnessInventoryError}</Message>{/if}
+{#if toggleError}<p class="error" role="alert">{toggleError}</p>{/if}
+{#if $harnessInventoryError}<p class="error" role="alert">{$harnessInventoryError}</p>{/if}
 
 {#if $hostGroupsLoading && groups.length === 0}
 	<p class="loading">Loading providers…</p>
-{:else if groups.length === 0}
+{:else if groups.length === 0 && cliRows.length === 0}
 	<div class="empty">
 		<div class="empty-title">No providers configured</div>
 		<div class="empty-hint">Add a local engine or a cloud API key to get started.</div>
-		<button type="button" class="add-btn primary" onclick={() => showAdd = true}>
-			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-				<path d="M12 5v14M5 12h14"/>
-			</svg>
-			Add your first provider
-		</button>
+		<Button onclick={() => showAdd = true}>Add your first provider</Button>
 	</div>
 {:else}
 	{#each groups as group (group.key)}
@@ -151,22 +235,32 @@
 		>
 			{#each group.providers as p (rowKey(group.key, p.name, p.server?.id))}
 				{@const key = rowKey(group.key, p.name, p.server?.id)}
+				{@const isLocalSetup = p.name === 'local-setup'}
+				{@const setupLabel = isLocalSetup
+					? localSource?.eligible === false
+						? LOW_MEMORY_LOCAL_MODEL_SENTENCE
+						: localSetupBusy || setupRunning ? 'Setting up…' : setupFailed ? 'Retry' : 'Set up'
+					: undefined}
 				<ProviderRow
 					provider={p}
-					expanded={expanded.has(key)}
+					expanded={!isLocalSetup && expanded.has(key)}
 					hasLoaded={hasLoaded(p)}
+					{setupLabel}
+					onSetup={isLocalSetup && localSource?.eligible !== false && !localSetupBusy && !setupRunning ? () => startLocalSetup() : undefined}
 					onToggleEnable={() => handleToggleEnable(p)}
 					onSettings={() => handleSettings(p)}
-					onToggleExpand={() => toggleExpand(key)}
+					onToggleExpand={() => { if (!isLocalSetup) toggleExpand(key); }}
 				>
 					{#snippet body()}
-						<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} />
+						{#if !isLocalSetup}<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} onAddProvider={() => showAdd = true} />{/if}
 					{/snippet}
 				</ProviderRow>
 			{/each}
 		</HostSection>
 	{/each}
 {/if}
+
+{#if cliRows.length}<SetupAiRows rows={cliRows} />{/if}
 
 {#if openProvider}
 	<ProviderSettingsModal
@@ -183,57 +277,26 @@
 {/if}
 
 <style>
+	/* The page title as on every Settings page, with the page's one action at the content edge. */
 	.page-head {
 		display: flex; align-items: center; justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 18px;
+		gap: var(--space-4);
+		margin-bottom: var(--space-5);
 	}
-	.page-head h2 {
-		font-size: var(--text-title2); font-weight: 600; letter-spacing: -0.015em;
-		color: var(--text-primary);
-		margin: 0;
-	}
+	.page-head h2.page-title { margin: 0; }
 
-	.add-btn {
-		display: inline-flex; align-items: center; gap: 6px;
-		height: 32px; padding: 0 13px;
-		color: var(--text-secondary); font-size: var(--text-subhead); font-weight: 500;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
-	}
-	.add-btn:hover {
-		color: var(--accent-text);
-		border-color: var(--accent-line);
-		background: var(--accent-wash);
-	}
-	.add-btn.primary {
-		background: var(--accent-wash);
-		border-color: var(--accent-line);
-		color: var(--accent-text);
-		margin-top: 12px;
-	}
+	.error { margin: 0 0 var(--space-4); padding: 0 var(--space-2); font-size: var(--text-footnote); color: var(--red-text); }
 
 	.loading {
+		margin: 0; padding: 0 var(--space-2);
 		font-size: var(--text-subhead);
-		color: var(--text-muted);
-		padding: 12px 0;
+		color: var(--text-tertiary);
 	}
 
 	.empty {
-		display: flex; flex-direction: column; align-items: center; gap: 10px;
-		padding: 32px 24px;
-		color: var(--text-tertiary); font-size: var(--text-subhead);
+		display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+		padding: var(--space-8) var(--space-6);
 	}
-	.empty-title { font-size: var(--text-subhead); color: var(--text-secondary); font-weight: 500; }
-	.empty-hint { font-size: var(--text-footnote); color: var(--text-tertiary); }
-
-	@media (max-width: 480px) {
-		.page-head { margin-bottom: 14px; }
-		.page-head h2 { font-size: var(--text-title2); }
-		.add-btn { height: 30px; padding: 0 11px; font-size: var(--text-footnote); }
-	}
+	.empty-title { font-size: var(--text-subhead); color: var(--text-secondary); }
+	.empty-hint { margin-bottom: var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
 </style>

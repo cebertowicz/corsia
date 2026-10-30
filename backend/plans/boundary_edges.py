@@ -22,9 +22,16 @@ def dispatch(
     if operation == "add_follow_up":
         import plans.followups as followups
 
+        from plans import intent_words
+
         created = followups.add_follow_up(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
+            size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
+            intent_words=intent_words.resolve_words(
+                db, params.get("intent_words"),
+                actor_id=actor.thread_id if actor.kind == "thread" else None,
+            ),
             **fields.expected(params), **common,
         )
         return service.get_node(params["node_id"], db=db), created
@@ -62,4 +69,24 @@ def dispatch(
         # An unchanged graph looks the same to a retry whether it or the lost
         # first call emptied it; this says which.
         result["removed"] = bool(outcome)
+        if not outcome:
+            _name_inherited_owner(result, params, db)
     return result
+
+
+def _name_inherited_owner(result: dict, params: dict, db) -> None:
+    """Say which open ancestor still holds the node on this prerequisite.
+
+    A step inherits its phase's prerequisites but owns none of those edges, so
+    removing one from the step changes nothing; the edge is removed from the
+    ancestor named here.
+    """
+    import plans.node_waits as node_waits
+    from prompts.plan_tools import inherited_edge_guidance
+
+    prerequisite = fields.text(params, "depends_on_node_id")
+    rows = node_waits.unmet_prerequisites(db, [params["node_id"]]).get(params["node_id"], [])
+    via = next((row["via"] for row in rows if str(row["id"]) == prerequisite and row["via"]), None)
+    if via:
+        result["held_via"] = str(via)
+        result["guidance"] = inherited_edge_guidance(prerequisite, str(via))

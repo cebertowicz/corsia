@@ -24,11 +24,9 @@ def completion_receipt_id(checkpoint_id: str) -> str:
 
 def _retire_source_continuation(record, selected_model: str, db) -> None:
     from core.checkpoint_types import SOURCE_RETIRING_TRIGGERS
+    from registry.provider_continuity import HARNESS_CONTINUITY_TYPES
 
-    continuation = {
-        "claude-code": ("claude-code", "session"),
-        "codex": ("codex", "thread"),
-    }.get(record.source_harness)
+    continuation = HARNESS_CONTINUITY_TYPES.get(record.source_harness)
     if (
         continuation is None
         or record.trigger not in SOURCE_RETIRING_TRIGGERS

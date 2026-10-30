@@ -6,6 +6,8 @@ import inspect
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -16,6 +18,44 @@ from subagents.codex_runtime_state import (
 )
 
 log = logging.getLogger(__name__)
+
+
+
+def require_owned_accept_db(db) -> None:
+    if db is not None:
+        raise RuntimeError("Codex async acceptance requires an owned DB connection")
+
+
+@dataclass(frozen=True)
+class CodexOnEventContext:
+    """Values the lifted Codex event handlers close over."""
+    live: Any
+    thread_id: Any
+    bcast: Any
+    dead_set: Any
+    thread_registry: Any
+    bind_tool_result_echo: Any
+    read_bound_tool_result: Any
+    load_assistant_step_display: Any
+    persist_assistant_text: Any
+    persist_tool_use: Any
+
+
+def reasoning_representation_kind(
+    current: dict | None,
+    incoming: dict,
+) -> str:
+    """Preserve summary evidence when a later Codex item is opaque."""
+    existing = current if isinstance(current, dict) else {}
+    kinds = {
+        provenance.get("representation_kind")
+        for provenance in (existing, incoming)
+    }
+    if "codex_reasoning_summary" in kinds:
+        return "codex_reasoning_summary"
+    if "opaque" in kinds:
+        return "opaque"
+    return incoming.get("representation_kind", "unknown")
 
 
 def request_stop_checkpoint_wait(live) -> None:
@@ -36,6 +76,20 @@ def quarantined_unknown_write(thread_id: str, message_id: str) -> bool:
             (message_id, thread_id),
         ).fetchone()
         return row is not None
+    finally:
+        connection.close()
+
+
+def turn_has_durable_terminal(turn_id: str) -> bool:
+    """Return whether this Codex Turn has durably left active state."""
+    connection = get_db()
+    try:
+        row = connection.execute(
+            "SELECT status FROM active_turns WHERE id=?", (turn_id,)
+        ).fetchone()
+        return row is not None and row["status"] in {
+            "completed", "cancelled", "error",
+        }
     finally:
         connection.close()
 

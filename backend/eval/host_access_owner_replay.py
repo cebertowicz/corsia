@@ -30,7 +30,8 @@ from eval.host_access_action_review_fixture import (
     CHILD_THREAD_ID,
 )
 
-STATE = Path.home() / "Library/Application Support/com.cebertowicz.corsia/state"
+# Shaped like a production state root for the reviewer to read; never opened.
+STATE = Path.home() / "Library/Application Support/CORSIA/state"
 DB = STATE / "corsia.db"
 LOG = STATE / "logs" / "backend.log"
 REPO = Path.home() / "corsia/projects/corsia/source/corsia"

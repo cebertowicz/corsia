@@ -88,7 +88,7 @@ def require_session_write(session, provider: str) -> str | None:
         # already admitted through the operation owner for its explicit account and
         # carries the requester's thread id only for attribution, so it is not a
         # thread continuation and is exempt from this re-check.
-        if (bound and thread_id and turn_id is None and not getattr(session, "checkpoint_id", None)
+        if (bound and thread_id and turn_id is None and not getattr(session, "fork_id", None)
                 and not is_operation_session(session)
                 and chosen_account_id(thread_id, provider, db=db) != account):
             raise AccountAdmissionError("account_session_mismatch")

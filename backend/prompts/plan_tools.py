@@ -98,6 +98,14 @@ def send_back_round_guidance(round_number: int, model: str) -> str:
         "evidence once the worker is idle), or raise to the user if its criteria cannot be met."
     )
 
+def inherited_edge_guidance(prerequisite: str, ancestor: str) -> str:
+    """Return the route when a node's wait comes from its ancestor's edge."""
+    return (
+        f"This node has no edge of its own to {prerequisite}; its ancestor {ancestor} "
+        f"depends on it. To release the node, remove that edge from {ancestor}."
+    )
+
+
 ARCHIVED_TASK = "task is archived"
 TASK_STATE = "task is {state}"
 NODE_KIND = "node is a {kind}"

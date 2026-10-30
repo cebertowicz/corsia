@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -158,7 +160,7 @@ describe('StatusBanners', () => {
 
 	it('renders the authoritative security audit report path', () => {
 		const report =
-			'/Users/alice/Library/Application Support/com.cebertowicz.corsia/state/security/audit-2026-07-22.md';
+			'/Users/alice/Library/Application Support/CORSIA/state/security/audit-2026-07-22.md';
 		securityAlert.set({
 			vulns: 2,
 			errors: 0,
@@ -172,6 +174,20 @@ describe('StatusBanners', () => {
 		expect(host.querySelector('.security-banner code')?.textContent).toBe(report);
 		expect(host.textContent).not.toContain('workspace/security');
 	});
+
+	// Chat content scrolls under this strip, so a banner painted with a translucent token alone lets the lines
+	// behind it show through the text. jsdom cannot paint, so read the rule from the component's own style.
+	it.each(['drain-banner', 'security-banner', 'connection-banner'])(
+		'paints %s over an opaque surface',
+		(name) => {
+			const source = readFileSync(resolve(__dirname, 'StatusBanners.svelte'), 'utf8');
+			const rule = source.match(new RegExp(`\\.${name} \\{([^}]*)\\}`))?.[1] ?? '';
+			const background = rule.match(/background:\s*([^;]+);/)?.[1] ?? '';
+			const opaque = /^(#[0-9a-f]{6}|var\(--yellow\))$/i.test(background.trim())
+				|| background.includes('var(--bg-primary)');
+			expect(opaque, `${name} background: ${background}`).toBe(true);
+		},
+	);
 
 	it('keeps every banner inside the strip that sits below the header', () => {
 		connectionState.set('error');

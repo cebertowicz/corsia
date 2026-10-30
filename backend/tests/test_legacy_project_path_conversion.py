@@ -326,6 +326,7 @@ def test_policy_db_failure_rolls_back_all_conversion_rows(isolated_db, tmp_path,
 def test_startup_calls_converter_after_database_initialization(tmp_path, monkeypatch):
     import app_lifecycle
     import core.project_path_conversion as conversion
+    import core.skill_data_conversion as skill_data_conversion
     import core.skill_key_conversion as skill_key_conversion
     import core.system_projection as system_projection
     import infra.config as config
@@ -343,19 +344,20 @@ def test_startup_calls_converter_after_database_initialization(tmp_path, monkeyp
     for directory in ("UPLOADS_DIR", "LOGS_DIR", "RUNTIME_DIR"):
         monkeypatch.setattr(config, directory, tmp_path / directory)
     monkeypatch.setattr(prerequisites, "prepare_startup_prerequisites", record("prerequisites"))
-    monkeypatch.setattr(app_lifecycle, "init_db", record("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", record("init_db"))
     monkeypatch.setattr(conversion, "convert_legacy_project_paths", record("convert"))
     monkeypatch.setattr(durable_writes, "recover_write_intents", record("write_intents"))
     monkeypatch.setattr(relocate, "recover_interrupted_relocations", record("relocations"))
     monkeypatch.setattr(system_projection, "ensure_system_projection", record("projection"))
     monkeypatch.setattr(skill_key_conversion, "convert_legacy_skill_keys", record("skill_keys"))
+    monkeypatch.setattr(skill_data_conversion, "convert_legacy_skill_data", record("skill_data"))
     monkeypatch.setattr(guidance_git, "startup_sweep", record("sweep"))
 
     class QuietLogger:
         def info(self, *_args: object) -> None:
             pass
 
-    app_lifecycle._initialize_startup(QuietLogger())
+    app_lifecycle.app_startup_init.initialize_startup(QuietLogger())
 
     assert calls.index("init_db") + 1 == calls.index("convert")
 

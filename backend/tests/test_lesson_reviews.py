@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from unittest.mock import patch
 
 import pytest
 
@@ -333,7 +332,7 @@ def _deliveries():
 async def _sweep(db, at: str, deliver) -> None:
     await runner.sweep(
         (datetime.fromisoformat(at) + timedelta(minutes=1)).isoformat(), db=db,
-        sources=[WatchExpirySource()], is_idle=lambda _thread: True, deliver=deliver,
+        sources=[WatchExpirySource()], deliver=deliver,
     )
 
 
@@ -402,38 +401,6 @@ def _watch_trigger_state(db) -> str | None:
     return row["state"] if row else None
 
 
-async def _sweep_until_the_review_wake_stalls(db, due: str, deliver) -> int:
-    """Sweep both sources each minute with no admission capacity; return the stalling minute.
-
-    A busy owner never stalls a wake (it waits without spending the budget), so
-    the stall comes from a capacity deferral: no global in-flight slot is free.
-    """
-    from automation.continuation import admission as wake_admission
-
-    for minute in range(1, 181):
-        with patch.object(wake_admission, "MAX_GLOBAL_INFLIGHT", 0):
-            await runner.sweep(
-                (datetime.fromisoformat(due) + timedelta(minutes=minute)).isoformat(), db=db,
-                sources=[LivenessSource(), WatchExpirySource()], is_idle=lambda _thread: True,
-                deliver=deliver,
-            )
-        if _watch_trigger_state(db) == "stalled":
-            return minute
-    raise AssertionError("the review wake never stalled")
-
-
-async def _liveness_wakes(db, due: str, minute: int, seen, deliver) -> list[list[str]]:
-    """Sweep both sources with an idle owner; return each liveness wake's node ids."""
-    for later in range(minute + 1, minute + 11):
-        await runner.sweep(
-            (datetime.fromisoformat(due) + timedelta(minutes=later)).isoformat(), db=db,
-            sources=[LivenessSource(), WatchExpirySource()], is_idle=lambda _thread: True,
-            deliver=deliver,
-        )
-    return [details["node_ids"] for _thread, event, _summary, details in seen
-            if event == "plan.liveness_wake"]
-
-
 def _detailed_deliveries():
     seen: list[tuple[str, str, str, dict]] = []
 
@@ -445,34 +412,8 @@ def _detailed_deliveries():
 
 
 @pytest.mark.asyncio
-async def test_a_stalled_review_wake_leaves_the_review_ready_for_liveness(db):
-    due = _due(days=14)
-    node_id, _ = _lesson(db, due=due)
-    seen, deliver = _detailed_deliveries()
-
-    minute = await _sweep_until_the_review_wake_stalls(db, due, deliver)
-
-    assert seen == []
-    assert _node(db, node_id)["state"] == "pending"
-    assert _armed(db, node_id) == []
-    [expired] = db.execute(
-        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='watch_expired'",
-        (node_id,),
-    )
-    assert '"outcome": "stalled"' in expired["payload_json"]
-    assert '"reason": "deferral_exhausted"' in expired["payload_json"]
-    assert node_id in liveness_signal("owner", db=db).node_ids
-
-    carried = await _liveness_wakes(db, due, minute, seen, deliver)
-
-    assert carried and all(node_id in node_ids for node_ids in carried)
-    assert _node(db, node_id)["state"] == "pending"
-
-
-@pytest.mark.asyncio
-async def test_a_review_wake_waits_out_a_busy_owner_and_is_delivered_once_when_idle(db):
+async def test_a_review_wake_reaches_a_busy_owner_in_the_sweep_it_falls_due(db):
     from automation import plan_liveness
-    from automation.continuation import admission as wake_admission
 
     plan = service.ensure_plan("thread", "owner", db=db)
     task = service.add_node(
@@ -480,51 +421,30 @@ async def test_a_review_wake_waits_out_a_busy_owner_and_is_delivered_once_when_i
     )
     service.transition_node(task.id, "active", db=db)
     admission.reconcile_plan(plan.id, actor_id=None, provenance="test.lesson_reviews", db=db)
-    db.commit()
     due = _due(days=14)
     node_id, _ = _lesson(db, due=due)
+    db.execute(
+        """INSERT INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+           VALUES ('turn-1','owner',0,'native/model','running','2000-01-01T00:00:00','boot-1')""",
+    )
+    db.commit()
     seen, deliver = _detailed_deliveries()
     sources = [LivenessSource(), WatchExpirySource()]
 
-    # The owner stays busy for far more sweeps than the deferral budget allows.
-    sweeps = wake_admission.MAX_DEFERRALS * 4
-    for minute in range(1, sweeps + 1):
-        await runner.sweep(
-            (datetime.fromisoformat(due) + timedelta(minutes=minute * 4)).isoformat(), db=db,
-            sources=sources, is_idle=lambda _thread: False, deliver=deliver,
-        )
-    assert seen == []
-    assert _watch_trigger_state(db) == "deferred"
-    [(retries,)] = db.execute(
-        "SELECT deferrals FROM continuation_triggers WHERE kind='t2_watch_expiry'"
-    ).fetchall()
-    assert retries == 0
-
-    mutate(
-        plan.id, "close_node",
-        {"node_id": task.id, "reason": "done elsewhere",
-         "expected_revision": _node(db, task.id)["revision"]},
-        actor=PlanActor("owner", "user", "project"), provenance="test.lesson_reviews",
-        mutation_id="close-running", db=db,
-    )
-    plan_liveness.on_turn_complete("owner", db=db)
-    db.commit()
-
-    idle_at = datetime.fromisoformat(due) + timedelta(minutes=sweeps * 4 + 10)
     await runner.sweep(
-        idle_at.isoformat(), db=db, sources=sources, is_idle=lambda _thread: True,
-        deliver=deliver,
+        (datetime.fromisoformat(due) + timedelta(seconds=1)).isoformat(), db=db,
+        sources=sources, deliver=deliver,
     )
 
     expired = [d for _thread, event, _summary, d in seen if event == "plan.watch_expired"]
     assert len(expired) == 1 and expired[0]["plan_node_id"] == node_id
     assert _watch_trigger_state(db) == "delivered"
-    carried = [d["node_ids"] for _thread, event, _summary, d in seen
-               if event == "plan.liveness_wake"]
-    assert all(node_id not in node_ids for node_ids in carried)
+
+    plan_liveness.on_turn_complete("owner", db=db)
     await runner.sweep(
-        (idle_at + timedelta(minutes=5)).isoformat(), db=db, sources=sources,
-        is_idle=lambda _thread: True, deliver=deliver,
+        (datetime.fromisoformat(due) + timedelta(minutes=5)).isoformat(), db=db,
+        sources=sources, deliver=deliver,
     )
     assert sum(1 for _t, event, _s, _d in seen if event == "plan.watch_expired") == 1
 
@@ -532,10 +452,7 @@ async def test_a_review_wake_waits_out_a_busy_owner_and_is_delivered_once_when_i
 OWNERS = ("owner", "other", "third")
 DATES = 4
 PER_DATE = 4
-#: A pin on the continuation runner's current tunable constants, not a product
-#: bound: two wakes admitted per project per sweep and six attempts per wake
-#: deliver twelve reviews due at one instant to idle owners. A busy owner, or a
-#: larger burst, can stall a named wake; liveness then carries the review.
+#: Twelve reviews due at one instant.
 BURST = len(OWNERS) * PER_DATE
 
 
@@ -546,9 +463,6 @@ async def test_owner_and_date_workload_is_one_unselected_review_and_one_wake_eac
     It pins what this slice costs an owner with no batching: one pending node
     and one wake per captured hypothesis. It is not an arrival rate.
     """
-    from automation.continuation import admission as wake_admission
-
-    assert BURST == wake_admission.MAX_PER_SCOPE_PER_SWEEP * (wake_admission.MAX_DEFERRALS + 1)
     _thread(db, "third")
     db.commit()
     dues = [_due(days=7 * (index + 1), minutes=1) for index in range(DATES)]
@@ -577,15 +491,12 @@ async def test_owner_and_date_workload_is_one_unselected_review_and_one_wake_eac
     assert len(_review_nodes(db)) == len(workload)
 
     seen, deliver = _deliveries()
-    stalled = 0
     for minute in range(1, 121):
-        result = await runner.sweep(
+        await runner.sweep(
             (datetime.fromisoformat(dues[0]) + timedelta(minutes=minute)).isoformat(), db=db,
-            sources=[WatchExpirySource()], is_idle=lambda _thread: True, deliver=deliver,
+            sources=[WatchExpirySource()], deliver=deliver,
         )
-        stalled += len(result["stalled"])
     woken = [thread for thread, _event, _summary in seen]
-    assert stalled == 0
     assert {owner: woken.count(owner) for owner in OWNERS} == dict.fromkeys(OWNERS, PER_DATE)
     assert len({summary for _thread, _event, summary in seen}) == BURST
 
@@ -805,11 +716,11 @@ async def test_a_paused_owners_review_moves_its_wake_and_wakes_once_resumed(db):
 
 
 @pytest.mark.asyncio
-async def test_a_stalled_review_is_not_armed_again_for_the_date_that_already_fired(db):
+async def test_a_fired_review_is_not_armed_again_for_the_date_that_already_fired(db):
     due = _due(days=14)
     node_id, _ = _lesson(db, due=due)
     _seen, deliver = _detailed_deliveries()
-    await _sweep_until_the_review_wake_stalls(db, due, deliver)
+    await _sweep(db, due, deliver)
 
     again, created = _lesson(db, due=due)
 
@@ -820,11 +731,11 @@ async def test_a_stalled_review_is_not_armed_again_for_the_date_that_already_fir
 
 
 @pytest.mark.asyncio
-async def test_a_stalled_review_given_a_later_date_is_scheduled_for_it(db):
+async def test_a_fired_review_given_a_later_date_is_scheduled_for_it(db):
     due = _due(days=14)
     node_id, _ = _lesson(db, due=due)
     _seen, deliver = _detailed_deliveries()
-    await _sweep_until_the_review_wake_stalls(db, due, deliver)
+    await _sweep(db, due, deliver)
     other = _due(days=30)
 
     again, created = _lesson(db, due=other)

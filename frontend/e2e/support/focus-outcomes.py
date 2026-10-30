@@ -2,28 +2,26 @@
 import json
 import os
 from pathlib import Path
-import sqlite3
 import sys
 
 from infra import thread_updates
+from infra.database import write_transaction
 from plans import service
 from plans.public import rebuild_plan_aggregates, sanctioned_plan_write
 
 
-def guarded_db():
+def assert_disposable_roots():
     assert os.environ.get("CORSIA_E2E_MOCK") == "1"
     assert os.environ.get("CORSIA_TEST_MODE") == "1"
     state = Path(os.environ["CORSIA_E2E_STATE_DIR"]).resolve()
     workspace = Path(os.environ["CORSIA_E2E_WORKSPACE"]).resolve()
     assert state == Path(os.environ["CORSIA_STATE_DIR"]).resolve()
     assert workspace == Path(os.environ["CORSIA_WORKSPACE"]).resolve()
-    assert state.name == "e2e-state" and workspace.name == "e2e-workspace"
-    assert state.parent == workspace.parent and state.parent.name.startswith("corsia-focus-e2e-")
-    assert state.parent.parent == Path("/tmp").resolve()
+    # scripts/e2e-local admits only fresh caller roots (or its own in-repo defaults), and the backend's
+    # production-state guard (infra.config under CORSIA_TEST_MODE=1) rejects the rest, so the roots
+    # named by CORSIA_E2E_* are the only database this may touch, wherever they live.
+    assert state != workspace and workspace not in state.parents and state not in workspace.parents
     assert (state / "corsia.db").is_file()
-    db = sqlite3.connect(state / "corsia.db")
-    db.row_factory = sqlite3.Row
-    return db
 
 
 def message(db, thread, seq, role, content, turn, at, *, marked=False):
@@ -50,7 +48,8 @@ def turn(db, thread, identifier, paused=False):
 
 
 def node(db, plan, title, assignee="coordinator", state="accepted"):
-    row = service.add_node(plan, kind="task", title=title, acceptance_criteria="Synthetic proof", assignee=assignee, db=db)
+    # Outcome cards only: a person-step card would carry the seed's wall-clock time.
+    row = service.add_node(plan, kind="task", title=title, acceptance_criteria="Synthetic proof", assignee=assignee, db=db, person_step=False)
     if state != "pending":  # a new node already is pending; leave its revision alone
         service.touch_node(db, row.id, state=state)
     if state == "failed":
@@ -127,12 +126,12 @@ def seed(db, main, passive, failed):
     # events settle nodes the operations never saw: recount every plan this seeded.
     for seeded_plan in (plan, passive_plan, failed_plan):
         rebuild_plan_aggregates(db, seeded_plan)
-    db.commit()
     revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (live_close,)).fetchone()[0]
     times = [row[0] for row in db.execute("SELECT created_at FROM thread_updates WHERE thread_id=? AND source_kind='plan_event' ORDER BY after_seq, id", (main,))]
     return {"plan": plan, "live_close": live_close, "live_revision": revision, "times": times, "user": user}
 
 
 if __name__ == "__main__":
-    with guarded_db() as connection:
+    assert_disposable_roots()
+    with write_transaction(None, scope="e2e_focus_outcomes_seed") as connection:
         print(json.dumps(seed(connection, *sys.argv[1:4])))

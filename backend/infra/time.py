@@ -15,11 +15,14 @@ def utc_now_iso() -> str:
     return utc_now().isoformat()
 
 
-def utc_storage_iso_to_api(value: str | None) -> str | None:
-    """Render one stored UTC ISO timestamp as explicit RFC 3339 UTC."""
+def utc_storage_datetime(value: str | datetime) -> datetime:
+    """One stored or API UTC timestamp as an aware datetime; naive means UTC."""
+    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+
+
+def utc_storage_iso_to_api(value: str | datetime | None) -> str | None:
+    """Render one stored UTC timestamp as explicit RFC 3339 UTC."""
     if value is None:
         return None
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return utc_storage_datetime(value).astimezone(UTC).isoformat().replace("+00:00", "Z")

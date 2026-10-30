@@ -145,16 +145,6 @@
 		min-height: 0;
 		overflow-y: auto;
 	}
-	/* The band's bottom gutter is exactly the gap down to the composer card, so a
-	   transcript scrolled mid-way showed through between the dock's row and the
-	   card. When the dock is the band's lowest row, that strip (and only it: the
-	   occupants keep the content box, the side gutters keep their shadow room) is
-	   filled in the transcript's colour, as the dock's own row is. */
-	.chat-attention-stack:has(> :global(.attention-dock:last-child)) {
-		background: linear-gradient(var(--bg-primary), var(--bg-primary)) center bottom /
-			calc(100% - 2 * var(--chat-attention-shadow-gutter)) var(--chat-attention-shadow-gutter)
-			no-repeat;
-	}
 	.chat-attention-stack > :global(*) {
 		pointer-events: auto;
 		/* Grid items default to `min-width: auto`, i.e. they refuse to shrink
@@ -165,6 +155,8 @@
 		   shrink; the occupants keep their own ellipsis rules. */
 		min-width: 0;
 	}
+	.chat-attention-stack > :global(.attention-dock) { pointer-events: none; }
+	.chat-attention-stack > :global(.chat-scroll-control) { justify-self: center; }
 	@media (max-width: 768px) {
 		.chat-attention-stack {
 			/* The mobile composer moves up by this canonical inset while an editor
@@ -184,8 +176,12 @@
 			   centring keeps them honest if one ever wraps. */
 			align-items: center;
 		}
+		/* The reply chip's row spans the whole band too: left in the auto-placed first track the row is one third of the band
+		   wide, so the document name (the chip's only "where") truncates with the rest of the band free. The chip itself stays
+		   content-width, like every other transcript chip, and only grows to the band's edge. */
 		.chat-attention-stack > :global(.attention-dock),
-		.chat-attention-stack > :global(.sources-panel) {
+		.chat-attention-stack > :global(.sources-panel),
+		.chat-attention-stack > :global(.reply-chip-notice) {
 			grid-column: 1 / -1;
 			order: 1;
 		}
@@ -199,7 +195,7 @@
 			justify-self: stretch;
 			order: 0;
 		}
-		.chat-attention-stack > :global(.mobile-scroll-fab) {
+		.chat-attention-stack > :global(.chat-scroll-control) {
 			grid-column: 2;
 			justify-self: center;
 			order: 2;
@@ -208,6 +204,11 @@
 			grid-column: 3;
 			justify-self: end;
 			order: 2;
+		}
+		/* Held document comments' Send: a full-width row under the dock, above the rail. */
+		.chat-attention-stack > :global(.held-doc-feedback) {
+			grid-column: 1 / -1;
+			order: 1;
 		}
 		/* The held-thread line describes the composer, so it sits nearest it. */
 		.chat-attention-stack > :global(.plan-limit-held) {
@@ -221,17 +222,6 @@
 		}
 		.chat-attention-stack:has(> :global(:nth-child(2))) > :global(*:first-child) {
 			overflow-y: visible;
-		}
-		/* Rail chips render below the dock here whatever their source order, so
-		   the strip is filled only when the dock is alone; under a rail it would
-		   be a band beside the chips. */
-		.chat-attention-stack:has(> :global(.attention-dock:last-child)) {
-			background: none;
-		}
-		.chat-attention-stack:has(> :global(.attention-dock:only-child)) {
-			background: linear-gradient(var(--bg-primary), var(--bg-primary)) center bottom /
-				calc(100% - 2 * var(--chat-attention-shadow-gutter)) var(--chat-attention-shadow-gutter)
-				no-repeat;
 		}
 	}
 	/* An out-of-flow slot no longer shortens the message list, so the list must

@@ -16,7 +16,26 @@ from typing import Any, Mapping
 from loguru import logger
 
 CORRECTION_EVENT = "measurement.correction"
+SOURCE_KIND_MESSAGE = "message"
+SOURCE_KIND_DOC_COMMENT = "doc_comment"
+SOURCE_KIND_CHAT_COMMENT = "chat_comment"
+SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
+SOURCE_KIND_SENT_BACK = "sent_back"
+SOURCE_KIND_SELF_CAUGHT = "self_caught"
 MESSAGE_SUBJECT_PREFIX = "message:"
+COMMENT_SUBJECT_PREFIX = "doc-comment:"
+CHAT_COMMENT_SUBJECT_PREFIX = "chat-comment:"
+DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
+SENT_BACK_SUBJECT_PREFIX = "plan-review-rejected:"
+SELF_CAUGHT_SUBJECT_PREFIX = "plan-correction-created:"
+SUBJECT_PREFIXES = {
+    SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
+    SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
+    SOURCE_KIND_CHAT_COMMENT: CHAT_COMMENT_SUBJECT_PREFIX,
+    SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
+    SOURCE_KIND_SENT_BACK: SENT_BACK_SUBJECT_PREFIX,
+    SOURCE_KIND_SELF_CAUGHT: SELF_CAUGHT_SUBJECT_PREFIX,
+}
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 # A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
@@ -32,7 +51,8 @@ SYSTEM_WRAPPER_PREFIXES = (
 )
 OWNER_MESSAGE_METADATA_KEYS = ("sender_kind", "routed_event", "send_idempotency_key")
 FACT_KEYS = (
-    "message_id",
+    "source_kind",
+    "source_id",
     "thread_id",
     "label",
     "asset_id",
@@ -93,6 +113,12 @@ def version_key(version: ClassifierVersion) -> str:
     return ":".join(version_attributes(version).values())
 
 
+def version_key_sql(attributes: str) -> str:
+    """SQL for ``version_key`` read from a fact's ``attributes`` expression."""
+    fields = version_attributes(ClassifierVersion("", "", "", 0, ""))
+    return "||':'||".join(f"json_extract({attributes},'$.{name}')" for name in fields)
+
+
 def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict[str, str]]:
     """SQL matching ``alias.attributes`` to one version, with its named parameters."""
     params = {f"version_{key}": value for key, value in version_attributes(version).items()}
@@ -104,14 +130,24 @@ def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict
 
 @dataclass(frozen=True)
 class CorrectionCandidate:
-    """One persisted user message eligible to be checked."""
+    """One persisted owner source (message, comment or decision answer) eligible to be checked.
 
-    message_id: str
+    ``arrived`` marks a source classified as it arrives, not by a later scan.
+    For a comment or a decision answer, ``quote`` is the person's words as
+    written (``content`` is their masked classifier input) and ``about`` is the
+    artifact or decision its triage note names.
+    """
+
+    source_kind: str
+    source_id: str
     thread_id: str
     project_id: str | None
     content: str
     created_at: str
     context: tuple[tuple[str, str], ...] = ()
+    arrived: bool = False
+    quote: str | None = None
+    about: str | None = None
 
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
@@ -152,15 +188,69 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
         db.close()
 
 
-def subject_key(message_id: str) -> str:
-    """The ``outcome_events`` subject for one durable message."""
-    return MESSAGE_SUBJECT_PREFIX + message_id
+def subject_key(source_kind: str, source_id: str) -> str:
+    """The non-colliding ``outcome_events`` subject for one correction source."""
+    if source_kind not in SUBJECT_PREFIXES:
+        raise ValueError(f"unknown correction source kind: {source_kind}")
+    return SUBJECT_PREFIXES[source_kind] + source_id
 
 
-def dedupe_key(message_id: str, version: ClassifierVersion) -> str:
-    """Stable idempotency key for one message under one classifier version."""
+def sent_back_dedupe_key(rejection_event_id: str) -> str:
+    """The one idempotency key for a sent-back fact: its rejection event, under no classifier."""
+    return f"correction:{SOURCE_KIND_SENT_BACK}:{rejection_event_id}"
+
+
+def self_caught_dedupe_key(correction_event_id: str) -> str:
+    """The idempotency key for a self-caught correction event."""
+    return f"correction:{SOURCE_KIND_SELF_CAUGHT}:{correction_event_id}"
+
+
+def chat_comment_source_id(message_id: str, cid: str) -> str:
+    """Identify a comment by its colon-free cid and sending message."""
+    return f"{cid}:{message_id}"
+
+
+def chat_comment_source_id_sql(alias: str) -> str:
+    """SQL source identity for an indexed chat comment."""
+    return f"{alias}.cid || ':' || {alias}.user_message_id"
+
+
+def chat_comment_source_parts(source_id: str) -> tuple[str, str] | None:
+    """Decode a source identity to (message id, cid)."""
+    cid, separator, message_id = source_id.partition(':')
+    return (message_id, cid) if separator else None
+
+
+def chat_comment_source_parts_sql(source_id: str) -> tuple[str, str]:
+    """SQL expressions for the message id and cid of a source identity."""
+    separator = f"instr({source_id},':')"
+    return f"substr({source_id},{separator}+1)", f"substr({source_id},1,{separator}-1)"
+
+
+def decision_answer_source_id(decision_id: str, revision: object) -> str:
+    """The stable source id for one answered revision of a plan decision."""
+    return f"{decision_id}:{revision}"
+
+
+def decision_answer_source_id_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's answered-decision source id."""
+    return f"{alias}.external_id || ':' || json_extract({alias}.metadata,'$.plan_decision.revision')"
+
+
+def decision_answer_arrived_at_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's recorded decision-answer arrival time."""
+    return f"json_extract({alias}.metadata,'$.plan_decision.answered_at')"
+
+
+def decision_answer_subject_key_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's correction-event subject key."""
+    return f"'{DECISION_SUBJECT_PREFIX}' || {decision_answer_source_id_sql(alias)}"
+
+
+def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> str:
+    """Stable idempotency key for one source under one classifier version."""
     payload = json.dumps(
-        {"message_id": message_id, **version_attributes(version)},
+        {"subject_key": subject_key(candidate.source_kind, candidate.source_id), **version_attributes(version)},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -191,19 +281,19 @@ def is_wrapper_or_delivery(
 
 
 def is_owner_authored_message(
-    *, role: object, content: object, metadata: object,
+    *, role: object, content: object, metadata: object, allow_blank: bool = False,
 ) -> bool:
     """Return whether one stored row is an owner's authored, non-system message.
 
     Scope membership is a query responsibility; this reusable predicate owns the
     row-level definition shared by the recording job and the served measure.
     """
-    if role != "user" or not isinstance(content, str) or not content.strip():
+    if role != "user" or not isinstance(content, str) or (not allow_blank and not content.strip()):
         return False
     return not is_wrapper_or_delivery(content, metadata)
 
 
-def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
+def owner_message_sql_predicate(alias: str = "m", *, allow_blank: bool = False) -> tuple[str, dict[str, str]]:
     """Build the SQL-safe superset filter for ``is_owner_authored_message``.
 
     The Python predicate remains authoritative after fetching rows. This filter only
@@ -211,7 +301,9 @@ def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
     cannot starve a bounded pending-candidate scan.
     """
     params = {"owner_message_role": "user"}
-    clauses = [f"{alias}.role=:owner_message_role", f"length(trim({alias}.content, ' ' || char(9, 10, 13))) > 0"]
+    clauses = [f"{alias}.role=:owner_message_role"]
+    if not allow_blank:
+        clauses.append(f"length(trim({alias}.content, ' ' || char(9, 10, 13))) > 0")
     for index, prefix in enumerate(SYSTEM_WRAPPER_PREFIXES):
         # Exact, case-sensitive prefix test like str.startswith; LIKE folds ASCII case.
         key = f"owner_wrapper_prefix_{index}"
@@ -242,7 +334,8 @@ def fact_attributes(
     if label not in LABELS or reason not in FAILURE_REASONS or (label == LABEL_UNREADABLE) == (reason == "none"):
         raise ValueError(f"inconsistent correction fact: label {label}, failure {reason}")
     return {
-        "message_id": candidate.message_id,
+        "source_kind": candidate.source_kind,
+        "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
         "label": label,
         **version_attributes(version),

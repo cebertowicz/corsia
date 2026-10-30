@@ -7,9 +7,12 @@ import sqlite3
 from dataclasses import dataclass
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
+from infra.chat_comment_index import place_comments
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
+from infra.reply_context import require_every_comment, validate_reply_context
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
 from infra.vendor_login import LOGIN_KEY, public_metadata
@@ -24,22 +27,26 @@ def stamped_human_metadata(
     metadata: dict | None,
     *,
     viewing_document: PreparedViewingDocument | None = None,
+    thread_id: str,
 ) -> dict | None:
     """Return the metadata a newly admitted human message is stored with.
 
     A human message (role ``user`` with none of the agent, completion or event
     markers) gains the stamp that makes its model frame end with the
-    ``post_update`` reply footer, and a server-resolved canvas note if supplied.
-    Both are written once, at admission, so a row
+    ``post_update`` reply footer, a server-resolved canvas note if supplied and
+    its validated reply context (what the person was answering, checked against
+    ``thread_id``). All are written once, at admission, so a row
     admitted before the stamp existed keeps rendering as it was cached and
     every replay of a stamped row renders the same footer. A retry of an id
     admitted earlier keeps the payload it was stored with, stamped or not, so
     the retry stays a duplicate.
     """
-    viewing_keys = (VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY)
+    server_keys = (
+        VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY, REPLY_CONTEXT_KEY,
+    )
     clean = (
-        {key: value for key, value in metadata.items() if key not in viewing_keys}
-        if metadata is not None and any(key in metadata for key in viewing_keys)
+        {key: value for key, value in metadata.items() if key not in server_keys}
+        if metadata is not None and any(key in metadata for key in server_keys)
         else metadata
     )
     if role != "user" or any((clean or {}).get(key) for key in NON_HUMAN_MARKERS):
@@ -51,6 +58,15 @@ def stamped_human_metadata(
     if prior is not None and REPLY_VIA_POST_UPDATE_KEY not in prior:
         return clean
     stamped = {**(clean or {}), REPLY_VIA_POST_UPDATE_KEY: True}
+    if prior is not None:
+        reply_context = prior.get(REPLY_CONTEXT_KEY)
+    else:
+        raw_context = (metadata or {}).get(REPLY_CONTEXT_KEY)
+        dropped: list[dict] = []
+        reply_context = validate_reply_context(connection, thread_id, raw_context, dropped=dropped)
+        require_every_comment(raw_context, reply_context, dropped)
+    if reply_context:
+        stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:
         target = viewing_document.target
         stamped[VIEWING_DOCUMENT_TARGET_KEY] = target
@@ -117,12 +133,12 @@ def checkpoint_cap_refusal(model: str) -> tuple[str, str]:
 
 def checkpoint_cap_impossible(window: int, model: str) -> bool:
     """Return whether the cap alone, before any history, leaves no checkpoint room."""
-    from core.checkpoint_fit import ColdFoldInputTooLarge
-    from core.checkpoint_render import require_cold_checkpoint_room
+    from core.fork_fit import ColdFoldInputTooLarge
+    from core.fork_render import require_cold_fork_room
     from prompts.checkpoint import build_checkpoint_system_prompt
 
     try:
-        require_cold_checkpoint_room(
+        require_cold_fork_room(
             window, build_checkpoint_system_prompt(), writer=model,
         )
     except ColdFoldInputTooLarge:
@@ -226,6 +242,13 @@ def _validate_input_shape(metadata, intent, role) -> None:
         raise ValueError(f"invalid model-bound input role: {role}")
 
 
+def _require_current_continuation(thread_id, continuation, connection):
+    if continuation is not None:
+        from automation.continuation.validity import require_current
+
+        require_current(thread_id, continuation, db=connection)
+
+
 def accept_thread_input(
     thread_id: str,
     *,
@@ -258,10 +281,7 @@ def accept_thread_input(
         )
         if duplicate is not None:
             return duplicate
-        if continuation is not None:
-            from automation.continuation.validity import require_current
-
-            require_current(thread_id, continuation, db=connection)
+        _require_current_continuation(thread_id, continuation, connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
         hold = _admission_hold(connection, model, thread_id=thread_id)
@@ -288,6 +308,8 @@ def accept_thread_input(
                 hold,
             ),
         )
+        if role == 'user':
+            place_comments(connection, thread_id, message_id, metadata, accepted_at)
         connection.execute(
             "UPDATE threads SET next_input_order=next_input_order+1 WHERE id=?",
             (thread_id,),

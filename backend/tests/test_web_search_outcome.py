@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from infra import key_store
+from tools import web as web_mod
 from tools import web_search_outcome as outcome_mod
-from tools.web import NO_KEY_TEXT, WebSearchTool
+from tools.web import WebSearchTool
 from tools.web_search_outcome import (
     FAILED,
     KEY_REFUSED,
@@ -118,13 +120,6 @@ def store(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
 
 
-@pytest.mark.asyncio
-async def test_web_search_says_how_to_add_a_key_when_none_is_set(store, monkeypatch):
-    seen = _transport(monkeypatch, _answer(200, {}))
-    assert await WebSearchTool().execute("q") == NO_KEY_TEXT
-    assert not seen
-
-
 @pytest.mark.parametrize("status,body,first_line", [
     (401, {"message": VALUE}, "Web search: key refused."),
     (422, {"error": {"code": "SUBSCRIPTION_TOKEN_INVALID", "detail": VALUE}}, "Web search: key refused."),
@@ -145,7 +140,8 @@ async def test_web_search_errors_name_the_class_and_never_the_key(store, monkeyp
 @pytest.mark.asyncio
 async def test_a_newly_saved_key_is_used_on_the_next_call(store, monkeypatch):
     seen = _transport(monkeypatch, _answer(200, {"web": {"results": [{"title": "Hit", "url": "https://x"}]}}))
-    assert await WebSearchTool().execute("q") == NO_KEY_TEXT
+    monkeypatch.setattr(web_mod, "keyless_search", AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS)))
+    assert await WebSearchTool().execute("q") == "No results for: q"
     key_store.set_value("web-search", VALUE)
     text = await WebSearchTool().execute("q", count=1)
     assert "1. Hit" in text and VALUE not in text

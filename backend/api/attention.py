@@ -1,19 +1,18 @@
 """User-attention HTTP surface (coordination MVP S6b).
 
 Thin endpoints over the tested attention lifecycle (S6a), parent disposition
-(S5b), and review-profile execution (S5a). No new backend concept — these wire
-the existing model functions for the launch UI:
+(S5b), and review-profile execution (S5a):
 
-- ``GET  /api/attention/raised``            — the Requires-user list (optionally scoped to a thread)
+- ``GET  /api/attention/raised``            — raised rows, optionally scoped to a thread
 - ``GET  /api/attention/rollup``            — pull-only parent roll-up (no badge/wake)
 - ``GET  /api/attention/{id}/review``       — the review-profile result for a card
 - ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
 - ``GET  /api/attention/queue``             — the one queue the user works through
 - ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
 
-There is one pile and one "needs you" concept (PLANS-AC29). `/queue` returns the
-rows a typed renderer can actually draw, head-first; `/raised` and `/rollup`
-return exactly the rows it cannot, so nothing is hidden by an unproven claim.
+``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
+semantics remain covered by backend tests while #921 decides whether raised rows
+receive a typed surface or stop being raised.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
-from doceditor import review_bar
+from doceditor import reply_attention, review_bar
 from plans import public
 from registry import artifact_record as AR
 from registry import attention
@@ -86,9 +85,11 @@ def _review_bar(artifact_id: str) -> dict | None:
         row = AR.identity_row_for(artifact_id, db=db)
         if row is None or row["type"] not in public.ASKABLE_TYPES:
             return None
+        person_step = public.person_step_instructions(str(row["id"]), db=db)
         return {
             "artifact_id": artifact_id, "artifact_type": row["type"],
             **review_bar.round_state(db, str(row["id"])),
+            **({"person_step": person_step} if person_step is not None else {}),
         }
     finally:
         db.close()
@@ -159,6 +160,9 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
 
     A decision is listed only where Activity would count it, so the dock and
     Activity's awaiting count never disagree about an archived plan or project.
+    Annotation marks a non-ask item whose every live link is paused, so the dock
+    never shows it until resume; a paused document or image ask never reaches
+    here, because ``list_raised`` already drops it.
     """
     _db = db or get_db()
     try:
@@ -179,6 +183,14 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
     finally:
         if not db:
             _db.close()
+
+
+def _reply_items_for(user_id: str) -> list[dict]:
+    db = get_db()
+    try:
+        return reply_attention.unread_reply_items(db, user_id)
+    finally:
+        db.close()
 
 
 # ── Lists ────────────────────────────────────────────────────────────────────
@@ -204,10 +216,12 @@ async def get_queue(user: dict = Depends(require_user)):
     always `items[0]`.
     """
     rows = await run_in_db(lambda: _queue_for(user["id"]))
+    replies = await run_in_db(lambda: _reply_items_for(user["id"]))
     return {
         "current": rows[0] if rows else None,
         "count": len(rows),
         "items": rows[:QUEUE_ITEMS_CAP],
+        **({"reply_items": replies} if replies else {}),
     }
 
 

@@ -1,0 +1,116 @@
+# Frozen startup/ingress functions from pre-protocol origin/dev, before #1358.
+# Bodies copied unchanged; imports unrelated to these functions omitted.
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from automation.restart_rule import IN_FLIGHT_TTL_SECONDS, row_is_active
+from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
+from infra.database import get_db, write_transaction
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _now_iso() -> str:
+    return _now().isoformat()
+
+
+def _row_is_active(row, *, now: datetime | None = None) -> bool:
+    return row_is_active(row, now=now or _now())
+
+
+def _active_row(connection) -> dict | None:
+    rows = connection.execute(
+        "SELECT * FROM self_restart_requests WHERE status='in_flight' "
+        "ORDER BY requested_at DESC,id DESC"
+    ).fetchall()
+    now = _now()
+    for row in rows:
+        if _row_is_active(row, now=now):
+            return dict(row)
+    return None
+
+
+def in_flight_request(*, db=None) -> dict | None:
+    """Return the current durable operation or non-stale legacy guard."""
+    connection = db or get_db()
+    try:
+        return _active_row(connection)
+    finally:
+        if db is None:
+            connection.close()
+
+
+def restart_holds_new_work(*, db=None) -> bool:
+    """Return cutoff truth once the durable owner has entered steering.
+
+    Admission is also used by deliberately minimal/legacy database fixtures that
+    do not install restart lifecycle state. Such a database cannot contain a
+    durable cutoff, so it has no hold to honor; production startup installs the
+    owner table before serving ingress. ``holding`` reserves an operation without
+    changing the pre-existing build-window ingress behavior.
+    """
+    connection = db or get_db()
+    try:
+        installed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='self_restart_requests'"
+        ).fetchone()
+        active = _active_row(connection) if installed is not None else None
+        return active is not None and active.get("phase") != "holding"
+    finally:
+        if db is None:
+            connection.close()
+
+
+def adopt_for_resume(*, db=None) -> str | None:
+    """Adopt a hold that survived the bounce so this startup can settle it.
+
+    Any pre-bounce phase is adopted, not just ``restarting``: the instance that
+    owned those phases is gone, so this startup is the only actor left that can
+    carry the operation to an ending. Without this the hold is never advanced,
+    ``complete_operation`` can never apply, and because an operational hold
+    deliberately never TTL-releases, every thread's ingress stays queued for the
+    life of the process.
+    """
+    with write_transaction(db, scope="restart_operation") as connection:
+        row = _active_row(connection)
+        if row is None:
+            return None
+        operation_id = str(row["id"])
+        if str(row.get("phase") or "") == "resuming":
+            return operation_id
+        connection.execute(
+            "UPDATE self_restart_requests SET phase='resuming',updated_at=? "
+            "WHERE id=? AND status='in_flight'",
+            (_now_iso(), operation_id),
+        )
+        return operation_id
+
+
+def complete_operation(operation_id: str, *, deployed_sha: str | None = None, db=None) -> bool:
+    """Release one exact operation only after continuity handoff succeeds."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        cur = connection.execute(
+            "UPDATE self_restart_requests SET status='complete',phase=NULL,"
+            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL "
+            "WHERE id=? AND status='in_flight' AND phase='resuming'",
+            (_now_iso(), _now_iso(), deployed_sha, operation_id),
+        )
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
+
+
+def clear_stale_in_flight(deployed_sha: str | None = None, *, db=None) -> int:
+    """Close only legacy pre-lifecycle rows; operational holds are never auto-released."""
+    cutoff = (_now() - timedelta(seconds=IN_FLIGHT_TTL_SECONDS)).isoformat()
+    with write_transaction(db, scope="restart_operation") as connection:
+        cur = connection.execute(
+            "UPDATE self_restart_requests SET status='superseded',settled_at=?,"
+            "updated_at=?,deployed_sha=? WHERE status='in_flight' AND phase IS NULL "
+            "AND requested_at < ?",
+            (_now_iso(), _now_iso(), deployed_sha, cutoff),
+        )
+        return cur.rowcount

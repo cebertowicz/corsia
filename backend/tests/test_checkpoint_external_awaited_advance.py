@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from types import SimpleNamespace
 
 import pytest
+from core import fork_runtime
 
 from core.checkpoint_resume import CheckpointAdmission, CheckpointWaitScope
-from core.checkpoint_types import (
-    CheckpointRequest,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import CheckpointRequest
 from core.turn_core import TurnIdentity
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
@@ -88,8 +91,8 @@ def _earlier_admission(
     )
     return CheckpointAdmission(
         request,
-        ProviderCheckpointRequest(
-            checkpoint_id=checkpoint_id,
+        CheckpointProviderForkRequest(
+            fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
             instruction="Write one checkpoint.",
@@ -101,12 +104,20 @@ def _earlier_admission(
 
 
 @pytest.fixture(autouse=True)
-async def _clean_checkpoint_runtime():
+async def _clean_checkpoint_runtime(monkeypatch):
     from core import checkpoint_runtime
+    from infra import thread_execution
 
-    await checkpoint_runtime.shutdown_checkpoint_tasks()
+    async def no_redrive(_thread_id):
+        return None
+
+    # These tests prove the cut, not the FIFO re-drive after it.
+    monkeypatch.setattr(thread_execution, "drive_thread", no_redrive)
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
     yield
-    await checkpoint_runtime.shutdown_checkpoint_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
 
 @pytest.mark.asyncio
@@ -136,9 +147,9 @@ async def test_external_tool_boundary_advances_after_awaited_earlier_cut(
 
     async def invoke(request, _cancel):
         provider_requests.append(request)
-        if request.checkpoint_id == earlier_id:
+        if request.fork_id == earlier_id:
             await release_earlier.wait()
-        return ProviderCheckpointResult('{"summary":"installed"}', None)
+        return ProviderForkResult('{"summary":"installed"}', None)
 
     def read_context(*_args, **_kwargs):
         head = query_store.current_installed(thread_id)
@@ -227,7 +238,7 @@ async def test_external_tool_boundary_advances_after_awaited_earlier_cut(
         )
     finally:
         db.close()
-    assert checkpoint_runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
 
 
 @pytest.mark.asyncio
@@ -257,9 +268,9 @@ async def test_external_initial_boundary_advances_after_awaited_earlier_cut(
 
     async def invoke(request, _cancel):
         provider_requests.append(request)
-        if request.checkpoint_id == earlier_id:
+        if request.fork_id == earlier_id:
             await release_earlier.wait()
-        return ProviderCheckpointResult('{"summary":"installed"}', None)
+        return ProviderForkResult('{"summary":"installed"}', None)
 
     def read_context(*_args, **_kwargs):
         head = query_store.current_installed(thread_id)
@@ -349,4 +360,4 @@ async def test_external_initial_boundary_advances_after_awaited_earlier_cut(
     assert (head.through_seq, head.through_message_id) == (
         4, f"{thread_id}-m4",
     )
-    assert checkpoint_runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0

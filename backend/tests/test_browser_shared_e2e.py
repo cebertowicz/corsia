@@ -21,7 +21,11 @@ from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_screencast, browser_session_commands
+from host_access import (
+    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
+    browser_step_lifecycle as lifecycle,
+)
+from tools import browser_runtime, browser_run_steps
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -99,12 +103,18 @@ document.querySelector('#closed-host').attachShadow({mode: 'closed'}).innerHTML 
 # A one-document sign-in: submitting hides the password field and shows a code field.
 SIGN_IN = """<!doctype html><title>Sign in</title>
 <input id=user value=person><input type=password id=pw value=hunter2><input id=code value=123456 hidden>"""
+# A sign-in held only in a session cookie (no expiry), as many sites keep one.
+SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
+document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
+</script>"""
+COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
 
 
 @contextmanager
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
-             "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode()}
+             "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -130,6 +140,113 @@ def fixture_server():
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_scripted_steps_guard_a_mock_password_page(tmp_path, monkeypatch):
+    """The runner reaches the real session path and stops on the password guard."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"scripted-steps-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-scripted-steps", instance_key=uuid4().hex)
+
+    commands = []
+
+    class ProcessOwner:
+        async def run_browser(self, thread, args, **kwargs):
+            kwargs["show_window"] = False
+            reply = await owner.run(thread, args, session="new" if args[0] == "open" else "existing", **kwargs)
+            commands.append((args, reply))
+            return reply
+
+    path = tmp_path / "skills/local/steps"
+    path.mkdir(parents=True)
+    (path.parent / "SKILL.md").write_text("---\nname: local\ndescription: Use for local setup.\n---\nSetup.\n", encoding="utf-8")
+    password_steps = []
+    _quiet_password_steps(monkeypatch, password_steps)
+    browser_control.pane_connected(thread_id, "pane")
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", ProcessOwner())
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
+    try:
+        with fixture_server() as origin:
+            (path / "mock.json").write_text(json.dumps({"domains": ["127.0.0.1"], "steps": [{
+                "id": "password-page", "says": "Open the mock password page.", "action": "goto", "url": f"{origin}/probe.html"
+            }]}), encoding="utf-8")
+            result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("local/mock", _thread_id=thread_id))
+        # The page opened, so its step is done; the guard's message hands the rest to the person.
+        assert result["ok"] is True and result["steps"] == ["password-page"], (result, commands)
+        assert result["message"].startswith(browser_control.PASSWORD_PAGE)
+        assert password_steps == ["opened"]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        # The agent's close is refused while the person's password step owns the page.
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_installed_setup_steps_run_in_native_browser(tmp_path, monkeypatch):
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"installed-steps-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-installed-steps", instance_key=uuid4().hex)
+
+    class ProcessOwner:
+        async def run_browser(self, thread, args, **kwargs):
+            kwargs["show_window"] = False
+            return await owner.run(thread, args, session="new" if args[0] == "open" else "existing", **kwargs)
+
+    path = tmp_path / "skills/shared-setup/steps"
+    path.mkdir(parents=True)
+    (path.parent / "SKILL.md").write_text("---\nname: shared-setup\ndescription: Use for shared setup.\n---\nSetup.\n", encoding="utf-8")
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", ProcessOwner())
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            (path / "run.json").write_text(json.dumps({"domains": ["127.0.0.1"], "steps": [
+                {"id": "open", "says": "Open", "action": "goto", "url": f"{origin}/plain.html"},
+                {"id": "click", "says": "Click", "action": "click", "selector": "#agent-button"},
+            ]}), encoding="utf-8")
+            result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("shared-setup/run", _thread_id=thread_id))
+            assert result == {"ok": True, "steps": ["open", "click"]}
+            text = await owner.run(thread_id, ("get", "text", "#result"), session="existing")
+            assert text == "1" or json.loads(text).get("text") == "1", text
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_profile_in_place(monkeypatch):
+    """A session-cookie sign-in survives the saved profile closing; one made on a copy reaches it without a reload."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"signin-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    holder, other = f"signin-holder-{uuid4().hex}", f"signin-copy-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-signin-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert (await owner.run(holder, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            await owner.close_thread(holder)
+            assert (await owner.run(holder, ("open", f"{origin}/cookies.html"))).startswith("holder=1")
+            await owner.run(holder, ("open", f"{origin}/plain.html"))
+            assert "copy=1" in await owner.run(other, ("open", f"{origin}/copy.html"))
+            assert owner._sessions[other].record.copy_of == holder
+            await owner.close_thread(other)
+            assert json.loads(await owner.run(holder, ("get", "url"), session="existing"))["url"] == f"{origin}/plain.html"
+            assert "copy=1" in await owner.run(holder, ("open", f"{origin}/cookies.html"))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 def page_endpoint(rendered: str) -> str:
@@ -257,16 +374,19 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
 
 def _quiet_password_steps(monkeypatch, steps: list[str]) -> None:
     """Record the person's password step instead of writing a plan, and report nothing to a pane."""
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
         steps.append("opened")
 
-    async def settle_episode(_thread_id, _episode):
+    async def settle_step(_thread_id, _step):
         steps.append("settled")
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda *_args: None)
 
 
 @pytest.mark.integration
@@ -332,7 +452,7 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
                 size = await cdp.call("Runtime.evaluate", returnByValue=True,
                                       expression="document.documentElement.outerHTML.length")
             assert size["result"]["value"] > 2**20
-            probe = await browser_cdp.page_password_probe(endpoint, None, frozenset())
+            probe = await browser_cdp.page_password_probe(endpoint, {})
             # The frame's, both shadow roots' and the autocomplete-named field; never the hidden one.
             assert len(probe.visible_nodes) == 4, probe
             assert probe.target == endpoint
@@ -341,7 +461,7 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
                 await owner.run(thread_id, ("snapshot", "-i"), session="existing")
             assert steps == ["opened"]
     finally:
-        await owner.close_thread(thread_id)
+        await owner.shutdown()
 
 
 @pytest.mark.integration
@@ -451,7 +571,7 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
             async with pane_screencast(endpoint) as (cast, frames, next_frame):
                 shown = (await next_frame())["deviceWidth"]
                 # Registered as the pane's cast, so the command path restarts it as it does in the app.
-                browser_control.screencast_started(thread_id, "pane", cast)
+                browser_pane_state.screencast_started(thread_id, "pane", cast)
                 try:
                     # 419 is narrower than Chrome's smallest window, so its frames hold the page beside
                     # the window's overflow; the pane must still get the page's own size.
@@ -477,6 +597,6 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
                         # temporary capture size never does.
                         assert (await next_frame())["deviceWidth"] == width
                 finally:
-                    browser_control.screencast_ended(thread_id, "pane", cast)
+                    browser_pane_state.screencast_ended(thread_id, "pane", cast)
     finally:
         await owner.close_thread(thread_id)

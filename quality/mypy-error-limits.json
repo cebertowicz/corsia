@@ -71,8 +71,12 @@
     "narrowed to BaseException; the pinned local mypy 2.3.0 gate reports 221.",
     "2026-10-10: backend lowered 221 -> 217 after the streaming dispatchers",
     "imported LLMResponse and ToolCallRequest for type checking; the pinned",
-    "local mypy 2.3.0 gate reports 217."
+    "local mypy 2.3.0 gate reports 217.",
+    "2026-10-22: backend lowered 214 -> 213 on the turn-error references",
+    "branch rebased onto dev; the pinned local mypy 2.3.0 gate reports 213.",
+    "2026-10-23: backend lowered 213 -> 212 on the echo-marker branch at dev",
+    "34cf9970; the pinned local mypy 2.3.0 gate reports 212."
   ],
-  "backend": 216,
+  "backend": 210,
   "tools": 4
 }

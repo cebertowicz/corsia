@@ -18,11 +18,11 @@ import math
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from automation.schedules import MAX_CADENCE_SECONDS, Schedule, _parse, _row
+from automation.schedules import MAX_CADENCE_SECONDS, Schedule, _parse, _row, next_slot
 from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
@@ -73,8 +73,8 @@ def _number(value: Any, name: str) -> float | None:
 
 def parse_series(raw: Any) -> list[Series]:
     """Validate the registration's series list."""
-    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SERIES:
-        raise ValueError(f"series must list 1 to {MAX_SERIES} readings")
+    if not isinstance(raw, list) or len(raw) > MAX_SERIES:
+        raise ValueError(f"series must list at most {MAX_SERIES} readings")
     parsed: list[Series] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -147,16 +147,22 @@ def create_script(
     *,
     script_path: Path,
     script_sha256: str,
-    cadence_seconds: int,
+    cadence_seconds: int | None,
     series: list[Series],
     timeout_seconds: int,
     now: str,
     db,
+    workflow: str | None = None,
 ) -> Schedule:
-    """Register one script schedule, due at once, under the per-agent and instance caps."""
-    if isinstance(cadence_seconds, bool) or not (
+    """Register one script schedule, due at once, under the per-agent and instance caps.
+
+    ``cadence_seconds=None`` registers a script only event rules start: it has no next
+    run, so the sweep never claims it, it never runs without an event and never reports
+    no data.
+    """
+    if cadence_seconds is not None and (isinstance(cadence_seconds, bool) or not (
         MIN_CADENCE_SECONDS <= cadence_seconds <= MAX_CADENCE_SECONDS
-    ):
+    )):
         raise ValueError(
             f"cadence_seconds must be between {MIN_CADENCE_SECONDS} and "
             f"{MAX_CADENCE_SECONDS}"
@@ -164,7 +170,7 @@ def create_script(
     if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
     payload = json.dumps(
-        {"series": [vars(s) for s in series]}, sort_keys=True,
+        {"series": [vars(s) for s in series], "workflow": workflow}, sort_keys=True,
     )
     schedule_id = uuid.uuid4().hex
     with write_transaction(db, scope="automation_script_create") as connection:
@@ -176,8 +182,10 @@ def create_script(
                 script_path,script_sha256,timeout_seconds)
                VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
             (
-                schedule_id, thread_id, scope_id, str(cadence_seconds), now,
-                UNBOUNDED_RUNS, payload, thread_id, now, now,
+                schedule_id, thread_id, scope_id,
+                # No cadence: no next run, which alone says only run_script rules start it.
+                "" if cadence_seconds is None else str(cadence_seconds),
+                None if cadence_seconds is None else now, UNBOUNDED_RUNS, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),
         )
@@ -206,18 +214,10 @@ def _require_capacity(connection, thread_id: str) -> None:
         )
 
 
-def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
-    """The first cadence slot after ``now``, anchored on the due time: no replay."""
-    due, current = _parse(due_at), _parse(now)
-    step = timedelta(seconds=cadence_seconds)
-    if due > current:
-        return due.isoformat()
-    missed = int((current - due) / step) + 1
-    return (due + missed * step).isoformat()
-
-
 def claim(schedule: Schedule, now: str, *, db) -> bool:
     """Mark one due run in flight and move the row to its next slot, exactly once."""
+    if schedule.next_run_at is None:
+        return False  # only event rules start it (claim_for_rule)
     cursor = db.execute(
         """UPDATE automation_schedules
            SET running_since=?, next_run_at=?, updated_at=?
@@ -234,8 +234,21 @@ def claim(schedule: Schedule, now: str, *, db) -> bool:
     return cursor.rowcount == 1
 
 
+def claim_for_rule(schedule_id: str, now: str, *, db) -> bool:
+    """Mark a rule-started run in flight on the script's own claim, leaving its next slot.
+
+    Scheduled and rule-started runs take the same claim, so at most one run of a
+    script is in flight; False while another run holds it.
+    """
+    return db.execute(
+        """UPDATE automation_schedules SET running_since=?, updated_at=?
+           WHERE id=? AND kind='script' AND state='active' AND running_since IS NULL""",
+        (now, now, schedule_id),
+    ).rowcount == 1
+
+
 def due_scripts(now: str, *, db) -> list[Schedule]:
-    """Active script schedules due and not in flight, oldest first."""
+    """Active script schedules due and not in flight, oldest first (a rules-only one has no next run)."""
     rows = db.execute(
         """SELECT * FROM automation_schedules
            WHERE kind='script' AND state='active' AND running_since IS NULL
@@ -264,18 +277,23 @@ def finish_run(
     status: str,
     error: str | None = None,
     noted: bool = False,
+    last_measures: str | None = None,
     db,
 ) -> None:
-    """Record one settled run on the schedule row and clear its in-flight mark."""
+    """Record one settled run on the schedule row and clear its in-flight mark.
+
+    ``last_measures`` is this run's measure line for ``automation_list``; a run that settled
+    no measures keeps the previous one.
+    """
     if error is not None:
         error = sanitize_credential_text(error)[:MAX_ERROR_CHARS]
     db.execute(
         """UPDATE automation_schedules
            SET runs=runs+1, last_run_at=?, running_since=NULL, last_status=?,
                last_error=?, noted_at=CASE WHEN ? THEN ? ELSE noted_at END,
-               updated_at=?
+               last_measures=coalesce(?, last_measures), updated_at=?
            WHERE id=? AND kind='script'""",
-        (ran_at, status, error, int(noted), ran_at, ran_at, schedule_id),
+        (ran_at, status, error, int(noted), ran_at, last_measures, ran_at, schedule_id),
     )
 
 

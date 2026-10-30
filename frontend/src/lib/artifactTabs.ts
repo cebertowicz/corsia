@@ -19,6 +19,9 @@ import {
 	openLegacyDiscussionTab as openAuxiliaryDiscussionTab,
 	openSubagentTab as openAuxiliarySubagentTab,
 } from './artifactAuxiliaryTabs';
+import { relocatedTitle } from './artifactTabTitle';
+import { isTabChanged } from './artifactTabStatus';
+export { isTabChanged } from './artifactTabStatus';
 import { restoreWorkspace as restorePersistedWorkspace } from './artifactWorkspaceRestore';
 import type {
 	ArtifactTab,
@@ -63,13 +66,6 @@ export function tabKey(tab: Pick<ArtifactTab, 'instanceId'>): string {
 	return tab.instanceId;
 }
 
-/** A newer content revision exists than the one this tab last loaded. */
-export function isTabChanged(tab: ArtifactTab): boolean {
-	if (tab.kind !== 'document') return false;
-	if (tab.loadedRevision === null || tab.latestRevision === null) return false;
-	return tab.loadedRevision !== tab.latestRevision;
-}
-
 export function getActiveTab(ws: ThreadArtifactWorkspace): ArtifactTab | null {
 	return ws.tabs.find((t) => t.instanceId === ws.activeTabId) ?? null;
 }
@@ -94,6 +90,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		if (input.artifactId && !tabs[existing].artifactId) {
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
+		if (input.landOn) tabs[existing] = { ...tabs[existing], landOn: input.landOn };
 		return {
 			...ws,
 			tabs,
@@ -112,6 +109,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		loadedRevision: null,
 		latestRevision: null,
 		status: 'loading',
+		...(input.landOn ? { landOn: input.landOn } : {}),
 	};
 	return {
 		...ws,
@@ -121,6 +119,8 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		activeSurface: 'artifact',
 	};
 }
+
+export { consumeLanding } from './artifactTabLanding';
 
 /** Adds or selects a child conversation in the existing artifact leaf. */
 export function openSubagentTab(ws: ThreadArtifactWorkspace, input: OpenSubagentInput): ThreadArtifactWorkspace {
@@ -193,7 +193,7 @@ function commitTab(ws: ThreadArtifactWorkspace, idx: number, next: ArtifactTab, 
 }
 
 function unchanged(a: ArtifactTab, b: ArtifactTab): boolean {
-	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision;
+	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.title === b.title && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision;
 }
 
 /**
@@ -244,6 +244,7 @@ export function applyRevisionCheck(ws: ThreadArtifactWorkspace, instanceId: stri
 		status: prev.status === 'unavailable' ? 'loading' : prev.status === 'ready' && !check.writable ? 'readonly' : prev.status === 'readonly' && check.writable ? 'ready' : prev.status,
 		artifactId: prev.artifactId ?? check.artifactId,
 		path: check.path ?? prev.path,
+		title: relocatedTitle(prev, check),
 		latestRevision: check.revision ?? prev.latestRevision,
 	};
 	if (unchanged(prev, next)) return null;

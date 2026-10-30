@@ -10,23 +10,24 @@ from __future__ import annotations
 
 import fcntl
 import os
-import shlex
 import stat
 import subprocess
 import tempfile
 import time
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from loguru import logger
 
+from infra.guidance_cas import stale_path
 from infra.guidance_history_paths import digest, file_version, find_commit
 from infra.guidance_messages import (
-    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
-    commit_message, recorded_reason,
+    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
+    commit_message, is_person_author, recorded_reason,
 )
+from infra.guidance_save_types import SaveResult, _Commit
+from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
@@ -45,41 +46,7 @@ class _LockBusy(GitFault):
     pass
 
 
-@dataclass(frozen=True)
-class GuidanceTarget:
-    """A save that needs history: its ``Scope`` label, or the fault that hid it."""
-
-    scope: str
-    fault: str | None = None
-
-
-@dataclass(frozen=True)
-class SaveResult:
-    """``outcome``: written, unchanged, failed, deferred, stale, history-off, ordinary or refused; ``sha`` is full.
-    ``unsynced`` names paths whose commit landed while the real index kept the old blob (reason
-    ``index-unsynced``): a partial success the caller must show, never a plain "committed". ``refused``
-    (reason ``invalid-skill``) wrote nothing; ``errors`` holds the validation errors and ``line`` the fix."""
-
-    outcome: str
-    reason: str = ""
-    sha: str | None = None
-    line: str | None = None
-    unsynced: tuple[str, ...] = ()
-    errors: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _Commit:
-    """A landed commit and the paths whose real-index sync failed after it, with that fault."""
-
-    sha: str
-    unsynced: tuple[str, ...] = ()
-    fault: str = ""
-
-    def unsynced_line(self) -> list[str]:
-        command = shlex.join(["git", "reset", "-q", "--", *self.unsynced])
-        paths = ", ".join(self.unsynced)
-        return [SAVE_UNSYNCED.format(sha=self.sha[:7], paths=paths, error=self.fault, command=command)] if self.unsynced else []
+# SaveResult stays importable from here for existing callers.
 
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
@@ -263,20 +230,6 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
         return [f"Guidance sweep failed: {exc}. Outside edits remain on disk and not in history. Report this."]
 
 
-def guidance_target(path: Path, workspace: Path | None = None) -> GuidanceTarget | None:
-    """Blocking. The Scope of a guidance path, or None; a classification fault still needs history, to surface it."""
-    from core.guidance_paths import classify_guidance_path
-    from infra.config import WORKSPACE
-    from infra.database import get_db
-
-    try:
-        with closing(get_db()) as db:
-            found = classify_guidance_path(path, workspace=workspace or Path(WORKSPACE), db=db)
-    except Exception as exc:
-        logger.warning("guidance classification failed for {}: {}", path, exc)
-        return GuidanceTarget("unknown", f"could not check whether this file is guidance ({exc})")
-    return GuidanceTarget(found) if found else None
-
 
 def save_guidance(
     writes: dict[Path, bytes],
@@ -288,21 +241,42 @@ def save_guidance(
     evidence: str | None = None,
     message: str | None = None,
     expected: dict[Path, str | None] | None = None,
+    deletes: dict[Path, str] | None = None,
     atomic: bool = False,
+    binary_safe_history: bool = False,
     write: Callable[[Path, bytes], object] = _write_bytes,
+    lesson_gate: bool = True,
+    lesson_observation_thread_id: str | None = None,
 ) -> SaveResult:
-    """Save ``writes`` and commit exactly those bytes. ``expected`` (path -> :func:`digest` the caller
-    computed from) writes nothing on mismatch, with or without history; ``atomic`` (placement) writes
-    nothing without history and restores prior bytes if the commit fails. ``write`` is the caller's
-    managed writer; its exceptions propagate after the lock is released.
+    """Save writes and compare-and-swap deletes in one guidance-history commit.
+
+    Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
+    An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     """
-    if (refused := refused_save(writes)) is not None:
+    lesson_changes = ()
+    if lesson_gate and not is_person_author(author):
+        from infra.lesson_save_gate import lesson_changes as assess_lesson_changes
+
+        lesson_changes = assess_lesson_changes(writes)
+    if (refused := refused_save(
+        writes, author=author, lesson_gate=lesson_gate, lesson_changes=lesson_changes,
+    )) is not None:
         return refused
+    deletes = deletes or {}
+    if set(writes) & set(deletes):
+        return SaveResult("refused", "write-delete-overlap", line="A guidance save cannot write and delete the same path.")
+    # A delete has no safe unrecorded equivalent: callers rely on history to recover it.
+    atomic = atomic or bool(deletes)
+    changes: dict[Path, bytes | None] = {**writes, **{path: None for path in deletes}}
+    expected = {**(expected or {}), **deletes}
     timing: dict[str, float] = {}
     done = (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
-    subject = f"guidance save: {', '.join(os.path.relpath(path, workspace) for path in writes)}"
+    subject = f"guidance save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = message or commit_message(subject, target.scope, reason, evidence)
-    result = _save(writes, workspace, target, author, commit, done, expected, atomic, write, timing)
+    result = _save(
+        changes, workspace, target, author, commit, done, expected, atomic,
+        binary_safe_history, write, timing,
+    )
     from infra.product_events import emit_product_event
 
     properties = {
@@ -311,36 +285,59 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
+    warnings: list[str | None] = []
+    if result.outcome == "written" and lesson_changes:
+        from infra.lesson_save_gate import observe_written_save
+
+        warnings.append(observe_written_save(
+            lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
+        ))
+    if result.outcome == "written" and result.sha and writes:
+        # Only a landed commit creates C1 work; matching remains off this request path.
+        from core.carry_in_facts import record_committed_save
+        from infra.carry_in_drain import request_drain
+
+        record_committed_save(workspace, list(writes), result.sha)
+        request_drain(workspace)
+    if any(warnings):
+        result = SaveResult(
+            result.outcome, result.reason, result.sha,
+            line="\n".join(line for line in (result.line, *warnings) if line),
+            unsynced=result.unsynced, errors=result.errors,
+        )
     return result
 
 
-def _stale(expected: dict[Path, str | None] | None) -> SaveResult | None:
-    """The refusal when a file no longer matches the digest its save was computed from."""
-    for path, want in (expected or {}).items():
-        try:
-            current = digest(path.read_text()) if path.exists() else None
-        except (OSError, UnicodeDecodeError):
-            current = ""
-        if current != want:
-            return SaveResult("stale", "deferred-destination-changed", line=SAVE_STALE.format(path=path))
-    return None
+def _stale(
+    expected: dict[Path, str | None] | None, *, binary_safe_history: bool = False,
+) -> SaveResult | None:
+    """Return a stale result when the destination changed after the caller read it."""
+    path = stale_path(expected, binary_safe_history=binary_safe_history, read_bytes=_read)
+    return SaveResult("stale", "deferred-destination-changed", line=SAVE_STALE.format(path=path)) if path else None
 
 
 def _save(
-    writes: dict[Path, bytes], workspace: Path, target: GuidanceTarget, author: str, message: str, done: str,
-    expected: dict[Path, str | None] | None, atomic: bool, write: Callable[[Path, bytes], object], timing: dict[str, float],
+    writes: dict[Path, bytes | None], workspace: Path, target: GuidanceTarget, author: str, message: str, done: str,
+    expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
+    write: Callable[[Path, bytes], object], timing: dict[str, float],
 ) -> SaveResult:
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := _stale(expected)) is not None:
+            if (stale := _stale(expected, binary_safe_history=binary_safe_history)) is not None:
                 return stale
             for path, data in writes.items():
-                write(path, data)
+                if data is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    write(path, data)
         return SaveResult(outcome, why, line=line)
 
+    if binary_safe_history and any(data is not None and len(data) > MAX_GUIDANCE_BYTES for data in writes.values()):
+        return SaveResult("refused", "binary-too-large", line="Not saved: reviewed bundle files must be at most 1 MB.")
     if target.fault:
-        return unrecorded("failed", target.fault, f"Saved. History may be missing: {target.fault}.")
-    if not all(_is_text(data) for data in writes.values()):
+        line = f"Not saved: {target.fault}." if atomic else f"Saved. History may be missing: {target.fault}."
+        return unrecorded("failed", target.fault, line)
+    if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)
     if repo is None:
@@ -360,18 +357,21 @@ def _save(
             lines = _sweep(repo, outside) if outside else []
         except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
             return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := _stale(expected)) is not None:
+        if (stale := _stale(expected, binary_safe_history=binary_safe_history)) is not None:
             return stale
         prior = {path: _read(path) for path in writes} if atomic else {}
         for path, data in writes.items():
-            write(path, data)
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                write(path, data)
         started = time.monotonic()
         try:
             landed = _commit(repo, {rels[path]: data for path, data in writes.items()}, message, author)
         except GitFault as exc:
             for path, old in prior.items():  # HEAD never moved, so restoring prior bytes is safe
                 if _read(path) == writes[path]:
-                    _write_bytes(path, old) if old is not None else path.unlink()
+                    _write_bytes(path, old) if old is not None else path.unlink(missing_ok=True)
             return SaveResult("failed", str(exc), line="\n".join([*lines, SAVE_FAILED.format(error=exc)]))
         finally:
             timing["commit_ms"] = (time.monotonic() - started) * 1000

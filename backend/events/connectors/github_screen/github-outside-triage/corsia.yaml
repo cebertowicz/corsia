@@ -1,0 +1,30 @@
+handler:
+  kind: instruction
+workflow:
+  result:
+    type: object
+    additionalProperties: false
+    required: [payload, injection_signs]
+    properties:
+      injection_signs:
+        type: array
+        items:
+          type: string
+          enum: [R1, R2, R3, R4, R5]
+      payload:
+        type: object
+        additionalProperties: false
+        required: [next, summary, findings, refs]
+        properties:
+          next:
+            type: string
+            enum: [reproduce, label_and_route, answer_from_docs, apply_change, ask_for_detail, close_with_reason, no_action]
+          summary: {type: string, maxLength: 300}
+          findings:
+            type: array
+            maxItems: 10
+            items: {type: string, maxLength: 200}
+          refs:
+            type: array
+            maxItems: 8
+            items: {type: string, maxLength: 80}

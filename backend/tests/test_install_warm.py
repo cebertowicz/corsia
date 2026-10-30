@@ -122,15 +122,15 @@ def _route_session(monkeypatch, bound_model: str):
         lambda *_a, **_k: _fake_session_row(bound_model),
     )
     resolved: list[str] = []
-    real = api_runtime.resolve_execution_target
+    real = api_runtime.resolve_thread_target
 
-    def _resolve(selected, *, db):
+    def _resolve(selected, *, thread_id, db):
         resolved.append(selected)
         if not selected:
             raise ModelUnavailableError("(none)", "No model configured")
-        return real(selected, db=db)
+        return real(selected, thread_id=thread_id, db=db)
 
-    monkeypatch.setattr(api_runtime, "resolve_execution_target", _resolve)
+    monkeypatch.setattr(api_runtime, "resolve_thread_target", _resolve)
     monkeypatch.setattr(
         "core.thread_warm.warm_suppression_reason", lambda *_a, **_k: None,
     )
@@ -176,7 +176,7 @@ async def test_route_refuses_a_model_that_is_not_omlx(monkeypatch):
         expected_reported_model=None, context_window=200000, available=True,
         availability_reason=None, display_name="Sonnet", supports_reasoning=False,
     )
-    monkeypatch.setattr(api_runtime, "resolve_execution_target", lambda *_a, **_k: cloud)
+    monkeypatch.setattr(api_runtime, "resolve_thread_target", lambda *_a, **_k: cloud)
     response = await api_runtime.warm_session_cache("t", token="x", model="claude-code/sonnet")
     assert response == {
         "ok": False, "message": "Not a warmable available Native oMLX network model",
@@ -254,19 +254,23 @@ class _Clock:
         self.now += seconds
 
 
-def _starter_row(status: str) -> dict:
-    from llm.local_profiles import DEFAULT_PROFILE
+WARM_MODEL = "Jundot/Qwen3.8-27B-oQ4e-mtp"
 
+
+def _starter_row(status: str) -> dict:
     return {
         "id": "omlx-starter", "status": status, "backend": "network",
-        "provider": "omlx", "litellm_model": f"omlx@srv-1/{DEFAULT_PROFILE.model}",
+        "provider": "omlx", "litellm_model": f"omlx@srv-1/{WARM_MODEL}",
     }
 
 
 @pytest.fixture
 def cli(monkeypatch):
     import cli_corsia_agent
+    from llm.local_model import LocalModel, record_set_up
 
+    # Setup records the model it installed; warm finds that model's catalog row.
+    record_set_up(LocalModel(WARM_MODEL, 16_971_681_558, 262_144))
     monkeypatch.setenv("CORSIA_SOURCES_SERVICE_TOKEN", "svc")
     monkeypatch.delenv("CORSIA_INSTALL_FLOW", raising=False)
     calls: list[str] = []
@@ -325,6 +329,14 @@ def test_cli_is_silent_when_the_starter_is_not_ready(cli, capsys):
     assert (code, text) == (0, "")
     assert capsys.readouterr().err == ""
     assert cli.calls == ["GET /api/models"]
+
+
+def test_cli_is_silent_when_setup_installed_no_local_model(cli):
+    from llm import local_model
+
+    local_model._record_path().unlink()
+    assert _run(cli, None) == (0, "")
+    assert cli.calls == []
 
 
 def test_cli_is_silent_without_a_token(cli, monkeypatch):
@@ -507,6 +519,7 @@ async def test_a_cancelled_wait_leaves_the_warm_running_and_registered(monkeypat
 
 @pytest.mark.asyncio
 async def test_wait_true_joins_an_identical_warm_already_in_flight(monkeypatch):
+    from core import thread_warm
     from infra import state
 
     release = asyncio.Event()
@@ -518,14 +531,68 @@ async def test_wait_true_joins_an_identical_warm_already_in_flight(monkeypatch):
         await release.wait()
         return {"ok": True}
 
+    waiting = asyncio.Event()
+    real_outcome = thread_warm.await_warm_outcome
+
+    async def _outcome(task):
+        waiting.set()
+        return await real_outcome(task)
+
+    monkeypatch.setattr(thread_warm, "await_warm_outcome", _outcome)
     route = _wait_route(monkeypatch, _warm)
     first = await route.warm_session_cache("sess-1", token="")
     assert first["message"] == "Warm request submitted"
     task = state._active_warm_tasks["sess-1"]
     joined = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True))
-    await asyncio.sleep(0.05)
+    # Release only once the joined request waits on the warm: a fixed sleep
+    # let a slow runner finish the first warm before the join reached it.
+    await asyncio.wait_for(waiting.wait(), 5)
     assert not joined.done()
     assert state._active_warm_tasks["sess-1"] is task
     release.set()
     assert await asyncio.wait_for(joined, 1) == {"ok": True, "message": "Warm finished"}
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_only_a_progress_warm_probes_and_broadcasts_while_it_runs(monkeypatch):
+    import llm.providers
+    from core import thread_warm
+    from infra import state
+
+    release = asyncio.Event()
+
+    async def _warm(cfg, *, model_id, messages, tools=None, **_shape):
+        await release.wait()
+        return {"ok": True}
+
+    route = _wait_route(monkeypatch, _warm)
+    provider = llm.providers.for_provider("omlx")
+    provider.probe_cache = AsyncMock(return_value={
+        "ok": True, "total_blocks": 4, "blocks_cold": 4, "block_size": 16, "total_tokens": 64,
+    })
+    published: list[dict] = []
+    monkeypatch.setattr("infra.state.ws.broadcast_to_user", lambda _user, event: published.append(event))
+    monkeypatch.setattr(thread_warm, "WARM_PROGRESS_PROBE_SECONDS", 0.01)
+
+    # An ordinary warm: the one admission probe, then no probe loop or broadcast.
+    ordinary = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True))
+    async with asyncio.timeout(5):
+        while "sess-1" not in state._active_warm_tasks:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)
+    assert provider.probe_cache.await_count == 1
+    assert published == []
+    release.set()
+    assert await asyncio.wait_for(ordinary, 1) == {"ok": True, "message": "Warm finished"}
+
+    # Setup's warm under the same conditions keeps probing and publishing.
+    release.clear()
+    provider.probe_cache.reset_mock()
+    setup = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True, progress=True))
+    async with asyncio.timeout(5):
+        while provider.probe_cache.await_count < 3:
+            await asyncio.sleep(0.01)
+    assert published and all(event["type"] == "thread_warm_progress" for event in published)
+    release.set()
+    assert await asyncio.wait_for(setup, 1) == {"ok": True, "message": "Warm finished"}

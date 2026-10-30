@@ -91,6 +91,7 @@ BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
 ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
 if is_app_mode; then
     app_mode_checkout || exit 1
+    app_mode_refuse_during_state_move "$@" || exit 1
 fi
 if [ -n "$_CORSIA_REQUEST_PYTHON" ]; then
     export CORSIA_PYTHON="$_CORSIA_REQUEST_PYTHON"
@@ -265,8 +266,10 @@ if [ ! -f "$BOOTSTRAP_CONFIG" ] && [ -z "${CORSIA_WORKSPACE:-}" ] \
     && is_canonical_checkout && [ "${1:-}" != "service" ]; then
     # scripts/install.sh numbers its steps; this block is steps 4 and 5.
     if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
-        INSTALL_STEP_5="5/8  "
-        printf '4/8  '
+        if [ "${CORSIA_INSTALL_LINUX:-}" != 1 ]; then
+            INSTALL_STEP_5="5/8  "
+            printf '4/8  '
+        fi
     else
         echo "CORSIA workspace not configured. Running first-time setup..."
     fi
@@ -324,7 +327,12 @@ NC='\033[0m'
 
 ok() { echo -e "  ${GREEN}✅ $1${NC}"; }
 warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
-fail() { echo -e "  ${RED}❌ $1${NC}"; }
+fail() {
+    if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-false}" = true ] && [ -z "${_corsia_lifecycle_refusal_reason:-}" ]; then
+        _corsia_lifecycle_refusal_reason="$1"
+    fi
+    echo -e "  ${RED}❌ $1${NC}"
+}
 
 status() {
     echo "CORSIA Status"
@@ -341,7 +349,15 @@ status() {
 }
 
 source "$SCRIPT_DIR/corsia.d/runtime.sh"
-source "$SCRIPT_DIR/corsia.d/service.sh"
+if [ "$(uname -s)" = Linux ]; then
+    source "$SCRIPT_DIR/corsia.d/systemd.sh"
+else
+    source "$SCRIPT_DIR/corsia.d/service.sh"
+fi
+# Direct lifecycle calls and their backend children need the same installed
+# tools as the service, even before a fresh shell has loaded Homebrew.
+# Keep an explicitly selected toolchain ahead of these platform defaults.
+export PATH="$PATH:$SERVICE_PATH"
 source "$SCRIPT_DIR/corsia.d/delegate.sh"
 if is_app_mode; then
     app_mode_install_overrides
@@ -379,8 +395,13 @@ case "${1:-status}" in
             esac
         done
         require_no_extra_lifecycle_args start "${start_args[@]}" || exit 1
+        refuse_if_app_owns_install || exit 1
         if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
-            echo "7/8  Starting…"
+            if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
+                echo "3/3  Starting…"
+            else
+                echo "4/4  Starting…"
+            fi
         else
             echo "Starting CORSIA..."
         fi
@@ -393,16 +414,31 @@ case "${1:-status}" in
         open_browser
         ;;
     stop)
-        require_no_extra_lifecycle_args stop "${@:2}" || exit 1
+        stop_args=()
+        STOP_LOCAL_MODEL=false
+        for arg in "${@:2}"; do
+            case "$arg" in
+                --stop-local-model) STOP_LOCAL_MODEL=true ;;
+                *) stop_args+=("$arg") ;;
+            esac
+        done
+        require_no_extra_lifecycle_args stop "${stop_args[@]}" || exit 1
         echo "Stopping CORSIA..."
         if service_managed; then
             service_stop   # drains internally
+        elif [ "$STOP_LOCAL_MODEL" = true ] && [ "$(uname -s)" = Linux ]; then
+            stop_direct_backend
+            echo "No local model runs on Linux; only the server is stopped."
+        elif [ "$STOP_LOCAL_MODEL" = true ]; then
+            fail "--stop-local-model needs the installed service"
+            exit 1
         else
             stop_direct_backend
         fi
         ;;
     restart)
         require_no_extra_lifecycle_args restart "${@:2}" || exit 1
+        refuse_if_app_owns_install || exit 1
         echo "Restarting CORSIA..."
         run_owned_restart_lifecycle restart_current_release
         ;;

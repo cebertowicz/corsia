@@ -40,7 +40,7 @@ beforeEach(() => {
 	connectionState.set('connected');
 	stop = startLiveDocuments();
 	api.fetchContent.mockResolvedValue({ text: 'disk copy', writable: true, artifact: { id: 'artifact' }, freshness: null });
-	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } });
+	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 });
 afterEach(async () => {
 	if (component) await unmount(component);

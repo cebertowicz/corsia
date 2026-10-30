@@ -24,7 +24,7 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
 function chooseButton(): HTMLButtonElement {
-	const found = [...host.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+	const found = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
 		b.textContent?.includes('Choose this folder'),
 	);
 	if (!found) throw new Error('no choose button');
@@ -32,7 +32,7 @@ function chooseButton(): HTMLButtonElement {
 }
 
 function rowButton(name: string): HTMLButtonElement {
-	const found = [...host.querySelectorAll<HTMLButtonElement>('button.row')].find((b) =>
+	const found = [...document.body.querySelectorAll<HTMLButtonElement>('button.row')].find((b) =>
 		b.textContent?.includes(name),
 	);
 	if (!found) throw new Error(`no row ${name}`);
@@ -92,15 +92,15 @@ function open(onSelect = vi.fn()) {
 describe('PathPicker confined to the projects folder', () => {
 	it('cannot choose the projects folder itself or leave it', async () => {
 		open();
-		await vi.waitFor(() => expect(host.textContent).toContain('alpha'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('alpha'));
 
 		expect(chooseButton().disabled).toBe(true);
-		expect(host.querySelector('button.up')).toBeNull();
+		expect(document.body.querySelector('button.up')).toBeNull();
 	});
 
 	it('cannot enter a symlinked folder', async () => {
 		open();
-		await vi.waitFor(() => expect(host.textContent).toContain('linked'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('linked'));
 
 		expect(rowButton('linked').disabled).toBe(true);
 		expect(rowButton('alpha').disabled).toBe(false);
@@ -108,7 +108,7 @@ describe('PathPicker confined to the projects folder', () => {
 
 	it('chooses a direct child folder', async () => {
 		const onSelect = open();
-		await vi.waitFor(() => expect(host.textContent).toContain('alpha'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('alpha'));
 
 		rowButton('alpha').click();
 		await vi.waitFor(() => expect(chooseButton().disabled).toBe(false));
@@ -119,12 +119,12 @@ describe('PathPicker confined to the projects folder', () => {
 
 	it('cannot choose a folder nested deeper', async () => {
 		const onSelect = open();
-		await vi.waitFor(() => expect(host.textContent).toContain('alpha'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('alpha'));
 
 		rowButton('alpha').click();
-		await vi.waitFor(() => expect(host.textContent).toContain('source'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('source'));
 		rowButton('source').click();
-		await vi.waitFor(() => expect(host.textContent).toContain(`${ROOT}/alpha/source`));
+		await vi.waitFor(() => expect(document.body.textContent).toContain(`${ROOT}/alpha/source`));
 
 		expect(chooseButton().disabled).toBe(true);
 		chooseButton().click();

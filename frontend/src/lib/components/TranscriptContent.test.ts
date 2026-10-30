@@ -8,6 +8,7 @@ import { auto, compact, input, said, suppressed, work, summary, CAUSE } from '$l
 import { buildMessageListPresentation, buildTranscriptPresentation } from './messageListModel';
 import { mergeTranscriptUpdates } from './transcriptUpdates';
 import { getTurnState, INITIAL_TURN_STATE, restoreTurnState } from '$lib/ws/turnState';
+import { seedOpenTime } from '$lib/__tests__/fixtures/focusRuns';
 import { token } from '$lib/stores/auth';
 import { get } from 'svelte/store';
 
@@ -38,20 +39,14 @@ describe('TranscriptContent update-card fold', () => {
 			kind: 'message' as const, id: `message-${id}`, showActivity: true, showContent: true,
 			message: { id, role: 'user', content: id, active_turn_id, write_started_at, metadata: {} },
 		});
-		component = mount(TranscriptContent, {
-			target: host,
-			props: {
-				entries: [
+		const entries = [
 					fold([focusTurnFixture.turn.id], focusTurnFixture.expected.activity_count),
 					ask('ask-one', 'one', '2026-09-30T12:01:00Z'),
 					fold(['one', 'two'], 1),
 					ask('ask-legacy', 'legacy', '2026-09-30T12:09:00Z'),
 					fold(['legacy']),
-				],
-				expandedTools: new Set(), expandedReasoning: new Set(),
-				onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
-				threadId: 'thread-1', renderedStreaming: false, historyComplete: true,
-				turnSummaries: {
+				];
+		const turnSummaries = {
 					one: { started_at: '2026-09-30T12:01:00Z', ended_at: '2026-09-30T12:04:00Z', status: 'completed', activity_count: 1 },
 					[focusTurnFixture.turn.id]: {
 						started_at: focusTurnFixture.turn.started_at,
@@ -60,7 +55,16 @@ describe('TranscriptContent update-card fold', () => {
 						activity_count: focusTurnFixture.expected.activity_count,
 					},
 					two: { started_at: '2026-09-30T12:05:00Z', ended_at: '2026-09-30T12:08:00Z', status: 'completed', activity_count: 2 },
-				},
+				};
+		seedOpenTime(entries as never, turnSummaries, { threadId: 'thread-1' });
+		component = mount(TranscriptContent, {
+			target: host,
+			props: {
+				entries,
+				expandedTools: new Set(), expandedReasoning: new Set(),
+				onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
+				threadId: 'thread-1', renderedStreaming: false, historyComplete: true,
+				turnSummaries,
 			},
 		});
 		flushSync();
@@ -150,7 +154,7 @@ describe('TranscriptContent update-card fold', () => {
 		flushSync();
 
 		const labels = host.querySelectorAll('.plan-limit-paused');
-		expect([...labels].map((label) => label.textContent)).toEqual(['Paused: plan limit reached']);
+		expect([...labels].map((label) => label.textContent)).toEqual(['Paused: usage limit reached']);
 		expect(labels[0].closest('.transcript-fold')).toBeTruthy();
 		expect(labels[0].previousElementSibling?.textContent).toBe('Earlier work');
 		host.querySelector<HTMLButtonElement>('.fold-toggle')!.click(); flushSync();
@@ -180,7 +184,7 @@ describe('TranscriptContent update-card fold', () => {
 		flushSync();
 
 		const labels = [...host.querySelectorAll('.plan-limit-paused')];
-		expect(labels.map((label) => label.textContent)).toEqual(['Paused: plan limit reached']);
+		expect(labels.map((label) => label.textContent)).toEqual(['Paused: usage limit reached']);
 		expect(labels[0].previousElementSibling?.textContent).toContain('ask-1');
 		expect(labels[0].nextElementSibling?.textContent).toContain('ask-2');
 	});

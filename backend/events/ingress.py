@@ -15,17 +15,7 @@ from events.reviewer_route import (
 )
 from events.router import RouteResult, route_event
 
-from events.markers import (
-    REVIEW_FP_MARKER_PREFIX as _FP_MARKER_PREFIX,
-    REVIEW_RESOLVED_MARKER as _RESOLVED_REPLY_MARKER,
-    REVIEW_SUMMARY_MARKER as _SUMMARY_MARKER,
-)
-
-_CORSIA_SELF_MARKERS: tuple[str, ...] = (
-    _SUMMARY_MARKER,
-    _RESOLVED_REPLY_MARKER,
-    _FP_MARKER_PREFIX,
-)
+from events.markers import has_reviewer_marker
 
 _COMMENT_EVENT_TYPES: frozenset[str] = frozenset({
     "webhook.github.pr_comment",
@@ -43,10 +33,7 @@ def _is_corsia_self_comment(internal_event: str, payload: dict[str, Any]) -> boo
     if internal_event not in _COMMENT_EVENT_TYPES:
         return False
     body: str = (payload.get("comment") or {}).get("body") or ""
-    return any(
-        f"\n{marker}" in body or body.startswith(marker)
-        for marker in _CORSIA_SELF_MARKERS
-    )
+    return has_reviewer_marker(body)
 
 
 async def route_leg_required(

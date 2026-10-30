@@ -2,13 +2,14 @@
 // can see which layer a token belongs to and where to change it.
 import type { ContextSheetSourceRow } from './contextSheetModel';
 import { promptTokenLabel } from './contextSheetFormat';
+import { contextSourceActionLabel, contextSourceOwnerLabel } from '$lib/contextSourceNavigation';
 
 export const SCOPE_GROUPS = [
 	{ id: 'system', name: 'System' },
 	{ id: 'workspace', name: 'Workspace' },
 	{ id: 'project', name: 'Project' },
 	{ id: 'agent', name: 'Agent' },
-	{ id: 'thread', name: 'This thread' },
+	{ id: 'thread', name: 'This chat' },
 	{ id: 'tools', name: 'Tools' },
 	{ id: 'history', name: 'History' },
 	{ id: 'other', name: 'Other' },
@@ -42,7 +43,7 @@ function text(value: unknown): string {
 function scopeName(scope: string, isAgent: boolean): string {
 	if (scope === 'workspace') return 'Workspace';
 	if (scope === 'project') return 'Project';
-	if (scope === 'thread') return isAgent ? 'Agent' : 'This thread';
+	if (scope === 'thread') return isAgent ? 'Agent' : 'This chat';
 	return 'System';
 }
 
@@ -61,7 +62,7 @@ export function sourceScope(
 	if (originSection === 'corsia' || originSection === 'system') return 'System';
 	if (originSection === 'workspace') return 'Workspace';
 	if (originSection === 'project') return 'Project';
-	if (originSection === 'thread') return isAgent ? 'Agent' : 'This thread';
+	if (originSection === 'thread') return isAgent ? 'Agent' : 'This chat';
 	if (originSection === 'role') return 'Agent';
 	if (originSection === 'tool' || originSection === 'tools' || originSection === 'model' || originSection === 'preflight') return 'Tools';
 	if (originSection === 'history' || originSection === 'summary' || originSection === 'provider') return 'History';
@@ -99,6 +100,8 @@ interface ListedSkill {
 	scopeId: string;
 	role: string;
 	trial: boolean;
+	listed: string;
+	path: string;
 	tokens: number | null;
 }
 
@@ -120,6 +123,8 @@ function listedSkills(metadata: Record<string, unknown> | undefined): ListedSkil
 			scopeId: text(row.scope_id),
 			role: text(row.role),
 			trial: typeof row.lesson_id === 'string' && row.lesson_id.length > 0,
+			listed: text(row.listed),
+			path: text(row.path),
 			tokens,
 		});
 	}
@@ -142,7 +147,11 @@ export function expandSkillsIndex(
 	if (listed === null || listed.some((skill) => skill.tokens === null)) return null;
 	const rows: ContextSheetSourceRow[] = listed.map((skill) => {
 		const category = scopeName(skill.scope, isAgent);
-		const tags = [...(skill.role ? ['agents only'] : []), ...(skill.trial ? ['trial'] : [])];
+		const tags = [
+			...(skill.role ? ['agents only'] : []),
+			...(skill.trial ? ['trial'] : []),
+			...(skill.listed === 'name' ? ['name only'] : []),
+		];
 		return {
 			...index,
 			id: `skill:${skill.scope}:${skill.scopeId}:${skill.role}:${skill.name}`,
@@ -150,6 +159,11 @@ export function expandSkillsIndex(
 			label: skill.name,
 			fullLabel: skill.name,
 			stableReference: '',
+			filePath: skill.path,
+			actionLabel: contextSourceActionLabel({ filePath: skill.path }),
+			ownerLabel: contextSourceOwnerLabel({ filePath: skill.path }),
+			ownerSurface: '',
+			layer: 'skill',
 			reason: `${category} skill${skill.trial ? ' (trial, unproven)' : ''}`,
 			countLabel: '',
 			tokenCount: skill.tokens,
@@ -166,6 +180,10 @@ export function expandSkillsIndex(
 			category: 'System',
 			label: 'Skills index',
 			fullLabel: 'Skills index',
+			stableReference: '',
+			filePath: '',
+			actionLabel: '',
+			ownerLabel: '',
 			countLabel: '',
 			tokenCount: header,
 			tokenLabel: promptTokenLabel(header),

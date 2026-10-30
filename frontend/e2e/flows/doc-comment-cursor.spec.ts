@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 type SeedComment = { anchor: string; body: string };
@@ -101,7 +102,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 		const from = text.indexOf(comment.anchor);
 		expect(from, `setup: "${comment.anchor}" is in the document`).toBeGreaterThanOrEqual(0);
 		const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-			data: { body: comment.body, anchor_text: comment.anchor, from_off: from, to_off: from + comment.anchor.length },
+			data: { body: comment.body, anchor_text: comment.anchor, from_off: from, to_off: from + comment.anchor.length, delivery_policy: 'immediate' },
 		});
 		expect(created.ok(), await created.text()).toBeTruthy();
 	}
@@ -134,7 +135,9 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 				transformed.push(`${current.tagName.toLowerCase()}.${current.getAttribute('class') ?? ''}`);
 			}
 		}
-		return { transformed, runningAnimations: document.getAnimations().filter((animation) => animation.playState === 'running').length };
+		// A working task's sidebar spinner never ends and moves nothing in the editor: only animations that finish count.
+		const finishing = (animation: Animation) => animation.playState === 'running' && animation.effect?.getComputedTiming().endTime !== Infinity;
+		return { transformed, runningAnimations: document.getAnimations().filter(finishing).length };
 	}), { message: 'setup: animations have finished and no ancestor of the editor is transformed' }).toEqual({ transformed: [], runningAnimations: 0 });
 	return `${size.width}x${size.height}, ${motion.name}`;
 }

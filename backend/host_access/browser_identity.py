@@ -124,10 +124,13 @@ def is_zombie(pid: int) -> bool:
 
 
 def default_socket_root() -> Path:
-    return Path("/tmp")
+    from host_access.browser_ports import SOCKET_ROOT
+    return SOCKET_ROOT
 
 
 def ensure_private_dir(path: Path) -> Path:
+    if path.parent == default_socket_root():
+        ensure_private_dir(path.parent)
     try:
         path.mkdir(mode=0o700, exist_ok=True)
         metadata = path.lstat()
@@ -251,7 +254,7 @@ def session_sidecar_path(socket_dir: Path, session: str, suffix: str) -> Path:
     return path
 
 
-def _read_regular_sidecar(path: Path, limit: int) -> tuple[str, float]:
+def read_regular_sidecar(path: Path, limit: int) -> tuple[str, float]:
     if path.is_symlink():
         raise BrowserIdentityError("browser session ownership could not be verified")
     flags = (
@@ -283,13 +286,13 @@ def read_sidecars(socket_dir: Path, session: str) -> BrowserSidecars:
     before = tuple(artifact_stamp(session_sidecar_path(socket_dir, session, suffix),
                                   socket_file=suffix == "sock")
                    for suffix in ("pid", "version", "sock"))
-    pid_raw, pid_mtime = _read_regular_sidecar(
+    pid_raw, pid_mtime = read_regular_sidecar(
         session_sidecar_path(socket_dir, session, "pid"),
         64,
     )
     version_path = session_sidecar_path(socket_dir, session, "version")
     try:
-        version_raw, _version_mtime = _read_regular_sidecar(version_path, 64)
+        version_raw, _version_mtime = read_regular_sidecar(version_path, 64)
         version = version_raw.strip() or None
     except BrowserIdentityError:
         version = None
@@ -302,12 +305,7 @@ def read_sidecars(socket_dir: Path, session: str) -> BrowserSidecars:
                            version=version, artifacts=artifacts)
 
 
-def daemon_environment_matches(
-    process: psutil.Process,
-    *,
-    session: str,
-    socket_dir: Path,
-) -> bool:
+def daemon_environment_matches(process: psutil.Process, *, session: str, socket_dir: Path) -> bool:
     try:
         env = process.environ()
     except psutil.NoSuchProcess as exc:
@@ -316,6 +314,8 @@ def daemon_environment_matches(
         raise BrowserExitTornRead("browser daemon environment identity is unavailable") from exc
     except OSError as exc:
         raise BrowserIdentityError("browser daemon environment identity is unavailable") from exc
+    if not env:  # A live daemon always has an environment; an exiting one serves none before it is a zombie.
+        raise BrowserExitTornRead("browser daemon environment identity is unavailable")
     return (
         env.get("AGENT_BROWSER_DAEMON") == "1"
         and env.get("AGENT_BROWSER_SESSION") == session

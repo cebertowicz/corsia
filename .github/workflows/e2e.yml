@@ -33,7 +33,8 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. It restarts the backend from a captured seed before each spec file (244 times across both projects). Green full runs with that reset took 1h53m and 1h57m; 180 min is that plus about an hour of headroom.
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
@@ -87,6 +88,31 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # The app's font stack (--font-sans) names Inter, and a bare runner has no face from it, so text falls back to DejaVu
+      # Sans, which is wider and wraps lines the layout specs measure. Install Inter so the runner resolves the face the stack asks for.
+      - name: Install Inter font
+        run: |
+          set -e
+          sudo apt-get install -y --no-install-recommends fonts-inter
+          fc-match 'Inter' | tee /dev/stderr | grep -qi inter
+
+      # browser-pane drives the real native agent-browser, which the backend resolves from PATH
+      # (backend/host_access/browser_cli.py). Same pinned install as browser-native.yml.
+      - name: Install native agent-browser
+        run: |
+          set -e
+          npm install --prefix "$RUNNER_TEMP/browser-cli" --no-audit --no-fund agent-browser@0.31.2
+          native_bin="$RUNNER_TEMP/browser-cli/node_modules/agent-browser/bin/agent-browser-linux-x64"
+          test -x "$native_bin"
+          "$native_bin" --version
+          chrome_bin="$(command -v google-chrome)"
+          test -x "$chrome_bin"
+          "$chrome_bin" --version
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -s "$native_bin" "$RUNNER_TEMP/browser-bin/agent-browser"
+          echo "$RUNNER_TEMP/browser-bin" >> "$GITHUB_PATH"
+          echo "AGENT_BROWSER_EXECUTABLE_PATH=$chrome_bin" >> "$GITHUB_ENV"
+
       - name: Run UI-E2E (mock mode via scripts/e2e-local)
         env:
           E2E_GREP: ${{ inputs.grep }}
@@ -96,6 +122,20 @@ jobs:
           else
             bash scripts/e2e-local
           fi
+
+      # Every failing test keeps its trace (playwright.config.ts retain-on-failure); a failure that does not
+      # reproduce locally is rooted in it, not guessed at.
+      - name: Upload failing-test traces
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-traces-${{ matrix.run-index }}
+          path: |
+            frontend/test-results/**/trace.zip
+            frontend/test-results/**/error-context.md
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload browser cleanup screenshots
         if: always()

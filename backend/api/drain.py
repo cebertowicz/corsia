@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -81,14 +82,63 @@ async def get_drain_status_route(token: str, operation_id: str | None = None):
 
 
 @router.delete("/drain")
-async def cancel_drain(token: str, operation_id: str):
-    """Compensate and cancel only the exact active restart operation."""
+async def cancel_drain(
+    token: str, operation_id: str, failure_code: str | None = None,
+    reason: str | None = None, backend_healthy: bool | None = None,
+):
+    """Release only the exact active operation, recording a pre-stop refusal."""
     _require_user(token)
     from automation.restart import abort_restart_control
 
-    if not await abort_restart_control(operation_id, cancelled=True):
+    if failure_code is None:
+        released = await abort_restart_control(operation_id, cancelled=True)
+    else:
+        if failure_code != "update_refused" or not reason or len(reason) > 500:
+            raise HTTPException(400, "invalid update refusal")
+        from automation import self_restart
+        from infra.db_async import run_in_db
+        from infra.update_prepare_output import terminal_update_summary
+
+        reason = terminal_update_summary(reason, None)
+        operation = await run_in_db(self_restart.operation_by_id, operation_id)
+        if not operation or operation.get("kind") != "update":
+            raise HTTPException(409, "update operation changed before refusal")
+        released = await abort_restart_control(
+            operation_id, error=reason, failure_code=failure_code,
+            failure_detail=json.dumps({"reason": reason, "backend_healthy": backend_healthy}),
+        )
+    if not released:
         raise HTTPException(409, "restart operation changed before cancellation")
     return {"ok": True, "active": False, "operation_id": operation_id}
+
+
+@router.post("/drain/update")
+async def confirm_update(token: str, body: dict):
+    """Receive the lifecycle shell's health observation in the running backend."""
+    user = _require_user(token)
+    from automation import self_restart
+    from automation.update_verification import confirm_packaged_update
+    from infra.db_async import run_in_db
+
+    operation_id = body.get("operation_id")
+    if not isinstance(operation_id, str) or not isinstance(body.get("healthy"), bool):
+        raise HTTPException(400, "operation_id and healthy are required")
+    operation = await run_in_db(self_restart.operation_by_id, operation_id)
+    if operation is None:
+        raise HTTPException(404, "Update operation not found")
+    if operation.get("requester_user") not in {None, user["id"]}:
+        raise HTTPException(403, "Update belongs to another user")
+    code = body.get("failure_code", "version_unverified")
+    if code not in {"version_unverified", "wrong_version_running"}:
+        raise HTTPException(400, "invalid Update failure code")
+    settled = await confirm_packaged_update(
+        operation_id, healthy=body["healthy"], reason=str(body.get("reason") or ""),
+        failure_code=code,
+    )
+    if settled is None:
+        raise HTTPException(409, "Update operation changed before confirmation")
+    return {"ok": True, "operation_id": operation_id, "status": settled["status"],
+            "failure_code": settled.get("failure_code")}
 
 
 @router.post("/drain/ready")

@@ -2,50 +2,48 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
-	import { threads, activeThreadId, activeThread, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
+	import { threads, coordinationThreads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
 	import { toasts } from '$lib/stores/toast';
-	import { activeModelId, loadModels, getLastChosenModelId, reconcileThreadModelSnapshots } from '$lib/stores/models';
+	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
+	import { models } from '$lib/stores/modelsState';
+	import { loadThreads } from '$lib/stores/threadsLoad';
 	import { loadSettings, loadUpdateStatus } from '$lib/stores/settings';
 	import { connect, on, subscribeThread } from '$lib/ws';
 	import { sidebarCollapsed } from '$lib/stores/ui';
 	import { isMobile } from '$lib/stores/viewport';
 	import { checkSecurityAlert } from '$lib/stores/connection';
-	import { uiScope, exitScope } from '$lib/stores/uiScope';
+	import { uiScope, exitScope, type UiScope } from '$lib/stores/uiScope';
 	import { enterProjectScope, enterThreadScope } from '$lib/stores/projects';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { watchSubagentOpenRequests } from '$lib/subagentOpen';
 	import { openThread } from '$lib/stores/openThread';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { closeScopeSettings, workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, listenForConnectedAppLinks, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
 	import type ChatPanel from '$lib/components/ChatPanel.svelte';
+	import CorsiaMessageRequestHandler from '$lib/components/CorsiaMessageRequestHandler.svelte';
 	import HomePageView from '$lib/components/HomePageView.svelte';
 	import { docLens, selectedDocId } from '$lib/stores/documentsSurface';
 	import { emitProductEvent } from '$lib/product_events';
 	import { registerHomeLifecycle } from '$lib/homeLifecycle';
 	import { createHomeThreadSelector } from '$lib/homeThreadSelection';
+	import FirstRunHandoff from '$lib/components/FirstRunHandoff.svelte';
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
-	import { buildNewThreadBody } from '$lib/threadCreate';
+	import { buildNewThreadBody, createdThreadRow, createFailedMessage, draftAccountForModel, reloadOnAccountRefusal } from '$lib/threadCreate';
+	import { pinThreadAccount } from '$lib/stores/threadAccountPin';
+	import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
-	import {
-		threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveSurface,
-	} from '$lib/stores/artifactWorkspace';
+	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveSurface } from '$lib/stores/artifactWorkspace';
 	import { checkThreadRevisions, startDocumentRealtime } from '$lib/documentRealtime';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
-	import {
-		getTurnState,
-		resetTurnState,
-		restoreTurnState,
-	} from '$lib/ws/turnState';
+	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
 
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
@@ -62,9 +60,10 @@
 		lastEmittedView = next;
 	});
 
+	$effect(() => { recordSettingsHomeThread(activeView, get(activeThreadId)); }); // every route out of Settings clears the thread it opened over
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
-		const request = $settingsOpenRequest;
+		const request = $settingsNavigation.openRequest;
 		if (request === lastSettingsOpenRequest) return;
 		lastSettingsOpenRequest = request;
 		openSettings();
@@ -79,7 +78,9 @@
 	let chatPanelRef = $state<ChatPanel | undefined>(undefined);
 	// Each deliberate selection advances this route-local intent. A first-run
 	// opener holds one generation and must yield as soon as the user chooses.
-	let selectionIntent = 0;
+	let selectionIntent = $state(0);
+	let setupFinishedHandoff = $state(0);
+	let setupFinishedIntent = $state<number | null>(null);
 
 	async function pollSystem() {
 		if (!$token) return;
@@ -103,7 +104,8 @@
 			// active. Any other navigation must not leak that target to a later open.
 			clearDocPickerTarget();
 		}
-		closeScopeSettings();
+		threadSettingsOpen.set(false);
+		recordSettingsHomeThread(view, get(activeThreadId)); // Settings keeps the thread it opened over, so a file opened there has a tab to land in.
 		if (!options.preserveActiveThread) activeThreadId.set(null);
 		activeView = view;
 		if (!options.preserveActiveThread) messages.set([]);
@@ -120,10 +122,11 @@
 		resetSurface('activity');
 	}
 
-	async function goConductor(): Promise<boolean> {
+	async function goConductor(isActive: () => boolean = () => true, scope: UiScope | null = $uiScope): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await fetchScopeTarget($token, $uiScope);
+		conductorLookup = await fetchScopeTarget($token, scope);
+		if (!isActive()) return false;
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
 			if ('reasoning_effort' in target) reasoningEffort.set(target.reasoning_effort ?? null);
@@ -133,24 +136,10 @@
 		// A user with no conductor has nothing to land on, so the chat surface stays.
 		if (conductorLookup.kind === 'absent') { resetSurface('chat'); return true; }
 		// Unresolved lookup: keep the surface, leave the rail retryable.
-		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
+		toasts.show(`Couldn't load ${scope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
-	$effect(() => {
-		const [t, scope, authenticated] = [$token, $uiScope, $isAuthenticated];
-		conductorLookup = { kind: 'unknown' };
-		if (!authenticated) return;
-		let active = true;
-		const firstRunIntent = selectionIntent;
-		void fetchScopeTarget(t, scope).then((lookup) => {
-			if (!active) return;
-			conductorLookup = lookup;
-			const ownsFirstRunSelection = () =>
-				active && $isAuthenticated && $token === t && $uiScope === scope && selectionIntent === firstRunIntent;
-			landOnFirstRun(lookup, scope, (id) => (activeView === 'measurement' ? undefined : selectThread(id, 'other', ownsFirstRunSelection))); // a link naming Measurement keeps it
-		});
-		return () => { active = false; };
-	});
+
 
 	function goDocuments(lens: 'all' | 'skills' = 'all', documentId?: string) {
 		const attachTarget = get(contextAttachTarget);
@@ -203,7 +192,7 @@
 	}
 
 	const paneConfig = $derived(
-		buildPaneConfig(activeView, $activeThread, $uiScope, conductorThreadId, $activeThreadId, $projectSettingsOpen || $workspaceSettingsOpen)
+		buildPaneConfig(activeView, $activeThread, $uiScope, $activeThreadId)
 	);
 
 	function pickProject(p: { id: string; name: string; accent_color?: string | null }) { enterProjectScope(p); resetSurface('activity'); }
@@ -246,14 +235,8 @@
 			threadSettingsOpen.set(true);
 			return;
 		}
-		if (target?.returnTo === 'project-settings') {
-			activeView = 'chat';
-			projectSettingsOpen.set(true);
-			return;
-		}
-		if (target?.returnTo === 'workspace-settings') {
-			activeView = 'activity';
-			workspaceSettingsOpen.set(true);
+		if (target?.returnTo === 'settings') {
+			requestSettingsSection(target.returnSection ?? 'context');
 			return;
 		}
 		activeView = 'activity';
@@ -266,8 +249,8 @@
 	$effect(() => {
 		const tab = $canvasCompact ? getActiveTab(activeWorkspace) : null;
 		syncCanvasHeader({
-			projectSettingsOpen: $projectSettingsOpen,
-			threadSettingsOpen: $threadSettingsOpen, workspaceSettingsOpen: $workspaceSettingsOpen,
+			threadSettingsOpen: $threadSettingsOpen,
+			settingsDrill: $settingsNavigation.drill,
 			compactArtifact: tab && $activeThreadId
 				? {
 					title: tab.title,
@@ -288,23 +271,25 @@
 			activeView,
 			uiScopeName: $uiScope?.name ?? null,
 			activeThreadId: $activeThreadId, conductorThreadId,
-			threads: $threads,
-			closeProjectSettings: () => projectSettingsOpen.set(false),
+			threads: [...$threads, ...$coordinationThreads],
 			closeThreadSettings,
 			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,
 		});
 	});
 
-	// Opening a document from the library or a settings takeover returns to the
-	// thread that now owns the tab, so the new tab is actually on screen.
-	let lastShowArtifactRequest = 0;
+	// Opening a document from the library or Settings returns to the thread that
+	// now owns the tab, so the new tab is actually on screen.
 	$effect(() => {
 		const request = $showArtifactThreadRequest;
-		if (request === lastShowArtifactRequest) return;
-		lastShowArtifactRequest = request;
+		if (!request) return;
+		showArtifactThreadRequest.set(null);
+		if (request.threadId !== get(activeThreadId)) {
+			void selectThread(request.threadId, 'other');
+			return;
+		}
 		contextAttachTarget.set(null);
-		closeScopeSettings();
+		threadSettingsOpen.set(false);
 		activeView = 'chat';
 		paneOpen.set(false);
 	});
@@ -313,9 +298,7 @@
 	// triggers a read-only re-check; focus covers changes made while away.
 	$effect(() => startDocumentRealtime());
 	$effect(() => { checkThreadRevisions($activeThreadId); });
-
 	$effect(() => watchSubagentOpenRequests({ selectThread: (id) => selectThread(id, 'link') }));
-
 	async function newThread(projectId?: string | null) {
 		selectionIntent++;
 		const t = $token;
@@ -323,38 +306,34 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const body = buildNewThreadBody({
-			projectId,
-			reasoningEffort: pendingEffort,
-			modelId: inheritModel,
-		});
+		const choice = get(draftAccountId);
+		const accountId = draftAccountForModel(choice, inheritModel, get(models));
+		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		});
+		if (!res.ok) {
+			const detail = await res.json().catch(() => null);
+			const refusal = accountId && await reloadOnAccountRefusal(res.status, detail?.detail, loadModels);
+			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : createFailedMessage(detail?.reference), 'error');
+			throw new Error('Thread creation failed');
+		}
 		const data = await res.json();
-		const thread: Thread = {
-			id: data.thread_id,
-			user_id: $user?.id ?? '',
-			profile: 'personal',
-			title: 'New Chat',
-			model: inheritModel,
-			project_id: projectId ?? undefined,
-			reasoning_effort: pendingEffort ?? null,
-			created_at: new Date().toISOString(),
-			updated_at: new Date().toISOString(),
-		};
+		const thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
 		adoptCreatedThread(thread);
 		activeThreadId.set(data.thread_id);
+		if (choice && !accountId) {
+			const result = await pinThreadAccount(data.thread_id, choice);
+			if (!result.ok) toasts.show(result.message, 'error');
+		}
 		messages.set([]);
 		clearThreadBuffers(data.thread_id);
 		sidebarOpen = false;
-		
 		subscribeThread(data.thread_id);
 		await chatPanelRef?.fetchThreadMessages(data.thread_id);
 	}
-
 	const selectThread = createHomeThreadSelector({
 		advanceIntent: () => selectionIntent++,
 		prepareChatSurface: (firstRun) => { activeView = 'chat'; if (!firstRun) sidebarOpen = false; }, // a late first-run landing keeps the user's drawer
@@ -416,17 +395,6 @@
 		}).catch(() => {});
 	}
 
-	async function loadThreads() {
-		const t = $token;
-		if (!t) return;
-		const res = await fetch(`/api/threads?token=${t}`);
-		const data = await res.json();
-		const filtered = reconcileThreadModelSnapshots(data.threads as Thread[]);
-		filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-		threads.set(filtered);
-		void fetchScopeTarget(t, $uiScope); // the list omits the target; re-read its model too
-	}
-
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
 			if (get(paneOpen)) { paneOpen.set(false); return; }
@@ -452,7 +420,8 @@
 	}
 
 	onMount(() => {
-		return registerHomeLifecycle({
+		const stopConnectedAppLinks = listenForConnectedAppLinks(openSettings);
+		const stop = registerHomeLifecycle({
 			token: () => $token,
 			activeThreadId: () => get(activeThreadId),
 			activeView: () => activeView,
@@ -469,6 +438,7 @@
 			on,
 			connect,
 		});
+		return () => { stopConnectedAppLinks(); stop(); };
 	});
 </script>
 
@@ -478,10 +448,16 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+<CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} />
+<FirstRunHandoff
+	authenticated={$isAuthenticated} token={$token} scope={$uiScope} {selectionIntent} {setupFinishedHandoff} {setupFinishedIntent}
+	chatPanelReady={!!chatPanelRef} activeThread={$activeThreadId} {activeView} {selectThread} bind:conductorLookup
+/>
 
 <HomePageView
 	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}
+	onSetupFinished={() => { setupFinishedIntent = selectionIntent; setupFinishedHandoff++; }}
 	bind:lightboxUrl bind:lightboxOpen
 	{deleteConfirmId}
 	onNewChat={focusEmptyChat} onActivity={openActivity} onConductor={goConductor} onDocuments={goDocuments}

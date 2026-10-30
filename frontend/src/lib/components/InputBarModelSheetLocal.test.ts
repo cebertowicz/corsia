@@ -18,8 +18,9 @@ let host: HTMLElement;
 let component: ReturnType<typeof mount> | null = null;
 let omlx: Partial<ModelSource> = {};
 let calls: string[] = [];
+let downloadBodies: unknown[] = [];
 let setupBodies: unknown[] = [];
-let setupResponses: Array<'consent' | 'failure' | 'ok'> = [];
+let setupResponses: Array<'failure' | 'never-local' | 'ok'> = [];
 
 beforeEach(() => {
 	host = document.createElement('div');
@@ -30,6 +31,7 @@ beforeEach(() => {
 	threads.set([]);
 	models.set([claude]);
 	calls = [];
+	downloadBodies = [];
 	setupBodies = [];
 	setupResponses = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -38,11 +40,14 @@ beforeEach(() => {
 		if (key === 'GET /api/providers/sources') {
 			return { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...omlx }] }) };
 		}
+		if (key === 'POST /api/providers/local/downloads') {
+			downloadBodies.push(JSON.parse(String(init?.body)));
+		}
 		if (key === 'POST /api/providers/local/setup') {
 			setupBodies.push(JSON.parse(String(init?.body)));
 			const response = setupResponses.shift();
-			if (response === 'consent') return { ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }) };
 			if (response === 'failure') return { ok: false, status: 500, json: async () => ({}) };
+			if (response === 'never-local') return { ok: false, status: 409, json: async () => ({ detail: { code: 'never_local_host', message: "Local models don't run on this computer. Connect a provider." } }) };
 		}
 		return { ok: true, json: async () => ({}) };
 	}));
@@ -70,90 +75,164 @@ async function render() {
 const button = (label: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
 describe('the picker\'s Local group', () => {
-	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: 40 };
+	it('keeps an installed model selectable when the setup memory floor is not met', async () => {
+		omlx = { eligible: false, state: 'ready', corsia_omlx: true, corsia_omlx_online: true };
+		activeThreadId.set(null);
+		models.set([claude, localModel]);
 		await render();
-		const fallback = host.querySelector('section[aria-label="Local"]')!;
+		const row = button('Qwen');
+		expect(row).toBeDefined();
+		row!.click();
+		await vi.waitFor(() => expect(get(activeModelId)).toBe('omlx@qwen'));
+		expect(button('Add a local model')).toBeUndefined();
+	});
+
+	it('offers the shared add-model sheet on an eligible Mac with no local rows', async () => {
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: true };
+		await render();
+		expect(button('Add a local model')).toBeDefined();
+	});
+
+	it('keeps the Add a local model link when no other model group exists', async () => {
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: true };
+		models.set([]);
+		await render();
+		expect(host.textContent).not.toContain('No available models');
+		expect(button('Add a local model')).toBeDefined();
+	});
+
+	it('keeps Set up when no other model group exists and CORSIA\'s local service is not set up', async () => {
+		omlx = { eligible: true, corsia_omlx_online: false };
+		models.set([]);
+		await render();
+		expect(host.textContent).not.toContain('No available models');
+		expect(button('Set up')).toBeDefined();
+	});
+
+	it('still says No available models when the Mac cannot run a local model', async () => {
+		omlx = { eligible: false, corsia_omlx_online: false };
+		models.set([]);
+		await render();
+		expect(host.textContent).toContain('No available models');
+	});
+
+	it('offers neither Set up nor Add a local model while CORSIA\'s own local service exists offline', async () => {
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: false };
+		await render();
+		expect(button('Set up')).toBeUndefined();
+		expect(button('Add a local model')).toBeUndefined();
+	});
+
+	it('hides Add a local model without CORSIA\'s local service and keeps Set up', async () => {
+		omlx = { eligible: true, corsia_omlx_online: false };
+		await render();
+		expect(button('Add a local model')).toBeUndefined();
+		expect(button('Set up')).toBeDefined();
+	});
+
+	// The Local only row's "Set up a local model" link (an eligible Mac's Local section hosts Set up itself): a Mac too small for a local model keeps it; a server that is not macOS never has it.
+	it.each([
+		['a low-memory Apple Silicon Mac', { eligible: false }, true],
+		['a Mac whose reply predates the host fact', { eligible: false, never_local: undefined }, true],
+		['a server that is not macOS with enough memory', { eligible: true, never_local: true }, false],
+		['a server that is not macOS with little memory', { eligible: false, never_local: true }, false],
+	])('Local only row on %s: Set up a local model is %s', async (_name, source, offered) => {
+		omlx = source;
+		await render();
+		expect(host.textContent).toContain('No local model is ready.');
+		expect(button('Set up a local model') !== undefined).toBe(offered);
+	});
+
+	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
+		omlx = { local_state: 'downloading', download_percent: 40 };
+		await render();
+		const fallback = host.querySelector('section[aria-label="CORSIA"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.getAttribute('data-variant')).toBe('fallback');
-		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
+		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('CORSIA');
 		expect(fallback.textContent).toContain('Downloading 40%');
 		expect(fallback.textContent).not.toContain('ready');
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 	});
 
 	it('says only Downloading before a percent is known', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: null };
+		omlx = { local_state: 'downloading', download_percent: null };
 		await render();
 		expect(host.textContent).toContain('Downloading');
 		expect(host.textContent).not.toContain('%');
 	});
 
 	it('keeps the fallback Local header plain when setup fails', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
-		const fallback = host.querySelector('section[aria-label="Local"]')!;
-		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
+		const fallback = host.querySelector('section[aria-label="CORSIA"]')!;
+		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('CORSIA');
 		expect(fallback.textContent).toContain('Setup failed');
 		expect(fallback.textContent).not.toContain('ready');
 	});
 
 	it('retries a failed setup through the setup route', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/setup'));
 		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
 
 	it('retries a failed starter download through the starter route, never the setup route', async () => {
-		omlx = { setup_error: 'network down', setup_kind: 'starter' };
+		omlx = { local_state: 'failed', setup_kind: 'starter' };
 		await render();
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/starter'));
 		expect(calls).not.toContain('POST /api/providers/local/setup');
 	});
 
-	it('offers informed consent in the picker and retries setup with it', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+	it('shows a Settings download progress line with its model name and percent', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: false } };
 		await render();
-		setupResponses = ['consent', 'ok'];
-		button('Try again')!.click();
-		await vi.waitFor(() => expect(setupBodies).toEqual([{ consent_existing: false }]));
-		expect(setupResponses).toEqual(['ok']);
-		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
-		expect(setupBodies).toEqual([{ consent_existing: false }]);
-		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.'));
-		const consent = get(toasts)[0]!;
-		expect(consent.action?.label).toBe('Use existing oMLX');
-
-		await toasts.runAction(consent.id);
-
-		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }]);
-		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
+		expect(host.textContent).toContain('Downloading Qwen 3.8 27B · 42%');
+		expect(button('Retry')).toBeUndefined();
 	});
 
-	it('shows a setup failure if the picker consent action cannot complete', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+	it('retries a durable Settings download failure with its stored repository', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
 		await render();
-		setupResponses = ['consent', 'failure'];
-		button('Try again')!.click();
-		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
-		await toasts.runAction(get(toasts)[0]!.id);
+		expect(host.textContent).toContain('Couldn’t download Qwen 3.8 27B.');
+		button('Retry')!.click();
+		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
+		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);
+		expect(calls).not.toContain('POST /api/providers/local/setup');
+		expect(calls).not.toContain('POST /api/providers/local/starter');
+	});
+
+	it('retries setup from Retry and says so when it fails', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['failure'];
+		button('Retry')!.click();
+		await vi.waitFor(() => expect(setupBodies).toEqual([{}]));
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Couldn't set up the local model."));
 	});
 
-	it('shows a failure with no setup_kind without Try again', async () => {
-		omlx = { setup_error: 'unknown' };
+	it('shows provider guidance when a stale setup retry reaches a non-macOS server', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['never-local'];
+		button('Retry')!.click();
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Local models don't run on this computer. Connect a provider."));
+	});
+
+	it('shows a failure with no setup_kind without Retry', async () => {
+		omlx = { local_state: 'failed' };
 		await render();
 		expect(host.textContent).toContain('Setup failed');
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 	});
 
 	it('puts the line inside the existing Local group when it already lists models', async () => {
 		models.set([claude, localModel]);
-		omlx = { setup_stage: 'downloading', download_percent: 10 };
+		omlx = { local_state: 'downloading', download_percent: 10 };
 		await render();
-		expect(host.querySelector('section[aria-label="Local"]')).toBeNull();
+		expect(host.querySelector('section[aria-label="CORSIA"]')).toBeNull();
 		expect(host.querySelector('section[aria-label="oMLX"]')?.textContent).toContain('Downloading 10%');
 	});
 

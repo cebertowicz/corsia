@@ -445,12 +445,14 @@ async def test_bash_callsite_annotates_and_delivers_owner_note(
     target = scope["category"] / "bash-callsite.md"
 
     async def create_subprocess(*_args, **_kwargs):
-        target.write_text("changed by shell\n", encoding="utf-8")
+        _shell_write(target, "changed by shell\n", time.time_ns())
         return _ShellProcess()
 
     monkeypatch.setattr(shell_module.asyncio, "create_subprocess_exec", create_subprocess)
     monkeypatch.setattr(processes, "_process_creation_fingerprint", lambda _pid: "fingerprint")
     monkeypatch.setattr(shell_module, "list_registered_repo_policies", lambda: [])
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell_module, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell_module, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell_module, "is_path_allowed", lambda *_a, **_k: True)

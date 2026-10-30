@@ -4,34 +4,43 @@
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 	import { peerFade } from '$lib/popoverMotion';
+	import { isSetupWide } from '$lib/stores/viewport';
+	import LivingMark from './LivingMark.svelte';
 
-	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
-	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
+	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code' | 'card'; state: 'current' | 'todo' | 'done' };
+	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; accentMeta?: boolean; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
 		steps: SetupStep[];
+		/** The sidebar section's grey caps: Setup, or Connect on the connect-to-another-computer screens. */
+		section?: string;
 		jobs?: SetupJob[];
 		page: string;
 		title: string;
 		lede?: string;
-		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string };
-		mark?: boolean;
+		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
 		onPrimary?: () => void;
 		secondary?: Snippet;
 		children?: Snippet;
 	}
 
-	const { steps, jobs = [], page, title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
-	let primaryButton = $state<HTMLButtonElement | null>(null);
+	let primaryButton = $state<HTMLButtonElement | undefined>();
 	let primaryLabelDuration = $state(0);
 	let previousPrimaryLabel: string | undefined;
 	let flipVersion = 0;
 	let pendingWidthFrame: number | undefined;
 	let removeWidthTransitionListener: (() => void) | undefined;
 	let mounted = false;
+	let mark = $state<LivingMark | undefined>();
+
+	/** Plays the mark's exit and resolves when it is done (at once where no mark shows or motion is reduced). Setup calls this once, as it hands over to the first chat. */
+	export function exitMark(): Promise<void> {
+		return mark ? mark.exit() : Promise.resolve();
+	}
 
 	$effect(() => {
 		const scene = page;
@@ -57,7 +66,7 @@
 		if (jobs.length === 0) shownJobs = [];
 	}
 
-	function readPrimaryLabelDuration(node: HTMLElement | null) {
+	function readPrimaryLabelDuration(node: HTMLElement | undefined) {
 		return node ? Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 : 0;
 	}
 
@@ -155,12 +164,38 @@
 			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
 	}
+
+	/**
+	 * Marks the body `data-more` while content sits under the dock edge and `data-above` while it sits under the title
+	 * and intro, so each edge fades its content out only on the side where there is more to scroll to.
+	 */
+	function scrollCue(node: HTMLElement) {
+		const sync = () => {
+			node.dataset.more = String(node.scrollTop + node.clientHeight < node.scrollHeight - 1);
+			node.dataset.above = String(node.scrollTop > 1);
+		};
+		node.addEventListener('scroll', sync, { passive: true });
+		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
+		resize?.observe(node);
+		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(sync);
+		mutate?.observe(node, { childList: true, subtree: true });
+		sync();
+		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
+	}
+
+	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
+			return fade(node, { duration: tight });
+		}
+		return peerFade(node, params, options);
+	}
 </script>
 
 <div class="setup-shell">
 	<aside class="rail" aria-label="Setup progress">
 		<div class="traffic-space" data-tauri-drag-region></div>
-		<RailSection label="Setup" first>
+		<RailSection label={section} first>
 			{#each steps as step (step.label)}
 				<RailRow label={step.label} iconName={step.icon} state={step.state} />
 			{/each}
@@ -180,19 +215,21 @@
 	<main class="pane">
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
+			<!-- Outside the keyed scene, so a screen change never rebuilds the mark or restarts its motion. From 1280 wide it fills the right half. -->
+			{#if $isSetupWide}<div class="brand"><LivingMark bind:this={mark} /></div>{/if}
 			{#key page}
-				<section class="pane-scene" data-setup-page={page} in:peerFade out:peerFade onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
-					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
+				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+					<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
-					<div class="body">{@render children?.()}</div>
+					<div class="body" use:scrollCue>{@render children?.()}</div>
 				</section>
 			{/key}
 		</div>
-		<footer>
-			<div>{@render secondary?.()}</div>
+		<footer class:error-footer={page === 'error'}>
+			{#if page !== 'error'}<div class="secondary-actions">{@render secondary?.()}</div>{/if}
 			{#if primary}
 				<div class="primary-action">
-					{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
+					{#if primary.note && (primary.disabled || primary.noteAlways)}<span class="footer-note">{primary.note}</span>{/if}
 					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary} bind:el={primaryButton}>
 						<span class="primary-label-stack">
 							{#key primary.label}
@@ -202,49 +239,60 @@
 					</Button>
 				</div>
 			{/if}
+			{#if page === 'error'}<div class="secondary-actions">{@render secondary?.()}</div>{/if}
 		</footer>
 	</main>
 </div>
 
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
-	/*
-	 * Setup keeps its own blue until its coherence pass (#863) moves it to the app accent. Each role has its own shade
-	 * because one hex cannot be a fill, ink on that fill, text and a hairline at AA in both themes.
-	 */
-	.setup-shell {
-		--accent-fill: #3aa9d0; --accent-on-fill: #04121a; --accent-text: #2e9cc4; --accent-line: #2e9cc4;
-		--accent-wash: color-mix(in srgb, #2e9cc4 10%, transparent);
-		--accent: #2e9cc4; --accent-hover: #3aa9d0;
-	}
-	:global([data-theme='light']) .setup-shell {
-		--accent-fill: #00769e; --accent-on-fill: #ffffff; --accent-text: #006d92; --accent-line: #00769e;
-		--accent-wash: color-mix(in srgb, #00769e 10%, transparent);
-		--accent: #00769e; --accent-hover: #006d92;
-	}
-	/* An on toggle is a fill: its track, border and focus ring all take the fill shade. */
-	.setup-shell :global(.tg) { --accent: var(--accent-fill); --accent-hover: var(--accent-fill); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
-	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
+	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6) var(--space-7); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
 	.pane-scenes { display: grid; flex: 1; min-height: 0; }
-	.pane-scene { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+	.pane-scene { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
-	.mark { width: var(--space-5); height: var(--space-5); }
-	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+	/* From 1280 wide every scene is two columns: content on the left, the mark in the right half. Below that there is no mark. The mark is placed against the pane, not the scene column, so a taller footer (a note beside Continue) never moves it between steps. */
+	.brand { position: absolute; top: calc(var(--space-8) + var(--space-4) + var(--space-7) + var(--space-3)); right: 0; bottom: calc(var(--space-6) + var(--space-7) + var(--space-2)); width: 50%; box-sizing: border-box; padding-left: var(--space-5); pointer-events: none; }
+	@media (min-width: 80em) {
+		.pane-scene header, .pane-scene .lede, .pane-scene .body { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
+	}
+	h1 { margin: 0; font-size: var(--text-title1); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
-	.lede { max-width: calc(var(--space-8) * 9); margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
-	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); }
-	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
+	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: var(--text-title3); line-height: var(--lh-normal); }
+	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; overflow-x: hidden; /* the connect code screen bleeds its focus-ring room outward, which must not scroll sideways */ scrollbar-width: thin; }
+	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
+	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
+	.body:global([data-above='true']) { --cue-top: var(--space-4); }
+	.body:global([data-more='true']) { --cue-bottom: var(--space-4); }
+	/* Bottom-aligned and as tall as the pill (--space-7 + --space-2) whether or not a primary or a note renders, so Back and Continue sit in the same place on every step. */
+	footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); min-height: calc(var(--space-7) + var(--space-2)); }
+	footer > div { display: flex; align-items: center; gap: var(--space-1); min-height: calc(var(--space-7) + var(--space-2)); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
+	.error-footer .secondary-actions { order: -1; }
 	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
 	.primary-label { grid-area: label; }
 	:global(.primary-label-exiting) { position: absolute; inset: 0; display: grid; place-items: center; }
 	/* The pill clips the exiting label while it shrinks; scoped here so the shared pill keeps its touch-target ::after. */
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
-	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
+	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-subhead); text-align: right; }
+	/* The setup floor (800 x 600): tighten the spacing before anything scrolls. */
+	@media (max-height: 43.75em) {
+		.pane { padding-top: var(--space-8); }
+		.lede { margin-top: var(--space-2); }
+		.brand { top: calc(var(--space-8) + var(--space-7) + var(--space-2)); }
+		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
+	}
+	@media (max-width: 40em) {
+		.rail { display: none; }
+		.primary-action { flex-direction: column; align-items: flex-end; }
+		.error-footer { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+		.error-footer .primary-action { align-items: flex-start; }
+		.error-footer .primary-action :global(.btn.pill) { min-height: var(--touch-target); }
+		.error-footer .secondary-actions { order: 0; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+	}
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
 	.job-row { min-height: 0; display: grid; grid-template-rows: 1fr; overflow: hidden; }

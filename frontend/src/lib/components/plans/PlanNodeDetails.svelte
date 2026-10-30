@@ -5,7 +5,7 @@
 	import { indentVar } from './planIndent';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
 	import {
-		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, tokenLine,
+		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, personStepInstructionsDocument, tokenLine,
 		tryEnding, waitingTime, withFollowUps, workingTime,
 	} from './nodeDetailsText';
 
@@ -58,6 +58,7 @@
 	const initiative = $derived(initiativeLine(node));
 	// One total on a lineage of two or more tasks: the older line gives way to it.
 	const followUps = $derived(initiative ? null : withFollowUps(node));
+	const instructionsDocument = $derived(personStepInstructionsDocument(node));
 </script>
 
 {#snippet statusLine()}
@@ -88,7 +89,7 @@
 		<p class="next"><span class="prefix">Next:</span> {next}</p>
 	{/if}
 
-	{#if node.assignee === 'user' && node.description}
+	{#if node.assignee === 'user' && node.description && !instructionsDocument}
 		<div class="person-instructions md-content">{@html renderMarkdown(node.description)}</div>
 	{/if}
 	{#if node.assignee === 'user' && node.waiting_on.length}
@@ -106,10 +107,10 @@
 	{#if waiting}<p class="waiting"><span class="prefix">Waiting:</span> {waiting}</p>{/if}
 	{#if tokenUsage}<p class="tokens"><span class="prefix">Tokens:</span> {tokenUsage}</p>{/if}
 	{#if cost}<p class="cost"><span class="prefix">Cost:</span> {cost}</p>{/if}
-	{#if ownWorking}<p class="own-working"><span class="prefix">This step working:</span> {ownWorking}</p>{/if}
-	{#if ownWaiting}<p class="own-waiting"><span class="prefix">This step waiting:</span> {ownWaiting}</p>{/if}
-	{#if ownTokens}<p class="own-tokens"><span class="prefix">This step tokens:</span> {ownTokens}</p>{/if}
-	{#if ownCost}<p class="own-cost"><span class="prefix">This step cost:</span> {ownCost}</p>{/if}
+	{#if ownWorking}<p class="own-working"><span class="prefix">Working, this task alone:</span> {ownWorking}</p>{/if}
+	{#if ownWaiting}<p class="own-waiting"><span class="prefix">Waiting, this task alone:</span> {ownWaiting}</p>{/if}
+	{#if ownTokens}<p class="own-tokens"><span class="prefix">Tokens, this task alone:</span> {ownTokens}</p>{/if}
+	{#if ownCost}<p class="own-cost"><span class="prefix">Cost, this task alone:</span> {ownCost}</p>{/if}
 	{#if initiative}
 		<p class="initiative">{#each initiative.segments as segment, index}{#if index > 0}{' · '}{/if}<span class="segment">{#if index === 0}<span class="prefix">{initiative.label}</span>{' '}{/if}{segment}</span>{/each}</p>
 	{/if}

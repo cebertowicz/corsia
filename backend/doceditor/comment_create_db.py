@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batches, image_regions
+from doceditor import comments, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
+from doceditor.suggestion_overlap import check_agent_suggestion_fits
 from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from registry import models as registry_models, service as registry_service
@@ -28,6 +29,7 @@ class CommentInput:
     parent_id: str | None = None
     review: bool = False
     replacement: str | None = None
+    insert_after: bool = False
     quote: str | None = None
     near: str | None = None
     start: int | None = None
@@ -36,8 +38,11 @@ class CommentInput:
     live_capture: bool = False
     registration: dict | None = None
     submit: bool = False
+    review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
+    # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
+    delivery_policy: str = feedback_batch_core.IMMEDIATE
 
 
 def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None) -> tuple:
@@ -96,6 +101,11 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             image_src, image_rev = _image(db, request, quote)
         artifact_id = request.artifact_id
         registered = request.registration is not None
+        if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id
+                and duplicate is None and artifact_id is not None):
+            # Creates of one live document are already serialized by its comment mutex.
+            check_agent_suggestion_fits(db, artifact_id, request.path, start, end,
+                                        insert_after=request.insert_after)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
             if request.registration is not None:
@@ -106,11 +116,37 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
-                review=request.review, replacement=request.replacement, client_id=identifier,
-                region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
+                review=request.review, replacement=request.replacement, insert_after=request.insert_after, client_id=identifier,
+                region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
-            feedback = feedback_batches.record_comment(connection, row, created=created, submit=request.submit)
-        return row, registered, feedback
+            if request.review_request_id is not None:
+                review_lifecycle.admit_feedback(
+                    connection, request.review_request_id, author_kind=request.author_kind,
+                    author_id=request.author_thread_id, artifact_id=artifact_id,
+                )
+            delivery_policy = (
+                feedback_batch_core.person_comment_lane(request.delivery_policy, region=request.region is not None)
+                if request.author_kind == "user"
+                else request.delivery_policy
+            )
+            feedback = feedback_batches.record_comment(
+                connection,
+                row,
+                created=created,
+                submit=request.submit and request.review_request_id is None,
+                delivery_policy=delivery_policy,
+            )
+            feedback["delivery_policy"] = delivery_policy
+            if request.review_request_id is not None and request.submit:
+                _pending, woken, undelivered = review_feedback.submit_fork_feedback(
+                    connection, request.review_request_id, request.author_thread_id, artifact_id,
+                )
+                feedback["woken"].extend(woken)
+                known = {batch["id"] for batch in feedback["undelivered_batches"]}
+                feedback["undelivered_batches"].extend(
+                    batch for batch in undelivered if batch["id"] not in known
+                )
+        return row, registered, feedback, created
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)
         raise

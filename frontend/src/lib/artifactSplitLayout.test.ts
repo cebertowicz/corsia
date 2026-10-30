@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	computeSplitLayout, computeDefaultArtifactWidth, dragArtifactWidth, keyboardArtifactWidth,
 	clamp, shouldOverlayPane, CHAT_MIN, ARTIFACT_MIN, DIVIDER_WIDTH, COMBINED_MIN,
-	PANE_DRAWER_WIDTH, ARTIFACT_DEFAULT_MIN_CAP, ARTIFACT_DEFAULT_MAX_CAP,
+	PANE_DRAWER_WIDTH, ARTIFACT_DEFAULT_FRACTION,
 } from './artifactSplitLayout';
 
 describe('shouldOverlayPane', () => {
@@ -76,12 +76,16 @@ describe('computeSplitLayout', () => {
 		expect(layout).toEqual({ mode: 'split', artifactWidth: ARTIFACT_MIN });
 	});
 
-	it('uses the default ~45% fraction capped to 600-640 when no preference is set', () => {
+	it('opens a new desktop canvas at 40% chat and 60% artifact with no width cap', () => {
 		const layout = computeSplitLayout(1600, true, true, null);
-		expect(layout.mode).toBe('split');
-		if (layout.mode === 'split') {
-			expect(layout.artifactWidth).toBe(ARTIFACT_DEFAULT_MAX_CAP);
-		}
+		expect(layout).toEqual({ mode: 'split', artifactWidth: 960 });
+	});
+
+	it('keeps the chat at its 420px floor when the 60% default would be wider', () => {
+		const canvasWidth = 1000;
+		expect(computeSplitLayout(canvasWidth, true, true, null)).toEqual({
+			mode: 'split', artifactWidth: canvasWidth - CHAT_MIN - DIVIDER_WIDTH,
+		});
 	});
 
 	it('respects a persisted preferred width, clamped to the current canvas', () => {
@@ -105,13 +109,10 @@ describe('computeSplitLayout', () => {
 });
 
 describe('computeDefaultArtifactWidth', () => {
-	it('is clamped between the min and max caps', () => {
-		expect(computeDefaultArtifactWidth(500)).toBe(ARTIFACT_DEFAULT_MIN_CAP);
-		expect(computeDefaultArtifactWidth(3000)).toBe(ARTIFACT_DEFAULT_MAX_CAP);
-	});
-
-	it('is ~45% of canvas width in the unclamped middle range', () => {
-		expect(computeDefaultArtifactWidth(1400)).toBeCloseTo(1400 * 0.45, 5);
+	it('uses 60% of every desktop canvas without a fixed cap', () => {
+		expect(ARTIFACT_DEFAULT_FRACTION).toBe(0.6);
+		expect(computeDefaultArtifactWidth(1400)).toBe(840);
+		expect(computeDefaultArtifactWidth(3000)).toBe(1800);
 	});
 });
 

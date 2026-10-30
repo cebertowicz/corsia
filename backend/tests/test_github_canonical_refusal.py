@@ -22,7 +22,7 @@ from webhook_ingress_fixtures import WEBHOOK_SECRET, _isolated_db  # noqa: F401
 @pytest.fixture(autouse=True)
 def own_admission(monkeypatch):
     monkeypatch.setattr(drain, "_turn_admissions", 0)
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
 
 
 @pytest.mark.parametrize("guard", ["identity", "budget"])

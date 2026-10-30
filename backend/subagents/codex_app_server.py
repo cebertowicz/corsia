@@ -9,27 +9,20 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from automation.restart_messages import TURN_STOPPED_REFUSAL
-from core.checkpoint_codex_context import CodexCheckpointContext
+from core.fork_codex_context import CodexForkContext
 from infra import provider_usage, turn_volume
 from subagents import codex_app_server_events as ev
 from subagents import codex_app_server_notifications as notifications
-from subagents.codex_app_server_errors import (
-    CodexAppServerError,
-    CodexWriteSurfaceError,
-)
+from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.codex_app_server_reader import read_app_server
 from subagents.codex_tool_requests import ToolRequests
 from subagents.codex_process import CodexProcessGroup, cancel_reader_bounded, signal_process
 from subagents.codex_dynamic_tools import dynamic_tool_values as _dynamic_tool_values
 from subagents.codex_dynamic_tools import dynamic_tool_response as _dynamic_tool_rejection
-from subagents.codex_env import governed_codex_model_catalog_path
 from subagents.managed_launch import (
-    codex_app_server_config_override_args,
-    codex_app_server_governance_args,
     codex_developer_instructions_with_write_path,
     codex_sandbox_reads_read_only,
     codex_tools_are_write_capable,
@@ -46,7 +39,7 @@ OnExit = Callable[[int | None, str | BaseException], Awaitable[None]]
 OnRawMessage = Callable[[dict[str, Any]], Awaitable[None]]
 STDOUT_LIMIT = 16 * 1024 * 1024
 REQUEST_TIMEOUT = 120.0
-STEER_ACK_TIMEOUT = 10.0
+STEER_REQUEST_TIMEOUT = 10.0
 _STEER_NOT_WRITTEN = object()
 _DYNAMIC_TOOL_DRAIN_REJECTION = TURN_STOPPED_REFUSAL
 _DYNAMIC_TOOL_IDENTITY_REJECTION = (
@@ -57,6 +50,8 @@ _NON_ACTION_SERVER_REQUESTS = {"account/chatgptAuthTokens/refresh"}
 
 
 class CodexAppServerSession:
+    confined = False  # Resolved from the canonical thread row before spawn.
+
     def __init__(
         self,
         *,
@@ -72,8 +67,8 @@ class CodexAppServerSession:
         tool_registry: Any | None = None,
         corsia_thread_id: str | None = None,
         corsia_turn_identity: TurnIdentity | None = None,
-        checkpoint_id: str | None = None,
-        checkpoint_tool_result_fits: Callable[..., bool | Awaitable[bool]] | None = None,
+        fork_id: str | None = None,
+        fork_tool_result_fits: Callable[..., bool | Awaitable[bool]] | None = None,
         project_id: str | None = None,
         sandbox_mode: str = "read-only",
         approval_policy: str = "never",
@@ -99,9 +94,9 @@ class CodexAppServerSession:
         self.tool_registry = tool_registry
         self.corsia_thread_id, self.corsia_turn_identity = corsia_thread_id, corsia_turn_identity
         self.declared_tool_step_ids: dict[str, str] = {}
-        self.checkpoint_id, self.checkpoint_tool_result_fits = checkpoint_id, checkpoint_tool_result_fits
+        self.fork_id, self.fork_tool_result_fits = fork_id, fork_tool_result_fits
         self._tool_requests = ToolRequests.for_session(self)
-        self.tool_context = CodexCheckpointContext(None, None)
+        self.tool_context = CodexForkContext(None, None)
         self.project_id = project_id
         self.sandbox_mode = sandbox_mode
         self.approval_policy = approval_policy
@@ -148,19 +143,9 @@ class CodexAppServerSession:
         return self._active_turn_id
 
     def build_cmd(self) -> list[str]:
-        cmd = [self.binary, "app-server", "--stdio", *codex_app_server_governance_args()]
-        if not self.control_only:
-            catalog_path = governed_codex_model_catalog_path(
-                Path(self.codex_home) if self.codex_home else None,
-            )
-            cmd += [
-                "-c",
-                f"model_catalog_json={json.dumps(str(catalog_path))}",
-            ]
-        if self.effort:
-            cmd += ["-c", f"model_reasoning_effort={self.effort}"]
-        cmd += codex_app_server_config_override_args(self.config_overrides)
-        return cmd
+        from subagents.codex_launch_policy import build_cmd
+
+        return build_cmd(self)
 
     def build_env(self) -> dict[str, str]:
         """Return a clean launch environment with an optional isolated home."""
@@ -235,6 +220,11 @@ class CodexAppServerSession:
         if self._closing:
             raise RuntimeError("Codex app-server terminated before process spawn")
         from infra.db_async import run_in_db
+        from subagents.codex_confinement import prepare_launch, verify_version
+
+        await run_in_db(prepare_launch, self)
+        if self.confined:
+            await verify_version(self.binary)
         if not self.control_only:
             from subagents.vendor_write_admission import prepare_session_launch
 
@@ -335,25 +325,10 @@ class CodexAppServerSession:
         )
 
     def _assert_launch_write_surface(self) -> None:
-        """Fail fast at spawn if a task-bearing session cannot write.
+        """Validate the enforced kind or ordinary task write surface."""
+        from subagents.codex_launch_policy import assert_launch_write_surface
 
-        The native filesystem is read-only by design, so the only sanctioned
-        write path is the CORSIA dynamic tool surface. A dispatched
-        write-bearing subagent that reaches ``thread/start`` without any write
-        tool would silently discover it mid-task; refuse the launch instead.
-        """
-        if self.control_only or self.task is None:
-            return
-        if not self._is_write_capable():
-            raise CodexWriteSurfaceError(
-                "codex session was dispatched with a task but has no "
-                "write-capable CORSIA tool; its harness cannot write to the "
-                "workspace. Rebuild the tool registry before dispatch.",
-                {
-                    "sandbox": self.sandbox_mode,
-                    "dynamic_tools": sorted(self._dynamic_tool_names()),
-                },
-            )
+        assert_launch_write_surface(self)
 
     async def _start_or_resume_thread(self) -> None:
         """Start a new provider thread or resume the persisted one."""
@@ -684,12 +659,9 @@ class CodexAppServerSession:
                              on_drain_confirmed=on_drain_confirmed)
 
     async def _notify(self, method: str, params: dict) -> None:
-        if self._proc is None or self._proc.stdin is None:
-            raise RuntimeError("CodexAppServerSession not started")
-        async with self._write_lock:
-            payload = {"method": method, "params": params}
-            self._proc.stdin.write((json.dumps(payload) + "\n").encode())
-            await self._proc.stdin.drain()
+        from subagents.codex_requests import notify
+
+        await notify(self, method, params)
 
     async def _respond(
         self, msg_id: int, *, result: Any = None, error: dict | None = None

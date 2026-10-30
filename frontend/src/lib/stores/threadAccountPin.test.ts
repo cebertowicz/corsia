@@ -7,7 +7,7 @@ vi.mock('./threadVendorAccounts', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./threadVendorAccounts')>()),
 	loadThreadVendorAccounts: reloadAccounts,
 }));
-vi.mock('./modelsLoad', () => ({ loadModels: reloadModels }));
+vi.mock('./modelsLoad', () => ({ loadModels: reloadModels, loadComposerModels: reloadModels }));
 
 import { PIN_FAILED, pinThreadAccount } from './threadAccountPin';
 import { token } from './auth';

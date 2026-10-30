@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import select
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import TextIO
 
@@ -22,9 +25,15 @@ _BASH_STARTUP_ENV = frozenset({
 })
 LIFECYCLE_SHELL_COMMAND = r"""
 set +x
+_corsia_lifecycle_is_update=false
+[ "${2:-}" != restart-prepared ] || _corsia_lifecycle_is_update=true
+readonly _corsia_lifecycle_is_update
 _corsia_lifecycle_done=false
+_corsia_update_stopping=
+_corsia_unconfirmed_bootout=false
 _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
+    local refusal_reason="${_corsia_lifecycle_refusal_reason:-}"
     trap - EXIT HUP INT TERM
     export -n _corsia_cleanup_token _corsia_cleanup_port \
         _corsia_cleanup_operation _corsia_cleanup_curl
@@ -32,7 +41,24 @@ _corsia_lifecycle_cleanup() {
     _corsia_cleanup_port="${_corsia_lifecycle_port:-${CORSIA_RESTART_BACKEND_PORT:-}}"
     _corsia_cleanup_operation="${_corsia_lifecycle_operation_id:-${CORSIA_RESTART_OPERATION_ID:-}}"
     _corsia_cleanup_curl="${_corsia_lifecycle_curl:-${CORSIA_RESTART_CURL:-}}"
+    local -a _corsia_cleanup_refusal_args=()
+    local backend_healthy=false
+    if [ "$_corsia_lifecycle_status" -ne 0 ] && [ "$_corsia_lifecycle_is_update" = true ] \
+        && [ -z "${_corsia_update_stopping:-}" ] && [ -n "$refusal_reason" ]; then
+        printf 'Update refused: %s\n' "$refusal_reason"
+        if declare -F is_backend_running > /dev/null && is_backend_running; then
+            backend_healthy=true
+        fi
+        _corsia_cleanup_refusal_args=(--data-urlencode 'failure_code=update_refused'
+            --data-urlencode "reason=${refusal_reason:0:500}"
+            --data-urlencode "backend_healthy=$backend_healthy")
+    fi
     if [ "$_corsia_lifecycle_done" != true ] \
+        && [ "$_corsia_lifecycle_status" -ne 0 ] \
+        && [ "$_corsia_lifecycle_is_update" = true ] \
+        && [ "$_corsia_unconfirmed_bootout" = true ]; then
+        printf 'Lifecycle drain cleanup held: launchd teardown unconfirmed\n'
+    elif [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
         && [ -n "$_corsia_cleanup_token" ] \
         && [ -n "$_corsia_cleanup_port" ] \
@@ -40,11 +66,12 @@ _corsia_lifecycle_cleanup() {
         && [ -n "$_corsia_cleanup_curl" ]
     then
         "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
-            --request DELETE --get \
+            --output /dev/null --write-out 'Lifecycle drain cleanup HTTP %{http_code}\n' \
+            --request DELETE --get "${_corsia_cleanup_refusal_args[@]}" \
             --data-urlencode "token=$_corsia_cleanup_token" \
             --data-urlencode "operation_id=$_corsia_cleanup_operation" \
-            "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" \
-            > /dev/null 2>&1 || :
+            "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" 2>/dev/null \
+            || printf 'Lifecycle drain cleanup curl exit %s\n' "$?"
     fi
     exit "$_corsia_lifecycle_status"
 }
@@ -157,6 +184,36 @@ def spawn_restart_lifecycle(
         str(corsia_script),
         *script_args,
     ]
+    if sys.platform.startswith("linux") and launch_env.get("CORSIA_SYSTEMD_SERVICE") == "1":
+        # A new session stays in the backend's cgroup. Let the user manager
+        # start the restart owner separately, passing its sanitized environment
+        # through stdin rather than exposing credentials in unit properties.
+        helper = Path(__file__).resolve().parent.parent / "scripts" / "systemd_restart.py"
+        process_env = dict(launch_env)
+        process_env.pop("CORSIA_RESTART_CALLER_TOKEN", None)
+        process = subprocess.Popen(
+            ["systemd-run", "--user", "--pipe", "--quiet", "--collect", sys.executable, "-I", str(helper)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=log_fh,
+            start_new_session=True,
+            env=process_env,
+        )
+        assert process.stdin is not None and process.stdout is not None
+        try:
+            payload = json.dumps({"command": command, "environment": launch_env}).encode()
+            process.stdin.write(payload + b"\n")
+            process.stdin.flush()
+            ready, _, _ = select.select([process.stdout], [], [], 10)
+            if not ready or process.stdout.readline() != b"ready\n":
+                raise OSError("systemd restart owner did not start")
+            process.stdin.write(b"go\n")
+            process.stdin.flush()
+        finally:
+            # Without go the helper exits on EOF and cannot stop the service.
+            process.stdin.close()
+            process.stdout.close()
+        return process
     return subprocess.Popen(
         command,
         stdout=log_fh,

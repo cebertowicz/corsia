@@ -1,5 +1,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import SetupScreen from './SetupScreen.svelte';
 import { connect } from '$lib/ws';
 import { token, user } from '$lib/stores/auth';
@@ -13,758 +15,770 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
-let calls: string[];
+let calls: Array<{ url: string; method: string }>;
+let progressBodies: string[];
+let localEligible = false;
+let macosSupported: boolean | null = true;
+let workFolder: string | undefined;
+let sources: Array<{ source: string; name: string; state: string }>;
+
+async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
+function button(label: string) { return Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label); }
+function getByRole(role: string) {
+	const match = host.querySelector(`[role="${role}"]`);
+	if (!match) throw new Error(`Expected an element with role ${role}`);
+	return match;
+}
+function setInput(id: string, value: string) {
+	const input = host.querySelector<HTMLInputElement>(`#${id}`)!;
+	input.value = value;
+	input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function fillAccount() {
+	setInput('setup-name', 'Ada Lovelace');
+	setInput('setup-username', 'ada');
+	setInput('setup-password', 'password1');
+	setInput('setup-confirm-password', 'password1');
+}
 
 beforeEach(() => {
-	token.set(null); user.set(null); calls = [];
-	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-		const url = String(input); calls.push(url);
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
-		if (url === '/api/setup/local-download') return json({ in_progress: true });
-		return json({ sources: [] });
+	token.set(null); user.set(null); localEligible = false; macosSupported = true; workFolder = '~/CORSIA'; calls = []; progressBodies = []; sources = [];
+	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
+		if (url === '/api/setup/progress' && method === 'PUT') progressBodies.push(String(init?.body));
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: macosSupported, local_eligible: localEligible, ...(workFolder ? { work_folder: workFolder } : {}) });
+		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
+		if (url.includes('/sources')) return json({ sources });
+		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+		if (url.includes('/models')) return json({ models: [] });
+		if (url.includes('/install')) return json({ state: 'running', reason: null, ref: null, path_shadowed_by: null });
+		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	finished = vi.fn();
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: finished } });
 	flushSync();
 });
 
+/** Welcome, then the account form with its work folder, ending wherever Continue leads once the account exists. */
+async function passFolder() {
+	await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
+	button('Continue')?.click(); await settle();
+}
+const rowNames = () => Array.from(host.querySelectorAll('section.item')).map((row) => row.getAttribute('aria-label'));
+
 afterEach(async () => {
 	if (component) await unmount(component);
-	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+	host.remove(); delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__; vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
-
-async function createAccountFromWelcome() {
-	Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-	await settle();
-	for (const [input, value] of [
-		[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-		[host.querySelector('input[autocomplete="username"]'), 'first'],
-		...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-	] as [HTMLInputElement, string][]) {
-		input.value = value;
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-	}
-	await tick();
-	const primary = Array.from(host.querySelectorAll('button')).find((button) => ['Continue', 'Start using CORSIA'].includes(button.textContent?.trim() ?? ''));
-	primary?.click();
-	await settle();
+// The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
+const APPROVED_WELCOME = {
+	title: 'Welcome to CORSIA',
+	lines: [
+		'Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to.',
+		'You can check that yourself: CORSIA measures the time you spend on work here, including keeping an eye on your agents.',
+	],
+	rows: [
+		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
+		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
+		'Asks you first: sending or posting as you, spending money, and opening files outside your work folder.',
+	],
+};
+const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
+function expectWelcomeCopy() {
+	const welcome = host.querySelector('.welcome');
+	expect(welcome).toBeTruthy();
+	expect(Array.from(welcome!.querySelectorAll('.line')).map((line) => flat(line.textContent))).toEqual(APPROVED_WELCOME.lines);
+	expect(Array.from(welcome!.querySelectorAll('.rows li')).map((row) => flat(row.textContent))).toEqual(APPROVED_WELCOME.rows);
+	expect(welcome!.querySelector('.account')).toBeNull();
+}
+/** The Getting started screen's Continue, then the account form. */
+async function openAccount() { await settle(); button('Continue')?.click(); await settle(); }
+async function remountWithWorkFolder(next: string | undefined) {
+	if (component) await unmount(component);
+	host.replaceChildren(); workFolder = next;
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: finished } });
+	flushSync();
+}
+/** Back on the account screen after the account was made and the person moved on to subscriptions. */
+let finished = vi.fn();
+async function backToAccount() {
+	await passFolder();
+	expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+	button('Back')?.click(); await settle();
+	expect(host.querySelector('h1')?.textContent).toBe('Your account');
+}
+const putCalls = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/setup/account' && init?.method === 'PUT');
+const putBodies = () => putCalls().map(([, init]) => JSON.parse(String(init?.body)));
+async function remountWide() {
+	if (component) await unmount(component);
+	vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 80em)', media: query, addEventListener() {}, removeEventListener() {} }));
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	flushSync(); await settle();
 }
 
 describe('SetupScreen', () => {
-	it('reads only setup status before showing the Welcome decision', async () => {
-		await settle();
-		expect(host.textContent).toContain('Welcome to CORSIA');
-		expect(host.textContent).toContain(
-			'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.'
-		);
-		const mark = host.querySelector('img[src="/icons/corsia-mark.svg"]');
-		expect(mark?.getAttribute('alt')).toBe('');
-		expect(calls).toEqual(['/api/setup/status']);
+	it.each([
+		{ supported: false, title: 'Update macOS to open CORSIA' },
+		{ supported: null, title: APPROVED_WELCOME.title },
+	])('shows $title when the macOS floor is $supported', async ({ supported, title }) => {
+		macosSupported = supported;
+		await remountWithWorkFolder('~/CORSIA'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe(title);
 	});
 
-	it('routes the setup_complete response to sign-in', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		const onExistingAccount = vi.fn();
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			calls.push(String(input));
-			return json({ code: 'setup_complete' }, 409);
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount, onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-
+	it('opens on Getting started, the first of four rail steps, with Continue to the account form', async () => {
 		await settle();
-
-		expect(onExistingAccount).toHaveBeenCalledOnce();
-		expect(calls).toEqual(['/api/setup/status']);
+		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
+		expectWelcomeCopy();
+		expect(host.querySelector('#setup-name')).toBeNull();
+		expect([...host.querySelectorAll('.lbl')].map((label) => label.textContent?.trim())).toEqual(['Getting started', 'Account & workspace', 'Your subscriptions', 'Providers & models']);
+		expect(button('Back')).toBeUndefined();
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Create your account');
+		// The work folder row rides with the form, so Welcome's Continue reaches both.
+		expect(host.textContent).toContain('Work folder');
+		expect(host.textContent).toContain('~/CORSIA');
+		expect(host.querySelector('.welcome')).toBeNull();
+		expect(host.querySelector('#setup-name')).toBeTruthy();
+		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
 	});
 
-	it('shows existing oMLX consent before any adoption request, and Not now leaves it untouched', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		expect(host.textContent).toContain('CORSIA will read:');
-		expect(host.textContent).toContain('your oMLX port setting');
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier']);
-
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Not now')?.click();
-		await settle();
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier']);
-		expect(host.textContent).toContain('Create your account');
+	it('shows the same screens from 1280 wide, with the living mark beside them that stays put from one screen to the next', async () => {
+		await remountWide();
+		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
+		expectWelcomeCopy();
+		const mark = host.querySelector('.brand .living-mark');
+		expect(mark).toBeTruthy();
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Create your account');
+		expect(host.querySelector('#setup-name')).toBeTruthy();
+		// A screen change swaps the scene, never the mark: it is the same element, so its animations carry on.
+		expect(host.querySelector('.brand .living-mark')).toBe(mark);
+		expect(host.querySelectorAll('.living-mark')).toHaveLength(1);
 	});
 
-	it('starts existing oMLX adoption only after Use it consents', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		const bodies: string[] = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
-			if (url === '/api/setup/local-download') { bodies.push(String(init?.body)); return json({ in_progress: true }); }
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
-		await settle();
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
-		expect(bodies).toEqual(['{"consent_existing":true}']);
+	it('keeps the account screen and its step names after Welcome', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.textContent).toContain('Account & workspace');
+		expect(host.textContent).toContain('Providers & models');
+		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
 	});
 
-	it('shows the existing oMLX choice when local download reports consent required', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: false, model_name: 'Example model', model_size_gb: 30 });
-			if (url === '/api/setup/local-download') return json({ code: 'consent_required' }, 409);
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
-		expect(host.textContent).toContain('CORSIA will read:');
-		expect(host.textContent).not.toContain('Create your account');
+	it('gives the account screen its lede and the email field its reason', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.querySelector('.lede')?.textContent).toBe('Your account and password stay on this computer.');
+		expect(host.querySelector('#setup-email')?.closest('.field')?.querySelector('.hint')?.textContent).toBe('Used only to sign you up for services you choose, such as web search.');
 	});
 
-	it('uses This computer for the ineligible local-model explanation', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_size_gb: 30, work_folder: '~/CORSIA' });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-
-		await settle();
-		expect(host.textContent).toContain('This computer doesn’t have enough memory to run an AI model itself. CORSIA will use Claude Code or Codex with your subscription, or an API key.');
-		expect(host.textContent).not.toContain('Also run AI on this computer');
+	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
 	});
 
-	it('keeps the setup shell mounted while Get started moves the local download into the rail', async () => {
-		await settle();
-		expect(host.textContent).toContain('Also run AI on this computer');
-		expect(host.textContent).toContain('Free, private, and works offline.');
-		expect(host.textContent).toContain('Example model · 30 GB · runs in oMLX');
-		expect(host.textContent).toContain('The download starts in the background when you press Get started.');
-		expect(host.querySelector('button[aria-label="Also run AI on this computer"], [role="switch"][aria-label="Also run AI on this computer"]')).not.toBeNull();
-		const shell = host.querySelector('.setup-shell');
-		expect(shell).not.toBeNull();
-		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
-		action?.click();
-		await settle();
-		expect(host.querySelector('.setup-shell')).toBe(shell);
-		expect(calls).toContain('/api/setup/local-download');
-		expect(host.textContent).toContain('Create your account');
-		expect(host.textContent).toContain('In the background');
-		expect(host.textContent).toContain('Example model');
-		expect(host.textContent).toContain('Downloading');
+	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {
+		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
+		expect(calls.some((call) => call.url === '/api/setup/first-account')).toBe(false);
+		button('Continue')?.click(); await settle();
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
+		expect(connect).toHaveBeenCalledOnce();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		button('Neither')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(host.textContent).toContain('CORSIA needs one working model to continue setup.');
+		expect(button('Start using CORSIA')?.disabled).toBe(true);
 	});
 
-	it('persists a protected native folder choice before creating the account', async () => {
-		if (component) await unmount(component);
+	it('keeps the shell-owned default when a warned folder is replaced', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
-			? { state: 'ready', path: '/Users/me/Documents/corsia', protected_folder: 'Documents' }
+			? { state: 'ready', path: '/fixture/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } }
 			: undefined);
-		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Change'))?.click();
-		await settle();
-		expect(host.textContent).toContain('/Users/me/Documents/corsia');
-		expect(host.textContent).toContain('macOS will ask before CORSIA can use Documents.');
-		for (const [id, value] of [['setup-name', 'Ada'], ['setup-username', 'ada'], ['setup-password', 'password1'], ['setup-confirm-password', 'password1']] as const) {
-			const input = host.querySelector(`#${id}`) as HTMLInputElement;
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Continue')?.click();
-		await settle();
-		expect(invoke).toHaveBeenNthCalledWith(1, 'choose_work_folder');
-		expect(invoke).toHaveBeenNthCalledWith(2, 'configure_work_folder', { path: '/Users/me/Documents/corsia' });
-		vi.mocked(connect).mockClear();
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/CORSIA');
+		await openAccount(); button('Change')?.click(); await settle();
+		button('Use ~/CORSIA')?.click(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
 	});
 
-	it('binds every account input to its visible label', async () => {
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-
-		for (const [id, name] of [
-			['setup-name', 'Name'],
-			['setup-username', 'Username'],
-			['setup-password', 'Password'],
-			['setup-confirm-password', 'Confirm password'],
-			['setup-email', 'Email (optional)'],
-		]) {
-			const input = host.querySelector(`#${id}`) as HTMLInputElement;
-			expect(input.labels?.[0]?.textContent).toBe(name);
-		}
+	it('offers the canonical default after returning to setup and re-picking a saved personal folder', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/personal-workspace', folder_warning: { kind: 'personal_folder', folder: 'Personal' } }
+			: undefined);
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/Personal');
+		await openAccount(); button('Back')?.click(); await settle(); button('Continue')?.click(); await settle();
+		button('Change')?.click(); await settle();
+		expect(button('Use ~/CORSIA')).toBeTruthy();
 	});
 
-	it('does not request a local download when free disk is below the selected model size', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, free_disk_gb: 20, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-
-		await settle();
-		expect(host.textContent).toContain('Needs 30 GB free; 20 GB is free.');
-		expect(host.textContent).toContain('Free up space, then check again');
-		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
-		action?.click();
-		await settle();
-		expect(calls).not.toContain('/api/setup/local-download');
-		expect(host.textContent).toContain('Create your account');
+	it('applies the real default path when replacing a saved personal folder before account submit', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/personal-workspace', folder_warning: { kind: 'personal_folder', folder: 'Personal' } }
+			: undefined);
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/Personal');
+		await openAccount(); button('Back')?.click(); await settle(); button('Continue')?.click(); await settle();
+		button('Change')?.click(); await settle(); button('Use ~/CORSIA')?.click(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(invoke).toHaveBeenCalledWith('configure_work_folder', { path: '/fixture/default-workspace' });
+		expect(invoke).not.toHaveBeenCalledWith('configure_work_folder', { path: '~/CORSIA' });
 	});
 
-	it('prefills the one data owner read-only, with no helper caption', async () => {
-		if (component) await unmount(component);
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_size_gb: 30, work_folder: '~/CORSIA', required_username: 'legacy-owner' });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
+	for (const [state, reason] of [['unreadable', 'permission denied'], ['unwritable', 'the disk is read-only']] as const) {
+		it(`does not apply a ${state} folder or create an account`, async () => {
+			const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+				? { state, path: '/fixture/unavailable', reason }
+				: undefined);
+			Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+			await openAccount(); button('Change')?.click(); await settle(); fillAccount(); await settle();
 
-		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-		expect(username.value).toBe('legacy-owner');
-		expect(username.readOnly).toBe(true);
-		expect(host.textContent).not.toContain('This matches the existing data on this computer.');
-	});
-
-	it('leaves the username editable with no helper text on a fresh install', async () => {
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-		expect(username.value).toBe('');
-		expect(username.readOnly).toBe(false);
-		expect(host.textContent).not.toContain('This matches the existing data');
-	});
-
-	it('validates usernames before submitting the account form', async () => {
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-		username.value = 'Not valid';
-		username.dispatchEvent(new Event('input', { bubbles: true }));
-		await tick();
-
-		expect(host.textContent).toContain("Use 1–32 lowercase letters, numbers, '-' or '_'.");
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))).toHaveProperty('disabled', true);
-	});
-
-	it('keeps a safe server account error inline on the account form', async () => {
-		await settle();
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/setup/first-account') return json({ detail: 'username is already in use' }, 422);
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
-			return json({ sources: [] });
-		}));
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
-
-		expect(host.textContent).toContain('username is already in use');
-		expect(host.textContent).toContain('Create your account');
-		expect(host.textContent).not.toContain('CORSIA couldn’t start');
-		expect(Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => (input as HTMLInputElement).value)).toEqual(['correct-password', 'correct-password']);
-	});
-
-	it('opens the live socket once the first account holds a session', async () => {
-		await settle();
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			return json({ sources: [] });
-		}));
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
-
-		expect(connect).toHaveBeenCalledTimes(1);
-	});
-
-	it('returns to the existing oMLX choice when the signed-in source start needs consent', async () => {
-		if (component) await unmount(component);
-		let localSetupStarts = 0;
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Example model', model_size_gb: 30 });
-			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
-			if (url === '/api/providers/sources/recheck') return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_error: 'Download failed' }] });
-			if (url === '/api/providers/local/setup') {
-				localSetupStarts += 1;
-				return localSetupStarts === 1 ? json({ detail: { code: 'consent_required' } }, 409) : json({ ok: true });
-			}
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again')?.click();
-		await settle();
-
-		expect(host.textContent).toContain('CORSIA will read:');
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
-		await settle();
-		expect(host.textContent).toContain('Connect an AI');
-		expect(host.textContent).not.toContain('Create your account');
-	});
-
-	it('renders Claude Code and Codex beside an inert local download state', async () => {
-		if (component) await unmount(component);
-		const calls: string[] = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'setup-user', name: 'First Person' } });
-			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_downloading: true, download_percent: 42 },
-				{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
-				{ source: 'codex', name: 'Codex', state: 'needs_auth' },
-			] });
-			if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'corsia-agent' } });
-			if (url === '/api/vendor-accounts?provider=claude-code') return json({ accounts: [{ id: 'account-1', is_default: false, state: 'signed_out' }] });
-			if (url === '/api/vendor-accounts/account-1/signin') return json({ state: 'pending' });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
-		const text = host.textContent ?? '';
-		expect(text).toContain('Claude Code');
-		expect(text).toContain('Codex');
-		expect(text).toContain('Downloading in the background');
-		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42%');
-		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
-		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in')?.click();
-		await settle();
-		expect(calls.some((url) => url.startsWith('/api/corsia-agent?token='))).toBe(true);
-		expect(calls).not.toContain('/api/conductor');
-	});
-
-	async function reachModels(classifier: unknown, options: { onRequest?: (url: string, init?: RequestInit) => void; sourceReady?: boolean; onFinished?: () => void; posts?: Array<unknown | (() => Promise<unknown>)> } = {}) {
-		const { onRequest, sourceReady = true, onFinished = vi.fn(), posts = [] } = options;
-		const queue = [...posts];
-		if (component) await unmount(component);
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = String(input);
-			onRequest?.(url, init);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/classifier/recheck') return json(classifier);
-			if (url === '/api/setup/classifier') {
-				if (init?.method !== 'POST' || queue.length === 0) return json(classifier);
-				const next = queue.shift();
-				return json(typeof next === 'function' ? await (next as () => Promise<unknown>)() : next);
-			}
-			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
-			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
-				{ source: 'claude-code', name: 'Claude Code', state: sourceReady ? 'ready' : 'needs_auth', accounts: [{ state: sourceReady ? 'ready' : 'needs_auth' }] },
-			] });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
+			expect(button('Continue')).toHaveProperty('disabled', true);
+			button('Continue')?.click(); await settle();
+			expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+			expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(0);
+		});
 	}
-	const startButton = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'));
-	const rail = () => host.querySelector('[aria-label="Setup progress"]')?.textContent ?? '';
 
-	it('enables Start when a source is ready beside a local download', async () => {
-		await reachModels({ state: 'idle' });
-
-		expect(host.textContent).toContain('Installing');
-		expect(host.textContent).toContain('Ready');
-		expect(startButton()).toHaveProperty('disabled', false);
+	it('asks which subscriptions they pay for, installs the picked tool at once and shows a row only for it', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(host.textContent).toContain('Which do you pay for?');
+		for (const label of ['Claude', 'ChatGPT', 'Both', 'Neither']) expect(button(label)).toBeTruthy();
+		button('Claude')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(calls).toContainEqual({ url: '/api/providers/cli/claude-code/install', method: 'POST' });
+		expect(calls.some((call) => call.url === '/api/providers/cli/codex/install')).toBe(false);
+		// The answer is kept in setup progress, where the first chat reads which subscriptions they pay for.
+		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false } });
+		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+		expect(button('Sign in')).toBeUndefined();
 	});
 
-	it('shows the background download only in the rail, as Finishing setup with its percent', async () => {
-		await reachModels({ state: 'downloading', bytes_done: 250, bytes_total: 1000 });
-
-		expect(rail()).toContain('In the background');
-		expect(rail()).toContain('Finishing setup');
-		expect(rail()).toContain('Downloading · 25%');
-		expect(host.textContent).not.toMatch(/classifier|learns from/i);
+	it('installs only the chosen CLI after its delayed detection', async () => {
+		await passFolder();
+		button('Claude')?.click(); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([]);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.some((call) => call.url.includes('/install') && call.method === 'POST')).toBe(false);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([{ url: '/api/providers/cli/claude-code/install', method: 'POST' }]);
 	});
 
-	it('never makes Start wait for the download', async () => {
-		const onFinished = vi.fn();
-		await reachModels({ state: 'downloading', bytes_done: 250, bytes_total: 1000 }, { onFinished });
-
-		expect(startButton()).toHaveProperty('disabled', false);
-		startButton()?.click();
-		await settle();
-		expect(onFinished).toHaveBeenCalledOnce();
+	it('polls for the chosen CLI without a source event and starts its install', async () => {
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
 	});
 
-	const failedSpace = { state: 'failed', code: 'disk_full', reason: 'Needs 0.9 GB more free space.', retryable: true, bytes_needed: 872206596 };
-	const railButtons = () => Array.from(host.querySelectorAll('[aria-label="Setup progress"] button'));
-
-	it('shows a failed download as a red dot and a message in secondary text, with Try again as the only click target', async () => {
-		const posts: string[] = [];
-		await reachModels(failedSpace, { onRequest: (url, init) => { if (url === '/api/setup/classifier' && init?.method === 'POST') posts.push(url); } });
-		expect(rail()).toContain('Finishing setup');
-		expect(rail()).toContain('Needs 0.9 GB more free space.');
-		expect(rail()).not.toMatch(/try again.*try again|free space\.\s*Try again\./i);
-		expect(host.textContent).not.toMatch(/classifier|learns from/i);
-		expect(startButton()).toHaveProperty('disabled', false);
-		expect(host.querySelector('.reddot')).not.toBeNull();
-		expect(host.querySelector('[aria-label="Setup progress"] .row.error.has-action')).not.toBeNull();
-
-		// The row is not a button; its fix is a real button with its own name and label.
-		expect(railButtons().filter((button) => button.textContent?.includes('Finishing setup'))).toHaveLength(0);
-		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Try again: Finishing setup"]');
-		expect(retry?.tagName).toBe('BUTTON');
-		expect(retry?.textContent?.trim()).toBe('Try again');
-		expect(railButtons().filter((button) => button.getAttribute('aria-label') === 'Try again: Finishing setup')).toHaveLength(1);
-		const before = posts.length;
-		retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-		await settle();
-
-		expect(posts.length).toBe(before + 1);
+	it('starts the chosen install when an unrelated source check fails', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		// The recheck writes Claude Code's row, then fails on another source's check.
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			return new Response('{}', { status: 503 });
+		});
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
 	});
 
-	it('goes back to the spinner and Downloading the moment Try again is pressed, never red while it runs', async () => {
-		let release!: (state: unknown) => void;
-		const held = new Promise<unknown>((resolve) => { release = resolve; });
-		await reachModels(failedSpace, { posts: [failedSpace, () => held] });
-		expect(host.querySelector('.reddot')).not.toBeNull();
-
-		host.querySelector<HTMLButtonElement>('[aria-label="Try again: Finishing setup"]')?.click();
-		await settle();
-
-		expect(host.querySelector('.reddot')).toBeNull();
-		expect(host.querySelector('[aria-label="Try again: Finishing setup"]')).toBeNull();
-		expect(rail()).toContain('Downloading');
-		release({ state: 'downloading', bytes_done: 20, bytes_total: 1000 });
-		await settle();
-		expect(rail()).toContain('Downloading · 2%');
-		expect(host.querySelector('.reddot')).toBeNull();
+	it('shows Retry if detection fails while an unchecked source is present', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sources/recheck') ? new Response('{}', { status: 500 }) : originalFetch(input, init));
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = host.querySelector('section[aria-label="Claude Code"]');
+			expect(row?.textContent).toContain('Couldn’t check Claude Code.');
+			expect(row?.textContent).not.toContain('Retry');
+			expect(row?.querySelector('.spinner')).toBeNull();
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
 	});
 
-	it('looks again for room when the window regains focus, only while the download is stopped for space', async () => {
-		const rechecks: string[] = [];
-		const onRequest = (url: string) => { if (url === '/api/setup/classifier/recheck') rechecks.push(url); };
-		await reachModels(failedSpace, { onRequest });
-		window.dispatchEvent(new Event('focus'));
-		await settle();
-		expect(rechecks).toEqual(['/api/setup/classifier/recheck']);
-
-		rechecks.length = 0;
-		await reachModels({ state: 'failed', code: 'checksum_failed', reason: 'The download was damaged.', retryable: true }, { onRequest });
-		window.dispatchEvent(new Event('focus'));
-		await settle();
-		await reachModels({ state: 'downloading', bytes_done: 1, bytes_total: 1000 }, { onRequest });
-		window.dispatchEvent(new Event('focus'));
-		await settle();
-		expect(rechecks).toEqual([]);
-	});
-
-	it('leaves the rail free of it once the download is ready', async () => {
-		await reachModels({ state: 'ready' });
-
-		expect(rail()).not.toContain('Finishing setup');
-		expect(host.textContent).not.toMatch(/classifier|learns from/i);
-	});
-
-	it('skips the AI step when a source is already Ready, with Start using CORSIA on the account step', async () => {
-		if (component) await unmount(component);
-		const onFinished = vi.fn();
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+	it.each([
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: true },
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: false },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: true },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: false },
+	])('shows $name source retry pending and returns to success=$succeeds', async ({ vendor, name, choice, succeeds }) => {
+		sources = [{ source: vendor, name, state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
-			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
-				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
-			] });
-			return json({ sources: [] });
+			if (url.includes('/sources/recheck')) {
+				rechecks++;
+				if (rechecks === 1) return new Response('{}', { status: 500 });
+				if (rechecks > 2) return json({ sources });
+				return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+			}
+			if (url.includes('/models') && sources[0]?.state === 'ready') return json({ models: [{ connection: vendor, status: 'ready', runs_on: [{ selected: true, status: 'ready' }] }] });
+			return originalFetch(input, init);
+		});
+		vi.useFakeTimers();
+		try {
+			button(choice)?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = () => host.querySelector(`section[aria-label="${name}"]`);
+			const error = 'CORSIA couldn’t check your model sources. Try again.';
+			const checking = 'Checking which models are ready…';
+			expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+			expect(host.textContent).toContain(error);
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+			button('Retry')!.click(); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + checking + '"] .spinner')).toBeTruthy();
+			expect(host.textContent).not.toContain(error);
+			expect(button('Retry')?.disabled).toBe(true);
+			button('Retry')?.click(); expect(rechecks).toBe(2);
+			window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(0); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + checking + '"] .spinner')).toBeTruthy();
+			expect(host.textContent).not.toContain(error);
+			expect(button('Retry')?.disabled).toBe(true);
+			if (succeeds) sources = [{ source: vendor, name, state: 'ready' }];
+			resolveRetry(succeeds ? json({ sources }) : new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+			if (succeeds) {
+				expect(host.textContent).not.toContain(error);
+				expect(row()?.textContent).toContain('Ready');
+			} else {
+				expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+				expect(host.textContent).toContain(error);
+				expect(button('Retry')?.disabled).toBe(false);
+			}
+			expect(row()?.querySelector('.spinner')).toBeNull();
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('keeps an unrelated provider error visible during a source retry', async () => {
+		sources = [
+			{ source: 'claude-code', name: 'Claude Code', state: 'unverified' },
+			{ source: 'codex', name: 'Codex', state: 'ready', limited: true } as never,
+		];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			if (++rechecks === 1) return new Response('{}', { status: 500 });
+			return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+		});
+		vi.useFakeTimers();
+		try {
+			(button('Yes') ?? button('Both'))!.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const codex = () => host.querySelector('section[aria-label="Codex"]');
+			expect(codex()?.textContent).toContain('usage limit');
+			button('Retry')!.click(); await tick();
+			expect(codex()?.textContent).toContain('usage limit');
+			expect(codex()?.querySelector('.spinner')).toBeNull();
+			resolveRetry(new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+		} finally { vi.useRealTimers(); }
+	});
+
+	describe('the Local model row by host', () => {
+		const providersStep = async (extra: Array<{ source: string; name: string; state: string }> = []) => {
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }, ...extra];
+			// The status is read when the screen mounts, so mount it again with this host's facts.
+			await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
+			await passFolder();
+			button('Claude')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		};
+
+		it('keeps the Local model row, and its memory reason, on a Mac with too little memory', async () => {
+			localEligible = false; macosSupported = true;
+			await providersStep();
+			expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+			expect(host.textContent).toContain('Adding a local model through CORSIA needs at least 32 GB of memory');
+		});
+
+		it('lists no Local model row, and no memory reason, on a server that is not macOS', async () => {
+			localEligible = false; macosSupported = null;
+			await providersStep();
+			expect(rowNames()).toEqual(['Claude Code', 'API provider']);
+			expect(host.textContent).not.toContain('24 GB');
+			expect(host.textContent).not.toContain('Local model');
+		});
+
+		it('lists no Local model row when the local source row says the host never runs one', async () => {
+			localEligible = false; macosSupported = true;
+			await providersStep([{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true } as never]);
+			expect(rowNames()).not.toContain('Local model');
+		});
+	});
+
+	it('explains the subscriptions screen: a lede, and under neither-signed-in the subscription and the free-model line this computer can honor', async () => {
+		const plans = 'Claude Code and Codex are the apps you’ll sign in to next.';
+		const lede = 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.';
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('.lede')?.textContent).toBe(lede);
+		expect(host.textContent).toContain(plans);
+		expect(host.textContent).toContain('No subscription? Add an API key on the next screen.');
+		expect(host.textContent).not.toContain('The free model downloading to this computer');
+		expect(host.querySelector('.explain')?.compareDocumentPosition(host.querySelector('.choices')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+	});
+
+	it('offers the free model as the no-subscription option when this computer can run it', async () => {
+		localEligible = true;
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		// The status is read when the screen mounts, so mount it again now that this computer is eligible.
+		await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
+		await passFolder();
+		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
+		expect(host.textContent).toContain('No subscription? The free model downloading to this computer works too, or add an API key.');
+		expect(host.textContent).not.toContain('Add an API key on the next screen.');
+	});
+
+	it('explains the ChatGPT question when Claude Code is signed in, and the Claude question when Codex is', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('.lede')?.textContent).toBe('CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.');
+		expect(host.textContent).toContain('A ChatGPT subscription uses Codex (a Claude subscription uses Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.');
+		expect(host.textContent).not.toContain('No subscription?');
+	});
+
+	it('explains the Claude question when Codex is signed in', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'ready' }];
+		await passFolder();
+		expect(host.textContent).toContain('A Claude subscription uses Claude Code (a ChatGPT subscription uses Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
+		expect(host.textContent).not.toContain('No subscription?');
+	});
+
+	it('says what the work folder is for beside its row on the account form', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.textContent).toContain('Your projects and files live here.');
+	});
+
+	it('asks only about the other subscription when one tool is signed in', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.textContent).toContain('Claude Code is signed in.');
+		expect(host.textContent).toContain('Do you also pay for ChatGPT?');
+		button('No')?.click(); await settle();
+		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+	});
+
+	it('says a signed-in account without the tool does not include it, and its switch unpicks the tool', async () => {
+		const account = { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state: 'no_usable_model', resets_at: null, corsia_agent_binding: false };
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [account] } as never, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		button('Claude')?.click(); await settle();
+		expect(host.textContent).toContain('This Claude account has no models for Claude Code. Sign in with another account, or turn Claude Code off.');
+		progressBodies.length = 0;
+		host.querySelector<HTMLButtonElement>('button[aria-label="Claude Code"]')!.click(); await settle();
+		expect(progressBodies.map((body) => JSON.parse(body).picks)).toContainEqual({ claude: false, chatgpt: false });
+		expect(rowNames()).not.toContain('Claude Code');
+	});
+
+	it('records nothing about the other tool when a row is turned off in a resumed setup, where the subscriptions question was not answered', async () => {
+		const account = { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state: 'no_usable_model', resets_at: null, corsia_agent_binding: false };
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [account] } as never, { source: 'codex', name: 'Codex', state: 'ready' }];
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/api/setup/progress' && (init?.method ?? 'GET') === 'GET') return json({ setup_completed: false, status: { local_eligible: false, work_folder: '~/CORSIA' } });
+			return base(input, init);
 		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished } });
-		flushSync();
-		await settle();
-		await createAccountFromWelcome();
-
-		expect(onFinished).toHaveBeenCalledTimes(1);
-		expect(host.textContent).not.toContain('Connect an AI');
+		await unmount(component);
+		token.set('setup-token');
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync(); await settle(); await settle();
+		expect(rowNames()).toContain('Claude Code');
+		progressBodies.length = 0;
+		host.querySelector<HTMLButtonElement>('button[aria-label="Claude Code"]')!.click(); await settle();
+		expect(progressBodies.map((body) => JSON.parse(body)).filter((body) => 'picks' in body)).toEqual([]);
+		expect(rowNames()).not.toContain('Claude Code');
+		expect(rowNames()).toContain('Codex');
 	});
 
-	it('names the ready source in the sidebar and reads Start using CORSIA before the account exists', async () => {
+	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
+		await passFolder();
+		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
+		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');
+		expect(host.querySelector('#setup-name')).toBeTruthy();
+	});
+
+	it('goes Back from models to subscriptions to the account, and it never creates a second account', async () => {
+		await passFolder();
+		button('Neither')?.click(); await settle();
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		button('Back')?.click(); await settle();
+		// The account exists, so Back shows the form again, filled, and Continue with nothing changed writes nothing.
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
+		expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada Lovelace');
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+		expect(button('Continue')?.disabled).toBe(false);
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
+	});
+
+	it('returns an existing-account response to the account form with Sign in', async () => {
+		await openAccount(); fillAccount(); await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json({}, 409) : json({})));
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Create your account');
+		expect(host.textContent).toContain('This computer already has a CORSIA account. Sign in instead.');
+		expect(button('Sign in')).toBeTruthy();
+	});
+
+	it.each([
+		['a plain user-facing detail', { detail: 'That username isn’t available. Choose another.' }, 'That username isn’t available. Choose another.'],
+		['the backend username validation detail', { detail: 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.' }, 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.'],
+		['the backend password validation detail', { detail: 'Use a password of at least 8 characters.' }, 'Use a password of at least 8 characters.'],
+		['structured detail', { detail: { message: 'username must be valid' } }, 'Couldn’t create your account. Try again.'],
+		['no detail', {}, 'Couldn’t create your account. Try again.'],
+	] as const)('returns a 422 with %s to an editable account form', async (_case, body, expected) => {
+		await openAccount(); fillAccount(); await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json(body, 422) : json({})));
+		button('Continue')?.click(); await settle();
+		expect(host.textContent).toContain(expected);
+		expect(getByRole('alert').textContent).toContain(expected);
+		expect(button('Continue')?.disabled).toBe(false);
+	});
+
+	describe('Back to the account after it was made (editable account)', () => {
+		beforeEach(() => {
+			vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
+				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
+				if (url === '/api/setup/first-account') return json({ token: 'first-token', user: { id: 'ada', name: 'Ada Lovelace' } });
+				if (url === '/api/setup/account' && method === 'PUT') {
+					const changes = JSON.parse(String(init?.body));
+					return json(changes.password ? { ok: true, token: 'renewed-token', user: { id: 'ada', name: 'Ada Lovelace' } } : { ok: true });
+				}
+				if (url.includes('/sources')) return json({ sources });
+				if (url.includes('/models')) return json({ models: [] });
+				return json({});
+			});
+		});
+
+		it('fills the form with what was entered, keeps the username read-only and leaves the passwords blank', async () => {
+			await backToAccount();
+			expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada Lovelace');
+			const username = host.querySelector('#setup-username') as HTMLInputElement;
+			expect(username.value).toBe('ada');
+			expect(username.readOnly).toBe(true);
+			expect((host.querySelector('#setup-password') as HTMLInputElement).value).toBe('');
+			expect((host.querySelector('#setup-confirm-password') as HTMLInputElement).value).toBe('');
+			// A blank pair reads as optional, not as something still to fill in.
+			expect(host.querySelector('label[for="setup-password"]')?.textContent).toContain('New password (optional)');
+			expect(host.querySelector('label[for="setup-confirm-password"]')?.textContent).toContain('Confirm new password');
+			// The folder was made with the account, so it reads back and cannot be changed here.
+			expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in ~/CORSIA');
+			expect(button('Change')).toBeUndefined();
+		});
+
+		it('makes no call at all when nothing changed, and never creates a second account', async () => {
+			await backToAccount();
+			button('Continue')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+			expect(putCalls()).toHaveLength(0);
+			expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
+		});
+
+		it('treats a name re-entered unchanged, with only spaces added, as no change', async () => {
+			await backToAccount();
+			setInput('setup-name', '  Ada Lovelace '); await settle();
+			button('Continue')?.click(); await settle();
+			expect(putCalls()).toHaveLength(0);
+		});
+
+		it('saves only the name when only the name changed', async () => {
+			await backToAccount();
+			setInput('setup-name', 'Ada King'); await settle();
+			expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ name: 'Ada King' }]);
+			expect(putCalls()[0][1]?.headers).toMatchObject({ Authorization: 'Bearer first-token' });
+			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		});
+
+		it('saves only the email when only the email changed, and an emptied email removes it', async () => {
+			await backToAccount();
+			setInput('setup-email', 'ada@example.test'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ email: 'ada@example.test' }]);
+			button('Back')?.click(); await settle();
+			setInput('setup-email', ''); await settle();
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ email: 'ada@example.test' }, { email: '' }]);
+		});
+
+		it('saves a new password with its confirmation and carries on with the session the server returns', async () => {
+			await backToAccount();
+			setInput('setup-password', 'newpassword1'); setInput('setup-confirm-password', 'newpassword1'); await settle();
+			const connected = vi.mocked(connect).mock.calls.length;
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ password: 'newpassword1' }]);
+			expect(get(token)).toBe('renewed-token');
+			// The old session ended with the old password, so the socket reconnects on the new one.
+			expect(connect).toHaveBeenCalledTimes(connected + 1);
+			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		});
+
+		it('holds Continue while a changed password is too short or does not match its confirmation', async () => {
+			await backToAccount();
+			setInput('setup-password', 'short'); setInput('setup-confirm-password', 'short'); await settle();
+			expect(button('Continue')?.disabled).toBe(true);
+			setInput('setup-password', 'newpassword1'); setInput('setup-confirm-password', 'different1'); await settle();
+			expect(button('Continue')?.disabled).toBe(true);
+			expect(putCalls()).toHaveLength(0);
+			setInput('setup-confirm-password', 'newpassword1'); await settle();
+			expect(button('Continue')?.disabled).toBe(false);
+		});
+
+		it('holds Continue when the name is emptied', async () => {
+			await backToAccount();
+			setInput('setup-name', ''); await settle();
+			expect(button('Continue')?.disabled).toBe(true);
+		});
+
+		it('sends the changed fields together in one save', async () => {
+			await backToAccount();
+			setInput('setup-name', 'Ada King'); setInput('setup-email', 'ada@example.test'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ name: 'Ada King', email: 'ada@example.test' }]);
+		});
+
+		it('sends the name along once when the profile an email belongs in is missing, instead of looping', async () => {
+			await backToAccount();
+			const answer = vi.mocked(fetch).getMockImplementation()!;
+			let refused = false;
+			vi.mocked(fetch).mockImplementation(async (input, init) => {
+				if (String(input) === '/api/setup/account' && !JSON.parse(String(init?.body)).name && !refused) { refused = true; return json({ code: 'profile_missing' }, 422); }
+				return answer(input, init);
+			});
+			setInput('setup-email', 'ada@example.test'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(putBodies()).toEqual([{ email: 'ada@example.test' }, { name: 'Ada Lovelace', email: 'ada@example.test' }]);
+			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		});
+
+		it('stays on the screen with the reason when the save is refused, and with a plain line when it fails', async () => {
+			await backToAccount();
+			const answer = vi.mocked(fetch).getMockImplementation()!;
+			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({ detail: 'Use a password of at least 8 characters.' }, 422) : answer(input, init));
+			setInput('setup-name', 'Ada King'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe('Your account');
+			expect(getByRole('alert').textContent).toContain('Use a password of at least 8 characters.');
+			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({ code: 'setup_failed', ref: 'K7QM2X' }, 500) : answer(input, init));
+			button('Continue')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe('Your account');
+			expect(getByRole('alert').textContent).toContain('Couldn’t save your account. Try again.');
+			// A system failure carries the reference that finds its log entry.
+			expect(getByRole('alert').textContent).toContain('Reference: K7QM2X');
+			// What was typed stays, and the next press tries the same change again.
+			expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada King');
+		});
+
+		it('ends the account step instead of offering a retry when setup finished somewhere else', async () => {
+			await backToAccount();
+			const answer = vi.mocked(fetch).getMockImplementation()!;
+			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({ code: 'setup_complete' }, 409) : answer(input, init));
+			setInput('setup-name', 'Ada King'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(finished).toHaveBeenCalledTimes(1);
+			expect(host.querySelector('[role="alert"]')).toBeNull();
+		});
+
+		it('goes Back to Getting started from the account screen', async () => {
+			await backToAccount();
+			button('Back')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
+			expect(putCalls()).toHaveLength(0);
+		});
+	});
+
+	it('checks the signed-in local retry through setup progress and the authenticated start', async () => {
 		if (component) await unmount(component);
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
-			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			return json({ sources: [] });
+		const requests: Array<{ url: string; init?: RequestInit }> = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input); requests.push({ url, init });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-model') return json({}, 409);
+			if (url === '/api/setup/local-download') return json(init?.method === 'POST' ? { ok: true } : { state: 'stopped' });
+			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
+			if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
+			if (url === '/api/providers/local/setup') return json({ ok: true });
+			if (url.includes('/sources')) return json({ sources: [] });
+			if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url.includes('/models')) return json({ models: [] });
+			return json({});
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync();
-		await settle();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
-		await settle();
-
-		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('Claude Code');
-		const buttons = Array.from(host.querySelectorAll('button'));
-		expect(buttons.some((button) => button.textContent?.trim() === 'Start using CORSIA')).toBe(true);
-		expect(buttons.some((button) => button.textContent?.trim() === 'Continue')).toBe(false);
+		flushSync(); await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		await vi.waitFor(() => expect(button('Neither')).toBeTruthy()); button('Neither')?.click(); await settle();
+		await vi.waitFor(() => expect(button('Retry')).toBeTruthy());
+		button('Retry')?.click();
+		await vi.waitFor(() => expect(requests.some((request) => request.url === '/api/providers/local/setup')).toBe(true));
+		expect(requests.some((request) => request.url === '/api/setup/progress')).toBe(true);
+		const authenticatedStart = requests.find((request) => request.url === '/api/providers/local/setup')!;
+		expect(authenticatedStart.init?.headers).toMatchObject({ Authorization: 'Bearer setup-token' });
+		expect(requests.filter((request) => request.url === '/api/setup/local-model')).toHaveLength(1);
 	});
 
-	describe('Connect an AI', () => {
-		type Fake = {
-			sources: Record<string, unknown>[];
-			installPost: { status: number; body: unknown };
-			install: { state: string; reason: string | null };
-			signin: string;
-			posted: string[];
-		};
-		let fake: Fake;
-		const claude = (state: string, extra: Record<string, unknown> = {}) => ({ source: 'claude-code', name: 'Claude Code', state, ...extra });
+	it('routes a completed setup status to sign in', async () => {
+		if (component) await unmount(component);
+		const onExistingAccount = vi.fn();
+		vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'setup_complete' }, 409)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount, onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync(); await settle();
+		expect(onExistingAccount).toHaveBeenCalledOnce();
+	});
 
-		async function openConnectStep(sources: Record<string, unknown>[]) {
-			if (component) await unmount(component);
-			fake = { sources, installPost: { status: 200, body: { ok: true } }, install: { state: 'running', reason: null }, signin: 'waiting', posted: [] };
-			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url = String(input);
-				const method = init?.method ?? 'GET';
-				fake.posted.push(`${method} ${url}`);
-				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Qwen 3.8', model_size_gb: 30 });
-				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
-				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
-				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
-				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
-				if (url === '/api/providers/cli/claude-code/link') return json({ ok: true, outcome: 'linked' });
-				if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'conductor-1' } });
-				if (url.startsWith('/api/vendor-accounts?provider=')) return json({ accounts: [] });
-				if (url === '/api/vendor-accounts') return json({ id: 'acct-1' });
-				if (url === '/api/vendor-accounts/acct-1/signin') return json({ account_id: 'acct-1', status: 'waiting' });
-				if (url === '/api/vendor-accounts/acct-1/signin/check') return json({ account_id: 'acct-1', status: fake.signin });
-				return json({ sources: [] });
-			}));
-			component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-			flushSync();
-			await settle();
-			await createAccountFromWelcome();
-		}
-
-		const row = (name: string) => host.querySelector(`section[aria-label="${name}"]`) as HTMLElement;
-		const press = async (scope: ParentNode, label: string) => {
-			Array.from(scope.querySelectorAll('button')).find((button) => button.textContent?.trim() === label)?.click();
-			await settle();
-		};
-		const refocus = async () => { window.dispatchEvent(new Event('focus')); await settle(); };
-		const start = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Start using CORSIA') as HTMLButtonElement;
-
-		it('shows one action per row with no Check again, and Start stays off until a source is Ready', async () => {
-			await openConnectStep([claude('not_installed'), { source: 'codex', name: 'Codex', state: 'not_installed' }]);
-
-			expect(host.textContent).toContain('Connect an AI');
-			expect(row('Claude Code').textContent).toContain('CORSIA installs Claude Code for you.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Set up']);
-			expect(Array.from(row('Codex').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Set up']);
-			expect(host.textContent).not.toContain('Check again');
-			expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('Your AI');
-			expect(start().disabled).toBe(true);
-		});
-
-		it('installs through the official installer after a confirm line, waits with up to 3 minutes, then signs in in place', async () => {
-			await openConnectStep([claude('not_installed')]);
-
-			await press(row('Claude Code'), 'Set up');
-			expect(row('Claude Code').textContent).toContain('Set up Claude Code? This runs Anthropic’s official installer, downloaded from claude.ai, and then you sign in to your Claude account.');
-			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/install');
-
-			await press(row('Claude Code'), 'Set up');
-			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/install');
-			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
-			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
-
-			// The installer finishes; coming back to the window notices it and opens sign-in in place.
-			fake.install = { state: 'done', reason: null };
-			fake.sources = [claude('needs_auth')];
-			await refocus();
-			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
-			expect(row('Claude Code').textContent).toContain('Installed. Finish signing in to your Claude account in the browser window that just opened.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Open sign-in again']);
-			expect(start().disabled).toBe(true);
-
-			fake.signin = 'completed';
-			fake.sources = [claude('ready', { accounts: [{ state: 'ready' }] })];
-			await refocus();
-			expect(row('Claude Code').textContent).toContain('Ready');
-			expect(start().disabled).toBe(false);
-		});
-
-		it('offers Sign in for a signed-out CLI, and signs in without installing', async () => {
-			await openConnectStep([claude('needs_auth')]);
-
-			expect(row('Claude Code').textContent).toContain('Claude Code is installed. Sign in to use it.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Sign in']);
-
-			await press(row('Claude Code'), 'Sign in');
-			expect(fake.posted.some((call) => call.includes('/install'))).toBe(false);
-			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
-			expect(row('Claude Code').textContent).toContain('Finish signing in to your Claude account in the browser window that just opened.');
-			expect(row('Claude Code').textContent).not.toContain('Installed.');
-		});
-
-		it('shows an install failure with its reason, Try again and the install page', async () => {
-			const { openExternalUrl } = await import('$lib/linkTargetResolver');
-			await openConnectStep([claude('not_installed')]);
-			await press(row('Claude Code'), 'Set up');
-			fake.install = { state: 'failed', reason: 'no internet connection' };
-			await press(row('Claude Code'), 'Set up');
-
-			expect(row('Claude Code').textContent).toContain('Couldn’t install Claude Code: no internet connection. Check your connection, then choose Try again.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Try again', 'Open the install page']);
-
-			await press(row('Claude Code'), 'Open the install page');
-			expect(openExternalUrl).toHaveBeenCalledWith('https://code.claude.com/docs/en/setup');
-
-			fake.install = { state: 'running', reason: null };
-			await press(row('Claude Code'), 'Try again');
-			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
-		});
-
-		it('treats an already installed CLI as a stale row, not a failure', async () => {
-			await openConnectStep([claude('not_installed')]);
-			fake.installPost = { status: 409, body: { reason: 'already_installed' } };
-			fake.sources = [claude('needs_auth')];
-			await press(row('Claude Code'), 'Set up');
-			await press(row('Claude Code'), 'Set up');
-
-			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
-			expect(row('Claude Code').textContent).not.toContain('Couldn’t install');
-		});
-
-		it('links a CLI the service cannot see, then goes on to sign in', async () => {
-			await openConnectStep([claude('not_installed', { invisible_binary: '/opt/example/bin/claude' })]);
-			fake.installPost = { status: 409, body: { reason: 'invisible_binary' } };
-			fake.sources = [claude('needs_auth')];
-			await press(row('Claude Code'), 'Set up');
-			await press(row('Claude Code'), 'Set up');
-
-			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/link');
-			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
-		});
-
-		it('rechecks the sources when the window regains focus', async () => {
-			await openConnectStep([claude('needs_auth')]);
-			const before = fake.posted.filter((call) => call === 'POST /api/providers/sources/recheck').length;
-			fake.sources = [claude('ready', { accounts: [{ state: 'ready' }] })];
-			await refocus();
-
-			expect(fake.posted.filter((call) => call === 'POST /api/providers/sources/recheck').length).toBe(before + 1);
-			expect(row('Claude Code').textContent).toContain('Ready');
-		});
+	it('shows Retry and Save a report when startup status fails', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => undefined) });
+		vi.stubGlobal('fetch', vi.fn(async () => json({}, 500)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('CORSIA couldn’t start');
+		expect(button('Retry')).toBeTruthy();
+		expect(button('Save a report')).toBeTruthy();
+		// No account exists yet, so the step rail must not mark it done under the error.
+		const accountRow = [...host.querySelectorAll('.lbl')].find((label) => label.textContent === 'Account & workspace')?.closest('*:has(> .lead)');
+		expect(accountRow).toBeTruthy();
+		expect(accountRow?.querySelector('.done-check')).toBeNull();
 	});
 });

@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from loguru import logger
@@ -11,28 +10,35 @@ from loguru import logger
 from infra.db_async import run_in_db
 from tools.base import Tool
 from tools.mcp_config import (
-    MCPConfigError, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
-    timeout_seconds,
+    MCPConfigError, _active_auth, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
+    timeout_seconds, url_origin,
 )
 from tools.mcp_local_transport import (
-    _mcp_cache_dir,
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,
+    prepare_managed_runtime,
     safehouse_stdio_parameters as _safehouse_stdio_parameters,
 )
+from tools.mcp_stamp import build_stamp
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
 
 class _StoredHeadersAuth(httpx.Auth):
     """Send managed header keys while keeping their values out of transport logs."""
 
-    def __init__(self, headers: dict[str, str], origin: str | None = None) -> None:
-        self._headers = headers
-        self._origin = _url_origin(origin) if origin is not None else None
+    def __init__(
+        self, headers: dict[str, str], origin: str | None = None, schemes: dict[str, str] | None = None,
+    ) -> None:
+        schemes = schemes or {}
+        # Each stored value is the token alone; its scheme goes back in front when sent.
+        self._headers = {name: f"{schemes[name]} {value}" if name in schemes else value for name, value in headers.items()}
+        # The sent value and the bare token are both secret; the longer one is replaced first.
+        self._secrets = sorted({*self._headers.values(), *headers.values()}, key=len, reverse=True)
+        self._origin = url_origin(origin) if origin is not None else None
 
     def auth_flow(self, request):
-        request_origin = _url_origin(str(request.url))
+        request_origin = url_origin(str(request.url))
         if self._origin is None:
             self._origin = request_origin
         if request_origin != self._origin:
@@ -42,23 +48,15 @@ class _StoredHeadersAuth(httpx.Auth):
 
     def redact(self, value):
         if isinstance(value, str):
-            for header_value in self._headers.values():
-                if header_value:
-                    value = value.replace(header_value, "[REDACTED]")
+            for secret in self._secrets:
+                if secret:
+                    value = value.replace(secret, "[REDACTED]")
             return value
         if isinstance(value, dict):
             return {self.redact(key): self.redact(item) for key, item in value.items()}
         if isinstance(value, list):
             return [self.redact(item) for item in value]
         return value
-
-
-def _url_origin(url: str) -> tuple[str, str, int] | None:
-    parsed = urlsplit(url)
-    if not parsed.scheme or not parsed.hostname:
-        return None
-    scheme = parsed.scheme.lower()
-    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
 
 
 class MCPConnectionError(MCPConfigError):
@@ -82,10 +80,16 @@ class MCPConnectionFailure(str):
 
 def mcp_failure_class(error: BaseException, config: dict) -> str:
     """Classify one launch failure before its safe text loses the machine cause."""
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeError
+
     if isinstance(error, BaseExceptionGroup):
         return mcp_failure_class(error.exceptions[0], config)
     if isinstance(error, MCPConnectionError):
         return error.failure_class
+    if isinstance(error, ManagedRuntimeError):  # runtime preparation failed before any MCP connection
+        return "runtime_download_failed" if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start"
+    if getattr(_active_auth.get(), "challenged", False):
+        return "needs_sign_in"  # the server asked for an OAuth sign-in this connection did not have
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):
         return "timed_out"
     if isinstance(error, OSError) and isinstance(config.get("command"), str):
@@ -119,8 +123,8 @@ class MCPToolWrapper(Tool):
         self.mcp_server_config = config
         # The server's own description of itself, from its initialize result.
         self.mcp_instructions = instructions
-        self.mcp_tool_name = tool_def.name
-        self._original_name = tool_def.name
+        self.mcp_tool_name = self._original_name = tool_def.name
+        self.mcp_stamp = build_stamp(config, tool_def.name)  # read by the registry for every result
         self._name = public_name(server_name, tool_def.name, config)
         self._auth = auth
         self._connection = None
@@ -168,15 +172,12 @@ class MCPToolWrapper(Tool):
         output = self._redact("\n".join(parts) or "(no output)")
         if not getattr(result, "isError", False):
             return output
-        if guidance := _mcp_denial_guidance(output):
-            return f"Error: {guidance}"
-        return f"Error: {output}"
+        return f"Error: {_mcp_denial_guidance(output) or output}"
 
     async def _authorized_user(self):
         if self._allowed_user_ids is None:
             return True
         from infra import state
-        from infra.db_async import run_in_db
         from infra.queries import load_thread_row
 
         thread_id = state._current_thread_id.get(None)
@@ -204,11 +205,11 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
-
 async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
-    from tools.mcp_secrets import resolve
+    from tools.mcp_oauth_auth import OAuthGrantAuth
+    from tools.mcp_secrets import header_schemes, resolve
 
     auth = None
     transport_task: asyncio.Task | None = None
@@ -235,8 +236,10 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         if secret_headers:
             if auth is not None:
                 raise MCPConfigError("stored header keys cannot be combined with bearer_file")
-            auth = _StoredHeadersAuth(secret_headers, config["url"])
+            auth = _StoredHeadersAuth(secret_headers, config["url"], header_schemes(config))
             options["auth"] = auth
+        elif auth is None:
+            auth = options["auth"] = OAuthGrantAuth(config.get("connected_app_id", name), config["url"])
         protect_transport_logs(auth)
         transport = config.get("transport", "http")
         if transport == "sse":
@@ -371,6 +374,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
         connection = None
         try:
             deadline = timeout_seconds(config, "connect_timeout", 10)
+            await prepare_managed_runtime(config)
             connection = _ServerConnection(name, config)
             wrappers = await asyncio.wait_for(asyncio.shield(connection.ready), deadline)
             names = [tool.name for tool in wrappers]

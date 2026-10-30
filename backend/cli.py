@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+
 import os
+import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,12 +20,14 @@ from infra.bind_host import (
     resolve_bind_host,
     write_setup,
 )
+from infra.devices_setting import parse_devices_setting
 from infra.platform_paths import (
     LegacyRuntimePaths,
     RuntimePaths,
     WorkspaceSelection,
     default_state_root,
     load_bootstrap,
+    runtime_db_paths,
     write_bootstrap,
 )
 
@@ -130,10 +135,11 @@ def _prompt_workspace_path() -> str:
     """Explain the workspace sandbox and return a confirmed workspace path."""
     print("Where should your work live?")
     print("     Your agents work freely inside this folder; anywhere else needs your approval.")
-    print("     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts).")
+    if not sys.platform.startswith("linux"):
+        print("     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts).")
     while True:
         path = input("     Folder (press Enter for ~/corsia, or type another): ").strip() or DEFAULT_WORKSPACE
-        if not _is_protected_workspace_path(Path(path).expanduser().resolve()):
+        if sys.platform.startswith("linux") or not _is_protected_workspace_path(Path(path).expanduser().resolve()):
             return path
         if input(
             "     That folder is protected by macOS, so you'd see permission prompts. "
@@ -165,6 +171,32 @@ def cmd_bind_host(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_remote_address(args: argparse.Namespace) -> int:
+    """Print the saved outside address while Let other devices connect is on.
+
+    Reads the bootstrap's own database read-only, so it never creates a file or
+    reads another instance's state. Prints nothing when the setting or address is
+    missing; reports an unreadable store to stderr and exits 2.
+    """
+    try:
+        bootstrap_path = Path(args.bootstrap or BOOTSTRAP_PATH)
+        if args.state_root:
+            state_root = Path(args.state_root)
+        else:
+            state_root = load_bootstrap(bootstrap_path).state_root
+        db_path = runtime_db_paths(state_root)[0]
+        with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute("SELECT value FROM settings WHERE key = ?", ("devices",)).fetchone()
+            enabled, address = parse_devices_setting(row["value"] if row else None)
+    except (OSError, TypeError, ValueError, sqlite3.Error):
+        print("Couldn't read the outside address.", file=sys.stderr)
+        return 2
+    if enabled and address:
+        print(address)
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Record the setup choice and the bind host that goes with it."""
     try:
@@ -187,7 +219,6 @@ def _runtime_paths_for_workspace(
 ) -> RuntimePaths:
     """Build a v2 selection, preserving an existing workspace identity."""
     root = workspace.expanduser().resolve()
-    fallback_state = default_state_root()
     bootstrap_status = _bootstrap_path_status()
     if bootstrap_status is None:
         raise _sandboxed_bootstrap_denial_error()
@@ -198,8 +229,9 @@ def _runtime_paths_for_workspace(
         if workspace_name is not None
         else (existing.workspace.name if existing else root.name or "workspace")
     )
+    # Resolved only when used: a bootstrapped install keeps its own state root.
     state_root = (
-        fallback_state
+        default_state_root()
         if os.environ.get("CORSIA_STATE_DIR") or existing is None
         else existing.state_root
     )
@@ -215,11 +247,11 @@ def _runtime_paths_for_workspace(
 
 # Commands that run before a workspace exists. The other sub-CLIs import
 # infra.config at module level, which refuses until one is configured.
-_BOOTSTRAP_FREE = {"init", "bind-host", "setup"}
+_BOOTSTRAP_FREE = {"init", "bind-host", "remote-address", "setup"}
 
 
 def _add_bootstrap_commands(sub: argparse._SubParsersAction) -> None:
-    """Register ``init``, ``bind-host`` and ``setup``."""
+    """Register ``init``, ``bind-host``, ``remote-address`` and ``setup``."""
     init = sub.add_parser("init", help="First-run setup — configure workspace path")
     init.add_argument(
         "--workspace", "--path", dest="path", help="Workspace path (skips the prompt)"
@@ -236,6 +268,13 @@ def _add_bootstrap_commands(sub: argparse._SubParsersAction) -> None:
     )
     bind_host.add_argument("--bootstrap", help="Bootstrap file (default: ~/.corsia/config.json)")
     bind_host.set_defaults(func=cmd_bind_host)
+
+    remote = sub.add_parser(
+        "remote-address", help="Print the saved outside address while devices can connect"
+    )
+    remote.add_argument("--bootstrap", help="Bootstrap file (default: ~/.corsia/config.json)")
+    remote.add_argument("--state-root", help="State directory to read instead of the bootstrap's (the app's own)")
+    remote.set_defaults(func=cmd_remote_address)
 
     setup = sub.add_parser("setup", help="Choose local or server exposure")
     setup.add_argument("setup", choices=sorted(SETUP_BINDS))
@@ -256,6 +295,10 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 
     build_artifact_parser(sub)
 
+    from cli_events import build_parser as build_event_parser
+
+    build_event_parser(sub)
+
     from cli_mcp import build_parser as build_mcp_parser
 
     build_mcp_parser(sub)
@@ -275,10 +318,10 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the CORSIA first-run and maintenance command parser."""
+    words = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="corsia-cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
     _add_bootstrap_commands(sub)
-    words = sys.argv[1:] if argv is None else argv
     if not words or words[0] not in _BOOTSTRAP_FREE:
         _add_runtime_commands(sub)
     args = parser.parse_args(argv)

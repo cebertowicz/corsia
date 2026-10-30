@@ -1,9 +1,9 @@
-"""Journal a content edit for the reviewers still waiting on the document (DCOL-FR10.2).
+"""Tell everyone waiting on a document's text that a content edit landed (DCOL-FR10.2).
 
 Every route that stores a document's bytes passes the digest before and after
-the write, so a re-save of identical bytes is not an edit. Only a document with
-an unsettled review request is journaled, so owners of other documents see no
-new rows.
+the write, so a re-save of identical bytes is not an edit. Reviewers still
+waiting on the document are journaled, and an agent whose pending suggestion
+the edit stranded is told. A document with neither sees no new rows.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from doceditor.note_names import actor_name, document_name
 from registry import models
 
 
-def journal_reviewed_edit(
+def note_content_edit(
     db: sqlite3.Connection,
     artifact: dict | sqlite3.Row,
     *,
@@ -23,24 +23,28 @@ def journal_reviewed_edit(
     new_sha256: str | None,
     actor_thread_id: str | None,
 ) -> bool:
-    """Append ``content_edited`` when the bytes changed while a review of the document is open.
+    """Record what a content edit means to everyone waiting on the document's text.
 
-    "Open" is Plans' answer (``review_is_open``), the same one the reviewer watch
-    reads, so no row is written that no reader would ever admit.
+    Tells each agent whose pending suggestion the edit stranded, and appends
+    ``content_edited`` when the bytes changed while a review of the document is
+    open. Active forks and Plans' open escalated nodes use the same definition
+    as the reviewer watch, so no row is written that no reader would ever admit.
+
+    Returns True when a review journal row was written.
     """
     if not new_sha256 or new_sha256 == previous_sha256:
         return False
-    from plans import public as plans_public
+    from doceditor.review_lifecycle import is_open
+    from doceditor.suggestion_stranding import note_stranded_suggestions
 
+    note_stranded_suggestions(db, artifact, actor_thread_id=actor_thread_id)
     artifact_id = str(artifact["id"])
     unsettled = db.execute(
-        # The join drops a request whose review node no longer exists, as the reviewer watch does.
-        "SELECT request.node_id FROM doc_review_requests AS request "
-        "JOIN plan_nodes AS node ON node.id=request.node_id WHERE request.artifact_id=? "
-        "AND request.cancelled_at IS NULL AND request.answered_batch_id IS NULL",
+        "SELECT request.* FROM doc_review_requests AS request WHERE request.artifact_id=? "
+        "AND request.state IN ('forked','handed_back','failed')",
         (artifact_id,),
     ).fetchall()
-    if not any(plans_public.review_is_open(db, str(row["node_id"])) for row in unsettled):
+    if not any(is_open(db, row) for row in unsettled):
         return False
     actor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     models.record_artifact_change(

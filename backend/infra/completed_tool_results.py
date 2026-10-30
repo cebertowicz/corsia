@@ -24,9 +24,9 @@ def _completed_binding(
         raise delivery_support.ToolResultBindingError(
             "completed tool result does not belong to the terminal Turn"
         )
-    if completed.checkpoint_id is not None:
+    if completed.fork_id is not None:
         raise delivery_support.ToolResultBindingError(
-            "checkpoint-private tool result cannot bind to a foreground Turn"
+            "fork-private tool result cannot bind to a foreground Turn"
         )
     arguments = completed.arguments
     if not isinstance(arguments, dict):

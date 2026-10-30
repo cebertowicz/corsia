@@ -11,9 +11,9 @@ commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
 key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
-:func:`resolve_google` and ``infra.key_store_servers.resolve_server`` are the
-only readers, and only a built-in, a cloud-provider, a Google sign-in or a
-server entry has one. An entry an agent adds does nothing until code
+``connections.connected_accounts.resolve_credentials`` and
+``infra.key_store_servers.resolve_server`` are the only readers, and only a
+built-in, a cloud-provider, a connected account or a server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 from infra import key_store_values
 from infra.database import get_db, write_transaction
-from infra.key_store_mcp import PREFIX as MCP_PREFIX, is_mcp_entry_name
+from infra.key_store_mcp import OAUTH_VALUE_MAX, PREFIX as MCP_PREFIX, is_mcp_entry_name, is_oauth_entry_name
 # VALUES_FILE and keys_dir are re-exported: callers find the values file through this module.
 from infra.key_store_values import VALUES_FILE as VALUES_FILE, KeyStoreError, keys_dir as keys_dir
 from infra.time import utc_now_iso
@@ -51,7 +51,11 @@ SOURCE_STORE = "keys"
 PROVIDER_PREFIX = "provider-"
 SERVER_PREFIX = "server-"
 GOOGLE_PREFIX = "google-"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX)
+CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
+#: A mail-host account's app password; the suffix is the account's id.
+MAILHOST_PREFIX = "connected-account--mailhost--"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX)
+ACCOUNT_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 #: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
 GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
 GOOGLE_CLIENT_SECRET = f"{GOOGLE_PREFIX}client-secret"
@@ -100,6 +104,8 @@ def is_managed_name(name: str) -> bool:
     return (
         name in BUILTINS
         or name in GOOGLE_ENTRIES
+        or (name.startswith(CONNECTED_ACCOUNT_PREFIX) and bool(name[len(CONNECTED_ACCOUNT_PREFIX):]))
+        or (name.startswith(MAILHOST_PREFIX) and bool(ACCOUNT_ID_PATTERN.match(name[len(MAILHOST_PREFIX):])))
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
         or is_mcp_entry_name(name)
@@ -122,14 +128,14 @@ def _require_entry(name: str, db: sqlite3.Connection) -> None:
         raise KeyStoreError("No key has that name.")
 
 
-def validated_value(value: object) -> str:
+def validated_value(value: object, *, limit: int = VALUE_MAX) -> str:
     """The value as it would be stored, or :class:`KeyStoreError` for one the store refuses."""
     if not isinstance(value, str):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     cleaned = value.strip()
     if not cleaned:
         raise KeyStoreError("Paste the key first.")
-    if len(cleaned) > VALUE_MAX or not _VALUE_PATTERN.match(cleaned):
+    if len(cleaned) > limit or not _VALUE_PATTERN.match(cleaned):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     return cleaned
 
@@ -201,6 +207,10 @@ def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None)
     The settings table is never read or written.
     """
     _require_entry(name, _db(db))
+    if name.startswith(MAILHOST_PREFIX):
+        from connections.mailhost.store import normalize_pasted  # Imported here: the store reads this module.
+
+        value = normalize_pasted(name, value, _db(db))
     _store(name, validated_value(value), db)
 
 
@@ -208,7 +218,7 @@ def set_managed_value(name: str, value: object, *, db: sqlite3.Connection | None
     """Store a value for an entry code owns. Server code only: no route calls it."""
     if not is_managed_name(name):
         raise KeyStoreError("No key has that name.")
-    _store(name, validated_value(value), db)
+    _store(name, validated_value(value, limit=OAUTH_VALUE_MAX if is_oauth_entry_name(name) else VALUE_MAX), db)
 
 
 def _store(name: str, cleaned: str, db: sqlite3.Connection | None) -> None:
@@ -244,10 +254,20 @@ def clear_value(name: str, *, db: sqlite3.Connection | None = None) -> None:
         key_store_values.sweep_after_commit(conn)
 
 
+def removal_refusal(name: str) -> str | None:
+    """Why this entry can only be cleared, or None when it can be removed."""
+    if name in BUILTINS:
+        return "A built-in key can be cleared but not removed."
+    if name.startswith(MAILHOST_PREFIX):
+        return "A mail account's app password can be cleared but not removed. It goes when you remove the account."
+    return None
+
+
 def remove_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an added entry and its value. A built-in entry cannot be removed."""
-    if name in BUILTINS:
-        raise KeyStoreError("A built-in key can be cleared but not removed.")
+    refusal = removal_refusal(name)
+    if refusal is not None:
+        raise KeyStoreError(refusal)
     if is_managed_name(name):
         drop_managed_entry(name, db=db)
         return
@@ -262,6 +282,8 @@ def resolve_builtin(builtin: BuiltinKey, *, db: sqlite3.Connection | None = None
     value is for the one request that uses it and is never written to the
     environment.
     """
+    if BUILTINS.get(builtin.name) != builtin:
+        return None
     stored = resolve_names([builtin.name], db=db).get(builtin.name)
     return (stored, SOURCE_STORE) if stored else None
 
@@ -271,18 +293,6 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
     if name not in PROVIDER_NAMES:
         return None
     return resolve_names([f"{PROVIDER_PREFIX}{name}"], db=db).get(f"{PROVIDER_PREFIX}{name}")
-
-
-def resolve_google(*, db: sqlite3.Connection | None = None) -> dict[str, str] | None:
-    """The Google sign-in's ``client_id``, ``client_secret`` and ``refresh_token``, or None unless all three are set."""
-    stored = resolve_names(GOOGLE_ENTRIES, db=db)
-    if len(stored) != len(GOOGLE_ENTRIES):
-        return None
-    return {
-        "client_id": stored[GOOGLE_CLIENT_ID],
-        "client_secret": stored[GOOGLE_CLIENT_SECRET],
-        "refresh_token": stored[GOOGLE_REFRESH_TOKEN],
-    }
 
 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:
@@ -312,6 +322,7 @@ def _metadata(name: str, row: sqlite3.Row | None, is_set: bool) -> dict:
         "is_set": is_set,
         "set_at": row["set_at"] if row is not None and is_set else None,
         "checkable": builtin is not None and builtin.checkable,
+        "removable": removal_refusal(name) is None,
     }
 
 

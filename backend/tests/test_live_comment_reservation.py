@@ -71,7 +71,7 @@ async def submit(entry, identifier, quote='b', start=2, end=3):
     app.include_router(doc_comments.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         return await client.post(f'/api/artifacts/{entry.artifact_id}/comments', params={'token': OWNER_TOKEN},
-            json=dict(body='reserved', anchor_text=quote, from_off=start, to_off=end,
+            json=dict(delivery_policy="immediate", body='reserved', anchor_text=quote, from_off=start, to_off=end,
                       live_capture=True, client_id=identifier))
 
 

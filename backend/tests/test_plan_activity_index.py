@@ -278,7 +278,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
         user_ready=0,
         user_blocked=0,
         paused_by_user=0,
-        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"])],
+        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"], None)],
     )
     assert facts == {
         "need_you": 0,
@@ -296,7 +296,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
         user_ready=0,
         user_blocked=0,
         paused_by_user=0,
-        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"])],
+        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"], None)],
     )
     assert overdue is not None
     assert overdue["overdue_waits"] == 1
@@ -694,7 +694,7 @@ def test_compact_pure_review_reducers_cover_every_review_kind(
     from plans import operator_node_state
 
     display = operator_node_state.display_from_facts(
-        "review_requested", "review", kind, needs_user=needs_user,
+        "review_requested", "review", kind, asks_user=needs_user,
     )
     assert display["label_key"] == label
     assert operator_node_state.leaf_bucket_from_facts(

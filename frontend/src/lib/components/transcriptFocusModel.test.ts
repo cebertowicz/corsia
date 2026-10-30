@@ -102,6 +102,62 @@ describe('Focus transcript presentation', () => {
 		]);
 	});
 
+	describe('the browser chip of a block', () => {
+		const call = { id: 'c1', name: 'browser_open', args: { url: 'https://x.example', show_window: true } };
+		let seq = 0;
+		// A Step whose open succeeded: the server stored the chip on it.
+		const opener = (id: string, host: string) =>
+			assistant({ id, seq: ++seq, content: '', metadata: { turn_id: 'turn-2', tool_calls: [call], browser_chip: { host } } });
+		const update = (id: string, metadata: Record<string, unknown> = {}) =>
+			assistant({ id, seq: ++seq, content: `Update ${id}`, metadata: { turn_id: 'turn-2', for_user: true, ...metadata } });
+		const human = (id: string) => ({ id, seq: ++seq, thread_id: 'thread', role: 'user', content: 'Thanks', metadata: {} });
+		const chips = (entries: ReturnType<typeof buildTranscriptPresentation>) => entries.map((entry) => (
+			entry.kind === 'fold' ? `fold:${entry.browserChip?.host ?? '-'}`
+				: entry.kind === 'message' ? `${entry.message.id}:${entry.message.metadata?.browser_chip?.host ?? '-'}` : entry.kind
+		));
+
+		it('sits on the block that holds the open, never on the update after it', () => {
+			expect(chips(buildTranscriptPresentation([opener('open', 'github.com'), update('tell')], true)))
+				.toEqual(['fold:github.com', 'tell:-']);
+		});
+
+		it('gives an update that came before the open nothing, and the block after it the chip', () => {
+			expect(chips(buildTranscriptPresentation([update('early'), opener('open', 'github.com')], true)))
+				.toEqual(['early:-', 'fold:github.com']);
+		});
+
+		it('stays with its block when a human message comes before the reply', () => {
+			expect(chips(buildTranscriptPresentation([opener('open', 'github.com'), human('human'), update('reply')], true)))
+				.toEqual(['fold:github.com', 'human:-', 'reply:-']);
+		});
+
+		it('gives each block its own and the newest open of a block wins', () => {
+			expect(chips(buildTranscriptPresentation([
+				opener('a', 'github.com'), opener('b', 'example.org'), update('one'),
+				opener('c', 'other.example'), update('two'),
+				assistant({ id: 'plain', seq: ++seq, content: '', metadata: { turn_id: 'turn-2', tool_calls: [{ id: 'x', name: 'bash' }] } }), update('three'),
+			], true))).toEqual(['fold:example.org', 'one:-', 'fold:other.example', 'two:-', 'fold:-', 'three:-']);
+		});
+
+		it('goes with the activity half of an update that made the open itself', () => {
+			const entries = buildTranscriptPresentation([update('self', { tool_calls: [call], browser_chip: { host: 'github.com' } })], true);
+
+			expect(chips(entries)).toEqual(['fold:github.com', 'self:-']);
+			expect(entries[0]).toMatchObject({ items: [{ message: { metadata: { browser_chip: { host: 'github.com' } } } }] });
+		});
+
+		it('shows on an open block with nothing after it, live Steps included', () => {
+			const live = assistant({ id: 'live', seq: undefined, content: '', metadata: { turn_id: 'turn-2', browser_chip: { host: 'live.example' } } });
+			expect(chips(buildTranscriptPresentation([opener('open', 'github.com'), live], true, { turnId: 'turn-2' })))
+				.toEqual(['fold:live.example']);
+		});
+
+		it('is not lifted out of the rows outside Focus', () => {
+			const entries = buildTranscriptPresentation([opener('open', 'github.com'), update('tell')], false);
+			expect(chips(entries)).toEqual(['open:github.com', 'tell:-']);
+		});
+	});
+
 	it('keeps human messages and actionable system notices visible', () => {
 		const entries = buildTranscriptPresentation([
 			{ id: 'human', thread_id: 'thread', role: 'user', content: 'Please investigate.', metadata: {} },

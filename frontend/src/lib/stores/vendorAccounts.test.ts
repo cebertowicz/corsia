@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { addVendorAccount, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, type VendorAccount, vendorAccounts } from './vendorAccounts';
+import { addVendorAccount, cancelVendorSignin, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, startVendorSignin, type VendorAccount, vendorAccounts } from './vendorAccounts';
 
 describe('request ordering', () => {
 	const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -15,6 +15,17 @@ describe('request ordering', () => {
 		return { resolve, promise };
 	}
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); });
+
+	it('reports a failed account reload after a lost login starts', async () => {
+		vendorAccounts.set([account('codex')]);
+		vi.stubGlobal('fetch', vi.fn()
+			.mockResolvedValueOnce(response({ account_id: 'work', status: 'waiting', route: 'browser', cause: null }))
+			.mockResolvedValueOnce(response({ detail: 'inventory unavailable' }, 500)));
+		const result = await startVendorSignin('work');
+		expect(result.ok).toBe(true);
+		expect(result.signin?.status).toBe('waiting');
+		expect(result.error).toBeTruthy();
+	});
 
 	for (const provider of ['codex', 'claude-code']) {
 		it(`accepts ordinary current inventory for ${provider}`, async () => {
@@ -238,5 +249,22 @@ describe('stale read races', () => {
 	 resolveOld(response({ accounts: [ambient] }));
 	 await earlierRead;
 	 expect(get(vendorAccounts).map(row => row.id)).toContain('work');
+	});
+
+	it('a sign-in reload overtaken by a newer read is not reported as a failure', async () => {
+	 vendorAccounts.set([{ ...account('codex'), state: 'signed_out' as const }]);
+	 let resolveReload!: (reply: Response) => void;
+	 const fetch = vi.fn()
+	  .mockResolvedValueOnce(response({ account_id: 'work', status: 'cancelled', route: 'browser', cause: null }))
+	  .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveReload = resolve; }))
+	  .mockResolvedValueOnce(response({ accounts: [] }));
+	 vi.stubGlobal('fetch', fetch);
+	 const cancel = cancelVendorSignin('work');
+	 await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+	 expect((await loadVendorAccounts()).ok).toBe(true);
+	 resolveReload(response({ accounts: [account('codex')] }));
+	 const result = await cancel;
+	 expect(result.error).toBeUndefined();
+	 expect(get(vendorAccounts)).toEqual([]);
 	});
 });

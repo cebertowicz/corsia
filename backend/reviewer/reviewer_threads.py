@@ -12,6 +12,7 @@ from reviewer.review_comment_fetch import ReviewThreadState
 from reviewer.review_thread_lifecycle import (
     THREAD_ACTION_KEY,
     ReviewThreadAction,
+    StillRaisedFinding,
     _comment_order,
     _newest_active_comment,
     classify_with_thread_states,
@@ -109,7 +110,9 @@ def classify_findings(
     existing_comments: list[dict[str, Any]],
     *,
     review_thread_states: dict[int, ReviewThreadState] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[StillRaisedFinding],
+]:
     """Classify findings, using GitHub thread state when a complete snapshot exists."""
     if review_thread_states is None:
         return _classify_by_markers(new_findings, existing_comments)
@@ -121,7 +124,9 @@ def classify_findings(
 def _classify_by_markers(
     new_findings: list[dict[str, Any]],
     existing_comments: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[StillRaisedFinding],
+]:
     """Keep legacy publication behavior when GitHub thread state is unavailable."""
     new_by_fingerprint = _group_by_fingerprint(new_findings)
     finding_comments: dict[str, list[dict[str, Any]]] = {}
@@ -159,10 +164,12 @@ def _classify_by_markers(
         comment for fingerprint, comment in active.items()
         if fingerprint not in new_by_fingerprint
     ]
-    unchanged_count = sum(
-        1 for fingerprint in new_by_fingerprint if fingerprint in active
-    )
-    return new_threads, resolve_replies, unchanged_count
+    still_raised = [
+        StillRaisedFinding(new_by_fingerprint[fingerprint], active[fingerprint])
+        for fingerprint in new_by_fingerprint
+        if fingerprint in active
+    ]
+    return new_threads, resolve_replies, still_raised
 
 
 def classify_review_findings(
@@ -174,14 +181,16 @@ def classify_review_findings(
     head_sha: str,
     *,
     approach_reset: bool = False,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[StillRaisedFinding],
+]:
     """Classify a completed review using lifecycle state from its exact head."""
     thread_states = exact_head_thread_states(
         pr_number, repo, head_sha, existing_comments,
     )
     has_exact_head_snapshot = thread_states is not None
     kwargs = {"review_thread_states": thread_states} if has_exact_head_snapshot else {}
-    new_threads, resolve_replies, unchanged_count = classify_findings(
+    new_threads, resolve_replies, still_raised = classify_findings(
         raw_findings, existing_comments, **kwargs,
     )
     if not has_exact_head_snapshot:
@@ -189,11 +198,11 @@ def classify_review_findings(
             comment for comment in resolve_replies if comment.get("issue_url")
         ]
     if not approach_reset:
-        return new_threads, resolve_replies, unchanged_count
-    grouped_new, _, grouped_unchanged = classify_findings(
+        return new_threads, resolve_replies, still_raised
+    grouped_new, _, grouped_still_raised = classify_findings(
         grouped_findings, existing_comments, **kwargs,
     )
-    return grouped_new, resolve_replies, grouped_unchanged
+    return grouped_new, resolve_replies, grouped_still_raised
 
 
 

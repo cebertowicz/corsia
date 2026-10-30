@@ -4,6 +4,8 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import AddRepoModal from './AddRepoModal.svelte';
 	import RepoRow, { type BranchCatalog, type Repo } from './RepoRow.svelte';
+	import SettingsGroup from './SettingsGroup.svelte';
+	import { Button } from '$lib/components/ui';
 	import { token } from '$lib/stores/auth';
 	import { toasts } from '$lib/stores/toast';
 	import { plainResponseError } from '$lib/plainError';
@@ -248,13 +250,11 @@
 
 </script>
 
-<section class="sec">
-	<div class="sec-cap">Repositories</div>
-
+<SettingsGroup label="Repositories" anchor="project-repositories">
 	{#if loading}
-		<div class="hint">Loading…</div>
+		<p class="hint">Loading…</p>
 	{:else if repos.length === 0}
-		<div class="hint">No repositories yet — a project doesn't need one.</div>
+		<p class="hint">No repositories. A project doesn’t need one.</p>
 	{:else}
 		{#each repos as r (r.name)}
 			<RepoRow
@@ -271,8 +271,8 @@
 		{/each}
 	{/if}
 
-	<button class="add" onclick={openAdd}>＋ Add repository</button>
-</section>
+	<div class="actions"><Button size="sm" variant="ghost" onclick={openAdd}>Add repository</Button></div>
+</SettingsGroup>
 
 <AddRepoModal
 	open={addOpen}
@@ -316,20 +316,6 @@
 />
 
 <style>
-	.sec {
-		border: 1px solid var(--border-subtle); border-radius: var(--lg-card-radius);
-		background: var(--bg-secondary); padding: 16px 18px;
-		display: flex; flex-direction: column; gap: 10px;
-	}
-	.sec-cap {
-		font-size: var(--text-caption); font-weight: 700; text-transform: uppercase;
-		letter-spacing: 0.1em; color: var(--text-tertiary);
-	}
-	.hint { font-size: var(--text-subhead); color: var(--text-tertiary); padding: 2px 0; }
-	.add {
-		align-self: flex-start; background: none; border: 1px dashed var(--border);
-		border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);
-		font-size: var(--text-subhead); padding: 6px 12px; font-family: inherit;
-	}
-	.add:hover { color: var(--accent-text); border-color: var(--accent); }
+	.hint { margin: 0; padding: 0 var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
+	.actions { display: flex; margin-top: var(--space-1); }
 </style>

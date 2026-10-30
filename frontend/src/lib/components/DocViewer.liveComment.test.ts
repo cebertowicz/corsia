@@ -36,7 +36,7 @@ beforeEach(() => {
 	connectionState.set('connected'); stop = startLiveDocuments();
 	api.fetchContent.mockResolvedValue({ text: 'disk copy', writable: true, artifact: { id: 'artifact' }, freshness: null });
 	api.fetchRevision.mockResolvedValue({ exists: true, writable: true, artifact_id: 'artifact', freshness: null });
-	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } });
+	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 	api.postComment.mockImplementation(async (_artifact, fields) => ({ id: fields.client_id, artifact_id: 'artifact',
 		body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
 		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [] }));
@@ -81,6 +81,93 @@ async function answer(ask: Record<string, any>, fields = {}) {
 		reserved: true, ...fields });
 }
 const released = () => wire.frames.filter(frame => frame.type === 'doc_release');
+it('collapses the selected text before returning focus on dismissal', async () => {
+	vi.stubGlobal('innerWidth', 1440);
+	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+	await open(); await select(); await compose();
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	expect(view.state.selection.main.empty).toBe(false);
+	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+	expect(document.activeElement).toBe(view.contentDOM);
+	expect(view.state.selection.main.empty).toBe(true);
+	view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+	expect(view.state.doc.toString()).toBe('alpha bet gamma');
+});
+it('keeps an open draft focused when a live session is replaced', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	connectionState.set('disconnected'); connectionState.set('connected');
+	await vi.waitFor(() => expect(wire.frames.filter(frame => frame.type === 'doc_open').length).toBeGreaterThan(1));
+	const ask = wire.frames.findLast(frame => frame.type === 'doc_open')!;
+	const replacement = new Y.Doc(); replacement.getText('text').insert(0, 'NEW alpha beta gamma');
+	emit('doc_opened', { type: 'doc_opened', live: true, writable: true, artifact_id: 'artifact', store_id: 'new-store',
+		request_id: ask.request_id, update: encodeUpdate(Y.encodeStateAsUpdate(replacement)), vector: encodeUpdate(Y.encodeStateVector(replacement)), pending: false, held: null });
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+	input.value += ' more'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	expect(get(commentDraft)?.body).toBe('Keep my body more');
+	expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma');
+	replacement.destroy();
+});
+it.each([
+	['reply', { replies: [{ id: 'reply', author: 'agent', author_kind: 'agent', body: 'A reply', created_at: '2026-10-07T00:00:00Z' }] }],
+	['resolution', { resolved: true }],
+	['suggestion creation', { replacement: 'A revised alpha' }],
+	['suggestion acceptance', { replacement: 'A revised alpha', decision: 'accepted' }],
+	['new comment', { id: 'new-comment', body: 'New agent comment' }],
+])('keeps a draft focused when a comment refresh brings an agent %s', async (_case, changes) => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	const row = { id: 'other', artifact_id: 'artifact', body: 'Earlier comment', anchor_text: 'alpha', from_off: 0, to_off: 5,
+		author: 'agent', author_kind: 'agent', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [], ...changes };
+	api.fetchComments.mockResolvedValue({ comments: [row], feedback: { open_count: 1, owner_label: null, undelivered_batches: [] } });
+	const count = api.fetchComments.mock.calls.length;
+	emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: 'artifact', comment_id: row.id });
+	await vi.waitFor(() => expect(api.fetchComments.mock.calls.length).toBeGreaterThan(count));
+	await vi.waitFor(() => expect(get(docComments).artifact?.some(comment => comment.id === row.id)).toBe(true));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
+it.each([
+	['inside', (text: Y.Text) => text.insert(8, 'X')],
+	['at the start', (text: Y.Text) => text.insert(6, 'X')],
+	['at the end', (text: Y.Text) => text.insert(10, 'X')],
+])('keeps focus and draft when an agent edits %s the selection', async (_case, edit) => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus(); remote(edit);
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('X'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
+it('keeps an open draft focused while an agent edits elsewhere', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	remote(text => text.insert(0, 'NEW '));
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	input.value += ' more'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	expect(get(commentDraft)?.body).toBe('Keep my body more');
+	expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma');
+});
+it('keeps the focused draft and explains a changed selection after an agent deletes it', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	remote(text => text.delete(6, 4));
+	await vi.waitFor(() => expect(document.querySelector('.selection-reason')?.textContent).toContain('text you selected changed'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
 it('captures original selection before Comment and submits its reserved range after remote prefix', async () => {
 	await open(); await select(); remote(text => text.insert(0, 'NEW ')); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
@@ -104,7 +191,9 @@ it('retains body across outside-close/reselection, rejects deleted identity and 
 	await vi.waitFor(() => expect(submit.disabled).toBe(true));
 	const reason = submit.getAttribute('aria-describedby');
 	expect(document.getElementById(reason!)?.textContent).toContain('your draft will carry over');
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	await select(0, 5); host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
@@ -120,7 +209,9 @@ it('highlights the selected text only while its composer is open: a close keeps 
 	const marked = () => [...host.querySelectorAll('.cm-comment-pending')].map(node => node.textContent).join('');
 	await open(); await select(); await compose();
 	expect(marked()).toBe('beta');
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	expect(marked()).toBe('');
@@ -155,7 +246,9 @@ it('cancels the positions wait on outside close and ignores its late reply', asy
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	await answer(ask);
 	await Promise.resolve(); await Promise.resolve();
@@ -189,7 +282,9 @@ it('after a store mismatch, reopening the composer and submitting sends one rese
 	emit('doc_error', { type: 'doc_error', artifact_id: 'artifact', store_id: 'other', request_id: refused.request_id, kind: 'store_mismatch' });
 	await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('.composer .submit')!.disabled).toBe(false));
 	expect(api.postComment).not.toHaveBeenCalled();
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	await select(); host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body'));
@@ -316,4 +411,20 @@ it('keeps the body and enabled Comment after HTTP refusal, then dismisses its to
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(dismiss).toHaveBeenCalledWith('refusal');
 	expect(get(commentDraft)).toBeNull();
+});
+it('returns focus to the editor without scrolling when the comment popover is dismissed', async () => {
+	// A bare element focus() makes WebKit scroll to the start of the document when the DOM selection is gone;
+	// CodeMirror's focus() restores its own selection and keeps the scroll position.
+	vi.stubGlobal('innerWidth', 1440);
+	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 0, right: 10, top: 0, bottom: 10 });
+	await open();
+	docComments.set({ artifact: [{ id: 'c1', from: 6, to: 10, anchor: 'beta', author: 'you', text: 'note', at: '2026-10-07T00:00:00Z', resolved: false, replies: [] }] });
+	flushSync();
+	await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
+	EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!.dispatch({ selection: { anchor: 8 } }); flushSync();
+	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
+	const viewFocus = vi.spyOn(EditorView.prototype, 'focus');
+	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+	expect(document.querySelector('[data-popover]')).toBeNull();
+	expect(viewFocus).toHaveBeenCalledOnce();
 });

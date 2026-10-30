@@ -28,7 +28,7 @@ vi.mock('$lib/product_events', () => ({
 // The picker's Local group status reads model sources; these tests count only model-switch requests.
 vi.mock('$lib/stores/localPickerStatus', async () => {
 	const { readable } = await import('svelte/store');
-	return { localStatus: readable(null), retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {} };
+	return { localStatus: readable(null), canAddLocalModel: readable(false), canSetUpLocalModel: readable(false), neverLocalHost: readable(false), retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {} };
 });
 
 const DISPATCH_ID = 'omlx@ns-test/Model-9B-mlx-mxfp8';
@@ -101,6 +101,7 @@ function mountControls() {
 			hasMessageToSend: false,
 			canSendToModel: true,
 			queueUntilSwitch: false,
+			onQueueAfterTurn: () => {},
 			onAttachFile: () => {},
 			onAttachCamera: () => {},
 			onAttachPhotos: () => {},

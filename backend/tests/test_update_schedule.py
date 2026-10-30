@@ -233,9 +233,10 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     from unittest.mock import AsyncMock
 
     from api import restart_shell, settings_restart, system_admin
-    from infra import accounts, product_events, token_admin
+    from infra import accounts, config, product_events, token_admin
     from infra.database import get_db
 
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     restart_log = tmp_path / "restart.log"
     emitted_events = []
     minted_tokens = []
@@ -292,7 +293,7 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     assert row is not None
     assert token not in " ".join(str(value) for value in row)
     assert token not in repr(emitted_events)
-    assert token.encode() not in restart_log.read_bytes()
+    assert token.encode() not in settings_restart._update_log_path(operation_id).read_bytes()
 
 
 def test_drain_cap_and_service_token_cover_the_full_authenticated_shell_span(monkeypatch):
@@ -538,6 +539,62 @@ def test_due_tonight_claims_once_before_the_scheduled_launch(isolated_db, monkey
     assert get_update_schedule()["tonight_at"] is None
     assert launches == [("tonight", 1957)]
     assert asyncio.run(_run_scheduled_update_if_due(now + timedelta(minutes=5))) is None
+    assert launches == [("tonight", 1957)]
+
+
+def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, monkeypatch, tmp_path):
+    import asyncio
+    import json
+
+    from api import system_admin
+    from automation import update_schedule
+    from infra import accounts, update_status
+    from infra.database import get_db
+    from infra.settings import get_update_schedule
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch({"tonight": True}, now=scheduled_at, user_id="steve")
+    monkeypatch.setenv("BACKEND_PORT", "1957")
+    monkeypatch.setattr(accounts, "get_user", lambda _user_id: {"id": "steve"})
+    bundle = tmp_path / "CORSIA.app"
+    resource = bundle / "Contents" / "Resources" / "updater-endpoint.json"
+    resource.parent.mkdir(parents=True)
+    resource.write_text('{"endpoint": "https://updates.example.test/latest.json"}')
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"version": "1.1.0", "platforms": {"darwin-aarch64": {}}}).encode()
+
+    # This test supplies a fully stubbed packaged-install feed and exercises
+    # real-install scheduling behavior, not test-environment isolation.
+    monkeypatch.setenv("CORSIA_TEST_MODE", "0")
+    update_status.invalidate_cache()
+    monkeypatch.setattr(update_status.platform_paths, "app_bundle_root", lambda: bundle)
+    monkeypatch.setattr(update_status, "_bundle_current_version", lambda: "1.0.0")
+    monkeypatch.setattr(update_status, "_tauri_platform_key", lambda: "darwin-aarch64")
+    monkeypatch.setattr(update_status, "urlopen", lambda _endpoint, timeout: Response())
+    launches = []
+
+    async def launch(_user, _token, trigger, _version, *, port, claim):
+        launches.append((trigger, port))
+        connection = get_db()
+        try:
+            assert claim(connection)
+        finally:
+            connection.close()
+        return "a" * 32, object()
+
+    monkeypatch.setattr(system_admin, "launch_update", launch)
+
+    assert asyncio.run(update_schedule.run_scheduled_tick(now)) == "a" * 32
+    assert get_update_schedule()["tonight_at"] is None
     assert launches == [("tonight", 1957)]
 
 

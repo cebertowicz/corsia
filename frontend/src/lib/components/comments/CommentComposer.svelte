@@ -1,27 +1,30 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { resizeTextInputToContent } from '$lib/textInputResize';
+	import { autosize } from '$lib/actions/autosize';
+	import Field from '$lib/components/ui/Field.svelte';
+	import CommentQuote from './CommentQuote.svelte';
 
-	let { quote, label = '', body = '', disabledReason = '', onBody, onSubmit, onCancel }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment…', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
 		body?: string;
+		fieldLabel?: string;
+		placeholder?: string;
 		disabledReason?: string;
+		submitLabel?: string;
+		submittingLabel?: string;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string) => Promise<void>;
 		onCancel: () => void;
 	} = $props();
 	let text = $state(untrack(() => body));
 	const explanationId = $props.id();
-	let textarea = $state<HTMLTextAreaElement>();
 	let posting = $state(false);
 	$effect(() => {
 		text;
 		onBody?.(text);
-		if (textarea) resizeTextInputToContent(textarea, 150);
 	});
-	const snippet = (value: string) => value.length > 64 ? value.slice(0, 64) + '…' : value;
 	async function submit() {
 		const value = text.trim();
 		if (!value || posting || disabledReason) return;
@@ -37,25 +40,24 @@
 </script>
 
 <div class="composer">
-	<div class="quote" class:label>{label || `“${snippet(quote)}”`}</div>
-	<textarea data-drawer-autofocus rows="2" placeholder="Comment…" bind:this={textarea} bind:value={text} onkeydown={onKey}></textarea>
+	<CommentQuote {quote} {label} />
+	<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
+		<textarea id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+	</Field>
 	<div class="actions">
 		<button class="cancel" onclick={onCancel}>Cancel</button>
-		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? 'Posting…' : 'Comment'}</button>
+		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? submittingLabel : submitLabel}</button>
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
 </div>
 
 <style>
-	.composer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-wash); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
-	.quote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent); padding-left: 8px; color: var(--text-secondary); font-size: var(--text-caption); font-style: italic; }
-	.quote.label { font-style: normal; }
-	textarea { box-sizing: border-box; width: 100%; min-height: 48px; max-height: 150px; resize: vertical; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: var(--text-footnote); }
-	textarea:focus { outline: none; border-color: var(--accent); }
+	.composer { display: flex; flex-direction: column; gap: 8px; }
 	.actions { display: flex; justify-content: flex-end; gap: 8px; }
 	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
 	.submit:disabled { opacity: .4; cursor: default; }
+	@media (pointer: coarse) { .actions button { min-width: var(--touch-target); min-height: var(--touch-target); } }
 	.selection-reason { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

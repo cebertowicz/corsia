@@ -19,9 +19,11 @@ from host_access.refusal_messages import (
     normalization_refusal,
 )
 from infra.project_repo_policy import RepoPolicy
+import tools.shell_sandbox as shell_sandbox
 from tools.host_access_external import external_agent_sandbox_rules
 from tools.base_git_paths import base_branch_selector_paths, base_git_control_paths, base_git_identity_paths
 from tools.host_path_policy import current_protected_host_path_policy
+from tools.protected_path_rules import DENIED_EXECUTABLES
 from tools.repo_worktree_guidance import branch_pinned_worktree_guidance
 from tools.shell_argv import command_tokens, direct_argv
 from tools.sandbox_config import (
@@ -35,9 +37,10 @@ from tools.sandbox_config import (
     registered_repo_for_path,
     repo_worktree_root,
 )
+from tools.sandbox_git import sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
-from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, shell_env_pass_names
+from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, agent_tool_ro_dirs, shell_env_pass_names
 
 _WORKTREE_FLAGS_WITH_VALUE = {
     "-b",
@@ -590,7 +593,7 @@ def _validate_worktree_target(target: str, cwd: str) -> str | None:
 
 
 def _sandbox_path(path: Path) -> str:
-    return str(path.resolve(strict=False)).replace("\\", "\\\\").replace('"', '\\"')
+    return sandbox_literal(path.resolve(strict=False))
 
 
 def _direct_git_command(
@@ -707,10 +710,9 @@ def pinned_repo_sandbox_profile(
             or not policy.source_binding_valid
         ):
             rules.append(f'(deny file-write* (subpath "{_sandbox_path(repo)}"))')
-            for worktree in worktrees:
+            for worktree in worktrees:  # resolved roots proved by this request's listing
                 rules.append(
-                    f'(allow file-read* file-write* (subpath '
-                    f'"{_sandbox_path(worktree)}"))'
+                    f'(allow file-read* file-write* (subpath "{sandbox_literal(worktree)}"))'
                 )
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
@@ -808,8 +810,8 @@ def pinned_repo_sandbox_profile(
         if repo != worktree_control_repo:
             rules.extend(
                 f'(deny file-write* '
-                f'(literal "{_sandbox_path(worktree / ".git")}"))'
-                for worktree in verified_worktrees_by_repo.get(repo, ())
+                f'(literal "{sandbox_literal(worktree / ".git")}"))'
+                for worktree in verified_worktrees_by_repo.get(repo, ())  # .git proved a plain file
             )
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
@@ -988,7 +990,6 @@ def safehouse_argv(
     leased: bool = False,
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
-    gws_home: Path | None = None,
     thread_id: str | None = None,
     policies: list[RepoPolicy] | None = None,
 ) -> list[str]:
@@ -1006,9 +1007,9 @@ def safehouse_argv(
         # untrusted below, so that file is not live lease authority.
         argv.append("--allow-workdir-config-writes")
     else:
-        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id, policies=policies), *([gws_home] if gws_home else [])]))):
+        if rw := ":".join(map(str, _canonical_paths(get_sandbox_add_dirs_rw(thread_id, policies=policies)))):
             argv.append(f"--add-dirs={rw}")
-        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
+        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account), *agent_tool_ro_dirs()]
         if ro := ":".join(map(str, _canonical_paths(read_only))):
             argv.append(f"--add-dirs-ro={ro}")
     argv.extend(
@@ -1035,6 +1036,7 @@ def _terminal_boundary_profile(
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
     thread_id: str | None = None,
+    granted_roots: tuple[Path, ...] = (),
 ) -> str:
     """Render the protected or reviewed lease boundary."""
     generated_profile = profile_path.expanduser().resolve(strict=False)
@@ -1045,21 +1047,11 @@ def _terminal_boundary_profile(
         # the Claude Code and Codex launch seams, not by mutable path matching.
         direct_denied_executables: list[Path] = []
     else:
-        direct_denied_executables = _canonical_paths(
-            [
-                Path("/usr/bin/sudo"),
-                Path("/usr/bin/su"),
-                Path("/usr/local/bin/doas"),
-                Path("/opt/homebrew/bin/doas"),
-                Path("/sbin/shutdown"),
-                Path("/sbin/reboot"),
-                Path("/sbin/halt"),
-                Path("/sbin/poweroff"),
-                Path("/usr/bin/pmset"),
-            ]
-        )
+        direct_denied_executables = _canonical_paths(list(DENIED_EXECUTABLES))
     path_policy = current_protected_host_path_policy(
-        generated_profile=generated_profile, safehouse_paths=safehouse_paths
+        generated_profile=generated_profile,
+        safehouse_paths=safehouse_paths,
+        granted_roots=granted_roots,
     )
     lines = [
         ";; CORSIA LEASE INVARIANTS" if leased
@@ -1132,6 +1124,7 @@ def execution_envelope_profile(
         external_agent=external_agent,
         agent_account=agent_account,
         thread_id=thread_id,
+        granted_roots=tuple(get_sandbox_add_dirs_rw(thread_id, policies=policies)) if policies is not None and not leased else (),
     )
     if leased:
         return "(allow default)\n" + terminal_rules
@@ -1175,8 +1168,7 @@ def safehouse_version_error() -> str | None:
 
 
 def is_sandbox_denial(
-    stderr: str,
-    is_available: AvailabilityCheck = is_safehouse_available,
+    stderr: str, is_available: AvailabilityCheck = is_safehouse_available,
 ) -> bool:
-    """Return true when stderr looks like a Safehouse filesystem denial."""
-    return bool(stderr) and "Operation not permitted" in stderr and is_available()
+    """Recognize platform filesystem denial text after a sandboxed launch."""
+    return shell_sandbox.is_denial(stderr, is_available)

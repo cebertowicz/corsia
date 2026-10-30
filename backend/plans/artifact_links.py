@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plans import service
+from plans import hierarchy, node_states, operator_display_state, service
 from plans.user_ask import ask_attention_state_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
@@ -17,6 +17,34 @@ _ATTENTION_STATE_SQL = f"""CASE
 END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
     {_ATTENTION_STATE_SQL} AS attention_state"""
+
+
+def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
+    """Raised non-ask attention artifacts whose every open-node link is paused.
+
+    A document or image ask is never named here: ``ask_attention_state_sql``
+    owns its deferral, and ``registry.attention.list_raised`` already drops one
+    that is not raised. For anything else, one link on an open node that is not
+    paused keeps the artifact raised; a link on a settled node never counts.
+    """
+    identities = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
+    deferred: set[str] = set()
+    for start in range(0, len(identities), hierarchy._ID_CHUNK):
+        chunk = identities[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows = db.execute(
+            f"""SELECT link.artifact_id FROM plan_node_artifact_links link
+                  CROSS JOIN artifact_identities ident ON ident.id=link.artifact_id
+                  CROSS JOIN plan_nodes node ON node.id=link.node_id
+                  CROSS JOIN plans plan ON plan.id=node.plan_id
+                 WHERE link.role='attention' AND link.artifact_id IN ({marks})
+                   AND NOT {askable_sql('ident')} AND {node_states.open_sql('node')}
+                 GROUP BY link.artifact_id
+                HAVING MIN({operator_display_state.ask_deferred_sql('node.id', plan_state_sql='plan.state')})=1""",
+            chunk,
+        ).fetchall()
+        deferred.update(str(row["artifact_id"]) for row in rows)
+    return deferred
 
 
 def raised_attention_nodes(node_ids, *, db) -> set[str]:

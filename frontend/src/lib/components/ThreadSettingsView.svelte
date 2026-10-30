@@ -38,17 +38,17 @@
 	const projectId = $derived(conductor ? scopeTarget?.project_id ?? null : $activeThread?.project_id ?? null);
 	const agentScope = $derived(projectId ? 'project' : 'workspace');
 	// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
-	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
+	const designatedName = $derived(scopeTarget?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 </script>
 
 <div class="ts-scroll">
 	<div class="ts">
 		{#if conductor && !scopeTarget}
-			<p role="status">{conductorLoading ? `Loading ${designatedName === 'CORSIA' ? 'CORSIA' : 'conductor'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
+			<p role="status">{conductorLoading ? `Loading ${$uiScope ? 'conductor' : 'CORSIA'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
 		{:else}
 		<section class="sec">
 			<div class="sec-cap">Context files</div>
-			<p class="sec-hint">Files pinned to this thread.</p>
+			<p class="sec-hint">Files pinned to this chat.</p>
 			<ThreadContextPanel
 				threadId={settingsThreadId}
 				hiddenThread={scopeTarget ? { id: scopeTarget.thread_id, title: scopeTarget.title ?? designatedName, project_id: scopeTarget.project_id ?? null, bootloader_files: scopeTarget.bootloader_files ?? null } : null}
@@ -58,14 +58,14 @@
 		</section>
 
 		<section class="sec">
-			<div class="sec-cap">Thread skills</div>
-			<p class="sec-hint">Skills local to this thread and inherited by its child threads.</p>
+			<div class="sec-cap">Chat skills</div>
+			<p class="sec-hint">Skills local to this chat and inherited by its child chats.</p>
 			<SkillScopePanel
 				scope="thread"
 				threadId={settingsThreadId}
 				projectId={projectId}
-				scopeLabel={`Thread: ${conductor ? designatedName : $activeThread?.title ?? 'Current thread'}`}
-				inheritanceHint="This thread inherits global, project, and ancestor-thread skills. Same-name local skills override inherited ones."
+				scopeLabel={conductor ? designatedName : $activeThread?.title ?? 'this chat'}
+				inheritanceHint="Includes skills from all projects, this project and parent chats. A skill with the same name here takes priority."
 				onBrowseSkills={onBrowseSkills}
 				onOpenSkill={() => threadSettingsOpen.set(false)}
 			/>
@@ -74,7 +74,7 @@
 		{#if !conductor}
 		<section class="sec">
 			<div class="sec-cap">Agent</div>
-			<p class="sec-hint">Promote this thread to a {agentScope} Agent when it has a clear responsibility.</p>
+			<p class="sec-hint">Promote this chat to a {agentScope} agent when it has a clear responsibility.</p>
 			<ThreadAgentPanel thread={$activeThread ?? null} />
 		</section>
 		{/if}

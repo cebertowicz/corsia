@@ -8,8 +8,9 @@
  * the thread has been shown for 3 s in a visible page with user input in the
  * last 10 min. Leaving sends `background` at once (tagged `hidden` for a
  * hidden page; the server applies the 30 s hidden grace), and 10 min without
- * input sends `idle` with how long ago the last input was. Frames carry state,
- * never client clock times, and are re-sent on every reconnect.
+ * input sends `idle` with how long ago the last input was. Foreground frames
+ * add their focus state for Measurement only; shared presence stays unchanged.
+ * Frames carry state, never client clock times, and are re-sent on every reconnect.
  *
  * Presence stays on the CORSIA server: this module never sends anything to
  * product analytics.
@@ -30,7 +31,7 @@ export type PresenceFrame = {
 	surface: PresenceSurface;
 	thread_id: string;
 } & (
-	| { state: 'foreground' }
+	| { state: 'foreground'; focused?: boolean }
 	| { state: 'background'; reason?: 'hidden' }
 	| { state: 'idle'; idle_for_ms: number }
 	| {
@@ -45,6 +46,7 @@ export interface PresenceEnv {
 	/** The page input clock's last input; -Infinity before any. */
 	lastInputAt(): number;
 	isVisible(): boolean;
+	isFocused(): boolean;
 	setTimer(fn: () => void, ms: number): unknown;
 	clearTimer(handle: unknown): void;
 }
@@ -58,6 +60,8 @@ export interface PresenceTracker {
 	visibilityChanged(): void;
 	/** The page input clock moved: re-read it. */
 	input(): void;
+	/** The page's focus target changed: update Measurement without releasing presence. */
+	focusChanged(): void;
 	/** A new socket authenticated: re-send the current claim. */
 	reconnected(): void;
 	/** Update document delivery facts only when the composed canvas changes them. */
@@ -79,6 +83,7 @@ export function createPresenceTracker(env: PresenceEnv): PresenceTracker {
 	let dwellTimer: unknown = null;
 	let idleTimer: unknown = null;
 	let documentOpen: DocumentOpenCapability | null = null;
+	let focused: boolean | null = null;
 
 	const frame = (extra: Record<string, unknown>): PresenceFrame => ({
 		type: 'presence',
@@ -120,6 +125,14 @@ export function createPresenceTracker(env: PresenceEnv): PresenceTracker {
 		}));
 	}
 
+	function publishFocus() {
+		if (!claimed || !target) return;
+		const next = env.isFocused();
+		if (focused === next) return;
+		focused = next;
+		env.send(frame({ state: 'foreground', focused: next }));
+	}
+
 	function tryClaim() {
 		dwellTimer = null;
 		if (claimed || !target || !env.isVisible() || !inputIsRecent() || shownSince === null) return;
@@ -129,7 +142,8 @@ export function createPresenceTracker(env: PresenceEnv): PresenceTracker {
 			return;
 		}
 		claimed = true;
-		env.send(frame({ state: 'foreground' }));
+		focused = null;
+		publishFocus();
 		publishDocumentOpenCapability();
 		armIdle();
 	}
@@ -140,6 +154,7 @@ export function createPresenceTracker(env: PresenceEnv): PresenceTracker {
 		dwellTimer = idleTimer = null;
 		if (claimed && target) env.send(frame({ state: 'background', ...extra }));
 		claimed = false;
+		focused = null;
 	}
 
 	return {
@@ -167,12 +182,19 @@ export function createPresenceTracker(env: PresenceEnv): PresenceTracker {
 			if (dwellTimer === null) tryClaim();
 		},
 		input() {
-			if (claimed) return armIdle();
+			if (claimed) {
+				publishFocus();
+				return armIdle();
+			}
 			if (dwellTimer === null) tryClaim();
+		},
+		focusChanged() {
+			publishFocus();
 		},
 		reconnected() {
 			if (!claimed || !target) return;
-			env.send(frame({ state: 'foreground' }));
+			focused = null;
+			publishFocus();
 			publishDocumentOpenCapability();
 		},
 		updateDocumentOpenCapability(capability) {
@@ -206,6 +228,11 @@ function browserEnv(): PresenceEnv {
 		now: () => Date.now(),
 		lastInputAt: lastUserInputAt,
 		isVisible: () => document.visibilityState === 'visible',
+		// hasFocus() stays true while an embedded frame holds focus and turns false once
+		// another app does; activeElement does not change on an app switch, so it is not read.
+		isFocused: () => document.visibilityState === 'visible' && (
+			document.hasFocus() || /Android.*Mobile|iPhone|iPod/i.test(navigator.userAgent)
+		),
 		setTimer: (fn, ms) => setTimeout(fn, ms),
 		clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 	};
@@ -216,6 +243,8 @@ function ensureBrowserTracker(): PresenceTracker | null {
 	if (typeof document === 'undefined' || typeof window === 'undefined') return null;
 	const tracker = createPresenceTracker(browserEnv());
 	document.addEventListener('visibilitychange', () => tracker.visibilityChanged());
+	window.addEventListener('focus', () => tracker.focusChanged());
+	window.addEventListener('blur', () => setTimeout(() => tracker.focusChanged(), 0));
 	onUserInput(() => tracker.input());
 	connectionState.subscribe((stateNow) => {
 		if (stateNow === 'connected') tracker.reconnected();

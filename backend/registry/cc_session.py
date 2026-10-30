@@ -1,4 +1,8 @@
-"""Atomic ownership of one Claude Code provider identity per CORSIA thread."""
+"""Atomic ownership of one Claude Code provider identity per CORSIA thread.
+
+Each launch stores its description (``claude_invocation``) on the session
+record. The thread row owns confinement for subsequent launches.
+"""
 
 from __future__ import annotations
 
@@ -43,6 +47,7 @@ def persist_cc_session(
             if invocation is not None:
                 from subagents.cc_invocation import claude_invocation_metadata
 
+                # Describes this process; the thread row owns future confinement.
                 metadata["claude_invocation"] = claude_invocation_metadata(invocation)
             if checkpoint_generation_id is not None:
                 metadata["checkpoint_generation_id"] = checkpoint_generation_id

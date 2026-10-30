@@ -29,7 +29,7 @@ def _poller_env(isolated_db, monkeypatch):
     from infra.settings import set_setting
 
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     monkeypatch.setattr(poller, "_status", {
         "state": "starting", "reason": None, "last_success_at": None, "last_error": None,
         "skipped_threads": 0, "dropped_notifications": 0,
@@ -65,22 +65,18 @@ async def _settle_dispatch() -> None:
 
 
 async def _post_webhook(event_type: str, payload: dict, delivery_id: str):
-    from api.webhooks import github_webhook
+    import httpx
+    from main import app
 
     raw = json.dumps(payload).encode()
-
-    class _Request:
-        headers = {
-            "X-GitHub-Event": event_type, "X-GitHub-Delivery": delivery_id,
-            "X-Hub-Signature-256": _make_signature(raw),
-        }
-
-        async def body(self):
-            return raw
-
-    response = await github_webhook(_Request())
+    headers = {
+        "X-GitHub-Event": event_type, "X-GitHub-Delivery": delivery_id,
+        "X-Hub-Signature-256": _make_signature(raw),
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhooks/github", content=raw, headers=headers)
     await _settle_dispatch()
-    return response
+    return response.json()
 
 
 async def _poll(gh: FakeGh) -> int:
@@ -99,11 +95,15 @@ def _delivery_rows() -> list[dict]:
     )]
 
 
-def test_every_github_call_is_a_read():
+@pytest.mark.parametrize("through_broker", [False, True], ids=["runner", "read_broker"])
+def test_every_github_call_is_a_read(through_broker):
+    from connections.github_broker import GithubReadBroker
+
     gh = FakeGh()
     gh.issue_comments = [comment_object(501)]
     gh.review_comments = [comment_object(601)]
-    asyncio.run(_poll(gh))
+    # The broker refuses a write by raising, which fails the poll.
+    asyncio.run(_poll(GithubReadBroker(gh) if through_broker else gh))
     assert gh.api_calls(), "the poll made no GitHub reads"
     for call in gh.api_calls():
         assert call[:4] == ["api", "--method", "GET", "-i"]
@@ -111,7 +111,8 @@ def test_every_github_call_is_a_read():
         assert "notifications/threads" not in call[-1]
 
 
-def test_polled_comment_routes_exactly_as_the_webhook_payload():
+def test_polled_comment_routes_exactly_as_the_webhook_payload(monkeypatch):
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "reviewer-human")
     owner = mk_session("own-1")
     register_pr(REPO, PR, owner)
     comment = comment_object(501)
@@ -133,7 +134,12 @@ def test_polled_comment_routes_exactly_as_the_webhook_payload():
 
     webhook_calls, polled_calls = asyncio.run(_run())
     assert len(webhook_calls) == 2
-    assert polled_calls == webhook_calls
+    # Each polled comment dispatches as its own background task, so the two
+    # deliveries may finish in either order; only their content must match.
+    def by_comment(call):
+        return call[3]["item_version"]
+
+    assert sorted(polled_calls, key=by_comment) == sorted(webhook_calls, key=by_comment)
     assert {call[0] for call in polled_calls} == {owner}
 
 

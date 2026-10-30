@@ -19,14 +19,12 @@ import json
 from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
-from api.cost_identity import IDENTITY_GROUP, ModelIdentity, identity_columns, identity_join
 from api.measurement_chain import chain_ctes
-from api.measurement_cost import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL, classify_usage_rows, endpoint_listings
+from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
-
-_BUCKETS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens", "cache_read_tokens")
-_ADMITTED = ",".join(f"SUM(CASE WHEN admission='ok' THEN {bucket} ELSE 0 END) AS {bucket}" for bucket in _BUCKETS)
+from core.cost_identity import ModelIdentity
+from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 
 
 def _bound(params: dict[str, Any], task_ids: Collection[str] | None) -> dict[str, Any]:
@@ -40,39 +38,33 @@ _CHAIN_ROWS = "(SELECT o.id AS task_id,o.period,o.settled_at,c.node_id FROM outc
 
 
 def _cost_sql(chain_rows: str) -> str:
-    """The grouped usage read over ``chain_rows``: calls are grouped on what classifies them first,
-    and the context manifest is joined afterwards, onto those few groups instead of onto every call."""
-    sums = ",".join(f"SUM(u.{bucket}) AS {bucket}" for bucket in _BUCKETS)
-    return f"""
-        SELECT period,task_id,{IDENTITY_GROUP},admission,input_tier,idle_hours,SUM(records) AS records,{_ADMITTED}
-        FROM (
-          SELECT g.period AS period,g.task_id AS task_id,{identity_columns("g")},
-            g.admission AS admission,g.input_tier AS input_tier,g.idle_hours AS idle_hours,g.records AS records,
-            g.prompt_tokens AS prompt_tokens,g.completion_tokens AS completion_tokens,
-            g.cache_creation_tokens AS cache_creation_tokens,g.cache_read_tokens AS cache_read_tokens
-          FROM (
-            SELECT x.period AS period,x.task_id AS task_id,u.model AS model,u.context_manifest_id AS context_manifest_id,
-              {ADMISSION_SQL} AS admission,{INPUT_TIER_SQL} AS input_tier,{IDLE_HOURS_SQL} AS idle_hours,
-              COUNT(*) AS records,{sums}
-            FROM {chain_rows} x JOIN llm_usage u ON u.plan_node_id=x.node_id AND u.created_at<=x.settled_at
-            GROUP BY x.period,x.task_id,u.model,u.context_manifest_id,admission,input_tier,idle_hours
-          ) g {identity_join("g")}
-        )
-        GROUP BY period,task_id,{IDENTITY_GROUP},admission,input_tier,idle_hours
-    """
+    """The grouped, classifiable usage of each task's chain calls up to its settlement."""
+    return grouped_usage_sql(
+        {"period": "x.period", "task_id": "x.task_id"},
+        f"{chain_rows} x JOIN llm_usage u ON u.plan_node_id=x.node_id AND u.created_at<=x.settled_at",
+    )
 
 
 def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | None = None) -> str:
     """Walk the chains of the prepared periods' accepted tasks (or only ``task_ids``) once into a temporary table
     the readers below can share.
 
-    Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces it,
-    so the caller drops it when done."""
+    Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces its
+    rows, so the caller empties it when done.
+
+    The table is created once per connection, before any write (see ``create_tables``), and refilled, never dropped:
+    creating or dropping a table changes the connection's schema, which expires every statement it has prepared, so
+    each would be planned again on its next run, whichever job sends it."""
     prefix, source, bound = _chain_source(params, task_ids, None)
-    db.execute("DROP TABLE IF EXISTS temp.measurement_task_chain")
-    db.execute(f"CREATE TEMP TABLE measurement_task_chain AS {prefix} SELECT task_id,period,settled_at,node_id FROM {source}",
-               bound)
-    return "temp.measurement_task_chain"
+    db.execute(CHAIN_DDL)
+    db.execute(f"DELETE FROM {CHAIN_TABLE}")
+    db.execute(f"INSERT INTO {CHAIN_TABLE} {prefix} SELECT task_id,period,settled_at,node_id FROM {source}", bound)
+    return CHAIN_TABLE
+
+
+def clear_chain(db) -> None:
+    """Empty the table :func:`materialize_chain` filled; the pooled connection outlives the caller."""
+    db.execute(f"DELETE FROM {CHAIN_TABLE}")
 
 
 def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None) -> tuple[str, str, dict[str, Any]]:

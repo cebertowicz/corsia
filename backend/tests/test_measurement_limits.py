@@ -228,7 +228,7 @@ async def test_series_omits_periods_before_the_limit_instrument_existed(isolated
     db = get_db()
     try:
         _thread(db, 'root', 'project-a')
-        _turn(db, 'recorded', 'root', 'model', 'completed', '2026-08-03T00:00:00Z', '2026-08-03T00:01:00Z', None, 'account')
+        _turn(db, 'recorded', 'root', 'model', 'completed', '2026-08-10T00:00:00Z', '2026-08-10T00:01:00Z', None, 'account')
         db.commit()
     finally:
         db.close()

@@ -5,11 +5,13 @@ from pathlib import Path
 import plistlib
 import re
 import stat
+import subprocess
 import sys
 
 import pytest
 
 from service_script_fixtures import (  # noqa: F401
+    fake_checkout,
     isolated_launch_agents_dir,
     run_bash as _run_bash,
 )
@@ -24,6 +26,9 @@ CORSIA_TOKEN=test-token
 source scripts/corsia.d/runtime.sh
 acquire_restart_operation() { return 0; }
 """
+
+
+# Pre-stop refusal delivery is covered through the lifecycle HTTP tests.
 
 
 def test_seed_disposable_account_preserves_mint_failure_detail() -> None:
@@ -123,6 +128,7 @@ exit 1
     launched_environment = capture.read_text().splitlines()
     assert "CORSIA_TEST_MODE=1" not in launched_environment
     assert "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI=1" not in launched_environment
+    assert "CORSIA_DEVICES_DISABLE=1" in launched_environment
 
 
 def test_drain_does_not_cancel_an_unconfirmed_lost_start_response(
@@ -951,7 +957,7 @@ BACKEND_PORT=9999
 CORSIA_TOKEN=test-token
 FORCE=false
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 SERVICE_PLIST="${LAUNCHCTL_TRACE}.plist"
 printf 'old plist\\n' > "$SERVICE_PLIST"
 service_installed() { return 0; }
@@ -968,7 +974,7 @@ service_is_loaded() {
 }
 service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 drain_and_wait() { return 0; }
 wait_for_backend_health() { printf 'health\\n' >> "$LAUNCHCTL_TRACE"; return "${HEALTH_RC:-0}"; }
 """
@@ -994,7 +1000,7 @@ service_restart
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
         "install-mode=restart",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -1106,7 +1112,7 @@ backend_pids() { printf '4242\n'; }
 is_backend_running() { return 0; }
 service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 bootout_service_and_wait() {
     printf 'bootout %s\\n' "$2" >> "$LAUNCHCTL_TRACE"
     return 0
@@ -1157,6 +1163,74 @@ service_stop
 
     assert result.returncode == 0, result.stderr
     assert "failure-action=hold" in trace.read_text()
+
+
+def test_service_stop_stops_the_local_model_after_the_drain_and_before_bootout(
+    tmp_path: Path,
+) -> None:
+    """T15: in-flight turns finish (drain) before the local model stops."""
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+CORSIA_RESTART_OPERATION_ID=op-stop
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { printf 'curl %s\\n' "$*" >> "$LAUNCHCTL_TRACE"; }
+cancel_failed_drain() { printf 'cancel-drain\\n' >> "$LAUNCHCTL_TRACE"; }
+STOP_LOCAL_MODEL=true
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    steps = trace.read_text().splitlines()
+    assert steps[0] == "drain"
+    assert "-X POST http://127.0.0.1:" in steps[1] and steps[1].endswith(
+        "/api/system/stop-local-model -H Content-Type: application/json -d {}"
+    )
+    assert steps[2:] == ["bootout com.corsia.prod"]
+
+
+def test_service_stop_without_the_flag_leaves_the_local_model_alone(tmp_path: Path) -> None:
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { printf 'curl %s\\n' "$*" >> "$LAUNCHCTL_TRACE"; }
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert trace.read_text().splitlines() == ["drain", "bootout com.corsia.prod"]
+
+
+def test_a_local_model_stop_failure_cancels_the_drain_and_keeps_the_service(
+    tmp_path: Path,
+) -> None:
+    """T16: an abort after the drain leaves the running service accepting turns."""
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+CORSIA_RESTART_OPERATION_ID=op-stop
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { return 22; }
+cancel_failed_drain() {
+    printf 'cancel-drain %s action=%s\\n' "$2" "${DRAIN_FAILURE_ACTION:-release}" >> "$LAUNCHCTL_TRACE"
+}
+STOP_LOCAL_MODEL=true
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode != 0
+    assert "Could not stop the local model" in result.stdout + result.stderr
+    assert trace.read_text().splitlines() == ["drain", "cancel-drain op-stop action=release"]
 
 
 def test_service_stop_refuses_to_drain_a_listener_not_owned_by_launchd(
@@ -1862,6 +1936,26 @@ print_backend_status
     assert "Process: legacy process PID 4321" in result.stdout
 
 
+def test_backend_status_reports_source_and_frontend_dirty_states() -> None:
+    result = _run_bash(
+        """
+    ok() { :; }
+    fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+    BACKEND_PORT=9999
+    source scripts/corsia.d/runtime.sh
+    curl() {
+        printf '%s' '{"frontend":{"full_hash":"abc123","dirty":true},"backend":{"full_hash":"abc123","dirty":true,"current_head":{"full_hash":"abc123","dirty":false}}}'
+    }
+    service_managed() { return 1; }
+    backend_pids() { :; }
+    print_backend_status
+    """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Dirty state: backend dirty, frontend dirty, checkout clean" in result.stdout
+
+
 def test_backend_status_rejects_mixed_runtime_revisions() -> None:
     result = _run_bash(
         """
@@ -1896,7 +1990,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -1917,7 +2011,7 @@ service_restart activate_release
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "activate release",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -1954,8 +2048,9 @@ PYTHON=/usr/bin/python3
 FORCE=true
 CORSIA_WORKSPACE="$TEST_WORKSPACE"
 CORSIA_STATE_DIR="$TEST_STATE"
+source scripts/corsia.d/runtime.sh
 source scripts/corsia.d/service.sh
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 service_installed() { return 0; }
 service_is_loaded() { return 0; }
 service_loaded_definition_matches() { return 1; }
@@ -2024,7 +2119,7 @@ service_is_loaded() { return 1; }
 is_backend_running() { return 1; }
 backend_pids() { :; }
 service_domain() { printf 'gui/501'; }
-service_plist_path() { printf '/tmp/com.corsia.test.plist'; }
+service_definition_path() { printf '/tmp/com.corsia.test.plist'; }
 launchctl() { printf '%s\\n' "$*" >> "$TRACE"; }
 service_start
 """,
@@ -2051,7 +2146,7 @@ FORCE=true
 source scripts/corsia.d/service.sh
 service_label() { printf 'com.corsia.test'; }
 service_domain() { printf 'gui/501'; }
-service_plist_path() { printf '/tmp/com.corsia.test.plist'; }
+service_definition_path() { printf '/tmp/com.corsia.test.plist'; }
 service_is_loaded() { return 0; }
 service_installed() { return 0; }
 require_owned_service_definition() { return 0; }
@@ -2105,7 +2200,7 @@ service_restart
     assert trace.read_text().splitlines() == [
         "install",
         "drain",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -2249,7 +2344,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2313,7 +2408,7 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
     ]
 
@@ -2343,9 +2438,9 @@ service_restart
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -2376,7 +2471,7 @@ service_restart
     assert Path(f"{trace}.plist").read_text() == "old plist\n"
     assert not list(tmp_path.glob("launchctl.log.plist.previous.*"))
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2410,7 +2505,7 @@ service_restart activate_release
     assert "prior service definition was restored" in result.stderr
     assert "update did not complete" in result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         "activate release",
         f"bootstrap gui/501 {trace}.plist",
         f"bootstrap gui/501 {trace}.plist",
@@ -2441,7 +2536,7 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         "sleep 1",
         f"bootstrap gui/501 {trace}.plist",
@@ -2490,7 +2585,7 @@ service_restart
 
     assert result.returncode != 0
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod",
+        "bootout gui/501/com.corsia.prod",
         f"bootstrap gui/501 {trace}.plist",
         f"bootstrap gui/501 {trace}.plist",
     ]
@@ -2518,7 +2613,7 @@ ENV_FILE=/tmp/corsia-no-such-env
 CORSIA_TOKEN=test-token
 FORCE=false
 source scripts/corsia.d/service.sh
-launchctl_bootout_wait() { launchctl bootout --wait "$1"; }
+launchctl_bootout_wait() { launchctl bootout "$1"; }
 require_owned_service_definition() { return 0; }
 service_installed() { return 0; }
 service_install() { return 0; }
@@ -2558,7 +2653,7 @@ launchctl() {
     assert result.returncode != 0
     assert url_trace.exists()
     assert trace.read_text().splitlines() == [
-        "launchctl bootout --wait gui/501/com.corsia.prod",
+        "launchctl bootout gui/501/com.corsia.prod",
         "cancel http://127.0.0.1:9999/api/system/drain?token=test-token",
     ]
 
@@ -2616,6 +2711,7 @@ def test_rendered_launchd_service_has_explicit_shutdown_budget(
     env_file.write_text(
         "CORSIA_RESTART_CALLER_TOKEN=must-not-render\n"
         "CORSIA_RESTART_CURL=/tmp/must-not-render\n"
+        "CORSIA_DEVICES_DISABLE=1\n"
         "VISIBLE_SETTING=preserved\n"
     )
     result = _run_bash(
@@ -2649,6 +2745,7 @@ render_service_plist generation-test
     assert environment["VISIBLE_SETTING"] == "preserved"
     assert "CORSIA_RESTART_CALLER_TOKEN" not in environment
     assert "CORSIA_RESTART_CURL" not in environment
+    assert "CORSIA_DEVICES_DISABLE" not in environment
 
 
 def test_rendered_launchd_service_keeps_key_variables_for_the_key_store_migration(
@@ -4074,3 +4171,122 @@ service_restart
     assert "cancel-drain" not in traced
     assert "ingress remains held" in result.stderr
     assert "ingress remains drained" not in result.stderr
+
+
+# --- App-owned install guard -------------------------------------------------
+
+
+def _app_owned_env(tmp_path: Path, service_json: str | None) -> dict[str, str]:
+    """Isolated HOME whose app folder holds ``service_json`` (None: no file)."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    if service_json is not None:
+        app_dir = home / "Library" / "Application Support" / "CORSIA"
+        app_dir.mkdir(parents=True)
+        (app_dir / "service.json").write_text(service_json)
+    return {"HOME": str(home), "CORSIA_STATE_DIR": str(state)}
+
+
+def _guard(tmp_path: Path, service_json: str | None, *, app_mode: bool = False):
+    return _run_bash(
+        """
+fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+BACKEND_DIR="$PWD/backend"
+PYTHON="$PYTHON_BIN"
+source scripts/corsia.d/runtime.sh
+"""
+        + ("is_app_mode() { return 0; }\n" if app_mode else "is_app_mode() { return 1; }\n")
+        + """refuse_if_app_owns_install || exit 1
+echo PROCEEDED
+""",
+        env={**_app_owned_env(tmp_path, service_json), "PYTHON_BIN": sys.executable},
+    )
+
+
+def test_app_owned_install_refuses_when_state_dir_matches(tmp_path: Path) -> None:
+    link = tmp_path / "state-link"
+    link.symlink_to(tmp_path / "state", target_is_directory=True)
+    # A symlinked spelling of the same directory still counts as the same root.
+    result = _guard(tmp_path, json.dumps({"state_dir": str(link), "port": 3001}))
+
+    assert result.returncode != 0
+    assert "PROCEEDED" not in result.stdout
+    assert "CORSIA app owns this install" in result.stderr
+    assert "Use the CORSIA app" in result.stderr
+
+
+def test_app_owned_install_proceeds_for_a_different_state_dir(tmp_path: Path) -> None:
+    other = tmp_path / "other-state"
+    other.mkdir()
+    result = _guard(tmp_path, json.dumps({"state_dir": str(other)}))
+
+    assert result.returncode == 0, result.stderr
+    assert "PROCEEDED" in result.stdout
+
+
+def test_app_owned_install_proceeds_without_the_file_or_the_key(tmp_path: Path) -> None:
+    missing = _guard(tmp_path / "a", None)
+    keyless = _guard(tmp_path / "b", json.dumps({"workspace": "/w", "port": 3001}))
+
+    for result in (missing, keyless):
+        assert result.returncode == 0, result.stderr
+        assert "PROCEEDED" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", "[]", json.dumps({"state_dir": 5}), json.dumps({"state_dir": "rel"})],
+)
+def test_app_owned_install_fails_closed_on_an_unreadable_file(
+    tmp_path: Path, content: str
+) -> None:
+    result = _guard(tmp_path, content)
+
+    assert result.returncode != 0
+    assert "PROCEEDED" not in result.stdout
+    assert "service.json" in result.stderr
+
+
+def test_app_mode_is_never_refused(tmp_path: Path) -> None:
+    result = _guard(
+        tmp_path,
+        json.dumps({"state_dir": str(tmp_path / "state")}),
+        app_mode=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PROCEEDED" in result.stdout
+
+
+@pytest.mark.parametrize("verb", ["start", "restart"])
+def test_start_and_restart_refuse_before_any_effect(tmp_path: Path, verb: str) -> None:
+    """Both verbs hit the guard ahead of the service and legacy branches."""
+    checkout = fake_checkout(tmp_path / "checkout")
+    env = _app_owned_env(
+        tmp_path, json.dumps({"state_dir": str(tmp_path / "state")})
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    launchctl = fake_bin / "launchctl"
+    launchctl.write_text("#!/bin/sh\nexit 1\n")
+    launchctl.chmod(0o755)
+    env.update(
+        {
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "BACKEND_PORT": "3999",
+            "CORSIA_WORKSPACE": str(tmp_path / "workspace"),
+        }
+    )
+    proc = subprocess.run(
+        ["bash", str(checkout / "scripts" / "corsia"), verb],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+    assert proc.returncode != 0
+    assert "CORSIA app owns this install" in proc.stdout + proc.stderr
+    assert "Restarting CORSIA" not in proc.stdout
+    assert "Starting CORSIA" not in proc.stdout

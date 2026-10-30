@@ -62,7 +62,7 @@ async def test_native_warm_send_and_checkpoint_freeze_same_external_tools(
     monkeypatch, main_db,
 ) -> None:
     from api import thread_cache_warm as thread_runtime
-    from core import checkpoint_native_fork, native_context_prefix, turn_context
+    from core import fork_native, native_context_prefix, turn_context
     from infra import state
     selection = exact_selection()
     boundary = selection.sealed_boundary
@@ -112,7 +112,7 @@ async def test_native_warm_send_and_checkpoint_freeze_same_external_tools(
     pending = state._active_warm_tasks.get(boundary.thread_id)
     if pending is not None:
         await pending
-    fork = checkpoint_native_fork.capture_live_warm_source(
+    fork = fork_native.capture_live_warm_source(
         boundary.thread_id,
         boundary,
         messages=list(prepared.messages),
@@ -182,6 +182,145 @@ def _install_preflight_shell(monkeypatch, *, ws, on_delivery):
             return await on_delivery({"provider": "native", "ws": ws})
 
     return FakePreflight(), prepared
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_pending_progress_probe_never_delays_warm_outcome(monkeypatch, scheduled) -> None:
+    from core import thread_warm
+    from infra import state
+
+    monkeypatch.setattr(thread_warm, "WARM_PROGRESS_PROBE_SECONDS", 0)
+    warm_release = asyncio.Event()
+    probe_started = asyncio.Event()
+    probe_cancelled = asyncio.Event()
+
+    async def warm():
+        await warm_release.wait()
+        return {"ok": True}
+
+    async def progress_probe():
+        probe_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            probe_cancelled.set()
+            raise
+
+    task, started, suppression = await thread_warm.start_thread_warm(
+        "thread-native", "progress-pending",
+        lambda: asyncio.ensure_future(warm()) if scheduled else warm(),
+        model="omlx@srv-1/model-1", admission_check=lambda: None,
+        progress_probe=lambda: asyncio.ensure_future(progress_probe()) if scheduled else progress_probe(),
+        progress_callback=lambda _progress: None,
+    )
+    assert task is not None and started and suppression is None
+    await asyncio.wait_for(probe_started.wait(), timeout=0.1)
+    warm_release.set()
+
+    assert await asyncio.wait_for(thread_warm.await_warm_outcome(task), timeout=0.1) == {
+        "ok": True, "message": "Warm finished",
+    }
+    await asyncio.wait_for(probe_cancelled.wait(), timeout=0.1)
+    assert "thread-native" not in state._active_warm_tasks
+
+
+@pytest.mark.asyncio
+async def test_progress_callback_failure_does_not_fail_warm(monkeypatch) -> None:
+    from core import thread_warm
+
+    monkeypatch.setattr(thread_warm, "WARM_PROGRESS_PROBE_SECONDS", 0)
+    callback_called = asyncio.Event()
+    warm_release = asyncio.Event()
+
+    async def warm():
+        await warm_release.wait()
+        return {"ok": True}
+
+    async def progress_probe():
+        return {"total_blocks": 8, "ready_blocks": 4}
+
+    def progress_callback(_progress):
+        callback_called.set()
+        raise RuntimeError("websocket unavailable")
+
+    task, started, suppression = await thread_warm.start_thread_warm(
+        "thread-native", "progress-callback", warm, model="omlx@srv-1/model-1",
+        admission_check=lambda: None, progress_probe=progress_probe,
+        progress_callback=progress_callback,
+    )
+    assert task is not None and started and suppression is None
+    await asyncio.wait_for(callback_called.wait(), timeout=0.1)
+    warm_release.set()
+    assert await asyncio.wait_for(thread_warm.await_warm_outcome(task), timeout=0.1) == {
+        "ok": True, "message": "Warm finished",
+    }
+
+
+@pytest.mark.asyncio
+async def test_initial_progress_callback_failure_does_not_strand_warm_owner() -> None:
+    from core import thread_warm
+    from infra import state
+
+    def progress_callback(_progress):
+        raise RuntimeError("websocket unavailable")
+
+    async def warm():
+        return {"ok": True}
+
+    task, started, suppression = await thread_warm.start_thread_warm(
+        "thread-native", "initial-progress-callback", warm,
+        model="omlx@srv-1/model-1", admission_check=lambda: None,
+        progress_callback=progress_callback, initial_progress={"total_blocks": 8},
+    )
+    assert task is not None and started and suppression is None
+    assert await thread_warm.await_warm_outcome(task) == {
+        "ok": True, "message": "Warm finished",
+    }
+    assert "thread-native" not in state._active_warm_tasks
+
+
+@pytest.mark.asyncio
+async def test_cancelling_warm_cleans_pending_progress_probe(monkeypatch) -> None:
+    from core import thread_warm
+    from infra import state
+
+    monkeypatch.setattr(thread_warm, "WARM_PROGRESS_PROBE_SECONDS", 0)
+    warm_started = asyncio.Event()
+    warm_cancelled = asyncio.Event()
+    probe_started = asyncio.Event()
+    probe_cancelled = asyncio.Event()
+
+    async def warm():
+        warm_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            warm_cancelled.set()
+            raise
+
+    async def progress_probe():
+        probe_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            probe_cancelled.set()
+            raise
+
+    task, started, suppression = await thread_warm.start_thread_warm(
+        "thread-native", "progress-cancel", warm, model="omlx@srv-1/model-1",
+        admission_check=lambda: None, progress_probe=progress_probe,
+        progress_callback=lambda _progress: None,
+    )
+    assert task is not None and started and suppression is None
+    await asyncio.wait_for(warm_started.wait(), timeout=0.1)
+    await asyncio.wait_for(probe_started.wait(), timeout=0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.wait_for(warm_cancelled.wait(), timeout=0.1)
+    await asyncio.wait_for(probe_cancelled.wait(), timeout=0.1)
+    assert "thread-native" not in state._active_warm_tasks
 
 
 @pytest.mark.asyncio

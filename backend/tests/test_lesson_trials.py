@@ -70,6 +70,13 @@ def test_a_plain_skill_and_a_valid_lesson_both_validate():
         (VALID_BLOCK.replace("state: trial", "state: promoted"),
          "corsia.lesson.destination {path, version} is required when promoted"),
         (VALID_BLOCK + "    review_ref: ''\n", "corsia.lesson.review_ref must be a non-empty string"),
+        (VALID_BLOCK + "    cause: bad_luck\n",
+         "corsia.lesson.cause must be one of wrong_rule, no_foundation, rule_gap, process_gap, "
+         "not_delivered, not_followed, cant_be_done"),
+        (VALID_BLOCK + "    new_evidence: maybe\n",
+         "corsia.lesson.new_evidence must be one of target_changed, case_differs"),
+        (VALID_BLOCK + "    target_file: context/rule.md\n    new_target_path: context/new.md\n",
+         "corsia.lesson.target_file and new_target_path do not go together; name one"),
     ],
 )
 def test_a_malformed_lesson_is_a_skill_error(block, error):
@@ -219,11 +226,13 @@ def test_a_capture_file_records_its_identity_and_is_never_a_skill():
         capture_id=LESSON, capture_hash="c" * 64, owner="owner", reason="missing-derivation",
         name="cite-the-head", description="Use when reporting a check result.",
         text="Name the exact commit the check ran on.", trial=held, source_refs=[*REFS, *REFS],
+        originating_subjects=("message:corrected",),
     )
     capture = lesson_files.read_capture(text)
 
     assert capture == lesson_files.CaptureFile(
         id=LESSON, hash="c" * 64, source_refs=({"kind": "turn", "reference": "turn-1"},),
+        originating_subjects=("message:corrected",),
     )
     assert "Not offered as guidance: it cites what a person said and gives no derivation" in text
     assert not validate_skill_text(text).ok

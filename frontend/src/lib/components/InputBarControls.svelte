@@ -1,12 +1,12 @@
 <script lang="ts">
 	import ContextSheet from './ContextSheet.svelte';
-	import ContextSourceDetail from './ContextSourceDetail.svelte';
 	import InputBarActionRow from './InputBarActionRow.svelte';
 	import InputBarModelSheet from './InputBarModelSheet.svelte';
 	import InputBarThinkingSheet from './InputBarThinkingSheet.svelte';
 	import LimitHeldLine from './LimitHeldLine.svelte';
 	import { checkpointsByThread, latestCheckpoint, requestManualCheckpoint } from '$lib/stores/checkpoints';
-	import { activeThreadId, reasoningEffort, threads, type ContextUsage } from '$lib/stores/threads';
+	import { activeThreadId, threads, type ContextUsage } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import {
 		contextPreviewByThread,
 		contextReading,
@@ -17,19 +17,18 @@
 		measuredHydratedThreads,
 		previewIdentity,
 	} from '$lib/stores/contextUsageByThread';
-	import { acceptsSend, activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
+	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
+	import { loadComposerModels } from '$lib/stores/modelsLoad';
 	import { canonicalName } from '$lib/stores/modelGroups';
 	import { subagentMeta } from '$lib/stores/subagents';
 	import { reasoningEffortLabel, resolveReasoningEffort } from './inputBarReasoning';
 	import { token } from '$lib/stores/auth';
-	import { contextSourceOwnerTarget } from '$lib/contextSourceNavigation';
+	import { contextSourceFilePath, contextSourceOwnerTarget } from '$lib/contextSourceNavigation';
 	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { uiScope } from '$lib/stores/uiScope';
+	import { openProjectSettings, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { toasts } from '$lib/stores/toast';
-	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import {
 		contextSheetUsageSummary,
 		type ContextSheetSourceRow,
@@ -48,6 +47,8 @@
 		hasMessageToSend,
 		canSendToModel,
 		queueUntilSwitch,
+		focusLocalOnly = false,
+		onfocusconsumed = () => {},
 		onAttachFile,
 		onAttachCamera,
 		onAttachPhotos,
@@ -65,6 +66,8 @@
 		hasMessageToSend: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		focusLocalOnly?: boolean;
+		onfocusconsumed?: () => void;
 		onAttachFile: () => void;
 		onAttachCamera: () => void;
 		onAttachPhotos: () => void;
@@ -72,7 +75,9 @@
 		onQueueAfterTurn: () => void;
 	} = $props();
 
-	const activeModel = $derived(findModelById($models, $activeModelId));
+	// The composer's own thread's selection: for a worker's composer, the worker's, not the open thread's.
+	const selection = $derived($composerSelectionFor(threadId));
+	const activeModel = $derived(findModelById(selection.models, selection.modelId));
 	// The chip reads as chosen under the composer's one send rule (`acceptsSend`): a usage-limit block
 	// is a normal chip, since the held line says why. Any other block (not offered, signed out,
 	// model gone) is still 'Unavailable'.
@@ -80,13 +85,21 @@
 	const modelName = $derived(
 		chipReady
 			? canonicalName(activeModel!)
-			: $activeModelId
-				? `Unavailable · ${activeModel ? canonicalName(activeModel) : $activeModelId}`
+			: selection.modelId
+				? `Unavailable · ${activeModel ? canonicalName(activeModel) : selection.modelId}`
 				: 'Select Model'
 	);
 	// Defaults to the active thread so a caller that predates the subagent
 	// leaf (#1949) keeps its existing behavior unchanged.
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
+	// A failed model switch is durable server state until another choice; otherwise the thread
+	// and selected account provide the two existing in-progress facts for the composer chip.
+	const switchState = $derived.by((): 'model' | 'account' | 'failed' | null => {
+		if (selection.switching?.switch_status === 'failed') return 'failed';
+		if (selection.switching?.pending_model) return 'model';
+		return activeModel?.runs_on?.find((entry) => entry.selected)?.pending === true ? 'account' : null;
+	});
+	const switchError = $derived(switchState === 'failed' ? selection.switching?.switch_error ?? null : null);
 	// Context usage and the next-turn preview are keyed by the bound thread
 	// (#2269), so every composer inspects its own thread: the active thread with
 	// the selected model, a subagent leaf (#1949) with the worker's own model.
@@ -104,8 +117,7 @@
 			?? $threads.find(thread => thread.id === boundThreadId)?.title
 			?? 'this thread',
 	);
-	const isSubagentThread = $derived(subagentRef !== undefined);
-	const isCCBacked = $derived(isSubagentThread || activeModel?.backend === 'cc');
+	const isCCBacked = $derived(activeModel?.backend === 'cc');
 	const showVisionWarning = $derived(
 		hasImageAttachments &&
 		!isCCBacked &&
@@ -116,12 +128,11 @@
 
 	const reasoningConfig = $derived(activeModel?.capabilities?.reasoning_config ?? null);
 	const supportsReasoning = $derived(reasoningConfig !== null);
-	const resolvedEffort = $derived(resolveReasoningEffort($reasoningEffort, reasoningConfig));
+	const resolvedEffort = $derived(resolveReasoningEffort(selection.effort, reasoningConfig));
 	const effortLabel = $derived.by(() => {
 		if (!supportsReasoning) return '';
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
 	});
-	let contextSourceDetail = $state<ContextSheetSourceRow | null>(null);
 	// The opened source groups of the context view now on screen. This component
 	// stays mounted across preview refreshes, which can leave the sheet with no
 	// snapshot for a moment, so the record lives here, not in the list. It starts
@@ -165,31 +176,44 @@
 			? previewIdentity(boundThreadId, previewModelId, boundUsage, latestCheckpoint(checkpointState))
 			: null,
 	);
-	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, $models));
-	// The preview read for this thread, model and measured turn, if any; a
-	// newer measured turn or another model leaves it unowned and unshown.
+	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, selection.models));
+	// The current owner's preview, including its loading or error state.
 	const ownedPreview = $derived(
 		previewIds && boundPreview?.owner === previewIds.owner ? boundPreview : undefined,
 	);
-	// One reading for the donut and the sheet headline (#1952): the owned
-	// preview, else the last measured usage, so opening never waits on the
-	// fetch (#1953) and closing the sheet changes nothing.
-	const sheetUsage = $derived(
-		previewIds ? contextReading(ownedPreview, previewIds.owner, measuredReading) : null,
-	);
+	let held = $state<{ threadId: string; modelId: string | null; usage: ContextUsage } | null>(null);
+	$effect.pre(() => {
+		if (sheetView !== 'context' || !boundThreadId || ownedPreview?.error) {
+			held = null;
+		} else if (ownedPreview?.usage) {
+			held = { threadId: boundThreadId, modelId: previewModelId, usage: ownedPreview.usage };
+		} else if (held && (held.threadId !== boundThreadId || held.modelId !== previewModelId)) {
+			held = null;
+		}
+	});
+	// Both surfaces choose the same reading; an open sheet keeps its last preview during refresh.
+	const reading = $derived.by(() => {
+		const holding = sheetView === 'context' && !ownedPreview?.usage && !ownedPreview?.error
+			&& held?.threadId === boundThreadId && held.modelId === previewModelId;
+		return {
+			usage: holding ? held!.usage : previewIds ? contextReading(boundPreview, previewIds.owner, measuredReading) : null,
+			updating: !!holding || !!ownedPreview?.loading,
+		};
+	});
+	const sheetUsage = $derived(reading.usage);
 	const contextChipSummary = $derived(chipSummaryFor(sheetUsage));
-	const contextPreviewLoading = $derived(ownedPreview?.loading ?? false);
+	const contextPreviewLoading = $derived(reading.updating);
 	const contextPreviewError = $derived(ownedPreview?.error ?? '');
 	let sheetWasOpen = false;
 	$effect(() => {
 		const t = $token;
 		const ids = previewIds;
+		const preview = ownedPreview;
 		const sheetOpen = surface === 'sheets' && sheetView === 'context';
 		const opening = sheetOpen && !sheetWasOpen;
 		sheetWasOpen = sheetOpen;
 		// The always-mounted sheets instance is the one reader per composer.
 		if (surface !== 'sheets' || !boundThreadId || !canInspectContext || !t || !ids) return;
-		if (opening) contextSourceDetail = null;
 		if (!sheetOpen) {
 			// Closed, the preview is read only so the donut is not empty: once the
 			// thread's first page is read and holds no usable receipt (a reading
@@ -197,7 +221,7 @@
 			// per owner, so a failed read is not repeated.
 			const hydrated = $measuredHydratedThreads.has(boundThreadId);
 			const usable = hasMeasuredNumbers(measuredReading) && !measuredReading?.stale;
-			if (!hydrated || usable || ownedPreview) return;
+			if (!hydrated || usable || preview) return;
 		}
 		void ensureContextPreview({
 			threadId: boundThreadId,
@@ -208,43 +232,33 @@
 		});
 	});
 	function openSheet(view: Exclude<SheetView, null>) {
-		if (sheetView !== view && view === 'model') loadModels({ refreshUsage: true });
+		if (sheetView !== view && view === 'model') void loadComposerModels(boundThreadId, { refreshUsage: true });
 		toggleSheet(view);
 	}
-	// Another surface asks for the model sheet; a leaf composer has its own thread.
-	$effect(() => (threadId ? undefined : onModelSheetRequest(() => {
-		if (sheetView !== 'model') openSheet('model');
-	})));
-
 	function documentName(source: ContextSheetSourceRow): string {
-		const parts = source.stableReference.split(/[\\/]/).filter(Boolean);
+		const parts = contextSourceFilePath(source).split(/[\\/]/).filter(Boolean);
 		return parts.at(-1) ?? source.label ?? 'Document';
 	}
 
 	function openContextSource(source: ContextSheetSourceRow) {
 		const target = contextSourceOwnerTarget(source);
 		if (target === 'project-settings') {
-			projectSettingsOpen.set(true);
+			if ($uiScope) openProjectSettings($uiScope.id);
+			else requestSettingsSection('projects');
 		} else if (target === 'thread-settings') {
 			threadSettingsOpen.set(true);
 		} else if (target === 'workspace-settings') {
-			workspaceSettingsOpen.set(true);
+			requestSettingsSection('context');
 		} else if (target === 'providers') {
 			requestSettingsSection('providers');
 		} else if (target === 'system') {
 			requestSettingsSection('system');
-		} else if (target === 'runtime-details' || target === null) {
-			// A row with no owner surface to open still explains itself.
-			// A detail visit is not part of the refresh the record survives.
-			expandedGroups = {};
-			contextSourceDetail = source;
-			return;
 		} else if (target === 'document') {
 			openArtifactAndShowThread(
-				{ path: source.stableReference, title: documentName(source) },
+				{ path: contextSourceFilePath(source), title: documentName(source) },
 				boundThreadId,
 			);
-		}
+		} else return;
 		toggleSheet('context');
 	}
 
@@ -275,7 +289,7 @@
 		<span>{activeModel?.name ?? 'Current model'} doesn't support images — switch to a vision-capable model to use image attachments.</span>
 	</div>
 {/if}
-<LimitHeldLine model={activeModel} onSwitchModel={() => openSheet('model')} />
+<LimitHeldLine threadId={boundThreadId} model={activeModel} onSwitchModel={() => openSheet('model')} />
 
 {#if sheetView === 'attachments'}
 	<div class="action-sheet">
@@ -304,15 +318,12 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} />
+	<InputBarModelSheet threadId={boundThreadId} onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}
 	<div class="action-sheet context-sheet" role="group" aria-label={`Context for ${contextThreadName}`}>
-		{#if contextSourceDetail}
-			<ContextSourceDetail source={contextSourceDetail} onBack={() => { contextSourceDetail = null; }} />
-		{/if}
-			{#if !contextSourceDetail && (sheetUsage || checkpointState)}
+			{#if sheetUsage || checkpointState}
 				<ContextSheet
 					usage={sheetUsage} loading={contextPreviewLoading}
 					refreshFailed={contextPreviewError}
@@ -324,16 +335,16 @@
 					{expandedGroups}
 					onToggleGroup={toggleGroup}
 				/>
-			{:else if !contextSourceDetail && contextPreviewLoading}
+			{:else if contextPreviewLoading}
 				<div class="sheet-empty">Loading context...</div>
-			{:else if !contextSourceDetail}
+			{:else}
 				<div class="sheet-empty">{contextPreviewError || 'No context available'}</div>
 			{/if}
 	</div>
 {/if}
 
 {#if sheetView === 'thinking' && supportsReasoning && reasoningConfig}
-	<InputBarThinkingSheet {reasoningConfig} />
+	<InputBarThinkingSheet threadId={boundThreadId} {reasoningConfig} />
 {/if}
 </div>
 {/if}
@@ -343,11 +354,11 @@
 		threadId={boundThreadId}
 		{sheetView}
 		{openSheet}
-		{isSubagentThread}
-		{subagentRef}
 		isActiveModelReady={chipReady}
 		{canSendToModel}
 		{queueUntilSwitch}
+		{switchState}
+		{switchError}
 		modelLabel={modelName}
 		activeModelName={activeModel?.name}
 		{supportsReasoning}

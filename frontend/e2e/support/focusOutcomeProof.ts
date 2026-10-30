@@ -47,7 +47,10 @@ export async function focusSetting(page: Page, enabled: boolean) {
 	const control = page.getByRole('button', { name: 'Focus mode', exact: true });
 	if ((await control.getAttribute('aria-pressed') === 'true') !== enabled) await control.click();
 	await expect(control).toHaveAttribute('aria-pressed', String(enabled));
-	await page.getByRole('button', { name: (page.viewportSize()?.width ?? 0) <= 768 ? 'Back' : 'Close settings', exact: true }).click();
+	// Phone: the header's one back names the page it returns to ("Settings", SettingsView.svelte); the
+	// callers then choose a thread from the sidebar. Desktop: the nav header's close button.
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.locator('.shell-header .h-back').click();
+	else await page.getByRole('button', { name: 'Close settings', exact: true }).click();
 }
 
 export async function expandLoadedWork(page: Page) {
@@ -71,6 +74,7 @@ export async function assertPassiveGeometry(page: Page) {
 		const describe = (element: Element | null) => element
 			? { tag: element.tagName, className: element.className } : null;
 		return {
+			coarsePointer: matchMedia('(pointer: coarse)').matches,
 			input: {
 				visible: document.visibilityState,
 				focused: document.hasFocus(),
@@ -93,7 +97,7 @@ export async function assertPassiveGeometry(page: Page) {
 					background: style.backgroundColor, border: style.borderTopWidth, radius: style.borderRadius, actions: bounds,
 					overlap: bounds.some((rect, i) => bounds.some((other, j) => j > i && rect.top < other.bottom && other.top < rect.bottom)),
 					overflow: section.scrollWidth > section.clientWidth,
-					timeInsideActions: actions.filter(button => button.classList.contains('node')).every(button => Boolean(button.querySelector('time'))),
+					timeInsideActions: actions.filter(button => button.classList.contains('row')).every(button => Boolean(button.querySelector('time'))),
 				};
 			}),
 		};
@@ -102,7 +106,9 @@ export async function assertPassiveGeometry(page: Page) {
 	for (const section of result.sections) {
 		expect(section.background, diagnostic).toBe('rgba(0, 0, 0, 0)');
 		expect(section.border, diagnostic).toBe('0px'); expect(section.radius, diagnostic).toBe('0px');
-		expect(section.actions.every(action => action.rectHeight >= 44), diagnostic).toBe(true);
+		// PassiveOutcomeList.svelte: the toggle is always 44px; node rows are 32px, 44px under `(pointer: coarse)`.
+		const target = (action: { className: string }) => action.className.includes('passive-toggle') || result.coarsePointer ? 44 : 32;
+		expect(section.actions.every(action => action.rectHeight >= target(action)), diagnostic).toBe(true);
 		expect(section.overlap, diagnostic).toBe(false); expect(section.overflow, diagnostic).toBe(false); expect(section.timeInsideActions, diagnostic).toBe(true);
 	}
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), diagnostic).toBe(true);

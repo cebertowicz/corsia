@@ -25,7 +25,7 @@ from connections.usage_verdicts import (
 )
 from connections.usage_windows import parse_time, window_stale
 
-#: The account's 'Spend past plan limit' switch in stored usage.
+#: The account's 'Spend past usage limit' switch in stored usage.
 ALLOW_OVERAGE_KEY = "allow_overage"
 
 

@@ -21,8 +21,9 @@ import time
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 import psutil
-from host_access.group_probe import live_group_members_after_eperm
+from host_access.group_probe import current_control_plane_pids as _current_control_plane_pids, group_pids as _group_pids, is_zombie as _is_zombie
 from host_access.browser_sessions import BROWSER_NAMESPACE, BrowserSessionOwner
+from host_access.browser_process_mixin import BrowserProcessMixin
 from host_access.managed_lifecycle import (
     DEFAULT_STALL_AFTER_SECONDS,
     LONG_RUNNING_MAX_LIFETIME_SECONDS,
@@ -216,44 +217,38 @@ def _process_creation_fingerprint(pid: int) -> str:
     return hashlib.sha256(material.encode()).hexdigest()
 
 
-def _is_zombie(process: psutil.Process) -> bool:
-    try:
-        return process.status() in {
-            psutil.STATUS_ZOMBIE,
-            getattr(psutil, "STATUS_DEAD", "dead"),
-            "terminated",
-        }
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return True
-
-
-def _group_pids(pgid: int) -> tuple[int, ...]:
+def stop_orphan_group(pgid: int, still_ours: Callable[[], bool | None], *,
+                      on_signal: Callable[[], None] | None = None,
+                      ignore_zombie_leader: bool = False) -> Literal["stopped", "already_gone", "unverified"]:
+    """Stop a verified orphan group, preserving the durable recovery contract."""
     if pgid <= 1:
-        return ()
-    # Exact process-group existence does not require broad host enumeration.
-    # This is both a tighter ownership proof and works in the protected
-    # envelope where macOS denies the sysctl used by ``psutil.pids()``.
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return ()
-    except PermissionError:
-        return live_group_members_after_eperm(pgid)
-    return (pgid,)
-
-
-def _current_control_plane_pids() -> frozenset[int]:
-    protected = {0, 1, os.getpid()}
-    current = os.getpid()
-    seen: set[int] = set()
-    while current > 1 and current not in seen:
-        seen.add(current)
-        protected.add(current)
+        return "unverified"
+    signalled = False
+    def present() -> tuple[int, ...]:
+        return _group_pids(pgid, ignore_zombie_leader=True) if ignore_zombie_leader else _group_pids(pgid)
+    for selected in (signal.SIGTERM, signal.SIGKILL):
+        if not present():
+            return "stopped" if signalled else "already_gone"
+        ours = still_ours()
+        if ours is False:
+            return "already_gone"
+        if ours is not True:
+            return "unverified"
         try:
-            current = psutil.Process(current).ppid()
-        except psutil.Error:
-            break
-    return frozenset(protected)
+            os.killpg(pgid, selected)
+            if not signalled and on_signal:
+                on_signal()
+            signalled = True
+        except ProcessLookupError:
+            return "stopped" if signalled else "already_gone"
+        except PermissionError:
+            return "unverified"
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not present():
+                return "stopped"
+            time.sleep(0.05)
+    return "unverified"
 
 
 def _metadata_for_process(process: psutil.Process) -> ProcessMetadata:
@@ -414,7 +409,7 @@ def signal_bound_process(
         raise ProcessBindingError("bound process signal was denied") from exc
 
 
-class ProcessOwner(ManagedLifecycleMixin):
+class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
     """One bounded owner for all CORSIA-agent process groups."""
 
     def __init__(
@@ -535,23 +530,6 @@ class ProcessOwner(ManagedLifecycleMixin):
         if len(payload) > bounded:
             payload = payload[-bounded:]
         return payload.decode("utf-8", errors="replace")
-
-    async def run_browser(
-        self,
-        thread_id: str,
-        args: Sequence[str],
-        *,
-        lease_id: str | None = None,
-        timeout: float = 30.0, show_window: bool | None = None,
-    ) -> str:
-        """Delegate one browser command to the composed session owner."""
-        return await self.browser_sessions().run(
-            thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
-        )
-
-    async def close_browser(self, thread_id: str) -> str:
-        """Close only the composed browser session for one exact thread."""
-        return await self.browser_sessions().close_thread(thread_id)
 
     def browser_sessions(self) -> BrowserSessionOwner:
         if self._browser_owner is None:

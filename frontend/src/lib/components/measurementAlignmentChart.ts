@@ -26,6 +26,7 @@ export interface AlignmentPeriod {
 
 /** The one issue the chart labels too few under the bar; every other issue is told only in the table. */
 export const TOO_FEW = 'Too few decisions answered to show the shares.';
+export const INCONSISTENT_ANSWERS = 'Couldn’t show this period’s shares because of an error in CORSIA’s decision counts. Ask CORSIA in chat to fix it.';
 
 /** Each drawn period's three shares, checked the way the stack needs them: all three served, measured and summing to one. */
 export function alignmentPeriods(rows: MeasurementRow[], points: BarPoint[]): AlignmentPeriod[] {
@@ -40,11 +41,12 @@ export function alignmentPeriods(rows: MeasurementRow[], points: BarPoint[]): Al
 
 function alignmentIssue(parts: (MeasurementRow | undefined)[], n: number): string | null {
 	if (n <= 0) return 'No decisions answered.';
-	if (parts.some((row) => !row)) return 'A share is missing for this period.';
+	if (parts.some((row) => !row)) return INCONSISTENT_ANSWERS;
 	if (parts.some((row) => row!.value === null || row!.thin)) return TOO_FEW;
 	if (parts.some((row) => !row!.comparable)) return 'Not comparable with the other periods.';
-	if (!parts.every((row) => row!.n === n && Number.isFinite(row!.value) && row!.value! >= 0 && row!.value! <= 1)) return 'The shares are invalid for this period.';
-	return Math.abs(parts.reduce((sum, row) => sum + row!.value!, 0) - 1) < 1e-9 ? null : 'The shares do not add up to the answered decisions.';
+	if (parts.some((row) => row!.n !== n)) return INCONSISTENT_ANSWERS;
+	if (parts.some((row) => !Number.isFinite(row!.value) || row!.value! < 0 || row!.value! > 1)) return INCONSISTENT_ANSWERS;
+	return Math.abs(parts.reduce((sum, row) => sum + row!.value!, 0) - 1) < 1e-9 ? null : INCONSISTENT_ANSWERS;
 }
 
 const f1 = (v: number) => v.toFixed(1);

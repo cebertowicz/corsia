@@ -8,6 +8,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Callable, Iterator
 
+import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
 from infra import write_effects
 from infra.db_loop_guard import guard_write_off_event_loop
@@ -83,6 +84,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, faster than FULL
         conn.commit()
         apply_thread_lane(conn)
+        startup_progress.watch(conn)
     except BaseException:
         conn.close()
         raise
@@ -148,6 +150,25 @@ def db_job_boundary(scope: str) -> Iterator[None]:
         )
 
 
+def claim_connection(db: sqlite3.Connection | None, scope: str) -> tuple[sqlite3.Connection, bool]:
+    """Resolve the connection a write frame works on and whether that frame owns it.
+
+    ``db=None`` claims this thread's pooled connection as its owner, which needs a clean connection
+    on a lane that may write; ``db=<connection>`` names the owner explicitly. One rule, shared by
+    ``write_transaction`` and any caller that must fail once, before it starts a multi-step pass.
+    """
+    connection = db if db is not None else get_db()
+    refuse_lane_write(connection, scope)
+    owns_connection = db is None
+    if owns_connection and connection.in_transaction:
+        raise TransactionOwnershipError(
+            f"{scope} claimed the outermost write transaction, but this thread's "
+            "pooled connection is already inside one owned by another frame; "
+            "pass that owner's connection as db= instead"
+        )
+    return connection, owns_connection
+
+
 @contextmanager
 def write_transaction(
     db: sqlite3.Connection | None, *, scope: str,
@@ -179,15 +200,7 @@ def write_transaction(
     """
     if not scope.isidentifier():
         raise ValueError(f"transaction scope must be a bare identifier: {scope!r}")
-    connection = db if db is not None else get_db()
-    refuse_lane_write(connection, scope)
-    owns_connection = db is None
-    if owns_connection and connection.in_transaction:
-        raise TransactionOwnershipError(
-            f"{scope} claimed the outermost write transaction, but this thread's "
-            "pooled connection is already inside one owned by another frame; "
-            "pass that owner's connection as db= instead"
-        )
+    connection, owns_connection = claim_connection(db, scope)
     try:
         if connection.in_transaction:
             savepoint = f"{scope}_{uuid.uuid4().hex}"
@@ -212,8 +225,9 @@ def write_transaction(
             connection.execute("BEGIN IMMEDIATE")
             write_effects.begin(connection)
             started_at = time.monotonic()
-            yield connection
-            connection.commit()
+            with startup_progress.transaction_writes(connection):
+                yield connection
+                connection.commit()
             committed = write_effects.take(connection)
         except BaseException:
             write_effects.abort(connection)
@@ -321,12 +335,18 @@ def init_db():
     from connections import seed_builtin_connections
     seed_builtin_connections()
 
+    from events.observe_rules import sync_shipped_rules
+    sync_shipped_rules(get_db())
+    from events.connectors.github_screen.install import sync as sync_github_screen
+    sync_github_screen(get_db())
+
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
 
     from infra.config import WORKSPACE
     from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
     carry_workspace_conductor_role_files(WORKSPACE)
+    startup_progress.mark("recovering")
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:

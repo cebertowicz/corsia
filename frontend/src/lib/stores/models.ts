@@ -8,6 +8,12 @@ import {
 	type PendingThreadModelSaveResult,
 } from './threadModelSwitch';
 import type { RunsOn, Runnable } from './modelTurn';
+import {
+	clearHeldThreadModels, compareServerTimes, heldThreadModel, holdThreadModel, newestDisplayTime, outranksHeld,
+	threadModelFor,
+} from './threadModelTruth';
+
+export { seedThreadModelTruth, threadModelFor, threadModelVersion } from './threadModelTruth';
 
 export type { PendingThreadModelSaveResult } from './threadModelSwitch';
 
@@ -55,6 +61,8 @@ export interface Model {
 	/** What the model is. Whether it is available is `modelAvailability(model)`. */
 	status: 'ready' | 'available' | 'unavailable';
 	status_reason?: string;
+	/** Whether this model is served locally or by a trusted device. */
+	is_local?: boolean;
 	/** Whether discovery reported this harness model on any account. */
 	available?: boolean;
 	cache_marker?: 'Cached';
@@ -86,10 +94,6 @@ export function pickerModels(all: Model[], current?: string | null): Model[] {
 
 let _lastChosenModelId: string | null = null;
 const switchingThreadIds = new Set<string>();
-const threadModelTruth = new Map<string, {
-	model: string | null;
-	updatedAt: string;
-}>();
 
 export interface CommittedThreadModelSaveResult {
 	kind: 'committed';
@@ -132,53 +136,24 @@ export function setActiveModel(id: string) {
 	_lastChosenModelId = id;
 }
 
-function normalizedServerTime(value: string): string {
-	return value.endsWith('Z') ? value.slice(0, -1) : value;
-}
 
-function compareServerTimes(left: string, right: string): number {
-	const normalizedLeft = normalizedServerTime(left);
-	const normalizedRight = normalizedServerTime(right);
-	if (normalizedLeft === normalizedRight) return 0;
-	const leftMs = Date.parse(`${normalizedLeft}Z`);
-	const rightMs = Date.parse(`${normalizedRight}Z`);
-	if (!Number.isNaN(leftMs) && !Number.isNaN(rightMs) && leftMs !== rightMs) {
-		return leftMs < rightMs ? -1 : 1;
-	}
-	return normalizedLeft < normalizedRight ? -1 : 1;
-}
 
-function newestDisplayTime(current: string | undefined, incoming: string): string {
-	if (!current) return incoming;
-	return compareServerTimes(incoming, current) >= 0 ? incoming : current;
-}
 
 export function reconcileThreadModelSnapshots<
 	T extends { id: string; model: string | null; updated_at: string },
 >(rows: T[]): T[] {
 	return rows.map((row) => {
 		if (!row.id || !row.updated_at) return row;
-		const current = threadModelTruth.get(row.id);
+		const current = heldThreadModel(row.id);
 		let resolved = row;
-		if (!current) {
-			threadModelTruth.set(row.id, {
-				model: row.model,
-				updatedAt: row.updated_at,
-			});
+		if (!current || outranksHeld(row.updated_at, current, row.model)) {
+			holdThreadModel(row.id, row.model, row.updated_at);
 		} else {
-			const order = compareServerTimes(row.updated_at, current.updatedAt);
-			if (order > 0 || (order === 0 && row.model === current.model)) {
-				threadModelTruth.set(row.id, {
-					model: row.model,
-					updatedAt: row.updated_at,
-				});
-			} else {
-				resolved = {
-					...row,
-					model: current.model,
-					updated_at: newestDisplayTime(row.updated_at, current.updatedAt),
-				};
-			}
+			resolved = {
+				...row,
+				model: current.model,
+				updated_at: newestDisplayTime(row.updated_at, current.updatedAt ?? row.updated_at),
+			};
 		}
 		if (get(activeThreadId) === row.id && resolved.model) {
 			setActiveModel(resolved.model);
@@ -194,12 +169,9 @@ export function acceptThreadModelTruth(
 ): boolean {
 	if (!threadId || !model || !updatedAt) return false;
 	const activeModelBefore = get(activeModelId);
-	const current = threadModelTruth.get(threadId);
-	if (current) {
-		const order = compareServerTimes(updatedAt, current.updatedAt);
-		if (order < 0 || (order === 0 && current.model !== model)) return false;
-	}
-	threadModelTruth.set(threadId, { model, updatedAt });
+	const current = heldThreadModel(threadId);
+	if (current && !outranksHeld(updatedAt, current, model)) return false;
+	holdThreadModel(threadId, model, updatedAt);
 	threads.update((rows) => {
 		const updated = rows.map((thread) => (
 			thread.id === threadId
@@ -220,27 +192,22 @@ export function acceptThreadModelTruth(
 	return true;
 }
 
-/** The accepted model of a thread, including one the thread list does not hold. */
-export function threadModelFor(threadId: string): string | null {
-	return threadModelTruth.get(threadId)?.model ?? null;
-}
 
 /** Bind a viewed thread to its saved selector; an unbound thread stays unbound. */
 export function bindActiveThreadModel(
 	threadId: string,
 	rows: Array<{ id: string; model: string | null }>,
-	hiddenModel?: string,
 ): void {
 	const thread = rows.find(row => row.id === threadId);
-	const selected = thread?.model ?? threadModelFor(threadId) ?? hiddenModel ?? null;
+	const selected = thread?.model ?? threadModelFor(threadId) ?? null;
 	activeModelId.set(selected);
 }
 
 export function _resetThreadModelTruthForTests(): void {
-	threadModelTruth.clear();
+	clearHeldThreadModels();
 }
 
-export { loadModels } from './modelsLoad';
+export { loadModels, loadThreadCatalog } from './modelsLoad';
 
 // A switch is never a question: when the thread does not fit the destination,
 // the server checkpoints on the model being left and carries on, answering 202

@@ -11,21 +11,14 @@ import pytest
 
 import app_lifecycle
 import app_startup_runtime
-from core import checkpoint_runtime
+from core import checkpoint_runtime, fork_runtime
 from infra import state
 from infra.config import RUNTIME_DIR
+from tests.browser_startup_fixture import ProcessOwnerTestContract as _ProcessOwnerTestContract
 
-
-class _ProcessOwnerTestContract:
-    """Minimal managed-process owner surface required by lifespan startup."""
-
-    process_dir = RUNTIME_DIR / "managed-processes"
-
-    def configure_transition_callback(self, _callback) -> None:
-        return None
-
-    def configure_long_running_capacity_callback(self, _callback) -> None:
-        return None
+# A hang guard, not a latency budget: several waits span a cold lifespan startup
+# (about 0.75s unloaded), which a 1s bound fails whenever the host is busy.
+_HANG_GUARD_SECONDS = 20
 
 
 async def _noop(*_args, **_kwargs) -> None:
@@ -46,6 +39,10 @@ def _isolate_lifespan(monkeypatch) -> None:
     from infra.state import turn_buffers
     import tools.mcp_runtime as mcp_runtime
     from tools.registry import ToolRegistry
+
+    # llm.local_sources binds get_servers at import. Importing it first keeps the
+    # stub below from becoming its permanent binding when startup imports it.
+    import llm.local_sources  # noqa: F401
 
     class _NoopProcessOwner(_ProcessOwnerTestContract):
         async def terminate_turn(
@@ -69,14 +66,15 @@ def _isolate_lifespan(monkeypatch) -> None:
         def live_count(self) -> int:
             return 0
 
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: None)
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
+    monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda: None)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
-    monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
+    monkeypatch.setattr(network_discovery, "get_servers", lambda **_filters: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
     monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
     monkeypatch.setattr(mcp_runtime, "_stack", None, raising=False)
@@ -104,8 +102,8 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr("infra.db_async.shutdown", lambda: None)
 
     monkeypatch.setattr(checkpoint_runtime, "reconcile_startup_checkpoints", _noop)
-    monkeypatch.setattr(checkpoint_runtime, "shutdown_checkpoint_tasks", _noop)
-    monkeypatch.setattr(checkpoint_runtime, "checkpoint_task_count", lambda: 0)
+    monkeypatch.setattr(fork_runtime, "shutdown_forks", _noop)
+    monkeypatch.setattr(fork_runtime, "fork_task_count", lambda: 0)
 
     monkeypatch.setattr(state, "_active_turns", {})
     monkeypatch.setattr(state, "_active_llm_tasks", {})
@@ -179,10 +177,25 @@ async def test_frontend_prerequisite_precedes_database_and_runtime_startup(monke
         "ensure_frontend_built",
         lambda: events.append("frontend"),
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
 
     async with app_lifecycle.lifespan(FastAPI()):
         assert events[:2] == ["frontend", "init_db"]
+
+
+async def test_browser_orphan_sweep_failure_does_not_stop_startup(monkeypatch):
+    from host_access import browser_orphan
+
+    _isolate_lifespan(monkeypatch)
+    calls = []
+
+    def fail_sweep(_directory):
+        calls.append("sweep")
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions", fail_sweep)
+    async with app_lifecycle.lifespan(FastAPI()):
+        assert calls == ["sweep"]
 
 
 async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(monkeypatch):
@@ -199,7 +212,7 @@ async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(mon
         intervals_at_database_start.append(sys.getswitchinterval())
         raise _StopStartup
 
-    monkeypatch.setattr(app_lifecycle, "_initialize_startup", stop_at_database_start)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "initialize_startup", stop_at_database_start)
     try:
         with pytest.raises(_StopStartup):
             async with app_lifecycle.lifespan(FastAPI()):
@@ -246,7 +259,7 @@ async def test_predecessor_direct_uvicorn_lifespan_fails_before_database(
         "ensure_frontend_built",
         ensure_frontend_built,
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", init_db)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", init_db)
 
     with pytest.raises(RuntimeError, match="frontend release pairing failed"):
         async with app_lifecycle.lifespan(main.app):
@@ -261,7 +274,7 @@ async def test_durable_write_recovery_runs_immediately_after_schema_init(monkeyp
 
     _isolate_lifespan(monkeypatch)
     events: list[str] = []
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
     monkeypatch.setattr(
         durable_writes,
         "recover_write_intents",
@@ -281,7 +294,7 @@ async def test_checkpoint_reconciliation_runs_after_orphan_terminalization(monke
 
     async def recover_turns(_logger):
         events.append("turn_recovery")
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def reconcile_checkpoints() -> None:
         events.append("checkpoint_reconciliation")
@@ -314,7 +327,7 @@ async def test_readiness_does_not_wait_on_a_stuck_continuity_drive(monkeypatch):
     driving = asyncio.Event()
 
     async def reconcile(_logger):
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def never_finishes(_recovered, _wakes, _logger) -> None:
         driving.set()
@@ -435,11 +448,11 @@ async def test_startup_continuity_waits_for_required_harness_discovery(
 
     task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(discovery_started.wait(), timeout=1.0)
+        await asyncio.wait_for(discovery_started.wait(), timeout=_HANG_GUARD_SECONDS)
         assert not task.done()
         assert events == []
         discovery_release.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await asyncio.wait_for(task, timeout=_HANG_GUARD_SECONDS)
     finally:
         discovery_release.set()
         if not task.done():
@@ -476,8 +489,8 @@ async def test_checkpoint_tasks_join_before_provider_teardown(monkeypatch):
         events.append("providers")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(
@@ -517,8 +530,8 @@ async def test_checkpoint_tasks_join_before_provider_and_storage_teardown(
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(harness_models, "shutdown_refresh_tasks", shutdown_refreshes)
@@ -526,12 +539,12 @@ async def test_checkpoint_tasks_join_before_provider_and_storage_teardown(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(checkpoint_started.wait(), timeout=1.0)
+        await asyncio.wait_for(checkpoint_started.wait(), timeout=_HANG_GUARD_SECONDS)
         assert events == ["serving", "checkpoint_started"]
         assert not lifespan_task.done()
 
         checkpoint_release.set()
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
     finally:
         checkpoint_release.set()
         if not lifespan_task.done():
@@ -570,8 +583,8 @@ async def test_host_access_supervisors_join_before_checkpoint_cleanup(monkeypatc
         shutdown_host_access,
     )
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
 
@@ -750,14 +763,14 @@ async def test_checkpoint_cleanup_defers_caller_cancellation(monkeypatch):
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     _record_tail(monkeypatch, events)
 
     lifespan_task = asyncio.create_task(run_lifespan())
-    await asyncio.wait_for(checkpoint_started.wait(), timeout=1.0)
+    await asyncio.wait_for(checkpoint_started.wait(), timeout=_HANG_GUARD_SECONDS)
     lifespan_task.cancel("checkpoint cleanup cancelled")
     await asyncio.sleep(0)
     assert not lifespan_task.done()
@@ -767,7 +780,7 @@ async def test_checkpoint_cleanup_defers_caller_cancellation(monkeypatch):
         asyncio.CancelledError,
         match="checkpoint cleanup cancelled",
     ):
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
 
     assert events == [
         "serving",
@@ -795,13 +808,13 @@ async def test_surviving_checkpoint_task_blocks_product_and_storage(monkeypatch)
         events.append("refresh")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "checkpoint_task_count",
+        fork_runtime,
+        "fork_task_count",
         lambda: 1,
     )
     monkeypatch.setattr(harness_models, "shutdown_refresh_tasks", shutdown_refreshes)
@@ -848,15 +861,11 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         finally:
             stopped.add(name)
 
+    monkeypatch.setattr(llm_lifecycle, "_autostart_targets", lambda: [{"provider": "omlx", "id": "managed"}])
     monkeypatch.setattr(
         llm_lifecycle,
-        "get_local_providers",
-        lambda: [{"name": "local", "enabled": True, "autoStart": True}],
-    )
-    monkeypatch.setattr(
-        llm_lifecycle,
-        "check_server",
-        lambda _name: block("provider auto-start"),
+        "get_managed_engine",
+        lambda _name: SimpleNamespace(ensure_live=lambda _cfg: block("provider auto-start")),
     )
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {"openai": "key"})
     monkeypatch.setattr(
@@ -1226,8 +1235,8 @@ async def test_runtime_owner_failure_blocks_product_and_storage(monkeypatch, own
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_failure if owner == "checkpoint" else _noop,
     )
     monkeypatch.setattr(
@@ -1353,7 +1362,7 @@ async def test_native_snapshot_does_not_signal_a_pre_call_successor(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(first_cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(first_cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         if replaced_owner == "cancel_handle":
             state._active_turns["replaced"] = successor_cancel
             state._active_turn_tasks["replaced"] = successor_task
@@ -1364,7 +1373,7 @@ async def test_native_snapshot_does_not_signal_a_pre_call_successor(
         first_cleanup_release.set()
 
         with pytest.raises(RuntimeError, match="shutdown retained live owners"):
-            await asyncio.wait_for(lifespan_task, timeout=1.0)
+            await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
 
         if replaced_owner == "cancel_handle":
             assert not successor_cancel.is_set()
@@ -1430,7 +1439,7 @@ async def test_refresh_shutdown_preserves_successor_and_reports_incomplete_join(
     shutdown_task = asyncio.create_task(harness_models.shutdown_refresh_tasks())
     successor = asyncio.create_task(asyncio.Event().wait())
     try:
-        await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         harness_models._REFRESH_TASKS["codex"] = successor
         if shutdown_outcome == "caller_cancel":
             shutdown_task.cancel("refresh shutdown cancelled")
@@ -1444,7 +1453,7 @@ async def test_refresh_shutdown_preserves_successor_and_reports_incomplete_join(
             else (RuntimeError, "harness refresh tasks remain")
         )
         with pytest.raises(expected[0], match=expected[1]):
-            await asyncio.wait_for(shutdown_task, timeout=1.0)
+            await asyncio.wait_for(shutdown_task, timeout=_HANG_GUARD_SECONDS)
 
         assert old_task.done()
         assert harness_models._REFRESH_TASKS["codex"] is successor
@@ -1501,13 +1510,13 @@ async def test_network_startup_owns_and_joins_stubborn_discovery_child(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         await asyncio.sleep(0)
         assert not lifespan_task.done()
         assert events == []
 
         cleanup_release.set()
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
     finally:
         cleanup_release.set()
         if not lifespan_task.done():
@@ -1687,7 +1696,7 @@ def _isolate_rollup_lifespan(monkeypatch) -> None:
     _isolate_lifespan(monkeypatch)
 
     async def startup_reconcile(_logger):
-        return SimpleNamespace(batches=[], settlements=[]), ()
+        return SimpleNamespace(batches=[], settlements=[]), (), None
 
     monkeypatch.setattr(restart_startup, "run_startup_reconcile", startup_reconcile)
     monkeypatch.setattr(restart_startup, "run_startup_drive", _noop)
@@ -1714,8 +1723,8 @@ async def test_startup_rollup_refresh_does_not_delay_lifespan_yield(monkeypatch)
     monkeypatch.setattr(usage_rollup, "_refresh", refresh)
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
-        await asyncio.wait_for(yielded.wait(), timeout=1.0)
+        await asyncio.wait_for(refresh_started.wait(), timeout=_HANG_GUARD_SECONDS)
+        await asyncio.wait_for(yielded.wait(), timeout=_HANG_GUARD_SECONDS)
     finally:
         release_refresh.set()
         await asyncio.gather(lifespan_task, return_exceptions=True)
@@ -1739,7 +1748,7 @@ async def test_startup_and_measurement_dependencies_share_one_rollup_refresh(mon
     monkeypatch.setattr(usage_rollup, "_refresh", refresh)
     try:
         async with app_lifecycle.lifespan(FastAPI()):
-            await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
+            await asyncio.wait_for(refresh_started.wait(), timeout=_HANG_GUARD_SECONDS)
             startup_task = usage_rollup._refreshing[asyncio.get_running_loop()]
             await asyncio.gather(*(usage_rollup.refresh_on_request() for _ in range(5)))
             assert calls == 1
@@ -1773,5 +1782,5 @@ async def test_shutdown_joins_rollup_refresh_before_database_pool_closes(monkeyp
         async with app_lifecycle.lifespan(FastAPI()):
             await refresh_started.wait()
 
-    await asyncio.wait_for(exercise(), timeout=1.0)
+    await asyncio.wait_for(exercise(), timeout=_HANG_GUARD_SECONDS)
     assert events == ["refresh_finished", "pool_closed"]

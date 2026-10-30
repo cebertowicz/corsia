@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from infra.accounts import AccountError
+from infra.account_validation import AccountError
 
 
 @pytest.mark.asyncio
@@ -134,6 +135,59 @@ async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(
     drain.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raised_error", [sqlite3.OperationalError("log unavailable"), asyncio.CancelledError()])
+async def test_update_log_attachment_failure_releases_hold_before_launch(
+    isolated_db, monkeypatch, tmp_path, raised_error
+):
+    from api import settings_restart
+    from automation import self_restart
+    from infra.database import get_db
+
+    log_path = tmp_path / "update.log"
+    log_path.write_text("prepared")
+    monkeypatch.setattr(settings_restart, "_update_log_path", lambda _id: log_path)
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+
+    def fail_attachment(*_args):
+        raise raised_error
+
+    monkeypatch.setattr(self_restart, "record_update_log", fail_attachment)
+    with pytest.raises(type(raised_error)):
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
+            lambda name: Path(name), caller_token="test-token",
+        )
+    connection = get_db()
+    try:
+        rows = connection.execute("SELECT status FROM self_restart_requests").fetchall()
+    finally:
+        connection.close()
+    assert rows and all(row["status"] != "in_flight" for row in rows)
+    drain.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_log_attachment_rejected_does_not_launch(isolated_db, monkeypatch, tmp_path):
+    from api import settings_restart
+
+    monkeypatch.setattr(settings_restart, "_update_log_path", lambda _id: tmp_path / "update.log")
+    spawn = AsyncMock()
+    monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
+    compensate = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_compensate_preparation_failure", compensate)
+
+    with pytest.raises(HTTPException, match="update log could not be recorded"):
+        await settings_restart._launch_settings_restart(
+            "operation", True, Path("/unused"), {}, ["restart"], lambda name: Path(name),
+        )
+    spawn.assert_not_called()
+    assert compensate.await_args.kwargs["failure_code"] == "update_refused"
+
+
 def test_update_precheck_credits_prunable_backups(tmp_path, monkeypatch):
     """The preflight accepts room the migration will make by pruning stale backups."""
     from api import update_preflight
@@ -204,6 +258,53 @@ async def test_failed_update_marks_conductor_only_after_successful_send(isolated
         connection.close()
     assert told_at is not None
     sent.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rolled_back_update_notice_names_the_target_and_running_versions(
+    isolated_db, monkeypatch
+):
+    from automation import self_restart
+    from automation.update_failure_notice import tell_conductor_about_failed_update
+    from core import agent_roster_queries
+    from events import delivery
+
+    operation_id = self_restart.try_acquire(
+        None, "steve", None, None, "update", kind="update", trigger="manual",
+        previous_version="0.4.1",
+    )
+    assert operation_id is not None
+    for expected, target in (
+        ("holding", "steering"),
+        ("steering", "draining"),
+        ("draining", "ready"),
+        ("ready", "restarting"),
+        ("restarting", "resuming"),
+    ):
+        assert self_restart.transition_operation(
+            operation_id, expected=expected, target=target,
+        )
+    assert self_restart.abort_operation(
+        operation_id,
+        error="Update target version 0.4.2 is not running (running: 0.4.1).",
+        failure_code="rolled_back",
+        failure_detail=json.dumps({
+            "reason": "mismatch",
+            "target_version": "0.4.2",
+            "running_version": "0.4.1",
+        }),
+    )
+    sent = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
+    )
+    monkeypatch.setattr(delivery, "deliver_to_thread", sent)
+
+    await tell_conductor_about_failed_update(operation_id)
+
+    assert "target version 0.4.2" in sent.await_args.args[2]
+    assert "running version 0.4.1" in sent.await_args.args[2]
+    assert "previous version 0.4.1" in sent.await_args.args[2]
 
 
 @pytest.mark.asyncio
@@ -334,7 +435,7 @@ async def test_release_returns_while_the_conductor_notice_is_pending(isolated_db
     monkeypatch.setattr(update_failure_notice, "tell_conductor_about_failed_update", slow_notice)
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: order.append("clear"))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: order.append("resume")
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: order.append("resume")
     )
 
     released = await asyncio.wait_for(
@@ -368,7 +469,7 @@ async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypa
     resumed = []
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: cleared.append(True))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
     )
 
     released = await restart.abort_restart_control(

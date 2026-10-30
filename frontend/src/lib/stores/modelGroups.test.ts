@@ -346,6 +346,15 @@ describe('groupModels', () => {
 		expect(groupStatusText(group)).toBe('');
 	});
 
+	it('keeps legacy and CORSIA-managed local oMLX models in distinct picker groups', () => {
+		const groups = groupModels([
+			row({ id: 'legacy', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac' }),
+			row({ id: 'managed', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'CORSIA' }),
+		]);
+
+		expect(groups.map(group => group.name)).toEqual(['This Mac', 'CORSIA']);
+	});
+
 	it('uses first back only when several accounts are limited', () => {
 		const [group] = groupModels([
 			row({ id: 'a', status: 'unavailable', status_reason: 'usage_limited', status_resets_at: '2026-10-03T05:00:00Z' }),
@@ -356,6 +365,14 @@ describe('groupModels', () => {
 		expect(groupStatusText(group, [limitedAccount()])).toMatch(/^limited · back (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d/);
 		expect(groupStatusText(group, [limitedAccount()])).not.toContain('first back');
 		expect(groupStatusText(group, [limitedAccount(), limitedAccount({ resets_at: '2026-10-04T05:00:00Z' })])).toMatch(/^All 2 accounts limited · first back (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d/);
+	});
+
+	it('reads first back as the soonest reset across the accounts, not the bound one', () => {
+		const now = new Date();
+		const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
+		const [group] = groupModels([row({ status: 'unavailable', status_reason: 'usage_limited', status_resets_at: at(50) })]);
+		const text = groupStatusText(group, [limitedAccount({ resets_at: at(50) }), limitedAccount({ resets_at: at(26) })]);
+		expect(text).toBe(`All 2 accounts limited · first back ${resetLabel(at(26), true)}`);
 	});
 
 	it('reports an account check in flight or failed, from the account', () => {

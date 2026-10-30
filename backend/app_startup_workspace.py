@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 def initialize_workspace(workspace: Path, logger) -> None:
-    """Refresh workspace projections, convert skill keys, sweep, assign owners, then backfill."""
+    """Refresh workspace projections, convert skill keys and data, sweep, assign owners, then backfill."""
+    from core.skill_data_conversion import convert_legacy_skill_data
     from core.skill_key_conversion import convert_legacy_skill_keys
     from core.system_projection import ensure_system_projection
     from infra.guidance_git import startup_sweep
@@ -22,6 +23,10 @@ def initialize_workspace(workspace: Path, logger) -> None:
         convert_legacy_skill_keys(workspace)
     except Exception:
         logger.exception("skill frontmatter key conversion failed; retrying next start")
+    try:
+        convert_legacy_skill_data(workspace)
+    except Exception:
+        logger.exception("skill CORSIA data conversion failed; retrying next start")
     startup_sweep(workspace)
     try:
         run_startup_assignment(workspace)

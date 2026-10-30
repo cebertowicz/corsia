@@ -1,41 +1,14 @@
 ---
 name: decision-brief
-description: Use before sending the user any substantive message — analysis, research, options, a proposal, a review result, a status update, a blocker, or a request for action or approval — to compress it to the message rule in core context, keep long form in an artifact, raise a real tradeoff through the plan decision, and bring anything to review or approve as an artifact ask. Not for a one-line answer, tool narration, or agent-to-agent messages.
-corsia:
-  handler:
-    kind: instruction
-  workflow:
-    steps:
-      - id: product-chain
-        title: Product-thinking chain recorded
-        required: false          # skip with reason when the decision is not about product behavior
-        difficulty: {default: standard, hard_if: "no approved objective covers the choice"}
-      - id: long-form
-        title: Analysis and evidence in an artifact
-        required: true
-        check: artifact holding options, trade-offs and evidence
-        after: [product-chain]
-        difficulty: {default: standard}
-      - id: brief
-        title: Brief message to the user
-        required: true
-        check: message answers first in one line, at most five items, no internal IDs
-        after: [long-form]
-        difficulty: {default: routine}
-      - id: decision
-        title: Plan decision raised
-        required: true
-        check: plan decision raised with options, one recommendation (pick one) or a pre-ticked set (pick any), and a link to the long-form artifact
-        after: [brief]
-        difficulty: {default: routine}
-        quality:
-          - {name: decided-as-framed, good: "answered with a listed option, or for pick any any ticked set or none; no replacement decision raised first", observed: signal, when: completion}
-          - {name: not-reversed, good: "no correction against the decision task within 30 days", observed: signal, when: "lagging:30"}
+description: Use before sending the user any substantive message (analysis, options, a proposal, a review result, a status update, a blocker or a request) to compress it to the message rule in skill `asking-the-person`, keep long form in an artifact, and raise a choice through the plan decision. Not for a one-line answer, tool narration, or agent-to-agent messages.
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: "1"
 ---
 
 # Decision brief
 
-**Applying these steps:** only when you raise a decision to the user. For a status update, review result, blocker, or any other message that raises no decision, skip them entirely: no phase, no tasks. When they apply, plan one phase with a task per step in the frontmatter, as `task-discipline` describes. Steps marked `required` need their `check` met; skip any other with a one-line reason on the phase.
+**Applying these steps:** only when you raise a decision to the user. For a status update, review result, blocker, or any other message that raises no decision, skip them entirely: no phase, no tasks. When they apply, plan one phase with a task per step in `corsia.yaml`, as `task-discipline` describes. Steps marked `required` need their `check` met; skip any other with a one-line reason on the phase.
 
 The user may have none of the task history. Make the result or decision understandable without reconstructing it; adapt depth to the requested deliverable and consequence.
 
@@ -56,7 +29,7 @@ Keep routine updates brief and consolidated. A requested report, explanation or 
 - Do not ask the user to choose what does not change behavior, external effect, cost, risk, or reversibility. Run skill `decide-or-raise` before drafting a raise.
 - Long form goes to the plan node or a registered document; the brief links it.
 - A genuine decision is a structured plan decision (draft, parent review, raise). Describing it in chat is not surfacing it.
-- Getting something reviewed or approved (a draft, document, plan, design or image) is an artifact ask on it, not a decision; related items share one artifact and one ask, and visuals are embedded inline as relative markdown images, not linked.
+- An artifact ask, for something they must judge itself (a draft to send, a design): register the document as yours (`artifact_register`), then `plan_update` `block_node` with `owner_kind: user` and `ask_artifact_id`. To have the person judge something, use this ask, not `request_review`.
 - Keep unanswered decisions pending. Chase an overdue decision through its existing supported route without creating duplicates or treating silence as consent.
 
 ## Before sending

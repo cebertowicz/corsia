@@ -62,7 +62,7 @@ describe('SidebarAttentionList', () => {
 		expect(focus).not.toHaveBeenCalled();
 
 		completeNavigation();
-		await vi.waitFor(() => expect(focus).toHaveBeenCalledWith('node-1', null));
+		await vi.waitFor(() => expect(focus).toHaveBeenCalledWith('node-1', null, false));
 		expect(focus).toHaveBeenCalledTimes(1);
 		for (const off of unregister) off();
 	});

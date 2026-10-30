@@ -41,7 +41,10 @@ jobs:
     # macOS: the L3 contract suite runs agent shells under Seatbelt
     # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
     runs-on: macos-15
-    timeout-minutes: 15
+    # Green runs take 8 to 15 minutes depending on the runner (p90 13 min,
+    # 2026-10-27); a slow runner finished all tests at 13.3 min and was still
+    # cancelled at 15, so the cap is a hang guard with room for that hardware.
+    timeout-minutes: 25
 
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
@@ -74,6 +77,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
 
       - name: Install uvx for MCP launch proof
         run: |
@@ -92,7 +99,14 @@ jobs:
       - name: Install stock agent CLIs
         run: |
           set -e
-          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.160.0
+          versions=$(python backend/subagents/codex_versions.py)
+          capture_root="$RUNNER_TEMP/codex-capture"
+          for version in $versions; do
+            npm install --prefix "$capture_root/$version" "@openai/codex@$version"
+          done
+          echo "CORSIA_CODEX_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
+          # The loop ends on the newest version, which the other stock-CLI proofs use.
+          npm install --global @anthropic-ai/claude-code@2.1.296 "@openai/codex@$version"
           claude --version
           codex --version
 
@@ -170,6 +184,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
 
       - name: Install Safehouse
         run: scripts/install-ci-safehouse
@@ -181,7 +199,9 @@ jobs:
       - name: Install stock agent CLIs
         run: |
           set -e
-          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.160.0
+          # The newest version read-only agents admit, from the same list the capture uses.
+          newest=$(python backend/subagents/codex_versions.py | awk '{print $NF}')
+          npm install --global @anthropic-ai/claude-code@2.1.296 "@openai/codex@$newest"
           claude --version
           codex --version
 

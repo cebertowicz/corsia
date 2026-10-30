@@ -202,6 +202,31 @@ describe('PlanDrawerControl attention-item click', () => {
 		expect(drawer?.textContent).not.toContain('no longer in this plan');
 	});
 
+	it('opens a person step’s instructions document directly from Sidebar Needs you', async () => {
+		const instructions = {
+			id: 'instructions-1', role: 'input' as const, integration: 'workspace', type: 'document',
+			external_id: 'how-to.md', title: 'How to set up', path: '/how-to.md', state: 'active' as const,
+			attention_state: null,
+		};
+		serve(envelope([operatorNode({
+			id: 'person-step', title: 'Set up workspace', assignee: 'user', artifacts: [instructions],
+		})]));
+		threadPlanStates.set({
+			t1: { state: 'needs_input', label_key: null, paused: false, attention_items: [
+				{ kind: 'user_step', title: 'Set up workspace', node_id: 'person-step' },
+			] },
+		});
+		await renderPhone();
+
+		document.querySelector<HTMLButtonElement>('.attention-item')!.click();
+		await settle();
+		await settle();
+
+		const workspace = get(threadWorkspaces).t1;
+		const tab = workspace.tabs.find((candidate) => candidate.instanceId === workspace.activeTabId)!;
+		expect(tab).toMatchObject({ artifactId: 'instructions-1', path: '/how-to.md', title: 'How to set up' });
+	});
+
 	it('says so in the drawer when the loaded plan no longer has the node', async () => {
 		serve(envelope([]));
 		await renderPhone();
@@ -210,6 +235,6 @@ describe('PlanDrawerControl attention-item click', () => {
 		await settle();
 		await settle();
 
-		expect(document.querySelector('[data-adaptive-drawer]')?.textContent).toContain('That item is no longer in this plan');
+		expect(document.querySelector('[data-adaptive-drawer]')?.textContent).toContain('That task isn’t in this plan.');
 	});
 });

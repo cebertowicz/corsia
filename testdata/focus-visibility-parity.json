@@ -421,7 +421,15 @@
       "role": "system",
       "content": "brief",
       "metadata_raw": "{\"cc\": true, \"type\": \"seed\"}",
-      "visible": true,
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system session seed",
+      "role": "system",
+      "content": "starting context",
+      "metadata_raw": "{\"type\": \"seed\"}",
+      "visible": false,
       "expected_kind": "other"
     }
   ]

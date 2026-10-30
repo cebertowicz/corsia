@@ -77,6 +77,38 @@ def pytest_runtest_call(item):
     return result
 
 
+@pytest.fixture(scope="session")
+def _browser_sweep_test_root(tmp_path_factory):
+    """Keep startup recovery away from every real browser socket directory."""
+    return tmp_path_factory.mktemp("browser-sweep")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_browser_startup_sweep(monkeypatch, _browser_sweep_test_root):
+    from functools import partial
+    from host_access import browser_orphan
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions",
+                        partial(browser_orphan.close_dead_sessions, root=_browser_sweep_test_root))
+
+
+@pytest.fixture
+def local_model_host(monkeypatch):
+    """Pin the local-model host gate, including its imported alias."""
+    from llm import local_setup_gates, local_sources
+
+    def set_host(*, is_mac):
+        monkeypatch.setattr(local_setup_gates, "host_never_runs_local", lambda: not is_mac)
+        monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: not is_mac)
+
+    return set_host
+
+
+@pytest.fixture
+def mac_local_model_host(local_model_host):
+    local_model_host(is_mac=True)
+
+
 @pytest.fixture
 def mock_emit(monkeypatch):
     """Replace ``emit_product_event`` with a list-capturing stub."""
@@ -243,7 +275,10 @@ def integration_client(integration_workspace):
     import asyncio
     import app_lifecycle
     import app_startup_runtime
+    import api.usage_rollup as usage_rollup
     import automation.plan_liveness as plan_liveness
+    import automation.restart_startup as restart_startup
+    import connections
     import llm.network_discovery as network_discovery
     import ws.presence_control as presence_control
     import infra.bulletin_live as bulletin_live
@@ -254,17 +289,19 @@ def integration_client(integration_workspace):
     async def _skip_external_harness_discovery() -> list[dict]:
         return []
 
-    async def _suspend_forever() -> None:
+    async def _suspend_forever(*_args) -> None:
         await asyncio.Event().wait()
 
     # Every long-running loop production starts at app startup. Each one
     # outlives this session-scoped app and keeps polling whichever isolated
     # per-test database happens to be active later, which has segfaulted the
     # suite from multiple loops (plan liveness, nightly, delivery recovery,
-    # idle retirement). Suspend the whole class here; dedicated lifecycle tests
+    # idle retirement). Startup recovery can also outlive startup and reach a
+    # later test's database. Suspend these here; dedicated lifecycle tests
     # exercise the real owners.
     _BACKGROUND_LOOPS = (
         (plan_liveness, "plan_liveness_sweep_loop"),
+        (restart_startup, "run_startup_drive"),
         (network_discovery, "health_sweep_loop"),
         (app_startup_runtime, "nightly_job_loop"),
         (app_startup_runtime, "idle_retirement_loop"),
@@ -283,6 +320,15 @@ def integration_client(integration_workspace):
             "_startup_harness_discovery",
             _skip_external_harness_discovery,
         ))
+        # Startup's init_db would re-seed the session database's CLI rows from
+        # whatever this host has installed, undoing the deterministic rows
+        # ``_init_isolated_db_schema`` seeded (#2975).
+        suspended.enter_context(patch.object(
+            connections, "seed_builtin_connections", lambda **_kwargs: 0,
+        ))
+        # The session app cannot refresh mutable rollup caches while per-test
+        # fixtures repeatedly replace the active isolated database.
+        suspended.enter_context(patch.object(usage_rollup, "schedule_refresh", lambda: None))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(
                 patch.object(module, loop_name, _suspend_forever)

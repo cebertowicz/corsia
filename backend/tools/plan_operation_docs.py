@@ -39,6 +39,8 @@ _OPERATION_NOTES = {
 #: Operations with more than one valid body, which one required set cannot
 #: express. The text replaces the generated key list for that operation.
 _ALTERNATE_SHAPES = {
+    "add": "title, acceptance_criteria; task size, intent, intent_words",
+    "insert": "title, acceptance_criteria; task size, intent, intent_words",
     "archive_node": "node_id, expected_revision for one node; or node_ids alone for many",
 }
 

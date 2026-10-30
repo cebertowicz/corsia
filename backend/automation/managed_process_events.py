@@ -235,6 +235,10 @@ async def durable_long_running_reservations(
 
 async def on_background_transition(record: ProcessRecord, kind: Transition) -> None:
     from infra.db_async import run_in_db
+    if kind == 'failed':
+        import asyncio
+        from tools.shell_sandbox import recheck_after_background_failure
+        await asyncio.to_thread(recheck_after_background_failure, record)
 
     from infra.admission_fence import is_fenced
 
@@ -292,13 +296,7 @@ async def abort_thread_close(token: ThreadCloseToken) -> None:
 def stage_thread_close(
     db: sqlite3.Connection, thread_ids: Sequence[str],
 ) -> tuple[str, ...]:
-    from host_access import processes
-
-    return stage_thread_family_retirements(
-        db,
-        thread_ids,
-        process_dir=processes.PROCESS_OWNER.process_dir,
-    )
+    return stage_thread_family_retirements(db, thread_ids)
 
 
 async def finish_thread_close(token: ThreadCloseToken) -> None:
@@ -306,6 +304,16 @@ async def finish_thread_close(token: ThreadCloseToken) -> None:
     from infra.db_async import run_in_db
 
     await processes.PROCESS_OWNER.commit_thread_close(token)
+    import sys
+    if sys.platform == 'linux':
+        import asyncio
+        from infra.config import STATE_ROOT
+        from tools.linux_sandbox import cleanup_thread_tmp
+        for thread_id in token.thread_ids:
+            try:
+                await asyncio.to_thread(cleanup_thread_tmp, STATE_ROOT, thread_id)
+            except Exception:
+                logger.exception("Linux sandbox temporary directory cleanup failed for thread {}", thread_id)
     try:
         await run_in_db(drain_retirements)
     except Exception:

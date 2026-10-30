@@ -1,0 +1,267 @@
+/* Generated from frontend/src/app-tokens.css by desktop/scripts/gen-shell-tokens.mjs. Do not edit. */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Fira Code', Menlo, Consolas, monospace;
+  --text-caption:  10.5px;
+  --text-footnote: 11.5px;
+  --text-subhead:  13px;
+  --text-callout:  14px;
+  --text-body:     15px;
+  --text-title3:   17px;
+  --text-title2:   20px;
+  --text-title1:   28px;
+  --text-input:    16px;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+  --lh-tight:   1.3;
+  --lh-snug:    1.4;
+  --lh-normal:  1.5;
+  --lh-relaxed: 1.65;
+  --ls-cap:    0.08em;
+  --ls-title: -0.01em;
+
+  --focus-ring: 0 0 0 3px var(--accent-wash);
+
+  --space-1: 4px;
+  --chip-inline-padding: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --touch-target: 44px;
+  --space-8: 48px;
+
+  --ease-snap: cubic-bezier(0.2, 0, 0, 1);
+  --ease-material: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-ios-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-entrance: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-tight: 120ms;
+  --dur-standard: 220ms;
+  --dur-drawer: 320ms;
+  --dur-spring: 380ms;
+  --dur-hero: 460ms;
+  --dur-hero-plus: 600ms;
+
+  --press-scale: 0.96;
+  --press-opacity: 0.8;
+  --press-bg: var(--bg-active);
+  /* Image-region marks stay legible against either theme and image pixels. */
+  --image-region-ink: #111;
+  --image-region-halo: #fff;
+  --image-region-edge: #000;
+}
+
+:root {
+  color-scheme: dark;
+  --bg-primary: #0a0a0b;
+  --bg-secondary: #141416;
+  --bg-tertiary: #1c1c1f;
+  --bg-surface: #141416;
+  --bg-elevated: #1c1c1f;
+  --bg-hover: #242428;
+  --bg-active: #2a2a2f;
+  --border: #2a2a2f;
+  --border-subtle: #1f1f24;
+  --text-primary: #e8e8ed;
+  --text-secondary: #adadb2;
+  --text-muted: #adadb2;
+  --text-tertiary: #919196;
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
+  --green: #34d399;
+  --green-bg: rgba(52, 211, 153, 0.08);
+  --green-border: rgba(52, 211, 153, 0.25);
+  --green-text: #34d399;
+  --red-text: var(--red);
+  --amber-text: var(--amber);
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --red-bg: rgba(248, 113, 113, 0.08);
+  --red-bg-hover: rgba(248, 113, 113, 0.14);
+  --orange: #fb923c;
+  --blue: #60a5fa;
+  --code-bg: #1c1c1f;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --radius-2xs: 4px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+  --sidebar-width: 280px;
+  --transcript-max-width: 760px;
+  --needs-you-tile-max-width: 480px;
+  --artifact-tile-size: 36px;
+  --plan-state-icon-size: 18px;
+  --header-height: 60px;
+  --list-row-min-height: 38px;
+  --button-pad-x-sm: 10px;
+  /* Inset between a segmented radiogroup's track and its options (Settings Theme, Add model Sort). */
+  --segment-inset: 2px;
+  /* Shared notice geometry preserves the established toast treatment without raw component values. */
+  --toast-detail-icon-offset: 3px;
+  --toast-close-inline-padding: 2px;
+  --toast-action-underline-offset: 2px;
+  --project-mark-size: 9px;
+  --project-mark-ring: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --header-bottom: calc(var(--header-height) + var(--safe-top));
+  --status-ready: #22c55e;
+  --status-in-progress: #3b82f6;
+  --status-planned: #f59e0b;
+  --status-blocked: #ef4444;
+  --status-idea: #6b7280;
+  --status-draft: #8b5cf6;
+  --status-done: #22c55e;
+  --status-failed: #ef4444;
+  --status-cancelled: #6b7280;
+  --status-validating: #8b5cf6;
+  --status-planning: #a855f7;
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-comment: #5c6370;
+  --hl-number: #d19a66;
+  /* The categorical violet: identity and kind colours that must stay apart from blue (never the accent). */
+  --purple: #8b5cf6;
+  --purple-2: #b29bff;
+  --purple-text: #bba8ff;
+  --purple-bg: rgba(139, 92, 246, 0.10);
+  --purple-line: rgba(139, 92, 246, 0.28);
+
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
+     default *is* a project colour: the corsia project's own accent, #007faa. Every value below is exactly what
+     `accentRoles('#007faa', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
+     a project painted #007faa look the same. Under a project scope +layout replaces --accent and every role from
+     accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
+  --accent-text: #009cd0;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
+  --accent-fill: var(--accent);
+  --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 45%, transparent);
+  --violet-brand: #8b5cf6;
+  --teal: #2dd4bf;
+  --teal-bg: rgba(45, 212, 191, 0.10);
+  --teal-line: rgba(45, 212, 191, 0.28);
+  --sky: var(--blue);
+  --sky-bg: rgba(96, 165, 250, 0.10);
+  --sky-line: rgba(96, 165, 250, 0.28);
+  --amber: #f59e0b;
+  --amber-bg: rgba(245, 158, 11, 0.10);
+  --amber-line: rgba(245, 158, 11, 0.28);
+
+  --glass-blur-radius: 40px;
+  /* Three sigma keeps a backdrop blur's sampling edge outside a visible glass card. */
+  --glass-blur-reach: calc(var(--glass-blur-radius) * 3);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(180%);
+  --glass-blur-soft: blur(8px) saturate(120%);
+  --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+  --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-scrim: rgba(0, 0, 0, 0.28);
+  --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);
+  --glass-elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.25), 0 16px 48px rgba(0, 0, 0, 0.45);
+  --glass-elevation-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.3), 0 32px 64px rgba(0, 0, 0, 0.5);
+  --lg-card-fill: color-mix(in srgb, white 5%, transparent);
+  --lg-card-radius: 14px;
+  --lg-row-hover: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  --header-gradient-top: var(--glass-thin);
+  --shadow-chip: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --shadow-focus: 0 0 0 3px var(--accent-wash);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f8fa;
+  --bg-tertiary: #f0f0f2;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e8e8ec;
+  --bg-active: #e0e0e5;
+  --border: #d8d8de;
+  --border-subtle: #ececf0;
+  --text-primary: #1a1a1e;
+  --text-secondary: #46464b;
+  --text-muted: #46464b;
+  --text-tertiary: #636368;
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
+  --green: #34d399;
+  --green-bg: #f0fdf4;
+  --green-border: rgba(34, 197, 94, 0.3);
+  --green-text: #166534;
+  --red-text: #b91c1c;
+  --amber-text: #a3480a;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --red-bg: #fef2f2;
+  --red-bg-hover: #fee2e2;
+  --orange: #fb923c;
+  --blue: #3b82f6;
+  --code-bg: #f8f8fa;
+  --status-ready: #22c55e;
+  --status-in-progress: #3b82f6;
+  --status-planned: #f59e0b;
+  --status-blocked: #ef4444;
+  --status-idea: #6b7280;
+  --status-draft: #8b5cf6;
+  --status-done: #22c55e;
+  --status-failed: #ef4444;
+  --status-cancelled: #6b7280;
+  --status-validating: #8b5cf6;
+  --status-planning: #a855f7;
+  --hl-keyword: #7c3aed;
+  --hl-string: #059669;
+  --hl-comment: #9ca3af;
+  --hl-number: #d97706;
+  --purple: #7c5cf6;
+  --purple-2: #6d4ce6;
+  --purple-text: #5b3fd0;
+  --purple-bg: rgba(124, 92, 246, 0.08);
+  --purple-line: rgba(124, 92, 246, 0.32);
+}
+
+[data-theme="light"] {
+  --accent-text: #006a8e;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
+  --accent-fill: var(--accent);
+  --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 35%, transparent);
+  --teal: #0d9488;
+  --teal-bg: rgba(13, 148, 136, 0.08);
+  --teal-line: rgba(13, 148, 136, 0.32);
+  --sky: #2563eb;
+  --sky-bg: rgba(37, 99, 235, 0.08);
+  --sky-line: rgba(37, 99, 235, 0.32);
+  --amber: #d97706;
+  --amber-bg: rgba(217, 119, 6, 0.08);
+  --amber-line: rgba(217, 119, 6, 0.32);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(118%);
+  --glass-thin:          color-mix(in srgb, var(--bg-secondary) 84%, transparent);
+  --glass-regular:       color-mix(in srgb, var(--bg-secondary) 89%, transparent);
+  --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --header-gradient-top: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  --shadow-chip: 0 6px 24px rgba(0, 0, 0, 0.10);
+  --glass-scrim: rgba(0, 0, 0, 0.22);
+  --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 8px rgba(0, 0, 0, 0.06), 0 6px 24px rgba(0, 0, 0, 0.10);
+  --glass-elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 4px 16px rgba(0, 0, 0, 0.08), 0 12px 36px rgba(0, 0, 0, 0.12);
+  --glass-elevation-3: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 4px 16px rgba(0, 0, 0, 0.10), 0 24px 56px rgba(0, 0, 0, 0.16);
+}

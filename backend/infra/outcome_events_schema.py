@@ -4,7 +4,8 @@ One row per source-stable fact, keyed on ``dedupe_key`` so every adapter is
 idempotent. ``attributes`` holds only allowlisted ids, counts and enums (see
 ``infra.outcome_event_attributes``); a withdrawn row keeps a tombstone, never
 its content. ``outcome_event_counters`` holds the durable intake counters
-(duplicates ignored, attribute keys dropped) that measures read later.
+(duplicates ignored, attribute keys dropped) that measures read later, keyed agent, day,
+event, counter so an agent's recent window is one index range.
 ``infra.outcome_events`` is the only writer; measures read the table in their own queries.
 """
 
@@ -41,11 +42,39 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         ON outcome_events(project_id, ts);
     CREATE INDEX IF NOT EXISTS idx_outcome_events_subject
         ON outcome_events(subject_key);
+    CREATE INDEX IF NOT EXISTS idx_outcome_events_agent_observed
+        ON outcome_events(agent_thread_id, observed_ts, event_name)
+        WHERE agent_thread_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_triage_subject
+        ON outcome_events(subject_key)
+        WHERE event_name='learning_loop.correction_triage';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_outcome_subject
+        ON outcome_events(subject_key)
+        WHERE event_name='learning_loop.correction_outcome';
     CREATE TABLE IF NOT EXISTS outcome_event_counters (
-        counter    TEXT NOT NULL CHECK (counter IN (
-                     'duplicate_ignored', 'attribute_dropped', 'mapping_failed')),
+        counter TEXT NOT NULL CHECK (counter IN (
+            'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
+            'name_undeclared', 'namespace_not_owned',
+            'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
-        n          INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0),
-        PRIMARY KEY (counter, event_name)
+        agent_thread_id TEXT NOT NULL DEFAULT '',
+        day TEXT NOT NULL DEFAULT '0000-00-00',
+        n INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0),
+        PRIMARY KEY (agent_thread_id, day, event_name, counter)
     );
+    CREATE TABLE IF NOT EXISTS measure_definitions (
+        owner_thread_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('event', 'kpi', 'view')),
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        spec_json TEXT NOT NULL CHECK (json_valid(spec_json)),
+        file_path TEXT NOT NULL,
+        file_sha256 TEXT NOT NULL,
+        synced_at TEXT NOT NULL,
+        removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1)),
+        version_attr TEXT,
+        PRIMARY KEY (owner_thread_id, kind, name, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name
+        ON measure_definitions(kind, name);
 """

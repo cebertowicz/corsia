@@ -6,8 +6,6 @@ const mocks = vi.hoisted(() => ({
 	fetchComments: vi.fn(),
 	fetchRevision: vi.fn(),
 	send: vi.fn(),
-	leave: vi.fn(),
-	ret: vi.fn(),
 	retry: vi.fn(),
 }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
@@ -20,8 +18,6 @@ vi.mock('$lib/api/docs', () => ({
 }));
 vi.mock('$lib/api/docFeedback', () => ({
 	sendDocFeedback: mocks.send,
-	leaveDocFeedback: mocks.leave,
-	returnDocFeedback: mocks.ret,
 	retryDocFeedback: mocks.retry,
 }));
 vi.mock('$lib/stores/viewport', async () => {
@@ -32,11 +28,16 @@ vi.mock('$lib/stores/viewport', async () => {
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 import ImageViewer from './ImageViewer.svelte';
+import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
+import { DocFeedback } from '$lib/docFeedback.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { isMobile } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
-const pending = (open_count: number) => ({ owner_label: 'Design', grace_closes_at: null, undelivered_batches: [], open_count });
+const pending = (open_count: number, lanes: { doc?: number; image?: number } = {}) => ({
+	owner_label: 'Design', undelivered_batches: [], open_count, document_held_count: lanes.doc ?? 0, image_held_count: lanes.image ?? 0,
+});
+const sentAll = (counts: ReturnType<typeof pending>, sent_count: number) => ({ woken: [], ...counts, sent_count });
 const onImage = (id: string, number: number) => ({
 	id, author: 'you', author_kind: 'user', body: id, created_at: '2026-10-10T00:00:00Z',
 	region_x: 0.1, region_y: 0.2, region_w: 0.2, region_h: 0.1, region_number: number, region_stale: false,
@@ -81,9 +82,9 @@ async function imageTab() {
 	return { target, component };
 }
 /** The document's own status row, which owns its batch while the viewer is over it. */
-function documentStatus() {
+function documentStatus(lane: 'document-held' | null = null, onFeedbackChanged?: () => void | Promise<void>) {
 	const target = host();
-	const component = mount(DocFeedbackStatus, { target, props: { artifactId: 'art-doc', targetInstanceId: 'tab-1' } }) as unknown as {
+	const component = mount(DocFeedbackStatus, { target, props: { artifactId: 'art-doc', targetInstanceId: 'tab-1', lane, onFeedbackChanged } }) as unknown as {
 		controller: () => import('$lib/docFeedback.svelte').DocFeedback;
 		sync: (id: string, feedback: ReturnType<typeof pending>) => void;
 	};
@@ -92,7 +93,7 @@ function documentStatus() {
 	return { target, component };
 }
 const sendIn = (element: ParentNode) => [...element.querySelectorAll<HTMLButtonElement>('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? '')) ?? null;
-/** The comments drawer's pinned footer, where an unsent batch is named and sent (RSR-5). */
+/** The comments drawer has no Send footer: each held lane is sent from its own header or bar. */
 const footerIn = (element: ParentNode) => element.querySelector<HTMLElement>('[data-drawer-unsent]');
 async function openDrawer(target: HTMLElement) {
 	target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!.click();
@@ -113,7 +114,7 @@ beforeEach(() => {
 	});
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 	docComments.set({});
-	for (const mock of [mocks.send, mocks.leave, mocks.ret, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	for (const mock of [mocks.send, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
 	mocks.fetchComments.mockReset().mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(0) });
 	mocks.fetchRevision.mockReset().mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-1', media_type: 'image/png', artifact_id: 'art-img' });
 });
@@ -131,31 +132,147 @@ afterEach(() => {
 });
 
 describe('Send in the image viewer (DCOL-FR13.12)', () => {
-	it('keeps send controls in the document review surface, and going Back is not leaving it', async () => {
-		const doc = documentStatus();
-		doc.component.sync('art-doc', pending(2));
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
+	it('keeps sending disabled until the owning reader settles a sync that overlapped the send', async () => {
+		let finishRead!: () => void;
+		const read = new Promise<void>((resolve) => { finishRead = resolve; });
+		const doc = documentStatus('document-held', () => read);
+		const feedback = doc.component.controller();
+		doc.component.sync('art-doc', pending(1, { doc: 1 }));
+		let finishSend!: (value: ReturnType<typeof sentAll>) => void;
+		mocks.send.mockImplementationOnce(() => new Promise((resolve) => { finishSend = resolve; }));
+		const sending = feedback.sendDocument();
+		// A count read begun before the close can arrive during the send with its old count.
+		doc.component.sync('art-doc', pending(1, { doc: 1 }));
+		finishSend(sentAll(pending(0), 1));
+		await settle();
+		expect(feedback.sendingLane).toBe('document-held');
+		expect(sendIn(doc.target)!.disabled).toBe(true);
+		doc.component.sync('art-doc', pending(0));
+		finishRead();
+		await sending;
 		flushSync();
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 2 comments to Design');
+		expect(feedback.sendingLane).toBeNull();
+		expect(feedback.documentHeld).toBe(0);
+		expect(sendIn(doc.target)).toBeNull();
+	});
+	for (const syncFirst of [true, false]) it(`keeps the reopened document header actionable when its sync lands ${syncFirst ? 'before' : 'after'} an image send result`, async () => {
+		const refresh = vi.fn();
+		const doc = documentStatus('document-held', refresh);
+		const feedback = doc.component.controller();
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
+		let finish!: (value: ReturnType<typeof sentAll>) => void;
+		mocks.send.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+		const sending = feedback.sendImage();
+		if (syncFirst) doc.component.sync('art-doc', pending(1, { doc: 1 }));
+		finish(sentAll(pending(0), 2));
+		await sending;
+		if (!syncFirst) {
+			expect(feedback.imageHeld).toBe(0);
+			expect(feedback.documentHeld).toBe(0);
+			doc.component.sync('art-doc', pending(1, { doc: 1 }));
+		}
+		flushSync();
+		expect(feedback.documentHeld).toBe(1);
+		expect(feedback.imageHeld).toBe(0);
+		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment');
+		expect(sendIn(doc.target)!.disabled).toBe(false);
+		expect(refresh).toHaveBeenCalledOnce();
+		mocks.send.mockResolvedValueOnce(sentAll(pending(0), 1));
+		sendIn(doc.target)!.click();
+		await settle();
+		expect(mocks.send).toHaveBeenLastCalledWith('art-doc', 'document-held', false);
+		expect(feedback.documentHeld).toBe(0);
+	});
+	it('sends the document\'s image comments from the viewer bar, leaving its own comments for the document', async () => {
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(3, { doc: 1, image: 2 }));
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(3, { doc: 1, image: 2 }) });
+		mocks.send.mockResolvedValue(sentAll(pending(1, { doc: 1 }), 2));
+		flushSync();
+		// The document's status row is lane-less here, so it offers no Send; the viewer's bar is the image lane's one sender.
+		expect(sendIn(doc.target)).toBeNull();
 
 		const shown = await viewer({
 			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
-		// The in-document lightbox has no review controls; the document bar remains the one place to send.
-		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 2 comments to Design');
+		const send = sendIn(shown.target.querySelector('.bar')!)!;
+		expect(send.textContent!.trim()).toBe('Send 2 comments');
+		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
+		send.click();
+		await settle();
 
-		doc.component.sync('art-doc', pending(1));
-		flushSync();
+		expect(mocks.send).toHaveBeenCalledOnce();
+		expect(mocks.send).toHaveBeenCalledWith('art-doc', 'image-held', false);
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
+		expect(doc.component.controller().documentHeld).toBe(1);
+		expect(footerIn(shown.target)).toBeNull();
+	});
+
+	it('sends nothing when only the lightbox goes: leaving the image is the overlay\'s exit, not the viewer\'s unmount', async () => {
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
 		unmount(shown.component);
 		mounted = mounted.filter((component) => component !== shown.component);
 		await settle();
-		expect(mocks.leave).not.toHaveBeenCalled();
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
+		expect(mocks.send).not.toHaveBeenCalled();
 	});
 
-	it('counts a comment made in the viewer into the document’s batch', async () => {
+	it('leaving the image sends what its viewer still holds, once; nothing when nothing is held', async () => {
+		const overlayOver = (feedback: DocFeedback) => {
+			const target = host();
+			const component = mount(ArtifactDocumentImageOverlay, {
+				target,
+				props: {
+					image: { src: SRC, alt: 'Mock', from: 10, to: 24 },
+					comments: { artifactId: 'art-doc', projectId: null, readOnly: false, post: vi.fn(async () => 'new'), feedback },
+					target: { instanceId: 'tab-1', name: 'notes.md', path: '/ws/notes.md', projectId: null, threadId: null, artifactId: 'art-doc' },
+					onBack: vi.fn(), onPlace: vi.fn(),
+				} as unknown as ComponentProps<typeof ArtifactDocumentImageOverlay>,
+			}) as Record<string, unknown>;
+			flushSync();
+			return component;
+		};
+		const held = new DocFeedback();
+		held.show('art-doc', 'tab-1');
+		held.sync('art-doc', { ...pending(2, { image: 2 }) });
+		const open = overlayOver(held);
+		mocks.send.mockResolvedValue(sentAll(pending(0), 2));
+		unmount(open);
+		await settle();
+		expect(mocks.send).toHaveBeenCalledOnce();
+		expect(mocks.send).toHaveBeenCalledWith('art-doc', 'image-held', false);
+
+		mocks.send.mockClear();
+		const empty = new DocFeedback();
+		empty.show('art-doc', 'tab-1');
+		empty.sync('art-doc', { ...pending(1, { doc: 1 }) });
+		unmount(overlayOver(empty));
+		await settle();
+		expect(mocks.send).not.toHaveBeenCalled();
+	});
+
+	it('two exits of one image are one request, and a sender that lands second delivers nothing', async () => {
+		const held = new DocFeedback();
+		held.show('art-doc', 'tab-1');
+		held.sync('art-doc', { ...pending(2, { image: 2 }) });
+		mocks.send.mockResolvedValue(sentAll(pending(0), 2));
+		await Promise.all([held.leaveImage(), held.sendImage(), held.leaveImage()]);
+		expect(mocks.send).toHaveBeenCalledOnce();
+		mocks.send.mockClear();
+		mocks.send.mockResolvedValue(sentAll(pending(0), 0));
+		held.sync('art-doc', { ...pending(2, { image: 2 }) });
+		await held.sendImage();
+		// The server found it already closed: nothing is claimed as sent.
+		expect(held.sent).toBe(0);
+		expect(held.imageHeld).toBe(0);
+	});
+
+	it('leaves nothing waiting to send after a comment made in the viewer, which goes at once', async () => {
 		const doc = documentStatus();
 		const shown = await viewer({
 			src: SRC, alt: 'Mock', artifactId: 'art-doc',
@@ -165,31 +282,32 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 		await settle();
-		const textarea = shown.target.querySelector<HTMLTextAreaElement>('textarea')!;
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 		textarea.value = 'Too dark';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		await settle();
-		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		// The document’s review surface owns the pending batch; the in-document lightbox has no duplicate control.
+		// A person's comment is delivered as it is made: no Send in the lightbox or the document's review surface.
 		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
+		expect(sendIn(doc.target)).toBeNull();
 	});
 
-	it('keeps an image artifact’s own batch, sent to its owner from the drawer footer, never the bar', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
+	it('sends an image artifact\'s own comments from its bar, with no drawer footer', async () => {
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1, { image: 1 }) });
+		mocks.send.mockImplementation(async () => {
+			mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(0) });
+			return sentAll(pending(0), 1);
+		});
 		const shown = await imageTab();
-		expect(sendIn(shown.target.querySelector('.bar')!), 'the bar has no Send (RSR-5)').toBeNull();
+		const send = sendIn(shown.target.querySelector('.bar')!)!;
+		expect(send.textContent!.trim()).toBe('Send 1 comment');
 		await openDrawer(shown.target);
-		const footer = footerIn(shown.target)!;
-		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design when you leave.');
-		const send = [...footer.querySelectorAll('button')].find((button) => button.textContent!.trim() === 'Send now')!;
+		expect(footerIn(shown.target)).toBeNull();
 		send.click();
 		await settle();
 		expect(mocks.send).toHaveBeenCalledOnce();
-		expect(mocks.send).toHaveBeenCalledWith('art-img');
-		// One batch: the footer and the bar's status read the same batch, so nothing is left to send in either.
-		expect(footerIn(shown.target)).toBeNull();
+		expect(mocks.send).toHaveBeenCalledWith('art-img', 'image-held', false);
 		expect(sendIn(shown.target)).toBeNull();
 	});
 
@@ -227,25 +345,24 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(footerIn(shown.target)).toBeNull();
 	});
 
-	it('reloading an image artifact is not leaving it: its batch stays pending', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
+	it('reloading an image artifact keeps its batch held, and closing the tab sends it', async () => {
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1, { image: 1 }) });
+		mocks.send.mockResolvedValue(sentAll(pending(0), 1));
 		const shown = await imageTab();
-		await openDrawer(shown.target);
-		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
+		expect(sendIn(shown.target)!.textContent!.trim()).toBe('Send 1 comment');
 
 		mocks.fetchRevision.mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-2', media_type: 'image/png', artifact_id: 'art-img' });
 		shown.component.reload();
 		await drawn(shown.target);
 
-		expect(mocks.leave).not.toHaveBeenCalled();
-		// The reload redraws the viewer with its drawer closed; reopened, it still names the pending batch.
-		await openDrawer(shown.target);
-		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
-		// Closing the tab is leaving it.
+		// The reload remounts the lightbox, not the tab: it is not leaving, and the batch is still held.
+		expect(mocks.send).not.toHaveBeenCalled();
+		expect(sendIn(shown.target)!.textContent!.trim()).toBe('Send 1 comment');
 		unmount(shown.component as unknown as Record<string, unknown>);
 		mounted = mounted.filter((component) => component !== (shown.component as unknown));
 		await settle();
-		expect(mocks.leave).toHaveBeenCalledWith('art-img');
+		expect(mocks.send).toHaveBeenCalledOnce();
+		expect(mocks.send).toHaveBeenCalledWith('art-img', 'image-held', false);
 	});
 
 	it('on a phone, keeps the in-document lightbox bar free of review controls', async () => {

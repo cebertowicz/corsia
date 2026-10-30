@@ -1,10 +1,11 @@
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
-import { activeThreadId, threads } from '$lib/stores/threads';
+import { activeThreadId } from '$lib/stores/threads';
+import { everyThread } from '$lib/stores/everyThread';
 import { openThread } from '$lib/stores/openThread';
 import { contextAttachTarget } from '$lib/stores/contextAttach';
 import { clearDocPickerTarget } from '$lib/stores/docPickerTarget';
-import { closeScopeSettings } from '$lib/stores/workspaceSettings';
+import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { beginThreadOpen, type ThreadOpenSource } from '$lib/openTimingRuntime';
 import { enterThreadScope } from '$lib/stores/projects';
@@ -38,16 +39,16 @@ export async function selectHomeThread(
 	openThread.set(null);
 	contextAttachTarget.set(null);
 	clearDocPickerTarget();
-	closeScopeSettings();
+	threadSettingsOpen.set(false);
 	ports.prepareChatSurface(!!firstRunOwner);
 	paneOpen.set(false);
 	await tick();
 	if (!ownsSelection()) return;
-	if (!get(threads).some((thread) => thread.id === id)) {
+	if (!get(everyThread).some((thread) => thread.id === id)) {
 		await ports.loadThreads();
 		if (!ownsSelection()) return;
 	}
-	const thread = get(threads).find((candidate) => candidate.id === id);
+	const thread = get(everyThread).find((candidate) => candidate.id === id);
 	if (thread) {
 		if (!ownsSelection()) return;
 		await enterThreadScope(thread, firstRunOwner);

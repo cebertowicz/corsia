@@ -1,3 +1,33 @@
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new().app_manifest(
+            tauri_build::AppManifest::new().commands(&[
+                "adopt_existing_install",
+                "adoption_progress",
+                "check_service_started",
+                "choose_work_folder",
+                "configure_work_folder",
+                "disconnect_remote",
+                "finish_setup_window",
+                "get_service_log_path",
+                "open_login_items",
+                "quit_app",
+                "read_startup_progress",
+                "remote_discovered",
+                "remote_pair",
+                "reopen_app",
+                "restart_source_install",
+                "retry_quit",
+                "retry_saved_remote",
+                "save_setup_report",
+                "start_existing_again",
+                "start_fresh",
+                "start_fresh_preview",
+                "start_local_service",
+                "start_source_install",
+                "start_window_drag",
+            ]),
+        ),
+    )
+    .expect("failed to build Tauri app manifest");
 }

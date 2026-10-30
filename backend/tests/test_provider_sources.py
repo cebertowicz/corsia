@@ -128,6 +128,14 @@ class TestSeedCodex:
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
 
+    def test_unverified_cli_reports_a_proven_package_manager(self, isolated_db, client, monkeypatch):
+        import cli_location
+
+        self._seed(monkeypatch, "ready")
+        monkeypatch.setattr(cli_location, "package_manager_for", lambda provider: "homebrew" if provider == "claude-code" else None)
+
+        assert _sources(client)["claude-code"]["cli_package_manager"] == "homebrew"
+
     def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
         from connections.models import get_connection
         from connections.source_state import apply_check
@@ -137,6 +145,7 @@ class TestSeedCodex:
         self._seed(monkeypatch, "ready")
         assert get_connection("claude-code")["status"] == "needs_auth"
         assert _sources(client)["claude-code"]["state"] == "needs_auth"
+
 
 
 def _stream(*frames):
@@ -179,6 +188,7 @@ def claude_session(monkeypatch):
 
     # `claude auth status`: an exit code, "hang" (never answers) or an exception.
     auth: list = [0]
+    auth_stdout: list[bytes] = [b'']
     auth_calls: list[tuple] = []
 
     class _AuthProcess:
@@ -193,7 +203,8 @@ def claude_session(monkeypatch):
             self.returncode = -9
 
         async def communicate(self):
-            return b"", b""
+            self.returncode = await self.wait()
+            return auth_stdout[0], b""
 
     real_exec = asyncio.create_subprocess_exec
 
@@ -201,8 +212,8 @@ def claude_session(monkeypatch):
         if tuple(args[1:3]) != ("auth", "status"):
             return await real_exec(*args, **kwargs)
         auth_calls.append(args)
-        # The command's output must never be captured: it carries the account's email.
-        assert kwargs["stdout"] == asyncio.subprocess.DEVNULL
+        assert len(args) == 3
+        assert kwargs["stdout"] == asyncio.subprocess.PIPE
         assert kwargs["stderr"] == asyncio.subprocess.DEVNULL
         if isinstance(auth[0], BaseException):
             raise auth[0]
@@ -214,6 +225,11 @@ def claude_session(monkeypatch):
     monkeypatch.setattr(harness_models, "binary_version", version)
     monkeypatch.setattr("connections.resolve_builtin_binary",
                         lambda provider, *, db=None: ({}, f"/bin/{provider}"))
+    # The account-label read after Ready finds the same binary; it is not the sign-in check counted here.
+    async def no_identity(_provider):
+        return {}
+
+    monkeypatch.setattr("connections.account_identity.default_identity", no_identity)
     # The suite's startup stub is lifted here: the only session is the faked one.
     monkeypatch.setattr("connections.startup.check_harness_source",
                         source_state.check_harness_source)
@@ -227,8 +243,36 @@ def claude_session(monkeypatch):
 
     answer.sessions = sessions
     answer.auth_status = auth_status
+    answer.auth_stdout = auth_stdout
     answer.auth_calls = auth_calls
     return answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome,output,expected', [
+    (1, b'{"loggedIn":false}', True),
+    (1, b'', False),
+    (1, b'not json', False),
+    (1, b'{"loggedIn":false', False),
+    (1, b'{"loggedIn":true}', False),
+    (0, b'{"loggedIn":true}', False),
+    ('hang', b'', False),
+])
+async def test_claude_default_visibility_requires_definite_status(isolated_db, client, claude_session, outcome, output, expected):
+    from connections.claude_discovery import ClaudeCatalogCheckFailed, _record_failed_sign_in
+    from connections.vendor_accounts import default_account
+
+    _put('claude-code', 'available')
+    claude_session.auth_status(1)
+    claude_session.auth_stdout[0] = b'{"loggedIn":false}'
+    with pytest.raises(ClaudeCatalogCheckFailed):
+        await _record_failed_sign_in('/bin/claude-code', 'failed')
+    assert default_account('claude-code')['identity']['default_comparison']['definitely_signed_out'] is True
+    claude_session.auth_status(outcome)
+    claude_session.auth_stdout[0] = output
+    with pytest.raises(ClaudeCatalogCheckFailed):
+        await _record_failed_sign_in('/bin/claude-code', 'failed')
+    assert default_account('claude-code')['identity']['default_comparison']['definitely_signed_out'] is expected
 
 
 @pytest.mark.real_harness_cli
@@ -405,6 +449,25 @@ class TestClaudeSignIn:
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["prior_state"]) == ("unverified", "ready")
 
+    def test_signing_back_in_shows_the_hidden_default_and_is_ready_on_the_first_refresh(
+        self, isolated_db, client, claude_session,
+    ):
+        from connections.claude_discovery import ClaudeCatalogCheckFailed, _record_failed_sign_in
+        from connections.vendor_accounts import default_account
+
+        _put("claude-code", "needs_auth")
+        claude_session.auth_status(1)
+        claude_session.auth_stdout[0] = b'{"loggedIn":false}'
+        with pytest.raises(ClaudeCatalogCheckFailed):
+            asyncio.run(_record_failed_sign_in("/bin/claude-code", "failed"))
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is True
+        claude_session(_listed())
+        claude_session.auth_status(0)
+        claude_session.auth_stdout[0] = b'{"loggedIn":true}'
+        self._recheck()
+        assert _sources(client)["claude-code"]["state"] == "ready"
+        assert default_account("claude-code")["identity"]["default_comparison"]["definitely_signed_out"] is False
+
     def test_a_listed_catalog_asks_auth_status_once_before_ready(
         self, isolated_db, client, claude_session,
     ):
@@ -547,6 +610,38 @@ class TestClaudeSignIn:
         assert sessions == ["list_models"]
         assert _sources(client)["claude-code"]["state"] == "ready"
 
+    def test_a_slow_catalog_refresh_does_not_ask_a_freshly_signed_in_row_again(
+        self, isolated_db, client, claude_session, monkeypatch,
+    ):
+        """The sign-in check cannot finish first and leave the refresh an available row."""
+        import app_lifecycle
+        import connections.harness_refresh as harness_refresh
+        import connections.startup as startup
+
+        real_check, real_refresh = startup.check_harness_source, harness_refresh.refresh_harness_catalogs
+        claude_checked = asyncio.Event()
+
+        async def check(provider, *, rediscover=False):
+            await real_check(provider, rediscover=rediscover)
+            if provider == "claude-code":
+                claude_checked.set()
+
+        async def slow_refresh(*, reason):
+            # Run beside the check, the refresh would start after it; run first, it never waits.
+            try:
+                await asyncio.wait_for(claude_checked.wait(), timeout=0.5)
+            except TimeoutError:
+                pass
+            return await real_refresh(reason=reason)
+
+        monkeypatch.setattr(startup, "check_harness_source", check)
+        monkeypatch.setattr(harness_refresh, "refresh_harness_catalogs", slow_refresh)
+        _put("claude-code", "needs_auth")
+        sessions = claude_session(_listed())
+        asyncio.run(app_lifecycle._startup_harness_discovery())
+        assert sessions == ["list_models"]
+        assert _sources(client)["claude-code"]["state"] == "ready"
+
     def test_a_catalog_refresh_alone_notices_a_sign_out(
         self, isolated_db, client, claude_session,
     ):
@@ -626,9 +721,20 @@ class TestHarnessCheck:
 
 
 def _server(status="online", kind="managed", provider="omlx", name="Studio", **meta):
+    from infra.config import STATE_ROOT
     from llm import network_discovery as nd
 
-    sid = nd.upsert_server(provider, f"{name}-inst", name, "127.0.0.1", 8000, status, kind=kind)
+    managed = provider == "omlx" and kind == "managed"
+    sid = nd.upsert_server(
+        provider, "corsia-managed" if managed else f"{name}-inst", name, "127.0.0.1", 8000, status, kind=kind,
+    )
+    if managed:
+        meta = {
+            "corsia_managed": True,
+            "base_path": str(STATE_ROOT / "managed-omlx"),
+            "model_dir": str(STATE_ROOT / "managed-omlx" / "models"),
+            **meta,
+        }
     if meta:
         nd.set_server_metadata(sid, **meta)
     return sid
@@ -647,56 +753,83 @@ def _model(litellm_model, *, enabled=1, available=1):
         )
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 class TestOmlx:
+    @pytest.fixture(autouse=True)
+    def reset_local_flight(self, monkeypatch):
+        from llm import local_setup
+
+        monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+
     def test_no_binary_is_not_installed(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: None)
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
         omlx = _sources(client)["omlx"]
         assert omlx["state"] == "not_installed" and omlx["name"] == "Local model"
 
-    def test_a_reachable_server_on_another_machine_is_ready_without_the_binary(
+    def test_the_bundled_binary_with_no_server_needs_setup_not_install(
         self, isolated_db, client, monkeypatch,
     ):
-        from llm import network_discovery as nd
-
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: None)
-        sid = nd.upsert_server("omlx", "studio:8000", "Studio", "studio.lan", 8000, "online",
-                               machine_id="another-mac")
-        _model(f"omlx@{sid}/qwen")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
+        monkeypatch.setattr(
+            "llm.local_sources.managed_omlx_executable",
+            lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx",
+        )
         omlx = _sources(client)["omlx"]
-        assert (omlx["state"], omlx["fix"], omlx["reason"]) == ("ready", None, None)
+        assert (omlx["state"], omlx["reason"]) == ("needs_setup", "No local model server is set up")
+
+    def test_a_reachable_explicit_external_endpoint_is_ready_without_a_local_binary(
+        self, isolated_db, client, monkeypatch,
+    ):
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
+        sid = _server(provider="external", kind="external", name="Studio")
+        _model(f"external@{sid}/qwen")
+
+        sources = _sources(client)
+        assert sources["omlx"]["state"] == "not_installed"
+        assert sources[f"external:{sid}"]["state"] == "ready"
 
     def test_an_offline_server_without_the_binary_needs_setup_not_install(
         self, isolated_db, client, monkeypatch,
     ):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: None)
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
         _server(status="offline")
         omlx = _sources(client)["omlx"]
         assert omlx["state"] == "needs_setup" and omlx["fix"] != "Install oMLX"
 
     def test_binary_without_a_managed_row_needs_setup(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         omlx = _sources(client)["omlx"]
         assert omlx["state"] == "needs_setup" and omlx["fix"] == "Settings › Providers › Local model"
 
     def test_server_that_is_not_answering_needs_setup(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         _server(status="offline")
         assert _sources(client)["omlx"]["state"] == "needs_setup"
 
     def test_online_server_without_models_needs_setup(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         _server()
         assert _sources(client)["omlx"]["state"] == "needs_setup"
 
     def test_online_server_with_a_model_is_ready(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         sid = _server()
         _model(f"omlx@{sid}/qwen")
         omlx = _sources(client)["omlx"]
         assert (omlx["state"], omlx["fix"], omlx["reason"]) == ("ready", None, None)
 
+    def test_online_installed_model_stays_ready_at_24_gib(self, isolated_db, client, monkeypatch):
+        monkeypatch.setattr("llm.local_setup_gates.host_ram_bytes", lambda: 24 * 1024**3)
+        sid = _server()
+        _model(f"omlx@{sid}/qwen")
+
+        omlx = _sources(client)["omlx"]
+
+        assert omlx["eligible"] is False
+        assert omlx["state"] == "ready"
+
     def test_an_external_endpoint_never_counts_as_the_local_model(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         sid = _server(provider="external", kind="external", name="Lab")
         _model(f"external@{sid}/m")
         assert _sources(client)["omlx"]["state"] == "needs_setup"
@@ -752,6 +885,7 @@ class TestLimited:
         assert "limited" not in _sources(client)["codex"]
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 class TestRecheck:
     def test_requires_a_signed_in_caller(self, isolated_db):
         from api.provider_sources import router
@@ -763,7 +897,6 @@ class TestRecheck:
         assert bare.post("/api/providers/sources/recheck").status_code == 401
 
     def test_local_setup_route_returns_the_current_background_stage(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: False)
         result = {"ok": True, "in_progress": True, "stage": "Downloading model (8.60 GiB)"}
         calls = []
 
@@ -771,59 +904,53 @@ class TestRecheck:
             calls.append(kwargs)
             return result
 
-        monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").json() == result
-        assert calls == [{"no_subscription_only": False, "automatic": False, "profile_id": None}]
+        assert calls == [{"no_subscription_only": False, "automatic": False, "onboarding": False}]
         assert client.post("/api/providers/local/setup", json={
             "no_subscription_only": True, "automatic": True,
         }).json() == result
-        assert calls[-1] == {"no_subscription_only": True, "automatic": True, "profile_id": None}
+        assert calls[-1] == {"no_subscription_only": True, "automatic": True, "onboarding": False}
+        assert client.post("/api/providers/local/setup", json={"onboarding": True}).status_code == 200
+        assert calls[-1]["onboarding"] is True
 
-    def test_local_setup_route_requires_existing_omlx_consent(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
+    def test_local_cancel_route_uses_the_canonical_flight_owner(self, isolated_db, client, monkeypatch):
+        calls = []
 
-        async def should_not_start(**kwargs):
-            raise AssertionError("existing oMLX must not start without consent")
+        async def cancel():
+            calls.append(True)
+            return {"ok": True, "cancelled": True}
 
-        monkeypatch.setattr("llm.local_setup.begin_local_setup", should_not_start)
-        response = client.post("/api/providers/local/setup")
-
-        assert response.status_code == 409
-        assert response.json() == {"detail": {"code": "consent_required"}}
-
-    def test_local_setup_route_records_accepted_existing_omlx_consent(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
-        persisted = []
-        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
-
-        async def begin(**kwargs):
-            return {"ok": True, "in_progress": True}
-
-        monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        response = client.post("/api/providers/local/setup", json={"consent_existing": True})
-
-        assert response.status_code == 200
-        assert response.json() == {"ok": True, "in_progress": True}
-        assert persisted == [True]
+        monkeypatch.setattr("llm.local_setup.cancel_local_setup", cancel)
+        assert client.post("/api/providers/local/cancel").json() == {"ok": True, "cancelled": True}
+        assert calls == [True]
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio
 
-        from llm import local_setup
+        from llm import local_model, local_setup
 
         monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
-        assert client.get("/api/providers/local/setup").json() == {
-            "state": "idle", "stage": None, "result": None, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+        monkeypatch.setattr("llm.local_setup_prepare.local_memory_ok", lambda *_args: True)
+        # Status is derived from the managed local server and flight record.
+        not_checked = {"state": "not_checked", "model": None, "message": None}
+        idle = client.get("/api/providers/local/setup").json()
+        assert idle["state"] == "stopped" and idle["local_model"] == not_checked
 
         failure = {"ok": False, "message": "oMLX failed"}
         local_setup._flight.result = failure
-        assert client.get("/api/providers/local/setup").json() == {
-            "state": "failed", "stage": None, "result": failure, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+        failed = client.get("/api/providers/local/setup").json()
+        assert failed["state"] == "failed" and failed["local_model"] == not_checked
+        assert failed["fix"] == "CORSIA couldn’t set up the local model." and idle["fix"] is None
+
+        # A finished setup's model is what the conductor's offer and Welcome read.
+        installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
+        local_model.record_set_up(installed)
+        assert client.get("/api/providers/local/setup").json()["local_model"] == {
+            "state": "picked", "model": installed.view(), "message": None}
 
         local_setup._flight.result = {"ok": True}
-        assert client.get("/api/providers/local/setup").json()["state"] == "succeeded"
+        assert client.get("/api/providers/local/setup").json()["state"] == "ready"
 
         async def running():
             local_setup._flight.task = asyncio.create_task(asyncio.sleep(10))
@@ -832,7 +959,8 @@ class TestRecheck:
             local_setup._flight.task.cancel()
             return status
 
-        assert asyncio.run(running()) == {"state": "running", "stage": "Downloading", "result": None}
+        running_status = asyncio.run(running())
+        assert running_status["state"] == "starting"
 
     def test_local_setup_status_route_requires_a_signed_in_caller(self, isolated_db):
         from api.provider_sources import router
@@ -840,12 +968,13 @@ class TestRecheck:
         app = FastAPI()
         app.include_router(router)
         assert TestClient(app).get("/api/providers/local/setup").status_code == 401
+        assert TestClient(app).post("/api/providers/local/cancel").status_code == 401
 
     def test_reruns_the_existing_checks_and_returns_the_list(self, isolated_db, client, monkeypatch):
         from llm import network_discovery as nd
         from api import provider_sources
 
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         managed = _server(status="offline")
         external = _server(status="offline", provider="external", kind="external", name="Lab")
         parked = _server(status="disabled", provider="external", kind="external", name="Off")
@@ -971,7 +1100,7 @@ class TestRecheck:
     ):
         from llm import network_discovery as nd
 
-        monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: "/bin/omlx")
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: "/bin/omlx")
         sid = _server()
         _model(f"omlx@{sid}/qwen")
         assert _sources(client)["omlx"]["state"] == "ready"

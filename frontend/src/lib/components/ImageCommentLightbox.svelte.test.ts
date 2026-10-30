@@ -12,8 +12,8 @@ vi.mock('$lib/api/docs', () => ({
 }));
 // An image artifact's viewer keeps its feedback batch (ImageCommentLightboxSend.svelte.test.ts covers it).
 vi.mock('$lib/api/docFeedback', () => {
-	const result = () => Promise.resolve({ woken: [], undelivered_batches: [] });
-	return { sendDocFeedback: vi.fn(result), leaveDocFeedback: vi.fn(result), returnDocFeedback: vi.fn(result), retryDocFeedback: vi.fn(result) };
+	const result = () => Promise.resolve({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
+	return { sendDocFeedback: vi.fn(result), retryDocFeedback: vi.fn(result) };
 });
 vi.mock('$lib/stores/viewport', async () => {
 	const { writable: make } = await import('svelte/store');
@@ -21,6 +21,7 @@ vi.mock('$lib/stores/viewport', async () => {
 });
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
+import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
@@ -56,9 +57,10 @@ beforeEach(() => {
 	define('clientWidth', () => 548);
 	define('clientHeight', () => 400);
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
-	// Tags are placed against the layer's measured size, which jsdom reports as zero.
+	// jsdom reports zero sizes: give the image layer and its clipping canvas realistic bounds.
 	const measured = HTMLElement.prototype.getBoundingClientRect;
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+		if (this.classList.contains('layout')) return new DOMRect(0, 0, 800, 600);
 		return this.hasAttribute('data-image-regions') ? new DOMRect(24, 50, 500, 250) : measured.call(this);
 	});
 	docComments.set({});
@@ -81,6 +83,27 @@ afterEach(() => {
 });
 
 describe('ImageCommentLightbox', () => {
+	it('shows the document reply chip for replies arriving while its image is open', async () => {
+		const step = vi.fn();
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
+		} });
+		await settle();
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		docComments.update((current) => ({ ...current, 'art-img': current['art-img'].map((item, index) => index === 1 ? { ...item, newReplyIds: ['new-reply'] } : item) }));
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button');
+		expect(chip?.textContent).toContain('1 new reply');
+		chip!.click();
+		expect(step).toHaveBeenCalledOnce();
+	});
+
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');
@@ -137,7 +160,7 @@ describe('ImageCommentLightbox', () => {
 		await settle();
 		// One comment per press of Comment.
 		expect(commentButton()!.getAttribute('aria-pressed')).toBe('false');
-		const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 		expect(textarea).not.toBeNull();
 		expect(props.draftOpen).toBe(false);
 		textarea.value = 'The whole layout is cramped';
@@ -150,7 +173,7 @@ describe('ImageCommentLightbox', () => {
 		textarea.dispatchEvent(escape);
 		await settle();
 		expect(escape.defaultPrevented).toBe(true);
-		expect(host.querySelector('textarea')).toBeNull();
+		expect(document.body.querySelector('textarea')).toBeNull();
 		expect(props.draftOpen).toBe(false);
 	});
 
@@ -253,6 +276,17 @@ describe('ImageCommentLightbox', () => {
 			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 			await settle();
 			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
+		});
+
+		it('does not focus a reply whose anchor is outside the canvas', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			const root = host.querySelector<HTMLElement>('.layout')!;
+			Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(0, 0, 20, 20) });
+			tag(1).focus();
+			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(document.body.querySelector('[data-popover]')?.getAttribute('aria-hidden')).toBe('true');
+			expect(document.activeElement?.classList.contains('ct-input')).toBe(false);
 		});
 
 		it('opens the drawer by growing its track, sized to leave the image its fitted height', async () => {
@@ -412,11 +446,11 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 			await settle();
-			const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
+			const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 			textarea.value = 'Too dark';
 			textarea.dispatchEvent(new Event('input', { bubbles: true }));
 			await settle();
-			host.querySelector<HTMLButtonElement>('button.submit')!.click();
+			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
 			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark');
 		});
@@ -428,7 +462,7 @@ describe('ImageCommentLightbox', () => {
 			}
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'also-here' } });
 			expect(host.querySelector('[data-region-tag="2"]')!.getAttribute('aria-pressed')).toBe('true');
-			expect(host.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
+			expect(document.body.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
 		});
 
 		it('opened to move a stale pin, starts placing it again', async () => {

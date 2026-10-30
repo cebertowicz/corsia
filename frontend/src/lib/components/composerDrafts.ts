@@ -1,9 +1,11 @@
 import type { Message } from '$lib/stores/threads';
 import type { Attachment } from './inputBarHelpers';
+import type { ChatComment } from '$lib/chatCommentAnchors';
 
 export type ComposerDraft = {
 	content: string;
 	attachments: Attachment[];
+	comments?: ChatComment[];
 };
 
 type PendingSubmitDraft = {
@@ -29,7 +31,28 @@ export function cloneDraft(draft: ComposerDraft): ComposerDraft {
 	return {
 		content: draft.content,
 		attachments: [...draft.attachments],
+		comments: draft.comments?.map(comment => ({ ...comment })),
 	};
+}
+
+/** Run an automatic send before restoring the person's interrupted composer draft. */
+export async function sendAndRestoreDraft<T>(
+	draft: ComposerDraft | null,
+	draftThreadId: string | null,
+	beforeSend: () => Promise<unknown>,
+	send: () => Promise<T>,
+	restore: (draft: ComposerDraft) => void,
+	save: (threadId: string) => void,
+): Promise<T> {
+	try {
+		await beforeSend();
+		return await send();
+	} finally {
+		if (draft) {
+			restore(draft);
+			if (draftThreadId) save(draftThreadId);
+		}
+	}
 }
 
 function sameAttachments(left: Attachment[], right: Attachment[]): boolean {
@@ -40,7 +63,12 @@ function sameAttachments(left: Attachment[], right: Attachment[]): boolean {
 
 function sameComposerDraft(left: ComposerDraft, right: ComposerDraft): boolean {
 	return left.content === right.content
-		&& sameAttachments(left.attachments, right.attachments);
+		&& sameAttachments(left.attachments, right.attachments)
+		&& (left.comments ?? []).length === (right.comments ?? []).length
+		&& (left.comments ?? []).every((comment, index) => {
+			const other = right.comments?.[index];
+			return other && comment.id === other.id && comment.note === other.note;
+		});
 }
 
 /**
@@ -94,8 +122,7 @@ export function createComposerDrafts(port: ComposerPort) {
 	function settleDeliveredDraft(pending: PendingSubmitDraft): void {
 		const { composerDraft, threadId: draftThreadId } = pending;
 		const saved = threadDrafts.get(draftThreadId);
-		if (saved && saved.content === composerDraft.content
-			&& sameAttachments(saved.attachments, composerDraft.attachments)) {
+		if (saved && sameComposerDraft(saved, composerDraft)) {
 			threadDrafts.delete(draftThreadId);
 		}
 		if (port.boundThreadId() === draftThreadId && matchesComposerDraft(composerDraft)) {

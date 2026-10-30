@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+
 #: What a thread is told when a plan result it did not cause reaches it. Each
 #: line is followed by the same `next` block a close returns.
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
@@ -31,6 +32,12 @@ WAKE_CHILD_NEEDS_INPUT = (
 WAKE_REVISION_REQUESTED = (
     "[CORSIA plan] Your returned work on {title} was rejected; the revision is now yours."
 )
+WAKE_INTENT_REVISED = (
+    "[CORSIA plan] Intent on {title} is now revision {requirements_revision}. "
+    "Re-check your work against this revision before continuing."
+)
+WAKE_INTENT_INPUT = ("[CORSIA plan] New words from the person may bear on {title} (revision {requirements_revision}). "
+                     "If they change the task, revise its intent and add these words; if not, carry on.")
 #: The revision_requested text for a delegated worker, which works a step seeded in its own plan.
 REVISION_WORKER_STEP = (
     "[CORSIA plan] Your returned work on {title} was rejected. Work step {worker_step_id} "
@@ -271,6 +278,8 @@ WAKE_CHIPS = {
     "plan.ask_released": "Artifact ask released work",
     "plan.child_returned": "Delegated work returned for your review",
     "plan.revision_requested": "Returned work was rejected",
+    "plan.intent_revised": "A task’s goal changed",
+    "plan.intent_input": "What you said may affect a running task",
     "plan.prerequisite_settled": "A task you depend on settled",
     "plan.conductor_task_settled": "A task you added settled",
     "plan.child_returned_nothing": "Delegated worker returned nothing",
@@ -280,6 +289,7 @@ WAKE_CHIPS = {
     "plan.child_friction_threshold": "Delegated step keeps failing",
     "plan.child_turn_errored": "Delegated worker's turn ended in error",
     "plan.child_provider_refused": "Delegated worker hit a provider limit",
+    "plan.child_held_local_only": "Delegated worker is held: local models only",
     "plan.child_stopped_open": "Delegated worker stopped with work open",
     "plan.child_stopped_on_user": "Delegated worker is held by the user",
     "plan.child_silent": "Delegated worker has gone silent",
@@ -374,8 +384,8 @@ def account_readiness_detail(readiness) -> str:
     return f'Its account is not ready: {copy[0]}. {copy[1]}' if copy else ACCOUNT_READINESS_UNREAD
 
 
-def account_wake_fields(readiness, error):
-    """Validated fixed cause/actions for the existing account refusal notice."""
+def account_wake_fields(readiness):
+    """Validated fixed cause/actions for the existing account refusal notice; never the turn's error text."""
     if readiness and readiness['ready']:
         return 'pending_resume', {}
     copy = _account_copy(readiness)

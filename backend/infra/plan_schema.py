@@ -11,6 +11,8 @@ from infra.plan_aggregates_schema import (
     PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES_SQL, column_ddl,
 )
 from infra.plan_events_schema import PLAN_EVENTS_SCHEMA_SQL
+from infra.plan_intent_schema import PLAN_INTENT_SCHEMA_SQL
+from infra.plan_markdown_import_schema import PLAN_MARKDOWN_IMPORT_SCHEMA_SQL
 from infra.plan_pane_views_schema import PLAN_PANE_VIEWS_SCHEMA_SQL
 from infra.plan_status_schema import PLAN_STATUS_DIRTY_SCHEMA_SQL
 from infra.unattributed_dispatch_schema import UNATTRIBUTED_DISPATCH_SCHEMA_SQL
@@ -65,6 +67,8 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         kind TEXT NOT NULL CHECK (kind IN ('phase', 'track', 'task')),
         title TEXT NOT NULL CHECK (length(trim(title)) > 0),
         description TEXT,
+        intent TEXT,
+        intent_node_id TEXT REFERENCES plan_nodes(id),
         workflow_ref TEXT,
         workflow_version TEXT,
         workflow_step TEXT,
@@ -105,10 +109,13 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         ON plan_nodes(follow_up_of);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_commitment
         ON plan_nodes(commitment_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_plan_nodes_intent_node ON plan_nodes(intent_node_id);
     -- A wait reads a step's child, and an executor's work, by thread.
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_spawned_thread ON plan_nodes(spawned_thread_id);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_executor_thread ON plan_nodes(executor_thread_id);
     {NODE_AGGREGATE_INDEXES_SQL}
+
+    {PLAN_INTENT_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS plan_node_dependencies (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,
@@ -344,57 +351,5 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         SELECT RAISE(ABORT, 'plan mutation receipts are immutable and append-only');
     END;
 
-    CREATE TABLE IF NOT EXISTS plan_markdown_imports (
-        id TEXT PRIMARY KEY,
-        artifact_id TEXT NOT NULL UNIQUE REFERENCES artifact_identities(id),
-        observed_owner_thread_id TEXT,
-        owner_thread_id TEXT REFERENCES threads(id),
-        registration_id TEXT,
-        plan_id TEXT UNIQUE,
-        integration TEXT NOT NULL,
-        artifact_type TEXT NOT NULL,
-        external_id TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        artifact_updated_at TEXT NOT NULL,
-        registration_updated_at TEXT,
-        registration_state TEXT,
-        source_sha256 TEXT CHECK (
-            source_sha256 IS NULL OR length(source_sha256) = 64
-        ),
-        parser_version TEXT,
-        manifest_json TEXT,
-        source_map_json TEXT,
-        status TEXT NOT NULL CHECK (
-            status IN (
-                'discovered', 'repair_required', 'ready',
-                'imported', 'rolled_back'
-            )
-        ),
-        applied_plan_hash TEXT,
-        wake_snapshot_json TEXT,
-        discovered_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        imported_at TEXT,
-        rolled_back_at TEXT
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_markdown_imports_owner
-        ON plan_markdown_imports(owner_thread_id)
-        WHERE owner_thread_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_plan_markdown_imports_status
-        ON plan_markdown_imports(status);
-
-    CREATE TABLE IF NOT EXISTS plan_markdown_import_issues (
-        id TEXT PRIMARY KEY,
-        import_id TEXT NOT NULL
-            REFERENCES plan_markdown_imports(id) ON DELETE CASCADE,
-        issue_order INTEGER NOT NULL CHECK (issue_order >= 0),
-        code TEXT NOT NULL CHECK (length(trim(code)) > 0),
-        message TEXT NOT NULL CHECK (length(trim(message)) > 0),
-        source_line INTEGER CHECK (source_line IS NULL OR source_line > 0),
-        detail_json TEXT,
-        created_at TEXT NOT NULL,
-        UNIQUE(import_id, issue_order)
-    );
-    CREATE INDEX IF NOT EXISTS idx_plan_markdown_import_issues_import
-        ON plan_markdown_import_issues(import_id, issue_order);
+    {PLAN_MARKDOWN_IMPORT_SCHEMA_SQL}
 """ + PLAN_EVENTS_SCHEMA_SQL + UNATTRIBUTED_DISPATCH_SCHEMA_SQL + PLAN_PANE_VIEWS_SCHEMA_SQL + TOUCH_INDEXES_SQL

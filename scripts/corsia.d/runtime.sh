@@ -1,5 +1,14 @@
 # Runtime helpers for local services.
 
+# Compare literal paths first, then their physical directories when they exist.
+same_directory() {
+    local left="$1" right="$2" left_real right_real
+    [ "$left" != "$right" ] || return 0
+    left_real="$(cd -P "$left" 2>/dev/null && pwd)" || return 1
+    right_real="$(cd -P "$right" 2>/dev/null && pwd)" || return 1
+    [ "$left_real" = "$right_real" ]
+}
+
 # CORSIA runs one backend, so a lifecycle verb takes no service selector.
 # --force is the only argument these verbs accept. Anything else -- a bare
 # word like `server`, or a mistyped option like `--forse` -- is rejected
@@ -19,26 +28,144 @@ require_no_extra_lifecycle_args() {
     done
 }
 
+# Once the CORSIA app adopts an install it runs its own service on that state
+# root and records it in service.json (its app folder, service_file). A second
+# backend on the same state root would share one database, so start and restart
+# from a source checkout refuse. The app runs this same script on that root and
+# is never refused. A missing file, or one without state_dir, leaves the install
+# unclaimed; a file that cannot be read is treated as claimed.
+refuse_if_app_owns_install() {
+    is_app_mode && return 0
+    local verdict
+    verdict="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import app_metadata_dir
+from infra.service_file import SERVICE_FILE, service_file_state_dir
+path = app_metadata_dir() / SERVICE_FILE
+try:
+    claimed = service_file_state_dir(path)
+except ValueError:
+    print("unreadable", path)
+else:
+    if claimed is not None and str(claimed) == os.path.realpath(sys.argv[2]):
+        print("owned", path)
+' "$BACKEND_DIR" "$CORSIA_STATE_DIR" 2>/dev/null)" || verdict="unreadable service.json"
+    case "$verdict" in
+        owned*)
+            fail "The CORSIA app owns this install (${verdict#owned }). Use the CORSIA app to start or restart it."
+            return 1
+            ;;
+        unreadable*)
+            fail "Cannot read the CORSIA app's ${verdict#unreadable }, so this install may belong to the app. Use the CORSIA app, or fix that file."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
-# A healthy backend must publish readiness within one minute. Provider catalog
-# refresh and durable inbox recovery continue as owned post-readiness work; this
-# bound covers only the critical database and continuity path.
+# A healthy backend must publish readiness within one minute of its last visible
+# progress. Before the port binds, progress is the service's own startup-progress
+# file (backend/infra/startup_progress.py), which a schema migration keeps
+# rewriting while it works; a service that never writes one gets one minute in
+# total, as before. Provider catalog refresh and durable inbox recovery continue
+# as owned post-readiness work; this bound covers only the critical database and
+# continuity path.
 CORSIA_HEALTH_WAIT_SECONDS="${CORSIA_HEALTH_WAIT_SECONDS:-60}"
+# However long a start keeps progressing, it ends here: the larger of 15 minutes
+# and 60 seconds per GiB of database. The slowest migration measured so far
+# (backup, a whole-table rebuild and its checks) costs about 23 s per GiB.
+CORSIA_STARTUP_CEILING_SECONDS="${CORSIA_STARTUP_CEILING_SECONDS:-900}"
+CORSIA_STARTUP_SECONDS_PER_GIB="${CORSIA_STARTUP_SECONDS_PER_GIB:-60}"
 CORSIA_DRAIN_MAX_WAIT="${CORSIA_DRAIN_MAX_WAIT:-60}"
 
 runtime_epoch_seconds() { date +%s; }
 
+startup_progress_file() { echo "${CORSIA_STATE_DIR:-}/runtime/startup-progress.json"; }
+
+# "<pid> <seq> <phase>" from the starting service's progress file. The service
+# writes pid, seq and phase first, so bash reads them without an interpreter.
+read_startup_progress() {
+    local file line=""
+    file="$(startup_progress_file)"
+    [ -f "$file" ] || return 1
+    IFS= read -r line < "$file" || [ -n "$line" ] || return 1
+    [[ "$line" =~ ^\{\"schema\":\ 1,\ \"pid\":\ ([0-9]+),\ \"seq\":\ ([0-9]+),\ \"phase\":\ \"([a-z_]+)\" ]] \
+        || return 1
+    echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
+}
+
+# launchd's process for the service being started, or nothing when no job is
+# loaded or this shell does not manage one.
+startup_service_pid() {
+    declare -F service_loaded_pid > /dev/null || return 0
+    service_is_loaded || return 0
+    service_loaded_pid 2>/dev/null || :
+}
+
+startup_ceiling_seconds() {
+    local db="${CORSIA_STATE_DIR:-}/corsia.db" bytes ceiling
+    bytes="$(stat -c %s "$db" 2>/dev/null || stat -f %z "$db" 2>/dev/null)" || bytes=0
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+    ceiling=$(( (bytes + 1073741823) / 1073741824 * CORSIA_STARTUP_SECONDS_PER_GIB ))
+    [ "$ceiling" -ge "$CORSIA_STARTUP_CEILING_SECONDS" ] || ceiling="$CORSIA_STARTUP_CEILING_SECONDS"
+    [ "$ceiling" -ge "$CORSIA_HEALTH_WAIT_SECONDS" ] || ceiling="$CORSIA_HEALTH_WAIT_SECONDS"
+    echo "$ceiling"
+}
+
+# Waits while the service is starting and still visibly working. Fails at once
+# when its process exits or launchd replaces it, or when it reports a failed
+# startup; after a minute with no progress; or at the ceiling.
 wait_for_backend_health() {
-    local started_at elapsed tty=0 line_open=0
+    local started_at now elapsed idle_since ceiling tty=0 line_open=0
+    local pid first_pid="" progress last_progress="" phase="" shown_phase="" why=idle
     [ -t 1 ] && tty=1
     started_at="$(runtime_epoch_seconds)"
+    idle_since="$started_at"
+    ceiling="$(startup_ceiling_seconds)"
     while :; do
         if is_backend_running; then
             [ "$line_open" -eq 0 ] || echo
             return 0
         fi
-        elapsed=$(( $(runtime_epoch_seconds) - started_at ))
+        now="$(runtime_epoch_seconds)"
+        elapsed=$(( now - started_at ))
+        pid="$(startup_service_pid)"
+        if [ -n "$first_pid" ] && [ "$pid" != "$first_pid" ]; then
+            if [ -n "$pid" ]; then
+                why=restarted
+                break
+            fi
+            if ! kill -0 "$first_pid" 2>/dev/null; then
+                why=exited
+                break
+            fi
+        fi
+        [ -n "$first_pid" ] || first_pid="$pid"
+        if [ -n "$pid" ] && progress="$(read_startup_progress)" \
+            && [ "${progress%% *}" = "$pid" ]; then
+            phase="${progress##* }"
+            if [ "$phase" = failed ]; then
+                why=failed
+                break
+            fi
+            if [ "$progress" != "$last_progress" ]; then
+                last_progress="$progress"
+                idle_since="$now"
+            fi
+        fi
+        case "$phase" in
+            backing_up|migrating|validating)
+                if [ "$shown_phase" != upgrading ]; then
+                    [ "$line_open" -eq 0 ] || echo
+                    line_open=0
+                    echo "  CORSIA is upgrading its data; this can take several minutes on a large database…"
+                    shown_phase=upgrading
+                fi
+                ;;
+        esac
         if [ "$tty" -eq 1 ]; then
             if [ "$elapsed" -ge 10 ]; then
                 printf '\r  Starting CORSIA… (%ss)' "$elapsed"
@@ -49,11 +176,27 @@ wait_for_backend_health() {
         elif [ "$elapsed" -eq 0 ] || [ "$elapsed" -eq 30 ]; then
             echo "  Starting CORSIA…"
         fi
-        [ "$elapsed" -lt "$CORSIA_HEALTH_WAIT_SECONDS" ] || break
+        if [ "$elapsed" -ge "$ceiling" ]; then
+            why=ceiling
+            break
+        fi
+        [ $(( now - idle_since )) -lt "$CORSIA_HEALTH_WAIT_SECONDS" ] || break
         sleep 1
     done
     [ "$line_open" -eq 0 ] || echo
-    fail "CORSIA didn't finish starting within ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+    case "$why" in
+        restarted) fail "CORSIA stopped while starting, and launchd started it again." ;;
+        exited) fail "CORSIA stopped while starting." ;;
+        failed) fail "CORSIA reported that it could not start." ;;
+        ceiling) fail "CORSIA was still starting after ${elapsed} seconds, the most one start may take." ;;
+        *)
+            if [ -n "$last_progress" ]; then
+                fail "CORSIA stopped making progress while starting: nothing changed for ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+            else
+                fail "CORSIA didn't finish starting within ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+            fi
+            ;;
+    esac
     echo "     Run 'corsia logs' to see why (log: ${BACKEND_LOG:-the backend log})."
     return 1
 }
@@ -65,13 +208,16 @@ resolve_bind_host() {
     (cd "$BACKEND_DIR" && "$PYTHON" -m cli bind-host ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
 }
 
+# Saved in Settings › System and printed only while Let other devices connect is on.
+resolve_remote_address() {
+    (cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
+}
+
 print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
-    local ts_ip
-    # A loopback-only setup is not reachable over the tailnet; don't offer it.
-    [ "$(resolve_bind_host 2>/dev/null)" = 127.0.0.1 ] && return 0
-    ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
-    [ -n "$ts_ip" ] && echo "  Tailscale: http://$ts_ip:$BACKEND_PORT"
+    local outside_address
+    outside_address="$(resolve_remote_address 2>/dev/null)" || outside_address=""
+    [ -n "$outside_address" ] && echo "  Outside address: $outside_address"
     return 0
 }
 
@@ -109,7 +255,8 @@ cancel_failed_drain() {
     # Releasing the hold for it would readmit work into the gap before teardown
     # and then kill that work without a recovery registration. The surviving
     # hold is safe: startup adopts any pre-bounce phase and settles it.
-    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ]; then
+    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ] \
+        || [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-}" = true ]; then
         return 0
     fi
     if [ -z "$operation_id" ]; then
@@ -569,7 +716,7 @@ require_port_served_by_this_checkout() {
     [ -n "$pids" ] || return 0
     if service_is_loaded; then
         require_loaded_service_owns_port || return 1
-        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_plist_path)")"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     fi
     for pid in $pids; do
@@ -612,8 +759,8 @@ start_backend() {
     cd "$BACKEND_DIR"
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
-        BACKEND_PORT="$BACKEND_PORT" \
-        nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
+        CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \
+        nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 7>&- &
 }
 
 read_backend_start_iso() {
@@ -643,13 +790,13 @@ prove_backend_replaced() {
 }
 
 print_backend_status() {
-    local payload revision checkout topology pid
+    local payload identity revision backend_dirty frontend_dirty checkout_dirty checkout topology pid
     if ! payload=$(curl -sf --max-time 5 \
         "http://127.0.0.1:$BACKEND_PORT/api/version" 2>/dev/null); then
         fail "Backend health responded, but build identity could not be read"
         return 1
     fi
-    if ! revision=$(
+    if ! identity=$(
         printf '%s' "$payload" |
             python3 -c 'import json,sys
 payload = json.load(sys.stdin)
@@ -664,15 +811,23 @@ if not isinstance(frontend_sha, str) or frontend_sha != backend_sha:
     raise ValueError("frontend and backend revisions differ")
 if current_sha is not None and current_sha != backend_sha:
     raise ValueError("running backend and checkout revisions differ")
-print(backend_sha)' 2>/dev/null
+def state(value):
+    return "dirty" if value is True else "clean" if value is False else "unknown"
+print("\t".join((backend_sha, state(backend.get("dirty")),
+                 state(frontend.get("dirty")), state((backend.get("current_head") or {}).get("dirty")))))' 2>/dev/null
     ); then
         fail "Backend is reachable, but backend, frontend, and checkout revisions do not agree"
         return 1
     fi
 
+    IFS=$'\t' read -r revision backend_dirty frontend_dirty checkout_dirty <<< "$identity"
     checkout="$(serving_checkout_root)"
     if service_managed; then
-        topology="launchd $(service_label)"
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            topology="systemd user service $(service_label)"
+        else
+            topology="launchd $(service_label)"
+        fi
     else
         pid="$(backend_pids | head -1)"
         topology="legacy process PID ${pid:-unknown}"
@@ -681,10 +836,14 @@ print(backend_sha)' 2>/dev/null
     echo "  Serving on :$BACKEND_PORT"
     echo "  Checkout: $checkout"
     echo "  Revision: ${revision:0:12} (backend + frontend)"
+    echo "  Dirty state: backend $backend_dirty, frontend $frontend_dirty, checkout $checkout_dirty"
     echo "  Process: $topology"
 }
 
 start_server() {
+    if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ] && ! service_installed; then
+        service_install || return 1
+    fi
     if service_installed; then
         service_start || return 1
     else
@@ -765,6 +924,7 @@ bounce_server() {
         # A failed stop leaves the old backend serving with no bounce coming to
         # settle the operation, so the hold has to come off here. Past this
         # point the backend is down and startup owns the surviving operation.
+        _corsia_update_stopping=1
         if ! stop_backend; then
             [ "$drain_attempted" = false ] \
                 || cancel_failed_drain "$(current_drain_url)" || :
@@ -887,11 +1047,13 @@ UPDATE_PREPARE_INDEX_LOCKED=43
 UPDATE_PREPARE_DETACHED=44
 UPDATE_PREPARE_DIRTY=45
 UPDATE_PREPARE_AWAITING_RESTART=46
+UPDATE_PREPARE_NO_UPSTREAM=47
+UPDATE_PREPARE_DIVERGED=48
 
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
-    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
+    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent pull_output ahead behind
 
     recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_INDEX_LOCKED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -914,10 +1076,23 @@ prepare_redeploy_locked() {
         return "$UPDATE_PREPARE_AWAITING_RESTART"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
-    if ! git -C "$checkout" pull --ff-only; then
-        fail "Redeploy refused: git pull --ff-only failed (diverged / non-fast-forward / offline) — checkout left untouched"
+    if ! pull_output="$(LC_ALL=C git -C "$checkout" pull --ff-only 2>&1)"; then
+        printf '%s\n' "$pull_output" >&2
+        if [[ "$pull_output" == *"There is no tracking information for the current branch."* ]]; then
+            fail "Redeploy refused: branch $branch has no upstream — checkout left untouched"
+            return "$UPDATE_PREPARE_NO_UPSTREAM"
+        fi
+        if [[ "$pull_output" == *"Not possible to fast-forward, aborting."* ]]; then
+            read -r ahead behind <<< "$(git -C "$checkout" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null)"
+            if [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]] && (( ahead > 0 && behind > 0 )); then
+                fail "Redeploy refused: branch $branch and its upstream have diverged — checkout left untouched"
+                return "$UPDATE_PREPARE_DIVERGED"
+            fi
+        fi
+        fail "Redeploy refused: git pull --ff-only failed — checkout left untouched"
         return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
+    [ -z "$pull_output" ] || printf '%s\n' "$pull_output"
     redeploy_sync_python_dependencies "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     redeploy_build "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     echo "  Pull + dependency check + build OK"
@@ -962,9 +1137,10 @@ prepare_redeploy() {
 }
 
 activate_prepared_frontend() {
-    local checkout expected_sha fe stage prepared backup absent recovering=false
+    local checkout expected_sha release_mode fe stage prepared backup absent recovering=false
     checkout="${1:-$(serving_checkout_root)}"
     expected_sha="${2:-}"
+    release_mode="${3:-}"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || { REDEPLOY_FRONTEND_STATE=activated; return 0; }
@@ -974,14 +1150,14 @@ activate_prepared_frontend() {
         recovering=true
         if [ -e "$fe/dist" ] || [ -z "$expected_sha" ] \
             || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$expected_sha"
+            || ! frontend_release_matches_sha "$stage" "$expected_sha" "$release_mode"
         then
             fail "Frontend activation recovery refused: incomplete state was preserved"
             return 1
         fi
         if [ -d "$backup" ] && [ ! -e "$absent" ] \
             && [ -s "$backup/index.html" ] \
-            && frontend_release_sha "$backup" > /dev/null
+            && frontend_release_sha "$backup" source > /dev/null
         then
             :
         elif [ ! -e "$backup" ] && [ -f "$absent" ]; then
@@ -1020,17 +1196,17 @@ if (
     not isinstance(value, str)
     or not value
     or value == "unknown"
-    or payload.get("dirty") is not False
+    or (payload.get("dirty") is not False and not (len(sys.argv) > 2 and sys.argv[2] == "source" and payload.get("dirty") is True))
 ):
     raise SystemExit(1)
 print(value)
-' "$1/build-info.json" 2>/dev/null
+' "$1/build-info.json" "${2:-}" 2>/dev/null
 }
 
 frontend_release_matches_sha() {
     local release_dir="$1" expected_sha="$2" actual_sha
     [ -d "$release_dir" ] && [ -s "$release_dir/index.html" ] || return 1
-    actual_sha="$(frontend_release_sha "$release_dir")" || return 1
+    actual_sha="$(frontend_release_sha "$release_dir" "${3:-}")" || return 1
     [ "$actual_sha" = "$expected_sha" ]
 }
 
@@ -1054,13 +1230,17 @@ clear_frontend_release_state() {
 }
 
 ensure_current_frontend_release_locked() {
-    local checkout="$1" fe stage prepared backup absent head_sha
+    local checkout="$1" fe stage prepared backup absent head_sha worktree_status fresh_source_build=false recovered_source_build=false
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || return 0
     head_sha="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
     if [ -z "$head_sha" ]; then
         fail "Frontend startup refused: could not resolve the serving checkout revision"
+        return 1
+    fi
+    if ! worktree_status="$(git -C "$checkout" status --porcelain 2>/dev/null)"; then
+        fail "Frontend startup refused: could not read checkout status"
         return 1
     fi
     if is_backend_running; then
@@ -1076,48 +1256,65 @@ ensure_current_frontend_release_locked() {
     fi
 
     if [ ! -d "$stage" ] &&
-        frontend_release_matches_sha "$fe/dist" "$head_sha" &&
+        frontend_release_matches_sha "$fe/dist" "$head_sha" source &&
         { [ -e "$prepared" ] || [ -e "$backup" ] || [ -e "$absent" ]; }
     then
         if ! clear_frontend_release_state "$checkout"; then
             fail "Frontend startup refused: completed activation cleanup did not finish"
             return 1
         fi
-        return 0
+        if [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+            return 0
+        fi
     fi
     if { [ -e "$backup" ] || [ -e "$absent" ]; } \
         && { [ -e "$fe/dist" ] || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"; }
+            || ! frontend_release_matches_sha "$stage" "$head_sha" source; }
     then
         fail "Frontend startup refused: incomplete activation state remains in $fe/node_modules"
         return 1
     fi
 
     if [ -e "$prepared" ]; then
-        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha"; then
+        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha" source; then
             fail "Frontend startup refused: prepared build does not match checkout $head_sha; retained at $stage"
             return 1
         fi
-    elif frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+        if ! frontend_release_matches_sha "$stage" "$head_sha"; then
+            recovered_source_build=true
+        fi
+    elif [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         return 0
     else
         redeploy_build "$checkout" || return 1
-        if [ ! -e "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"
+        fresh_source_build=true
+        if [ ! -e "$prepared" ] || [ ! -s "$stage/index.html" ] \
+            || [ "$(frontend_release_sha "$stage" source)" != "$head_sha" ]
         then
             fail "Frontend startup refused: completed build does not match checkout $head_sha; retained at $stage"
             return 1
         fi
     fi
 
-    activate_prepared_frontend "$checkout" "$head_sha" || return 1
+    activate_prepared_frontend "$checkout" "$head_sha" source || return 1
     if ! clear_frontend_release_state "$checkout"; then
         fail "Frontend startup refused: activated release cleanup did not complete"
         return 1
     fi
-    if ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+    if [ "$recovered_source_build" = true ]; then
+        # The working tree may have changed since the interrupted build.
+        ensure_current_frontend_release_locked "$checkout" || return 1
+    elif [ "$fresh_source_build" = true ]; then
+        [ -s "$fe/dist/index.html" ] && [ "$(frontend_release_sha "$fe/dist" source)" = "$head_sha" ] || {
+            fail "Frontend startup refused: activated assets do not match checkout $head_sha"
+            return 1
+        }
+    elif ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         fail "Frontend startup refused: activated assets do not match checkout $head_sha"
         return 1
+    elif [ -n "$worktree_status" ]; then
+        # Resolve prepared update ownership before building the working tree.
+        ensure_current_frontend_release_locked "$checkout" || return 1
     fi
 }
 
@@ -1136,20 +1333,30 @@ ensure_current_frontend_release() {
         "$checkout" "Frontend startup refused" ensure_current_frontend_release_locked
 }
 
+# Pre-stop checks run in the owning shell so their failure reason is retained.
 # Drain while the old release is intact. The lifecycle owner invokes frontend
 # activation only after it has confirmed that no old backend remains.
 restart_prepared() {
-    local checkout fe stage prepared backup absent original_force
+    local checkout fe stage prepared backup absent original_force reason
     local drain_attempted=false
     checkout="$(serving_checkout_root)"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
 
     if [ -d "$fe" ]; then
-        [ -d "$stage" ] || { fail "Prepared frontend build is missing"; return 1; }
-        [ -e "$prepared" ] || { fail "Prepared frontend ownership marker is missing"; return 1; }
+        if [ ! -d "$stage" ]; then
+            reason="Prepared frontend build is missing"
+            fail "$reason"
+            return 1
+        fi
+        if [ ! -e "$prepared" ]; then
+            reason="Prepared frontend ownership marker is missing"
+            fail "$reason"
+            return 1
+        fi
         if [ -e "$backup" ] || [ -e "$absent" ]; then
-            fail "Prepared frontend rollback path already exists"
+            reason="Prepared frontend rollback path already exists"
+            fail "$reason"
             return 1
         fi
     fi
@@ -1157,7 +1364,11 @@ restart_prepared() {
     # owner bounce_server/service_restart would prove before that first effect.
     # Revalidation inside the bounce remains intentional across the drain gap.
     if service_installed; then
-        require_owned_service_definition || return 1
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            require_manager_service_definition || return 1
+        else
+            require_owned_service_definition || return 1
+        fi
         if service_is_loaded; then
             if is_backend_running || [ -n "$(backend_pids)" ]; then
                 require_loaded_service_owns_port || return 1
@@ -1170,7 +1381,8 @@ restart_prepared() {
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
-            fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            fail "$reason"
             return 1
         fi
         # Update is the only path that pulls, so refusing here on an incomplete

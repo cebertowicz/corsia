@@ -36,9 +36,11 @@ jobs:
     if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Backend unit tests
     runs-on: ubuntu-24.04
-    # The Mac Studios finished the three shards in about 6 minutes; a hosted
-    # runner has four slower cores, so the cap leaves room for that hardware.
-    timeout-minutes: 25
+    # Hosted runners split into a fast and a slow kind on the same image: the
+    # slowest shard takes about 14 minutes on one and 22 on the other
+    # (2026-10-27), and the slow kind finished every test and was still
+    # cancelled at 25. The cap is a hang guard with room for the slow kind.
+    timeout-minutes: 35
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
       # the HOME-prefix guard (it protects a shared host's live workspace)
@@ -69,12 +71,26 @@ jobs:
       # parser and query planner differ from what CORSIA runs on.
       - uses: astral-sh/setup-uv@v6
 
+      # Cache pip's download/wheel cache only, never the venv.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py3.11-${{ hashFiles('backend/requirements.txt', 'backend/requirements-test.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-py3.11-
 
       - name: Install deps
         run: |
-          # The search tests assert real ripgrep semantics.
-          sudo apt-get update --quiet
-          sudo apt-get install --yes --no-install-recommends ripgrep
+          # The search tests assert real ripgrep semantics. ripgrep comes from
+          # the Ubuntu archive, so refresh only the image's Ubuntu sources: a
+          # third-party source on the runner (packages.microsoft.com 403s) must
+          # not fail this job.
+          sudo apt-get update --quiet \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0
+          sudo apt-get install --yes --no-install-recommends ripgrep bubblewrap
+          bash scripts/install-linux-sandbox.sh
           rg --version
           uv venv --python 3.11 --managed-python --seed .venv
           .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'
@@ -142,20 +158,20 @@ jobs:
             done
             return 0
           }
-          mapfile -t cgr_files < <(linux_files backend/tests/test_[cgr]*.py)
-          mapfile -t aehilsuw_files < <(linux_files backend/tests/test_[aehilsuw]*.py)
+          mapfile -t cdgmr_files < <(linux_files backend/tests/test_[cdgmr]*.py)
+          mapfile -t aehilostuw_files < <(linux_files backend/tests/test_[aehilostuw]*.py)
 
           # One CI job owns all concurrency: three shards on the hosted
           # runner's four cores; worktree agents remain targeted-test only.
           # The letter split keeps the three shards' summed test time within
           # a few percent of each other (measured from the junit reports); a
           # lopsided shard is what pushes the job past its timeout under load.
-          run_backend_shard core-cgr "${cgr_files[@]}"
+          run_backend_shard core-cdgmr "${cdgmr_files[@]}"
           run_backend_shard remainder backend/tests \
-            '--ignore-glob=backend/tests/test_[cgr]*.py' \
-            '--ignore-glob=backend/tests/test_[aehilsuw]*.py' \
+            '--ignore-glob=backend/tests/test_[cdgmr]*.py' \
+            '--ignore-glob=backend/tests/test_[aehilostuw]*.py' \
             "${macos_ignores[@]}"
-          run_backend_shard core-aehilsuw "${aehilsuw_files[@]}"
+          run_backend_shard core-aehilostuw "${aehilostuw_files[@]}"
 
           status=0
           for index in "${!pids[@]}"; do
@@ -308,6 +324,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
@@ -361,6 +381,8 @@ jobs:
         with:
           # Active LTS; the frontend declares no engines constraint.
           node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install deps + run tests
         working-directory: frontend

@@ -7,7 +7,7 @@ import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 import { shouldReloadPresenceEdit } from '$lib/docPresence';
-import { effectiveDraftTarget, existingDraft } from '$lib/stores/docSaveQueue';
+import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 
 // The viewer retains retry state; the composer needs the rejection to keep its draft.
@@ -51,7 +51,7 @@ export async function prepareDocumentReload(
 ): Promise<(() => void) | null> {
 	const current = () => isCurrent() && shouldReloadPresenceEdit(existingDraft(target));
 	if (!current()) return null;
-	const fallbackArtifactId = effectiveDraftTarget(target).artifactId;
+	const fallbackArtifactId = withDraftArtifactId(target).artifactId;
 	// Claim a load only at reveal: a prepared reload that is never revealed
 	// must not discard a load already in flight.
 	const response = await fetchContent(target.path, { projectId: target.projectId, threadId: target.threadId });
@@ -105,9 +105,9 @@ export function reloadDocumentFeedback(
 	sequence: number | undefined,
 	currentSequence: () => number,
 	sync: { sync?: (id: string, feedback: Awaited<ReturnType<typeof loadComments>>) => void } | undefined,
-): void {
-	if (!artifactId) return;
-	void loadComments(artifactId)
+): Promise<void> {
+	if (!artifactId) return Promise.resolve();
+	return loadComments(artifactId)
 		.then((feedback) => {
 			if (sequence === undefined || sequence === currentSequence()) sync?.sync?.(artifactId, feedback);
 		})

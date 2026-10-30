@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from core import checkpoint_cc_boundary as boundary
+from core import fork_cc_boundary as boundary
 
 
 def _lines(*records: dict) -> bytes:

@@ -65,9 +65,25 @@ describe('groupByHost', () => {
 		expect(groups).toHaveLength(1);
 		expect(groups[0].key).toBe('this-mac');
 		expect(groups[0].providers[0].name).toBe('omlx');
-		expect(groups[0].providers[0].label).toBe('oMLX');
+		expect(groups[0].providers[0].label).toBe('Mac');
 		expect(groups[0].providers[0].type).toBe('local');
 		expect(groups[0].providers[0].raw.type).toBe('network');
+	});
+
+	it('shows distinct registered names for legacy and CORSIA-managed local oMLX rows', () => {
+		const endpoint = (server_id: string) => ({ id: `e-${server_id}`, server_id, host: '127.0.0.1', kind: 'local' as const, last_ok_at: null, last_latency_ms: null });
+		const groups = groupByHost(
+			[p({ name: 'omlx', type: 'network' })],
+			[
+				s({ id: 'legacy', instance_id: '127.0.0.1:8000', instance_name: 'This Mac', endpoints: [endpoint('legacy')] }),
+				s({ id: 'managed', instance_id: 'corsia-managed', instance_name: 'CORSIA', endpoints: [endpoint('managed')] }),
+			],
+			null,
+		);
+
+		expect(groups).toHaveLength(1);
+		expect(groups[0].name).toBe('This computer');
+		expect(groups[0].providers.map(provider => provider.label)).toEqual(['This Mac', 'CORSIA']);
 	});
 
 	it('groups remote daemons sharing machine_id under one host', () => {
@@ -108,15 +124,16 @@ describe('groupByHost', () => {
 		const groups = groupByHost([p({ name: 'omlx', type: 'network' })], [remote], null);
 		expect(groups[0].key).toBe('host-r-99');
 		expect(groups[0].providers[0].type).toBe('network');
+		expect(groups[0].providers[0].label).toBe('oMLX');
 	});
 
-	it('relabels omlx → "oMLX"', () => {
+	it('uses an oMLX server’s registered name', () => {
 		const groups = groupByHost(
 			[p({ name: 'omlx', type: 'network' })],
 			[s({ provider: 'omlx', endpoints: [{ id: 'e', server_id: 'srv-1', host: '127.0.0.1', kind: 'local', last_ok_at: null, last_latency_ms: null }] })],
 			null,
 		);
-		expect(groups[0].providers[0].label).toBe('oMLX');
+		expect(groups[0].providers[0].label).toBe('Mac');
 	});
 
 	it('leaves unknown provider labels unchanged', () => {
@@ -133,7 +150,7 @@ describe('groupByHost', () => {
 		);
 		expect(groups).toHaveLength(1);
 		const labels = groups[0].providers.map(x => x.label).sort();
-		expect(labels).toEqual(['X', 'oMLX']);
+		expect(labels).toEqual(['Mac', 'X']);
 	});
 
 	it('groups remote servers by instance_id, separate from This Mac', () => {
@@ -185,8 +202,17 @@ describe('groupByHost', () => {
 			},
 		);
 		expect(groups[0].resources?.total_gb).toBe(256);
-		expect(groups[0].subname).toContain('256');
-		expect(groups[0].subname).toContain('128');
+		expect(groups[0].subname).toBe('256 GB memory');
+
+		const lowMemory = groupByHost(
+			[p({ name: 'omlx', type: 'network' })],
+			[s({
+				provider: 'omlx',
+				endpoints: [{ id: 'e-low', server_id: 'srv-low', host: '127.0.0.1', kind: 'local', last_ok_at: null, last_latency_ms: null }],
+			})],
+			{ total_gb: 16, free_gb: 4, models_used_gb: 0, other_used_gb: 12, safe_free_gb: 8, safe_reserve_gb: 4, by_provider: {} },
+		);
+		expect(lowMemory[0].subname).toBe('16 GB memory');
 	});
 
 	it('subline for an offline network server includes port', () => {
@@ -295,5 +321,17 @@ describe('groupByHost', () => {
 		expect(groups[0].providers.map(provider => provider.subline)).toEqual([
 			'2 accounts · 3 models', '1 account · 1 model',
 		]);
+	});
+
+	it('counts only accounts visible in the settings list', () => {
+		vendorAccounts.set([
+			{ ...account('codex', 'default'), default_signed_out: true }, account('codex', 'work'),
+			{ ...account('claude-code', 'default'), default_signed_out: true },
+		]);
+		const groups = groupByHost([], [], null, [
+			{ name: 'codex', label: 'Codex', total: 3, ready: 3 },
+			{ name: 'claude-code', label: 'Claude Code', total: 1, ready: 1 },
+		]);
+		expect(groups[0].providers.map(provider => provider.subline)).toEqual(['1 account · 3 models', '1 model']);
 	});
 });

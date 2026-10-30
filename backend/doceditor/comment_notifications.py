@@ -5,8 +5,9 @@ The comment store announces every row it creates or updates
 write path cannot leave a second open canvas stale. Two writes are outside it.
 Anchor position saves (``comments.update_positions``) follow a text change on
 every autosave and are not announced; a canvas picks up moved anchors when it
-loads the document. Feedback batch state (send, leave, return, retry) is
-announced only when a due batch closes.
+loads the document. Feedback batch state (send, retry) is announced when a due
+batch closes. A person's comment is announced once, after it is delivered, so
+a canvas that reloads on the frame never shows it as unsent.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ def publish_due_user_feedback(deliveries: list[str]) -> None:
 
 def announce_after_commit(
     connection, artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None,
+    reply_attention_changed: bool = False,
 ) -> None:
     """Send the change frame once the comment write on ``connection`` commits.
 
@@ -58,6 +60,7 @@ def announce_after_commit(
         connection,
         lambda: broadcast_doc_comment_changed(
             artifact_id, comment_id=comment_id, author_thread_id=author_thread_id,
+            reply_attention_changed=reply_attention_changed,
         ),
     )
 
@@ -70,13 +73,16 @@ def _send(audience: str, message: dict) -> None:
 
 
 def broadcast_doc_comment_changed(
-    artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None, db=None,
+    artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None,
+    reply_attention_changed: bool = False, db=None,
 ) -> None:
     """Nudge every permitted open canvas after a comment projection changes."""
     try:
         audience = _comment_change_audience(artifact_id, db=db)
         if audience:
             message = {"type": "doc_comment_changed", "artifact_id": artifact_id}
+            if reply_attention_changed:
+                message['reply_attention_changed'] = True
             if comment_id and author_thread_id:
                 message.update(comment_id=comment_id, author_thread_id=author_thread_id)
             _send(audience, message)

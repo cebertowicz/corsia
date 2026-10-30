@@ -6,11 +6,11 @@ from test_checkpoint_external_adapters import _target
 
 
 def _context(window=1000):
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_context import CCForkContext
 
     target = replace(_target("claude-code"), context_window=window,
                      transport_model="gpt-4", expected_reported_model="gpt-4")
-    return CCCheckpointContext(target, 10)
+    return CCForkContext(target, 10)
 
 
 def _stream(context, event):

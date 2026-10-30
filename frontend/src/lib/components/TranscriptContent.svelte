@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import UserMessageBubble from './UserMessageBubble.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import SystemMessageRow from './SystemMessageRow.svelte';
@@ -7,22 +8,31 @@
 	import PassiveOutcomeList from './PassiveOutcomeList.svelte';
 	import VisitDivider from './VisitDivider.svelte';
 	import WorkBlock from './WorkBlock.svelte';
-	import { activeToolsByThread } from '$lib/stores/threads';
+	import WaitCapsule from './WaitCapsule.svelte';
+	import WaitLine from './WaitLine.svelte';
+	import { waitFace } from './waitFace';
+	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { coreSettings } from '$lib/stores/settings';
+	import { chatReplyJump } from '$lib/stores/chatReplyJump';
+	import { activeToolsByThread, messages } from '$lib/stores/threads';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
 	import type { TranscriptEntry } from './messageListModel';
 	import { isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
-	import { liveRunTimes, runLabels, type TurnSummaries } from './transcriptRunLabel';
+	import { liveRunTimes, runLabels, runRanges, waitElapsed, waitRange, type RunRange, type TurnSummaries } from './transcriptRunLabel';
 	import { minuteClock } from '$lib/time';
+	import { trackVisibleRow } from '$lib/actions/trackVisibleRow';
+	import { openMilliseconds, openRangeKey, openTimes, requestOpenTime, type OpenTimeQuery } from '$lib/openTime';
 	import { attachPlanLimitPauses, stubPauseTurns, type PlanLimitPauseDescriptor } from './planLimitPause';
-	import { deliveryPresentation } from '$lib/messageDelivery';
+	import { deliveryPresentation, isAwaitingDelivery } from '$lib/messageDelivery';
 	import type { TranscriptMessage } from './messageListModel';
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
 	import { sourceMembers } from './contextEventModel';
-	import { PAUSED_AT_PLAN_LIMIT } from '$lib/stores/overageSetting';
+	import { PAUSED_AT_USAGE_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
+	import type { WorkBlockLive } from './workBlockLive';
 
 	let {
 		entries,
@@ -39,6 +49,8 @@
 		historyComplete = false,
 		runLoads = {},
 		onLoadRun,
+		liveRollup = null,
+		showWait = true,
 	}: {
 		entries: TranscriptEntry[];
 		expandedTools: Set<string>;
@@ -57,6 +69,10 @@
 		runLoads?: Record<string, RunLoad>;
 		/** Read (more of) a stub run's rows. */
 		onLoadRun?: (stub: RunStub) => void;
+		/** Parent + descendant activity derived once at the MessageList boundary. */
+		liveRollup?: WorkBlockLive | null;
+		/** False for the pending-input copy, so the outside-wait face shows once. */
+		showWait?: boolean;
 	} = $props();
 
 	const uid = $props.id();
@@ -99,18 +115,76 @@
 		if (previous !== undefined && previous !== boundThreadId) expandedFolds = new Set();
 	});
 	// AS14 owns what a running Turn is doing now; Focus reads the same step as its plan row.
-	const liveNow = $derived(
+	const ownLiveNow = $derived(
 		boundThreadId ? threadLiveStep(boundThreadId, $turnStates, $activeToolsByThread) : null,
 	);
+	const liveNow = $derived(liveRollup?.step ?? ownLiveNow);
+	const liveOwnThread = $derived(liveRollup?.ownRunning ?? ownLiveNow !== null);
+	const liveActorName = $derived(liveRollup?.actorName ?? null);
+	const livePreviewFromDescendant = $derived(liveRollup?.previewFromDescendant ?? false);
 	const liveRunIndex = $derived(renderedEntries.findIndex((entry) => entry.kind === 'fold' && entry.live));
 	const hasLiveFold = $derived(liveRunIndex !== -1);
 	// The live line restarts after each shown item: its segment is the item before the open run.
 	const liveSegment = $derived(hasLiveFold
 		? runTokens(renderedEntries, liveRunIndex, historyComplete).find((token) => token.startsWith('after:')) ?? 'after:'
 		: undefined);
-	const liveLine = createLiveLine(() => liveNow, () => !renderedStreaming, () => liveSegment);
-	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete));
-	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, $minuteClock.getTime()) : new Map<string, string | null>());
+	// A descendant can keep this Focus block live after the visible parent's turn settles.
+	const liveLine = createLiveLine(() => liveNow, () => !(liveRollup?.active ?? renderedStreaming), () => liveSegment);
+	// One server number, open time, for every run and for the wait chip (it counts on locally while the work is open).
+	const runRangeList = $derived(runRanges(renderedEntries, turnSummaries, historyComplete));
+	const openKey = (range: RunRange) => openRangeKey(boundThreadId ?? '', range);
+	const openMs = (range: RunRange) => (boundThreadId ? openMilliseconds($openTimes, openKey(range), $minuteClock.getTime()) : null);
+	const outsideWaitRange = $derived(waitRange(renderedEntries, turnSummaries, historyComplete));
+	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete, openMs));
+	// An outside wait with nothing running and no sent input waiting to start a turn (EW8). One predicate
+	// gates both the Focus chip and the non-Focus face, so a turn starting swaps it out in the same render.
+	// pendingInputIds covers only this tab's send before its first receipt; the transcript row is the server's
+	// truth for an input it still holds (queued, or Queue-after-turn), after a reload or from another tab too.
+	const inputAwaiting = $derived($messages.some((msg) => msg.thread_id === boundThreadId && isAwaitingDelivery(msg, false)));
+	const focusMode = $derived($coreSettings?.features?.focus_mode === true);
+	const waitState = $derived(boundThreadId ? $threadPlanStates[boundThreadId] : undefined);
+	const wait = $derived(
+		showWait && waitState?.state === 'waiting' && waitState.wait
+			&& (boundTurn?.phase === 'idle' || boundTurn?.phase === 'terminal') && boundTurn.pendingInputIds.length === 0 && !inputAwaiting
+			&& !renderedStreaming && !hasLiveFold
+			? waitFace(waitState.wait, waitElapsed(outsideWaitRange, openMs), $minuteClock)
+			: null,
+	);
+	// The open run is the trailing block; after a reply there is none, and the chip stands alone in its place.
+	const waitRunId = $derived.by(() => {
+		const last = renderedEntries.at(-1);
+		return last?.kind === 'fold' ? last.id : null;
+	});
+	// A block a descendant keeps live counts its last Turn on to now, so the worker's time is included.
+	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, openMs) : new Map<string, string | null>());
+	// Ask the server again only when something that changes the number happens: a range, a Turn starting or ending
+	// (this thread's or a descendant's), or the plan's wait. Never on a timer: the count between answers is local.
+	const openQueries = $derived.by((): OpenTimeQuery[] => {
+		if (!boundThreadId) return [];
+		const ranges = outsideWaitRange ? [...runRangeList, outsideWaitRange] : runRangeList;
+		return ranges.map((range) => ({ key: openKey(range), threadId: boundThreadId, since: range.since, until: range.until }));
+	});
+	// A string, so a recompute that changes none of these (any tool or phase frame re-derives the entries) asks nothing.
+	const openTimeEvents = $derived(JSON.stringify([
+		openQueries.map((query) => query.key),
+		boundTurn?.phase, boundTurn?.turnId, liveRollup?.active ?? null, waitState?.state, waitState?.wait?.until ?? null,
+		Object.entries(turnSummaries).map(([id, summary]) => `${id}:${summary.status}:${summary.ended_at}`),
+	]));
+	$effect(() => {
+		void openTimeEvents;
+		requestOpenTime(untrack(() => openQueries));
+	});
+	// A reply on a hidden row opens the Focus run containing it.
+	$effect(() => {
+		const target = $chatReplyJump;
+		if (!target || target.threadId !== boundThreadId) return;
+		const index = renderedEntries.findIndex(entry => entry.kind === 'fold' &&
+			(entry.items.some(item => item.message.id === target.messageId) ||
+				(entry.stub && entry.stub.firstSeq <= target.seq && target.seq <= entry.stub.lastSeq)));
+		if (index < 0) return;
+		const tokens = runTokens(renderedEntries, index, historyComplete);
+		if (!isRunExpanded(tokens, expandedFolds)) expandedFolds = new Set([...expandedFolds, ...tokens]);
+	});
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {
 		renderedEntries.forEach((entry, index) => {
@@ -123,7 +197,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	<div class="message {msg.role}" data-message-id={msg.id} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
+	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />
 		{:else if msg.role === 'user'}
@@ -157,14 +231,14 @@
 		{@render deliveryWarning(annotation.pause.source)}
 		<div class="historical-anchor">{annotation.pause.anchorKind === 'input' ? 'Earlier input' : 'Earlier work'}</div>
 	{/if}
-	<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+	<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 {/snippet}
 
 {#each renderedEntries as entry, index (entry.id)}
 	{#if entry.kind === 'message'}
 		{@render messageRow(entry)}
 	{:else if entry.kind === 'update'}
-		<UpdateCard card={entry.card} earlier={entry.earlier} />
+		<UpdateCard card={entry.card} earlier={entry.earlier} group={entry.group} />
 	{:else if entry.kind === 'passive'}
 		{#key boundThreadId}<PassiveOutcomeList cards={entry.cards} id={`${uid}-${entry.id}`} />{/key}
 	{:else if entry.kind === 'divider'}
@@ -172,7 +246,7 @@
 	{:else if entry.kind === 'pause'}
 		{@render historicalPause(entry, entry.showProxy || !visibleSources.has(entry.pause.source.id))}
 	{:else if entry.kind === 'stub-pause'}
-		<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+		<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 	{:else if entry.kind === 'fold'}
 		{@const tokens = runTokens(renderedEntries, index, historyComplete)}
 		{@const expanded = isRunExpanded(tokens, expandedFolds)}
@@ -186,19 +260,25 @@
 			liveTime={liveTimes.get(entry.id) ?? null}
 			livePhrase={liveLine.shown?.phrase ?? UNKNOWN_STEP}
 			liveDimmed={liveLine.shown?.between === true}
+			{liveOwnThread}
+			{liveActorName}
+			{livePreviewFromDescendant}
 			load={entry.stub ? runLoads[entry.stub.lastId] : undefined}
 			onToggle={() => { expandedFolds = toggleRun(tokens, expandedFolds); }}
 			{onLoadRun}
 			row={messageRow}
 			pause={historicalPause}
 			warning={deliveryWarning}
+			wait={focusMode && entry.id === waitRunId ? wait : null}
+			waitThreadId={boundThreadId}
+			threadId={boundThreadId}
 		>
 			{#snippet liveActivity()}
 				<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
 			{/snippet}
 			{#snippet notes()}
 				{#each stubPauses.get(entry.id) ?? [] as turnId (turnId)}
-					<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+					<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 				{/each}
 			{/snippet}
 		</WorkBlock>
@@ -207,11 +287,19 @@
 
 {#if renderedStreaming && !hasLiveFold}
 	<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
+{:else if wait && !(focusMode && waitRunId !== null)}
+	{#if focusMode}
+		<!-- No run to open: a static capsule, no toggle or chevron, keeping the label link. -->
+		<section class="wait-standalone" data-work-block><WaitCapsule face={wait} threadId={boundThreadId} /></section>
+	{:else}
+		<WaitLine face={wait} threadId={boundThreadId} />
+	{/if}
 {/if}
 
 <style>
+	.wait-standalone { display: flex; max-width: var(--transcript-max-width); margin: 0 auto 14px; min-width: 0; }
 	.message {
-		max-width: 760px;
+		max-width: var(--transcript-max-width);
 		margin: 0 auto 20px;
 		overflow-x: hidden;
 	}
@@ -223,12 +311,13 @@
 	}
 	.message.user.agent-inbound { justify-content: flex-start; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
+	.message[data-first-run-opening] { scroll-margin-top: var(--sticky-top, 0px); }
 	.message.system { animation: fadeIn var(--dur-tight) ease; }
 	@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 	@keyframes fadeInUp {
 		from { opacity: 0; transform: translateY(8px); }
 		to { opacity: 1; transform: translateY(0); }
 	}
-	.plan-limit-paused { max-width: 760px; margin: -6px auto 20px; color: var(--text-secondary); font-size: var(--text-footnote); }
-	.historical-anchor { max-width: 760px; margin: 0 auto 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.plan-limit-paused { max-width: var(--transcript-max-width); margin: -6px auto 20px; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.historical-anchor { max-width: var(--transcript-max-width); margin: 0 auto 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

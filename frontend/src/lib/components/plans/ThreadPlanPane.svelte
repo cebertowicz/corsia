@@ -7,6 +7,7 @@
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
+	import { personStepInstructionsDocument } from './nodeDetailsText';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
@@ -74,13 +75,13 @@
 	 * its row while it is rendered, else the step of this plan that nests it.
 	 */
 	const PLAN_UNLOADED = 'The plan couldn’t load, so that item can’t be shown';
-	let pendingFocus = $state<{ nodeId: string; stepId: string | null } | null>(null);
+	let pendingFocus = $state<{ nodeId: string; stepId: string | null; open: boolean } | null>(null);
 	let focusNotice = $state<string | null>(null);
 	let overviewTree = $state<PlanTree | null>(null);
 	let drillView = $state<PlanDrillView | null>(null);
 
-	$effect(() => registerNodeFocus(threadId, (nodeId, stepId) => {
-		pendingFocus = { nodeId, stepId };
+	$effect(() => registerNodeFocus(threadId, (nodeId, stepId, open) => {
+		pendingFocus = { nodeId, stepId, open };
 		focusNotice = null;
 	}));
 
@@ -97,7 +98,7 @@
 		const status = query.status;
 		if (!request || status === 'idle' || status === 'loading' || query.refreshing) return;
 		pendingFocus = null;
-		if (status === 'ready' || status === 'stale') untrack(() => void focusNode(request.nodeId, request.stepId));
+		if (status === 'ready' || status === 'stale') untrack(() => void focusNode(request.nodeId, request.stepId, request.open));
 		else focusNotice = PLAN_UNLOADED;
 	});
 
@@ -106,12 +107,12 @@
 		if (plan) untrack(() => { if (focusNotice === PLAN_UNLOADED) focusNotice = null; });
 	});
 
-	async function focusNode(nodeId: string, stepId: string | null = null): Promise<void> {
+	async function focusNode(nodeId: string, stepId: string | null = null, open = false): Promise<void> {
 		const node = plan?.nodes.find((candidate) => candidate.id === nodeId);
 		if (!node) {
 			// Not this plan's node: a nested subagent plan's row while rendered, else its owning step.
 			if ((drillRootId ? drillView : overviewTree)?.focusRow(nodeId)) return;
-			if (stepId && stepId !== nodeId) return focusNode(stepId);
+			if (stepId && stepId !== nodeId) return focusNode(stepId, null, open);
 			// Older finished work is not in the read: page it in from the server's folded history.
 			const forThread = threadId;
 			const drilled = drillRootId;
@@ -124,7 +125,12 @@
 				return;
 			}
 			drillRootId = drilled;
-			focusNotice = 'That item is no longer in this plan';
+			focusNotice = 'That task isn’t in this plan.';
+			return;
+		}
+		const instructions = personStepInstructionsDocument(node);
+		if (instructions) {
+			openAsk(instructions, node.title);
 			return;
 		}
 		const forThread = threadId;
@@ -142,6 +148,7 @@
 		await tick();
 		if (threadId !== forThread) return;
 		if (!tree?.focusRow(nodeId)) focusNotice = 'That item couldn’t be shown in this plan';
+		else if (open) tree?.openDetails(nodeId);
 	}
 
 
@@ -152,7 +159,7 @@
 	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
 		if (outcome === 'requested') return;
 		if (outcome === 'empty') {
-			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
+			decisionMessage = 'That decision is closed. Refreshing the plan.';
 			query.retry();
 			return;
 		}
@@ -221,20 +228,10 @@
 			<span class="spinner" aria-hidden="true"></span>
 			<strong>Loading plan…</strong>
 		</div>
-	{:else if query.status === 'unauthorized' && !hasPayload}
+	{:else if (query.status === 'unauthorized' || query.status === 'forbidden' || query.status === 'not-found') && !hasPayload}
+		<!-- The plans store words these states; the pane shows its message as is. -->
 		<div class="plan-state error" role="alert">
-			<strong>Sign in to see this plan</strong>
-			<p>Your session expired before the plan could load.</p>
-		</div>
-	{:else if query.status === 'forbidden' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>You don’t have access to this plan.</p>
-		</div>
-	{:else if query.status === 'not-found' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>It may have been removed or is no longer shared with you.</p>
+			<strong>{query.errorMessage}</strong>
 		</div>
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">

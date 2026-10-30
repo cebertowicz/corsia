@@ -8,18 +8,34 @@
 	not a live region, so a phrase change is not announced.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { watchThread } from '$lib/ws';
+	import type { OperatorNode } from '$lib/api/plans';
+	import { openMilliseconds, openTimes, requestOpenTime } from '$lib/openTime';
 	import { createPhraseSwap } from './phraseSwap.svelte';
-	import { FADE_MS, liveStepClock, liveStepLabel, type LiveStep } from './planLiveStep';
+	import { FADE_MS, type LiveStep } from './planLiveStep';
+	import { liveStepClock, liveStepLabel, stepOpenQuery } from './planStepTime';
 
-	let { step }: { step: LiveStep } = $props();
+	let { step, node }: { step: LiveStep; node: OperatorNode } = $props();
 
 	const threadId = $derived(step.threadId);
 	$effect(() => watchThread(threadId));
 
 	const swap = createPhraseSwap(() => step.phrase, () => step.between);
 
-	const label = $derived(liveStepLabel({ ...step, phrase: swap.shown }, $liveStepClock));
+	// The step's time is the server's open time, not this Turn's: it carries on across Turns, workers and waits.
+	// It is read again when the plan's step changes or a new Turn starts, and counts on locally between.
+	const query = $derived(stepOpenQuery(node, step.threadId));
+	const asked = $derived(JSON.stringify([query, node.revision, step.startedAt]));
+	$effect(() => {
+		void asked;
+		const wanted = untrack(() => query);
+		if (wanted) requestOpenTime([wanted]);
+	});
+	const label = $derived(liveStepLabel(
+		{ ...step, phrase: swap.shown },
+		query ? openMilliseconds($openTimes, query.key, $liveStepClock) : null,
+	));
 </script>
 
 <span class="live-step" class:dimmed={swap.dimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={label}>{label}</span>

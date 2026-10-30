@@ -1,13 +1,21 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { get } from 'svelte/store';
 	import LoginScreen from './LoginScreen.svelte';
 	import SetupScreen from './SetupScreen.svelte';
+	import { connectOpen } from '$lib/stores/remoteConnect';
 	import HomeShell from './HomeShell.svelte';
 	import HomeOverlays from './HomeOverlays.svelte';
 	import type ChatPanel from './ChatPanel.svelte';
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
+	import { token } from '$lib/stores/auth';
+	import { settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { fetchSetupProgress } from '$lib/setupProgress';
+	import { finishSetupWindow } from '$lib/setupWindow';
+	import { setupMode } from '$lib/stores/setupMode';
 
 	let {
 		isAuthenticated,
@@ -25,6 +33,7 @@
 		onNewChat,
 		onActivity,
 		onConductor,
+		onSetupFinished,
 		onDocuments,
 		onAttachProject,
 		onSelectThread,
@@ -61,6 +70,7 @@
 		onNewChat: () => void;
 		onActivity: () => void;
 		onConductor: () => boolean | void | Promise<boolean | void>;
+		onSetupFinished: () => void;
 		onDocuments: (lens?: 'all' | 'skills', documentId?: string) => void;
 		onAttachProject: (id: string, projectId: string | null, projectName?: string | null) => void | Promise<void>;
 		onSelectThread: (id: string) => void | Promise<void>;
@@ -84,23 +94,70 @@
 	} = $props();
 
 	const easeOutQuint = cubicOut;
-	let setupMode = $state<'login' | 'flow'>('login');
+	// The backend, not this tab, knows whether a signed-in person finished setup. Read once per session, never during setup itself.
+	let setupResume = $state(false);
+	let setupChecked = false;
+	onDestroy(() => setupMode.set('login'));
+	$effect(() => {
+		if (!isAuthenticated) { setupChecked = false; return; }
+		if ($setupMode === 'flow') { setupChecked = true; return; }
+		if (setupChecked) return;
+		setupChecked = true;
+		void fetchSetupProgress(get(token)).then((progress) => {
+			// An unreadable record leaves the app as it is: a failed read must never lock out someone who finished setup.
+			if (progress && !progress.setup_completed) { setupResume = true; $setupMode = 'flow'; }
+		});
+	});
+
+	function reduceMotion() {
+		return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	function duration(node: Element, name: '--dur-tight' | '--dur-standard') {
+		return Number.parseFloat(getComputedStyle(node).getPropertyValue(name)) || 0;
+	}
+
+	function authGateExit(node: Element) {
+		return fade(node, { duration: duration(node, reduceMotion() ? '--dur-tight' : '--dur-standard'), easing: easeOutQuint });
+	}
+
+	function appGateEnter(node: Element) {
+		const reduced = reduceMotion();
+		return fade(node, {
+			duration: duration(node, reduced ? '--dur-tight' : '--dur-standard'),
+			delay: reduced ? 0 : duration(node, '--dur-tight'),
+			easing: easeOutQuint,
+		});
+	}
 </script>
 
-{#if setupMode === 'flow'}
-	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
+{#if $setupMode === 'flow'}
+	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
-			onExistingAccount={() => setupMode = 'login'}
-			onAccountCreated={() => setupMode = 'flow'}
-			onFinished={() => setupMode = 'login'}
+			resume={setupResume}
+			onExistingAccount={() => $setupMode = 'login'}
+			onAccountCreated={() => $setupMode = 'flow'}
+			onFinished={() => {
+				$setupMode = 'login';
+				setupResume = false;
+				void finishSetupWindow();
+				// The route owns first-run selection. It waits for its actual ChatPanel
+				// binding before retrying a lookup that completed during setup.
+				onSetupFinished();
+			}}
 		/>
 	</div>
+{:else if $connectOpen}
+	<div class="auth-gate" out:authGateExit>
+		<SetupScreen startConnect onLeaveConnect={() => connectOpen.set(false)} onExistingAccount={() => connectOpen.set(false)} onAccountCreated={() => {}} onFinished={() => connectOpen.set(false)} />
+	</div>
 {:else if !isAuthenticated}
-	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
-		<LoginScreen onNoAccount={() => setupMode = 'flow'} />
+	<div class="auth-gate" out:authGateExit>
+		<LoginScreen onNoAccount={() => $setupMode = 'flow'} />
 	</div>
 {:else}
-	<HomeShell
+	<div class="app-gate" in:appGateEnter>
+		<HomeShell
 		{activeView}
 		bind:sidebarOpen
 		bind:chatPanelRef
@@ -129,6 +186,7 @@
 		onCloseMeasurement={onCloseMeasurement}
 		{onGoWorkspace}
 	/>
+	</div>
 {/if}
 
 <HomeOverlays
@@ -142,4 +200,8 @@
 	onProjectCreated={onProjectCreated}
 	onConfirmDeleteThread={onConfirmDeleteThread}
 	onCancelDeleteThread={onCancelDeleteThread}
+	onUpdateFinished={() => {
+		if (activeView !== 'settings') return;
+		return get(settingsNavigation).homeThread ? onCloseSettings() : onNewChat();
+	}}
 />

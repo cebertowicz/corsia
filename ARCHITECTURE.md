@@ -72,6 +72,30 @@ and context rows advertise those workspace-readable paths while delivery still
 reads package bytes. The projection is generated, read-only in effect, and
 restores drift rather than accepting edits as System content.
 
+### Confined workers
+
+`infra/thread_confinement.py` persists an untrusted worker's approved read directories
+on its thread. `tools/confined_reads.py` projects only `read_file`, `grep`, `glob`
+and `list_dir`; the registry and filesystem gate recheck every call and resolved
+path, including symlink targets. The parent's tool surface is unchanged.
+
+Codex uses this same model-reachable tool boundary as native workers. Its
+app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
+restrict the process's network access. `subagents/codex_confinement.py` reads
+confinement through the canonical thread owner and admits only the captured
+Codex version before spawning and again at app-server start. It disables native
+and hosted tool producers, uses a neutral empty working directory, and refuses
+forks at launch. Project instructions
+are disabled. The isolated Codex home projects subscription auth for the
+app-server, without importing the person's config, profiles or MCP servers;
+confined reads cannot reach that home. No model-invoked native tool can reach a
+TCC-granted capability.
+
+The pinned app-server has no full model-tool readback. The credential-free
+integration capture checks the entire outgoing model request's tools array,
+including hosted entries, on cold start and process resume. A new Codex version
+refuses confined launches until CORSIA updates and repeats that proof.
+
 ### Foreground shell invocation identity
 
 `infra/state/context.py` owns a task-local invocation scope. Bridge, native
@@ -324,16 +348,34 @@ without a wake; a blocker raised again after it cleared wakes the parent anew.
 node's `own` figure holds tokens, model cost, usage-recording failures,
 `execution` (Turn seconds from `active_turns`) and `waiting` (seconds). The
 `rolled` figure adds every descendant and the rolled total of each attached
-child plan, folding each plan exactly once. Waiting is wall clock, never spend:
+child plan, folding each plan exactly once. Model cost is Measurement's
+API-equivalent price for every usage row, never a stored `cost_usd` and never
+what a subscription charged: `plans/usage_cost.py` prices rows through
+`core/measurement_pricing.py`, the admission SQL, grouped read and
+`classify_usage_rows` that Measurement's Cost and Models read, with
+`core/cost_identity.py` resolving each row's model. A local model's rows have no
+API price and add nothing; a row Measurement cannot price counts unknown. An
+operator read prices its nodes and their commitments in one grouped read and
+hands the commitments' dollars to `plans/commitment_cost.py`.
+Waiting is wall clock, never spend:
 it rolls up beside execution and is never added to tokens or cost.
 `plans/node_waiting.py` derives it on read with no stored column. A node waits
-while it is open and has an armed watch, an unmet dependency (edge events
-intersected with the prerequisite's not-accepted state stretches), or is in
-`review_requested` with a linked GitHub pull-request artifact. Overlaps count
-once. User-owned holds, whole-plan pauses (from `plan_events`) and time after
-settling are cut out. Every read is a
-chunked `IN (...)` batch, a fixed count per call. The status read shows a
+while it is open and has an armed watch (other than a task its agent set
+aside, whose `watch_armed` event carries `scheduled.reason`), an unmet
+dependency (edge events intersected with the prerequisite's not-accepted
+state stretches), or is in `review_requested` with a linked GitHub
+pull-request artifact. Overlaps count once. The user's time is cut out,
+whoever armed the wait: user-owned holds, whole-plan pauses (from
+`plan_events`), and a decision on the node while its review step is in
+`review_requested`, up to the step's archiving (the step is found by source
+node through `idx_artifact_identities_decision_source`; its state transitions
+are the history, so a withdrawn or answered decision still counts for the time
+it was open); so is time after settling. Every read is a chunked `IN (...)`
+batch, a fixed count per call. The status read shows a
 node's own `waited_seconds` in the ages of running, review and waiting rows.
+`plans.public.open_wait_intervals` returns the same intervals per thread,
+unioned over that thread's own plan nodes and clipped to a window, for a run's
+open time (the caller passes descendant threads; there is no delegation walk).
 
 ### User presence
 
@@ -342,14 +384,34 @@ Whether the user is actually looking at a thread is state with one owner:
 document-open capabilities, and live-read verdict. Its durable entry, exit and
 finalization writes (`thread_presence` for the current visit, `presence_visits`
 for settled history) live in `backend/infra/presence_records.py`, called only by
-the owner; `presence.py` itself keeps claim orchestration and the keep-alive,
-mark-seen, delete and startup-reconcile writes. `backend/infra/presence_view.py` derives the `User
+the owner (keep-alive, mark-seen and the restart exit too); `presence.py` itself
+keeps claim orchestration, the sweep and the thread-delete write. `backend/infra/presence_view.py` derives the `User
 presence` line, thread read and `user_presence` tool payload from that owner.
 The browser client
 (`frontend/src/lib/ws/presence.ts`) only reports `presence` frames over the
 existing socket, and `backend/ws/presence_control.py` hands them straight to the
 owner: a presence frame never starts, steers or queues a Turn. Presence is
 never emitted as a product event, and no other module may compute or write it.
+
+Window focus is a second, separate fact the same owner records for Measurement
+attention (`backend/infra/presence_focus.py` holds its in-memory state). Each visit carries the spans in which a CORSIA window had focus
+(`focus_spans`, plus the open span's `focus_since`); every blur ends focus, and
+a focus change never touches presence, ownership or the visit's exit. A visit
+whose `focus_spans` is NULL predates focus tracking and counts whole. Measurement
+expands the spans only in the attention allocator's `presence_focus_spans`; the
+visit rows themselves stay one per visit, so `n` still counts visits.
+
+Reading every span costs time quadratic in how often a user switches windows, so
+Measurement reads the finished past from a cache of the same union: the focus
+rollup (`backend/api/presence_rollup.py`, tables in
+`backend/infra/presence_rollup_schema.py`) keeps, per 15-minute UTC bucket, the
+seconds during which exactly one set of threads was focused. `api.usage_rollup`
+runs its refresh beside the usage refresh (compute on the bulk lane, one short
+`write_transaction` per step). It covers only what it can prove: `built_through`
+never passes two hours ago or the start of a visit still open, and a trigger on
+`presence_visits` moves it back when a row is written below it, so a read is
+exact whatever the rollup's state and falls back to the spans when it is not
+usable. `backend/api/measurement_presence_rollup.py` is the one reader.
 
 ### Agent endpoints
 
@@ -518,8 +580,8 @@ cannot be attributed is refused rather than assumed. A backend verifies the
 installed definition only when launchd started it, which
 `CORSIA_SERVICE_GENERATION` in its environment is what says.
 
-Agents work in linked feature worktrees created from the standalone worker
-clone; they do not develop in, repoint, or switch the serving checkout. Tests
+Which checkout an agent may edit is set in `AGENTS.md`; a maintainer's linked
+worktrees are created from the standalone worker clone. Tests
 and evals run against disposable state seeded into an explicit
 `CORSIA_STATE_DIR` (`scripts/seed-worktree-db`), never against the operational
 database. The backend log lives in that instance's state root, so two checkouts

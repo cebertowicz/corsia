@@ -8,6 +8,7 @@ from unittest.mock import ANY, patch
 
 import pytest
 from events.connectors import github_reviewer_notifications
+from reviewer.reviewer_types import reviewer_verdict
 from reviewer_gate_fixtures import (  # noqa: F401
     _DEFAULT_PR_INFO,
     _call_on_backend_loop,
@@ -265,7 +266,7 @@ class TestFinalGate:
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=draft_pr_info) as mock_fetch, \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch("infra.product_events.emit_product_event",
                    side_effect=lambda s, e, **kw: emitted.append((s, e))), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
@@ -442,7 +443,8 @@ class TestFinalGate:
         """Unreadable check state returns None — distinct from False — so the
         caller can emit a loud retryable event instead of silently holding."""
         gate_mod = _reload_gate
-        with patch("reviewer.gh_helpers.get_check_runs_for_sha", return_value=None):
+        with patch("reviewer.gh_helpers.get_check_runs_for_sha", return_value=None), \
+             patch("infra.transient_read.time.sleep"):
             assert gate_mod.github_reviewer_gate.checks_green("owner/repo", 42, "abc123def") is None
 
 
@@ -516,7 +518,7 @@ class TestMergeableGate:
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=pr_info) as mock_fetch, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(gate_mod, "emit_product_event"):
 
@@ -524,7 +526,7 @@ class TestMergeableGate:
 
         mock_run.assert_not_called()
         # UNKNOWN is retried up to the full budget before giving up (BUG #574).
-        assert mock_fetch.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS
+        assert mock_fetch.call_count == gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS
 
     def test_gate_fires_after_transient_unknown_mergeability(self, _reload_gate):
         """The #574 fix: UNKNOWN that settles to MERGEABLE fires the reviewer."""
@@ -536,7 +538,7 @@ class TestMergeableGate:
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info",
                           side_effect=[unknown, unknown, ready]) as mock_fetch, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer",
                           side_effect=lambda *a, **kw: run_reviewer.append(1)), \
              patch.object(gate_mod, "emit_product_event"):
@@ -550,6 +552,7 @@ class TestMergeableGate:
         gate_mod = _reload_gate
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(gate_mod, "emit_product_event"):
@@ -571,6 +574,7 @@ class TestMergeableGate:
 
         with patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(
                  github_reviewer_notifications, "notify_pr_info_unreadable",
@@ -598,8 +602,8 @@ class TestMergeableGate:
             "number": 42,
             "mergeable": True,
             "draft": True,
-            "base": {"ref": "dev", "sha": "base123def"},
-            "head": {"sha": "abc123def"},
+            "base": {"ref": "dev", "sha": "base123def", "repo": {"full_name": "owner/repo"}},
+            "head": {"sha": "abc123def", "repo": {"full_name": "owner/repo"}},
             "labels": [{"name": "ready"}],
             "title": "Contain reviewer scope",
             "body": "## Scope\nOnly review the changed release slice.",
@@ -616,6 +620,8 @@ class TestMergeableGate:
             "baseRefName": "dev",
             "baseRefOid": "base123def",
             "headRefOid": "abc123def",
+            "headRepoFullName": "owner/repo",
+            "baseRepoFullName": "owner/repo",
             "labels": [{"name": "ready"}],
             "title": "Contain reviewer scope",
             "body": "## Scope\nOnly review the changed release slice.",
@@ -665,15 +671,18 @@ class TestIngressGateTriggerLeg:
                 asyncio.get_running_loop()
             ) or True
         )
-        verdict = {
-            "verdict": "clean",
-            "summary": "0 block, 0 flag, 0 nit -- reviewed by codex",
-            "block_count": 0,
-            "flag_count": 0,
-            "nit_count": 0,
-            "finding_count": 0,
-            "model_label": "codex",
-        }
+        verdict = reviewer_verdict(
+            verdict="clean",
+            required_action="none",
+            summary="0 block, 0 flag, 0 nit -- reviewed by codex",
+            block_count=0,
+            flag_count=0,
+            nit_count=0,
+            finding_count=0,
+            model_label="codex",
+            reviewer_version="test-version",
+            reviewer_standards=["product"],
+        )
 
         with patch("events.ingress.route_leg", new=AsyncMock(return_value=None)), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \

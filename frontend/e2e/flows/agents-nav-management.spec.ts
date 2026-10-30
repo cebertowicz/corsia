@@ -1,5 +1,48 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
-import { loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loginByUrl, saveEvidenceScreenshot, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+
+// The presence client records a visit only after a 3s dwell on one thread (ws/presence.ts
+// DWELL_MS), and Mark unread needs that record (backend/api/thread_seen.py). Eight sequential
+// dwells would dominate the L2 budget, so record the visits the way a viewer's claim does:
+// infra.presence_records.enter, the writer behind presence.claim.
+function openVisits(threadIds: string[]): void {
+	const workspace = process.env.CORSIA_E2E_WORKSPACE;
+	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !workspace || !stateRoot) {
+		throw new Error('Visit fixture requires isolated e2e-local mock state');
+	}
+	const script = `
+import sys
+from infra.database import get_db
+from infra.presence_records import enter
+from infra.time import utc_now
+
+db = get_db()
+try:
+    for thread_id in sys.argv[1:]:
+        owner = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()['user_id']
+        enter(db, owner, thread_id, utc_now())
+finally:
+    db.close()
+`;
+	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), ['-c', script, ...threadIds], {
+		cwd: repoRoot,
+		env: {
+			...process.env,
+			PYTHONPATH: path.join(repoRoot, 'backend'),
+			CORSIA_WORKSPACE: workspace,
+			CORSIA_STATE_DIR: stateRoot,
+			CORSIA_TEST_MODE: '1',
+			CORSIA_ANALYTICS_DISABLE: '1',
+		},
+	});
+}
 
 const tok = encodeURIComponent(TEST_TOKEN);
 
@@ -33,15 +76,21 @@ async function createAgent(request: APIRequestContext, title: string, projectId:
 }
 
 async function openProjectScope(page: import('@playwright/test').Page, projectName: string) {
-	if (!(await page.getByRole('button', { name: /Jump to/ }).isVisible())) {
+	// loginByUrl leaves a phone's sidebar closed after it opens a new chat. A closed sidebar's
+	// Jump button still counts as visible, so open it by width, not by visibility.
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
 		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	}
 	await page.getByRole('button', { name: /Jump to/ }).click();
-	const projectRow = page.locator('.palette .res').filter({ hasText: projectName });
+	// Conversation rows also carry their project's name; only a project row has the accent dot (CommandPalette.svelte).
+	const projectRow = page.locator('.palette .res', { has: page.locator('.proj-dot') }).filter({ hasText: projectName });
 	await expect(projectRow).toBeVisible({ timeout: 10_000 });
 	await projectRow.click();
 	await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
-}
+	// Choosing a project closes a phone's sidebar; reopen it so the Agent drawer can be operated.
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	}}
 
 test.describe('@flow:agents-nav-management @surface:navigation compact Agent drawer', () => {
 	test('keeps Agents actionable and conversations reachable on desktop and mobile', async ({ page, request }, testInfo) => {
@@ -58,16 +107,24 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 			agentIds.push(await createAgent(request, title, project.id));
 		}
 		const conversationTitle = `Reachable conversation ${stamp}`;
-		await createSession(request, conversationTitle, project.id);
+		const conversationId = await createSession(request, conversationTitle, project.id);
 
-		// Eight unread Agents force five into the visible budget and leave exactly
-		// three unread in the ten-row overflow: "Show 10 more · 3 unread".
-		await page.addInitScript((ids) => {
-			localStorage.setItem('corsia_unread', JSON.stringify(ids));
-		}, agentIds.slice(7));
-
+		// Unread is the server's seen state (backend/api/thread_seen.py: a thread must have
+		// been opened before Mark unread has a record to write), so open eight Agents and then
+		// mark them unread. Eight unread Agents force five into the visible budget and leave
+		// exactly three unread in the ten-row overflow: "Show 10 more · 3 unread".
+		const unreadIds = agentIds.slice(7);
+		// The idle Agent and the conversation are marked unread later through their menus, which
+		// offer the mark only for a thread the person has opened (canMarkSeen).
+		openVisits([...unreadIds, agentIds[0], conversationId]);
 		await loginByUrl(page);
 		await openProjectScope(page, projectName);
+		const statuses = await page.evaluate(async ({ ids, token }) => Promise.all(ids.map((id) => fetch(`/api/threads/${id}/seen`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({ unread: true }),
+		}).then((response) => response.status))), { ids: unreadIds, token: TEST_SESSION_TOKEN });
+		expect(statuses).toEqual(unreadIds.map(() => 200));
 
 		const agents = page.locator('.scoped-item.agent');
 		await expect(agents).toHaveCount(5);
@@ -80,7 +137,8 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 		const colors = await drawer.locator('.drawer-attention').evaluate((element) => {
 			const root = getComputedStyle(document.documentElement);
 			const probe = document.createElement('span');
-			probe.style.color = root.getPropertyValue('--accent').trim();
+			// Accent text uses the --accent-text role, stepped to 4.5:1 (DESIGN-SYSTEM.md §2.1, RailScopedSection.svelte).
+			probe.style.color = root.getPropertyValue('--accent-text').trim();
 			document.body.appendChild(probe);
 			const accentColor = getComputedStyle(probe).color;
 			probe.remove();
@@ -88,6 +146,10 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 		});
 		expect(colors.attention).toBe(colors.accent);
 
+		// The rows ease their colour when they settle; read it once no transition is still running.
+		await expect.poll(() => page.locator('.scoped-item.conductor, .scoped-item.agent').evaluateAll(
+			(rows) => rows.every((row) => row.getAnimations().length === 0),
+		)).toBe(true);
 		const conductorStyle = await page.locator('.scoped-item.conductor').evaluate((element) => ({
 			color: getComputedStyle(element).color,
 			weight: getComputedStyle(element).fontWeight,
@@ -130,7 +192,7 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 		const idleAgent = agents.filter({ hasText: agentTitles[0] });
 		await idleAgent.click({ button: 'right' });
 		await menu.getByRole('button', { name: 'Mark unread' }).click();
-		await expect(idleAgent.locator('.unread-dot')).toBeVisible();
+		await expect(idleAgent.locator('.update-dot')).toBeVisible();
 
 		const scrollSurface = page.locator('.sidebar-scroll');
 		await scrollSurface.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -141,7 +203,7 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 		await conversation.click({ button: 'right' });
 		await expect(menu.getByRole('button', { name: 'Mark unread' })).toBeVisible();
 		await menu.getByRole('button', { name: 'Mark unread' }).click();
-		await expect(conversation.locator('.unread-dot')).toBeVisible();
+		await expect(conversation.locator('.update-dot')).toBeVisible();
 
 		await saveEvidenceScreenshot(page, testInfo, 'agents-nav-expanded-scroll');
 	});

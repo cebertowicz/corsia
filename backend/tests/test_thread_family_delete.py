@@ -162,6 +162,34 @@ async def test_deleting_a_subagent_with_a_live_spawner_deletes_its_children(stop
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_thread_removes_rules_it_wrote_or_received(stopped):
+    from infra.database import get_db
+
+    _seed(("root", None, 0), ("writer", "root", 0), ("recipient", "root", 0))
+    db = get_db()
+    try:
+        db.executemany(
+            'INSERT INTO event_rules (id,created_at,updated_at,scope,connector,event_type,"match",'
+            'action,"to",mode,note,origin,created_by,authority_ref) '
+            "VALUES (?,'t','t','project:p','github','pr.merged','[]','deliver',?,'wake',NULL,"
+            "'agent:test',?,'self')",
+            [("written", "thread:writer", "writer"),
+             ("received", "thread:writer", "root")],
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    await _delete("writer")
+    assert _lineage() == {"root": None, "recipient": "root"}
+    db = get_db()
+    try:
+        assert db.execute("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'").fetchall() == []
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_a_promoted_agent_under_a_deleted_subagent_keeps_its_subtree(stopped):
     _seed(
         ("root", None, 0), ("mid", "root", 0),

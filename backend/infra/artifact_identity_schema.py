@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 
+#: A decision's source task finds its decisions by this key, so its waiting time
+#: costs its own decisions, never every decision ever raised (``plans.node_waiting``).
+#: Partial on well-formed decision rows: an expression index evaluates every row it covers.
+DECISION_SOURCE_INDEX_SQL = """\
+CREATE INDEX IF NOT EXISTS idx_artifact_identities_decision_source
+    ON artifact_identities(json_extract(metadata, '$.plan_decision.source_node_id'))
+    WHERE integration='local' AND type='plan-decision' AND json_valid(metadata);
+"""
+
 ARTIFACT_IDENTITY_SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS artifact_identities (
         id TEXT PRIMARY KEY,
@@ -22,4 +31,4 @@ CREATE TABLE IF NOT EXISTS artifact_identities (
     );
 CREATE INDEX IF NOT EXISTS idx_artifact_identities_upload_path
     ON artifact_identities(path) WHERE integration='upload';
-"""
+""" + DECISION_SOURCE_INDEX_SQL

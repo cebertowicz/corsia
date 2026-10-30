@@ -17,7 +17,7 @@ def test_missing_invocation_clears_an_inherited_foreground_identity(missing):
 
 def test_checkpoint_scope_never_inherits_or_exports_a_foreground_call():
     with tool_invocation_context("foreground-call"):
-        with tool_invocation_context("private-call", checkpoint_id="checkpoint-1"):
+        with tool_invocation_context("private-call", fork_id="checkpoint-1"):
             assert _current_tool_invocation_id.get() is None
         assert _current_tool_invocation_id.get() == "foreground-call"
     assert _current_tool_invocation_id.get() is None

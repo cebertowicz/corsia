@@ -15,9 +15,9 @@ def _now() -> str:
 
 
 def undelivered_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[dict]:
-    """Return the visible retry state for one author's document."""
+    """Return retry state for one author's document, preserving each batch's owning lane."""
     rows = db.execute(
-        """SELECT id,item_count,undelivered_reason,attempts FROM doc_feedback_batches
+        """SELECT id,item_count,undelivered_reason,attempts,delivery_policy FROM doc_feedback_batches
            WHERE state='undelivered' AND author_kind=? AND author_id=? AND artifact_id=?
            ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
@@ -53,30 +53,122 @@ def has_pending_for_document(
     ).fetchone() is not None
 
 
+# The person's unsent items: each comment once, plus one for a batch's coalesced document edit. Every count of
+# what is waiting reads this one projection, so an edit-only batch has a Send too.
+_USER_ITEMS = """
+    SELECT batch.id AS batch_id, batch.artifact_id AS artifact_id, batch.recipient_id AS recipient_id,
+           batch.delivery_policy AS policy, batch.opened_at AS opened_at, item.comment_id AS item_key
+      FROM doc_feedback_batches batch JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
+     WHERE batch.state IN ({states}) AND batch.author_kind='user' AND batch.author_id=?
+    UNION ALL
+    SELECT batch.id, batch.artifact_id, batch.recipient_id, batch.delivery_policy, batch.opened_at,
+           'edit:' || batch.id
+      FROM doc_feedback_batches batch JOIN doc_feedback_edit_items edit ON edit.batch_id=batch.id
+     WHERE batch.state IN ({states}) AND batch.author_kind='user' AND batch.author_id=?"""
+_OPEN_USER_ITEMS = _USER_ITEMS.format(states="'open'")
+_PENDING_USER_ITEMS = _USER_ITEMS.format(states="'open','undelivered'")
+
+
+def open_counts_for_document(db, artifact_id: str) -> dict[str, int]:
+    """The user's unsent items on one document: the total and each held lane."""
+    rows = db.execute(
+        f"SELECT policy, COUNT(DISTINCT item_key) AS count FROM ({_OPEN_USER_ITEMS}) WHERE artifact_id=? GROUP BY policy",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, artifact_id),
+    ).fetchall()
+    by_policy = {row["policy"]: int(row["count"]) for row in rows}
+    return {
+        "open_count": sum(by_policy.values()),
+        "document_held_count": by_policy.get("document-held", 0),
+        "image_held_count": by_policy.get("image-held", 0),
+    }
+
+
+def held_counts_for_thread(db, thread_id: str, policy: str) -> list[dict[str, Any]]:
+    """One row per document the thread holds in one lane: the artifact and its unsent items."""
+    rows = db.execute(
+        f"""SELECT artifact_id, COUNT(DISTINCT item_key) AS count FROM ({_OPEN_USER_ITEMS})
+            WHERE recipient_id=? AND policy=? GROUP BY artifact_id ORDER BY MIN(opened_at), artifact_id""",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, thread_id, policy),
+    ).fetchall()
+    return [{"artifact_id": row["artifact_id"], "open_count": int(row["count"])} for row in rows]
+
+
+# A retry from one lane's control also retries the immediate batches that failed beside it, since a
+# document header is where those show; an image lane's retry stays image-only.
+RETRY_LANES = {
+    "immediate": ("immediate",),
+    "document-held": ("document-held", "immediate"),
+    "image-held": ("image-held",),
+}
+
+
+def user_batch_ids(
+    db, state: str, *, artifact_id: str | None = None, recipient_id: str | None = None,
+    policies: tuple[str, ...] | None = None,
+) -> list[str]:
+    """The user's batches in one state, optionally narrowed to a document, a recipient thread and lanes."""
+    where, params = ["state=?", "author_kind='user'", "author_id=?"], [state, USER_AUTHOR_ID]
+    for column, value in (("artifact_id", artifact_id), ("recipient_id", recipient_id)):
+        if value is not None:
+            where.append(f"{column}=?")
+            params.append(value)
+    if policies is not None:
+        where.append(f"delivery_policy IN ({','.join('?' * len(policies))})")
+        params.extend(policies)
+    rows = db.execute(
+        f"SELECT id FROM doc_feedback_batches WHERE {' AND '.join(where)} ORDER BY opened_at,id", params,
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def pending_item_keys(db, batch_ids: list[str]) -> dict[str, set[str]]:
+    """The items each named user batch holds now, read before a close or retry consumes them."""
+    keys: dict[str, set[str]] = {batch_id: set() for batch_id in batch_ids}
+    marks = ",".join("?" * len(batch_ids))
+    rows = db.execute(
+        f"SELECT batch_id, item_key FROM ({_PENDING_USER_ITEMS}) WHERE batch_id IN ({marks})",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, *batch_ids),
+    ).fetchall() if batch_ids else []
+    for row in rows:
+        keys[row["batch_id"]].add(row["item_key"])
+    return keys
+
+
+def outcome_counts(db, keys: dict[str, set[str]]) -> dict[str, int]:
+    """What the batches read by `pending_item_keys` ended in: items delivered, and items left undelivered."""
+    rows = db.execute(
+        f"SELECT id,state FROM doc_feedback_batches WHERE id IN ({','.join('?' * len(keys))})", tuple(keys),
+    ).fetchall() if keys else []
+    ended: dict[str, set[str]] = {"delivered": set(), "undelivered": set()}
+    for row in rows:
+        if row["state"] in ended:
+            ended[row["state"]] |= keys[row["id"]]
+    return {"sent_count": len(ended["delivered"]), "undelivered_count": len(ended["undelivered"])}
+
+
+def undelivered_documents(db, keys: dict[str, set[str]]) -> list[dict[str, Any]]:
+    """The documents whose batches read by `pending_item_keys` ended undelivered, each with its title."""
+    rows = db.execute(
+        f"SELECT DISTINCT artifact_id FROM doc_feedback_batches WHERE state='undelivered' "
+        f"AND id IN ({','.join('?' * len(keys))}) ORDER BY artifact_id", tuple(keys),
+    ).fetchall() if keys else []
+    documents = []
+    for row in rows:
+        artifact = registry_models.get_artifact(row["artifact_id"], db=db)
+        documents.append({"artifact_id": row["artifact_id"], "title": artifact["title"] if artifact else None})
+    return documents
+
+
 def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     """Project the user's durable feedback state for one document canvas."""
-    count = db.execute(
-        """SELECT COUNT(DISTINCT item.comment_id) FROM doc_feedback_batches batch
-           JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
-           WHERE batch.state='open' AND batch.author_kind='user'
-             AND batch.author_id=? AND batch.artifact_id=?""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()[0]
-    grace_deadline = db.execute(
-        """SELECT MIN(closes_at) FROM doc_feedback_batches
-           WHERE state='open' AND author_kind='user' AND author_id=?
-             AND artifact_id=? AND closed_reason='leave'""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()[0]
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = db.execute(
         "SELECT title FROM threads WHERE id=?",
         (artifact["parent_thread_id"],),
     ).fetchone() if artifact else None
     return {
-        "open_count": count,
+        **open_counts_for_document(db, artifact_id),
         "owner_label": owner["title"] if owner else None,
-        "grace_closes_at": grace_deadline,
         "undelivered_batches": undelivered_for_document(
             db,
             author_kind="user",
@@ -86,20 +178,28 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     }
 
 
-def _waiting_threads(db, user_id: str, artifact_id: str | None = None) -> dict[str, str]:
-    """Map open user-touched roots with a non-user reply newer than their view to their document."""
-    rows = db.execute(
-        """SELECT DISTINCT root.id, root.artifact_id
-           FROM doc_comments reply
+def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
+    """The one definition of a new reply: the FROM/JOIN/WHERE every read of it shares.
+
+    A reply is new for a user when someone else wrote it, in an open root the
+    user touched (wrote it or replied in it), and it is newer than the user's
+    seen stamp on that root: by time, then by reply id.
+    """
+    # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
+    scoped = artifact_id is not None
+    sql = f"""FROM doc_comments reply
+           {"JOIN threads thread ON thread.id=reply.author_thread_id" if include_author_thread else ""}
            JOIN doc_comments root ON root.id=reply.parent_id
+           LEFT JOIN (
+               SELECT DISTINCT parent_id FROM doc_comments
+               WHERE author_kind='user' AND parent_id IS NOT NULL
+                 {"AND artifact_id=?" if scoped else ""}
+           ) touched ON touched.parent_id=root.id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE reply.author_kind<>'user' AND root.resolved=0
-             AND (? IS NULL OR root.artifact_id=?)
-             AND (root.author_kind='user' OR EXISTS (
-                 SELECT 1 FROM doc_comments touched
-                 WHERE touched.parent_id=root.id AND touched.author_kind='user'
-             ))
+             {"AND reply.artifact_id=? AND root.artifact_id=?" if scoped else ""}
+             AND (root.author_kind='user' OR touched.parent_id IS NOT NULL)
              AND (
                  reply.created_at>COALESCE(thread_view.seen_at, '')
                  OR (
@@ -107,28 +207,43 @@ def _waiting_threads(db, user_id: str, artifact_id: str | None = None) -> dict[s
                      AND reply.created_at=thread_view.seen_at
                      AND reply.id>thread_view.seen_reply_id
                  )
-             )""",
-        (user_id, artifact_id, artifact_id),
+             )"""
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
+
+
+def _new_replies(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
+    """One document's new replies as (root id, reply id) in thread order, one row per reply."""
+    sql, params = new_reply_rows(user_id, artifact_id)
+    rows = db.execute(
+        f"SELECT root.id AS root_id, reply.id AS reply_id {sql} ORDER BY reply.created_at, reply.id",
+        params,
     ).fetchall()
-    return {str(row["id"]): str(row["artifact_id"]) for row in rows}
+    return [(str(row["root_id"]), str(row["reply_id"])) for row in rows]
 
 
 def reply_waiting_ids(db, user_id: str) -> set[str]:
-    """Return documents containing a waiting reply in an open user-touched thread."""
-    return set(_waiting_threads(db, user_id).values())
+    """Return documents containing a thread with a new reply: one row per document, not per reply."""
+    sql, params = new_reply_rows(user_id, None)
+    rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
+    return {str(row["artifact_id"]) for row in rows}
 
 
-def annotate_reply_waiting_threads(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
-    """Attach the per-root passive marker to the comment-list projection."""
-    waiting = _waiting_threads(db, user_id, artifact_id)
+def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
+    """Attach each thread's new reply ids to the comment-list projection."""
+    new_by_root: dict[str, list[str]] = {}
+    for root_id, reply_id in _new_replies(db, user_id, artifact_id):
+        new_by_root.setdefault(root_id, []).append(reply_id)
     for thread in threads:
-        thread["reply_waiting"] = thread["id"] in waiting
+        thread["new_reply_ids"] = new_by_root.get(thread["id"], [])
 
 
 def mark_thread_viewed(
     db, user_id: str, artifact_id: str, root_id: str, seen_reply_id: str,
-) -> bool:
-    """Persist the newest rendered reply for one root, never moving its stamp back."""
+) -> list[str]:
+    """Persist the newest rendered reply for one root, never moving its stamp back.
+
+    Returns the root's new reply ids that remain after the stamp.
+    """
     root = db.execute(
         "SELECT id FROM doc_comments WHERE id=? AND artifact_id=? AND parent_id IS NULL",
         (root_id, artifact_id),
@@ -151,7 +266,7 @@ def mark_thread_viewed(
                   AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
         (user_id, root_id, reply["created_at"], reply["id"]),
     )
-    return root_id not in _waiting_threads(db, user_id, artifact_id)
+    return [reply_id for waiting_root, reply_id in _new_replies(db, user_id, artifact_id) if waiting_root == root_id]
 
 
 def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
@@ -167,3 +282,14 @@ def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
 
     visit(pane.get("nodes") or [])
     return pane
+
+
+def seconds_until_next_due(now: datetime, *, db) -> float | None:
+    """Seconds until the earliest open batch still ahead of its deadline, or None when there is none.
+
+    An already-overdue batch is left to the ordinary sweep, so one that keeps failing cannot hide the others.
+    """
+    row = db.execute(
+        "SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open' AND closes_at>?", (now.isoformat(),),
+    ).fetchone()
+    return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()

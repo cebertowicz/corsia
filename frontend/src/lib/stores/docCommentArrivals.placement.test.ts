@@ -47,7 +47,6 @@ function live() {
 	};
 }
 
-const settled = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 const rows = () => get(docComments).artifact ?? [];
 const row = (id: string) => rows().find((comment) => comment.id === id);
 
@@ -58,8 +57,8 @@ async function opened() {
 	mocks.fetchComments.mockResolvedValue({ comments: ROWS, feedback: {} });
 	await loadComments('artifact');
 	doc.answer(doc.asks().at(-1)!, ['c0', 'c1']);
-	await settled();
-	expect(rows().map((comment) => comment.placement)).toEqual(['placed', 'placed']);
+	// Placement awaits a SHA-256 digest of the text, which no fixed number of timer ticks bounds.
+	await vi.waitFor(() => expect(rows().map((comment) => comment.placement)).toEqual(['placed', 'placed']));
 	return doc;
 }
 
@@ -90,8 +89,7 @@ describe('a held comment is placed by the placement owner when it becomes visibl
 		expect(row('c1')?.placement).toBe('placing');
 		expect(doc.asks()).toHaveLength(asks + 1);
 		doc.answer(doc.asks().at(-1)!, ['c0', 'c1']);
-		await settled();
-		expect(row('c1')?.placement).toBe('placed');
+		await vi.waitFor(() => expect(row('c1')?.placement).toBe('placed'));
 	});
 
 	it('a missing-frame release places the comment and asks for its position', async () => {

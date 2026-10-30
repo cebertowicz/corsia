@@ -1,5 +1,7 @@
 import { mount, unmount, flushSync } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { token } from '$lib/stores/auth';
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import { reactiveProps } from '$lib/__tests__/fixtures/reactiveProps.svelte';
 import PassiveOutcomeList from './PassiveOutcomeList.svelte';
@@ -16,6 +18,8 @@ vi.mock('$lib/stores/planQuery.svelte', () => ({
  }),
  planKeySet: () => ({ state: (key: { id: string }) => plan.children[key.id] ?? { status: 'idle', payload: null }, retry: plan.childRetry }),
 }));
+const foldedRead = vi.hoisted(() => vi.fn());
+vi.mock('$lib/api/plansFolded', () => ({ readFoldedNode: foldedRead }));
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 const card = (id: number, kind: UpdateCard['kind'] = 'done'): UpdateCard => ({
  id, kind, thread_id: 't', node_id: `node-${id}`, node_exists: true, asks_user: true, blocked_asks_user: false, after_seq: id,
@@ -29,6 +33,7 @@ function render(cards: UpdateCard[]) {
  component = mount(PassiveOutcomeList, { target: host, props }); flushSync();
  return props;
 }
+beforeEach(() => { token.set('tok'); foldedRead.mockReset(); foldedRead.mockResolvedValue({ status: 'not-found' }); });
 afterEach(async () => {
  if (component) await unmount(component); host?.remove(); focus.mockClear(); plan.retry.mockClear(); plan.childRetry.mockClear();
  plan.status = 'ready'; plan.payload = null; plan.children = {};
@@ -36,10 +41,11 @@ afterEach(async () => {
 const planNode = (id: string, parent: string | null, over: Record<string, unknown> = {}) => ({
  id, parent_id: parent, title: `Title ${id}`, description: null, acceptance_criteria: '', child: null, ...over,
 });
-const planRead = (...nodes: Record<string, unknown>[]) => ({ plans: [{ nodes }] });
+const planRead = (...nodes: Record<string, unknown>[]) => ({ plans: [{ plan: { id: 'plan-1' }, nodes }] });
 const openList = () => { host.querySelector<HTMLButtonElement>('.passive-toggle')!.click(); flushSync(); };
 const rowButton = (index = 0) => host.querySelectorAll<HTMLButtonElement>('li > button.row')[index];
 const expand = (index = 0) => { rowButton(index).click(); flushSync(); };
+const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); await tick(); } };
 
 describe('passive task list failures', () => {
  const failedCard = (id: number): UpdateCard => ({ ...card(id, 'failed'), asks_user: false });
@@ -210,20 +216,20 @@ describe('completed task rows', () => {
   host.querySelector<HTMLButtonElement>('.open-plan')!.click();
   expect(focus).toHaveBeenCalledWith('t', 'node-1', 'step-9');
  });
- it('hides the link, and stops offering expansion, for a task no loaded plan holds', () => {
+ it('hides the link, and stops offering expansion, for a task no loaded plan holds', async () => {
   plan.payload = planRead(planNode('step-9', null, { child: { available: true, thread_id: 'child-1' } }));
   plan.children = { 'child-1': { status: 'ready', payload: planRead(planNode('other', null)) } };
-  render([card(1)]); openList(); expand(0);
+  render([card(1)]); openList(); expand(0); await settle();
   expect(host.querySelector('.open-plan')).toBeNull();
   expect(rowsText()[0]).toContain('Original snapshot 1');
   expect(host.querySelectorAll('li > button.row')).toHaveLength(0);
   expect(host.querySelector('.detail')).toBeNull();
  });
- it('moves focus to the list toggle when an expanded row loses its button', () => {
+ it('moves focus to the list toggle when an expanded row loses its button', async () => {
   plan.payload = planRead(planNode('step-9', null, { child: { available: true, thread_id: 'child-1' } }));
   plan.children = { 'child-1': { status: 'ready', payload: planRead(planNode('other', null)) } };
   render([card(1)]); openList();
-  rowButton(0).focus(); expand(0);
+  rowButton(0).focus(); expand(0); await settle();
   expect(document.activeElement).toBe(host.querySelector('.passive-toggle'));
  });
  it('reports a failed child plan read instead of hiding the link, and retries that read', () => {
@@ -235,6 +241,31 @@ describe('completed task rows', () => {
   host.querySelector<HTMLButtonElement>('.detail .link:not(.open-plan)')!.click();
   expect(plan.retry).toHaveBeenCalled();
   expect(plan.childRetry).toHaveBeenCalledWith({ kind: 'child', id: 'child-1' });
+ });
+ it('reads a completed task the thread read leaves out as folded, keeping the row a button while it loads', async () => {
+  plan.payload = planRead(planNode('step-9', null));
+  let finish!: (value: unknown) => void;
+  foldedRead.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  render([card(1)]); openList(); expand(0); await settle();
+  expect(foldedRead).toHaveBeenCalledWith('tok', 'plan-1', 'node-1');
+  expect(rowButton(0).getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector('.skeleton')).not.toBeNull();
+  finish({ status: 'fresh', etag: '', payload: planNode('node-1', 'step-9', { description: 'What was done' }) });
+  await settle();
+  expect(host.querySelector('.text')!.textContent).toBe('What was done');
+  expect(host.querySelector('.crumbs')!.textContent).toContain('Title step-9');
+  host.querySelector<HTMLButtonElement>('.open-plan')!.click();
+  expect(focus).toHaveBeenCalledWith('t', 'node-1', null);
+ });
+ it('offers a retry when the folded read fails, and loads the task on retry', async () => {
+  plan.payload = planRead(planNode('step-9', null));
+  foldedRead.mockResolvedValueOnce({ status: 'error', message: 'x' });
+  render([card(1)]); openList(); expand(0); await settle();
+  expect(host.querySelector('.detail')!.textContent).toContain('Couldn’t load details · Retry');
+  foldedRead.mockResolvedValue({ status: 'fresh', etag: '', payload: planNode('node-1', null, { description: 'Back again' }) });
+  host.querySelector<HTMLButtonElement>('.detail .link:not(.open-plan)')!.click();
+  await settle();
+  expect(host.querySelector('.text')!.textContent).toBe('Back again');
  });
  it('does not make a deleted task expandable', () => {
   render([{ ...card(1), node_exists: false }]); openList();

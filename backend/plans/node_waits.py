@@ -13,6 +13,7 @@ import json
 import sqlite3
 
 from infra.packed_rows import fetch_all
+from plans import node_states
 
 #: The node states in which a dependency or a hold keeps work from starting.
 WAITABLE_STATES = frozenset({"pending", "active"})
@@ -23,37 +24,96 @@ def encoded_ids(node_ids) -> str:
     return json.dumps(list(dict.fromkeys(str(node_id) for node_id in node_ids)))
 
 
+def inherited_sql(prerequisite: str, ancestor: str) -> str:
+    """An ``ancestor``'s edge to ``prerequisite`` holds its descendants, as SQL.
+
+    Only a prerequisite outside the ancestor's own subtree is inherited: a
+    phase that depends on one of its own steps restates that it finishes after
+    it, and handing that edge down would make the step wait on itself. Both
+    arguments are SQL expressions for node ids. The read below and the cycle
+    check in ``plans.dependencies`` share this one rule.
+    """
+    return (
+        f"NOT EXISTS (WITH RECURSIVE above(id) AS ("
+        f" SELECT parent_id FROM plan_nodes WHERE id={prerequisite}"
+        f" UNION SELECT a.parent_id FROM plan_nodes a JOIN above ON a.id=above.id)"
+        f" SELECT 1 FROM above WHERE above.id={ancestor})"
+    )
+
+
+def _prerequisite_columns(node_id: str, owner: str, compact: bool) -> str:
+    """The prerequisite row's columns; ``owner`` is the alias of the waiting node."""
+    if compact:
+        return f"{node_id},p.id,p.state,p.plan_id,p.archived_at"
+    return f"""{node_id},p.id,p.title,p.state,
+               CASE WHEN p.plan_id<>{owner}.plan_id THEN pl.owner_id END AS foreign_owner,
+               CASE WHEN p.plan_id<>{owner}.plan_id
+                    THEN COALESCE(NULLIF(t.title,''),'Untitled thread') END AS foreign_label"""
+
+
 def unmet_prerequisites(
-    connection: sqlite3.Connection, node_ids, *, compact: bool = False,
+    connection: sqlite3.Connection, node_ids, *, compact: bool = False, inherit: bool = True,
 ) -> dict[str, list]:
     """Each node's prerequisites that are not accepted yet, in plan order.
 
     A dependency is met only by an accepted prerequisite. A failed one is
     unmet and never will be met; the caller names that as its own cause.
+    An open ancestor's edges hold its descendants too (``via`` names that
+    ancestor). This read is the one place that inheritance lives: writers
+    pass ``inherit=False`` to change and record only the edges a node owns,
+    so a step's inherited wait is derived here, never stored or evented on
+    the step.
     For a prerequisite in another plan (#1552), ``foreign_owner`` is the
     thread owning it and ``foreign_label`` that thread's title; else None.
     """
     ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
     found: dict[str, list] = defaultdict(list)
-    if ids:
-        columns = "d.node_id,p.id,p.state,p.plan_id,p.archived_at" if compact else """d.node_id,p.id,p.title,p.state,
-                       CASE WHEN p.plan_id<>n.plan_id THEN pl.owner_id END AS foreign_owner,
-                       CASE WHEN p.plan_id<>n.plan_id
-                            THEN COALESCE(NULLIF(t.title,''),'Untitled thread') END AS foreign_label"""
-        for row in fetch_all(
-            connection,
-            f"""SELECT {columns}
-                FROM plan_node_dependencies d
-                JOIN plan_nodes p ON p.id=d.depends_on_node_id
-                JOIN plan_nodes n ON n.id=d.node_id
-                JOIN plans pl ON pl.id=p.plan_id
-                LEFT JOIN threads t ON t.id=pl.owner_id
-                WHERE d.node_id IN (SELECT value FROM json_each(?))
-                  AND p.state NOT IN ('accepted','accepted_with_followup')
-                ORDER BY d.node_id,p.order_key,p.id""",
-            (encoded_ids(ids),),
-        ):
-            found[str(row["node_id"])].append(row)
+    if not ids:
+        return {}
+    unmet = "AND p.state NOT IN ('accepted','accepted_with_followup')"
+    # A node's own edges (depth 0), then those of its open ancestors: an
+    # ancestor's dependency on work outside it holds its descendants too.
+    # Nearest first, so a prerequisite reached at several levels keeps the
+    # nearest one. A parent link is set once, at insert, to a node that
+    # already exists, so the walk up always ends at a root.
+    touched = set()
+    inherited = f"""UNION ALL
+            SELECT {_prerequisite_columns('up.root', 'r', compact)},up.id,p.order_key,up.depth
+            FROM up JOIN plan_node_dependencies d ON d.node_id=up.id
+            JOIN plan_nodes n ON n.id=up.id
+            {"" if compact else "JOIN plan_nodes r ON r.id=up.root"}
+            JOIN plan_nodes p ON p.id=d.depends_on_node_id
+            JOIN plans pl ON pl.id=p.plan_id
+            LEFT JOIN threads t ON t.id=pl.owner_id
+            WHERE {node_states.open_sql('n')} AND {inherited_sql('p.id', 'up.id')} {unmet}"""
+    for row in fetch_all(
+        connection,
+        f"""WITH RECURSIVE up(root,id,depth) AS (
+                SELECT id,parent_id,1 FROM plan_nodes
+                WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL
+                UNION ALL
+                SELECT up.root,a.parent_id,up.depth+1 FROM up JOIN plan_nodes a ON a.id=up.id
+                WHERE a.parent_id IS NOT NULL
+            )
+            SELECT {_prerequisite_columns('d.node_id', 'n', compact)},NULL AS via,p.order_key AS order_key,0 AS depth
+            FROM plan_node_dependencies d
+            JOIN plan_nodes p ON p.id=d.depends_on_node_id
+            JOIN plan_nodes n ON n.id=d.node_id
+            JOIN plans pl ON pl.id=p.plan_id
+            LEFT JOIN threads t ON t.id=pl.owner_id
+            WHERE d.node_id IN (SELECT value FROM json_each(?1)) {unmet}
+            {inherited if inherit else ""}
+            ORDER BY 1,depth,order_key,2""",
+        (encoded_ids(ids),),
+    ):
+        node_id = str(row["node_id"])
+        if row["depth"] == 0:
+            found[node_id].append(row)
+        elif all(str(have["id"]) != str(row["id"]) for have in found.get(node_id, ())):
+            found[node_id].append(row)
+            touched.add(node_id)
+    for node_id in touched:
+        found[node_id].sort(key=lambda row: (row["order_key"], str(row["id"])))
     return dict(found)
 
 
@@ -97,7 +157,8 @@ def armed_watches(
             columns += """,w.armed_at,w.expected_event,w.artifact_integration,
                        json_extract(e.payload_json,'$.blocked.owner_id') AS blocked_owner_id,
                        json_extract(e.payload_json,'$.blocked.reason') AS blocked_reason,
-                       json_extract(e.payload_json,'$.scheduled.reason') AS scheduled_reason"""
+                       json_extract(e.payload_json,'$.scheduled.reason') AS scheduled_reason,
+                       i.id AS artifact_id,i.title AS artifact_title"""
         for row in fetch_all(
             connection,
             f"""SELECT {columns}
@@ -105,11 +166,40 @@ def armed_watches(
                 LEFT JOIN plan_node_events e
                   ON e.node_id=w.plan_node_id AND e.event='watch_armed'
                  AND json_extract(e.payload_json,'$.watch_id')=w.id
+                LEFT JOIN artifact_identities i
+                  ON i.integration=w.artifact_integration AND i.type=w.artifact_type
+                 AND i.external_id=w.artifact_external_id
                 WHERE w.plan_node_id IN (SELECT value FROM json_each(?)) AND w.status='armed'
                 ORDER BY w.plan_node_id,w.armed_at,w.id""",
             (encoded_ids(ids),),
         ):
             found[str(row["plan_node_id"])].append(row)
+    return dict(found)
+
+
+def armed_in_plans(connection: sqlite3.Connection, plan_ids) -> dict[str, list[tuple]]:
+    """Each listed plan's armed watches (``armed_watches`` rows), each with its task's title, in two reads.
+
+    For a parent's child summaries, whose rollups list no nodes. The read is
+    driven from the few armed watches, never from a plan's node history.
+    """
+    ids = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
+    if not ids:
+        return {}
+    node_of = {
+        str(row["plan_node_id"]): (str(row["plan_id"]), str(row["title"]))
+        for row in fetch_all(
+            connection,
+            """SELECT w.plan_node_id,n.plan_id,n.title
+                FROM expected_event_watches w CROSS JOIN plan_nodes n ON n.id=w.plan_node_id
+                WHERE w.status='armed' AND n.plan_id IN (SELECT value FROM json_each(?))""",
+            (encoded_ids(ids),),
+        )
+    }
+    found: dict[str, list[tuple]] = defaultdict(list)
+    for node_id, rows in armed_watches(connection, node_of).items():
+        plan_id, title = node_of[node_id]
+        found[plan_id].extend((row, title) for row in rows)
     return dict(found)
 
 
@@ -128,6 +218,21 @@ def watch_cause(row) -> dict:
         "kind": "waiting", "reason_key": row["condition_type"], "watch_id": row["id"],
         "blocked_wait": row["blocked_owner_kind"] is not None,
         "ends_at": row["condition_value"] if row["condition_type"] == "deadline" else None,
+    }
+
+
+def named_watch_cause(row) -> dict:
+    """A full-read watch's cause with what it waits on: why, and the watched artifact.
+
+    Only the full ``armed_watches`` read selects these columns; the compact read
+    keeps ``watch_cause`` alone, so the narrow and full lifecycle parts agree.
+    """
+    return {
+        **watch_cause(row),
+        "blocked_reason": row["blocked_reason"],
+        "scheduled_reason": row["scheduled_reason"],
+        "artifact_id": row["artifact_id"],
+        "artifact_title": row["artifact_title"],
     }
 
 
@@ -151,5 +256,5 @@ def project(connection: sqlite3.Connection, rows) -> dict[str, tuple[list[str], 
 
 
 def waits_on_dependency(connection: sqlite3.Connection, node_id: str, state: str) -> bool:
-    """Whether an open node has an unmet dependency: the writer-side delta test."""
-    return state in WAITABLE_STATES and bool(unmet_prerequisites(connection, [node_id]))
+    """Whether an open node has an unmet edge of its own: the writer-side delta test."""
+    return state in WAITABLE_STATES and bool(unmet_prerequisites(connection, [node_id], inherit=False))

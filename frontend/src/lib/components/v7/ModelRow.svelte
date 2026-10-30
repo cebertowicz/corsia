@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { ModelCapability, ModelState } from '$lib/stores/providerModels';
+	import Menu from '$lib/components/ui/Menu.svelte';
+	import { createRowMenu } from '$lib/components/ui/rowMenu.svelte';
+	import ModelRowActions from './ModelRowActions.svelte';
 
 	interface Props {
 		name: string;
@@ -10,12 +13,26 @@
 		/** What the switch does, as [label when on, label when off]: Unload/Load for a local engine. */
 		toggleLabels?: [string, string];
 		progress?: number;
+		/** Whether a loading row shows its progress puck; a download has nothing to switch yet. */
+		puck?: boolean;
 		/** Short line under the row, e.g. why the model is missing from the chat picker. */
 		warning?: string | null;
+		/** Muted model metadata that should sit below the primary row details. */
+		note?: string | null;
 		onToggle?: () => void;
 		onInfo?: () => void;
 		onCancel?: () => void;
 		onRetry?: () => void;
+		/** A pinned model oMLX didn't load at start: load it now even though memory is short. */
+		onLoadAnyway?: () => void;
+		/** A download in progress: a standard row with its switch off-limits until the model is on disk. */
+		downloading?: boolean;
+		/** Whether the model will be kept loaded when the download completes. */
+		downloadingOn?: boolean;
+		/** A local model loading into memory: its switch is on, since the switch is the keep-loaded pin, and off-limits until it loads. */
+		loadingOn?: boolean;
+		/** Settings-owned local downloads can be removed from this row's action menu. */
+		onDeleteDownload?: () => void;
 	}
 
 	const {
@@ -26,34 +43,49 @@
 		toggleOn = false,
 		toggleLabels = ['Unload', 'Load'],
 		progress = 0,
+		puck = true,
 		warning = null,
+		note = null,
 		onToggle,
 		onInfo,
 		onCancel,
 		onRetry,
+		onLoadAnyway,
+		downloading = false,
+		downloadingOn = false,
+		loadingOn = false,
+		onDeleteDownload,
 	}: Props = $props();
 
-	const showCancel = $derived(state === 'loading' || state === 'cache_warming' || state === 'queued');
+	// Cancel only where there is something to cancel: oMLX's own start preload has no job.
+	const showCancel = $derived((state === 'loading' || state === 'cache_warming' || state === 'queued' || downloading) && !!onCancel);
 	const showRetry = $derived(state === 'error');
 	const showInfo = $derived(!showCancel && !showRetry);
+	const menu = createRowMenu<string>(() => !!onDeleteDownload);
+	const menuItems = $derived(onDeleteDownload ? [{ id: 'delete-download', label: 'Delete download' }] : []);
+
+	function selectMenuItem(id: string) {
+		menu.close();
+		if (id === 'delete-download') onDeleteDownload?.();
+	}
 	const metaClass = $derived(
+		downloading ? 'download' :
 		state === 'loading' ? 'loading' :
 		state === 'cache_warming' ? 'warming' :
 		state === 'error' ? 'error' :
 		'',
 	);
-	const rowClass = $derived(
-		state === 'loaded' ? 'loaded' :
-		state === 'loading' ? 'loading-row' :
-		state === 'cache_warming' ? 'warming-row' :
-		state === 'error' ? 'error-row' :
-		'',
-	);
 </script>
 
-<div class="mr {rowClass}" class:has-warn={!!warning} style="--p: {progress}%">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
+<div class="mr" class:has-warn={!!warning || !!note} role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
-		{#if state === 'loading' || state === 'cache_warming'}
+		{#if downloading || loadingOn}
+			{@const on = downloading ? downloadingOn : loadingOn}
+			<button type="button" class="tg sm" class:on aria-label={on ? toggleLabels[0] : toggleLabels[1]} disabled></button>
+		{:else if (state === 'loading' || state === 'cache_warming') && !puck}
+			<!-- Keeps the grid column so the name stays aligned with its neighbours. -->
+		{:else if state === 'loading' || state === 'cache_warming'}
 			<span class="puck" class:warming={state === 'cache_warming'}>
 				<span class="fill" style="width: {progress}%"></span>
 			</span>
@@ -101,57 +133,46 @@
 		{/each}
 	</span>
 
-	<span class="action">
-		{#if showInfo}
-			<button
-				type="button"
-				class="ico-btn sm"
-				aria-label="Info"
-				onclick={(e) => { e.stopPropagation(); onInfo?.(); }}
-			>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-					<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
-					<path d="M12 11v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-					<circle cx="12" cy="8" r="1" fill="currentColor"/>
-				</svg>
-			</button>
-		{:else if showCancel}
-			<button
-				type="button"
-				class="row-btn"
-				onclick={(e) => { e.stopPropagation(); onCancel?.(); }}
-			>Cancel</button>
-		{:else if showRetry}
-			<button
-				type="button"
-				class="row-btn danger"
-				onclick={(e) => { e.stopPropagation(); onRetry?.(); }}
-			>Retry</button>
-		{/if}
-	</span>
+	<ModelRowActions {showInfo} {showCancel} {showRetry} {onInfo} {onCancel} {onRetry} />
 
 	{#if warning}
-		<span class="warn" role="status">{warning}</span>
+		<span class="warn" role="status">{warning}{#if onLoadAnyway} <button type="button" class="link-btn" onclick={(event) => { event.stopPropagation(); onLoadAnyway?.(); }}>Load anyway</button>{/if}</span>
+	{:else if note}
+		<span class="note">{note}</span>
 	{/if}
 </div>
 
+{#if menu.open}
+	<Menu
+		ariaLabel={`Actions for ${name}`}
+		items={menuItems}
+		x={menu.open.x}
+		y={menu.open.y}
+		onSelect={selectMenuItem}
+		onClose={menu.close}
+	/>
+{/if}
+
 <style>
+	/* A nested Settings list row under its provider: it starts on the provider's name column and ends
+	   on the content edge, flat on the pane, with space alone between rows. State is the switch, the
+	   status text carries load, warm and download progress; there is no row progress bar. */
 	.mr {
 		display: grid;
 		/* The name keeps a floor, so a long status line wraps instead of squeezing it to nothing. */
 		grid-template-columns: 32px minmax(35%, 1fr) auto auto auto;
 		grid-template-areas: "toggle name meta caps action";
 		align-items: center;
-		gap: 12px;
-		padding: 10px 18px;
-		transition: all var(--dur-tight) var(--ease-snap);
-		position: relative;
+		gap: var(--space-3);
+		min-height: var(--list-row-min-height);
+		padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		border-radius: var(--radius-sm);
+		transition: background var(--dur-tight) var(--ease-snap);
 	}
 	.mr-toggle-wrap { grid-area: toggle; }
 	.mname { grid-area: name; }
 	.meta { grid-area: meta; }
 	.caps { grid-area: caps; }
-	.action { grid-area: action; display: inline-flex; }
 	.mr.has-warn {
 		grid-template-areas:
 			"toggle name meta caps action"
@@ -160,55 +181,12 @@
 	}
 	.warn {
 		grid-area: warn;
-		font-size: var(--text-footnote);
-		color: var(--amber);
+		font-size: var(--text-caption);
+		color: var(--amber-text);
 	}
-	.mr:hover { background: var(--bg-hover); }
-	.mr + :global(.mr) { box-shadow: inset 0 1px 0 var(--border-subtle); }
-
-	.mr.loaded { background: var(--accent-wash); }
-	.mr.loaded::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--accent);
-	}
-	.mr.loaded:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
-
-	.mr.loading-row { background: var(--amber-bg); }
-	.mr.loading-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--amber);
-	}
-	.mr.loading-row::after {
-		content: '';
-		position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--amber) 0%, var(--amber) var(--p, 0%), transparent var(--p, 0%));
-		border-radius: 1px;
-	}
-
-	.mr.warming-row { background: var(--sky-bg); }
-	.mr.warming-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--sky);
-	}
-	.mr.warming-row::after {
-		content: '';
-		position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--sky) 0%, var(--sky) var(--p, 0%), transparent var(--p, 0%));
-		border-radius: 1px;
-	}
-
-	.mr.error-row { background: var(--red-bg); }
-	.mr.error-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--red);
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last row tapped. */
+	@media (hover: hover) {
+		.mr:hover { background: var(--bg-hover); }
 	}
 
 	.mr-toggle-wrap { display: flex; justify-content: center; }
@@ -229,9 +207,13 @@
 		font-variant-numeric: tabular-nums;
 		flex-shrink: 0;
 	}
-	.meta.loading { color: var(--amber); font-weight: 500; }
-	.meta.warming { color: var(--sky); font-weight: 500; }
-	.meta.error   { color: var(--red); font-weight: 500; }
+	.meta.loading { color: var(--text-secondary); }
+	.meta.download { color: var(--accent-text); }
+	.meta.warming { color: var(--sky); }
+	.meta.error   { color: var(--red-text); }
+	.link-btn { border: 0; background: transparent; padding: 0; margin-left: var(--space-1); color: var(--accent-text); font: inherit; cursor: pointer; }
+	.link-btn:hover { text-decoration: underline; }
+	.note { grid-area: warn; color: var(--text-tertiary); font-size: var(--text-footnote); }
 
 	.caps { display: flex; gap: 4px; align-items: center; }
 
@@ -246,6 +228,7 @@
 	.cap[data-cap="reasoning"] { background: var(--purple-bg); color: var(--purple-text); box-shadow: inset 0 0 0 1px var(--purple-line); }
 	.cap[data-cap="tools"]     { background: var(--teal-bg);   color: var(--teal);   box-shadow: inset 0 0 0 1px var(--teal-line); }
 
+	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
 	.tg {
 		--w: 30px; --h: 17px;
 		width: var(--w); height: var(--h);
@@ -281,8 +264,8 @@
 	.puck {
 		--w: 30px; --h: 17px;
 		width: var(--w); height: var(--h);
-		background: var(--amber-bg);
-		border: 1px solid var(--amber-line);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border);
 		border-radius: var(--radius-pill);
 		position: relative; overflow: hidden;
 		box-shadow: inset 0 1px 1px rgba(0,0,0,0.3);
@@ -294,7 +277,7 @@
 	.puck::before {
 		content: '';
 		position: absolute; inset: 0;
-		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 40%, transparent), transparent);
+		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-tertiary) 40%, transparent), transparent);
 		background-size: 200% 100%;
 		animation: shimmer 1.4s linear infinite;
 	}
@@ -304,7 +287,7 @@
 	}
 	.puck > .fill {
 		position: absolute; left: 0; top: 0; bottom: 0;
-		background: linear-gradient(180deg, var(--amber), #d97706);
+		background: var(--text-tertiary);
 		opacity: 0.5;
 	}
 	.puck.warming > .fill {
@@ -330,33 +313,6 @@
 		color: var(--red);
 	}
 
-	.ico-btn {
-		display: inline-flex; align-items: center; justify-content: center;
-		border-radius: var(--radius-xs);
-		color: var(--text-tertiary);
-		transition: all var(--dur-tight) var(--ease-snap);
-		background: transparent;
-		border: 0;
-		cursor: pointer;
-	}
-	.ico-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-	.ico-btn.sm { width: 28px; height: 28px; }
-
-	.row-btn {
-		display: inline-flex; align-items: center; gap: 4px;
-		padding: 4px 10px;
-		border-radius: var(--radius-xs);
-		background: transparent;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote); font-weight: 500;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
-		border: 0;
-		cursor: pointer;
-	}
-	.row-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-	.row-btn.danger:hover { color: var(--red); }
-
 	@media (max-width: 480px) {
 		.mr {
 			grid-template-columns: 28px 1fr auto;
@@ -364,14 +320,12 @@
 				"toggle name action"
 				".      meta action"
 				".      caps action";
-			gap: 4px 10px;
-			padding: 9px 12px;
+			gap: var(--space-1) var(--space-3);
 			align-items: start;
 		}
 		.mname { font-size: var(--text-subhead); line-height: 1.3; padding-top: 2px; }
-		.meta  { font-size: var(--text-footnote); }
+		.meta  { font-size: var(--text-caption); }
 		.caps  { padding-top: 2px; }
-		.action { align-self: center; }
 		.mr.has-warn {
 			grid-template-areas:
 				"toggle name action"

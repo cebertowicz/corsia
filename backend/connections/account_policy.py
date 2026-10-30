@@ -13,7 +13,7 @@ NOT_CONFIGURED = "account_not_configured"
 
 
 def read_account_readiness(thread_ids, *, db):
-    """Stored-only advisory batch using the same fact evaluator as require_claim."""
+    """Advisory batch using the same fact evaluator as require_claim (stored records plus its home check)."""
     from connections.account_readiness import read_account_readiness as read
 
     return read(thread_ids, db=db)
@@ -30,7 +30,9 @@ class AccountAdmissionError(AccountError):
 
 def thread_scope(thread_id: str, *, db) -> dict:
     """Derive ownership and project from durable server-side thread identity."""
-    row = db.execute("SELECT user_id,project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+    row = db.execute(
+        "SELECT user_id,project_id,local_only FROM threads WHERE id=?", (thread_id,),
+    ).fetchone()
     if row is None:
         raise AccountAdmissionError("account_thread_missing")
     return dict(row)
@@ -82,11 +84,12 @@ def _policies(provider: str, project_ids: list, *, db) -> list[dict]:
     return [effective_policy(project, provider, db=db) for project in (project_ids or [None])]
 
 
-def permitted_accounts(provider: str, *, project_ids: list, selection_only: bool = False, db) -> list[dict]:
+def permitted_accounts(provider: str, *, project_ids: list, selection_only: bool = False, db,
+                       accounts: list[dict] | None = None) -> list[dict]:
     """Intersect effective scope policies while preserving destination order."""
     policies = _policies(provider, project_ids, db=db)
-    accounts = ordered_accounts(provider, policies[0], selection_only=selection_only, db=db)
-    return [account for account in accounts if all(account["id"] not in policy["disabled"] for policy in policies)]
+    ordered = ordered_accounts(provider, policies[0], selection_only=selection_only, db=db, accounts=accounts)
+    return [account for account in ordered if all(account["id"] not in policy["disabled"] for policy in policies)]
 
 
 def account_fact_reason(account: dict | None, *, provider: str, policies: list,
@@ -112,8 +115,17 @@ def account_fact_reason(account: dict | None, *, provider: str, policies: list,
 def account_reason(account: dict, *, provider: str, project_ids: list, execution: bool,
                    model: str | None = None, db) -> str | None:
     """Evaluate lifecycle and project state without interpreting usage limits."""
-    return account_fact_reason(account, provider=provider, execution=execution, model=model,
-                               policies=_policies(provider, project_ids, db=db))
+    reason = account_fact_reason(account, provider=provider, execution=execution, model=model,
+                                 policies=_policies(provider, project_ids, db=db))
+    if reason is None and execution and model and account and account['source_home'] is None:
+        from llm.harness_catalog import harness_row
+
+        row = harness_row(model, db=db)
+        if row is not None and row.get('default_listed') is False:
+            return 'account_model_not_discovered'
+        if row is not None and row.get('added_available') and not row.get('available'):
+            return 'account_runtime_pending'
+    return reason
 
 
 def _candidate(thread_id, provider, account_id, projects, *, db):

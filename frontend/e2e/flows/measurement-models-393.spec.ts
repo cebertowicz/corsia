@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject } from '../support/measurement-fixture';
 import { waitForMainSlideToSettle } from '../support/sidebar';
@@ -269,7 +270,7 @@ test.describe('@flow:measurement-models-393 @surface:measurement the Models sect
 
 	test('a scope that recorded no model usage says so', async ({ page, request }, testInfo) => {
 		const section = await enter(page, request, 'none', 'none', testInfo);
-		await expect(section.getByText('No model activity in this scope.')).toBeVisible();
+		await expect(section.getByText('No models were used for this selection.')).toBeVisible();
 	});
 
 	test('a failed read says so in the page\'s own words, and Retry serves the rows', async ({ page, request }, testInfo) => {

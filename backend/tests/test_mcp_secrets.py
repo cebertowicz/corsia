@@ -45,6 +45,21 @@ def test_a_name_that_only_starts_with_mcp_is_not_claimed_as_code_owned():
         assert not key_store.is_managed_name(name), name
 
 
+def test_a_key_for_a_server_named_oauth_is_never_taken_for_a_sign_in(store):
+    from infra.key_store_mcp import OAUTH_VALUE_MAX, is_oauth_entry_name
+    import tools.mcp_oauth_store as grants
+
+    names = [mcp_secrets.entry_name(server, field, var) for server in ("oauth", "OAuth Tools", "oauth-x")
+             for field in ("env", "headers") for var in ("API_KEY", "x")]
+    assert all(key_store.is_managed_name(name) and not is_oauth_entry_name(name) for name in names), names
+    assert is_oauth_entry_name(grants.entry_name("app-1")) and is_oauth_entry_name(grants.entry_name("oauth"))
+    with pytest.raises(key_store.KeyStoreError):  # a key keeps the key ceiling, not the grant's
+        key_store.set_managed_value(names[0], "k" * (key_store.VALUE_MAX + 1))
+    assert key_store.VALUE_MAX < OAUTH_VALUE_MAX
+    key_store.set_managed_value(names[0], "oauth-server-api-key")
+    assert grants.register_stored() == 0
+
+
 CONFIG = {
     "command": "fixture",
     "env": {"SERVICE_TOKEN": "value-one", "API_KEY": "value-two", "LOG_LEVEL": "debug"},
@@ -94,7 +109,9 @@ def test_authorization_and_cookie_headers_lift_to_references():
     assert "headers" not in clean
     assert clean["secret_headers"] == ["Authorization", "Cookie"]
     mcp_secrets.check_references(clean)
-    assert set(lifted.values()) == {"Bearer example", "session=example"}
+    # The scheme stays in the config; only the token goes to the store.
+    assert set(lifted.values()) == {"example", "session=example"}
+    assert clean["key_header_schemes"] == [{"header": "Authorization", "scheme": "Bearer"}]
 
 
 def test_resolve_returns_stored_values_and_names_missing_variables_without_values(store):
@@ -114,9 +131,11 @@ def test_resolve_returns_stored_values_and_names_missing_variables_without_value
 
 
 def test_url_origin_normalizes_scheme_before_default_port_selection():
-    from tools.mcp import _url_origin
+    from tools.mcp_config import url_origin
 
-    assert _url_origin("HTTPS://example.test/mcp") == ("https", "example.test", 443)
+    assert url_origin("HTTPS://example.test/mcp") == ("https", "example.test", 443)
+    assert url_origin("http://Example.test:8080/x") == ("http", "example.test", 8080)
+    assert url_origin("not a url") is None
 
 
 def test_managed_header_key_reaches_auth_only_after_key_store_resolution(store):

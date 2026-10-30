@@ -42,3 +42,31 @@ async def test_guidance_legacy_open_then_save_records_history(history_scope, tmp
     finally:
         await document_control.disconnect(socket)
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_document_save_surfaces_the_lesson_gate_refusal_kind(history_scope):
+    from doceditor.document_save import DocumentSaveError
+
+    workspace, thread_id = history_scope
+    path = workspace / ".threads" / thread_id / "skills" / "demo" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(SKILL_BODY)
+    db = get_db()
+    try:
+        user_id = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
+    finally:
+        db.close()
+
+    with pytest.raises(DocumentSaveError) as refused:
+        await save_document_text(
+            DocumentSave(
+                path=str(path), text=SKILL_BODY + "\n## Lessons\n- Add a lesson only through place.\n",
+                thread_id=thread_id,
+            ),
+            user_id,
+            by_agent=True,
+        )
+
+    assert refused.value.kind == "lesson-outside-placement"
+    assert path.read_text() == SKILL_BODY

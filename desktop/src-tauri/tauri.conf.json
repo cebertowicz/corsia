@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CORSIA",
+  "mainBinaryName": "CORSIA",
   "version": "0.1.0",
   "identifier": "ai.corsia.app",
   "build": {
@@ -51,13 +52,16 @@
       "../bundle/bin/corsia-service": "bin/corsia-service",
       "../bundle/bin/omlx": "bin/omlx",
       "../bundle/bin/git": "bin/git",
+      "../bundle/bin/agent-browser": "bin/agent-browser",
+      "../bundle/bin/safehouse": "bin/safehouse",
       "../bundle/libexec": "libexec",
       "../bundle/share": "share",
       "../bundle/licenses": "licenses",
       "../bundle/python": "python",
       "../bundle/backend": "backend",
       "../bundle/frontend": "frontend",
-      "../bundle/scripts": "scripts"
+      "../bundle/scripts": "scripts",
+      "../bundle/updater-endpoint.json": "updater-endpoint.json"
     },
     "icon": [
       "icons/icon.icns",
@@ -67,7 +71,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "15.0",
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
     }
   }
 }

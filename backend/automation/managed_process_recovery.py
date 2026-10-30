@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import signal
 import sqlite3
 import time
 from pathlib import Path
@@ -20,7 +18,6 @@ from automation.managed_process_events import (
 )
 from infra.managed_process_store import get_handle, unsettled_handles, upsert_transition
 
-_ORPHAN_GRACE_SECONDS = 2.0
 OrphanResult = Literal["stopped", "already_gone", "unverified"]
 
 
@@ -34,33 +31,10 @@ def _still_ours(row: dict[str, Any], pgid: int) -> bool | None:
 
 
 def _reconcile_orphan_group(row: dict[str, Any]) -> OrphanResult:
-    from host_access.processes import _group_pids
+    from host_access.processes import stop_orphan_group
 
     pgid = int(row["pgid"] or 0)
-    if pgid <= 1:
-        return "unverified"
-    signalled = False
-    for selected in (signal.SIGTERM, signal.SIGKILL):
-        if not _group_pids(pgid):
-            return "stopped" if signalled else "already_gone"
-        ours = _still_ours(row, pgid)
-        if ours is False:
-            return "already_gone"
-        if ours is not True:
-            return "unverified"
-        try:
-            os.killpg(pgid, selected)
-            signalled = True
-        except ProcessLookupError:
-            return "stopped" if signalled else "already_gone"
-        except PermissionError:
-            return "unverified"
-        deadline = time.monotonic() + _ORPHAN_GRACE_SECONDS
-        while time.monotonic() < deadline:
-            if not _group_pids(pgid):
-                return "stopped"
-            time.sleep(0.05)
-    return "unverified"
+    return stop_orphan_group(pgid, lambda: _still_ours(row, pgid))
 
 
 def read_persisted_logs(
@@ -72,8 +46,10 @@ def read_persisted_logs(
     long_running = bool(row["long_running"])
     cap = owner.long_running_tail_bytes if long_running else owner.max_log_bytes
     bounded = max(1, min(int(limit_bytes), cap))
+    # Found from the handle, not the stored path, which names the folder the
+    # state was in when the process started.
     payload = read_log_tail(
-        Path(row["log_path"]),
+        owner.process_dir / f"{row['handle']}.log",
         long_running=long_running,
         limit_bytes=bounded,
     )

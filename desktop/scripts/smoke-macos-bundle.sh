@@ -32,7 +32,6 @@ else
   else
     "$ROOT/desktop/scripts/build-macos-bundle.sh"
   fi
-  "$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$SOURCE_APP"
 fi
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
@@ -178,6 +177,16 @@ while IFS= read -r git_dir; do
   [ "$git_dir" -ef "$GIT_CORE" ] || { echo "error: the backend ran Git from $git_dir" >&2; exit 1; }
 done < <(sed -n 's/.*trace: resolved executable dir: //p' "$TEMP_ROOT/service-git-trace.log" | sort -u)
 "$RESOURCES/bin/omlx" --version
+"$RESOURCES/bin/agent-browser" --version
+# The bundled sandbox really confines a shell that reaches the bundled Python read-only. This
+# runner is not itself inside a sandbox, so the nested run is real; it is what every agent shell is.
+"$RESOURCES/bin/safehouse" --version
+sandbox_python="$(cd "$RESOURCES/python" && pwd -P)"
+sandbox_out="$("$RESOURCES/bin/safehouse" --workdir= --trust-workdir-config=false --add-dirs-ro="$sandbox_python" -- \
+  /bin/bash --noprofile --norc -c "\"$sandbox_python/bin/python3\" -c 'print(1)' && \"$sandbox_python/bin/python3\" -m pip --version")" \
+  || { echo "error: the bundled safehouse could not run the bundled Python" >&2; exit 1; }
+printf 'sandboxed-python=%s\n' "$sandbox_out"
+case "$sandbox_out" in 1$'\n'pip\ *) ;; *) echo "error: unexpected sandboxed Python output" >&2; exit 1 ;; esac
 PYTHONPATH="$RESOURCES/python/omlx-packages" "$PYTHON" -c 'import mlx.core as mx; value = mx.sum(mx.ones((1024, 1024)) @ mx.ones((1024, 1024))); mx.eval(value); print(f"MLX device={mx.default_device()} value={value.item()}")'
 codesign --verify --deep --strict --verbose=2 "$APP"
 [ ! -e "$SYSTEM_GIT_CALLS" ] || { echo "error: a system Git shim ran:" >&2; cat "$SYSTEM_GIT_CALLS" >&2; exit 1; }

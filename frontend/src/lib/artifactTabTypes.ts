@@ -1,5 +1,8 @@
 export type ArtifactTabStatus = 'ready' | 'loading' | 'error' | 'unavailable' | 'readonly';
 
+/** The one document arrival that opens its waiting reply thread. */
+export type DocumentLanding = 'new-replies';
+
 /** In-session camera position for an image viewport; null scale keeps it fitted to the viewport. */
 export interface ImageViewportPlace {
 	scrollLeft: number;
@@ -28,6 +31,8 @@ export interface ArtifactTab {
 	/** Latest revision observed on the server; null until this session verifies it. */
 	latestRevision: string | null;
 	status: ArtifactTabStatus;
+	/** Where the viewer should go once this tab's comments load; consumed once. */
+	landOn?: DocumentLanding;
 }
 
 export interface ThreadArtifactWorkspace {
@@ -41,6 +46,8 @@ export interface OpenArtifactInput {
 	artifactId?: string | null;
 	path: string;
 	title: string;
+	/** Set by the waiting-reply handoff, never by an ordinary document opener. */
+	landOn?: DocumentLanding;
 }
 
 export interface OpenSubagentInput {

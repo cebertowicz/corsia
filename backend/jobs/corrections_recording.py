@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from core.corrections_recording import (
     CORRECTION_EVENT,
+    DECISION_SUBJECT_PREFIX,
     FACT_KEYS,
+    LABEL_CORRECTION,
     LABEL_UNREADABLE,
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
@@ -17,7 +24,14 @@ from core.corrections_recording import (
     version_match_sql,
 )
 from infra.db_async import run_in_db
-from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates, pending_candidate_keys
+from jobs.corrections_scanning import (
+    PendingCandidateKey,
+    ScanCursor,
+    hydrate_candidates,
+    pending_candidate_keys,
+    pending_source_candidate_keys,
+    source_candidate,
+)
 
 if TYPE_CHECKING:
     from core.corrections_classifier import Classification
@@ -45,7 +59,11 @@ def _record_fact(
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
 ) -> bool:
-    """Write one versioned local-classifier fact in its own transaction."""
+    """Write one versioned local-classifier fact in its own transaction.
+
+    A new correction queues its triage note in the same transaction.
+    """
+    from core.correction_notes import queue_correction_note
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -55,19 +73,53 @@ def _record_fact(
     with write_transaction(None, scope="record_correction_fact") as db:
         result = record_outcome_event(
             db,
-            dedupe_key=dedupe_key(candidate.message_id, version),
+            dedupe_key=dedupe_key(candidate, version),
             event_name=CORRECTION_EVENT,
             source="corsia",
             provenance="agent_recorded",
             ts=candidate.created_at,
-            subject_key=subject_key(candidate.message_id),
+            subject_key=subject_key(candidate.source_kind, candidate.source_id),
             project_id=candidate.project_id,
             agent_thread_id=candidate.thread_id,
             attributes=attributes,
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
-        return result.inserted
+        if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
+            queue_correction_note(db, candidate, version, result.event_id)
+    if result.inserted and classification["label"] == LABEL_CORRECTION and candidate.project_id:
+        try:
+            from datetime import datetime, timezone
+
+            from infra.database import get_db
+            from jobs.learning_report import maybe_emit_early, report_date_for
+
+            report_db = get_db()
+            try:
+                maybe_emit_early(
+                    report_db, scope=candidate.project_id,
+                    report_date=report_date_for(datetime.now(timezone.utc)),
+                )
+            finally:
+                report_db.close()
+        except Exception:
+            # The correction fact is committed before this best-effort report hook.
+            logger.exception("learning report delivery hook failed")
+    return result.inserted
+
+
+def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
+    """Hydrate one newly arrived correction source, or return no human candidate."""
+    from infra.database import get_db
+
+    if source_kind == SOURCE_KIND_MESSAGE:
+        return candidate_for_message(source_id)
+    db = get_db()
+    try:
+        candidate = source_candidate(db, source_kind, source_id)
+    finally:
+        db.close()
+    return replace(candidate, arrived=True) if candidate is not None else None
 
 
 def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
@@ -82,11 +134,80 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
         ).fetchone()
         if row is None:
             return None
-        key = PendingCandidateKey(int(row[0]), str(row[1]), str(row[2]), row[3], str(row[4]))
+        key = PendingCandidateKey(int(row[0]), SOURCE_KIND_MESSAGE, str(row[1]), str(row[2]), row[3], str(row[4]))
     finally:
         db.close()
     candidates = hydrate_candidates([key])
-    return candidates[0] if candidates else None
+    return replace(candidates[0], arrived=True) if candidates else None
+
+
+def _plans_hear(source_kind: str, source_id: str) -> None:
+    """Tell Plans the person's words arrived; it schedules off-path, and a failure here stays here."""
+    try:
+        from plans.public import person_words_arrived
+
+        person_words_arrived(source_kind, source_id)
+    except Exception:
+        logger.exception("plan input matching hook failed")
+
+
+def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
+    """Hand Plans and the corrections worker an admitted owner message; best effort, never failing the send.
+
+    Plans hears any message holding the person's words, comment notes included;
+    the corrections worker takes typed text as the message and each non-blank
+    chat comment note as its own source.
+    """
+    from core.corrections_recording import is_owner_authored_message
+    from jobs.corrections_realtime import notify
+
+    try:
+        from plans.public import person_message_words
+
+        if accepted.duplicate:
+            return
+        if person_message_words(role=role, content=content, metadata=metadata):
+            _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if is_owner_authored_message(role=role, content=content, metadata=metadata):
+            notify(SOURCE_KIND_MESSAGE, accepted.message_id)
+        if is_owner_authored_message(role=role, content=content, metadata=metadata, allow_blank=True):
+            from core.corrections_recording import SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id
+            from infra.reply_context import comment_cid
+
+            context = metadata.get("reply_context", {}) if isinstance(metadata, dict) else {}
+            comments = context.get("comments", []) if isinstance(context, dict) else []
+            if isinstance(comments, list):
+                for index, comment in enumerate(comments):
+                    if isinstance(comment, dict) and isinstance(comment.get("note"), str) and comment["note"].strip():
+                        notify(SOURCE_KIND_CHAT_COMMENT, chat_comment_source_id(accepted.message_id, comment_cid(accepted.input_order, index)))
+    except Exception:
+        logger.exception("corrections classifier admission notification failed")
+
+
+def notify_doc_comment(comment_id: str) -> None:
+    """Hand the worker a committed user comment; best effort, never failing the comment."""
+    from jobs.corrections_realtime import notify
+
+    _plans_hear(SOURCE_KIND_DOC_COMMENT, comment_id)
+    try:
+        notify(SOURCE_KIND_DOC_COMMENT, comment_id)
+    except Exception:
+        logger.exception("corrections classifier comment notification failed")
+
+
+def notify_decision_answer(decision_id: str, other_text: object) -> None:
+    """Hand the worker a committed decision answer that carries free text; best effort, never failing the answer.
+
+    An Other answer and a pick-any note both arrive as ``other_text``.
+    """
+    from jobs.corrections_realtime import notify
+
+    try:
+        if isinstance(other_text, str) and other_text.strip():
+            _plans_hear(SOURCE_KIND_DECISION_ANSWER, decision_id)
+            notify(SOURCE_KIND_DECISION_ANSWER, decision_id)
+    except Exception:
+        logger.exception("corrections classifier decision-answer notification failed")
 
 
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
@@ -108,10 +229,12 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
     return await run_in_db(_record_fact, candidate, classification, version)
 
 
-def unreadable_messages(db, version: ClassifierVersion) -> int:
-    """Count this version's ``unreadable`` messages in the Measurement window, each once.
+def unreadable_facts(db, version: ClassifierVersion) -> int:
+    """Count served unreadable facts in the Measurement window, once per source.
 
-    The ``(event_name, ts)`` index bounds the read to the window's correction facts.
+    Message, chat-comment and document-comment facts count, including legacy facts that lack a
+    source-kind attribute. Decision answers stay triage-only. The ``(event_name,
+    ts)`` index bounds the read to the window's correction facts.
     """
     from jobs.corrections_activation import measurement_window_start
 
@@ -119,9 +242,11 @@ def unreadable_messages(db, version: ClassifierVersion) -> int:
     row = db.execute(
         f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
            WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
-             AND {version_filter} AND json_extract(e.attributes,'$.label')=:label""",
+             AND {version_filter} AND e.subject_key NOT LIKE :decision_prefix || '%'
+             AND json_extract(e.attributes,'$.label')=:label""",
         {
             **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,
+            "decision_prefix": DECISION_SUBJECT_PREFIX,
             "since": measurement_window_start().isoformat(),
         },
     ).fetchone()
@@ -137,18 +262,23 @@ class _PendingBatch:
 
 
 async def next_pending_batch(
-    version: ClassifierVersion, batch_size: int, before: tuple[str, str] | None,
+    version: ClassifierVersion, batch_size: int, before: ScanCursor | None,
     *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the bounded classifier inputs."""
-    keys: list[PendingCandidateKey] = []
+    keys: list[PendingCandidateKey] = await run_in_db(
+        pending_source_candidate_keys, version, batch_size, before, since,
+    )
+    from jobs.chat_comment_corrections import pending_chat_comment_keys
+
     for owner_user_id in await run_in_db(owner_user_ids):
+        keys.extend(await run_in_db(pending_chat_comment_keys, version, batch_size, owner_user_id, before, since))
         keys.extend(
             await run_in_db(
                 pending_candidate_keys, version, batch_size, owner_user_id, before, since,
             )
         )
     selected = sorted(
-        keys, key=lambda key: (key.created_at, key.message_id), reverse=True,
+        keys, key=lambda key: (key.created_at, key.source_kind, key.source_id), reverse=True,
     )[:batch_size]
     return _PendingBatch(selected, await run_in_db(hydrate_candidates, selected))

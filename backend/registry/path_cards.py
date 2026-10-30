@@ -1,16 +1,10 @@
-"""Reference cards: the registered artifacts a message's text links to or names.
+"""Reference cards for registered artifacts and existing scoped files named in text.
 
-The server half of ``frontend/src/lib/linkTargetResolver.ts``. The client turns a
-clicked link into a path and opens the artifact; here the same turning runs over
-a message's text so a card can stand for each file the message names. The path
-rules (``link_target_path``, ``normalize_path``, ``workspace_path``) are ports of
-the client's, held to each other by ``testdata/link-target-vectors.json``, which
-both test suites read.
-
-Only a registered artifact the reading user may open becomes a card, and a plain
-file the message happens to mention does not. At most ``MAX_CARDS`` are returned,
-with the count of those past the cap, and at most ``MAX_CANDIDATES`` targets are
-looked at, so a long message costs a bounded number of lookups.
+The client link resolver and these card paths share decoding and normalization
+vectors in ``testdata/link-target-vectors.json``. Their allowed roots differ: the
+client opens workspace links, while cards can also refer to scoped files.
+Relative card paths use the explicit workspace origin when supplied, otherwise
+the inherited first-scoped-root fallback.
 """
 
 from __future__ import annotations
@@ -20,16 +14,15 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
-from registry.chat_cards import reference_card
+from registry.chat_cards import file_card, reference_card
+from registry import service as registry_service
 from registry.path_access import FileLookup, lookup_file
-
-MAX_CARDS = 8
-MAX_CANDIDATES = 40
 
 _FENCE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 _MARKDOWN_LINK = re.compile(r"\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
-# An absolute path with a file extension, as an agent writes it in prose or code.
-_BARE_PATH = re.compile(r"(?<![\w/.:~-])(/(?:[\w@%+=,.~-]+/)*[\w@%+=,~-][\w@%+=,.~-]*\.[A-Za-z0-9]{1,8})(?![\w/])")
+# File paths in prose or inline code; URLs are masked before this scan.
+_BARE_PATH = re.compile(r"(?<![\w/.:~%-])((?:/|(?:\.{1,2}/))?(?:[\w@%+=,.~-]+/)*[\w@%+=,~-][\w@%+=,.~-]*\.[A-Za-z0-9]{1,8})(?![\w/])")
+_URL = re.compile(r"[a-z][a-z\d+.-]*://[^\s<>()]+", re.IGNORECASE)
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 _SCHEME = re.compile(r"^[a-z][a-z\d+.-]*:", re.IGNORECASE)
 
@@ -62,34 +55,38 @@ def normalize_path(root: str, target: str) -> str | None:
     return resolved if resolved == root or resolved.startswith(root + "/") else None
 
 
-def workspace_path(href: str, roots: Sequence[str]) -> str | None:
-    """The workspace path a link names: absolute under a root, or relative to the first."""
+def workspace_path(href: str, roots: Sequence[str], origin: str | None = None) -> str | None:
+    """Resolve under a scoped root, using the workspace origin or first root for relative paths."""
     target = link_target_path(href)
     if not target or not roots:
         return None
     if target.startswith("/"):
         root = next((r for r in roots if target == r or target.startswith(r + "/")), None)
         return normalize_path(root, target) if root else None
-    return normalize_path(roots[0], target)
+    return normalize_path(origin or roots[0], target)
 
 
 def targets(text: str) -> list[str]:
-    """Link targets and bare absolute paths outside fenced code, in the order text names them."""
+    """Link targets and bare paths outside fenced code, in the order text names them."""
     body = _FENCE.sub("", text or "")
     found: list[tuple[int, str]] = [(m.start(), m.group(1)) for m in _MARKDOWN_LINK.finditer(body)]
-    found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(body)]
+    bare_body = _MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body)
+    bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
+    found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(bare_body)]
     ordered: list[str] = []
+    seen: set[str] = set()
     for _pos, target in sorted(found):
-        if not _SCHEME.match(target) and target not in ordered:
+        if not _SCHEME.match(target) and target not in seen:
+            seen.add(target)
             ordered.append(target)
-    return ordered[:MAX_CANDIDATES]
+    return ordered
 
 
 def reference_cards(
     db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
-    lookup_memo: dict[str, FileLookup] | None = None,
-) -> tuple[list[dict], int]:
-    """Cards for the registered artifacts ``text`` names, and how many more past the cap.
+    lookup_memo: dict[str, FileLookup] | None = None, origin: Path | None = None,
+) -> list[dict]:
+    """Cards for accessible files ``text`` names.
 
     ``covered`` maps an artifact id to the holds whose ask card covers it: the card is
     kept and marked ``covered_by_ask``, so the client shows it only when none of those
@@ -98,21 +95,35 @@ def reference_cards(
     roots = [str(base) for base in bases]
     lookups = lookup_memo if lookup_memo is not None else {}
     cards: list[dict] = []
-    seen: set[str] = set()
+    seen_paths: set[str] = set()
+    seen_ids: set[str] = set()
     for target in targets(text):
-        path = workspace_path(target, roots)
+        path = workspace_path(target, roots, str(origin) if origin else None)
         if path is None:
             continue
         found = lookups.get(path)
         if found is None:
             found = lookup_file(path, list(bases), db=db)
             lookups[path] = found
-        if found.artifact is None or str(found.artifact["id"]) in seen:
+        if not found.allowed or not found.is_file or found.path is None:
             continue
-        card = reference_card(db, found.artifact, user_id)
+        canonical = str(found.path)
+        artifact_id = str(found.artifact["id"]) if found.artifact else None
+        if canonical in seen_paths or (artifact_id and artifact_id in seen_ids):
+            continue
+        if found.artifact:
+            card = reference_card(db, found.artifact, user_id)
+        else:
+            # An identity without a live owner is not an unregistered file. In particular,
+            # a retired file must not reappear as an openable file-only card.
+            if found.has_identity:
+                continue
+            card = file_card(canonical, registry_service.classify(found.path))
         if card is not None:
-            seen.add(card["artifact_id"])
-            if covered and covered.get(card["artifact_id"]):
-                card["covered_by_ask"] = sorted(covered[card["artifact_id"]])
+            seen_paths.add(canonical)
+            if artifact_id:
+                seen_ids.add(artifact_id)
+            if covered and artifact_id and covered.get(artifact_id):
+                card["covered_by_ask"] = sorted(covered[artifact_id])
             cards.append(card)
-    return cards[:MAX_CARDS], max(0, len(cards) - MAX_CARDS)
+    return cards

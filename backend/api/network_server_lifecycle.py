@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from infra.db_async import run_in_db
+from infra.failure_reference import new_reference
 from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm.providers import for_provider
 
 router = APIRouter(tags=["network-servers"])
+log = logging.getLogger(__name__)
+
+
+def _remember_managed_choice(server: dict, running: bool) -> None:
+    """The person's Start or Stop on CORSIA's own local model decides whether startup runs it."""
+    from infra import settings
+    from llm.managed_omlx_binary import is_corsia_managed_server
+
+    if is_corsia_managed_server(server):
+        settings.save_setting_merge("providers", {server["provider"]: {"autoStart": running}})
 
 
 @router.post("/{server_id}/lifecycle/{action}")
@@ -34,9 +47,12 @@ async def lifecycle_action(server_id: str, action: str):
                 "message": f"Discovered {result.get('discovered', 0)} model(s)",
                 **{k: v for k, v in result.items() if k != "ok"},
             }
+        ref = new_reference("local")
+        log.warning("Model list refresh failed reference=%s: %s", ref, result.get("error"))
         return {
             "ok": False,
-            "message": result.get("error", "Reload failed"),
+            "message": "Couldn’t refresh the model list. Try again.",
+            "ref": ref,
         }
 
     try:
@@ -58,6 +74,12 @@ async def lifecycle_action(server_id: str, action: str):
             await run_in_db(nd.update_server_status, server_id, status="online")
         elif action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
+        await run_in_db(_remember_managed_choice, server, action == "start")
+    else:
+        # The reference ties the failure the person sees to this line, which carries its cause.
+        error = result.pop("error", None) or result.get("message")
+        result = {**result, "ref": new_reference("local")}
+        log.warning("Local server %s failed reference=%s: %s", action, result["ref"], error)
 
     return result
 
@@ -108,8 +130,12 @@ async def update_daemon_model_settings(
     result = await provider_module.update_model_settings(cfg, model_id, body)
     if not result.get("ok"):
         status = result.get("status", 502)
-        raise HTTPException(status if status < 500 else 502, detail=result.get("message"))
+        log.warning("Could not save model settings: %s", result.get("message"))
+        raise HTTPException(status if status < 500 else 502, detail="Couldn’t save this model’s settings. Try again.")
     if "pinned" in body:
+        from llm.local_keep_loaded import forget_failure
+
+        forget_failure(server_id, model_id)
         action = "pin" if body["pinned"] else "unpin"
         emit_product_event(
             "model", action,

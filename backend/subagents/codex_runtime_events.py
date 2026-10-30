@@ -5,16 +5,14 @@ from __future__ import annotations
 import functools
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 from automation.turn_end_effects import (
     deliver_turn_end_after,
     record_external_turn_end,
 )
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
-from core.tool_result_delivery import PROVIDER_MISSING_RESULT_REASON
+from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
 from core.turn_core import (
     TurnIdentity,
     TurnTerminalResult,
@@ -23,10 +21,15 @@ from core.turn_core import (
 from infra.db_async import run_in_db
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
+from llm.error_cause import codex_failure_meta
 from registry.observer import observe_settled_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed, register_codex_thread
 from subagents.assistant_step_display import assistant_step_payload
+from subagents.codex_runtime_support import (
+    CodexOnEventContext as _CodexOnEventContext,
+    reasoning_representation_kind as _reasoning_representation_kind,
+)
 from tools.tool_display import SettledResult, tool_done_frame, tool_start_frame
 from subagents.codex_runtime_terminal import (
     provider_reported_model_id as _provider_reported_model_id,
@@ -36,6 +39,7 @@ from subagents.codex_runtime_terminal import (
     settle_failed_turn_usage as _settle_failed_turn_usage,
 )
 from subagents.codex_usage_calls import on_call_usage as _on_call_usage
+from subagents import terminal_marker_writer
 
 log = logging.getLogger(__name__)
 
@@ -43,23 +47,6 @@ _PROVIDER_MISSING_TOOL_RESULT = (
     "Codex did not provide a result for this tool call. "
     "CORSIA will rebuild provider context before the next turn."
 )
-
-
-def _reasoning_representation_kind(
-    current: dict | None,
-    incoming: dict,
-) -> str:
-    """Preserve summary evidence when a later Codex item is opaque."""
-    existing = current if isinstance(current, dict) else {}
-    kinds = {
-        provenance.get("representation_kind")
-        for provenance in (existing, incoming)
-    }
-    if "codex_reasoning_summary" in kinds:
-        return "codex_reasoning_summary"
-    if "opaque" in kinds:
-        return "opaque"
-    return incoming.get("representation_kind", "unknown")
 
 
 async def _observe_tool_result(
@@ -111,9 +98,7 @@ async def settle_committed_tool_result(
         )
     tool_id = canonical.provider_tool_call_id
     if not isinstance(tool_id, str) or not tool_id:
-        raise ToolResultBindingError(
-            "canonical Codex tool result lacks provider call identity"
-        )
+        raise ToolResultBindingError("canonical Codex tool result lacks provider call identity")
     step_id = live.tool_step_ids.get(tool_id)
     if step_id is None:
         existing = await run_in_db(
@@ -136,6 +121,8 @@ async def settle_committed_tool_result(
         )
     name = live.tool_names.pop(tool_id, canonical.name)
     live.tool_step_ids.pop(tool_id)
+    if live.open_tool_step_id == step_id and step_id not in live.tool_step_ids.values():
+        live.open_tool_step_id = None
     if not live.tool_step_ids:
         live.tools_settled.set()
     meta = {
@@ -213,7 +200,11 @@ async def settle_missing_tool_results(
         for tool_id, _name in calls:
             live.tool_names.pop(tool_id, None)
             live.tool_step_ids.pop(tool_id, None)
+        if live.open_tool_step_id == step_id and step_id not in live.tool_step_ids.values():
+            live.open_tool_step_id = None
     live.tools_settled.set()
+
+
 def make_on_event(
     live,
     thread_id: str,
@@ -246,21 +237,6 @@ def make_on_event(
         persist_tool_use=persist_tool_use,
     )
     return functools.partial(_dispatch_on_event, ctx)
-
-
-@dataclass(frozen=True)
-class _CodexOnEventContext:
-    """Values the lifted Codex event handlers close over."""
-    live: Any
-    thread_id: Any
-    bcast: Any
-    dead_set: Any
-    thread_registry: Any
-    bind_tool_result_echo: Any
-    read_bound_tool_result: Any
-    load_assistant_step_display: Any
-    persist_assistant_text: Any
-    persist_tool_use: Any
 
 
 def _event_identity(ctx, ev: dict) -> TurnIdentity:
@@ -365,6 +341,7 @@ async def _on_assistant_text(ctx, ev: dict) -> None:
     }))
     ctx.live.last_text = text
     ctx.live.last_assistant_message_id = mid
+    ctx.live.open_tool_step_id = mid
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
     ctx.live.turn_has_assistant_row = True
@@ -402,6 +379,8 @@ async def _on_tool_use(ctx, ev: dict) -> None:
     args = ev.get("input") or {}
     hint = name[:80]
     model_id = _provider_reported_model_id(ctx.live)
+    # Pending calls share the open Step until the last result settles.
+    append_step_id = ctx.live.open_tool_step_id
     step_id = await run_in_db(
         ctx.persist_tool_use,
         ctx.thread_id, tool_id=tool_id, name=name,
@@ -413,9 +392,11 @@ async def _on_tool_use(ctx, ev: dict) -> None:
         provider="codex",
         model=model_id,
         expected_model=getattr(ctx.live, "expected_reported_model", None),
+        assistant_step_id=append_step_id,
     )
     ctx.live.thinking_buf = ""
     ctx.live.thinking_provenance = None
+    ctx.live.open_tool_step_id = step_id
     ctx.live.tool_names[tool_id] = name
     ctx.live.tool_step_ids[tool_id] = step_id
     ctx.live.tools_settled.clear()
@@ -485,21 +466,13 @@ async def record_terminal_marker(
     try:
         if db is None:
             marker_id = await run_in_db(
-                insert_message,
-                thread_id,
-                "system",
-                content,
-                metadata,
+                terminal_marker_writer.insert_terminal_marker,
+                insert_message, thread_id, content, metadata,
                 **insert_kwargs,
             )
         else:
-            marker_id = insert_message(
-                thread_id,
-                "system",
-                content,
-                metadata,
-                db=db,
-                **insert_kwargs,
+            marker_id = terminal_marker_writer.insert_terminal_marker(
+                insert_message, thread_id, content, metadata, db=db, **insert_kwargs,
             )
     except Exception as exc:
         log.error("codex_runtime: %s marker failed for %s: %s", label, thread_id, exc)
@@ -603,12 +576,10 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
 
             mark_provider_context_untrusted(ctx.thread_id)
             ctx.thread_registry.pop(ctx.thread_id, None)
-        meta_f: dict = {
-            "codex": True, "type": "cc_error", "event_type": "harness.error",
-            "harness": "codex", "cause": cause, **unrecorded,
+        meta_f = {
+            **codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded),
+            "turn_id": identity.turn_id,
         }
-        if reset_at:
-            meta_f["reset_at"] = reset_at
         marker_id = await record_terminal_marker(
             ctx.thread_id,
             content=f"⚠️ {msg}",
@@ -641,40 +612,9 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
 
 
 async def _on_provider_tool_violation(ctx, ev: dict) -> None:
-    tool_type = ev.get("tool_type") or "provider-native-tool"
-    phase = ev.get("phase") or "observed"
-    if not _is_current_provider_event(ctx, 
-        ev,
-        label=f"provider-native action ({phase})",
-    ):
-        return
-    ctx.live.provider_context_untrusted = True
-    meta_f = {
-        "codex": True,
-        "type": "tool_boundary_violation",
-        "event_type": "harness.tool_boundary_violation",
-        "harness": "codex",
-        "provider": ev.get("provider") or "codex",
-        "tool_type": tool_type,
-        "phase": phase,
-        "provider_tool_id": ev.get("id"),
-        "repair_owner": "execution-dispatch",
-    }
-    text = (
-        f"Codex attempted provider-native {tool_type} ({phase}). "
-        "CORSIA tools must run through the CORSIA tool bridge. Host "
-        "access cannot authorize provider-native tools; retry through "
-        "the corresponding CORSIA tool."
+    await terminal_marker_writer.record_provider_tool_violation(
+        ctx, ev, _is_current_provider_event,
     )
-    if not ctx.live.tool_boundary_violation_recorded:
-        ctx.live.tool_boundary_violation_recorded = True
-        mid = await run_in_db(
-            insert_message, ctx.thread_id, "system", text, meta_f,
-            msg_id=str(uuid.uuid4()),
-        )
-        ctx.live.tool_boundary_marker_id = mid
-        await broadcast_message_rows(ctx.thread_id, (mid,), broadcast=ctx.bcast)
-    raise RuntimeError("Codex capability boundary violated")
 
 
 async def _on_model_reported(ctx, ev: dict) -> None:

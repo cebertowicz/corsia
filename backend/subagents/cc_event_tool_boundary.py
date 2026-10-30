@@ -66,6 +66,32 @@ def _is_served_corsia_tool(tool: object, definitions: tuple[dict, ...] | None) -
     return any(definition["function"]["name"] == bare for definition in definitions)
 
 
+def admitted_native_tools(live: object) -> tuple[str, ...]:
+    """Claude Code's own tools this launch may run; none unless it is confined.
+
+    A ``untrusted`` launch reads with Read, Grep and Glob and has no CORSIA tool
+    bridge (event-rules design §8.1). Its admitted calls and their results
+    stay in the provider's own transcript: CORSIA declares no tool call for
+    them and binds no result. Any other tool on that launch crosses the
+    boundary, since nothing could serve it.
+    """
+    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED, UNTRUSTED_NATIVE_TOOLS
+
+    session = getattr(live, "session", None)
+    if getattr(session, "confinement", None) == CONFINEMENT_UNTRUSTED:
+        return UNTRUSTED_NATIVE_TOOLS
+    return ()
+
+
+def unadmitted_tool_names(raw_uses: list, admitted: tuple[str, ...]) -> list[str]:
+    """Names of a confined step's tool calls outside its admitted tools."""
+    return sorted({
+        str(tool.get("name") or "<unnamed>") if isinstance(tool, dict) else "<malformed>"
+        for tool in raw_uses
+        if not isinstance(tool, dict) or tool.get("name") not in admitted
+    })
+
+
 _MCP_SERVER_STARTUP_STATUSES = {
     "authenticating",
     "connecting",
@@ -136,8 +162,13 @@ def _tool_bridge_unavailable_from_init(ev: dict) -> tuple[dict, str] | None:
     return meta, content
 
 
-def _tool_boundary_violation_from_init(ev: dict) -> tuple[dict, str] | None:
-    tools = [str(tool) for tool in (ev.get("tools") or []) if str(tool)]
+def _tool_boundary_violation_from_init(
+    ev: dict, admitted: tuple[str, ...] = (),
+) -> tuple[dict, str] | None:
+    tools = [
+        str(tool) for tool in (ev.get("tools") or [])
+        if str(tool) and str(tool) not in admitted
+    ]
     mcp_server_names = [
         name for name in (_mcp_server_name(server) for server in (ev.get("mcp_servers") or []))
         if name

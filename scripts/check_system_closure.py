@@ -2,24 +2,21 @@
 """Check that the packaged System tier is closed over its skill references.
 
 The System tier (``backend/prompts/system/v1``) must ship every skill its own
-text depends on, and no skill that only a contributor workspace can supply.
-The check computes that set from the text and compares it with the skills the
-manifest lists.
+text depends on. The check computes that set from the text and compares it
+with the skills the manifest lists.
 
 1. Declaration sources are every ``kind: "context"`` System manifest file and
    the conductor core and CORSIA agent prompts that consume System skills.
-2. The skill pool is the System skills, the starter kit's remaining skills and
-   the kit's ``project-skills``.
+2. The skill pool is the System skills.
 3. Seed: every declared ``skill `name` `` reference in those sources.
    Declarations are the closure contract: the checker validates them
    independently of the installed skill pool.
 4. Close: repeat over every manifest-listed file belonging to each reached
    System skill.
-5. Fail if a declaration is unavailable or project-only, the computed set
-   differs from the manifest's skills, or a manifest-listed closure input is
-   missing. Manifest freshness remains owned by ``generate_system_manifest.py``.
-   This check proves declared dependencies, not arbitrary natural-language
-   references.
+5. Fail if a declaration is unavailable, the computed set differs from the
+   manifest's skills, or a manifest-listed closure input is missing. Manifest
+   freshness remains owned by ``generate_system_manifest.py``. This check
+   proves declared dependencies, not arbitrary natural-language references.
 
 Standard library only; needs no workspace. Exit 0 on pass, 1 on failure.
 """
@@ -38,7 +35,6 @@ CONDUCTOR_CONTEXT_RELS = (
     Path("backend/prompts/conductor/core-v2.md"),
     Path("backend/prompts/conductor/corsia-agent-v2.md"),
 )
-KIT_REL = Path("docs/contributing/bootstrap/starter-kit")
 _DECLARED_SKILL = re.compile(r"\bskill\s+`([a-z][a-z0-9-]*)`")
 
 
@@ -81,7 +77,6 @@ def _closure_sources(
 def compute(root: Path) -> ClosureResult:
     result = ClosureResult()
     system = root / SYSTEM_REL
-    kit = root / KIT_REL
     manifest_path = system / "MANIFEST.json"
     if not manifest_path.is_file():
         result.errors.append(f"missing manifest: {manifest_path.relative_to(root)}")
@@ -102,16 +97,9 @@ def compute(root: Path) -> ClosureResult:
             context_files.append(path)
         elif entry["kind"] == "skill":
             skill = Path(rel).parts[1]
-            result.manifest_skills.add(skill)
+            if Path(rel).parts[2:] == ("SKILL.md",):
+                result.manifest_skills.add(skill)  # an asset-only directory is not a skill
             skill_files.setdefault(skill, []).append(path)
-
-    kit_skills = _skill_names(kit / "skills")
-    project_skills = _skill_names(kit / "project-skills")
-    pool = {
-        **{name: [path] for name, path in kit_skills.items()},
-        **{name: [path] for name, path in project_skills.items()},
-        **skill_files,
-    }
 
     def label(path: Path) -> str:
         try:
@@ -136,7 +124,7 @@ def compute(root: Path) -> ClosureResult:
 
     while queue:
         current = queue.pop(0)
-        paths = pool.get(current)
+        paths = skill_files.get(current)
         if paths is None:
             result.errors.append(f"skill not found in pool: {current} ({result.chains[current]})")
             continue
@@ -152,8 +140,6 @@ def compute(root: Path) -> ClosureResult:
         result.errors.append(f"computed but not in manifest: {result.chains[name]}")
     for name in missing:
         result.errors.append(f"in manifest but not reachable: {name}")
-    for name in sorted(result.computed & set(project_skills)):
-        result.errors.append(f"System text names a project-skills skill: {result.chains[name]}")
     return result
 
 
@@ -162,10 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args(argv)
     result = compute(args.root)
-    total = len(
-        set(_skill_names(args.root / SYSTEM_REL / "skills"))
-        | set(_skill_names(args.root / KIT_REL / "skills"))
-    )
+    total = len(_skill_names(args.root / SYSTEM_REL / "skills"))
     print(f"System closure: {len(result.computed)} of {total} skills reachable; "
           f"manifest lists {len(result.manifest_skills)}")
     for name in sorted(result.computed):

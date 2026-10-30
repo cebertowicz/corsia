@@ -1,5 +1,6 @@
 import { showAllThreads } from '../support/commentDrawer';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { layouts } from '../support/liveConcurrency';
@@ -77,7 +78,7 @@ for (const [width, height, project] of layouts) {
 			await saveEvidenceScreenshot(page, testInfo, `document-suggestions-inline-open-${width}`, { fullPage: false });
 		});
 
-		test(`@flow:document-suggestions pressing an inline suggestion focuses its card, with or without the comments list at ${width}`, async ({ page, request }) => {
+		test(`@flow:document-suggestions pressing an inline suggestion focuses its card once the comments list is closed at ${width}`, async ({ page, request }) => {
 			const { drawer, editor, ids: [loose, fine] } = await openSuggestionDocument(page, request, PROSE, [
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
@@ -103,19 +104,19 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
-			// A phone's list is a sheet over the document: an insert under it cannot be pressed until the list closes.
+			// The list is a modal sheet over the document column (its scrim and grabber included) in both layouts here, since
+			// neither canvas reaches 900 px (RSR-7): an insert under it cannot be pressed until the list closes.
 			const covered = await insert(page, fine).evaluate((element) => {
 				const rect = element.getBoundingClientRect();
-				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-doc-comments-drawer]');
+				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-adaptive-drawer]');
 			});
-			if (covered) return;
-			await insert(page, fine).click();
-			await expect(drawer).toBeVisible();
-			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toBeInViewport();
-			await expect(drawer.locator(`[data-comment-id="${loose}"] .ct.focused`)).toHaveCount(0);
-			await insert(page, loose).click();
-			await expect(drawer.locator(`[data-comment-id="${loose}"] .ct.focused`)).toBeInViewport();
-			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toHaveCount(0);
+			expect(covered, 'the insert is under the list sheet and its scrim').toBe(true);
+			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			if (project === 'chromium-mobile') await insert(page, fine).tap(); else await insert(page, fine).click();
+			await expect(card('Loosen the second line.')).toBeVisible();
+			await expect(card('Loosen the second line.')).toHaveClass(/\bfocused\b/);
+			await expect(card('Tighten the first line.')).toHaveCount(0);
 		});
 
 		test(`@flow:document-suggestions accepting applies the change and rejecting leaves the file, and both clear the inline marks at ${width}`, async ({ page, request }) => {
@@ -146,7 +147,7 @@ for (const [width, height, project] of layouts) {
 			const text = '# Overlap\n\nThe quick brown fox jumps.\n';
 			const { accept, drawer, ids: [earlier, later], row } = await openSuggestionDocument(page, request, text, [
 				{ quote: 'quick brown', replacement: 'slow red', body: 'Slow it down.' },
-				{ quote: 'brown fox', replacement: 'grey wolf', body: 'A different animal.' },
+				{ quote: 'brown fox', replacement: 'grey wolf', body: 'A different animal.', author: 'person' },
 			]);
 			await expect(strike(page, earlier)).toHaveText('quick brown');
 			await expect(insert(page, earlier)).toHaveAttribute('data-insert', 'slow red');
@@ -162,11 +163,13 @@ for (const [width, height, project] of layouts) {
 		});
 
 		test(`@flow:document-suggestions typing inside a quote drops that suggestion's inline marks and keeps its card at ${width}`, async ({ page, request }) => {
+			// Loud quarantine of a product defect (EAS anti-pattern #10): tracked in #1009, owned by Documents & Artifacts; remove this line when it is fixed, and review it by 2026-10-24 whether or not it is.
+			test.fixme(true, 'cebertowicz/corsia#1009 (review by 2026-10-24): a caret reaching a suggestion quote reopens its card on every caret move, so the editor cannot take the typed character on a canvas under 900 px');
 			const { drawer, editor, ids: [loose, fine], row } = await openSuggestionDocument(page, request, PROSE, [
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
-			// The list drawer is nonmodal: a caret landing in commented text keeps it open and the editor focused.
+			// A caret landing in commented text must leave the editor focused to take the edit; pending #1009 it reopens the card.
 			await openComments(page, drawer);
 			await expect(strike(page, loose)).toHaveText('is loose');
 			// The middle of the struck quote, not either edge, so the typed character lands inside it.
@@ -178,6 +181,45 @@ for (const [width, height, project] of layouts) {
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			await expect(row(loose)).toContainText('Tighten the first line.');
+		});
+
+		test(`@flow:document-suggestions deleting the first character of a quote drops that suggestion's inline marks and keeps its card at ${width}`, async ({ page, request }) => {
+			const { drawer, editor, ids: [loose, fine], row } = await openSuggestionDocument(page, request, PROSE, [
+				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
+				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
+			]);
+			// This canvas is narrower than 900 px, so the list is a modal sheet over the document column (RSR-7): the sheet is
+			// closed before the document is touched, and the card is still listed when it opens again.
+			await openComments(page, drawer);
+			await expect(strike(page, loose)).toHaveText('is loose');
+			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			// A caret reaching the quote opens its card as a modal sheet too, and every caret move inside the quote opens it again,
+			// so the card closes first and the editor, which keeps its caret at the quote's start, takes the edit: deleting the
+			// quote's first character.
+			// The click lands at the line's end, clear of the margin markers on its left, and Home returns the caret to its start.
+			const line = editor.locator('.cm-line', { hasText: 'The first line is loose.' });
+			await line.click({ position: { x: (await line.boundingBox())!.width - 4, y: 5 } });
+			await page.keyboard.press('Home');
+			const card = page.getByRole('dialog');
+			for (let step = 0; step < 18 && !(await card.isVisible()); step += 1) await page.keyboard.press('ArrowRight');
+			await expect(card).toBeVisible();
+			await page.keyboard.press('Escape');
+			await expect(card).toHaveCount(0);
+			await expect(editor).toBeFocused();
+			await page.keyboard.press('Delete');
+			await expect(editor).not.toContainText('The first line is loose.');
+			await expect(editor).toContainText('The first line s loose.');
+			await expect(strike(page, loose)).toHaveCount(0);
+			await expect(insert(page, loose)).toHaveCount(0);
+			// Only that suggestion: the other keeps its marks.
+			await expect(strike(page, fine)).toHaveText('is fine');
+			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			// The edit moved the caret within the quote, which opens a sheet again on a phone: close it, then list the comments.
+			await page.keyboard.press('Escape');
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');
 		});
 

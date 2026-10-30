@@ -63,6 +63,22 @@ def assert_terminal_response_identity(db):
     return response
 
 
+def test_stopped_selected_child_matches_full_activity_projection(db):
+    from plans import mutations
+
+    parent = service.ensure_plan("thread", "moving", db=db)
+    step = _task(parent.id, "Delegated", db=db, spawn_kind="claude-code")
+    service.transition_node(step.id, "active", db=db)
+    child = service.ensure_plan("thread", "child", db=db)
+    work = _task(child.id, "Work", db=db)
+    service.transition_node(work.id, "active", db=db)
+    mutations.attach_spawned_thread(step.id, "child", db=db)
+    admission.select(work.id, actor_id="child", provenance="test", db=db)
+    detailed, row = assert_header_parity(db, parent.id)
+    assert row["progress"]["liveness"] == "waiting"
+    assert not detailed["nodes"][0]["execution"]["causes"][0]["child_active"]
+
+
 @pytest.mark.parametrize("selection", ["valid", "revision_superseded", "executor_superseded"])
 def test_selected_attempt_identity_and_supersession_are_owner_facts(db, selection):
     plan = service.ensure_plan("thread", "moving", db=db)

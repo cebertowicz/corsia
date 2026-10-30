@@ -92,3 +92,18 @@ def turn_snapshot(executor: str, *, db) -> dict | None:
         "plan_commitment_id": attempt["commitment_id"],
         "plan_usage_role": commitments.usage_role(attempt["node_id"], db=db),
     }
+
+
+def call_snapshot(executor: str, *, db) -> dict | None:
+    """Return the plan fields one model call by ``executor`` is billed to, or None.
+
+    The Turn-start snapshot first; a delegated child that holds no selection
+    then falls to ``delegated_usage``. Only calls read this: the Turn's own
+    ``active_turns`` snapshot is still written by ``turn_snapshot`` alone.
+    """
+    snapshot = turn_snapshot(executor, db=db)
+    if snapshot is not None:
+        return snapshot
+    from plans import delegated_usage
+
+    return delegated_usage.binding(executor, db=db)

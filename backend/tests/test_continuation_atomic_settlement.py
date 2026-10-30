@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
 
 import pytest
 
-from automation.continuation import admission, execution, triggers
+from automation.continuation import execution, triggers
 from infra.schema import SCHEMA_SQL
 
 
@@ -76,30 +75,4 @@ def test_terminal_without_delivery_rolls_back_trigger_and_source_together():
         )
 
     assert triggers.get(trigger.id, db=db).state == "dispatched"
-    assert db.execute("SELECT COUNT(*) FROM settlement_markers").fetchone()[0] == 0
-
-
-def test_deferral_exhaustion_rolls_back_trigger_and_source_together():
-    db = _db()
-    trigger = _trigger(db)
-    db.execute(
-        "UPDATE continuation_triggers SET deferrals=? WHERE id=?",
-        (admission.MAX_DEFERRALS, trigger.id),
-    )
-    db.commit()
-    exhausted = triggers.get(trigger.id, db=db)
-
-    with pytest.raises(RuntimeError, match="source settlement failed"):
-        execution.defer_trigger(
-            exhausted,
-            "global_in_flight",
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            _CrashingSource(),
-            db=db,
-            results=_results(),
-        )
-
-    stored = triggers.get(trigger.id, db=db)
-    assert stored.state == "dispatched"
-    assert stored.deferrals == admission.MAX_DEFERRALS
     assert db.execute("SELECT COUNT(*) FROM settlement_markers").fetchone()[0] == 0

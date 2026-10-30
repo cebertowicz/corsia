@@ -21,9 +21,9 @@ def added_root(monkeypatch, tmp_path) -> Path:
     return root
 
 
-def test_switch_warm_source_reads_the_added_account_root(isolated_db, added_root, tmp_path):
+def test_switch_warm_source_reads_the_added_account_root(isolated_db, added_root, tmp_path, monkeypatch):
     """checkpoint_model=target captures the registered session from the thread's own root."""
-    from core.checkpoint_cc_fork import _registered_identity
+    from core.fork_cc import _registered_identity
     from infra.database import get_db
     from registry.service import register_cc_session
     from subagents.cc_invocation import ClaudeInvocation
@@ -50,6 +50,18 @@ def test_switch_warm_source_reads_the_added_account_root(isolated_db, added_root
     assert identity is not None
     assert identity[2] == str(added_root.resolve())
     assert Path(identity[3]) == transcript
+    assert identity[6] == "none"
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET confinement='untrusted', confined_read_dirs='[\"/row\"]' WHERE id='switched'")
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr("subagents.cc_confinement.untrusted_working_dir", lambda *_args: str(tmp_path))
+    identity = _registered_identity("switched")
+    assert identity[1].confinement == "none"  # the prior process description
+    assert identity[6] == "untrusted"  # the row controls a cold capture
 
 
 @pytest.mark.asyncio

@@ -157,6 +157,35 @@ async def test_turn_admitted_during_holding_is_captured_by_the_later_cutoff(
 
 
 @pytest.mark.asyncio
+async def test_drain_database_writer_does_not_stall_event_loop(isolated_db, monkeypatch):
+    import sqlite3
+    import threading
+    import time
+    from automation import restart, self_restart
+    from infra.database import get_db
+    from infra.db_async import run_in_db
+
+    _without_projection(monkeypatch)
+    operation_id = await run_in_db(self_restart.try_acquire, None, None, None, None, "test restart")
+    database_path = get_db().execute("PRAGMA database_list").fetchone()[2]
+    writer = sqlite3.connect(database_path, timeout=5, check_same_thread=False)
+    writer.execute("BEGIN IMMEDIATE")
+    release = threading.Timer(4.0, writer.rollback)
+    release.start()
+    task = asyncio.create_task(restart.begin_restart_drain("test restart", operation_id=operation_id))
+    try:
+        started = time.monotonic()
+        await asyncio.sleep(0.1)
+        delay = time.monotonic() - started
+        print(f"event loop 0.1-second timer under 4-second writer lock: {delay:.3f}s")
+        assert delay < 1.0
+        assert (await task)["operation_id"] == operation_id
+    finally:
+        release.join()
+        writer.close()
+
+
+@pytest.mark.asyncio
 async def test_drain_tracks_exact_turn_until_terminal(
     isolated_db,
     monkeypatch,
@@ -627,7 +656,7 @@ async def test_startup_wakes_large_pending_switch_only_after_readiness_phase(
     monkeypatch.setattr(model_pending, "drive_pending_model_switch", record_preparation)
 
     logger = SimpleNamespace(info=lambda *_args: None)
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert prepared == []
     assert wakes == ("large-thread",)
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)
@@ -651,7 +680,7 @@ async def _completed():
 
 async def _run_startup_recovery(startup, logger):
     """Run both continuity halves in the order startup runs them."""
-    recovered, wakes = await startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await startup.reconcile_startup_continuity(logger)
     await startup.drive_startup_continuity(recovered, wakes, logger)
 
 
@@ -681,6 +710,7 @@ def _startup_recovery_probe(
         events.append("recover_turns")
         return SimpleNamespace(
             settlements=(SimpleNamespace(thread_id="settled-thread"),),
+            ended_turns=(),
             batches=batches,
         )
 
@@ -812,9 +842,9 @@ async def test_drive_phase_failure_is_not_reported_as_completion(monkeypatch) ->
         exception=lambda *_a: None,
     )
 
-    recovered, wakes = await startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await startup.reconcile_startup_continuity(logger)
     with pytest.raises(ExceptionGroup) as caught:
-        await startup.run_startup_drive(_completed(), recovered, wakes, logger)
+        await startup.run_startup_drive(_completed(), recovered, wakes, _rolled_back, logger)
 
     assert str(caught.value.exceptions[0]) == "webhook failure"
     assert "release_ingress" in events

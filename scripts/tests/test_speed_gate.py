@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from speed_gate import cli, fixture_build, fixture_excluded, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
+from speed_gate import cli, clock, fixture_build, fixture_excluded, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
 from speed_gate.sqlite_pin import PINNED_SQLITE, PinError, sqlite3  # noqa: E402  (the pinned build, not the stdlib one)
 from speed_gate import sqlite_pin  # noqa: E402
 
@@ -86,6 +86,14 @@ def test_a_route_that_crosses_the_ceiling_without_being_grandfathered_fails():
     assert ("/a", "ceiling", "steps") in kinds(verdict)
 
 
+def test_focus_byte_cap_applies_when_its_step_cost_is_grandfathered():
+    focus = "/api/threads/{thread_id}/messages?limit=50&view=focus"
+    base = baseline_for({focus: cost(900_000, size=131_000)})
+    assert focus in base["grandfathered"]
+    verdict = ratchet.compare(result({focus: cost(900_000, size=131_100)}), base)
+    assert (focus, "ceiling", "bytes") in kinds(verdict)
+
+
 def test_improvement_is_reported_but_never_fails():
     base = baseline_for({"/a": cost(1_000_000)})
     verdict = ratchet.compare(result({"/a": cost(100_000)}), base)
@@ -129,7 +137,7 @@ def test_counting_records_steps_and_statements_and_ignores_time(monkeypatch):
         assert statements == 1 and steps >= 20_000
         again = counters.snapshot()
         db.execute("SELECT COUNT(*) FROM t WHERE x % 7 = 0").fetchone()
-        assert abs((counters.snapshot()[0] - again[0]) - steps) <= 2 * harness.PROGRESS_EVERY
+        assert counters.snapshot()[0] - again[0] == steps  # exact: preparing it the first time is not counted
     finally:
         sqlite3.connect = real_connect
 
@@ -142,6 +150,55 @@ def test_route_target_fills_path_and_required_query_and_reports_the_unfillable()
     assert missing.url is None and "thing_id" in missing.reason
     static = routes.build_target("/docs", route, {}, {}, "tok")
     assert static.url is None and "no application read" in static.reason
+
+
+def test_path_query_fixture_matches_each_route_semantics():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("path")]))
+    extra = {
+        "/api/artifacts/resolve": {"path": "/workspace/README.md"},
+        "/api/files/content": {"path": "/workspace/README.md"},
+        "/api/files/revision": {"path": "/workspace/README.md"},
+        "/api/fs/browse": {"path": "/workspace"},
+    }
+    assert routes.build_target("/api/artifacts/resolve", route, {}, extra, "tok").url == (
+        "/api/artifacts/resolve?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/content", route, {}, extra, "tok").url == (
+        "/api/files/content?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/revision", route, {}, extra, "tok").url == (
+        "/api/files/revision?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/fs/browse", route, {}, extra, "tok").url == "/api/fs/browse?path=%2Fworkspace"
+
+
+def test_message_targets_measure_default_and_focus_client_query_shapes():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route, {"thread_id": "thread-1"}, {}, "tok",
+    )
+    assert [(target.template, target.url) for target in targets] == [
+        ("/api/threads/{thread_id}/messages", "/api/threads/thread-1/messages?token=tok&limit=50"),
+        ("/api/threads/{thread_id}/messages?limit=50&view=focus",
+         "/api/threads/thread-1/messages?token=tok&limit=50&view=focus"),
+    ]
+
+
+def test_message_targets_do_not_duplicate_the_generic_paged_read():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route, {"thread_id": "agent-thread"}, {}, "tok",
+    )
+
+    assert [target.template for target in targets] == [
+        "/api/threads/{thread_id}/messages",
+        "/api/threads/{thread_id}/messages?limit=50&view=focus",
+    ]
+    assert targets[0].url.endswith("/agent-thread/messages?token=tok&limit=50")
+    assert targets[1].url.endswith("/agent-thread/messages?token=tok&limit=50&view=focus")
 
 
 def test_update_baseline_needs_a_reason_and_grandfathers_over_ceiling_routes(tmp_path):
@@ -192,6 +249,8 @@ def test_measurement_runs_with_an_empty_home_and_account_columns_reference_real_
     monkeypatch.setenv("CODEX_HOME", "/somewhere/on/the/host")
     env = runner._env(tmp_path)
     assert env["HOME"] == str(tmp_path / "home") and "CODEX_HOME" not in env
+    # The update-status route must never reach the host checkout's remote.
+    assert env["GIT_DIR"] == str(tmp_path / "no-repository") and not (tmp_path / "no-repository").exists()
     pools = SimpleNamespace(ids={"vendor_account": ["a1"]})
     assert [fixture_rows.pool_for(column, pools) for column in ("account_id", "pending_account_id", "vendor_account_id")] \
         == ["vendor_account"] * 3
@@ -212,6 +271,57 @@ def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
     common = ["portal: SELECT 1", "db_0: SELECT 2"]
     lines = cli._trace_difference([run(common + ["db_0: SELECT 3"]), run(common)], "/a")
     assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
+
+
+def test_a_difference_between_runs_names_statements_that_ran_in_another_order():
+    def run(trace):
+        return {"routes": {"/a": {"info": {"trace": trace}}}}
+    first = ["portal: SELECT 1", "db_0: SELECT 2", "db_0: SELECT 3", "db_0: ROLLBACK"]
+    moved = ["portal: SELECT 1", "db_0: SELECT 3", "db_0: SELECT 2", "db_0: ROLLBACK"]
+    lines = cli._trace_difference([run(first), run(first), run(moved)], "/a")
+    assert lines == ["    order differs in run 3 at 2 of 4 statements, from statement 2: "
+                     "run 1 ran db_0: SELECT 2; run 3 ran db_0: SELECT 3"]
+
+
+def test_a_cached_statement_counts_the_same_whatever_ran_it_before(counted):
+    """The same work counts the same however often its cached prepared statement ran before.
+
+    SQLite starts a statement's handler interval from that statement's lifetime instruction count, so a
+    counter called every N instructions counts one execution differently by up to N with its history.
+    """
+    counters, connect = counted
+    db = connect()
+    db.execute("CREATE TABLE t(x)")
+    db.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(37)])
+    counts = []
+    for _ in range(6):
+        before = counters.steps
+        db.execute("SELECT SUM(x) FROM t").fetchone()
+        counts.append(counters.steps - before)
+    assert counts[0] > 0 and counts == [counts[0]] * 6
+
+
+def test_preparing_a_statement_is_not_counted(counted):
+    """SQLite calls the progress handler while it plans a statement, so counting it would make a statement's
+    first run on a connection (or its first after the statement cache evicted it) count more than a reuse;
+    which pooled connection prepares it first depends on how concurrent jobs interleaved."""
+    counters, connect = counted
+    db = connect()
+    db.execute("CREATE TABLE t(x)")
+    db.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(50)])
+
+    def run(sql: str) -> int:
+        before = counters.steps
+        db.execute(sql).fetchall()
+        return counters.steps - before
+
+    first, reuse = run("SELECT x FROM t WHERE x % 7 = 0"), run("SELECT x FROM t WHERE x % 7 = 0")
+    assert first == reuse > 0
+    for number in range(300):  # each used more often than the statement above, so the default cache evicts it
+        for _ in range(3):
+            run(f"SELECT x FROM t WHERE x = {number}")
+    assert run("SELECT x FROM t WHERE x % 7 = 0") == reuse
+
 
 
 MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}, "short": {}}
@@ -329,6 +439,28 @@ def background(tmp_path, monkeypatch):
     return harness.Background(tmp_path), namespace
 
 
+def test_background_ignores_venv_tasks_but_tracks_application_tasks(tmp_path, monkeypatch):
+    """Interpreter internals live under the backend root but are not application work."""
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_task", asyncio.BaseEventLoop.create_task)
+    venv_code: dict = {}
+    app_code: dict = {}
+    exec(
+        compile("async def internal():\n    return None\n", str(tmp_path / ".venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py"), "exec"),
+        venv_code,
+    )
+    exec(compile("async def refresh():\n    return None\n", str(tmp_path / "api/usage_rollup.py"), "exec"), app_code)
+    background = harness.Background(tmp_path)
+
+    async def scenario():
+        await asyncio.gather(
+            asyncio.get_running_loop().create_task(venv_code["internal"]()),
+            asyncio.get_running_loop().create_task(app_code["refresh"]()),
+        )
+
+    asyncio.run(scenario())
+    assert [name for name, _ in background._live] == ["api/usage_rollup.py:refresh"]
+
+
 def test_drain_waits_for_a_task_the_request_started_and_names_it(background):
     bg, app = background
 
@@ -420,6 +552,7 @@ def run_heavy(counters, db):
 def test_an_application_progress_handler_neither_replaces_nor_clears_the_count(counted):
     counters, connect = counted
     db = connect()
+    run_heavy(counters, db)  # a new connection's first statement also reads the schema
     baseline = run_heavy(counters, db)
     assert baseline > 100_000
     calls: list[int] = []
@@ -523,3 +656,46 @@ def test_the_report_lists_fixture_tables_below_their_target_with_the_reason():
     text = report.render(current, ratchet.compare(current, baseline_for({"/a": cost()})), baseline_for({"/a": cost()}),
                          report_only=True, base_label="the baseline")
     assert "`wakes` | 966 | 553 | thread_id is UNIQUE" in text
+
+
+@pytest.fixture
+def join(monkeypatch):
+    """The application's join module, loaded by path: it needs only the standard library."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "backend" / "api" / "measurement_join.py"
+    spec = importlib.util.spec_from_file_location("speed_gate_test_measurement_join", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)  # its dataclass looks itself up there
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("frozen, reads", [(True, 1), (False, 2)])
+def test_a_reused_measurement_read_stays_reused_however_slowly_the_run_goes(monkeypatch, join, frozen, reads):
+    """A loaded host once stretched the gap past the window, so one run of a tree measured the recompute."""
+    import time
+
+    if frozen:
+        clock.freeze_reuse_window(join)
+    real, late = time.monotonic, [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: real() + late[0])
+    calls = []
+
+    async def read():
+        calls.append(1)
+        return {}
+
+    async def page_then_slow_where_to_look():
+        await join.joined("payload", read, reuse_finished=True)
+        late[0] += join.RETENTION_SECONDS + 1
+        await join.joined("payload", read, reuse_finished=True)
+
+    asyncio.run(page_then_slow_where_to_look())
+    assert len(calls) == reads
+
+
+def test_the_reuse_clock_freeze_refuses_a_module_that_reads_another_clock(join):
+    join.time = SimpleNamespace(monotonic=lambda: 0.0)
+    with pytest.raises(RuntimeError, match="no longer reads the clock"):
+        clock.freeze_reuse_window(join)

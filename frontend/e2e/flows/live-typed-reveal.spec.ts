@@ -1,9 +1,14 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
+import { readFile, writeFile } from 'node:fs/promises';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
+import { setDeliveryPreference } from '../support/heldComments';
 import { openLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, designateConductor } from '../support/sharedLiveDocument';
 import { layouts } from '../support/liveConcurrency';
-import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses } from '../support/mock';
+import { beginComment } from '../support/liveCommentProof';
+import { expectCapability, watchSocket } from '../support/documentOpen';
 
 /**
  * Design 6.1 acceptance on the real editor: an agent live write is typed in at that agent's caret.
@@ -70,6 +75,84 @@ async function seed(request: APIRequestContext, owner: Agent, stamp: string): Pr
 }
 
 for (const [width, height, project] of layouts) {
+	test(`@surface:live-document an agent file edit preserves a focused comment draft at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.');
+		test.setTimeout(120_000);
+		const stamp = `${width}-${Date.now()}`;
+		const context = await browser.newContext({ viewport: { width, height } });
+		try {
+			const viewer = await context.newPage();
+			const socket = watchSocket(viewer);
+			await setDeliveryPreference(request, true);
+			const agent = await openAgent(request, viewer, `Draft Agent ${stamp}`);
+			const live = await seed(request, agent, stamp);
+			const frames = await openLiveDocument(viewer, live);
+			const quote = `lead line ${stamp}`, body = `Unfinished ${stamp}`;
+			await beginComment(viewer, quote, body);
+			const input = viewer.getByPlaceholder('Comment…');
+			await expect(input).toBeFocused();
+			const editorNode = await viewer.locator('.cm-content').elementHandle();
+			await seedMockResponses(request, [
+				{ tool_calls: [{ id: `show-${stamp}`, name: 'document_open', arguments: JSON.stringify({ artifact_id: live.artifactId }) }], completion_gate: `show-${stamp}`, finish_reason: 'tool_calls', match_thread: agent.id },
+				{ tool_calls: [{ id: `register-${stamp}`, name: 'artifact_register', arguments: JSON.stringify({ path: live.docPath, description: `Updated ${stamp}` }) }], finish_reason: 'tool_calls', match_thread: agent.id },
+				{ content: 'Updated document registry.', finish_reason: 'stop', match_thread: agent.id },
+			]);
+			await sendChatMessage(agent.page, 'Show and register the document.');
+			await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(1);
+			await viewer.bringToFront();
+			await input.focus();
+			await expectCapability(socket, agent.id, { canShow: false, visibleArtifactId: live.artifactId });
+			await releaseMockGate(request, `show-${stamp}`);
+			await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(3);
+			await expect.poll(() => socket.results, { timeout: 10_000 }).toContainEqual(expect.objectContaining({ outcome: 'already_open' }));
+			await expect.poll(async () => {
+				const response = await request.get('/api/artifacts/resolve', { params: { token: TEST_TOKEN, path: live.docPath } });
+				return response.ok() ? (await response.json()).artifact?.description : null;
+			}).toBe(`Updated ${stamp}`);
+			expect(await editorNode!.evaluate(node => node.isConnected), 'the viewer stays mounted across the agent turn').toBe(true);
+			await expect(input).toHaveValue(body);
+			await expect(input).toBeFocused();
+			await agentWrites(request, agent, live, MARKER_A, `Edited elsewhere ${stamp}`);
+			await expect(viewer.locator('.cm-content')).toContainText(`Edited elsewhere ${stamp}`, { timeout: 20_000 });
+			await expect(input).toBeVisible();
+			await expect(input).toHaveValue(body);
+			await expect(input).toBeFocused();
+			await viewer.keyboard.type(' continued');
+			await expect(input).toHaveValue(`${body} continued`);
+			await expect(viewer.locator('.cm-content')).toContainText(quote);
+			// A process outside CORSIA writes the disposable file. The next lane write imports it first.
+			const disk = await readFile(live.docPath, 'utf8');
+			await writeFile(live.docPath, disk.replace(MARKER_B, `Outside disk ${stamp}`));
+			await agentWrites(request, agent, live, `closing line ${stamp}`, `Closing edited ${stamp}`);
+			await expect(viewer.locator('.cm-content')).toContainText(`Outside disk ${stamp}`);
+			await expect(input).toHaveValue(`${body} continued`);
+			await expect(input).toBeFocused();
+			expect(frames.opened.get(live.artifactId)).toBe(1);
+			const params = { token: TEST_TOKEN };
+			const agentComment = async (data: Record<string, unknown>) => {
+				const response = await request.post('/api/delegation/docs/comments', { params, data: { as_session_id: agent.id, ...data } });
+				expect(response.ok(), await response.text()).toBeTruthy();
+				return (await response.json()).comment.id as string;
+			};
+			const intact = async () => { await expect(input).toBeVisible(); await expect(input).toHaveValue(`${body} continued`); await expect(input).toBeFocused(); };
+			const root = await agentComment({ artifact_id: live.artifactId, quote: `Closing edited ${stamp}`, body: 'Agent comment' });
+			await expect(viewer.locator('.cm-comment-anchor')).not.toHaveCount(0);
+			await intact();
+			await agentComment({ parent_id: root, body: 'Agent reply' });
+			await intact();
+			const resolved = await request.patch(`/api/delegation/docs/comments/${root}`, { params, data: { as_session_id: agent.id, resolved: true } });
+			expect(resolved.ok(), await resolved.text()).toBeTruthy();
+			await intact();
+			const suggestion = await agentComment({ artifact_id: live.artifactId, quote: `Outside disk ${stamp}`, body: 'Agent suggestion', replacement: `Accepted ${stamp}` });
+			await intact();
+			const accepted = await request.post(`/api/comments/${suggestion}/decision`, { params, data: { decision: 'accept' } });
+			expect(accepted.ok(), await accepted.text()).toBeTruthy();
+			await expect(viewer.locator('.cm-content')).toContainText(`Accepted ${stamp}`);
+			await intact();
+			await viewer.screenshot({ path: testInfo.outputPath(`agent-edit-draft-${width}.png`), animations: 'disabled' });
+		} finally { await context.close(); }
+	});
+
 	test(`@surface:live-document an agent write types in at the agent caret, then the caret blinks idle at ${width}`, async ({ browser, request }, testInfo) => {
 		test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.');
 		test.setTimeout(120_000);

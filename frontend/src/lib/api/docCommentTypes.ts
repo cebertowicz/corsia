@@ -15,12 +15,13 @@ export interface ServerComment {
 	resolved: number;
 	acked: number;
 	replacement?: string | null;
+	insert_after?: boolean | number;
 	decision?: 'accepted' | 'rejected' | null;
 	decided_by?: string | null;
 	orphaned?: boolean;
 	created_at: string;
 	updated_at: string;
-	reply_waiting?: boolean;
+	new_reply_ids?: string[];
 	replies?: ServerComment[];
 	/** A region comment on an image (DCOL-FR13.3): fractions of the image; w = h = 0 is a point. */
 	region_x?: number | null;
@@ -41,8 +42,10 @@ export type ImageRegion = { x: number; y: number; w: number; h: number };
 
 export interface CommentFeedback {
 	open_count: number;
+	/** Of the open comments, those held for the document's header Send and for its image viewer's Send. */
+	document_held_count?: number;
+	image_held_count?: number;
 	owner_label: string | null;
-	grace_closes_at: string | null;
 	undelivered_batches: UndeliveredBatch[];
 }
 

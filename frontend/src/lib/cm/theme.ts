@@ -1,3 +1,4 @@
+import '../components/commentAnchors.css';
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -24,9 +25,14 @@ export const docTheme = EditorView.theme({
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
-	'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-		backgroundColor: 'var(--accent-subtle)'
-	},
+	// The selection is the strongest wash in the editor: --accent-subtle is a 12% wash that sits at about 1.1:1 on the page,
+	// too faint to see a drag, and it is also the matched-text wash below, so it is its own token rather than that one.
+	// --accent-selection follows the accent (a project's, or the default) and comes from accentRoles() with every other
+	// accent role: the share that reads against the page is per accent and theme, since the same percentage of a pale
+	// colour reads far fainter than of a deep one. .cm-selectionMatch keeps the faint wash so a match never reads as
+	// the selection. The editor draws no selection layer of its own (no drawSelection), so the native ::selection is
+	// the only selection there is.
+	'::selection': { backgroundColor: 'var(--accent-selection)' },
 	'.cm-selectionMatch': { backgroundColor: 'var(--accent-wash)' },
 	'.cm-gutters': { display: 'none' },
 
@@ -75,6 +81,8 @@ export const docTheme = EditorView.theme({
 	// against the editor's height map and a click lands on the line underneath.
 	// The diagram widget's spacing is beside the shared .mermaid-diagram rule in app.css.
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
+	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
+	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
 	'.cm-md-table .table-wrap': { margin: '0' },
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
@@ -82,21 +90,13 @@ export const docTheme = EditorView.theme({
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 
-	'.cm-comment-anchor': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 13%, transparent)',
-		borderBottom: '2px solid color-mix(in srgb, var(--amber) 42%, transparent)',
-		transition: 'background-color 0.15s'
-	},
-	// The captured range while its comment is being written: the anchor's amber with a dashed
-	// underline, so an unposted draft never reads as a placed or focused comment.
-	'.cm-comment-pending': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 20%, transparent)',
-		borderBottom: '2px dashed var(--amber)'
-	},
-	'.cm-comment-focused': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 26%, transparent)',
-		borderBottomColor: 'var(--amber)'
-	},
+	// Text anchor rules live in commentAnchors.css for documents and chat.
+	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
+	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
+	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
+	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
+	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
+	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
 	// Markers live in a rail the content padding reserves (--doc-rail: 24px for a fine pointer,
 	// 44px for a coarse or unknown one, decided by railWidth() and set by the rail and the viewer;
 	// the document header takes the same inset, and every CSS fallback is the unknown-pointer 44px). The rail is a

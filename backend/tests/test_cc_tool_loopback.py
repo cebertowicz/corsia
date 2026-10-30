@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -369,13 +368,14 @@ async def test_stdio_http_client_preserves_tool_result_text(result):
 
 
 @pytest.mark.asyncio
-async def test_stdio_http_client_ignores_environment_proxies():
+async def test_stdio_http_client_ignores_environment_proxies(monkeypatch):
     from subagents import corsia_mcp_server
 
-    client = corsia_mcp_server._http_client("live-secret", "cp-1")
+    monkeypatch.setenv("CORSIA_FORK_ID", "cp-1")
+    client = corsia_mcp_server._http_client("live-secret")
     try:
         assert client._trust_env is False
-        assert client.headers["X-CORSIA-Checkpoint-Id"] == "cp-1"
+        assert client.headers["X-CORSIA-Fork-Id"] == "cp-1"
     finally:
         await client.aclose()
 
@@ -1036,7 +1036,7 @@ async def test_rejected_resume_does_not_replace_an_unsettled_process(monkeypatch
     )
     monkeypatch.setattr(cc_feed_transition, "require_cc_provider_fit", lambda *_: None)
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _catalog_id: target,
+        "llm.resolution.resolve_execution_target", lambda _catalog_id, **_k: target,
     )
 
     try:
@@ -1378,8 +1378,10 @@ async def test_constructor_failure_cleans_unregistered_seed_and_config(
     monkeypatch.setattr(cc_destination, "_main_working_dir", lambda *_args: str(tmp_path))
 
     seed_glob = "cc-seed-main-1-*"
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    seeds_before = set(tmp_path.glob(seed_glob))
+    from tools.private_runtime_files import SEED_DIR, private_runtime_dir
+
+    seed_dir = private_runtime_dir(SEED_DIR)
+    seeds_before = set(seed_dir.glob(seed_glob))
     target = cc_target()
     prepared = await prepared_cc_input("main-1", "hello", target)
     with pytest.raises(RuntimeError, match="constructor broke"):
@@ -1391,7 +1393,7 @@ async def test_constructor_failure_cleans_unregistered_seed_and_config(
 
     assert runtime._LIVE.get("main-1") is None
     assert not Path(created["config"]).exists()
-    assert set(Path(tempfile.gettempdir()).glob(seed_glob)) == seeds_before
+    assert set(seed_dir.glob(seed_glob)) == seeds_before
 
 
 @pytest.mark.asyncio

@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 from core.project_context import resolve_project_paths
+from tools.private_runtime_files import SEED_DIR, private_mkstemp
 
 log = logging.getLogger(__name__)
 
@@ -138,8 +138,15 @@ def _artifact_cc_session_cwd(thread_session_id: str, db) -> str | None:
     return cwd if isinstance(cwd, str) and cwd else None
 
 
-def registered_cwd_or_default(session_id: str, db, default: str) -> str:
-    """Use a current-scope registered cwd, otherwise the current default."""
+def registered_cwd_or_default(session_id: str, db, default: str, confinement) -> str:
+    """Use a current-scope registered cwd, otherwise the current default.
+
+    A confined child always runs in its own directory, the one the launch's
+    ``confinement`` (read once by the caller) names, even after its provider
+    session was retired.
+    """
+    if confinement.confined:
+        return confinement.working_dir
     registered = _artifact_cc_session_cwd(session_id, db)
     if not registered:
         return default
@@ -196,7 +203,7 @@ def _build_seed(working_dir: str | None) -> str:
 
 
 def _write_seed_file(child_id: str, seed: str) -> str:
-    fd, path = tempfile.mkstemp(prefix=f"cc-seed-{child_id[:8]}-", suffix=".txt")
+    fd, path = private_mkstemp(SEED_DIR, prefix=f"cc-seed-{child_id[:8]}-", suffix=".txt")
     with os.fdopen(fd, "w") as f:
         f.write(seed)
     return path

@@ -68,7 +68,8 @@ describe('F2 the block that holds what is new', () => {
 		render();
 		const capsule = host.querySelector<HTMLElement>('[data-work-block][data-new]');
 		expect(capsule).not.toBeNull();
-		expect(capsule!.querySelector('.fold-new')?.textContent).toContain('new');
+		expect(capsule!.querySelector('[data-new-capsule]')?.textContent).toContain('new');
+		expect(capsule!.querySelector('[data-visit-divider]')).toBeNull();
 		expect(capsule!.querySelector('.fold-toggle')?.getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
 		expect(host.querySelectorAll('[data-work-block]')).toHaveLength(1);
 	});

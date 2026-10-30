@@ -1,0 +1,118 @@
+"""Where first-run setup stands, kept by the backend: one record per install.
+
+The record is the only owner of "did this person finish setup". It holds the
+step reached after the account exists, the person's local-AI choice, which
+subscriptions they said they pay for (``picks``), the setup-to-chat handoff, and
+``setup_completed``, which is written only when they finish. Eligibility facts
+(memory, disk, sources) are never stored here: a resumed setup re-reads them.
+
+An install with no record, or one made by ``corsia user add``, has no setup to
+resume: with an account present it counts as completed. Only a record that
+reached a step and was never completed reopens setup. An install the shell marked
+at its first run (``infra.setup_marker``) never gets that far: its unfinished setup is wiped
+on the next launch. That marker exists only while this record reads unfinished, so every path that makes it
+read finished removes the marker first (``release_marker_if_finished``).
+"""
+
+from __future__ import annotations
+
+import logging
+import sqlite3
+
+import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
+from infra.database import write_transaction
+from infra.settings import get_setting, set_setting
+
+logger = logging.getLogger(__name__)
+
+KEY = "setup_progress"
+#: Steps after the account exists: Connect an AI, and the existing-oMLX question inside it.
+STEPS = frozenset({"models", "local-consent"})
+#: What the person says they pay for: the two subscriptions.
+PICKS = ("claude", "chatgpt")
+
+
+class SetupProgressError(ValueError):
+    """A change the record refuses: an unknown step, or one outside what the caller may write."""
+
+
+def read(*, db: sqlite3.Connection | None = None) -> dict | None:
+    """The stored record, or None when this install never started setup in the app."""
+    return get_setting(KEY, db=db)
+
+
+def view(*, db: sqlite3.Connection | None = None) -> dict:
+    """What the signed-in app reads: whether setup is completed, and where to reopen it if not."""
+    record = read(db=db) or {}
+    incomplete = record.get("step") in STEPS and record.get("setup_completed") is not True
+    local_ai = record.get("local_ai")
+    picks = record.get("picks")
+    return {
+        "setup_completed": not incomplete,
+        "step": record["step"] if incomplete else None,
+        "local_ai": local_ai if isinstance(local_ai, bool) else None,
+        "picks": {key: picks.get(key) is True for key in PICKS} if isinstance(picks, dict) else None,
+    }
+
+
+def release_marker_if_finished(*, db: sqlite3.Connection | None = None) -> None:
+    """Delete the shell's wipe marker once this install has an account and ``view()`` reads it as finished.
+
+    The marker exists only while setup is unfinished, and ``view()`` is the one answer to that. Every way an install
+    can come to read finished calls this: the first account made outside the app (``corsia user add``), backend
+    startup, and ``update(completed=True)``. Before an account exists the marker stays: the first run is still
+    being set up. Raises ``OSError`` if the marker cannot be deleted.
+    """
+    from infra import accounts
+
+    if setup_marker.marker_path().exists() and accounts.has_users(db) and view(db=db)["setup_completed"]:
+        setup_marker.remove()
+
+
+def release_marker_at_startup(startup_logger) -> None:
+    """``release_marker_if_finished`` for backend startup, which a marker that will not go never stops."""
+    try:
+        release_marker_if_finished()
+    except OSError:
+        startup_logger.exception("The unfinished-setup marker of a finished install could not be removed")
+
+
+def start_after_account(first_run_path: str | None, *, db: sqlite3.Connection) -> None:
+    """The first account was made in the app: setup is now at Connect an AI, with any earlier choice kept."""
+    if first_run_path != "app":
+        return
+    set_setting(KEY, {**(read(db=db) or {}), "step": "models"}, db=db)
+
+
+def update(
+    *, step: str | None = None, local_ai: bool | None = None, picks: dict[str, bool] | None = None,
+    handoff: dict | None = None, completed: bool = False, db: sqlite3.Connection | None = None,
+) -> None:
+    """Record setup state and the validated setup-to-chat handoff; a completed setup never reopens."""
+    if step is not None and step not in STEPS:
+        raise SetupProgressError("unknown setup step")
+    if picks is not None and (set(picks) != set(PICKS) or not all(isinstance(on, bool) for on in picks.values())):
+        raise SetupProgressError("picks must say yes or no for each of claude and chatgpt")
+    # One write transaction around the read and the write: overlapping changes queue, so a step
+    # written late can never overwrite a completion that landed first.
+    with write_transaction(db, scope="setup_progress_update") as connection:
+        record = read(db=connection) or {}
+        if record.get("setup_completed") is True:
+            return
+        if step is not None and "step" in record:  # only a setup the app started can move; none is begun here
+            record["step"] = step
+        if local_ai is not None:
+            record["local_ai"] = local_ai
+        if picks is not None:
+            record["picks"] = {key: picks[key] for key in PICKS}
+        if handoff is not None:
+            record["handoff"] = handoff
+        if completed:
+            # Before the commit: a finished install must never still carry the shell's wipe marker.
+            try:
+                setup_marker.remove()
+            except OSError as error:
+                logger.error("The unfinished-setup marker could not be removed, so setup was not finished", exc_info=True)
+                raise SetupProgressError("setup could not be finished: the unfinished-setup marker stays") from error
+            record["setup_completed"] = True
+        set_setting(KEY, record, db=connection)

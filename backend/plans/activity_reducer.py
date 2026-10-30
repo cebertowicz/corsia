@@ -39,7 +39,7 @@ class ReducedNode:
 
 def _execution_facts(
     row: dict, plan: dict, *, decision_wait: bool, child_cause: dict | None,
-) -> tuple[str, bool, bool, bool, bool]:
+) -> tuple[str, list[dict], bool, bool, bool, bool]:
     causes = [*admission_projection.intrinsic_cause_facts(row, plan), *row["causes"]]
     if decision_wait:
         causes.append({"kind": "waiting", "reason_key": "decision"})
@@ -54,7 +54,7 @@ def _execution_facts(
     liveness_quiet = operator_node_state.quiet_from_causes(
         condition, causes, row["own_prerequisite_ids"],
     )
-    return condition, child_active, child_working, quiet_block, liveness_quiet
+    return condition, causes, child_active, child_working, quiet_block, liveness_quiet
 
 
 def _terminal_node(state: str, review_kind: str | None) -> ReducedNode:
@@ -90,15 +90,21 @@ def reduce_node(
     if state in service._TERMINAL_STATES:
         # Terminal lifecycle state has higher precedence than every live fact.
         return _terminal_node(state, review_kind)
-    condition, child_active, child_working, quiet_block, liveness_quiet = _execution_facts(
+    condition, causes, child_active, child_working, quiet_block, liveness_quiet = _execution_facts(
         row, plan, decision_wait=decision_wait, child_cause=child_cause,
     )
-    needs_user = operator_node_state.needs_user_from_facts(
+    paused = operator_display_state.plan_defers_asks(plan["state"])
+    node_paused = bool(row["has_user_pause"])
+    asks_user = operator_display_state.asks_user_from_facts(
         str(row["state"]),
         condition,
         None if row["assignee"] is None else str(row["assignee"]),
         review_kind,
         has_attention=bool(row["has_attention"]),
+        causes=causes,
+    )
+    needs_user = asks_user and not operator_display_state.ask_deferred(
+        plan_paused=paused, node_paused=node_paused,
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,
@@ -111,7 +117,7 @@ def reduce_node(
         str(row["state"]),
         condition,
         review_kind,
-        needs_user=needs_user,
+        asks_user=asks_user,
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
     )
@@ -127,6 +133,8 @@ def reduce_node(
         child_working=child_working,
         quiet_block=quiet_block,
         unactionable_user_block=bool(row["has_user_block"]) and not needs_user,
+        plan_paused=paused,
+        node_paused=node_paused,
     )
     return ReducedNode(
         condition=condition,
@@ -159,10 +167,11 @@ def plan_state(
         if row["state"] not in service._TERMINAL_STATES
     ]
     conditions = [item.condition for item in incomplete]
+    delegated_moving = any(item.child_working for item in incomplete)
     moving = any(
         item.condition == "running" and not item.executor_stalled
         for item in incomplete
-    ) or any(item.child_working for item in incomplete)
+    ) or delegated_moving
     held = any(item.condition == "blocked" and not item.liveness_quiet for item in incomplete)
     return PlanState(
         progress=Progress(
@@ -174,6 +183,7 @@ def plan_state(
             ),
         ),
         moving=moving,
+        delegated_moving=delegated_moving,
     )
 
 

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+import sqlite3
 import time
 
 import pytest
+from loguru import logger
 
 from core.turn_core import TurnIdentity
 from core.turn_core import persist_turn_start
-from events.connectors import registered_command_triggers
+from events import observe_rules
 from infra.database import get_db
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.thread_driver import admit_input
+from registry import tool_result_observation as observation_module
 from registry import models
-from registry.observer import command_matches_trigger
+from registry.command_match import command_matches_rule
 from subagents.child_thread import persist_tool_use
 from subagents.harness_tool_bridge import execute_tool
 from tests.registry_helpers import artifact_rows_for_thread, make_session
@@ -25,7 +28,18 @@ from tools.shell import (
 
 
 _URL = "https://github.com/owner/repo/pull/42"
-_GITHUB_TRIGGER = registered_command_triggers("bash")[0][1]
+
+
+def _shipped_rule() -> observe_rules.ObserveRule:
+    """The shipped gh pr create row, as a fresh install seeds it."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(EVENT_RULE_SCHEMA_SQL)
+    observe_rules.sync_shipped_rules(db)
+    return observe_rules.from_row(db.execute("SELECT * FROM event_rules").fetchone())
+
+
+_GITHUB_TRIGGER = _shipped_rule()
 
 
 def _direct_shell_context(thread_id: str) -> dict[str, object]:
@@ -103,6 +117,8 @@ def _stub_process(
         lambda _pid: "test-fingerprint",
     )
     monkeypatch.setattr(shell_module, "list_registered_repo_policies", lambda: [])
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell_module, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell_module, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell_module, "is_path_allowed", lambda *_a, **_k: True)
@@ -158,7 +174,7 @@ def _pr_rows(db, thread_id: str) -> list[dict]:
     ],
 )
 def test_direct_classifier_rejects_active_shell_expansion(command):
-    assert not command_matches_trigger(command, _GITHUB_TRIGGER)
+    assert not command_matches_rule(command, _GITHUB_TRIGGER)
 
 
 @pytest.mark.parametrize(
@@ -174,7 +190,7 @@ def test_direct_classifier_rejects_active_shell_expansion(command):
     ],
 )
 def test_direct_classifier_allows_literal_shell_metacharacters(command):
-    assert command_matches_trigger(command, _GITHUB_TRIGGER)
+    assert command_matches_rule(command, _GITHUB_TRIGGER)
 
 
 @pytest.mark.asyncio
@@ -191,7 +207,7 @@ async def test_direct_success_registers_from_full_output_and_notifies(
     db = get_db()
     thread_id = make_session(db, prefix="bash-pr")
     notifications = []
-    monkeypatch.setattr(shell_module, "notify_changed", notifications.append)
+    monkeypatch.setattr(observation_module, "notify_changed", notifications.append)
     _stub_process(monkeypatch, stdout=stdout, stderr=stderr)
 
     result = await BashTool().execute(
@@ -360,7 +376,7 @@ async def test_cross_user_preowned_pr_cannot_be_claimed(isolated_db, monkeypatch
     row = models.resolve("github", "pull-request", "owner/repo#42", db=db)
     assert row is not None and row["parent_thread_id"] == owner_id
     assert _pr_rows(db, other_id) == []
-    assert "Warning: An external artifact was created" in other_result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in other_result
     assert "artifact_register" in other_result
 
 
@@ -377,22 +393,20 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(
-        shell_module,
-        "observe_command_result",
-        fail_registration,
-        raising=False,
-    )
+    monkeypatch.setattr(observation_module, "observe_tool_result", fail_registration)
 
-    with caplog.at_level(logging.ERROR, logger="tools.shell"):
+    sink = logger.add(caplog.handler, level="ERROR", format="{message}")
+    try:
         result = await BashTool().execute(
             "gh pr create --title warning",
             **_direct_shell_context(thread_id),
         )
+    finally:
+        logger.remove(sink)
 
     assert result.startswith(_URL)
     assert not result.startswith("Error")
-    assert "Warning: An external artifact was created" in result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in result
     assert "artifact_register" in result
     assert "registry unavailable" in caplog.text
     assert _pr_rows(db, thread_id) == []
@@ -408,22 +422,21 @@ async def test_slow_registration_does_not_block_event_loop_timer(
     _stub_process(monkeypatch, stdout=_URL + "\n")
     events = []
 
-    def slow_registration(*_args, **_kwargs):
+    def slow_registration(*_args, **kwargs):
         events.append("db-start")
         time.sleep(0.05)
         events.append("db-done")
-        return {
+        artifact = {
             "integration": "github",
             "type": "pull-request",
             "external_id": "owner/repo#42",
         }
+        kwargs["changed"].append(artifact)
+        return artifact
 
-    monkeypatch.setattr(shell_module, "observe_command_result", slow_registration)
+    monkeypatch.setattr(observation_module, "observe_tool_result", slow_registration)
     monkeypatch.setattr(
-        shell_module,
-        "notify_changed",
-        lambda _artifact: events.append("notified"),
-        raising=False,
+        observation_module, "notify_changed", lambda _artifact: events.append("notified"),
     )
 
     async def timer():
@@ -454,7 +467,7 @@ async def test_bash_registration_warning_budget_preserves_warning(
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(shell_module, "observe_command_result", fail_registration)
+    monkeypatch.setattr(observation_module, "observe_tool_result", fail_registration)
 
     result = await BashTool().execute(
         "gh pr create --title capped",
@@ -462,8 +475,21 @@ async def test_bash_registration_warning_budget_preserves_warning(
     )
 
     assert len(result) <= BASH_REGISTRATION_WARNING_RESULT_CAP
-    assert "Warning: An external artifact was created" in result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in result
     assert "artifact_register" in result
+
+
+@pytest.mark.asyncio
+async def test_a_registration_note_keeps_the_full_output_budget(isolated_db, monkeypatch):
+    db = get_db()
+    thread_id = make_session(db, prefix="bash-note")
+    stdout = ("x" * 6_000) + "\n" + _URL + "\n"
+    _stub_process(monkeypatch, stdout=stdout)
+
+    result = await BashTool().execute("gh pr create --title noted", **_direct_shell_context(thread_id))
+
+    assert result.startswith(stdout.rstrip("\n")) and "truncated" not in result
+    assert result.endswith("\n\nRegistered pull request owner/repo#42 to you.")
 
 
 

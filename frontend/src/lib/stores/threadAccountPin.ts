@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { token } from './auth';
-import { loadModels } from './modelsLoad';
+import { loadComposerModels } from './modelsLoad';
 import { threads } from './threads';
 import { acceptsThreadAccountFrame, loadThreadVendorAccounts, threadAccountFields } from './threadVendorAccounts';
 import { SERVER_UNREACHABLE } from '$lib/plainError';
@@ -15,7 +15,7 @@ const REFUSALS: Record<string, string> = {
 export const PIN_FAILED = "Couldn't switch accounts. Try again.";
 
 /** The refusal's reason code, which the backend writes first in its detail (`<code>; <advice>`). */
-function reasonOf(detail: unknown): string | null {
+export function reasonOf(detail: unknown): string | null {
 	return typeof detail === 'string' ? detail.trim().match(/^[a-z0-9]+(?:_[a-z0-9]+)+/)?.[0] ?? null : null;
 }
 
@@ -48,12 +48,12 @@ export async function pinThreadAccount(threadId: string, accountId: string): Pro
 	if (body?.pending === true) {
 		// Chosen during a running turn, or another vendor's account: it applies at a later turn, and the
 		// catalog already marks it. The thread's own binding is unchanged, so its fields stay.
-		await loadModels();
+		await loadComposerModels(threadId);
 		return { ok: true, changed: false };
 	}
 	const frame = { thread_id: threadId, account_id: body?.account_id, runtime_context_epoch: body?.runtime_context_epoch };
 	if (typeof frame.account_id !== 'string' || !acceptsThreadAccountFrame(frame)) return { ok: false, message: PIN_FAILED };
 	threads.update((rows) => rows.map((row) => row.id === threadId ? { ...row, ...threadAccountFields(frame) } : row));
-	await Promise.all([loadThreadVendorAccounts(threadId, `epoch-${frame.runtime_context_epoch}`), loadModels()]);
+	await Promise.all([loadThreadVendorAccounts(threadId, `epoch-${frame.runtime_context_epoch}`), loadComposerModels(threadId)]);
 	return { ok: true, changed: body?.changed === true };
 }

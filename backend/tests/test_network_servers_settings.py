@@ -133,7 +133,7 @@ def test_lifecycle_reload_dispatches_to_discover(client):
     assert "4" in body["message"]
 
 
-def test_lifecycle_reload_propagates_failure_message(client):
+def test_lifecycle_reload_logs_failure_and_shows_retry(client, caplog):
     with patch(
         "llm.catalog.discover_network_models",
         new=AsyncMock(return_value={
@@ -147,7 +147,9 @@ def test_lifecycle_reload_propagates_failure_message(client):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
-    assert "offline" in body["message"]
+    assert body["message"] == "Couldn’t refresh the model list. Try again."
+    assert body["ref"].startswith("local-")
+    assert f"reference={body['ref']}: Server is offline" in caplog.text
 
 
 def test_lifecycle_start_dispatches_to_provider_connector(client, monkeypatch):
@@ -186,6 +188,20 @@ def test_lifecycle_stop_dispatches_to_provider_connector(client, monkeypatch):
     assert r.json()["ok"] is True
 
 
+def test_a_failed_stop_carries_a_reference_logged_with_it(client, caplog):
+    with patch(
+        "llm.providers.omlx.stop_server",
+        new=AsyncMock(return_value={"ok": False, "message": "Still running", "error": "SIGTERM failed: denied"}),
+    ):
+        r = client.post(
+            f"/api/settings/network-servers/ns-test/lifecycle/stop?token={_TOKEN}"
+        )
+    body = r.json()
+    assert body["ok"] is False and body["ref"].startswith("local-")
+    assert "error" not in body
+    assert f"reference={body['ref']}: SIGTERM failed: denied" in caplog.text
+
+
 def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     from llm import network_discovery as _nd
     monkeypatch.setattr(
@@ -202,3 +218,57 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     body = r.json()
     assert body["ok"] is False
     assert "retired" in body["message"]
+
+
+def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeypatch):
+    from llm import local_keep_loaded
+
+    model = "Qwen3.8-27B-oQ4e"
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_LOADED)
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": False, "message": "no"})):
+        client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model})
+    assert local_keep_loaded.failures("ns-test") == {}
+
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_KEPT)
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={"ok": True})):
+        r = client.put(f"/api/settings/network-servers/ns-test/models/{model}/settings", params=_auth(), json={"pinned": True})
+    assert r.status_code == 200, r.text
+    assert local_keep_loaded.failures("ns-test") == {}
+
+
+def test_download_progress_failure_hides_exception(client, monkeypatch, caplog):
+    from llm import network_endpoints
+    monkeypatch.setattr(network_endpoints, "build_mgmt_base", lambda _sid: "http://localhost:5100")
+    with patch("api.network_server_jobs.httpx.AsyncClient") as http:
+        http.return_value.__aenter__.return_value.get = AsyncMock(side_effect=RuntimeError("raw failure"))
+        response = client.get("/api/settings/network-servers/ns-test/jobs/j1", params=_auth())
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Couldn’t read this download’s progress from the model server. Try again."
+    assert "raw failure" in caplog.text
+
+
+def test_download_progress_unexpected_response(client, monkeypatch):
+    from llm import network_endpoints
+    monkeypatch.setattr(network_endpoints, "build_mgmt_base", lambda _sid: "http://localhost:5100")
+    with patch("api.network_server_jobs.httpx.AsyncClient") as http:
+        http.return_value.__aenter__.return_value.get.return_value.status_code = 503
+        response = client.get("/api/settings/network-servers/ns-test/jobs/j1", params=_auth())
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The model server gave an unexpected response. Try again."
+
+
+def test_model_settings_failure_hides_upstream_message(client, caplog):
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={
+        "ok": False, "status": 503, "message": "HTTP 503: upstream detail",
+    })):
+        response = client.put(
+            "/api/settings/network-servers/ns-test/models/m/settings",
+            params=_auth(), json={"pinned": True},
+        )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Couldn’t save this model’s settings. Try again."
+    assert "HTTP 503: upstream detail" in caplog.text
+
+
+def _auth() -> dict[str, str]:
+    return dict(zip(("token",), (_TOKEN,)))

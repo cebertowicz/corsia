@@ -23,8 +23,13 @@ ToolCategory = Literal[
     "artifacts",
     "connection_admin",
     "host_access",
+    "processes",
     "discovery",
-    "google",
+    "email",
+    "microsoft",
+    "microsoft_mail",
+    "microsoft_calendar",
+    "microsoft_files",
 ]
 
 
@@ -37,6 +42,8 @@ class ToolCatalogEntry:
     A ``core`` tool is advertised with its full schema on every call; every
     other tool is listed by ``summary`` in its pack's line of the
     ``tools_load`` index and reached through ``tools_load``/``tool_call``.
+    An ``account_bound`` tool is only counted in its pack's index line: it
+    serves a connected account, so naming it costs everyone else tokens.
     """
 
     category: ToolCategory
@@ -45,5 +52,8 @@ class ToolCatalogEntry:
     authority: str = "session"
     core: bool = False
     summary: str = ""
+    account_bound: bool = False
+    #: A durable external or hard-to-undo effect that proposes Serious triage.
+    serious_effect: bool = False
     # The row verb a call of this tool reads as, e.g. "Reading" in "Reading a.md".
     activity: str = field(kw_only=True)

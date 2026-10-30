@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
@@ -85,8 +86,8 @@ test.describe('@flow:artifact-image @surface:documents image artifacts open as i
 			if (width > 768) await expect(imageTab.locator('.tab-ico circle')).toHaveCount(1);
 			if (width > 768 && kind.ext === 'png') {
 				await saveEvidenceScreenshot(page, testInfo, 'artifact-image-tab-strip-1440', { fullPage: false });
-				await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
-				const rail = page.getByRole('button', { name: /Expand artifact panel/ });
+				await page.getByRole('button', { name: 'Collapse Files' }).click();
+				const rail = page.getByRole('button', { name: /Expand Files/ });
 				await expect(rail.locator('.rail-ico circle')).toHaveCount(1);
 				await saveEvidenceScreenshot(page, testInfo, 'artifact-image-tab-rail-1440', { fullPage: false });
 				await rail.click();

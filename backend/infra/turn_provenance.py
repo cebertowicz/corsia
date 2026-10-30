@@ -10,9 +10,11 @@ from typing import Any
 
 UNREADABLE_METADATA_REASON = "unreadable_metadata"
 UNUSABLE_TURN_PROVENANCE_REASON = "unusable_turn_provenance"
+SERVER_SCRIPTED_REASON = "server_scripted"
 LEGACY_REASONS = frozenset(
     {
         "legacy_import",
+        SERVER_SCRIPTED_REASON,
         "pre_turn_binding_migration",
         UNREADABLE_METADATA_REASON,
         UNUSABLE_TURN_PROVENANCE_REASON,

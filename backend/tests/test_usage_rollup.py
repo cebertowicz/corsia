@@ -319,7 +319,10 @@ async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_othe
     await asyncio.wait_for(started.wait(), 1)
     release.set()
     await asyncio.wait_for(finished.wait(), 1)
-    assert calls == [("read", "_plan_job"), ("write", "_write_job")]
+    await asyncio.wait_for(usage_rollup._refreshing[asyncio.get_running_loop()], 1)
+    # One flight plans the usage ledger, then the focus-attention rollup, each read before it is written.
+    assert calls == [("read", "_plan_job"), ("write", "_write_job"),
+                     ("read", "_plan_presence_job"), ("write", "_write_job")]
 
 
 @pytest.mark.asyncio
@@ -418,6 +421,8 @@ def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
         "migration_97_to_98_effort_and_limit_history.py": False,
         # creates the rollup itself; it starts empty and builds from scratch.
         "migration_99_to_100_usage_rollup.py": False,
+        # adds Measurement-only boundaries and an index; it does not mutate a rollup grain or value.
+        "migration_146_to_147_measure_breaks.py": False,
     }
     pattern = re.compile(r"\bllm_usage\b")
     found = set()

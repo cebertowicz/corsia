@@ -1,12 +1,10 @@
-"""Measurement connector manifest (declared data).
+"""Measurement connector manifest for movement and learning reports.
 
-One platform-produced event type, the daily movement report. The report is
-informational (a passive digest note) and becomes actionable only when its
-producer states ``breach`` true, so a person-attention or cost series that
-crossed its threshold wakes the owner. Each report is its own artifact
-(scope + report date), so a rule routes it to the scope's conductor as of
-delivery time and a later designation move reaches the new owner. The payload
-contract and its validator live in ``events/movement_report.py``.
+Both platform-produced report types are informational unless their declared
+wake fact promotes them. The payloads carry no type of their own: each delivery
+function names its event type explicitly, and ``_classify`` answers only for a
+payload normalized without one, which is a movement digest. Payload contracts and their strict validators live beside their
+delivery functions (``events/movement_report.py``, ``events/learning_report.py``).
 """
 
 from __future__ import annotations
@@ -19,24 +17,30 @@ MEASUREMENT_CONNECTOR = "measurement"
 MEASUREMENT_INTEGRATION = "measurement"
 MOVEMENT_REPORT_TYPE = "movement-report"
 MOVEMENT_DIGEST_EVENT = "measurement.movement_digest"
-
+LEARNING_REPORT_TYPE = "learning-report"
+LEARNING_REPORT_EVENT = "measurement.learning_report"
 _FILTERABLE = ("scope",)
+# The validators admit exact key sets, so a payload carries only its own type's facts.
+_FACT_KEYS = ("scope", "report_date", "report_key", "breach", "moves", "wake", "items")
 
 
 def _classify(raw: dict[str, Any]) -> str:
     return MOVEMENT_DIGEST_EVENT
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
-    keys = ("scope", "report_date", "report_key", "breach", "moves")
-    return {k: raw[k] for k in keys if raw.get(k) is not None}
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
+    return {k: raw[k] for k in _FACT_KEYS if raw.get(k) is not None}
 
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
     key = facts.get("report_key")
     if key is None:
         return None
-    return {"integration": MEASUREMENT_INTEGRATION, "type": MOVEMENT_REPORT_TYPE,
+    artifact_type = {
+        MOVEMENT_DIGEST_EVENT: MOVEMENT_REPORT_TYPE,
+        LEARNING_REPORT_EVENT: LEARNING_REPORT_TYPE,
+    }[event_type]
+    return {"integration": MEASUREMENT_INTEGRATION, "type": artifact_type,
             "external_id": key}
 
 
@@ -51,7 +55,16 @@ MANIFEST = register(ConnectorManifest(
             artifact_integration=MEASUREMENT_INTEGRATION,
             event_class="informational",
             actionable_when={"breach": True},
-            collapse_fact="report_key"),
+            collapse_fact="report_key",
+            digest_line_facts=("scope", "report_date", "report_key", "breach", "moves")),
+        LEARNING_REPORT_EVENT: EventTypeDecl(
+            LEARNING_REPORT_EVENT, ("report_key",), _FILTERABLE,
+            artifact_type=LEARNING_REPORT_TYPE,
+            artifact_integration=MEASUREMENT_INTEGRATION,
+            event_class="informational",
+            actionable_when={"wake": True},
+            collapse_fact="report_key",
+            digest_line_facts=("scope", "report_date", "report_key", "items")),
     },
     classify=_classify,
     extract_facts=_extract_facts,

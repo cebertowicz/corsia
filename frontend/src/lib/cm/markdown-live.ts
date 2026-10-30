@@ -4,8 +4,12 @@ import { StateField, type EditorState, type Extension, type Range } from '@codem
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
-import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
+import {
+	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, refreshMarkdownImages, renderableImage, selectImageOnClick
+} from './markdown-image';
+import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
+import { blockSource, isMermaidFence } from './widget-blocks';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -30,17 +34,27 @@ class HrWidget extends WidgetType {
  * Renders a GFM table block as a real HTML table, reusing the app's canonical
  * markdown renderer so inline formatting and theming match everywhere else.
  * The table always stays rendered — it never drops to raw pipe/dash source.
+ * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
  */
 class TableWidget extends WidgetType {
-	constructor(readonly src: string) { super(); }
-	eq(o: TableWidget) { return o.src === this.src; }
+	readonly images: ImageContext | null;
+	constructor(readonly src: string, images: ImageContext | null) {
+		super();
+		// The context provider is live; retain this render's values so a refresh can compare them with the next one.
+		this.images = images && { ...images };
+	}
+	eq(o: TableWidget) {
+		const [a, b] = [o.images, this.images];
+		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token && a?.imageCacheKey === b?.imageCacheKey;
+	}
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-table md-content';
 		// Same trust boundary as every `{@html} renderMarkdown(...)` surface:
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
-		el.innerHTML = renderMarkdown(this.src);
+		el.append(renderedFragment(renderMarkdown(this.src), this.images));
+		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}
 	ignoreEvent() { return true; }
@@ -78,9 +92,7 @@ class MermaidWidget extends WidgetType {
  * null. Reads the FencedCode node's CodeInfo (language) and CodeText children.
  */
 function mermaidFence(node: SyntaxNodeRef, doc: EditorState['doc']): string | null {
-	const info = node.node.getChild('CodeInfo');
-	if (!info) return null;
-	if (doc.sliceString(info.from, info.to).trim().toLowerCase() !== 'mermaid') return null;
+	if (!isMermaidFence(node, doc)) return null;
 	const text = node.node.getChild('CodeText');
 	return text ? doc.sliceString(text.from, text.to) : '';
 }
@@ -193,13 +205,13 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 function buildTableDecorations(state: EditorState): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
+	const images = state.facet(imageContext)();
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name !== 'Table') return;
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = blockSource(doc, node);
 			const src = doc.sliceString(from, to);
-			decos.push(Decoration.replace({ widget: new TableWidget(src), block: true }).range(from, to));
+			decos.push(Decoration.replace({ widget: new TableWidget(src, images), block: true }).range(from, to));
 			return false;
 		}
 	});
@@ -216,18 +228,19 @@ function buildTableDecorations(state: EditorState): DecorationSet {
  * once against the partial tree and never sees those nodes — leaving real-world
  * docs (a table 40 lines down) stuck on raw markdown until the next edit.
  */
-function syntaxDecorationField(build: (state: EditorState) => DecorationSet): StateField<DecorationSet> {
+function syntaxDecorationField(build: (state: EditorState) => DecorationSet, refreshesImages = false): StateField<DecorationSet> {
 	return StateField.define<DecorationSet>({
 		create: build,
 		update(deco, tr) {
-			if (tr.docChanged || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state);
+			const imageRefresh = refreshesImages && tr.effects.some((effect) => effect.is(refreshMarkdownImages));
+			if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state);
 			return deco.map(tr.changes);
 		},
 		provide: (f) => EditorView.decorations.from(f)
 	});
 }
 
-const markdownTableDecorations = syntaxDecorationField(buildTableDecorations);
+const markdownTableDecorations = syntaxDecorationField(buildTableDecorations, true);
 
 /**
  * Replaces each ```mermaid fenced block with a rendered diagram block widget.
@@ -243,8 +256,7 @@ function buildMermaidDecorations(state: EditorState): DecorationSet {
 			if (node.name !== 'FencedCode') return;
 			const code = mermaidFence(node, doc);
 			if (code === null) return; // a non-mermaid fence: left as styled code
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = blockSource(doc, node);
 			decos.push(Decoration.replace({ widget: new MermaidWidget(code), block: true }).range(from, to));
 			return false;
 		}

@@ -8,8 +8,9 @@ import { cursorCharLeft, cursorCharRight, deleteCharBackward, deleteCharForward 
 import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
+import { installLinkTargetResolver } from '$lib/linkTargetResolver';
 import {
-	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, resolveImagePath, UNAVAILABLE_IMAGE,
+	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
 } from './markdown-image';
 
@@ -38,6 +39,7 @@ afterEach(() => {
 });
 
 const imagePath = (img: HTMLImageElement) => new URL(img.src, 'http://x').searchParams.get('path');
+const imageCacheKey = (img: HTMLImageElement) => new URL(img.src, 'http://x').searchParams.get('v');
 const IMAGE = '![Mock screen](shots/a.png)';
 const DOC = `# Plan\n\n${IMAGE}\n\nafter the image\n`;
 
@@ -69,6 +71,28 @@ describe('resolveImagePath', () => {
 });
 
 describe('markdown images in the live preview', () => {
+	it('uses one cache key throughout an open document and a new key after reopening it', () => {
+		const firstOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-1' };
+		const sameOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-1' };
+		const secondOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-2' };
+		const source = `${IMAGE}\n\n| Image |\n| - |\n| ${IMAGE} |\n`;
+		const first = mount(source, 0, firstOpen);
+		const reopened = mount(source, 0, secondOpen);
+		const rebuilt = mount(source, 0, sameOpen);
+
+		for (const selector of ['.cm-md-image img', '.cm-md-table td img']) {
+			expect(imageCacheKey(first.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-1');
+			expect(imageCacheKey(rebuilt.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-1');
+			expect(imageCacheKey(reopened.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-2');
+		}
+
+		firstOpen.imageCacheKey = 'refresh-1';
+		expect(first.state.facet(imageContext)()?.imageCacheKey).toBe('refresh-1');
+		first.dispatch({ effects: refreshMarkdownImages.of() });
+		expect(imageCacheKey(first.dom.querySelector<HTMLImageElement>('.cm-md-image img')!)).toBe('refresh-1');
+		expect(imageCacheKey(first.dom.querySelector<HTMLImageElement>('.cm-md-table td img')!)).toBe('refresh-1');
+	});
+
 	it('draws a relative image below its line, named by its alt text, from the content route', () => {
 		const view = mount(DOC);
 		const img = view.dom.querySelector<HTMLImageElement>('.cm-md-image img')!;
@@ -349,5 +373,65 @@ describe('markdown images in the live preview', () => {
 		const doc = ['```', '![code](a.png)', '```', '', '| a |', '| - |', '| ![cell](b.png) |', ''].join('\n');
 		const view = mount(doc, doc.length);
 		expect(view.dom.querySelector('.cm-md-image')).toBeNull();
+	});
+});
+
+describe('images in a rendered table', () => {
+	const TABLE_DOC = ['# Shots', '', '| Phone | Desktop |', '| - | - |', '| ![A phone](img/a.png) | ![A desktop](/ws/other/b.png) |', ''].join('\n');
+	const cells = (view: EditorView) => [...view.dom.querySelectorAll<HTMLImageElement>('.cm-md-table td img')];
+
+	it('loads each cell image from the content route, a relative one from the document folder', () => {
+		const imgs = cells(mount(TABLE_DOC, 0));
+		expect(imgs.map((img) => img.alt)).toEqual(['A phone', 'A desktop']);
+		expect(imgs.map(imagePath)).toEqual(['/ws/notes/img/a.png', '/ws/other/b.png']);
+		expect(imgs.every((img) => img.src.includes('/api/files/content'))).toBe(true);
+	});
+
+	it('says why a cell image did not load', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, body: null })));
+		const view = mount(TABLE_DOC, 0);
+		cells(view)[0].dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(view.dom.querySelector('.cm-md-table .cm-md-image-note')?.textContent).toBe(`A phone · ${MISSING_IMAGE}`));
+	});
+
+	it('never fetches a web image in a cell, or any image when the document has no path', () => {
+		const web = ['| a |', '| - |', '| ![remote](https://example.com/x.png) |', ''].join('\n');
+		expect(mount(web, 0).dom.querySelector('.cm-md-table img')).toBeNull();
+		expect(mount(web, 0).dom.querySelector('.cm-md-table .cm-md-link')?.textContent).toBe('remote');
+		expect(cells(mount(TABLE_DOC, 0, null))).toEqual([]);
+	});
+});
+
+describe('links in a rendered table', () => {
+	const LINK_DOC = ['| Step | Where |', '| - | - |', '| Up | [Steps](../onboarding/steps.md#top) |', '| Here | [Same](same%20dir.md) |', '| Web | [Site](https://example.com/a) |', '| Abs | [Abs](/ws/other/b.md) |', ''].join('\n');
+	const hrefs = (view: EditorView) => [...view.dom.querySelectorAll<HTMLAnchorElement>('.cm-md-table a')].map((a) => a.getAttribute('href'));
+
+	it('points a relative cell link at the document folder, as a link in the text does', () => {
+		expect(hrefs(mount(LINK_DOC, 0))).toEqual(['/ws/onboarding/steps.md', '/ws/notes/same%20dir.md', 'https://example.com/a', '/ws/other/b.md']);
+	});
+
+	it('opens the folder-relative file when the cell link is clicked', async () => {
+		const fetchRevision = vi.fn().mockResolvedValue({ exists: true, path: '/ws/onboarding/steps.md', revision: 'r', size: 1, writable: true, artifact_id: null });
+		const openArtifact = vi.fn();
+		const showError = vi.fn();
+		const deps = {
+			activeThreadId: () => 't1', projectId: () => 'p1',
+			fetchTree: vi.fn().mockResolvedValue([{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws', nodes: [], capped: false }]),
+			fetchRevision, openArtifact, showError, openExternal: vi.fn(), isTauri: () => true, origin: () => 'http://corsia.test',
+			openSettings: vi.fn(), openThread: vi.fn(),
+		};
+		const cleanup = installLinkTargetResolver(document, () => deps);
+		try {
+			mount(LINK_DOC, 0).dom.querySelector<HTMLAnchorElement>('.cm-md-table a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+			await vi.waitFor(() => expect(openArtifact).toHaveBeenCalledWith('t1', { artifactId: null, path: '/ws/onboarding/steps.md', title: 'steps.md' }));
+			expect(fetchRevision).toHaveBeenCalledWith('/ws/onboarding/steps.md', 'p1');
+			expect(showError).not.toHaveBeenCalled();
+		} finally {
+			cleanup();
+		}
+	});
+
+	it('leaves a cell link as written when the document has no path', () => {
+		expect(hrefs(mount(LINK_DOC, 0, null))[0]).toBe('../onboarding/steps.md#top');
 	});
 });

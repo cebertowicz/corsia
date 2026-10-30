@@ -83,8 +83,7 @@ def _returned(db, *titles: str, still_running: bool = False):
         service.transition_node(running.id, "active", actor_id="worker", db=db)
     db.commit()
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     return parent_plan, delegated, plan, leaves
 
@@ -95,6 +94,7 @@ def _verdict(db, plan_id: str, operation: str, node_id: str, **extra) -> dict:
         {
             "node_id": node_id, "verification_result": "passed",
             "expected_revision": service._node_row(db, node_id)["revision"],
+            **({"size": "unknown"} if operation == "accept_with_follow_up" else {}),
             **extra,
         },
         actor=PARENT, provenance="test.verdict", mutation_id=uuid.uuid4().hex, db=db,

@@ -71,10 +71,10 @@ def _history_message_ids(raw: object) -> tuple[str, ...]:
     return tuple(found)
 
 
-async def profile_history_id() -> str:
-    """Read Gmail's current history floor for a first run or expired cursor."""
+async def profile_history_id(account_id: str) -> str:
+    """Read one mailbox's current history floor for a first run or expired cursor."""
     try:
-        profile = await client.get_json(_PROFILE_URL)
+        profile = await client.get_json(account_id, _PROFILE_URL)
     except client.GoogleRequestFailed as exc:
         raise GmailFeedError(f"profile_http_{exc.status}" if exc.status else "profile_unreachable") from None
     history_id = profile.get("historyId") if isinstance(profile, dict) else None
@@ -83,8 +83,8 @@ async def profile_history_id() -> str:
     return history_id
 
 
-async def added_messages(start_history_id: str) -> HistoryPage:
-    """List every Inbox addition after one durable Gmail history cursor."""
+async def added_messages(account_id: str, start_history_id: str) -> HistoryPage:
+    """List every Inbox addition after one mailbox's durable Gmail history cursor."""
     params: dict[str, str] = {
         "startHistoryId": start_history_id,
         "historyTypes": "messageAdded",
@@ -94,7 +94,7 @@ async def added_messages(start_history_id: str) -> HistoryPage:
     seen: set[str] = set()
     while True:
         try:
-            raw = await client.get_json(_HISTORY_URL, params=params)
+            raw = await client.get_json(account_id, _HISTORY_URL, params=params)
         except client.GoogleRequestFailed as exc:
             if exc.status == 404:
                 raise GmailHistoryExpired() from None
@@ -112,12 +112,12 @@ async def added_messages(start_history_id: str) -> HistoryPage:
         params["pageToken"] = page_token
 
 
-async def metadata(message_id: str) -> gmail_read.Message:
+async def metadata(account_id: str, message_id: str) -> gmail_read.Message:
     """Read only the event headers before a full message is needed for screening."""
     mid = gmail_read.check_message_id(message_id)
     try:
         raw = await client.get_json(
-            f"{gmail_read.API}/{mid}",
+            account_id, f"{gmail_read.API}/{mid}",
             params={
                 "format": "metadata",
                 "metadataHeaders": ["From", "To", "Date", "Subject"],
@@ -132,9 +132,9 @@ async def metadata(message_id: str) -> gmail_read.Message:
     return gmail_read.Message(mid, str(raw.get("threadId") or ""), gmail_read.headers_from_payload(payload))
 
 
-async def full_message(message_id: str) -> gmail_read.Message:
+async def full_message(account_id: str, message_id: str) -> gmail_read.Message:
     """Read the full message only after metadata selects it for screening."""
     try:
-        return await gmail_read.fetch(message_id)
+        return await gmail_read.fetch(account_id, message_id)
     except client.GoogleRequestFailed as exc:
         raise _message_error(exc) from None

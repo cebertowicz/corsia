@@ -1,9 +1,6 @@
 ---
 name: context-stewardship
-description: Use when evidence attributes a wrong decision to delivered context, when repeated cross-agent behavior may need promotion to a shared layer, when a System instruction seems wrong or missing, or when auditing context delivery, duplication, or token cost. Not for routine local edits with no delivery, structural, or cross-agent effect.
-corsia:
-  handler:
-    kind: instruction
+description: Use when evidence ties a wrong decision to delivered context, cross-agent behavior may need promotion to a shared layer, a System instruction seems wrong or missing, or when auditing context delivery, duplication or token cost. Not for local edits with no delivery, structural or cross-agent effect.
 ---
 
 # Context stewardship
@@ -41,7 +38,13 @@ Keep authority, safety, and invariants even when costly. Cut duplication, stale 
 
 ## Promote
 
-A local lesson is promoted when the same failure recurs across agents or its cause is shared. Propose the exact line, destination layer, and evidence to the conductor, who owns project-wide sources. Decline duplicates. For a wrong or missing System instruction, preserve the failing scenario, exact proposed text and expected behavior; ask the conductor to check placement and conflicts. Use a configured upstream review route if one exists. If its owner or route is unavailable, record that capability gap and retain the proposal; do not claim submission, edit a generated projection or hide a replacement in a shadowed local copy.
+A local lesson is promoted when the same failure recurs across agents or its cause is shared. Propose the exact line, destination layer, and evidence to the conductor, who owns project-wide sources. Decline duplicates. For a wrong or missing System instruction, preserve the failing scenario, exact proposed text and expected behavior; ask the conductor to check placement and conflicts. Use a configured upstream review route if one exists. If its owner or route is unavailable, record that capability gap and retain the proposal; do not claim submission, edit a generated projection or hide a replacement in a shadowed local copy. A project conductor also looks for these patterns itself, on the cadence its role context gives; the procedure is in `references/cross-agent-read.md`.
+
+## Learning reports
+
+A `measurement.learning_report` counts one scope's day: corrections by source; lessons recorded, in use, confirmed, consolidated or repeated; experiments started or decided; wins. Each count carries record references, and `null` means not recorded, never zero. A project conductor runs its cross-agent read on it; the CORSIA agent's workspace report holds only cross-project items. Route what you find at once.
+
+Only the daily report (`report_key` ending `:daily`) writes to the person: one consolidated `post_update` for the scope, or add lines to that turn's update, including early reads. An early read never posts. On correction days, open with one floor line: correction total (chat, document comments and decision answers added; reviewer send-backs excluded), then lessons recorded. With non-null `lessons.in_use` and at least one recorded lesson, add “All/None/<n> of that day’s lessons reached an agent”: All if equal to recorded; else None at zero or `<n>`. It never asks the person to act. Also add a line for: a new theme across 2+ agents, routed; a kept trial or consolidated lesson; an experiment started or decided; a win (a trial kept for quality or cost, with its measure); an agent repeating its own lesson's miss. With no correction or listed item, send nothing. At most five plain lines; no mechanism, id or path; each names agents and fix. CORSIA agent sends at most one cross-project line daily. No report is a quiet day: post nothing, and do not look for one.
 
 ## Prove it
 

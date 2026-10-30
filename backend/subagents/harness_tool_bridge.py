@@ -8,7 +8,6 @@ import json
 import os
 import secrets
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +22,7 @@ from subagents.harness_tool_publication import (
     ToolBridgeResult,
     publish_completed_tool_result,
 )
+from tools.private_runtime_files import HARNESS_MCP_DIR, private_mkstemp
 from tools.registry import ToolRegistry
 from tools.recorded_call import (
     CompletedToolCall,
@@ -53,45 +53,44 @@ def build_tool_registry(working_dir: str | None = None) -> ToolRegistry:
     return agent.tools
 
 
-def dynamic_tool_definitions(registry: ToolRegistry) -> tuple[dict[str, Any], ...]:
-    """Return the advertised tool list for Claude Code (MCP) and Codex (dynamic)."""
+def dynamic_tool_definitions(
+    registry: ToolRegistry, confined: bool = False,
+) -> tuple[dict[str, Any], ...]:
+    """Return the shared confinement-aware provider-facing tool projection."""
     from tools.catalog import advertised_tool_definitions
+    from tools.confined_reads import project_definitions
 
-    return advertised_tool_definitions(registry)
+    return project_definitions(advertised_tool_definitions(registry), confined)
 
 
 def write_cc_mcp_config(
     *,
     thread_id: str,
     tool_token: str,
+    fork_id: str | None = None,
 ) -> str:
     """Write a Claude Code MCP config that exposes only CORSIA tools."""
     server = Path(__file__).with_name("corsia_mcp_server.py")
     port = os.environ.get("BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
     if not port.isdigit() or not 0 < int(port) < 65536:
         raise RuntimeError(f"Invalid BACKEND_PORT for Claude Code tool bridge: {port!r}")
+    env = {
+        "CORSIA_CC_TOOL_URL": f"http://127.0.0.1:{port}/api/cc/_tool-bridge/{thread_id}",
+        "CORSIA_CC_TOOL_TOKEN": tool_token,
+    }
+    if fork_id is not None:
+        env["CORSIA_FORK_ID"] = fork_id
     payload = {
         "mcpServers": {
             "corsia": {
                 "command": sys.executable,
                 "args": [str(server)],
-                "env": {
-                    "CORSIA_CC_TOOL_URL": (
-                        f"http://127.0.0.1:{port}/api/cc/_tool-bridge/{thread_id}"
-                    ),
-                    "CORSIA_CC_TOOL_TOKEN": tool_token,
-                },
+                "env": env,
                 "alwaysLoad": True,
             }
         }
     }
-    out_dir = Path(tempfile.gettempdir()) / "corsia-harness-mcp"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fd, raw_path = tempfile.mkstemp(
-        prefix="cc-",
-        suffix=".json",
-        dir=out_dir,
-    )
+    fd, raw_path = private_mkstemp(HARNESS_MCP_DIR, prefix="cc-", suffix=".json")
     path = Path(raw_path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -209,19 +208,6 @@ async def settle_codex_tool_result(app_session: Any, result: str, reply: dict) -
         )
 
 
-async def _execute_registry_tool(
-    registry: ToolRegistry,
-    name: str,
-    arguments: dict[str, Any],
-    checkpoint_id: str | None,
-) -> str:
-    if checkpoint_id is None:
-        return await registry.execute(name, arguments)
-    from infra.continuity_staging import checkpoint_execution_scope
-
-    with checkpoint_execution_scope(checkpoint_id):
-        return await registry.execute(name, arguments)
-
 
 async def _media_delivery(delivery: "ToolExecutionResult", model: str | None):
     """Resolve harness media off-loop through the canonical delivery owner."""
@@ -331,7 +317,8 @@ async def execute_tool(
     invocation_id: str | None = None,
     provider_tool_call_id: str | None = None,
     assistant_step_id: str | None = None,
-    checkpoint_id: str | None = None,
+    fork_id: str | None = None,
+    fork_policy: Any = None,
     model: str | None = None,
     name: str,
     arguments: dict[str, Any],
@@ -342,14 +329,17 @@ async def execute_tool(
     turn_token = state._current_turn_identity.set(turn_identity)
     completion = None
     try:
-        with state.tool_invocation_context(invocation_id, checkpoint_id=checkpoint_id,
+        with state.tool_invocation_context(invocation_id, fork_id=fork_id,
                                            provider_call_id=provider_tool_call_id):
-            content = await _execute_registry_tool(registry, name, arguments, checkpoint_id)
+            if fork_policy is None:
+                content = await registry.execute(name, arguments)
+            else:
+                content = await fork_policy.execute(name, arguments)
         completion = CompletedToolCall(
             name=name, result=content, arguments=dict(arguments), thread_id=thread_id,
             turn_id=turn_identity.turn_id if turn_identity else None,
             invocation_id=invocation_id, provider_tool_call_id=provider_tool_call_id,
-            assistant_step_id=assistant_step_id, checkpoint_id=checkpoint_id,
+            assistant_step_id=assistant_step_id, fork_id=fork_id,
         )
         from tools.tool_surface import resolve_dispatch
 
@@ -363,7 +353,7 @@ async def execute_tool(
             completion,
             thread_id=thread_id,
             turn_identity=turn_identity,
-            checkpoint_id=checkpoint_id,
+            fork_id=fork_id,
             model=model,
             persist_delivery=_persist_delivery_off_loop,
             media_delivery=_media_delivery,
@@ -380,7 +370,7 @@ async def execute_tool(
             invocation_id=invocation_id,
             provider_tool_call_id=provider_tool_call_id,
             assistant_step_id=assistant_step_id,
-            checkpoint_id=checkpoint_id,
+            fork_id=fork_id,
         )
         raise
     finally:

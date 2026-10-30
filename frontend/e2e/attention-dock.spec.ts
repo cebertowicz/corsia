@@ -1,6 +1,6 @@
+import { test } from "./support/test";
 import {
   expect,
-  test,
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
@@ -171,7 +171,7 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
     // Other → listed option: the head defect. The draft clears and Answer arms.
     const other = showcase.locator(".other-option textarea").first();
     await other.fill("Actually, split this into two.");
-    await expect(showcase.locator(".other-option").first()).toHaveClass(
+    await expect(showcase.locator(".other-option textarea").first()).toHaveClass(
       /selected/,
     );
     await showcase
@@ -204,7 +204,11 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       showcase.getByText("Raised directly — no parent review").first(),
     ).toBeVisible();
     await shot(page, "dock-04-root-direct-labelled");
-    await showcase.getByRole("button", { name: "Done", exact: true }).click();
+    // The page also holds a Setup row named Done; the drawer's own Done is AdaptiveDrawer's `.drawer-done`.
+    await showcase
+      .getByRole("dialog")
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
 
     // External review hands off and never resolves someone else's object.
     await showcase.getByRole("button", { name: "External review" }).click();
@@ -342,6 +346,9 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       expect(closeMetrics.right, `${label} close right`).toBeLessThanOrEqual(closeMetrics.width);
       expect(closeMetrics.bottom, `${label} close bottom`).toBeLessThanOrEqual(closeMetrics.height);
       await close.press("Enter");
+      // The bar stays on screen while the drawer plays its outro, and the next width reuses this same document, so wait
+      // for the drawer itself to be gone: otherwise the next pass sees the closing drawer as open and never opens it.
+      await expect(drawer).toBeHidden();
       await expect(frame.locator(".dock-bar").first()).toBeVisible();
     }
 

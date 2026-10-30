@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from api import measurement_chain_costs, measurement_model_cost, measurement_models
-from api.cost_identity import IdentityResolver, ModelIdentity
+from core.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_model_cost import query_model_costs
 from api.measurement_models import build_models, models_payload
 from api.measurement_scope import resolve_grain
@@ -352,7 +352,20 @@ def test_models_shares_its_gap_walk_and_leaves_no_table(db, monkeypatch):
     (row,) = models_payload(db, SCOPE, GRAIN, [])["rows"]
     assert row["tasks"] == 1 and row["recording_gap"] is True
     assert len(walks) == 1
-    assert db.execute("SELECT name FROM sqlite_temp_master WHERE name='measurement_task_chain'").fetchone() is None
+    assert db.execute("SELECT COUNT(*) FROM temp.measurement_task_chain").fetchone()[0] == 0
+
+
+def test_reading_chains_again_leaves_the_connection_schema_alone(db):
+    """Creating or dropping the chain table on every read would expire every statement the pooled connection
+    has prepared, so each would be planned again on its next run, whichever job sends it."""
+    _task(db, "task")
+    _usage(db, "call", "task", "claude-code/claude-opus-5-5")
+    models_payload(db, SCOPE, GRAIN, [])
+    db.commit()  # the request's own transaction ends; the table it created outside it stays
+    version = db.execute("PRAGMA temp.schema_version").fetchone()[0]
+    (row,) = models_payload(db, SCOPE, GRAIN, [])["rows"]
+    assert row["tasks"] == 1
+    assert db.execute("PRAGMA temp.schema_version").fetchone()[0] == version
 
 
 def test_tasks_are_accepted_tasks_only(db):

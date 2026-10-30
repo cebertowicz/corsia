@@ -17,6 +17,7 @@ Red at `8826029d`: neither operation exists at the boundary, and
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import sqlite3
 
@@ -24,6 +25,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import service
 from plans.boundary import PlanActor, mutate
@@ -96,10 +99,17 @@ def test_add_creates_its_dependency_in_the_same_mutation(db):
     plan = _plan(db)
     prerequisite = _task(db, plan.id, "Prerequisite")
 
+    intent = "Complete the prerequisite before dependent work"
+    _init_messages_fts(db)
+    accept_thread_input(
+        "root", role="user", content=intent, intent="apply_now", message_id="dependency-authority", db=db,
+    )
+    db.execute("UPDATE messages SET active_turn_id='dependency-turn' WHERE id='dependency-authority'")
     created = mutate(plan.id, "add", {
-        "title": "Dependent", "acceptance_criteria": "Dependent DOD",
+        "title": "Dependent", "acceptance_criteria": "Dependent DOD", "size": "unknown",
+        "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}],
         "depends_on_node_id": prerequisite.id,
-    }, actor=OWNER, provenance="test", mutation_id=_mid(), db=db).result["node"]
+    }, actor=replace(OWNER, turn_id="dependency-turn"), provenance="test", mutation_id=_mid(), db=db).result["node"]
 
     assert _edges(db) == 1
     assert _blocked(db, created["id"])

@@ -3,6 +3,8 @@ import { token } from '$lib/stores/auth';
 import { ok, fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
 
 
+export type DocumentReviewLifecycleState = 'forked' | 'submitted' | 'withdrawn' | 'handed_back' | 'failed';
+
 export interface DocumentReview {
 	id: string;
 	reviewer_thread_id: string;
@@ -10,7 +12,10 @@ export interface DocumentReview {
 	requester_name: string;
 	created_at: string;
 	may_cancel: boolean;
-	outcome: 'open' | 'ended_without_comments';
+	state: DocumentReviewLifecycleState;
+	outcome: 'open' | 'ended' | 'ended_without_comments';
+	comment_count: number;
+	reason?: string | null;
 }
 export interface DocumentReviewer {
 	id: string;

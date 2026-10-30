@@ -111,7 +111,7 @@
 <div class="measurement-page">
 	<header class="header">
 		<div class="controls">
-			<span class="scope-label">Scope</span>
+			<span class="scope-label">Showing</span>
 			<MeasurementScopePicker
 				projects={pickerProjects}
 				agents={pickerAgents}

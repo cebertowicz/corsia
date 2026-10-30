@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button, Field, Message } from '$lib/components/ui';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 	import { billingSummary, parsePriceCents, parseChargeDay, PRICE_ERROR, DAY_ERROR, LIST_PRICE, NO_LIST_PRICE, type BillingMode, type BillingValue } from './billingFormat';
 
 	// One billing row for every account and External endpoint, so the price, day, copy and layout cannot drift apart.
@@ -83,13 +84,13 @@
 	const showFields = $derived(!endpoint || draftMode === 'subscription');
 </script>
 
-<div class="billing" class:ruled={!!endpoint} data-settings-anchor={anchorId} tabindex="-1" aria-label={label} role="group">
+<div class="billing" class:ruled={!!endpoint} data-settings-anchor={anchorId} use:settingsAnchor={anchorId} tabindex="-1" aria-label={label} role="group">
 	{#if !editing}
 		<div class="summary">
 			<span class="name">Billing</span>
 			<span class="value">{summary.text}</span>
 			{#if !readonly}
-				<span class="edit"><Button size="sm" onclick={begin}>{isSet ? 'Edit' : 'Set price'}</Button></span>
+				<span class="edit"><Button size="sm" variant="ghost" onclick={begin}>{isSet ? 'Edit' : 'Set price'}</Button></span>
 			{/if}
 		</div>
 	{:else}

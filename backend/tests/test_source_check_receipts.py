@@ -10,6 +10,9 @@ from tests.test_provider_sources import (  # noqa: F401
 )
 
 
+pytestmark = pytest.mark.usefixtures("mac_local_model_host")
+
+
 @pytest.mark.real_harness_cli
 @pytest.mark.parametrize("answer", [None, OSError("database is locked")])
 def test_primary_and_error_path_writes_failing_never_return_prior_row_as_fresh(
@@ -56,7 +59,7 @@ def test_all_check_writes_failing_returns_safe_error(isolated_db, client, monkey
             raise answer
         return None
 
-    monkeypatch.setattr(connections, "resolve_builtin_binary", lambda p: ({}, None))
+    monkeypatch.setattr(connections, "resolve_builtin_binary", lambda provider, *, db=None: ({}, None))
     monkeypatch.setattr("api.provider_sources.check_harness_source", source_state.check_harness_source)
     monkeypatch.setattr(source_state, "record_source_check", failed)
     response = client.post("/api/providers/sources/recheck")

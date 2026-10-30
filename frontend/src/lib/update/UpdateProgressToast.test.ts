@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { toasts } from '$lib/stores/toast';
 import UpdateProgressToast from './UpdateProgressToast.svelte';
-import { resetUpdateStoreForTests, updateProgressMinimized, updateStarting, updateStatus, type UpdateStatus } from './store';
+import { resetUpdateStoreForTests, updateProgressMinimized, updateStarting, updateStatus, updateToastSuppressed, type UpdateStatus } from './store';
 
 let component: Record<string, unknown> | null = null;
 
@@ -76,5 +76,17 @@ describe('UpdateProgressToast', () => {
 		updateStatus.set(running('restarting'));
 		flushSync();
 		expect(pinned()?.message).toBe('Restarting CORSIA');
+	});
+
+	it('removes only the update-progress toast while System Updates is visible and restores it elsewhere', () => {
+		updateStatus.set(running('draining'));
+		flushSync();
+		expect(pinned()?.type).toBe('progress');
+		updateToastSuppressed.set(true);
+		flushSync();
+		expect(pinned()).toBeUndefined();
+		updateToastSuppressed.set(false);
+		flushSync();
+		expect(pinned()?.type).toBe('progress');
 	});
 });

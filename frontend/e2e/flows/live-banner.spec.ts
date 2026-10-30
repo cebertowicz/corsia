@@ -1,10 +1,14 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { createSession, openAppByUrl } from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
+import { createSession, openAppByUrl, waitForWsConnected, watchSessionSubscriptions } from '../support/corsia';
 
 const LONG_BASH_PHRASE = "Running grep -rn --hidden --glob='*.ts' 'live work banner truncation must preserve the full command in details' frontend/src backend/tests";
-const LIVE_LABEL = `Working 5 min · ${LONG_BASH_PHRASE}`;
+// transcriptRunLabel.liveLabel joins `Working · <time> · <phrase>` and drops a time its turn summaries do not prove
+// (A9-A12); this injected turn has no stored summary, so the label is the phrase alone. The time form has its own
+// unit tests (transcriptBlockModel.test.ts).
+const LIVE_LABEL = `Working · ${LONG_BASH_PHRASE}`;
 
 async function openThread(page: Page, title: string): Promise<void> {
 	await openAppByUrl(page);
@@ -39,16 +43,21 @@ test('@surface:live-banner Focus shows a time-first single-line live bash step o
 	test.setTimeout(90_000);
 	const title = `live-banner-proof-${Date.now()}`;
 	const threadId = await createSession(request, title);
+	const subscriptions = watchSessionSubscriptions(page);
 
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await openThread(page, title);
+	// The server's turn snapshot arrives with the thread's first load and replaces local turn state, so inject after it.
+	await waitForWsConnected(page);
+	await subscriptions.waitForSubscribed(threadId);
+	await expect(page.getByText("What's on your mind?")).toBeVisible();
 	await showLiveBanner(page, threadId);
 
 	const banner = page.locator('.live-work .live-step');
 	const toggle = page.locator('.live-work .fold-toggle');
 	await expect(banner).toHaveText(LIVE_LABEL);
 	await expect(banner).toHaveAttribute('title', LIVE_LABEL);
-	await expect(toggle).toHaveAttribute('aria-label', `Expand current work: ${LIVE_LABEL}`);
+	await expect(toggle).toHaveAttribute('aria-label', `Expand current work: ${LONG_BASH_PHRASE}`);
 	await expect(page.locator('.live-work .live-spinner')).toBeVisible();
 	await expect(page.locator('.live-work .fold-chevron')).toBeVisible();
 	expect(await banner.evaluate((element) => {

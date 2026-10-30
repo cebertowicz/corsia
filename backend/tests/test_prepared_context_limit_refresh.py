@@ -126,8 +126,8 @@ async def test_external_release_uses_raised_catalog_cap(main_db, monkeypatch, mo
         corsia_turn=SimpleNamespace(turn_id="turn"), checkpoint_wait_scope=CheckpointWaitScope(),
         session=session, last_call_usage={"input_tokens": 200000, "output_tokens": 12})
     if release == "steer":
-        from core.checkpoint_cc_context import CCCheckpointContext
-        from core.checkpoint_codex_context import CodexCheckpointContext
+        from core.fork_cc_context import CCForkContext
+        from core.fork_codex_context import CodexForkContext
         from infra.input_render import project_claimed_input
         from infra.preflight_attempt import live_input_fits
         from llm.resolution import resolve_execution_target
@@ -137,8 +137,8 @@ async def test_external_release_uses_raised_catalog_cap(main_db, monkeypatch, mo
         row = _thread_row(main_db)
         target = resolve_execution_target(model, db=main_db)
         session.tool_context = (
-            CCCheckpointContext(target, 200000) if harness == "claude-code"
-            else CodexCheckpointContext(target, 200000)
+            CCForkContext(target, 200000) if harness == "claude-code"
+            else CodexForkContext(target, 200000)
         )
         projection = project_claimed_input(main_db, batch, thread_row=row, target=target)
         assert await live_input_fits(batch, live, row, target, projection)

@@ -73,9 +73,10 @@ async def get_job(server_id: str, job_id: str):
                 raise HTTPException(404, detail="Job not found or expired")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(500, detail=str(e))
-    raise HTTPException(502, detail="Daemon returned unexpected status")
+    except Exception:
+        log.exception("Could not read model download progress")
+        raise HTTPException(500, detail="Couldn’t read this download’s progress from the model server. Try again.")
+    raise HTTPException(502, detail="The model server gave an unexpected response. Try again.")
 
 
 @router.delete("/{server_id}/jobs/{job_id}")

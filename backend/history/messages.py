@@ -27,6 +27,7 @@ _INBOUND_SOURCE_KEYS = (
     "plan_paused_since",
     "reply_via_post_update",
     "viewing_document",
+    "reply_context",
 )
 
 

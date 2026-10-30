@@ -29,7 +29,7 @@ export const SET_ASIDE_COPY: Readonly<Record<string, {
 	},
 	stale_plan_wake: {
 		label: 'Not needed',
-		title: 'The work this was about moved on before the agent picked it up.',
+		title: 'The task this message was for moved on before the agent picked it up.',
 	},
 });
 
@@ -41,12 +41,81 @@ export const WAITING_FOR_MODEL = {
 	title: 'The selected model is unavailable. Your message is saved and will send when the model is back, or as soon as you switch models.',
 } as const;
 
+/** The local-only project policy held a message still bound to a cloud model. */
+export const PROJECT_CLOUD_OFF = 'project_cloud_off';
+
+/** The action that resumes either locality hold. */
+export const SWITCH_TO_LOCAL_MODEL = 'Switch to a local model to send';
+
+export const WAITING_FOR_LOCAL_MODEL = {
+	label: SWITCH_TO_LOCAL_MODEL,
+	title: 'Local models only is on for this project. Your message is saved and will send as soon as you switch this chat to a local model or turn Local models only off.',
+} as const;
+
+/** The chat itself excludes cloud models, so only switching this chat can resume it. */
+export const THREAD_LOCAL_ONLY = 'thread_local_only';
+
+export const WAITING_FOR_THREAD_LOCAL_MODEL = {
+	label: SWITCH_TO_LOCAL_MODEL,
+	title: 'Local only is on for this chat. Your message is saved and will send as soon as you switch this chat to a local model.',
+} as const;
+
 /** The same hold, written while the thread has no model at all. */
 export const NO_MODEL_SELECTED = 'no_model_selected';
 
 export const WAITING_FOR_MODEL_CHOICE = {
 	label: 'Choose a model to send',
 	title: 'This thread has no model yet. Your message is saved and will send as soon as you choose one.',
+} as const;
+
+export const CREATE_ACCOUNT_REFUSED = 'Couldn’t start the chat on that account. Its row in the model picker says why; pick another account there.';
+export const CREATE_FAILED = 'Couldn’t create the chat. Try again.';
+export const WAITING_FOR_ACCOUNT = 'Waiting for account';
+
+const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
+const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
+
+/**
+ * Account holds by cause, keyed by `connections.account_holds.ACCOUNT_HOLD_REASONS`.
+ *
+ * A removed account stays removed: adding it again creates a new account that
+ * the held chat is not bound to, so switching models is its only route.
+ */
+export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_FOR_ACCOUNT; title: string }>> = Object.freeze({
+	account_signed_out: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account is signed out. ${SIGN_IN_AGAIN}` },
+	account_login_unverified: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `CORSIA couldn’t confirm this chat’s account is still signed in. ${SIGN_IN_AGAIN}`,
+	},
+	account_home_mismatch: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	codex_auth_source_missing: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	codex_auth_projection_changed: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	account_model_not_discovered: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `CORSIA couldn’t find this model on this chat’s account. ${SWITCH_MODELS}, or sign in again in Settings › Providers.`,
+	},
+	account_removed: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account isn’t set up in CORSIA. ${SWITCH_MODELS}.` },
+	// The denying policy may be the workspace's or the project's and the hold
+	// does not say which, so no settings pointer: it could name a place with no toggle.
+	account_project_denied: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `Your provider settings don’t allow this chat’s account. ${SWITCH_MODELS}.`,
+	},
+	project_policy_missing: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `This project doesn’t allow this chat’s account. ${SWITCH_MODELS}.`,
+	},
+	account_runtime_pending: {
+		label: WAITING_FOR_ACCOUNT,
+		title: 'This chat’s account isn’t ready to run. Your message is saved and will send when it is.',
+	},
+});
+
+/** Any hold code this client has no copy for yet: true, and never a wrong cause. */
+export const WAITING_TO_SEND = {
+	label: 'Waiting to send',
+	title: 'Your message is saved and will send when CORSIA can deliver it.',
 } as const;
 
 /**

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -46,6 +47,39 @@ def test_profile_name_is_sanitized_and_bounded(first_account):
     assert user_profile.profile_name(first_account) == "Pat " + "x" * 116
 
 
+@pytest.mark.parametrize(("answer", "expected"), [
+    ("yes", True), ("Yes.", True), ("YES, please", True),
+    ("No", False), ("Not now", False), ("", False),
+])
+def test_community_consent_requires_an_explicit_yes(tmp_path, answer, expected):
+    profile = tmp_path / PROFILE
+    profile.parent.mkdir()
+    profile.write_text(f"{user_profile.USE_COMMUNITY_LABEL} {answer}\n", encoding="utf-8")
+
+    assert user_profile.uses_community_improvements(tmp_path) is expected
+
+
+def test_community_consent_rejects_missing_or_misplaced_labels(tmp_path):
+    reader, label = user_profile.uses_community_improvements, user_profile.USE_COMMUNITY_LABEL
+    assert reader(tmp_path) is False
+    profile = tmp_path / PROFILE
+    profile.parent.mkdir()
+    profile.write_text("- **Preferred name:** Pat\n", encoding="utf-8")
+
+    assert reader(tmp_path) is False
+    profile.write_text(f"other {label} Yes\n", encoding="utf-8")
+
+    assert reader(tmp_path) is False
+
+
+def test_the_first_chat_writes_the_line_the_consent_reader_reads():
+    first_chat = (Path(__file__).resolve().parents[1] / "prompts/system/v1/skills/conductor-bootstrap"
+                  / "references/first-run-app.md").read_text(encoding="utf-8")
+
+    for answer in ("Yes", "No"):
+        assert f"`{user_profile.USE_COMMUNITY_LABEL} {answer}`" in first_chat
+
+
 def test_the_seeded_profile_reaches_agents_as_workspace_context(first_account, monkeypatch):
     from core.workspace_context_sources import workspace_context_source_entries
 
@@ -77,13 +111,15 @@ def test_a_new_profile_holds_the_answer_and_the_macs_timezone(first_account, mon
     assert (first_account / PROFILE).read_text() == (
         "# User profile\n\n"
         "- **Preferred name:** Patricia\n"
+        "- **Full name:** Patricia\n"
         "- **Timezone:** America/Los_Angeles. Give every time and timestamp in this zone, never UTC.\n"
     )
 
 
 def test_an_empty_answer_takes_the_full_name_on_this_mac(first_account, monkeypatch):
     assert _add(monkeypatch, tty=True, answer="") == 0
-    assert "- **Preferred name:** Pat Example\n" in (first_account / PROFILE).read_text()
+    text = (first_account / PROFILE).read_text()
+    assert "- **Preferred name:** Pat\n- **Full name:** Pat Example\n" in text
 
 
 def test_with_no_terminal_it_asks_nothing_and_uses_the_macs_full_name(first_account, monkeypatch):
@@ -96,7 +132,7 @@ def test_with_no_terminal_it_asks_nothing_and_uses_the_macs_full_name(first_acco
     monkeypatch.setattr(sys, "stdin", stdin)
     args = argparse.Namespace(name="pat", password_stdin=False)
     assert cli_accounts.cmd_user_add(args) == 0
-    assert "- **Preferred name:** Pat Example\n" in (first_account / PROFILE).read_text()
+    assert "- **Full name:** Pat Example\n" in (first_account / PROFILE).read_text()
 
 
 def test_an_existing_profile_is_never_changed(first_account, monkeypatch, capsys):
@@ -134,7 +170,37 @@ def test_the_timezone_is_read_from_the_macs_localtime_link(tmp_path, monkeypatch
 
 
 def test_a_mac_that_reports_no_timezone_leaves_that_line_out():
-    assert user_profile.profile_text("Pat", "") == "# User profile\n\n- **Preferred name:** Pat\n"
+    assert user_profile.profile_text("Pat", "") == (
+        "# User profile\n\n- **Preferred name:** Pat\n- **Full name:** Pat\n"
+    )
+
+
+def test_a_full_name_seeds_its_first_word_as_the_preferred_name():
+    text = user_profile.profile_text("  Ada   Lovelace ", "")
+    assert "- **Preferred name:** Ada\n- **Full name:** Ada Lovelace\n" in text
+    assert "- **Preferred name:** Cher\n- **Full name:** Cher\n" in user_profile.profile_text("Cher", "")
+
+
+def test_profile_full_name_is_sanitized_bounded_and_empty_when_absent(first_account):
+    assert user_profile.profile_full_name(first_account) == ""
+    path = first_account / PROFILE
+    path.parent.mkdir()
+    path.write_text("- **Preferred name:** Pat\n", encoding="utf-8")
+    assert user_profile.profile_full_name(first_account) == ""
+    path.write_text("- **Full name:** Pat\x01 " + "x" * 130 + "\n", encoding="utf-8")
+    assert user_profile.profile_full_name(first_account) == "Pat " + "x" * 116
+    assert user_profile.profile_name(first_account) == ""
+
+
+def test_the_cli_asks_for_the_full_name(first_account, monkeypatch):
+    prompts: list[str] = []
+    stdin = io.StringIO()
+    stdin.isatty = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(signed_in_emails, "signed_in_emails", lambda: [])
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "")
+    cli_accounts.cmd_user_add(argparse.Namespace(name="pat", password_stdin=False))
+    assert any(p.startswith("What's your full name?") for p in prompts)
 
 
 def _add_with_answers(monkeypatch, *answers: str) -> int:

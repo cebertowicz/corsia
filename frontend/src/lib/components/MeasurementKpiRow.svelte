@@ -69,7 +69,7 @@
 	@container kpi-tile (max-width: 185.98px) { dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 	dl > div { display: flex; flex-direction: column; min-width: 0; }
 	dt { color: var(--text-secondary); font-size: 11px; }
-	dd { margin: 0; overflow-wrap: anywhere; color: var(--text-primary); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
+	dd { margin: auto 0 0; overflow-wrap: anywhere; color: var(--text-primary); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
 	.error { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--red-text); font-size: 12px; }
 	.error button { font: inherit; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); padding: 5px 9px; cursor: pointer; }
 	.skeleton { min-height: 56px; margin-top: 8px; border-radius: var(--radius-xs); background: var(--bg-hover); }

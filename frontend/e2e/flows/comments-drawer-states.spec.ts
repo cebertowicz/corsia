@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/imageRegionComments';
-import { comment, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
+import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
 
 /**
  * The comments drawer in each state a person can reach, on the real composed canvas: the inline drawer
@@ -11,12 +12,28 @@ import { comment, journey, open, seed, settled, shot, type Case, type Doc } from
  * sheet. Each journey asserts its state and saves a whole-screen frame named rs-<n> for design review.
  */
 const FINE_AND_PHONE: readonly Case[] = [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark']];
+/** The drawer's states share one database; each case leaves it as it found it, so a late case never runs against earlier cases' threads. */
+test.afterEach(({ request }) => deleteSeededThreads(request));
 const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
 const pill = (page: Page) => page.locator('.comment-status');
 
-async function reply(request: APIRequestContext, doc: Doc, parentId: string, body: string) {
-	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId } });
+async function reply(request: APIRequestContext, doc: Doc, parentId: string, body: string): Promise<string> {
+	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId, delivery_policy: 'immediate' } });
 	expect(created.ok(), await created.text()).toBeTruthy();
+	return (await created.json()).comment.id as string;
+}
+/** A reply written by the document's agent, which is what the server counts as new for the person. */
+async function agentReply(request: APIRequestContext, doc: Doc, parentId: string, body: string): Promise<string> {
+	const id = await reply(request, doc, parentId, body);
+	isolatedDb([
+		'changed = connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=? WHERE id=?", ("Reviewer", sys.argv[2], sys.argv[3])).rowcount',
+		'assert changed == 1, changed',
+	], doc.threadId, id);
+	return id;
+}
+async function markViewed(request: APIRequestContext, doc: Doc, rootId: string, replyId: string) {
+	const viewed = await request.post(`/api/artifacts/${doc.artifactId}/comments/${rootId}/viewed`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: replyId } });
+	expect(viewed.ok(), await viewed.text()).toBeTruthy();
 }
 async function resolve(request: APIRequestContext, commentId: string) {
 	const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved: true } });
@@ -55,11 +72,9 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await expect(drawer).toBeVisible();
 	await settled(page);
 	await expect(drawer.locator('.drawer-heading h2')).toContainText('2 open');
-	const toggle = drawer.getByRole('button', { name: /2 replies/ });
-	await expect(toggle).toBeVisible();
-	await shot(page, 'rs-13a-thread-replies-collapsed', info);
-	await toggle.click();
+	await expect(drawer.locator('.ct-reply-count')).toContainText('2 replies');
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
+	await shot(page, 'rs-13a-thread-replies-visible', info);
 	await settled(page);
 	// Visible text passes on a zero-height clipped box: both replies must be rendered at full height, fully inside the viewport.
 	for (const text of ['Agreed, ring two waits for the canary.', 'I will move it after the canary window.']) {
@@ -67,7 +82,7 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 		await expect.poll(async () => (await reply.boundingBox())?.height ?? 0, { message: `reply "${text}" has a rendered height` }).toBeGreaterThan(12);
 		await expect(reply).toBeInViewport({ ratio: 1 });
 	}
-	await shot(page, 'rs-13b-thread-replies-expanded', info);
+	await shot(page, 'rs-13b-thread-replies-rendered', info);
 
 	// The All filter counts every thread, and its menu item carries a visible check, not colour alone.
 	await chooseFilter(page, 'All');
@@ -83,12 +98,10 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await menu.getByRole('menuitemradio', { name: 'Open', exact: true }).click();
 	await expect(drawer.locator('[data-drawer-filter]')).toHaveAttribute('aria-label', 'Filter comments: Open');
 
-	// A reply opens in place; on a fine pointer the Reply text opens the field, on touch the icon does.
+	// Every writable open thread keeps its reply field visible in place.
 	const firstCard = drawer.getByRole('region', { name: /^Comment by / }).first();
-	await firstCard.getByRole('button', { name: 'Reply', exact: true }).first().click();
 	const field = firstCard.locator('.ct-input');
 	await expect(field).toBeVisible();
-	await expect(field).toBeFocused();
 	await expect(field).toBeInViewport();
 	await shot(page, mode === 'phone' ? 'rs-16-reply-open-touch' : 'rs-16-reply-open-fine-pointer', info);
 
@@ -98,9 +111,17 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await settled(page);
 	await expect(page.locator('.cm-content')).toContainText('Step 12:');
 	await expect(drawer).toBeVisible();
-	// The first thread's reply field was empty and untouched, so it closes when focus moves on: never two empty fields open.
-	await expect.poll(() => drawer.locator('.ct-input').count()).toBeLessThanOrEqual(1);
-	for (const field of await drawer.locator('.ct-input').all()) await expect(field).toBeInViewport({ ratio: 1 });
+	// Every writable open thread keeps its reply field available; the selected thread stays in view.
+	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(2);
+	// The drawer owns scrolling, so the reply must be fully contained in its scrollport;
+	// browser-viewport containment is unrelated once the document has scrolled underneath it.
+	const replyField = drawer.locator('.ct-input').last();
+	await expect.poll(() => replyField.evaluate((input) => {
+		const list = input.closest<HTMLElement>('.drawer-comments')!;
+		const replyRect = input.getBoundingClientRect();
+		const listRect = list.getBoundingClientRect();
+		return replyRect.top >= listRect.top - 1 && replyRect.bottom <= listRect.bottom + 1;
+	})).toBe(true);
 	await shot(page, 'rs-17-quote-jump-near-document-end', info);
 });
 
@@ -162,7 +183,7 @@ journey('a read-only document lists comments without writing controls', [['1440 
 	await open(page, doc, mode, theme);
 	await pill(page).click();
 	const drawer = drawerOf(page);
-	await drawer.getByRole('button', { name: /1 reply/ }).click();
+	await expect(drawer.locator('.ct-reply-count')).toContainText('1 reply');
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await expect(drawer.locator('.ct-act:visible'), 'no reply, agree or resolve control').toHaveCount(0);
 	await expect(drawer.locator('.ct-compose:visible')).toHaveCount(0);
@@ -204,5 +225,72 @@ journey('a failed refresh offers Retry, and Retry reads as Loading', [['1440 lig
 		release();
 	}
 	await expect(drawer.getByText('Loading comments…')).toBeHidden();
-	await expect(drawer.getByRole('button', { name: /1 reply/ })).toBeVisible();
+	await expect(drawer.locator('.ct-reply-count')).toContainText('1 reply');
+});
+
+const NEW_REPLY_CASES: readonly Case[] = [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']];
+
+journey('the server names the new replies, a long thread keeps only them and the latest', NEW_REPLY_CASES, async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Drawer new replies ${mode} ${theme}`);
+	const parent = await comment(request, doc, 'Ring two should wait.', 2);
+	// The stamp is stubbed so the frame never depends on it; the thread keeps the marks it opened with either way.
+	await page.route('**/comments/*/viewed', (route) => route.fulfill({ json: { root_id: parent, new_reply_ids: [] } }));
+	if (mode === 'closed') {
+		await agentReply(request, doc, parent, 'Agreed, ring two waits for the canary.');
+		await agentReply(request, doc, parent, 'I will move it after the canary window.');
+		await reply(request, doc, parent, 'Thanks, that works for me.');
+	} else {
+		const earlier = [];
+		for (const text of ['First reply.', 'Second reply.', 'Third reply.']) earlier.push(await agentReply(request, doc, parent, text));
+		await agentReply(request, doc, parent, 'Newest reply, not seen yet.');
+		await markViewed(request, doc, parent, earlier[2]);
+	}
+	await open(page, doc, mode, theme);
+	await pill(page).click();
+	const drawer = drawerOf(page);
+	await expect(drawer).toBeVisible();
+	await settled(page);
+	if (mode === 'closed') {
+		await expect(drawer.locator('.ct-new'), 'both agent replies are new; the person\'s own is not').toHaveCount(2);
+		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
+		await shot(page, 'rs-23a-new-replies-marked', info);
+	} else {
+		await expect(drawer.getByRole('button', { name: 'Show 3 earlier replies' })).toBeVisible();
+		await expect(drawer.locator('.ct-new')).toHaveCount(1);
+		await expect(drawer.getByText('Newest reply, not seen yet.')).toBeVisible();
+		await expect(drawer.getByText('First reply.')).toBeHidden();
+		await shot(page, 'rs-23b-earlier-replies-collapsed', info);
+	}
+});
+
+journey('new replies clear once the newest is seen, and the person\'s own never mark', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, `Drawer seen replies ${mode} ${theme}`);
+	const parent = await comment(request, doc, 'Ring two should wait.', 2);
+	await agentReply(request, doc, parent, 'Agreed, ring two waits for the canary.');
+	await reply(request, doc, parent, 'My own newest reply.');
+	await open(page, doc, mode, theme);
+	const stamped = page.waitForResponse((response) => response.url().includes('/viewed') && response.request().method() === 'POST');
+	await pill(page).click();
+	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(1);
+	await stamped;
+	await open(page, doc, mode, theme);
+	await pill(page).click();
+	await expect(drawerOf(page).getByText('My own newest reply.')).toBeVisible();
+	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(0);
+});
+
+journey('a reply being typed survives someone else resolving the thread', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Drawer resolved while replying ${mode} ${theme}`);
+	const parent = await comment(request, doc, 'Ring two should wait.', 2);
+	await open(page, doc, mode, theme);
+	await pill(page).click();
+	const drawer = drawerOf(page);
+	await expect(drawer).toBeVisible();
+	const field = drawer.locator('.ct-input').first();
+	await field.fill('Half a reply that must not vanish.');
+	await resolve(request, parent);
+	await expect(drawer.locator('[data-resolved-note]')).toBeVisible();
+	await expect(field).toHaveValue('Half a reply that must not vanish.');
+	await settled(page);
+	await shot(page, 'rs-24-resolved-while-replying', info);
 });

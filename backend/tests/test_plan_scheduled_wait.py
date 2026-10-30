@@ -197,8 +197,7 @@ async def test_a_due_scheduled_task_wakes_its_agent_with_what_and_why(db):
     seen, deliver = _deliveries()
 
     await runner.sweep(
-        _sweep_at(due), db=db, sources=[WatchExpirySource()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        _sweep_at(due), db=db, sources=[WatchExpirySource()], deliver=deliver,
     )
 
     assert seen == [("owner", "plan.watch_expired", (
@@ -219,8 +218,7 @@ async def test_an_event_watch_keeps_the_fixed_wake(db):
     seen, deliver = _deliveries()
 
     await runner.sweep(
-        _sweep_at(due), db=db, sources=[WatchExpirySource()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        _sweep_at(due), db=db, sources=[WatchExpirySource()], deliver=deliver,
     )
 
     [(_thread, _event, summary)] = seen
@@ -243,8 +241,7 @@ async def test_the_scheduled_wake_reads_its_own_connection(isolated_db):
     seen, deliver = _deliveries()
 
     await runner.sweep(
-        _sweep_at(due), db=None, sources=[WatchExpirySource()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        _sweep_at(due), db=None, sources=[WatchExpirySource()], deliver=deliver,
     )
 
     [(woken, _event, summary)] = seen

@@ -178,6 +178,9 @@ def test_a_passing_migration_checks_only_changed_tables(tmp_path, ladder):
         if statement.startswith("PRAGMA integrity_check(")
     ]
     assert integrity_checks == ['PRAGMA integrity_check("added")']
+    # A whole-database quick_check walks every b-tree in one VM operation and
+    # starves startup progress on a large database.
+    assert not [statement for statement in statements if "quick_check" in statement.lower()]
 
 
 def test_a_rebuild_with_identical_ddl_still_checks_the_table(tmp_path, ladder):
@@ -868,7 +871,7 @@ def test_only_this_databases_backups_match(tmp_path):
     )
     (tmp_path / "test.db.pre-migration-v8-20250101T000000Z.bak").mkdir()
 
-    assert [p.name for p in migrations._pre_migration_backups(tmp_path / "test.db")] == [
+    assert [p.name for p in migrations.pre_migration_backups(tmp_path / "test.db")] == [
         "test.db.pre-migration-v9-20260101T000000Z.bak",
         "test.db.pre-migration-v10-20260301T000000Z.bak",
     ]

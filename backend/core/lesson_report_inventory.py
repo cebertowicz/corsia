@@ -14,8 +14,12 @@ from core.skill_validation import validate_skill_text
 Identity = tuple[str, str, str]
 
 
-def source_record(text: str, path: str) -> dict[str, Any] | None:
-    """Project one authorized current source using the canonical file validators."""
+def source_record(text: str, path: str, *, with_statement: bool = False) -> dict[str, Any] | None:
+    """Project one authorized current source using the canonical file validators.
+
+    ``with_statement`` adds the trial's one-line statement for list rows; recorded
+    reads keep their original shape.
+    """
     trial = read_trial(text)
     if trial:
         lesson = trial.lesson
@@ -29,6 +33,8 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
             "path": path, "raw_sha256": raw_sha256(text.encode()),
             "source_refs": list(lesson.source_refs),
         }
+        if with_statement:
+            record["statement"] = trial.statement
         if "originating_subjects" in block:
             record["originating_subjects"] = list(lesson.originating_subjects)
         return record
@@ -38,12 +44,15 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
 
         metadata, _ = parse_frontmatter(text)
         block = metadata["corsia"]["capture"]
-        return {
+        record = {
             "kind": "capture", "id": capture.id, "version": capture.hash,
             "name": capture.id, "state": block.get("state"), "path": path,
             "owner_id": block.get("owner"), "review_after": block.get("review_after"),
             "raw_sha256": raw_sha256(text.encode()), "source_refs": list(capture.source_refs),
         }
+        if "originating_subjects" in block:
+            record["originating_subjects"] = list(capture.originating_subjects)
+        return record
     return None
 
 

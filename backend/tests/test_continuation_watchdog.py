@@ -9,7 +9,6 @@ import pytest
 
 from automation.continuation import recovery, runner, triggers
 from automation.continuation.sources.watchdog import WatchdogSource
-from automation.continuation.triggers import Trigger
 from infra.schema import SCHEMA_SQL
 from plans import admission, service
 
@@ -88,10 +87,6 @@ async def _find_landed_input(_thread_id, _idempotency_key):
     return {"delivery_state": "delivered"}
 
 
-def _idle(_thread_id):
-    return True
-
-
 def test_watchdog_is_due_only_after_budget_and_transition_clears_it():
     db = _db()
     _plan, node = _active_node(db)
@@ -130,7 +125,6 @@ async def test_watchdog_blocked_after_collection_never_enters_fifo(isolated_db):
             "2000-01-01T00:01:01+00:00",
             db=db,
             sources=[_BlockAfterCollection(active.id, blocker.id)],
-            is_idle=_idle,
         )
 
     assert result["cancelled"] == ["owner"]
@@ -155,48 +149,6 @@ async def test_watchdog_blocked_after_collection_never_enters_fifo(isolated_db):
     db.close()
 
 
-def test_watchdog_escalation_appends_event_without_writing_node_state():
-    db = _db()
-    _plan, node = _active_node(db)
-    source = WatchdogSource()
-    request = source.due("2099-01-01T00:00:00+00:00", db=db)[0]
-    trigger = Trigger(
-        id="trigger",
-        kind=request.kind,
-        thread_id=request.thread_id,
-        scope_id=request.scope_id,
-        subject_id=request.subject_id,
-        dedupe_key=request.dedupe_key,
-        idempotency_key=None,
-        state="stalled",
-        reason="cycle_cap_reached",
-        attempt=1,
-        deferrals=0,
-        cost_estimate_usd=0.0,
-        next_attempt_at=None,
-        created_at="t",
-        updated_at="t",
-    )
-
-    source.settle(
-        trigger, "stalled", "cycle_cap_reached", db=db
-    )
-    source.settle(
-        trigger, "stalled", "cycle_cap_reached", db=db
-    )
-
-    stored = db.execute(
-        "SELECT state FROM plan_nodes WHERE id=?", (node.id,)
-    ).fetchone()
-    events = db.execute(
-        "SELECT event FROM plan_node_events "
-        "WHERE node_id=? AND event='watchdog_escalated'",
-        (node.id,),
-    ).fetchall()
-    assert stored["state"] == "active"
-    assert len(events) == 1
-
-
 @pytest.mark.asyncio
 async def test_post_delivery_crash_recovers_trigger_and_watchdog_audit_atomically():
     db = _db()
@@ -209,7 +161,6 @@ async def test_post_delivery_crash_recovers_trigger_and_watchdog_audit_atomicall
             "2000-01-01T00:01:01+00:00",
             db=db,
             sources=[crash_source],
-            is_idle=_idle,
             deliver=delivery,
         )
 
@@ -258,7 +209,31 @@ async def test_post_delivery_crash_recovers_trigger_and_watchdog_audit_atomicall
 
 
 @pytest.mark.asyncio
-async def test_watchdog_cap_is_terminal_without_repeating_trigger_or_event():
+async def test_a_watchdog_spread_by_startup_is_delivered_once_it_falls_due():
+    db = _db()
+    _plan, _node = _active_node(db)
+    delivery = _LandedDelivery()
+
+    # A startup sweep spreads the new trigger past `now`, so it is not due yet.
+    await runner.sweep(
+        "2000-01-01T00:01:01+00:00",
+        db=db, sources=[WatchdogSource()], deliver=delivery, startup_jitter_seconds=600,
+    )
+    assert delivery.calls == 0
+
+    await runner.sweep(
+        "2000-01-01T01:00:00+00:00",
+        db=db, sources=[WatchdogSource()], deliver=delivery,
+    )
+
+    assert delivery.calls == 1
+    assert [tuple(row) for row in db.execute(
+        "SELECT state, attempt FROM continuation_triggers WHERE kind='t1_watchdog'"
+    )] == [("delivered", 1)]
+
+
+@pytest.mark.asyncio
+async def test_watchdog_keeps_waking_past_three_cycles_with_one_trigger_each():
     db = _db()
     _plan, node = _active_node(db)
     delivery = _LandedDelivery()
@@ -266,13 +241,13 @@ async def test_watchdog_cap_is_terminal_without_repeating_trigger_or_event():
     for offset in range(4):
         await runner.sweep(
             f"2099-01-01T00:0{offset}:00+00:00",
-            db=db, sources=[WatchdogSource()], is_idle=_idle, deliver=delivery,
+            db=db, sources=[WatchdogSource()], deliver=delivery,
         )
 
-    assert delivery.calls == 3
+    assert delivery.calls == 4
     assert db.execute(
         "SELECT COUNT(*) FROM continuation_triggers WHERE kind='t1_watchdog'"
     ).fetchone()[0] == 4
     assert db.execute(
-        "SELECT COUNT(*) FROM plan_node_events WHERE event='watchdog_escalated'"
-    ).fetchone()[0] == 1
+        "SELECT COUNT(*) FROM plan_node_events WHERE event='watchdog_wake'"
+    ).fetchone()[0] == 4

@@ -6,7 +6,7 @@ from functools import partial
 import logging
 import os
 import subprocess
-import tempfile
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,6 @@ from host_access.processes import (
     PROCESS_OWNER,
 )
 from connections import github_agent
-from host_access.refusal_messages import safehouse_unavailable_refusal
 from infra.db_async import run_in_db, run_off_db
 from infra.project_repo_policy import (
     RepoPolicy,
@@ -26,13 +25,9 @@ from infra.project_repo_policy import (
 )
 from infra.repo_flock import fast_forward_repo_locked
 from tools.shared_write_detection import collect_shell_shared_write_notices
-from registry.observer import (
-    CommandArtifactRegistrationError,
-    observe_command_result,
-)
+from registry.tool_result_observation import observe_with_warning
 from registry.registration_writer import origin_from_tool_context
-from registry.service import notify_changed
-from tools import shell_long_running
+import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward
 from tools.base import Tool
 from tools.sandbox_config import (
@@ -57,10 +52,11 @@ from tools.shell_output import (
     REGISTRATION_WARNING_RESULT_CAP as BASH_REGISTRATION_WARNING_RESULT_CAP,
     append_denial_guidance,
     foreground_output_parts,
-    registration_warning as build_registration_warning,
     with_shell_warnings,
 )
 from tools.shell_policy import load_shell_repo_policies
+import tools.controlled_git_sandbox as controlled_git_sandbox
+import tools.shell_sandbox as shell_sandbox
 from tools.shell_guard import (
     chained_base_git_denial_guidance,
     check_command_safety,
@@ -96,33 +92,13 @@ async def _run_controlled_git(
     agent_account = await run_in_db(github_agent.view) if agent_account is None else agent_account
     kind = args[0] if args and args[0] in {"fetch", "merge"} else "query"
     live_policies = list_registered_repo_policies()
-    descriptor, raw_path = tempfile.mkstemp(
-        prefix="corsia-controlled-git-",
-        suffix=".sb",
+    profile_path, argv = await asyncio.to_thread(
+        controlled_git_sandbox.envelope, repo, args, policy=policy,
+        operation=kind, policies=live_policies, agent_account=agent_account,
+        env=env, thread_id=thread_id, build_profile=execution_envelope_profile,
+        build_argv=safehouse_argv,
     )
-    profile_path = Path(raw_path).resolve(strict=False)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            profile = execution_envelope_profile(
-                "",
-                repo,
-                profile_path,
-                leased=False,
-                controlled_policy=policy,
-                controlled_operation=kind,
-                policies=live_policies,
-                agent_account=agent_account,
-            )
-            handle.write(profile)
-        argv = safehouse_argv("", repo, profile_path, agent_account=agent_account)
-        argv = [
-            *argv[: argv.index("--")],
-            "--",
-            "git",
-            "-c",
-            "core.hooksPath=/dev/null",
-            *args,
-        ]
         owned = await PROCESS_OWNER.spawn(
             argv,
             thread_id=thread_id,
@@ -139,6 +115,7 @@ async def _run_controlled_git(
             raise RuntimeError(
                 f"{operation} process owner returned an invalid result"
             )
+        await shell_sandbox.recheck_after(owned, leased=lease_id is not None)
         if owned.timed_out:
             raise subprocess.TimeoutExpired(
                 argv,
@@ -153,7 +130,8 @@ async def _run_controlled_git(
             owned.stderr.decode("utf-8", errors="replace"),
         )
     finally:
-        profile_path.unlink(missing_ok=True)
+        if profile_path is not None:
+            profile_path.unlink(missing_ok=True)
 
 
 class BashTool(Tool):
@@ -180,7 +158,7 @@ class BashTool(Tool):
             "USE THIS for:\n"
             "- Running build commands, tests, and scripts\n"
             "- Git operations (status, log, diff, commit)\n"
-            "- Package management (pip, npm, brew)\n"
+            "- Package management (pip, npm, uv; CORSIA supplies Python, Node, uv and gh)\n"
             "- System commands that don't have a dedicated tool\n\n"
             "DO NOT use this for operations that have dedicated tools:\n"
             "- Reading files → use read_file (not cat/head/tail)\n"
@@ -335,11 +313,8 @@ class BashTool(Tool):
                     policies=policies,
                 )
                 if fast_forward_policy is not None:
-                    if not is_safehouse_available():
-                        refusal = safehouse_unavailable_refusal(os.environ.get("PATH"))
-                        return f"Error: {refusal}"
-                    if version_error := await asyncio.to_thread(safehouse_version_error):
-                        return f"Error: {version_error}"
+                    if error := await shell_sandbox.startup_error(is_safehouse_available, safehouse_version_error):
+                        return error
 
                     try:
                         owner_thread_id = thread_id
@@ -412,23 +387,21 @@ class BashTool(Tool):
                 if guard_error:
                     return guard_error
 
-            sandbox_available = is_safehouse_available()
-            if not sandbox_available:
-                refusal = safehouse_unavailable_refusal(os.environ.get("PATH"))
-                return f"Error: {refusal}"
-            if version_error := await asyncio.to_thread(safehouse_version_error):
-                return f"Error: {version_error}"
+            if error := await shell_sandbox.startup_error(
+                is_safehouse_available, safehouse_version_error, leased=leased,
+            ):
+                return error
 
             canonical_cwd, cwd_denial = await _resolve_execution_cwd(
                 cwd,
                 working_dir,
                 leased=leased,
                 policies=policies,
-                thread_id=thread_id,
-                path_allowed=is_path_allowed,
+                thread_id=thread_id, path_allowed=is_path_allowed,
             )
             if cwd_denial is not None:
                 return cwd_denial
+            await agent_shell_tools.wait_for_prefetch()
             envelope = execution_envelope_for_consumed_action(
                 consumed,
                 leased=leased, thread_id=thread_id,
@@ -455,7 +428,7 @@ class BashTool(Tool):
                 env=env,
                 timeout_seconds=effective_timeout,
                 background=background,
-                cleanup_paths=(profile_path,) if background else (),
+                cleanup_paths=(profile_path,) if background and profile_path is not None else (),
                 **long_call.spawn_options,
             )
             if isinstance(owned, BackgroundProcessResult):
@@ -464,6 +437,7 @@ class BashTool(Tool):
                 return long_call.started_message(owned.handle)
             if not isinstance(owned, ForegroundProcessResult):
                 raise RuntimeError("process owner returned an invalid result")
+            await shell_sandbox.recheck_after(owned, leased=leased)
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
@@ -471,64 +445,41 @@ class BashTool(Tool):
             combined_output = stdout_text + stderr_text
             if owned.returncode != 0 and not leased and is_sandbox_denial(
                 combined_output,
-                is_safehouse_available,
+                lambda: shell_sandbox.available_for_denial(is_safehouse_available),
             ):
-                # A repo-policy denial (pinned/protected base) has a concrete
-                # better non-host path — the exact `.worktrees/` recovery — so
-                # that guidance leads. A chained direct-Git form on a base
-                # checkout also gets the one-command teaching, because worktrees
-                # now grant Git by location and unchaining is the real fix there.
-                # The generic state-aware host-scope template applies only when
-                # no policy-specific better way exists; never steer to host scope
-                # to route around repo policy.
+                # Prefer the repo-policy recovery path over host-scope guidance.
+                linux = sys.platform == 'linux'
                 repo_guidance = check_repo_write_path(canonical_cwd)
-                chained_guidance = chained_base_git_denial_guidance(
-                    command,
-                    str(canonical_cwd),
-                )
+                chained_guidance = chained_base_git_denial_guidance(command, str(canonical_cwd))
+                if linux and (repo_guidance or chained_guidance):
+                    output_parts.append('\nIf the sandbox restricted the path, this guidance may help:')
                 append_denial_guidance(output_parts, thread_id, repo_guidance, chained_guidance)
                 if not repo_guidance and not chained_guidance:
                     output_parts.append(
                         "\n"
                         + denial_guidance_prefix(combined_output)
                         + protected_scope_denial(
-                            "this command was blocked by the protected-mode sandbox",
+                            ("the sandbox may restrict access to the path" if linux else
+                             "this command was blocked by the protected-mode sandbox"),
                             lease_active=await _thread_has_live_lease(thread_id),
+                            conditional=linux,
                         )
                     )
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            registration_warning = None
-            try:
-                artifact = await run_in_db(
-                    observe_command_result,
-                    thread_id,
-                    "bash", {"command": command},
-                    "\n".join(part for part in (stdout_text, stderr_text) if part),
-                    is_error=owned.returncode != 0, notify=False,
-                    origin=origin_from_tool_context(thread_id, kwargs, "command_trigger"),
-                )
-                if artifact is not None:
-                    notify_changed(artifact)
-            except CommandArtifactRegistrationError as exc:
-                log.exception(
-                    "connector command artifact registration failed in %s",
-                    thread_id,
-                )
-                registration_warning = build_registration_warning(exc.artifact, exc.error)
-            except Exception as exc:
-                log.exception(
-                    "connector command observation failed in %s",
-                    thread_id,
-                )
-                registration_warning = build_registration_warning(None, exc)
+            told, registration_warning = await run_in_db(
+                observe_with_warning,
+                thread_id,
+                "bash", {"command": command},
+                "\n".join(part for part in (stdout_text, stderr_text) if part),
+                is_error=owned.returncode != 0, notify=False,
+                origin=origin_from_tool_context(thread_id, kwargs, "observe_rule"),
+            )
 
             ownership_notices = await collect_shell_shared_write_notices(
                 thread_id, project_id, command, shared_write_started_at_ns, canonical_cwd, runner=run_off_db,
             )
-            result = with_shell_warnings(
-                result, registration_warning, ownership_notices,
-            )
+            result = with_shell_warnings(result, registration_warning, ownership_notices, told)
 
             return result
 

@@ -50,8 +50,11 @@ def retired_detail(db, durable, *, clock: str) -> dict[str, Any]:
     same way, so "archived" is never a special case of itself. The display is
     derived from the durable state alone, because nothing live remains.
     """
+    from plans import intent_words
+
     return {
         **dict(durable),
+        **intent_words.detail(db, durable),
         "display": operator_node_state.retired_display(str(durable["state"])),
         "events": events(db, str(durable["id"])),
         "as_of": clock,

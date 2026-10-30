@@ -23,7 +23,9 @@ from api.files import router as files_router
 from api.files_revision import router as files_revision_router
 from api.doc_comments import router as doc_comments_router
 from api.doc_comment_thread_views import router as doc_comment_thread_views_router
+from api.chat_comment_views import router as chat_comment_views_router
 from api.provider_sources import router as provider_sources_router
+from api.provider_local_models import router as provider_local_models_router
 from api.provider_cli_link import router as provider_cli_link_router
 from api.providers import router as providers_router
 from api.provider_policy import router as provider_policy_router
@@ -31,6 +33,7 @@ from api.vendor_accounts import router as vendor_accounts_router
 from api.discovered_models import router as discovered_models_router
 from api.network_servers import router as network_servers_router
 from api.version import router as version_router
+from api.devices import router as devices_router
 from api.webhooks import router as webhooks_router
 from api.cc_attach import router as cc_attach_router
 from api.conductor import router as conductor_router
@@ -69,7 +72,9 @@ __all__ = [
     "files_revision_router",
     "doc_comments_router",
     "doc_comment_thread_views_router",
+    "chat_comment_views_router",
     "provider_sources_router",
+    "provider_local_models_router",
     "provider_cli_link_router",
     "providers_router",
     "provider_policy_router",
@@ -77,6 +82,7 @@ __all__ = [
     "discovered_models_router",
     "network_servers_router",
     "version_router",
+    "devices_router",
     "webhooks_router",
     "cc_attach_router",
     "conductor_router",

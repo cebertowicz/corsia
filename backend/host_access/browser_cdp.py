@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence
+import logging
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -16,6 +17,7 @@ from host_access.browser_session_state import BrowserSessionError
 
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
+log = logging.getLogger(__name__)
 # The CDP plain-text search matches tag names, attribute names and values, and text, in every
 # in-process document and in open and closed shadow roots; the probe keeps only password inputs.
 _PASSWORD_SEARCH = "password"
@@ -24,15 +26,16 @@ _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 
 @dataclass(frozen=True)
 class PasswordProbe:
-    """The guarded page visit and visible password-node identities, never values.
+    """The guarded page visit and visible/present password-node identities, never values or text.
 
-    ``target`` is the page target probed, so a probe of another tab never settles this one's episode.
+    ``target`` is the page target probed, so a probe of another tab never settles the step open on this one.
     """
 
     visit: str
     host: str
     visible_nodes: frozenset[int]
     target: str = ""
+    present_nodes: frozenset[int] = field(kw_only=True)
 
 
 class CdpClient:
@@ -42,6 +45,7 @@ class CdpClient:
         self.endpoint = endpoint
         self._max_size = max_size
         self._next_id = 0
+        self.parents: dict[int, int] = {}
 
     def next_request(self) -> int:
         """The id of the next send, for a reader that must know its answer before send returns."""
@@ -58,8 +62,21 @@ class CdpClient:
         while True:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
+                if response.get("method") == "DOM.setChildNodes":
+                    event_params = response.get("params", {})
+                    parent = event_params.get("parentId")
+                    if isinstance(parent, int):
+                        for child in event_params.get("nodes", []):
+                            node_id = child.get("nodeId")
+                            if isinstance(node_id, int):
+                                self.parents[node_id] = parent
                 continue
             if "error" in response:
+                error = response["error"]
+                if isinstance(error, dict):
+                    log.debug("CDP %s failed (code %s): %s", method, error.get("code"), error.get("message"))
+                else:
+                    log.debug("CDP %s failed with an invalid error response", method)
                 raise BrowserSessionError("This page couldn't be checked")
             result = response.get("result")
             if not isinstance(result, dict):
@@ -74,8 +91,10 @@ class CdpClient:
         await self.socket.close()
 
 
-async def page_password_probe(endpoint: str, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
+async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]) -> PasswordProbe:
     """Find visible password inputs on the page target, preserving this visit's reveal-toggle nodes (AR3).
+
+    ``known`` maps each guarded visit to its password nodes; only those of the page's own visit apply.
 
     It covers the top document, in-process (same-origin) frames, and open and closed shadow roots,
     and transfers only the matching nodes, never the whole DOM.
@@ -86,10 +105,10 @@ async def page_password_probe(endpoint: str, known_visit: str | None, known_node
         host = _host(frame)
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
-        known = known_nodes if known_visit == loader else frozenset()
+        known_here = known.get(loader, frozenset())
         current = await _password_inputs(cdp)
-        visible = {node for node in current | known if await _visible(cdp, node)}
-        return PasswordProbe(loader, host, frozenset(visible), endpoint)
+        visible = {node for node in current | known_here if await _visible(cdp, node)}
+        return PasswordProbe(loader, host, frozenset(visible), endpoint, present_nodes=frozenset(current))
 
 
 async def _password_inputs(cdp: CdpClient) -> set[int]:
@@ -105,9 +124,64 @@ async def _password_inputs(cdp: CdpClient) -> set[int]:
     inputs = set()
     for node_id in found.get("nodeIds", []):
         node = (await cdp.call("DOM.describeNode", nodeId=protocol_int(node_id), depth=0)).get("node", {})
-        if _is_password_input(node):
+        if _is_password_input(node) and not await _display_secret(cdp, node):
             inputs.add(protocol_int(node.get("backendNodeId")))
     return inputs
+
+
+def _sign_in_action(button: dict) -> bool:
+    label = button.get("name", {}).get("value", "")
+    disabled = any(prop.get("name") == "disabled" and prop.get("value", {}).get("value") is True
+                   for prop in button.get("properties", []))
+    return (not disabled and isinstance(label, str)
+            and label.strip().casefold() in {"sign in", "log in", "next", "continue", "verify", "submit", "confirm"})
+
+
+async def _display_secret(cdp: CdpClient, node: dict) -> bool:
+    """Recognize display secrets without reading field values; uncertain context stays guarded."""
+    flat = node.get("attributes") or []
+    names = {str(name).lower() for name in flat[::2]}
+    display_signal = bool(names & {"readonly", "disabled"})
+    parent = cdp.parents.get(cast(int, node.get("nodeId")))
+    if not isinstance(parent, int):
+        return False
+    try:
+        reveal_levels = 0
+        while isinstance(parent, int):
+            ancestor = (await cdp.call("DOM.describeNode", nodeId=parent, depth=0)).get("node", {})
+            name = str(ancestor.get("nodeName", "")).upper()
+            if name == "#DOCUMENT":
+                return display_signal
+            if reveal_levels < 3 and name not in {"FORM", "BODY"}:
+                buttons = (await cdp.call("Accessibility.queryAXTree", nodeId=parent, role="button")).get("nodes", [])
+                if any(_sign_in_action(button) for button in buttons):
+                    return False
+                for button in buttons:
+                    label = button.get("name", {}).get("value", "")
+                    if isinstance(label, str):
+                        label = label.strip().casefold()
+                        if label.startswith(("show", "reveal")) and "password" not in label:
+                            display_signal = True
+                reveal_levels += 1
+            if name in {"FORM", "BODY"}:
+                reveal_levels = 3
+            if reveal_levels == 3 and not display_signal:
+                return False
+            nearby = await cdp.call(
+                "DOM.querySelectorAll", nodeId=parent,
+                selector="input:is([type=email i], [autocomplete~=username i], [autocomplete~=email i], [autocomplete~=one-time-code i], [name*=username i], [name*=email i])",
+            )
+            if nearby.get("nodeIds"):
+                return False
+            if name == "FORM":
+                submit = await cdp.call("DOM.querySelectorAll", nodeId=parent,
+                                        selector="button:not([type]), button[type=submit i], input[type=submit i], input[type=image i]")
+                if submit.get("nodeIds"):
+                    return False
+            parent = cdp.parents.get(parent)
+    except BrowserSessionError:
+        return False
+    return False
 
 
 def _is_password_input(node: dict) -> bool:
@@ -163,7 +237,8 @@ async def dispatch_mouse_event(endpoint: str, event: dict) -> None:
             params["button"] = button
         # CDP does not infer the held-button mask from `button`; a pointer press
         # must carry it or a background shared page can ignore the click sequence.
-        params["buttons"] = 1 if event_type == "mousePressed" else 0
+        params["buttons"] = ({"left": 1, "right": 2, "middle": 4, "back": 8, "forward": 16}.get(button, 0)
+                             if event_type != "mouseReleased" and button is not None else 0)
         if click_count is not None:
             if not isinstance(click_count, int) or isinstance(click_count, bool) or click_count < 0:
                 raise BrowserSessionError("This page couldn't receive pointer input")
@@ -222,14 +297,21 @@ async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitab
 async def page_endpoint(run: RunCommand) -> str:
     """The one resolver of a session's shared page target, for agent commands, probes and the pane.
 
-    It picks the page target showing the session's current URL, so every consumer acts on the page
-    agent-browser itself reports, even when the browser holds more than one tab.
+    It picks the page matching agent-browser's active URL and title. Pages with the same
+    URL and title remain indistinguishable because the native CLI exposes no target ID.
     """
-    browser_endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
-    if browser_endpoint is None or not browser_endpoint.startswith("ws"):
-        raise BrowserSessionError("This page couldn't be checked")
+    endpoint = await browser_endpoint(run, "This page couldn't be checked")
     current_url = _data_field(await run(("get", "url"), 10), "url")
-    return await asyncio.to_thread(_page_endpoint, browser_endpoint, current_url)
+    current_title = _data_field(await run(("get", "title"), 10), "title")
+    return await asyncio.to_thread(_page_endpoint, endpoint, current_url, current_title)
+
+
+async def browser_endpoint(run: RunCommand, refusal: str) -> str:
+    """The session's browser-level CDP endpoint, refused with the caller's own wording."""
+    endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
+    if endpoint is None or not endpoint.startswith("ws"):
+        raise BrowserSessionError(refusal)
+    return endpoint
 
 
 def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
@@ -238,7 +320,7 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
     return value if not result.returncode and isinstance(value, str) else None
 
 
-def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> str:
+def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
     parsed = urlparse(browser_endpoint)
     listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
@@ -251,7 +333,8 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> st
         raise BrowserSessionError("This page couldn't be checked")
     pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
     if expected_url:
-        pages.sort(key=lambda target: target.get("url") != expected_url)
+        pages.sort(key=lambda target: (target.get("url") != expected_url,
+                                       expected_title is not None and target.get("title") != expected_title))
     for target in pages:
         endpoint = target.get("webSocketDebuggerUrl")
         if isinstance(endpoint, str) and endpoint.startswith("ws"):

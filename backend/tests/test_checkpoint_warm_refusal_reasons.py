@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import threading
 from types import SimpleNamespace
 
 import pytest
-from core.checkpoint_codex_root import RegisteredRollout
+from core.fork_codex_root import RegisteredRollout
 from loguru import logger
 
 from test_checkpoint_unavailable_release import blocked_input  # noqa: F401
@@ -23,7 +24,7 @@ def _info_lines():
 
 
 def _refused(thread_id: str, harness: str, reason: str) -> str:
-    return f"checkpoint warm capture refused for {thread_id} ({harness}): {reason}"
+    return f"fork warm capture refused for {thread_id} ({harness}): {reason}"
 
 
 @pytest.mark.asyncio
@@ -56,7 +57,7 @@ async def test_native_capture_without_receipt_names_its_reason() -> None:
 async def test_claude_initial_capture_names_its_reason(
     harness, boundary, warm_boundary, reason,
 ) -> None:
-    from core.checkpoint_cc_boundary import capture_boundary_warm_source
+    from core.fork_cc_boundary import capture_boundary_warm_source
 
     context = SimpleNamespace(
         target=SimpleNamespace(harness=harness),
@@ -80,10 +81,10 @@ async def test_claude_initial_capture_names_its_reason(
     ),
 )
 async def test_switch_capture_names_its_reason(harness, binary, reason) -> None:
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
 
     with _info_lines() as lines:
-        source = await capture_warm_checkpoint_source(
+        source = await capture_warm_fork_source(
             "thread-s", object(),
             target=SimpleNamespace(harness=harness),
             binary=binary,
@@ -95,9 +96,72 @@ async def test_switch_capture_names_its_reason(harness, binary, reason) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ("claude-code", "codex"))
+async def test_switch_capture_renders_durable_boundary_off_loop_and_preserves_result(
+    monkeypatch, harness: str,
+) -> None:
+    """Both harness paths retain their source/result contract off the event loop."""
+    import core.fork_render as fork_render
+
+    loop_thread = threading.get_ident()
+    render_threads: list[int] = []
+    durable_boundary = object()
+    expected_source = object()
+    observed: dict[str, tuple[object, ...]] = {}
+
+    def render_boundary(thread_id, boundary, rendered_harness):
+        observed["durable_args"] = (thread_id, boundary, rendered_harness)
+        render_threads.append(threading.get_ident())
+        return durable_boundary
+
+    monkeypatch.setattr(fork_render, "_durable_warm_boundary", render_boundary)
+    target = SimpleNamespace(harness=harness)
+    boundary = object()
+    if harness == "claude-code":
+        import core.fork_cc_boundary as cc_boundary
+
+        async def capture_claude(thread_id, captured_boundary, warm_boundary, **kwargs):
+            observed["capture_args"] = (thread_id, captured_boundary, warm_boundary, kwargs)
+            return expected_source
+
+        monkeypatch.setattr(cc_boundary, "capture_registered_boundary_warm_source", capture_claude)
+        source = await fork_render.capture_warm_fork_source(
+            "thread-off-loop", boundary, target=target, binary="/bin/claude", reasoning_effort=None,
+        )
+    else:
+        import core.fork_codex as codex
+
+        def prefix(thread_id, warm_boundary):
+            observed["prefix_args"] = (thread_id, warm_boundary)
+            return 123
+
+        async def capture_codex(thread_id, captured_boundary, **kwargs):
+            observed["capture_args"] = (thread_id, captured_boundary, kwargs)
+            return expected_source
+
+        monkeypatch.setattr(codex, "warm_tool_boundary_prefix_bytes", prefix)
+        monkeypatch.setattr(codex, "capture_warm_source", capture_codex)
+        source = await fork_render.capture_warm_fork_source(
+            "thread-off-loop", boundary, target=target, binary="/bin/codex", reasoning_effort=None,
+        )
+
+    assert source is expected_source
+    assert observed["durable_args"] == ("thread-off-loop", boundary, harness)
+    assert render_threads and render_threads != [loop_thread]
+    if harness == "claude-code":
+        assert observed["capture_args"][:3] == ("thread-off-loop", boundary, durable_boundary)
+    else:
+        assert observed["prefix_args"] == ("thread-off-loop", durable_boundary)
+        assert observed["capture_args"] == (
+            "thread-off-loop", boundary,
+            {"target": target, "binary": "/bin/codex", "prefix_bytes": 123},
+        )
+
+
+@pytest.mark.asyncio
 async def test_registered_capture_without_identity_names_its_reason(monkeypatch) -> None:
-    import core.checkpoint_cc_fork as fork
-    from core.checkpoint_cc_boundary import capture_registered_boundary_warm_source
+    import core.fork_cc as fork
+    from core.fork_cc_boundary import capture_registered_boundary_warm_source
 
     async def no_live_identity(_thread_id):
         return None
@@ -126,7 +190,7 @@ async def test_registered_capture_without_identity_names_its_reason(monkeypatch)
 async def test_codex_capture_names_one_reason(
     monkeypatch, harness, boundary_thread, registered, reason,
 ) -> None:
-    import core.checkpoint_codex_fork as fork
+    import core.fork_codex as fork
     from history.types import HistoryBoundary
 
     monkeypatch.setattr(fork, "_registered_rollout", lambda _thread_id: registered)
@@ -144,7 +208,7 @@ async def test_codex_capture_names_one_reason(
 async def test_codex_tool_boundary_refusal_names_the_rollout_check(monkeypatch) -> None:
     """The rollout matcher's own reason reaches the log, once, in place of
     the old catch-all ``prefix_unproved``."""
-    import core.checkpoint_codex_fork as fork
+    import core.fork_codex as fork
 
     monkeypatch.setattr(fork, "_live_refusal", lambda *_: None)
     monkeypatch.setattr(

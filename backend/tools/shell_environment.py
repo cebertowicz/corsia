@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from connections import github_agent, gws_agent_home
+from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import BOT_ENV_NAMES, is_host_identity_name
+from events.trace_env import TRACE_ENV
 from infra.db_async import run_in_db
+import tools.agent_shell_tools as agent_shell_tools
 
 _SENSITIVE_ENV_NAME_RE = re.compile(
     r"(?:^|_)(?:API_?KEY|AUTH_?TOKEN|ACCESS_?TOKEN|TOKEN|SECRET|PASSWORD|"
@@ -24,8 +27,15 @@ _SENSITIVE_ENV_NAME_RE = re.compile(
 )
 _ENV_CONTROL_NAMES = frozenset({"BASH_ENV", "ENV", "CDPATH"})
 # The backend's own identities Safehouse may pass into a child, in argv order.
+# TRACE_ENV is set only by the script runner for a run an event rule started.
 _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_TOOL_INVOCATION_ID",
-                     "AGENT_BROWSER_ARGS")
+                     "AGENT_BROWSER_ARGS", *agent_shell_tools.CACHE_ENV_NAMES, TRACE_ENV,
+                     "CORSIA_SCRIPT_GITHUB_SOCKET")
+
+
+def is_credential_env_name(name: str) -> bool:
+    """Whether a variable carries a credential or a GitHub or Git identity no child inherits."""
+    return bool(_SENSITIVE_ENV_NAME_RE.search(name)) or is_host_identity_name(name)
 
 
 def shell_env_pass_names() -> str:
@@ -33,7 +43,7 @@ def shell_env_pass_names() -> str:
 
     Safehouse skips a name the environment does not carry, so the values decide what passes.
     """
-    return ",".join((*_SHELL_PASS_NAMES, *BOT_ENV_NAMES, gws_agent_home.SHELL_ENV))
+    return ",".join((*_SHELL_PASS_NAMES, *BOT_ENV_NAMES))
 
 
 async def bind_agent_account(env: dict[str, str]) -> AgentAccountView:
@@ -46,26 +56,14 @@ async def bind_agent_account(env: dict[str, str]) -> AgentAccountView:
     return view
 
 
-def bind_gws_home(env: dict[str, str], thread_id: str | None) -> Path | None:
-    """Name this thread's own gws home in its shell env and return it for the grant, or None.
-
-    Only the thread's own home is ever named or granted; with none, the helper fails closed.
-    """
-    home = gws_agent_home.home_for(thread_id)
-    if home is not None:
-        env[gws_agent_home.SHELL_ENV] = str(home)
-    return home
-
-
-def own_gws_home(env: dict[str, str]) -> Path | None:
-    """The gws home a spawn's env names, which is the one its argv grants read-write."""
-    value = env.get(gws_agent_home.SHELL_ENV)
-    return Path(value) if value else None
-
-
 def agent_account_ro_dirs(view: AgentAccountView | None) -> list[Path]:
     """The agents' account home, granted read-only so no command can sign it in or out."""
     return github_agent.sandbox_ro_dirs(github_agent.view() if view is None else view)
+
+
+def agent_tool_ro_dirs() -> list[Path]:
+    """The folders CORSIA's Python and runtimes live in, granted read-only so PATH can reach them."""
+    return agent_shell_tools.readable_dirs()
 
 
 def agent_account_deny_rule(render: Callable[[Path], str], view: AgentAccountView | None) -> str | None:
@@ -93,12 +91,10 @@ def safehouse_subprocess_env(
         if (
             not name.startswith("SAFEHOUSE_")
             and name not in _ENV_CONTROL_NAMES
-            and not _SENSITIVE_ENV_NAME_RE.search(name)
-            and not is_host_identity_name(name)
-            and name != gws_agent_home.SHELL_ENV
+            and not is_credential_env_name(name)
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
-                "CORSIA_TOOL_INVOCATION_ID",
+                "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV, "CORSIA_SCRIPT_GITHUB_SOCKET",
             }
         )
     }
@@ -106,8 +102,12 @@ def safehouse_subprocess_env(
         env["CORSIA_THREAD_ID"] = str(thread_id)
     if thread_id and isinstance(invocation_id, str) and invocation_id.strip():
         env["CORSIA_TOOL_INVOCATION_ID"] = invocation_id
-    # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
-    env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
+    if sys.platform == "darwin":
+        # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
+        env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
+    elif sys.platform == "linux":
+        env.pop("AGENT_BROWSER_ARGS", None)
+    env.update(agent_shell_tools.shell_environment(env.get("PATH", "")))
     return env
 
 
@@ -144,5 +144,4 @@ def shell_execution_context(
     env = safehouse_subprocess_env(
         thread_id, invocation_id=invocation_id if export_invocation else None,
     )
-    bind_gws_home(env, thread_id)
     return thread_id, project_id, turn_id, env

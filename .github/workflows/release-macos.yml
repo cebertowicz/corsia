@@ -1,48 +1,167 @@
 name: Build unsigned macOS app
 
 on:
+  schedule:
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       tag:
         description: Existing release tag to build
-        required: true
+        required: false
         type: string
+      channel:
+        description: Release channel to build
+        required: false
+        default: stable
+        type: choice
+        options:
+          - stable
+          - dev
+      force:
+        description: Build even when this dev version already has an artifact or prerelease
+        required: false
+        default: false
+        type: boolean
+
+# The release owner bumps this after each stable release.
+env:
+  NEXT_RELEASE_VERSION: '0.4.1'
+  DEV_UPDATER_ENDPOINT: https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json
 
 jobs:
-  verify:
-    name: Verify tagged main commit
+  hourly:
+    name: Check hourly dev build
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
+      statuses: write
     outputs:
-      commit_sha: ${{ steps.tag.outputs.commit_sha }}
+      commit_sha: ${{ steps.decision.outputs.commit_sha }}
+      should_build: ${{ steps.decision.outputs.should_build }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Test the hourly decision
+        if: vars.HOURLY_DEV_BUILD == 'true'
+        run: bash desktop/scripts/test-hourly-dev-build.sh
+      - id: decision
+        env:
+          HOURLY_DEV_BUILD: ${{ vars.HOURLY_DEV_BUILD }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash desktop/scripts/hourly-dev-build.sh
+      - name: Mark the dev build pending
+        if: steps.decision.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ steps.decision.outputs.commit_sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=pending -f context=dev-build
+
+  verify:
+    needs: hourly
+    if: always() && (github.event_name == 'workflow_dispatch' || (needs.hourly.result == 'success' && needs.hourly.outputs.should_build == 'true'))
+    name: ${{ github.event_name == 'schedule' && format('Dev build {0}', needs.hourly.outputs.commit_sha) || 'Verify build input' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
+    outputs:
+      commit_sha: ${{ steps.tag.outputs.commit_sha }}
+      release_tag: ${{ steps.tag.outputs.release_tag }}
+      should_build: ${{ steps.tag.outputs.should_build }}
+      manual_pending: ${{ steps.pending.outcome }}
+    steps:
+      - name: Mark a manual dev build pending
+        id: pending
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'dev' && github.ref == 'refs/heads/dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=pending -f context=dev-build
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
           fetch-depth: 0
       - id: tag
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          git check-ref-format "refs/tags/$RELEASE_TAG"
-          [[ "$RELEASE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
-            echo "tag must be v0.X.Y" >&2
-            exit 1
-          }
-          git fetch --force --tags origin main
-          commit_sha="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          git merge-base --is-ancestor "$commit_sha" origin/main
-          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
+          case "${{ github.event_name == 'schedule' && 'dev' || inputs.channel }}" in
+            stable)
+              git check-ref-format "refs/tags/$RELEASE_TAG"
+              [[ "$RELEASE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
+                echo "tag must be v0.X.Y" >&2
+                exit 1
+              }
+              git fetch --force --tags origin main
+              commit_sha="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+              git merge-base --is-ancestor "$commit_sha" origin/main
+              release_tag="$RELEASE_TAG"
+              should_build=true
+              ;;
+            dev)
+              [ "$GITHUB_REF" = "refs/heads/dev" ] || [ "$GITHUB_EVENT_NAME" = schedule ] || {
+                echo "dev channel builds must be dispatched from refs/heads/dev" >&2
+                exit 1
+              }
+              commit_sha="$(git rev-parse HEAD)"
+              latest_tag="$(GH_TOKEN="${{ github.token }}" gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+              desktop/scripts/test-validate-next-release-version.sh
+              desktop/scripts/validate-next-release-version.sh "$NEXT_RELEASE_VERSION" "$latest_tag"
+              dev_count="$(git rev-list --count "$commit_sha")"
+              version="$NEXT_RELEASE_VERSION-dev.$dev_count"
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || {
+                echo "computed dev version is invalid: $version" >&2
+                exit 1
+              }
+              release_tag="v$version"
+              artifact_name="corsia-unsigned-macos-app-$release_tag"
+              artifact_names="$(GH_TOKEN="${{ github.token }}" gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$artifact_name&per_page=100" --jq '.artifacts[] | select(.expired == false) | .name')"
+              artifact_exists=false
+              if grep -Fx "$artifact_name" <<<"$artifact_names" >/dev/null; then
+                artifact_exists=true
+              fi
+              release_exists=false
+              if release_response="$(GH_TOKEN="${{ github.token }}" gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" 2>&1)"; then
+                release_exists=true
+              elif [[ "$release_response" != *"HTTP 404"* ]]; then
+                echo "unable to check for existing release $release_tag: $release_response" >&2
+                exit 1
+              fi
+              if [ "$artifact_exists" = true ] || [ "$release_exists" = true ]; then
+                if [ "${{ inputs.force }}" != true ]; then
+                  echo "Dev version $release_tag already has an artifact or prerelease; skipping build (set force=true to rebuild)."
+                  should_build=false
+                else
+                  should_build=true
+                fi
+              else
+                should_build=true
+              fi
+              ;;
+            *)
+              echo "channel must be stable or dev" >&2
+              exit 1
+              ;;
+          esac
+          {
+            printf 'commit_sha=%s\n' "$commit_sha"
+            printf 'release_tag=%s\n' "$release_tag"
+            printf 'should_build=%s\n' "$should_build"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build unsigned app artifact
     needs: verify
+    if: always() && needs.verify.result == 'success' && needs.verify.outputs.should_build == 'true'
     runs-on: macos-15
     permissions:
       contents: read
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
+      CHANNEL: ${{ github.event_name == 'schedule' && 'dev' || inputs.channel }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -56,15 +175,24 @@ jobs:
           set -euo pipefail
           release_version="${RELEASE_TAG#v}"
           desktop/scripts/test-stamp-release-version.sh
+          desktop/scripts/test-stamp-bundle-version.sh
           desktop/scripts/stamp-release-version.sh "$RELEASE_TAG"
+          if [ "$CHANNEL" = dev ]; then
+            desktop/scripts/test-stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
+            desktop/scripts/stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
+          fi
           # The marketing version is the release tag without v. Previews use
           # 0.x.y-dev.N but macOS requires an integer-only build sequence.
+          macos_short_version="${release_version%%-dev.*}"
           macos_bundle_version="1.0.$(git rev-list --count HEAD)"
-          CORSIA_APP_VERSION="$release_version" CORSIA_MACOS_SHORT_VERSION="$release_version" CORSIA_MACOS_BUNDLE_VERSION="$macos_bundle_version" desktop/scripts/build-macos-bundle.sh --skip-dmg
+          [[ "$macos_short_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid macOS short version: $macos_short_version" >&2; exit 1; }
+          [[ "$macos_bundle_version" =~ ^1\.0\.[0-9]+$ ]] || { echo "invalid macOS bundle version: $macos_bundle_version" >&2; exit 1; }
+          CORSIA_APP_VERSION="$release_version" CORSIA_MACOS_SHORT_VERSION="$macos_short_version" CORSIA_MACOS_BUNDLE_VERSION="$macos_bundle_version" desktop/scripts/build-macos-bundle.sh --skip-dmg
           app="desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
           test -d "$app"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | grep -Fx "$release_version"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | grep -Fx "$macos_short_version"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" | grep -Fx "$macos_bundle_version"
+          /usr/libexec/PlistBuddy -c 'Print :CORSIAVersion' "$app/Contents/Info.plist" | grep -Fx "$release_version"
           ditto -c -k --keepParent "$app" CORSIA.app.zip
       - name: Upload unsigned app
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -73,3 +201,36 @@ jobs:
           path: CORSIA.app.zip
           if-no-files-found: error
           retention-days: 7
+
+  dev-status:
+    name: Complete dev build status
+    needs: [hourly, verify, build]
+    if: always() && ((github.event_name == 'schedule' && needs.hourly.outputs.should_build == 'true') || (github.event_name == 'workflow_dispatch' && inputs.channel == 'dev' && github.ref == 'refs/heads/dev'))
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Record the outcome
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
+          HOURLY_RESULT: ${{ needs.hourly.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_PENDING: ${{ needs.verify.outputs.manual_pending }}
+        run: |
+          state=success
+          if [ "$HOURLY_RESULT" = cancelled ] || [ "$VERIFY_RESULT" = cancelled ] || [ "$BUILD_RESULT" = cancelled ] || [ "$HOURLY_RESULT" = failure ] || { [ "$EVENT_NAME" = workflow_dispatch ] && [ "$MANUAL_PENDING" != success ]; }; then
+            state=error
+          elif [ "$VERIFY_RESULT" = failure ] || [ "$BUILD_RESULT" = failure ]; then
+            state=failure
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f "state=$state" -f context=dev-build
+      - name: Record cancellation
+        if: ${{ cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event_name == 'schedule' && needs.hourly.outputs.commit_sha || github.sha }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$COMMIT_SHA" -f state=error -f context=dev-build

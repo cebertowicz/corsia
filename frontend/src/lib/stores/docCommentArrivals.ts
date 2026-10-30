@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { fetchComments, type CommentFeedback } from '$lib/api/docs';
 import { docComments, fromServer, loadComments, reshow, type DocComment } from './docComments';
-import { endHold, heldIds, startHold } from './docCommentHolds';
+import { endHold, heldIds, holdCall, startHold } from './docCommentHolds';
 
 export interface PreparedCommentArrival {
 	comment: DocComment | null;
@@ -37,6 +37,9 @@ export function holdCommentArrival(artifactId: string, commentId: string): void 
 	startHold(artifactId, commentId, shown);
 	if (shown) reshow(artifactId);
 }
+
+/** Note which agent call a held comment came from, so that call's streamed preview outlasts the hold. */
+export const holdCommentCall = holdCall;
 
 /** Show a held comment normally again (every exit but its reveal). Safe to call when it is not held. */
 export function releaseCommentArrival(artifactId: string, commentId: string): void {

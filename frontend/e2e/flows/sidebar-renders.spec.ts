@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, e2eModel, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 test.describe('@flow:sidebar @surface:navigation sidebar renders', () => {
@@ -99,7 +100,7 @@ test.describe('@flow:sidebar @surface:navigation sidebar renders', () => {
 		await saveEvidenceScreenshot(page, testInfo, `while-away-${testInfo.project.name}`);
 	});
 
-	test('empty session list shows "No conversations yet"', async ({ page, request }, testInfo) => {
+	test('empty session list shows "No chats here"', async ({ page, request }, testInfo) => {
 		await loginByUrl(page);
 
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
@@ -114,7 +115,7 @@ test.describe('@flow:sidebar @surface:navigation sidebar renders', () => {
 		const itemCount = await threadItems.count();
 		if (itemCount === 0) {
 			await expect(emptyState).toBeVisible();
-			await expect(emptyState).toContainText(/no conversations/i);
+			await expect(emptyState).toContainText(/no chats here/i);
 		}
 
 		await saveEvidenceScreenshot(page, testInfo, 'sidebar-empty-state');

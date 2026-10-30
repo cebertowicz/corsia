@@ -14,9 +14,10 @@ from api.doc_comments import comment_action_status, decision_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError, agent_document_writer
 from doceditor.comment_actions import (
-    SUGGESTION_REASON_MAX_CHARS, CommentActionError, check_agent_update, decide_all_from_author,
+    SUGGESTION_REASON_MAX_CHARS, CommentActionError, check_agent_update,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import decide_all_from_author
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
@@ -83,6 +84,7 @@ class AgentCommentCreate(BaseModel):
     parent_id: str | None = None
     review: bool = False
     replacement: str | None = None
+    insert_after: bool = False
     as_session_id: str | None = None
     client_id: str | None = None
     submit: bool = False
@@ -95,11 +97,11 @@ class AgentCommentCreate(BaseModel):
 
 def _validate_create_shape(body: AgentCommentCreate) -> None:
     """Validate the request shape."""
-    if body.replacement is not None:
+    if body.replacement is not None or body.insert_after:
         try:
             validate_create(body=body.body, parent_id=body.parent_id, review=body.review,
                             quote=body.quote, replacement=body.replacement,
-                            doc_path=body.doc_path, artifact_id=body.artifact_id)
+                            doc_path=body.doc_path, artifact_id=body.artifact_id, insert_after=body.insert_after)
         except CommentActionError as exc:
             raise HTTPException(400, exc.message) from exc
     elif not body.body.strip():
@@ -151,10 +153,11 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
     request = CommentInput(
         artifact_id=artifact_id, path=doc_path, body=text, author=author, author_kind="agent", user_id=user["id"],
         author_thread_id=body.as_session_id, parent_id=body.parent_id, review=is_review,
-        quote=body.quote, near=body.near, replacement=body.replacement, registration=register_spec, submit=body.submit,
+        quote=body.quote, near=body.near, replacement=body.replacement, insert_after=body.insert_after,
+        registration=register_spec, submit=body.submit,
     )
     try:
-        row, registered, feedback = await create_validated_comment(request, body.client_id)
+        row, registered, feedback, _created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:
@@ -167,6 +170,8 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         raise HTTPException(
             409, "client_id collides with another artifact's comment — re-mint and retry"
         ) from exc
+    except CommentActionError as exc:
+        raise HTTPException(comment_action_status(exc), exc.message) from exc
     except ValueError as exc:
         detail = str(exc)
         status = 413 if "too large" in detail else 415 if "binary" in detail else 422
@@ -222,6 +227,7 @@ async def agent_feedback_action(action: str, token: str, body: AgentFeedbackActi
                         author_kind="agent",
                         author_id=body.as_session_id,
                         artifact_id=artifact_id,
+                        delivery_policy=feedback_batches.IMMEDIATE,
                     )
                 undelivered = feedback_batches.undelivered_for_document(
                     connection,

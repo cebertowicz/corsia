@@ -23,11 +23,13 @@ from connections.account_receipts import capture_receipt, ReceiptFence
 from connections.account_runtime import LaunchHomes, validate_launch
 from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, default_account, get_account, set_account_state
-from core.checkpoint_account import admit_checkpoint, require_checkpoint_write
+from core.fork_account import admit_fork, require_fork_write
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
-from core.checkpoint_types import (
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
     WarmForkUnusable,
 )
 from infra.database import get_db
@@ -231,7 +233,7 @@ def test_pending_receipt_preserves_account_across_projection_failure(isolated_db
 
 @pytest.mark.asyncio
 async def test_cross_vendor_checkpoint_freezes_actual_writer_not_source_turn(isolated_db):
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.checkpoint_types import CheckpointProviderForkRequest
     from core.checkpoint_usage import bind_usage
     from infra import checkpoints
     from llm.resolution import ExecutionTarget
@@ -246,7 +248,7 @@ async def test_cross_vendor_checkpoint_freezes_actual_writer_not_source_turn(iso
     checkpoints.create_running(cp, db=db)
     db.commit()
     target = ExecutionTarget(writer_model, "codex", "codex", "external", "test", None, None, True, None, "Test", False)
-    request = ProviderCheckpointRequest("cp", "worker", target, "summarize", None, "/tmp")
+    request = CheckpointProviderForkRequest("cp", "worker", target, "summarize", None, "/tmp")
     bound = await bind_usage(request)
     second = add_account("codex", "Later", db=db)["id"]
     db.execute("INSERT INTO thread_vendor_accounts(thread_id,provider,account_id) VALUES ('worker','codex',?)", (second,))
@@ -328,19 +330,19 @@ async def test_mismatch_cold_correction_preserves_original_login(vendors, tmp_pa
 
     db, row, _ = _launched_session(vendors, provider, tmp_path)
     calls, adopted, writes = [], [], []
-    request = ProviderCheckpointRequest('checkpoint', 'destination', _target(provider), 'instruction', None,
+    request = CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider), 'instruction', None,
         str(tmp_path), warm_source=object(), vendor_account_id=row['id'], vendor_account_bound=True)
     async def cold_builder():
         if supersede:
             set_account_state(row['id'], 'signed_in', expected_revision=row['revision'], db=db)
         return SimpleNamespace(provider_request=replace(request, warm_source=None, cold_source=object()))
-    frozen = admit_checkpoint(replace(request, same_model_cold=cold_builder))
+    frozen = admit_fork(replace(request, same_model_cold=cold_builder))
     async def adopt(_fn, checkpoint_id):
         adopted.append(checkpoint_id)
     monkeypatch.setattr(checkpoint_cold_fallback, 'run_in_db', adopt)
     async def invoke(candidate, _cancel):
         calls.append(candidate)
-        candidate = admit_checkpoint(candidate)
+        candidate = admit_fork(candidate)
         require_same_operation_home(candidate, str(tmp_path / 'other-account'))
         assert candidate.vendor_account_receipt == frozen.vendor_account_receipt
         assert candidate.vendor_launch == frozen.vendor_launch
@@ -348,9 +350,9 @@ async def test_mismatch_cold_correction_preserves_original_login(vendors, tmp_pa
             from connections.account_operation import prepare_operation_home
 
             candidate = prepare_operation_home(candidate, tmp_path / 'cold-home', kind='checkpoint')
-        require_checkpoint_write(candidate)
+        require_fork_write(candidate)
         writes.append(candidate.vendor_account_id)
-        return ProviderCheckpointResult('cold body', None)
+        return ProviderForkResult('cold body', None)
     if supersede:
         with pytest.raises(AccountAdmissionError):
             await invoke_with_cold_correction(frozen, asyncio.Event(), invoke)
@@ -385,7 +387,7 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
         source_harness='claude-code', source_model='claude-code/test',
         writer_harness='claude-code', writer_model='claude-code/test'), db=db)
     calls, writes = [], []
-    request = ProviderCheckpointRequest('checkpoint', 'destination', _target('claude-code'),
+    request = CheckpointProviderForkRequest('checkpoint', 'destination', _target('claude-code'),
         'instruction', None, str(tmp_path), warm_source=object())
     async def cold_builder():
         await asyncio.sleep(0)
@@ -407,26 +409,26 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
     async def invoke(candidate, _cancel):
         calls.append(candidate)
         candidate = await bind_usage(candidate)
-        candidate = admit_checkpoint(candidate)
+        candidate = admit_fork(candidate)
         require_same_operation_home(candidate, str(tmp_path / 'other-account'))
-        require_checkpoint_write(candidate)
+        require_fork_write(candidate)
         session = CCStreamSession(binary='/synthetic/claude', session_id='synthetic',
             corsia_thread_id='destination', model='test')
-        session.checkpoint_id = 'checkpoint'
+        session.fork_id = 'checkpoint'
         bind_operation_session(candidate, session, kind='checkpoint')
         session._proc = SimpleNamespace(stdin=SimpleNamespace(write=writes.append, drain=AsyncMock()), returncode=None)
         await session.feed('cold user')
         await candidate.on_usage('cold', candidate.target.catalog_id, {
             'prompt_tokens': 3, 'completion_tokens': 2, 'cache_read_tokens': 0,
             'cache_creation_tokens': 0, 'total_tokens': 5})
-        return ProviderCheckpointResult('cold body', None)
+        return ProviderForkResult('cold body', None)
     async def capture(_identity, result):
         assert result.raw_body == 'cold body'
         return SimpleNamespace(status='captured')
     async def notify(_record):
         pass
     monkeypatch.setattr(checkpoint_runtime, '_invoke', invoke)
-    monkeypatch.setattr(checkpoint_runtime, '_capture_and_install', capture)
+    monkeypatch.setattr(checkpoint_runtime, 'CHECKPOINT_KIND', replace(CHECKPOINT_KIND, end_handler=capture))
     monkeypatch.setattr(checkpoint_runtime, '_notify_completion', notify)
     result = await checkpoint_runtime._execute('checkpoint', request, asyncio.Event())
     assert result.status == ('failed' if change == 'login' else 'captured'), getattr(result, 'error', None)
@@ -694,18 +696,18 @@ def test_observation_rollback_changes_no_generation_or_evidence(accounts):
 @pytest.mark.parametrize('operation', ['checkpoint', 'detached'])
 def test_admitted_operation_freezes_writer_homes_and_rejects_same_row_new_login(vendors, tmp_path, provider, operation):
     from connections.vendor_accounts import set_account_state
-    from core.checkpoint_types import ProviderCheckpointRequest
-    from core.checkpoint_account import admit_checkpoint, require_checkpoint_write
+    from core.checkpoint_types import CheckpointProviderForkRequest
+    from core.fork_account import admit_fork, require_fork_write
     from llm.isolated_structured import IsolatedStructuredRequest
     from llm.isolated_admission import admit_structured, require_structured_write
 
     db, row, _ = _launched_session(vendors, provider, tmp_path)
     target = _target(provider)
     if operation == 'checkpoint':
-        request = ProviderCheckpointRequest('checkpoint', 'destination', target, 'instruction', None,
+        request = CheckpointProviderForkRequest('checkpoint', 'destination', target, 'instruction', None,
             str(tmp_path), vendor_account_id=row['id'], vendor_account_bound=True)
-        frozen = admit_checkpoint(request)
-        validate = lambda: require_checkpoint_write(frozen)
+        frozen = admit_fork(request)
+        validate = lambda: require_fork_write(frozen)
     else:
         request = IsolatedStructuredRequest(system_prompt='system', user_prompt='user', output_schema={},
             max_output_tokens=32, thread_id='destination', vendor_account_id=row['id'], vendor_account_bound=True)
@@ -726,8 +728,11 @@ def test_admitted_operation_freezes_writer_homes_and_rejects_same_row_new_login(
 
 @pytest.mark.asyncio
 async def test_checkpoint_claude_spawn_uses_writer_home_and_rechecks_before_stdin(vendors, tmp_path, monkeypatch):
-    from core import checkpoint_cc_fork, checkpoint_cc_io
-    from core.checkpoint_types import ProviderCheckpointRequest, ProviderCheckpointResult
+    from core import fork_cc, fork_cc_io
+    from core.fork_types import (
+        ProviderForkRequest,
+        ProviderForkResult,
+)
 
     db, row, _ = _launched_session(vendors, 'claude-code', tmp_path)
     seen = []
@@ -736,17 +741,17 @@ async def test_checkpoint_claude_spawn_uses_writer_home_and_rechecks_before_stdi
         seen.append((argv, cwd, env))
         return process
     async def communicate(proc, request, *args, **kwargs):
-        from core.checkpoint_account import require_checkpoint_write
+        from core.fork_account import require_fork_write
 
-        require_checkpoint_write(request)
+        require_fork_write(request)
         assert proc is process
-        return SimpleNamespace(stdout=b'synthetic', stderr=b'', truncated=False, failure=None)
-    monkeypatch.setattr(checkpoint_cc_fork, '_spawn_process', spawn)
-    monkeypatch.setattr(checkpoint_cc_io, 'communicate_checkpoint', communicate)
-    monkeypatch.setattr(checkpoint_cc_fork, '_result_after_process', lambda *a: ProviderCheckpointResult('body', None))
-    request = ProviderCheckpointRequest('checkpoint', 'destination', _target('claude-code'), 'instruction', None,
+        return fork_cc_io.CCForkOutput(stdout=b'synthetic', stderr=b'', truncated=False)
+    monkeypatch.setattr(fork_cc, '_spawn_process', spawn)
+    monkeypatch.setattr(fork_cc_io, 'communicate_fork', communicate)
+    monkeypatch.setattr('core.fork_cc_result.result_after_process', lambda *a, **kw: ProviderForkResult('body', None))
+    request = CheckpointProviderForkRequest('checkpoint', 'destination', _target('claude-code'), 'instruction', None,
         str(tmp_path), binary='/synthetic/claude', vendor_account_id=row['id'], vendor_account_bound=True)
-    result = await checkpoint_cc_fork.invoke_checkpoint(request, asyncio.Event())
+    result = await fork_cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == 'body' and len(seen) == 1
     assert seen[0][2]['CLAUDE_CONFIG_DIR'] == row['source_home']
 
@@ -757,12 +762,12 @@ async def test_actual_checkpoint_claude_exchange_rechecks_login_after_context_aw
     import json
     import time
     from connections.vendor_accounts import set_account_state
-    from core.checkpoint_account import admit_checkpoint
-    from core.checkpoint_cc_io import communicate_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.fork_account import admit_fork
+    from core.fork_cc_io import communicate_fork
+    from core.checkpoint_types import CheckpointProviderForkRequest
 
     db, row, _ = _launched_session(vendors, 'claude-code', tmp_path)
-    request = admit_checkpoint(ProviderCheckpointRequest('checkpoint', 'destination', _target('claude-code'),
+    request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target('claude-code'),
         'instruction', None, str(tmp_path), warm_source=object(), vendor_account_id=row['id'], vendor_account_bound=True))
     frames, lines, ended = [], asyncio.Queue(), asyncio.Event()
     class Process:
@@ -798,10 +803,10 @@ async def test_actual_checkpoint_claude_exchange_rechecks_login_after_context_aw
     process = Process()
     if supersede:
         with pytest.raises(AccountAdmissionError):
-            await communicate_checkpoint(process, request, asyncio.Event(), spawned_at=time.monotonic())
+            await communicate_fork(process, request, asyncio.Event(), spawned_at=time.monotonic())
         assert [frame['type'] for frame in frames] == ['control_request']
     else:
-        result = await communicate_checkpoint(process, request, asyncio.Event(), spawned_at=time.monotonic())
+        result = await communicate_fork(process, request, asyncio.Event(), spawned_at=time.monotonic())
         assert b'body' in result.stdout
         assert [frame['type'] for frame in frames] == ['control_request', 'user']
     assert process.returncode == 0
@@ -815,9 +820,9 @@ async def test_actual_codex_operation_turn_writer_uses_temporary_own_home_and_lo
     from unittest.mock import AsyncMock
     from connections.account_operation import operation_directory
     from connections.vendor_accounts import set_account_state
-    from core.checkpoint_account import admit_checkpoint
-    from core.checkpoint_codex_fork import _checkpoint_session
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.fork_account import admit_fork
+    from core.fork_codex import _fork_session
+    from core.checkpoint_types import CheckpointProviderForkRequest
     from llm.isolated_admission import admit_structured
     from llm.isolated_structured import IsolatedStructuredRequest, _new_codex_invocation_session
     from subagents.codex_app_server import CodexAppServerSession
@@ -825,7 +830,7 @@ async def test_actual_codex_operation_turn_writer_uses_temporary_own_home_and_lo
     db, row, _ = _launched_session(vendors, 'codex', tmp_path)
     target = _target('codex')
     if operation == 'checkpoint':
-        request = admit_checkpoint(ProviderCheckpointRequest('checkpoint', 'destination', target,
+        request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', target,
             'instruction', None, str(tmp_path), tool_registry={}, dynamic_tool_specs=(),
             vendor_account_id=row['id'], vendor_account_bound=True))
     else:
@@ -838,8 +843,8 @@ async def test_actual_codex_operation_turn_writer_uses_temporary_own_home_and_lo
     with operation_directory(request, prefix='corsia-operation-proof-', kind=operation,
             model=target.catalog_id) as (frozen, home):
         if operation == 'checkpoint':
-            session = _checkpoint_session(frozen, None, source_home=Path(row['source_home']),
-                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop)
+            session = _fork_session(frozen, None, source_home=Path(row['source_home']),
+                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop, kind=CHECKPOINT_KIND)
         else:
             session = _new_codex_invocation_session(target, frozen,
                 SimpleNamespace(on_event=noop, on_exit=noop, on_raw_message=noop),
@@ -975,25 +980,25 @@ async def test_session_paid_writer_rechecks_custom_account_before_bytes(vendors,
 async def test_checkpoint_writer_account_blocks_before_home_or_process(vendors, provider, warm, unknown, monkeypatch):
     from connections.account_policy import AccountAdmissionError
     from vendor_account_fixtures import set_legacy_policy
-    from core.checkpoint_types import ProviderCheckpointRequest
-    from core import checkpoint_cc_fork, checkpoint_codex_fork
+    from core.checkpoint_types import CheckpointProviderForkRequest
+    from core import fork_cc, fork_codex
 
     db, identities = vendors
     account = identities[provider]
     set_legacy_policy("destination-project", provider, allowlist=[account["id"]], default_account_id=account["id"], db=db)
     # The source model is Codex, including when the actual writer is Claude.
-    request = ProviderCheckpointRequest("checkpoint", "destination", _target(provider), "instruction", None,
+    request = CheckpointProviderForkRequest("checkpoint", "destination", _target(provider), "instruction", None,
                                         "/tmp", binary="/bin/synthetic", warm_source=object() if warm else None,
                                         vendor_account_id=None if unknown else account["id"], vendor_account_bound=True)
     spawn = AsyncMock(side_effect=AssertionError("provider process must not start"))
     codex_run = AsyncMock(side_effect=AssertionError("provider app server must not start"))
-    monkeypatch.setattr(checkpoint_cc_fork, "_spawn_process", spawn)
-    monkeypatch.setattr(checkpoint_codex_fork, "_run_app_server_checkpoint", codex_run)
+    monkeypatch.setattr(fork_cc, "_spawn_process", spawn)
+    monkeypatch.setattr(fork_codex, "_run_app_server_fork", codex_run)
     home = []
     monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home.append("ambient"))
-    adapter = checkpoint_cc_fork if provider == "claude-code" else checkpoint_codex_fork
+    adapter = fork_cc if provider == "claude-code" else fork_codex
     with pytest.raises(AccountAdmissionError) as rejected:
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+        await adapter.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert rejected.value.reason == ("account_project_denied" if unknown else "account_model_not_discovered")
     spawn.assert_not_awaited()
     codex_run.assert_not_awaited()
@@ -1208,13 +1213,13 @@ def test_added_account_warm_home_is_where_its_own_transcript_lives(vendors, tmp_
     ``account_sessions_root`` (the account's runtime home for Codex), so the
     guard has to accept that home and still refuse a foreign one.
     """
-    from core.checkpoint_account import admit_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.fork_account import admit_fork
+    from core.checkpoint_types import CheckpointProviderForkRequest
 
     db, row, _ = _launched_session(vendors, provider, tmp_path)
     receipt = capture_receipt(provider, account_id=row['id'], db=db)
     assert receipt is not None
-    request = admit_checkpoint(ProviderCheckpointRequest('checkpoint', 'destination', _target(provider),
+    request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider),
         'instruction', None, str(tmp_path), warm_source=SimpleNamespace(vendor_account_receipt=receipt),
         vendor_account_id=row['id'], vendor_account_bound=True))
     assert request.vendor_launch.custom and request.vendor_account_receipt == receipt
@@ -1242,13 +1247,16 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
     """The adapter forks an added account's warm rollout into a disposable home instead of refusing it.
 
     Drives capture through the real registry and rollout, then the actual
-    ``invoke_checkpoint`` up to the checkpoint launch, with a fake provider that
+    ``invoke_fork`` up to the checkpoint launch, with a fake provider that
     never spawns a process and never reaches inference.
     """
     from connections.vendor_accounts import get_account
-    from core import checkpoint_codex_fork as adapter
-    from core.checkpoint_account import admit_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRequest, ProviderCheckpointRejected
+    from core import fork_codex as adapter
+    from core.fork_account import admit_fork
+    from core.fork_types import (
+        ProviderForkRequest,
+        ProviderForkRejected,
+)
     from history.types import HistoryBoundary
     from infra.vendor_login import stamp_initial_claim
     from registry.service import register_codex_thread
@@ -1271,11 +1279,11 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
         target=_target('codex'), binary='/synthetic/codex')
     assert source is not None, 'the account root resolution itself already finds the rollout'
     assert Path(source.sessions_root) == sessions
-    request = admit_checkpoint(ProviderCheckpointRequest('checkpoint', 'destination', _target('codex'),
+    request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target('codex'),
         'instruction', None, str(tmp_path), binary='/synthetic/codex', warm_source=source,
         tool_registry={}, dynamic_tool_specs=(), vendor_account_id=row['id'], vendor_account_bound=True))
 
-    facts, real = {}, adapter._checkpoint_session
+    facts, real = {}, adapter._fork_session
 
     def disposable_launch(frozen, src, *, source_home, isolated_home, cwd, **kwargs):
         """Record what the actual checkpoint launch sees, then refuse to spawn anything."""
@@ -1293,9 +1301,9 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
         session.start = never_spawn
         return session
 
-    monkeypatch.setattr(adapter, '_checkpoint_session', disposable_launch)
-    with pytest.raises(ProviderCheckpointRejected):
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+    monkeypatch.setattr(adapter, '_fork_session', disposable_launch)
+    with pytest.raises(ProviderForkRejected):
+        await adapter.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert facts, 'the adapter never reached a disposable checkpoint launch'
     assert facts['pre_isolation'] == row['runtime_home']  # the rollout's own home, not the login tree
     assert facts['account_id'] == get_account(row['id'], db=db)['id']
@@ -1311,7 +1319,7 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
 def test_legacy_ambient_warm_home_is_captured_once(vendors, tmp_path, monkeypatch, provider):
     from connections.account_operation import admit_operation
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.checkpoint_types import CheckpointProviderForkRequest
 
     home = tmp_path / 'ambient'
     if provider == 'claude-code':
@@ -1321,7 +1329,7 @@ def test_legacy_ambient_warm_home_is_captured_once(vendors, tmp_path, monkeypatc
     from vendor_account_fixtures import default_receipt
 
     source = SimpleNamespace(vendor_account_receipt=default_receipt(provider))
-    request = admit_operation(provider, provider + '/test', ProviderCheckpointRequest(
+    request = admit_operation(provider, provider + '/test', CheckpointProviderForkRequest(
         'checkpoint', 'destination', _target(provider), 'instruction', None, str(tmp_path), warm_source=source))
     assert request.vendor_launch.custom is False
     assert request.vendor_launch.warm_home == str(home)
@@ -1364,8 +1372,11 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     from connections.account_observation import begin_default_observation, commit_default_observation
     from connections.account_receipts import capture_receipt
     from connections.vendor_accounts import resolve_account_id
-    from core.checkpoint_account import admit_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRequest, WarmForkUnusable
+    from core.fork_account import admit_fork
+    from core.fork_types import (
+        ProviderForkRequest,
+        WarmForkUnusable,
+)
     from history.types import HistoryBoundary
     from registry.models import register_artifact
 
@@ -1375,7 +1386,7 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     provider_id = '11111111-1111-4111-8111-111111111111'
     model = provider + '/test'
     if provider == 'claude-code':
-        from core import checkpoint_cc_fork as adapter
+        from core import fork_cc as adapter
         from subagents.cc_invocation import ClaudeInvocation, claude_invocation_metadata
 
         monkeypatch.setattr('subagents.cc_sessions.resolve_claude_dir', lambda *_args: str(home))
@@ -1390,7 +1401,7 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
         db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
             "VALUES ('claude-code/test','Test','claude-code/test','claude-code','test','claude-code','t','t')")
     else:
-        from core import checkpoint_codex_fork as adapter
+        from core import fork_codex as adapter
 
         monkeypatch.setattr('llm.codex_rollout_files.default_codex_sessions_root', lambda: home / 'sessions')
         path = home / 'sessions' / ('rollout-' + provider_id + '.jsonl')
@@ -1418,7 +1429,7 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
         thread_id='destination', history_epoch=0, seq=1, message_id='synthetic'),
         target=_target(provider), binary='/synthetic/vendor')
     assert source is not None
-    request = admit_checkpoint(ProviderCheckpointRequest('checkpoint', 'destination', _target(provider),
+    request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider),
         'instruction', None, str(tmp_path), binary='/synthetic/vendor', warm_source=source))
     assert request.vendor_account_receipt == current
     effects = []
@@ -1426,9 +1437,9 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
         effects.append(True)
         raise AssertionError('unproved warm source reached copy or spawn')
     monkeypatch.setattr(adapter, '_snapshot' if provider == 'claude-code' else '_copy_rollout', forbidden)
-    monkeypatch.setattr(adapter, '_spawn_process' if provider == 'claude-code' else '_checkpoint_session', forbidden)
+    monkeypatch.setattr(adapter, '_spawn_process' if provider == 'claude-code' else '_fork_session', forbidden)
     with pytest.raises(WarmForkUnusable, match='warm_fork_login_mismatch'):
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+        await adapter.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert effects == []
     assert path.read_text().count('session_meta') == 1
 

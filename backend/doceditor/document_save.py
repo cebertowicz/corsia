@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.skill_validation import is_skill_file
-from core.workspace_context_sources import is_workspace_context_path
+from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
 from doceditor.document_scope import (
     MAX_TEXT_BYTES,
@@ -24,7 +24,8 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
-from infra.guidance_git import GuidanceTarget, guidance_target, save_guidance
+from infra.guidance_git import save_guidance
+from infra.guidance_targets import GuidanceTarget, guidance_target
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
 from registry.durable_writes import write_text
@@ -128,6 +129,8 @@ def _guided_write(
     )
     if saved.outcome == "refused":
         assert saved.line is not None
+        if saved.reason == "lesson-outside-placement":
+            raise DocumentSaveError("lesson-outside-placement", saved.line, {"errors": list(saved.errors), "line": saved.line})
         raise _invalid_skill_save_error(saved.errors, saved.line)
     if not payloads:
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
@@ -151,12 +154,12 @@ def _validate_document_write(body: DocumentSave, user_id: str) -> Path:
             resolved = path.resolve(strict=not body.create)
         except OSError as exc:
             raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
-        # Workspace context files are injected into every system prompt.
+        # Workspace context and System projection files are injected into every prompt.
         # They remain read-only through the document API so this endpoint
         # cannot become a system-prompt-injection vector.
-        if is_workspace_context_path(resolved, config.WORKSPACE, db=db):
+        if is_read_only_context_path(resolved, config.WORKSPACE, db=db):
             raise DocumentSaveError(
-                "context_read_only", "Workspace context file is read-only via the doc API"
+                "context_read_only", "Context file is read-only via the doc API"
             )
         if not path_write_allowed(resolved, bases):
             raise DocumentSaveError("outside_scope", "Path is outside this scope's roots")
@@ -269,9 +272,9 @@ def _write_document(
         else:
             artifact = registry_service.resolve_file_identity(str(resolved), db=db)
             if artifact is not None:
-                from registry.review_edit_journal import journal_reviewed_edit
+                from registry.review_edit_journal import note_content_edit
 
-                journal_reviewed_edit(
+                note_content_edit(
                     db, artifact, previous_sha256=prior_sha256,
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )
@@ -292,7 +295,7 @@ def _write_document(
 
 async def save_document_text(
     body: DocumentSave, user_id: str, *, by_agent: bool = False, reason: str | None = None,
-    expected_sha256: str | None = None,
+    expected_sha256: str | None = None, author: str | None = None,
 ) -> dict:
     """Shared validated document writer for editor saves and accepted suggestions.
 
@@ -305,7 +308,7 @@ async def save_document_text(
     from doceditor.live_tools import find_live
     manager = get_documents()
     if manager is None or await run_off_db(guidance_target, resolved, config.WORKSPACE) is not None:
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author)
     async with manager.admission_lock(resolved):
         if (entry := find_live(resolved)) is not None:
             from doceditor import live_events
@@ -316,19 +319,19 @@ async def save_document_text(
         if refused is not None and not falls_back_to_plain(refused["code"]):
             # The file must not move away from acknowledged text the store still holds.
             raise DocumentSaveError(refused["code"], refused["message"], dict(refused))
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author)
 
 
 async def _save_legacy_document(
     body: DocumentSave, resolved: Path, user_id: str, by_agent: bool,
-    reason: str | None, expected_sha256: str | None,
+    reason: str | None, expected_sha256: str | None, author: str | None = None,
 ) -> dict:
     """Keep the validated legacy writer intact under the admission boundary."""
     thread_id = body.thread_id if by_agent else None
     result = await _save_validated(
         resolved,
         body.text,
-        lambda: saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id),
+        lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
         reason,
         lambda path: _write_document(
             body, path, direct_user=not by_agent, expected_sha256=expected_sha256,
@@ -341,15 +344,14 @@ async def _save_legacy_document(
 
 
 def agent_document_writer(thread_id: str, user_id: str) -> DocumentWriter:
-    """Writer for a suggestion an agent accepts: saves as that thread, raising DocumentSaveError if refused."""
+    """Writer for a suggestion an agent accepts, preserving a person suggestion's author."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
+        suggestion_author: str | None,
     ) -> dict:
+        author = saver_author(user_id=suggestion_author) if suggestion_author else None
         return await save_document_text(
             DocumentSave(path=path, text=text, thread_id=thread_id, project_id=project_id),
-            user_id,
-            by_agent=True,
-            reason=reason,
-            expected_sha256=expected_sha256,
+            user_id, by_agent=True, reason=reason, expected_sha256=expected_sha256, author=author,
         )
     return write

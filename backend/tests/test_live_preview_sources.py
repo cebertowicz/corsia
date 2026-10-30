@@ -190,7 +190,7 @@ async def test_a_preview_never_changes_the_document(tmp_path, monkeypatch):
     monkeypatch.setattr("doceditor.live_tools.find_live", lambda path: entry)
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
     monkeypatch.setattr("infra.queries.get_thread", lambda thread_id: None)
-    monkeypatch.setattr("tools.filesystem_gate._resolve_path", lambda path, workspace, **_: workspace / path)
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path", lambda path, workspace, **_: workspace / path)
     monkeypatch.setattr(live_preview, "FLUSH_SECONDS", 0)
     before = (live.text, live.doc.get_state())
     route = PreviewRoute()
@@ -208,7 +208,7 @@ def test_the_provider_call_id_is_bound_only_inside_its_tool_run():
     with tool_invocation_context("inv-1", provider_call_id="toolu_1"):
         assert _current_provider_call_id.get() == "toolu_1"
     assert _current_provider_call_id.get() is None
-    with tool_invocation_context(None, checkpoint_id="cp", provider_call_id="toolu_1"):
+    with tool_invocation_context(None, fork_id="cp", provider_call_id="toolu_1"):
         assert _current_provider_call_id.get() is None
 
 

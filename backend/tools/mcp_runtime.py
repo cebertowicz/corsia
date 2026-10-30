@@ -4,8 +4,12 @@ Discovery completes at startup, before any turn is prepared. A later import
 only adds servers: reload connects the newly configured ones into the live
 session set and leaves every existing session untouched.
 
-Start, reload and stop serialize on one lock, and a stop is final until the
+Start, reload, sign-out and stop serialize on one lock, and a stop is final until the
 next explicit start: a reload that lands during or after shutdown opens nothing.
+An app's Remove is the one exception: it never waits on the lock. It first ends every
+action for that app, running or still queued on the lock (all are tracked in
+``_connecting``), then clears the app's state, so nothing for a removed app publishes
+state or opens a session afterwards.
 """
 
 import asyncio
@@ -27,8 +31,12 @@ _lock = asyncio.Lock()
 _app_stacks: dict[str, AsyncExitStack] = {}
 _app_tools: dict[str, set[str]] = {}
 _app_servers: dict[str, str] = {}
+_app_configs: dict[str, tuple[str, dict[str, object]]] = {}
 _app_states: dict[str, dict[str, object]] = {}
 _reconnect_at: dict[str, float] = {}
+# Every connect, restart, reconnect or sign-out for an app, running or still queued on the lock,
+# so that app's Remove can end them all before it clears the app's state.
+_connecting: dict[str, set[asyncio.Task]] = {}
 
 
 class MCPReconnectRateLimitError(RuntimeError):
@@ -65,80 +73,156 @@ async def _remove_connected_app(app_id: str) -> None:
         getattr(_registry, "mcp_server_configs", {}).pop(server, None)
         getattr(_registry, "mcp_server_states", {}).pop(server, None)
     stack = _app_stacks.pop(app_id, None)
+    _app_configs.pop(app_id, None)
     if stack is not None:
         await stack.aclose()
 
 
+async def _await_sign_in(app_id: str) -> dict[str, object]:
+    """The person signed out or the provider ended the sign-in: withdraw the tools and wait for Sign in."""
+    await _remove_connected_app(app_id)
+    result = {"state": "needs_sign_in", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+    await _publish_app_state(app_id, result)
+    return result
+
+
+async def _remove_app_runtime(app_id: str) -> dict[str, object]:
+    """Discard one app's live state."""
+    await _remove_connected_app(app_id)
+    _app_states.pop(app_id, None)
+    _reconnect_at.pop(app_id, None)
+    return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+
+
+def _admit_reconnect(app_id: str) -> None:
+    """Allow one unsaved forced restart of an app per ten seconds."""
+    now = time.monotonic()
+    if now - _reconnect_at.get(app_id, float("-inf")) < 10:
+        raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
+    _reconnect_at[app_id] = now
+
+
+def _needs_token_result(config: dict, missing_keys: list[object]) -> dict[str, object] | None:
+    """Return the durable missing-token state when this app cannot connect yet."""
+    needs_token = (
+        config.get("needs_token") is True
+        and not config.get("secret_env")
+        and not config.get("secret_headers")
+    ) or bool(missing_keys)
+    if not needs_token:
+        return None
+    return {"state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+
+
 async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, object]:
-    """Connect, reconnect or remove exactly one stable-id connected app."""
-    async with _lock:
-        if action == "remove":
-            await _remove_connected_app(app_id)
-            _app_states.pop(app_id, None)
-            _reconnect_at.pop(app_id, None)
+    """Connect, restart, reconnect or remove exactly one stable-id connected app.
+
+    This is the one owner of an app's session. ``connect`` keeps a running session whose stored
+    config is unchanged (startup, approve, a person's add). ``restart`` replaces the session at
+    once and follows a write a person just committed: a saved config or key, or a completed
+    sign-in. ``reconnect`` is the same replacement asked for with nothing saved (the Reconnect
+    button or an agent), so it alone is limited to one per ten seconds. An app that is not
+    approved never loads a config here: ``runtime_app_config`` refuses a waiting or expired one.
+    """
+    if action == "remove":
+        # Remove touches only this app's own state, so it never queues behind another app's connect,
+        # and it ends this app's connects, stuck or still queued, so none publishes state after it.
+        await _cancel_connecting(app_id)
+        return await _remove_app_runtime(app_id)
+    work = asyncio.ensure_future(_run_locked(action, app_id))
+    _connecting.setdefault(app_id, set()).add(work)
+    try:
+        return await work
+    except asyncio.CancelledError:
+        if work.cancelled() and not (asyncio.current_task() or work).cancelling():
             return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+        raise
+    finally:
+        pending = _connecting.get(app_id, set())
+        pending.discard(work)
+        if not pending:
+            _connecting.pop(app_id, None)
+
+
+async def _run_locked(action: str, app_id: str) -> dict[str, object]:
+    async with _lock:
         if _stopped:
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
-        if action == "reconnect":
-            now = time.monotonic()
-            if now - _reconnect_at.get(app_id, float("-inf")) < 10:
-                raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
-            _reconnect_at[app_id] = now
-            await _remove_connected_app(app_id)
-        elif app_id in _app_stacks:
-            return _app_states[app_id]
-        from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
+        if action == "sign_out":
+            return await _await_sign_in(app_id)
+        return await _connect_app(action, app_id)
 
-        name, config = await run_in_db(load_runtime_app_config, app_id)
-        connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
-        await _publish_app_state(app_id, connecting)
-        stack: AsyncExitStack | None = None
-        try:
-            missing_keys = await run_in_db(load_missing_app_key_refs, app_id)
-            token_without_key_ref = config.get("needs_token") is True and not (
-                config.get("secret_env") or config.get("secret_headers")
-            )
-            if token_without_key_ref or missing_keys:
-                result = {
-                    "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
-                    "failure_class": None,
-                }
-                await _publish_app_state(app_id, result)
-                return result
-            _app_servers[app_id] = name
-            stack = AsyncExitStack()
-            errors = await connect_mcp_servers({name: config}, _registry, stack)
-            if error := errors.get(name):
-                await stack.aclose()
-                _app_servers.pop(app_id, None)
-                result = {
-                    "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                    "failure_class": getattr(error, "failure_class", "protocol_error"),
-                }
-            else:
-                names = {
-                    name for name in _registry.tool_names
-                    if getattr(_registry.get(name), "mcp_app_id", None) == app_id
-                }
-                _app_stacks[app_id] = stack
-                _app_tools[app_id] = names
-                result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+
+async def _cancel_connecting(app_id: str) -> None:
+    """End this app's connects, running or queued, and wait for them to close what they opened."""
+    works = {work for work in _connecting.get(app_id, ()) if not work.done()}
+    for work in works:
+        work.cancel()
+    if works:
+        await asyncio.wait(works)
+
+
+async def _connect_app(action: str, app_id: str) -> dict[str, object]:
+    """One connect, restart or reconnect of one app; the caller holds the runtime lock."""
+    from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
+
+    if action == "reconnect":
+        _admit_reconnect(app_id)
+    if action in {"restart", "reconnect"}:
+        await _remove_connected_app(app_id)
+    name, config = await run_in_db(load_runtime_app_config, app_id)
+    if app_id in _app_stacks:
+        if _app_configs.get(app_id) == (name, config):
+            return _app_states[app_id]
+        await _remove_connected_app(app_id)
+    connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+    await _publish_app_state(app_id, connecting)
+    stack: AsyncExitStack | None = None
+    try:
+        result = _needs_token_result(config, await run_in_db(load_missing_app_key_refs, app_id))
+        if result is not None:
             await _publish_app_state(app_id, result)
-            if state._agent is not None:
-                register_mcp_tools(state._agent.tools)
             return result
-        except Exception:
-            logger.exception("connected-app runtime failed for app_id={}", app_id)
-            registered = _app_stacks.get(app_id) is stack
-            await _remove_connected_app(app_id)
-            if stack is not None and not registered:
-                await stack.aclose()
+        _app_servers[app_id] = name
+        stack = AsyncExitStack()
+        errors = await connect_mcp_servers({name: config}, _registry, stack)
+        if error := errors.get(name):
+            await stack.aclose()
+            _app_servers.pop(app_id, None)
+            failure = getattr(error, "failure_class", "protocol_error")
             result = {
-                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": "cannot_start",
+                "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
+                "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": None if failure == "needs_sign_in" else failure,
             }
-            await _publish_app_state(app_id, result)
-            return result
+        else:
+            names = {
+                name for name in _registry.tool_names
+                if getattr(_registry.get(name), "mcp_app_id", None) == app_id
+            }
+            _app_stacks[app_id] = stack
+            _app_tools[app_id] = names
+            _app_configs[app_id] = (name, config)
+            result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+        await _publish_app_state(app_id, result)
+        if state._agent is not None:
+            register_mcp_tools(state._agent.tools)
+        return result
+    except asyncio.CancelledError:
+        registered = _app_stacks.get(app_id) is stack
+        await _remove_connected_app(app_id)
+        if stack is not None and not registered:
+            await stack.aclose()
+        raise
+    except Exception as error:
+        logger.exception("connected-app runtime failed for app_id={}", app_id)
+        registered = _app_stacks.get(app_id) is stack
+        await _remove_connected_app(app_id)
+        if stack is not None and not registered:
+            await stack.aclose()
+        result = {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
+        await _publish_app_state(app_id, result)
+        return result
 
 
 async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
@@ -148,6 +232,11 @@ async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
 
     async with _lock:
         _stopped = False
+    import tools.mcp_oauth_secrets as mcp_oauth_secrets
+    import tools.mcp_oauth_store as mcp_oauth_store
+
+    mcp_oauth_secrets.install()
+    await run_in_db(mcp_oauth_store.register_stored)
     results = {}
     for app_id in await run_in_db(load_runtime_app_ids):
         results[app_id] = await apply_connected_app_runtime("connect", app_id)
@@ -190,6 +279,7 @@ async def _close() -> None:
     _app_stacks.clear()
     _app_tools.clear()
     _app_servers.clear()
+    _app_configs.clear()
     _app_states.clear()
     _reconnect_at.clear()
     try:

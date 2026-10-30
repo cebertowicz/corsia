@@ -32,10 +32,10 @@
 </script>
 
 {#snippet policyExceptions()}
-	<section class="policy-exceptions" aria-label="Policy exceptions requested">
-		<span class="label">Policy exceptions requested</span>
+	<section class="policy-exceptions" aria-label="Beyond the usual rules">
+		<span class="label">Beyond the usual rules</span>
 		{#if external}
-			<p class="external-warning">External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.</p>
+			<p class="external-warning">This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.</p>
 		{/if}
 		<ul>
 			{#each exceptions as exception}
@@ -49,11 +49,11 @@
 						{:else}
 							<p class="launch-missing">Command missing</p>
 						{/if}
-						<div class="launch-label">Working directory</div>
+						<div class="launch-label">Working folder</div>
 						{#if text(exception.working_directory)}
 							<code>{exception.working_directory}</code>
 						{:else}
-							<p class="launch-missing">Working directory missing</p>
+							<p class="launch-missing">Working folder missing</p>
 						{/if}
 					{:else}
 						<strong>{exception.repo_name}: {policyLabel(exception.policy)}</strong>
@@ -65,23 +65,34 @@
 	</section>
 {/snippet}
 
+<!-- A first request can arrive before anything else has explained host access. -->
+{#snippet explainer()}
+	<p class="explainer">This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
+{/snippet}
+
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div>
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'State stale' : duration(lease.requested_duration_seconds)} />
+		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(lease.requested_duration_seconds)} />
 	</header>
 
 	<div class="decision-body">
+		{#if !external}
+			{@render explainer()}
+		{/if}
+
 		<section class="purpose">
 			<span class="label">Purpose</span>
 			<p>{text(lease.purpose) ? lease.purpose : 'Unavailable'}</p>
 		</section>
 
 		{#if external}
+			<!-- The external warning and exact launch must stay above the footer on a phone. -->
 			{@render policyExceptions()}
+			{@render explainer()}
 		{/if}
 
 		<section class="plan">
@@ -237,6 +248,7 @@
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
+	.decision-body .explainer { margin: 0; }
 	.purpose p { color: var(--text-primary); font-size: var(--text-body); }
 	ol {
 		margin: 7px 0 0;
@@ -332,7 +344,10 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 14px 0 4px;
+		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
+		   and sits on the scroller's edge instead of above a strip of padding the
+		   content scrolls through. */
+		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
 		background: var(--glass-thick);
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);
@@ -340,6 +355,17 @@
 	.decision-spacer { flex: 1; }
 
 	@media (max-width: 720px) {
+		/* Keep the first requested exception above the sticky decision footer even
+		   when a non-Apple system font takes an extra line. The drawer remains the
+		   only scroll container; this only compacts existing sheet spacing. */
+		.decision-head { padding-bottom: var(--space-2); }
+		.decision-body { gap: var(--space-3); }
+		.policy-exceptions { padding: var(--space-2); }
+		.policy-exceptions .external-warning {
+			margin: var(--space-2) 0;
+			line-height: var(--lh-snug);
+		}
+		.decision-actions { padding-top: var(--space-2); }
 		.repo-policy-context li {
 			grid-template-columns: 1fr;
 			gap: 2px;

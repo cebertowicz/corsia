@@ -111,7 +111,8 @@ const renderer: RendererObject = {
 		// handlers. The click is handled by the delegated listener in ensureClientSetup().
 		const copyBtn = `<button class="copy-btn" type="button" aria-label="Copy code">Copy</button>`;
 		const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
-		return `<div class="code-block">${langLabel}${copyBtn}<pre><code${cls}>${highlighted}</code></pre></div>`;
+		const blockClass = lang?.toLowerCase() === 'text' ? 'code-block text-code-block' : 'code-block';
+		return `<div class="${blockClass}">${langLabel}${copyBtn}<pre><code${cls}>${highlighted}</code></pre></div>`;
 	},
 
 	table({ header, rows }: Tokens.Table): string {
@@ -133,7 +134,9 @@ const renderer: RendererObject = {
 	link({ href, title, tokens }: Tokens.Link): string {
 		const text = this.parser.parseInline(tokens);
 		const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-		return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener">${text}</a>`;
+		// In-app anchors are product navigation; external links keep their own tab.
+		const external = !href.startsWith('#');
+		return `<a href="${escapeHtml(href)}"${titleAttr}${external ? ' target="_blank" rel="noopener"' : ''}>${text}</a>`;
 	},
 };
 
@@ -169,7 +172,7 @@ function ensureClientSetup(): void {
 		const code = btn.parentElement?.querySelector('code');
 		if (!code) return;
 		void navigator.clipboard.writeText(code.textContent ?? '').then(() => {
-			btn.textContent = 'Copied!';
+			btn.textContent = 'Copied';
 			setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
 		});
 	});

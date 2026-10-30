@@ -29,10 +29,11 @@ def notify_turn_error(
     Plan, fixed cause and parent's last message identify the existing episode. ``resumes_at`` is the reset wait the worker's liveness actually armed, never a time merely quoted.
     """
     from datetime import datetime, timezone
-    import hashlib
 
+    from infra.thread_confinement import ChildOutput
     from plans import delegation_turn_end, wait_causes
     from plans.delegation_child_rollover import has_rollover_successor
+    from plans.delegation_error_episode import error_episode
     from plans.delegation_notice import _wake_parent
     from prompts import plan_wakes as text
     from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
@@ -47,40 +48,32 @@ def notify_turn_error(
     if delegation is None:
         return
     parent_plan_id, worker = delegation
-
-    def episode(cause: str) -> str:
-        sent = connection.execute(  # newest first: stops at the parent's latest input
-            """SELECT m.input_order AS last FROM messages AS m JOIN plans AS p ON p.id=?
-               WHERE m.thread_id=? AND m.input_order IS NOT NULL AND json_valid(m.metadata)
-                 AND json_extract(m.metadata,'$.from_thread')=p.owner_id
-               ORDER BY m.input_order DESC LIMIT 1""",
-            (parent_plan_id, worker),
-        ).fetchone()
-        key = f"{cause}\n{sent['last'] if sent is not None else None}"
-        return f"{worker}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+    provider_limit = is_provider_usage_or_quota_limit(error)
+    shared_error = ChildOutput.read(connection, worker).error(error)  # what the parent may read
 
     # A head held for its model has the same recovery as a limit (#3317).
     held_kind = wait_causes.stalled_why(connection, thread_id)
     held = held_kind == "model"
-    if held_kind != 'account' and not held and not is_provider_usage_or_quota_limit(error):
+    refused_on = connection.execute(  # the Turn's model, else the thread's
+        "SELECT COALESCE(NULLIF(COALESCE((SELECT model FROM active_turns WHERE id=? AND thread_id=?),"
+        " (SELECT model FROM threads WHERE id=?)),''),'its current model')", (turn_id, worker, worker)).fetchone()[0]
+    if held_kind == 'locality':  # the person's policy, not a limit: only moving the thread lifts it
+        _wake_locality(connection, parent_plan_id, worker, refused_on, child_plan_id=str(plan['id']),
+                       subject_id=error_episode(connection, parent_plan_id, worker, f'locality\n{refused_on}'))
+        return
+    if held_kind != 'account' and not held and not provider_limit:
         _wake_parent(
             connection, parent_plan_id, worker, kind="child_turn_errored",
-            subject_id=episode(error), child_plan_id=str(plan["id"]), error=error,
+            subject_id=error_episode(connection, parent_plan_id, worker, error), child_plan_id=str(plan["id"]),
+            error=shared_error,
         )
         return
-    model = connection.execute(
-        """SELECT COALESCE(
-             (SELECT model FROM active_turns WHERE id=? AND thread_id=?),
-             (SELECT model FROM threads WHERE id=?)) AS model""",
-        (turn_id, worker, worker),
-    ).fetchone()
-    refused_on = (model["model"] if model is not None else None) or "its current model"
     if held_kind == 'account':
         from connections import read_account_readiness
 
-        state, fields = text.account_wake_fields(read_account_readiness([worker], db=connection).get(worker), error)
+        state, fields = text.account_wake_fields(read_account_readiness([worker], db=connection).get(worker))
         _wake_parent(connection, parent_plan_id, worker, kind='child_provider_refused',
-                     subject_id=episode(f'account\n{refused_on}\n{error}'), child_plan_id=str(plan['id']),
+                     subject_id=error_episode(connection, parent_plan_id, worker, f'account\n{refused_on}\n{error}'), child_plan_id=str(plan['id']),
                      model=refused_on, account_hold_state=state, **fields)
         return
     if not held and has_rollover_successor(connection, worker, turn_id):  # recovered on another account
@@ -93,10 +86,25 @@ def notify_turn_error(
     )
     _wake_parent(
         connection, parent_plan_id, worker, kind="child_provider_refused",
-        subject_id=episode(f"{refused_on}\n{resumes_at}"),
-        child_plan_id=str(plan["id"]), error=error,
+        subject_id=error_episode(connection, parent_plan_id, worker, f"{refused_on}\n{resumes_at}"),
+        child_plan_id=str(plan["id"]), error=shared_error,
         model=refused_on, resume_note=resume_note,
     )
+
+
+def _wake_locality(connection, parent_plan_id: str, worker: str, refused_on: str, **fields) -> None:
+    """Wake the parent about the worker's locality-held head, worded by its durable cause."""
+    from plans.delegation_notice import _wake_parent
+    from prompts.cloud_off import parent_wake_template
+
+    head = connection.execute(
+        "SELECT delivery_error FROM messages WHERE thread_id=? AND input_order IS NOT NULL"
+        " AND delivery_state='queued' AND active_turn_id IS NULL ORDER BY input_order LIMIT 1",
+        (worker,),
+    ).fetchone()
+    cause = str(head["delivery_error"]) if head is not None else "project_cloud_off"
+    _wake_parent(connection, parent_plan_id, worker, kind='child_held_local_only',
+                 template=parent_wake_template(cause), model=refused_on, **fields)
 
 
 def _waits_elsewhere(connection, plan) -> bool:

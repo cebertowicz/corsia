@@ -1,21 +1,19 @@
 import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { noticeSuppressed, updateToastSuppressed } from './noticeSuppression';
+export { updateToastSuppressed } from './noticeSuppression';
 import { toasts } from '$lib/stores/toast';
-import { activeThreadId } from '$lib/stores/threads';
-import { requestSettingsSection, settingsReturnThread } from '$lib/stores/settingsNavigation';
+import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import { failureCopy, failureFromOperation } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
-
-const BASE = '';
-const POLL_MS = 1_000;
-
+import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
 import type { UpdateSchedule, UpdateStatus } from './types';
 
+const POLL_MS = 1_000;
 export type { UpdateSchedule, UpdateStatus } from './types';
-
 export const updateStatus = writable<UpdateStatus | null>(null);
 /** The person shrank the progress toast to its pill; it lasts until the operation settles. */
 export const updateProgressMinimized = writable(false);
@@ -25,6 +23,7 @@ export const updateFailureVerdict = writable<ClientVerdict | null>(null);
 export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
+export const updateConfirmed = writable<{ operationId: string; version: string | null } | null>(null);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
 /** The server is down or coming back: the composer cannot send. */
@@ -38,15 +37,14 @@ let versionPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalCheckRunning = false;
 let versionMismatchStartedAt: number | null = null;
 let noticeToastId: string | null = null;
+let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
 const noticedVersions = new Set<string>();
-
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
 	pollTimer = null;
 }
-
 function stopVersionPolling(): void {
 	if (versionPollTimer !== null) clearInterval(versionPollTimer);
 	versionPollTimer = null;
@@ -62,26 +60,40 @@ async function observeRecovery(): Promise<void> {
 	if (!version) return;
 	updateUnreachable.set(false);
 	stopVersionPolling();
+	clearStartupProgress();
 	await loadUpdateStatus();
 }
 
 function pollVersionWhileUnreachable(): void {
 	if (versionPollTimer !== null) return;
-	versionPollTimer = setInterval(() => { void observeRecovery(); }, POLL_MS);
+	versionPollTimer = setInterval(() => { void observeRecovery(); void refreshStartupProgress(); }, POLL_MS);
 	void observeRecovery();
+	void refreshStartupProgress();
 }
 
-function dismissNotice(): void {
+function dismissNotice(forSuppression = false): void {
+	const visible = noticeToastId && get(toasts).some((toast) => toast.id === noticeToastId);
+	if (forSuppression && visible && latestNoticeStatus?.target_version) noticedVersions.delete(latestNoticeStatus.target_version);
 	if (noticeToastId) toasts.dismiss(noticeToastId);
 	noticeToastId = null;
 }
 
 function showNotice(status: UpdateStatus): void {
+	latestNoticeStatus = status;
 	const version = status.target_version;
+	if (get(noticeSuppressed)) {
+		dismissNotice();
+		return;
+	}
 	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || noticedVersions.has(version)) return;
 	noticedVersions.add(version);
 	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
+
+noticeSuppressed.subscribe((suppressed) => {
+	if (suppressed) dismissNotice(true);
+	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
+});
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
 function dropProgressToast(): void {
@@ -124,7 +136,9 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		}
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
+			updateConfirmed.set({ operationId: operation.operation_id, version: operation.target_version ?? get(updateStatus)?.target_version ?? null });
 			showTerminal(operation);
+			void loadUpdateStatus();
 			return;
 		}
 		versionMismatchStartedAt ??= Date.now();
@@ -162,7 +176,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	const authToken = get(token);
 	if (!authToken) return;
 	try {
-		const response = await fetch(`${BASE}/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
+		const response = await fetch(`/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
 			headers: { Authorization: `Bearer ${authToken}` },
 			cache: 'no-store',
 		});
@@ -204,7 +218,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 
 function showScheduleSaveError(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): void {
 	toasts.showAction("Couldn't save the schedule", {
-		label: 'Try again', run: () => { void saveUpdateSchedule(patch); },
+		label: 'Retry', run: () => { void saveUpdateSchedule(patch); },
 	});
 }
 
@@ -215,7 +229,7 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 		return false;
 	}
 	try {
-		const response = await fetch(`${BASE}/api/system/update-schedule`, {
+		const response = await fetch('/api/system/update-schedule', {
 			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch), cache: 'no-store',
 		});
@@ -229,10 +243,9 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 	}
 }
 
-/** Open Settings > System at the Updates card, remembering the thread so Back returns to it. */
+/** Open Settings > System at the Updates card; Settings keeps the thread it opened over, so Back returns to it. */
 export function openUpdates(): void {
 	dismissNotice();
-	settingsReturnThread.set(get(activeThreadId));
 	requestSettingsSection('system', 'update');
 }
 
@@ -241,18 +254,17 @@ export async function startUpdate(): Promise<void> {
 	updateFailureVerdict.set(null);
 	const previous = get(updateStatus)?.operation;
 	const previousOperationId = previous?.operation_id;
+	updateStarting.set(true);
 	// Retrying is acting on the failure: it no longer needs to greet any device.
 	if (isFailedOperation(previous)) void markOutcomeSeen(previous.operation_id);
-	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
 	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
 	const result = await restartSystem('update').finally(() => { clearInterval(adopt); updateStarting.set(false); });
 	if (!result.ok) {
 		await loadUpdateStatus(true);
 		const latest = get(updateStatus)?.operation;
-		// Only a failure this request recorded is its outcome; an older failed row is history.
-		// The failed row surfaces itself through the poll; nothing more to show here.
-		if (isFailedOperation(latest) && latest.operation_id !== previousOperationId) return;
+		// A new in-flight operation proves it started; a new failed row surfaces itself through the poll.
+		if (latest?.operation_id !== previousOperationId && (isInFlight(latest) || isFailedOperation(latest))) return;
 		const message = result.message ?? "Update didn't start.";
 		updateFailureVerdict.set({ kind: 'refused', message });
 		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdates } });
@@ -281,4 +293,7 @@ export function resetUpdateStoreForTests(): void {
 	updateFailureVerdict.set(null);
 	updateStarting.set(false);
 	updateServerClockOffsetMs.set(0);
+	updateConfirmed.set(null);
+	updateToastSuppressed.set(false);
+	latestNoticeStatus = null;
 }

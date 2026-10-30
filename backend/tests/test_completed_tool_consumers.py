@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.recorded_call import CompletedToolFailure
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -141,7 +142,7 @@ async def test_native_batch_survives_a_failed_dispatch_settlement(
 @pytest.mark.asyncio
 async def test_native_checkpoint_stops_after_completed_settlement_failure(isolated_db, monkeypatch):
     from dataclasses import replace
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from infra.database import get_db
     from llm.router import LLMResponse, ToolCallRequest
     from tests.plan_execution_helpers import ProbeTool, registry_of
@@ -177,10 +178,10 @@ async def test_native_checkpoint_stops_after_completed_settlement_failure(isolat
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     with pytest.raises(CompletedToolFailure) as raised:
-        await native.invoke_checkpoint(replace(_request(_source(native)), on_usage=paid), asyncio.Event())
+        await native.invoke_fork(replace(_request(_source(native)), on_usage=paid), asyncio.Event(), kind=CHECKPOINT_KIND)
     [completed] = raised.value.completed
     assert completed.provider_tool_call_id == "private-call"
-    assert completed.checkpoint_id == "checkpoint-1"
+    assert completed.fork_id == "checkpoint-1"
     assert completed.result == "private completed mutation" and completed.canonical is None
     assert tool.calls == len(provider_calls) == 1
     assert usage == [{"total_tokens": 150}]
@@ -206,7 +207,7 @@ async def test_codex_reply_failure_keeps_completed_output(isolated_db, monkeypat
     }], turn_id=identity.turn_id, db=db)
     db.commit()
     session = SimpleNamespace(
-        checkpoint_id="checkpoint" if checkpoint else None, checkpoint_tool_result_fits=None,
+        fork_id="checkpoint" if checkpoint else None, fork_tool_result_fits=None,
         tool_registry=registry_of(tool), corsia_thread_id="thread-1", corsia_turn_identity=identity,
         declared_tool_step_ids={"call": step}, catalog_model_id=None, model=None,
     )
@@ -220,7 +221,7 @@ async def test_codex_reply_failure_keeps_completed_output(isolated_db, monkeypat
     [completed] = raised.value.completed
     assert completed.result == "completed Codex mutation"
     assert completed.provider_tool_call_id == "call" and completed.invocation_id == "call"
-    assert completed.checkpoint_id == session.checkpoint_id
+    assert completed.fork_id == session.fork_id
     assert completed.canonical is None if checkpoint else completed.canonical.assistant_step_id == step
     assert tool.calls == 1
     assert not isinstance(raised.value, ToolResultBindingError)

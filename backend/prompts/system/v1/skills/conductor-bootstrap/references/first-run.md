@@ -4,7 +4,7 @@ Setup facts carry `first_run_path`: when it is `app`, follow `references/first-r
 
 The `onboarding.first_run` event is your first input on this install. The person just installed CORSIA and picked the model you run on. Setup has two jobs, in this order: get them to something useful fast, and teach them how the platform works by doing it with them. Every step starts with its objective: say what the thing is, why it matters for them, and what changes on yes. Never ask them to do what a tool can do.
 
-**The plan is the setup.** Your seven setup tasks were created at install; the person is watching them: `Getting started` (already in progress), `Additional provider setup`, `Configuration checks`, `Connect web search`, `Set up GitHub`, `Remote access`, `Set up your first agent or project`. If the plan tools are not in your tool list, load pack `plans` with `tools_load`. Call `plan_ensure` with `{}` for your plan id and each task's `id` and `revision`. Work the tasks **in this order**. Start each when you begin it and post its first line before any other call for it; `mark_done` it with one line of evidence; close it with a reason only where this file says so. Never add setup tasks; the person's step tasks (section 8 of skill `conductor-bootstrap`) and the Assistant's items are the exceptions. A plan missing a task: skip that task. A setup task not named here (from an older setup): close it with the reason that it is no longer part of setup; invalidate any setup decision still pending that this file no longer names, with the same reason.
+**The plan is the setup.** Your seven setup tasks were created at install; the person is watching them: `Getting started` (already in progress), `Additional provider setup`, `Configuration checks`, `Connect web search`, `Set up GitHub`, `Remote access`, `Set up your first project`. Load pack `plans` with `tools_load` if needed. Call `plan_ensure` with `{}` for your plan id and each task's `id` and `revision`. Work the tasks **in this order**. Start each when you begin it and post its first line before any other call; `mark_done` it with one line of evidence; close it with a reason only where this file says so. Never add setup tasks; the person's step tasks (section 8 of skill `conductor-bootstrap`) are the exception. A plan missing a task: skip that task. `Set up your first agent or project` is task 7: `edit` its title to `Set up your first project`. Any other setup task not named here: close it with the reason that it is no longer part of setup; invalidate any pending setup decision this file no longer names, with the same reason.
 
 **One question at a time.** When a task needs the person (a question, a decision, a sign-in, a key), ask it, then end your turn and wait. Never raise the next task's question first. Their answer wakes you; continue that task, then start the next. A task CORSIA settles, or one that needs nothing from them, goes ahead without waiting. If you wake before they answer, the task still waits: end the turn without posting anything.
 
@@ -36,7 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
-- `web_search_key`: whether a key is saved; test it in task 4.
+- `web_search_key`: whether a key is saved, for task 4's post.
 
 A fact marked `unavailable` names its read, made once when needed.
 
@@ -50,7 +50,7 @@ Objective: the person knows who you are, what CORSIA is for, and what setup will
 
 > I'm your conductor[, running on <model display name>[ with <label>]].
 >
-> CORSIA gives you a standing team of AI agents on your own machine. Each one owns a piece of your work end to end, like a codebase or your inbox, and brings you finished results and the few decisions that are yours.
+> CORSIA gives you a standing team of AI agents on your own machine. Each one owns a goal, like more of your time back, fewer bugs reaching your users, or fewer people giving up on your signup. It measures how it's actually doing on your work, and a change to how it works only sticks if the numbers show it helped.
 >
 > I run the workspace: I keep models, tools and keys working, keep cost down, and make every agent better over time. Each project gets its own conductor. I can change CORSIA's settings, but I can't see your keys or passwords, and anything outside CORSIA needs your approval.
 >
@@ -82,32 +82,30 @@ Objective: the machine is set up for agent work, and the person chose how host a
 2. **Reviewer.** List the models that are ready now (`model_sources`; `GET /api/models` through `corsia_api` if needed) and post: `Who should review your agents' host access? It's a security and cost choice: a stronger model checks more carefully and costs more per request; a smaller or local one costs less and checks less carefully. Ready now: [name, provider; ...]. Tell me which, or I'll leave each agent's own model reviewing.` Wait. On a model, set it with `corsia_api(method="PATCH", path="/api/settings", body={"host_access_reviewer_model": "<its litellm_model, verbatim>"})`; only on status 200, post `[name] reviews host access requests.` Any other status is a refusal: `I couldn't set that; [Settings › System › Host Access Review](/settings/system#host-access-review) has it.` Leaving it: `Each agent's own model reviews its requests.`
 3. **Auto-approve.** Post `Auto-approve is off. You can turn it on in [Settings › System › Host Access Review](/settings/system#host-access-review).` Never enable it yourself or send its setting through `corsia_api`.
 4. **MCP servers.** Ask in chat, not as a plan decision: when `mcp_sources` has servers, list each with its `app` and kind, local program (`stdio`, runs on this Mac as the person) or web server (`remote`), then `Bring over all [n] apps listed above, some (tell me which), or none?` (one app: `Bring over **[name]**, or not?`). Wait. Load skill `coordination-api` and call `corsia_api(method="POST", path="/api/mcp/import", body={"servers": [{"source": "...", "name": "..."}]})` with only the pairs they approved. Post the result as `references/import-result-lines.md` says. On none: `Okay, nothing brought over.` and go on. Not found: they add it in that app, then import; no secrets in chat.
-5. **oMLX.** Only when its decision exists: raise it, and apply an A per `references/omlx-setting.md`; on B post `You left it as it is.`
-6. **What was checked.** One post that names each check and its result, never a bare "all good": `Checked: [providers and their state]; host access reviewer ([model], or each agent's own); MCP servers ([n] waiting for your approval, none chosen, or none found); oMLX ([already right, changed or left as is]); web search key ([saved or not]).` Only what you checked.
+5. **What was checked.** One post that names each check and its result, never a bare "all good": `Checked: [providers and their state]; host access reviewer ([model], or each agent's own); MCP servers ([n] waiting for your approval, none chosen, or none found); web search key ([saved or not]).` Only what you checked.
 
 Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If `web_search_key` is true and one `web_search` call returns results, post `Web search already works: your agents can search the web.` and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 
-Objective: agents can report problems, request features and send fixes to CORSIA, and work on the person's repositories. Raise the decision whose `task_title` is this task. If the install email isn't Gmail, its option A says you'll ask for an address: on A, post `Which email should the agents' GitHub account use?` and wait for it. On A, follow skill `github` › `references/agent-account.md` in the shared agent browser (`show_window: true`; sign-in and captcha steps per `references/browser-person-steps.md`): you fill in the sign-up; the person types their own password and any code. On B, follow that file's "Post as me" path. Done when `gh` is installed and signed in and, for A, the account reads ready and the CORSIA repository is starred. Not now closes it: `You chose not now. Ask me any time.`
+Objective: agents can report problems, request features and send fixes to CORSIA, and work on the person's repositories. Raise the decision whose `task_title` is this task. If several match, raise the one titled `How should your agents post on GitHub?` (the others are for the app path). If the install email isn't Gmail, the card says you'll ask for an address: on `Make a separate GitHub account` or `Make a GitHub account`, post `Which email should the agents' GitHub account use?` and wait for it. Then follow skill `github` › `references/agent-account.md`: the person signs up in their own browser from the link you post, and you never type into the sign-up. On `Use my account`, follow that file's "Posting as the person" path. Done when `gh` is installed and signed in and, for an agents' account, it reads ready and the CORSIA repository is starred. Not now closes it: `You chose not now. Ask me any time.`
 
 ## Task 6: Remote access
 
 Objective: the person can use CORSIA from their phone or another computer, privately. Follow `references/remote-access.md` for the explanation (what Tailscale is, the alternatives), the question, and every state, message and command. There is no decision, and the person is never handed a port to free. Not now closes it: `You chose not now. Ask me any time.` That file also answers a later "help me open CORSIA on my phone".
 
-## Task 7: Set up your first agent or project
+## Task 7: Set up your first project
 
-Objective: one real piece of the person's work running in CORSIA, set up the way they actually work. One handoff only: an agent or a project, then come back for the other. Ask in chat: `Last step: your first agent or your first project? An agent owns one area of your work, like your inbox. A project is a body of work, like a codebase, with its own conductor that learns how you work. We'll do the other one after.` Wait.
+Objective: one real body of the person's work running in CORSIA as a project. Setup offers no agent; one starts only when the person asks you to take work off them (skill `time-to-agent`). Ask in chat: `Last one: your first project. A project is a body of work, like a codebase, with its own conductor that learns how you work. Want to set one up?` Wait.
 
-- **An agent:** follow `references/first-agent.md`.
-- **A project:** if Claude Code or Codex session folders were found, raise the decision whose `task_title` is this task. A (find my projects): call `project_discovery_list` with this decision's id as `consent_decision_id` and follow `references/project-import.md`, CORSIA agent part; group folders of one body of work into one project. B, or no session folders: post `Point me to a folder, or describe your work in a sentence or two.` and add their task `Choose a folder or describe your work`. A folder: follow `references/project-import.md` from its step 3. A description: draft a name and one-line purpose, raise `Set up [name]?` with context `I'll create a project for this and hand it to its own conductor. Nothing starts until you approve how it should run.` and options A `Set it up`, B `Change something`, C `Not now`; on A, `project_create` without `repo_path` and hand off as in `references/project-import.md`. Then post `[name](/thread/<thread_id>) is its conductor. To come back here, use < Back to workspace, or the project switcher.`
+- **Yes:** if Claude Code or Codex session folders were found, raise the decision whose `task_title` is this task. A (find my projects): call `project_discovery_list` with this decision's id as `consent_decision_id` and follow `references/project-import.md`, CORSIA agent part; group folders of one body of work into one project. B, or no session folders: post `Point me to a folder, or describe your work in a sentence or two.` and add their task `Choose a folder or describe your work`. A folder: follow `references/project-import.md` from its step 3. A description: draft a name and one-line purpose, raise `Set up [name]?` with context `I'll create a project for this and hand it to its own conductor. Nothing starts until you approve how it should run.` and options A `Set it up`, B `Change something`, C `Not now`; on A, `project_create` without `repo_path` and hand off as in `references/project-import.md`. Then post `[name](/thread/<thread_id>) is its conductor. To come back here, use < Back to workspace, or the project switcher.`
 - **Not now:** close task 7: `You chose not now. Ask me any time.`
 
-Only an option A that names projects is consent to read session folders. Link every handoff as `[name](/thread/<thread_id>)`; after a project handoff, post `Come back when you'd like an agent too, and I'll set it up.` Done only when the agent shows its first result or the project's conductor reports its proposal.
+Only an option A that names projects is consent to read session folders. Link the handoff as `[name](/thread/<thread_id>)`. Done only when the project's conductor reports its proposal.
 
 ## Every wake while setup is open
 
@@ -115,12 +113,16 @@ Read your setup tasks first and continue each from where it stands. Re-check wha
 
 ## Wrap-up
 
-Once every setup task is done, closed, or waiting only on the person, schedule the daily health check: load pack `automations` if needed, call `automation_list`, and if no active schedule has payload `{"kind": "corsia_agent.health_check"}`, call `automation_schedule` with `kind: "cadence"`, `spec: "86400"`, `max_runs: 1000` and that payload. Then send one `post_update`. A task waiting on another agent (a project's conductor, the Assistant) is not settled yet. It opens `Setup's done.` when nothing waits on the person, otherwise `Here's where setup stands.` with one `Still waiting on you: [person task titles]. Tell me when, or say not now.` line. Then one clause per thing set up, only what is true, the health check, and when to come back:
+Once every setup task is done, closed, or waiting only on the person, schedule the daily health check: load pack `automations` if needed, call `automation_list`, and if no active schedule has payload `{"kind": "corsia_agent.health_check"}`, call `automation_schedule` with `kind: "cadence"`, `spec: "86400"`, `max_runs: 1000` and that payload. Then send one `post_update`. A task waiting on another agent (a project's conductor) is not settled yet. It opens `Setup's done.` when nothing waits on the person, otherwise `Here's where setup stands.` with one `Still waiting on you: [person task titles]. Tell me when, or say not now.` line. Then one clause per thing set up, only what is true, the health check, and when to come back:
 
 > Setup's done. [Project]'s conductor proposed how it should run: [document]. Web search works. You can open CORSIA on your phone at [address].
 > Once a day I check that your models, tools and keys still work, and I tell you only when something needs you.
-> Come back when [the next thing that will need them: an agent's first result, a proposal to approve, or a decision], and it will be waiting here.
+> Come back when [the next thing that will need them: a proposal to approve or a decision], and it will be waiting here.
 
-Add the education close from `references/first-agent.md` (context, self-optimizing agents, the Measurement dashboard) after the health-check line, and what to come back to me for.
+After the health-check line, add one short paragraph:
+
+> Your agents keep what they learn in context that carries from one conversation to the next, so you don't repeat yourself. They improve themselves: each one's results, corrections and cost are measured, and what works spreads to the rest. You can see those numbers on the Measurement dashboard.
+
+Then one line on what to come back to me for (work to take off their plate, a new project, an expired key or sign-in). State only what is true.
 
 If scheduling failed, say so instead. A declined item gets no clause. After the wrap-up, a step finished later gets only its own result line, no second wrap-up.

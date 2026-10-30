@@ -1,5 +1,4 @@
 # Launchd service — the one durable backend for this machine (#242).
-
 LAUNCH_AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 SERVICE_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SERVICE_EXIT_TIMEOUT_SECONDS=120
@@ -22,27 +21,16 @@ case "${CORSIA_SERVICE_LABEL-}" in
         ;;
 esac
 service_label() { echo "${CORSIA_SERVICE_LABEL:-com.corsia.prod}"; }
-service_plist_path() { echo "$LAUNCH_AGENTS_DIR/$(service_label).plist"; }
+service_definition_path() { echo "$LAUNCH_AGENTS_DIR/$(service_label).plist"; }
 service_domain() { echo "gui/$(id -u)"; }
 service_is_loaded() { launchctl print "$(service_domain)/$(service_label)" > /dev/null 2>&1; }
-
-# Two paths name the same directory. Either side may be a symlinked spelling
-# (a plist rendered through ~/.corsia, a listener's physical cwd), so compare
-# the resolved directories when both exist and the literal strings otherwise.
-same_directory() {
-    local left="$1" right="$2" left_real right_real
-    [ "$left" != "$right" ] || return 0
-    left_real="$(cd -P "$left" 2>/dev/null && pwd)" || return 1
-    right_real="$(cd -P "$right" 2>/dev/null && pwd)" || return 1
-    [ "$left_real" = "$right_real" ]
-}
 
 # The installed definition under this checkout's label describes this checkout.
 # Deeper identity (port, interpreter, roots, generation) is proved separately
 # by require_owned_service_definition before any effect.
 service_definition_describes_this_checkout() {
     local plist workdir
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     [ -f "$plist" ] || return 1
     command -v plutil > /dev/null 2>&1 || return 1
     [ "$(service_definition_value "$plist" Label)" = "$(service_label)" ] || return 1
@@ -89,26 +77,80 @@ require_loaded_service_owns_port() {
     fi
 }
 
+# macOS 15 rejects `bootout --wait` as an unrecognized target, so plain bootout
+# runs and teardown is confirmed here, inside the one deadline: launchd no
+# longer lists the job (so KeepAlive cannot start it again), and every PID it
+# reported before or during the bootout has exited.
 launchctl_bootout_wait() {
     "$PYTHON" -c '
+import os
+import re
 import subprocess
 import sys
+import time
+
+target = sys.argv[1]
+deadline = time.monotonic() + int(sys.argv[2])
+
+
+def launchctl(*args):
+    return subprocess.run(
+        ["launchctl", *args], check=False, capture_output=True, text=True,
+        timeout=max(deadline - time.monotonic(), 0.1),
+    )
+
+
+def job():
+    """Return (loaded, pid); pid is "?" when launchd reports one we cannot read."""
+    loaded = launchctl("print", target)
+    if loaded.returncode != 0:
+        return False, None
+    match = re.search(r"^\s*pid = (\S+)\s*$", loaded.stdout, re.MULTILINE)
+    if match is None:
+        return True, None
+    return True, int(match.group(1)) if match.group(1).isdigit() else "?"
+
+
+def running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # EPERM: alive, but not ours to signal.
+    return True
+
 
 try:
-    completed = subprocess.run(
-        ["launchctl", "bootout", "--wait", sys.argv[1]],
-        check=False,
-        timeout=int(sys.argv[2]),
-    )
+    _, pid = job()
+    if pid == "?":
+        # Nothing is stopped yet, so this is a plain refusal with the job loaded.
+        sys.stderr.write(f"cannot read the PID launchd reports for {target}\n")
+        raise SystemExit(1)
+    seen = {pid} if pid is not None else set()
+    completed = launchctl("bootout", target)
+    sys.stderr.write(completed.stderr)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+    while True:
+        loaded, pid = job()
+        if isinstance(pid, int):
+            seen.add(pid)
+        # An unreadable PID while still loaded keeps waiting, so it ends in 124.
+        if not loaded and not any(running(each) for each in seen):
+            break
+        if time.monotonic() >= deadline:
+            raise SystemExit(124)
+        time.sleep(0.2)
 except subprocess.TimeoutExpired:
     raise SystemExit(124)
-raise SystemExit(completed.returncode)
 ' "$1" "$SERVICE_PID_EXIT_WAIT_SECONDS"
 }
 
 bootout_service_and_wait() {
     local domain="$1" label="$2" bootout_status
-    # launchd owns KeepAlive and termination; Python only bounds the native wait.
+    # launchd owns KeepAlive and termination; the wrapper confirms the job is
+    # unloaded and its processes have exited, inside one deadline.
     if launchctl_bootout_wait "$domain/$label"; then
         return 0
     else
@@ -116,12 +158,14 @@ bootout_service_and_wait() {
     fi
     if [ "$bootout_status" -eq 124 ]; then
         fail "$label bootout did not complete after ${SERVICE_PID_EXIT_WAIT_SECONDS}s; no replacement was started"
+        _corsia_unconfirmed_bootout=true
         return 2
     fi
     if service_is_loaded; then
         return 1
     fi
     fail "$label bootout did not confirm teardown completed; launchd no longer reports the job and no replacement was started"
+    _corsia_unconfirmed_bootout=true
     return 2
 }
 
@@ -131,7 +175,7 @@ new_service_generation() {
 
 service_loaded_definition_matches() {
     local plist expected loaded
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     command -v plutil > /dev/null 2>&1 || return 1
     expected="$(plutil -extract EnvironmentVariables.CORSIA_SERVICE_GENERATION raw "$plist" 2>/dev/null)" \
         || return 1
@@ -269,7 +313,7 @@ service_port_mismatch_guidance() {
 
 require_owned_service_definition() {
     local plist label actual
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     label="$(service_label)"
     [ -f "$plist" ] || { fail "$label not installed. Run: corsia service install"; return 1; }
     command -v plutil > /dev/null 2>&1 || {
@@ -344,7 +388,7 @@ render_env_file_vars() {
             CORSIA_WORKSPACE|CORSIA_STATE_DIR)
                 warn "$ENV_FILE sets $key — $key is resolved by infra.config and rendered separately" >&2
                 continue ;;
-            CORSIA_TEST_MODE|CORSIA_ALLOW_HOME_WORKSPACE_IN_CI)
+            CORSIA_TEST_MODE|CORSIA_ALLOW_HOME_WORKSPACE_IN_CI|CORSIA_DEVICES_DISABLE)
                 warn "$ENV_FILE sets $key — ignored: test-only safety bypasses cannot configure the production service" >&2
                 continue ;;
             BACKEND_PORT|CORSIA_E2E_MODEL|CORSIA_SERVICE_GENERATION|\
@@ -444,7 +488,7 @@ service_install() {
         direct|restart) ;;
         *) fail "Unknown service installation mode: $mode"; return 1 ;;
     esac
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     if service_is_loaded; then
         if ! service_installed; then
             fail "$(foreign_loaded_service_guidance "$(service_label)" "$plist")"
@@ -494,7 +538,7 @@ service_install() {
 
 service_uninstall() {
     local plist loaded=false
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     if service_is_loaded; then
         loaded=true
         [ -f "$plist" ] || {
@@ -527,7 +571,7 @@ require_no_unmanaged_backend() {
 
 service_start() {
     if service_is_loaded && ! service_installed; then
-        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_plist_path)")"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     fi
     service_installed || { fail "$(service_label) not installed. Run: corsia service install"; return 1; }
@@ -537,8 +581,14 @@ service_start() {
         return 0
     fi
     require_no_unmanaged_backend "$BACKEND_PORT" || return 1
-    launchctl bootstrap "$(service_domain)" "$(service_plist_path)" \
+    launchctl bootstrap "$(service_domain)" "$(service_definition_path)" \
         && ok "$(service_label) bootstrapped using the installed definition (RunAtLoad starts it). Source changes are not rendered by start; run corsia service install before start, or corsia service restart."
+}
+
+stop_local_model_before_bootout() {
+    local port="$1"
+    curl -sf --max-time 60 -X POST "http://127.0.0.1:$port/api/system/stop-local-model" \
+        -H "Content-Type: application/json" -d '{}' > /dev/null 2>&1
 }
 
 service_stop() {
@@ -547,7 +597,7 @@ service_stop() {
         warn "$(service_label) not loaded"
         return 0
     fi
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     label="$(service_label)"
     domain="$(service_domain)"
     if ! service_installed; then
@@ -566,6 +616,16 @@ service_stop() {
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service stop" "$port" \
             || warn "Drain did not complete; stopping anyway"
+        # Opt-in (--stop-local-model): stop the local model CORSIA started only
+        # once in-flight turns have finished, while the service can still
+        # answer. A failure here aborts with the service up and accepting turns.
+        if [ "${STOP_LOCAL_MODEL:-false}" = true ] && ! stop_local_model_before_bootout "$port"; then
+            cancel_failed_drain "$(current_drain_url "$port")" "$CORSIA_RESTART_OPERATION_ID" || :
+            fail "Could not stop the local model; $label is still running"
+            return 1
+        fi
+    elif [ "${STOP_LOCAL_MODEL:-false}" = true ]; then
+        warn "--stop-local-model skipped: the backend is not answering"
     fi
     if bootout_service_and_wait "$domain" "$label"; then
         :
@@ -596,6 +656,7 @@ service_restart() {
     require_owned_service_definition || return 1
     if ! service_is_loaded; then
         require_no_unmanaged_backend "$port" || return 1
+        _corsia_update_stopping=1
         if [ -n "$after_teardown" ] && ! "$after_teardown"; then
             fail "Release activation failed before service definition installation"
             return 1
@@ -609,7 +670,7 @@ service_restart() {
     fi
     domain="$(service_domain)"
     label="$(service_label)"
-    plist="$(service_plist_path)"
+    plist="$(service_definition_path)"
     bootstrap_attempts="${CORSIA_LAUNCHD_BOOTSTRAP_ATTEMPTS:-15}"
     case "$bootstrap_attempts" in
         ""|*[!0-9]*|0)
@@ -638,6 +699,7 @@ service_restart() {
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service restart" "$port" \
             || warn "Drain did not complete; restarting anyway"
     fi
+    _corsia_update_stopping=1
     if bootout_service_and_wait "$domain" "$label"; then
         :
     else
@@ -741,7 +803,7 @@ Manual recovery: $manual_command"
 service_status() {
     local label plist pid port="$BACKEND_PORT"
     label="$(service_label)"
-    plist="$(service_plist_path)"
+    plist="$(service_definition_path)"
     echo "$label"
     if [ -f "$plist" ]; then ok "plist installed"; else warn "plist not installed ($plist)"; fi
     if service_is_loaded; then

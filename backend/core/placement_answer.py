@@ -42,6 +42,18 @@ _REQUIRED = {
         "verdict trial takes a placement with trial set and q1 agent, in a "
         "thread that has its own tray"
     ),
+    "written": (
+        "verdict written takes a q1 agent placement in a thread with its own tray: a "
+        "project or everywhere lesson is proposed, a hypothesis is a trial, and a "
+        "thread lesson stays in continuity"
+    ),
+}
+
+_AT_CAP = "that file is at its cap: retire or shorten a line there you no longer need, then place again"
+
+#: The destination kinds each in-turn verdict's placement may map to.
+_KINDS = {
+    "proposal": ("proposal",), "trial": ("trial",), "written": ("context", "skill", "reference"),
 }
 
 
@@ -81,10 +93,11 @@ def thread_place(db: sqlite3.Connection, thread_id: str) -> ThreadPlace:
 def history(db: sqlite3.Connection, thread_id: str, entry: dict[str, Any]) -> list[dict]:
     """Earlier decisions on the same subject, for the duplicate check (P5)."""
     from memory.checkpoint_search import search_checkpoints
+    from infra.thread_confinement import Reader
 
     query = str(entry.get("statement") or entry.get("result") or "")[:300]
     hits = search_checkpoints(
-        db, query, caller_thread_id=thread_id, limit=_HISTORY_HITS + 1,
+        db, query, reader=Reader.agent(thread_id), limit=_HISTORY_HITS + 1,
     )
     return [
         {
@@ -133,13 +146,15 @@ def stage(
         )
         place = thread_place(db, thread_id)
         destination = map_destination(place, decision)
-        if require is not None and destination.kind != require:
+        if require is not None and destination.kind not in _KINDS[require]:
             raise InvalidDecision(_REQUIRED[require])
         if destination.kind == "trial":
             return _stage_trial(db, thread_id, entry, place, decision, destination, room)
         if destination.kind == "proposal":
             _check_publishable(db, thread_id, entry, decision)
         request = room_request(place, decision, destination)
+        if request is not None and require is not None:
+            raise InvalidDecision(_AT_CAP)
         if request is None:
             if room is not None:
                 raise InvalidDecision(
@@ -188,8 +203,9 @@ def _originating_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str, 
 
 
 def _stored(decision: Decision) -> dict[str, Any]:
-    """The answer as the mark keeps it; an answer without a trial is unchanged."""
+    """The answer as the mark keeps it; an answer without a trial or case is unchanged."""
     stored = asdict(decision)
+    stored.update(stored.pop("case_metadata"))
     if stored["trial"] is None:
         del stored["trial"]
     if not stored["originating_subjects"]:

@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
 from plans.boundary import PlanActor, mutate
@@ -48,6 +50,11 @@ def db() -> Iterator[sqlite3.Connection]:
             "INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, user_id, spawned_by, "t", "t"),
         )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "parent", role="user", content="Mutate the requested plan task.", intent="apply_now",
+        message_id="mutation-authority", db=connection,
+    )
     connection.commit()
     yield connection
     connection.close()
@@ -74,6 +81,15 @@ _MUTATION_IDS = itertools.count(1)
 
 
 def _mutate(db, plan_id, operation, params, actor=None, mutation_id=None):
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task":
+        params = {
+            **params,
+            "intent": params.get("intent", "Mutate the requested plan task."),
+            "intent_words": params.get(
+                "intent_words",
+                [{"quote": "Mutate the requested plan task.", "role": "authority"}],
+            ),
+        }
     deferred = mutate(
         plan_id, operation, params, actor=actor or _actor(), provenance="test",
         mutation_id=mutation_id or f"test-{next(_MUTATION_IDS)}", db=db,
@@ -86,12 +102,12 @@ def test_insert_append_split_edit_and_attach_keep_identity_and_events(db, plan_a
 
     appended = _mutate(
         db, plan.id, "insert",
-        {"kind": "task", "title": "Append", "acceptance_criteria": "Append passes"},
+        {"kind": "task", "title": "Append", "acceptance_criteria": "Append passes", "size": "S"},
     )["node"]
     split = _mutate(
         db, plan.id, "split",
         {"node_id": node.id, "title": "Remainder", "acceptance_criteria": "Remainder passes",
-         "expected_revision": node.revision},
+         "size": "S", "expected_revision": node.revision},
     )["node"]
     source = service.get_node(node.id, db=db)
     restated = _mutate(
@@ -119,7 +135,7 @@ def test_creation_rejects_extra_operation_fields(db, plan_and_node):
     with pytest.raises(service.PlanError, match="unexpected parameters"):
         _mutate(
             db, plan.id, "add",
-            {"kind": "task", "title": "Extra", "acceptance_criteria": "Never",
+            {"kind": "task", "title": "Extra", "acceptance_criteria": "Never", "size": "S",
              "before_node_id": "anything"},
         )
 
@@ -158,7 +174,7 @@ def test_thread_actor_cannot_mutate_project_or_workspace_scope_plans(db, plan_an
     workspace_plan = service.ensure_plan(
         "workspace_scope", config.WORKSPACE_SELECTION.workspace_id, db=db,
     )
-    params = {"kind": "task", "title": "Blocked", "acceptance_criteria": "Never"}
+    params = {"kind": "task", "title": "Blocked", "acceptance_criteria": "Never", "size": "S"}
 
     with pytest.raises(PermissionError, match="project scope"):
         _mutate(db, project_plan.id, "add", params, actor=actor)
@@ -176,7 +192,7 @@ def test_insert_cannot_target_a_node_in_another_plan(db, plan_and_node):
     with pytest.raises(PermissionError, match="insert target"):
         _mutate(
             db, plan.id, "insert",
-            {"kind": "task", "title": "Bad", "acceptance_criteria": "Bad DOD",
+            {"kind": "task", "title": "Bad", "acceptance_criteria": "Bad DOD", "size": "S",
              "before_node_id": other.id},
         )
 
@@ -354,6 +370,7 @@ def test_root_review_allows_owner_settlement_and_authenticated_human_fallback(db
             "node_id": follow_source.id,
             "title": "Bounded residual",
             "acceptance_criteria": "Residual is verified",
+            "size": "S",
             "verification_result": "passed",
             "expected_revision": waiting["revision"],
         },

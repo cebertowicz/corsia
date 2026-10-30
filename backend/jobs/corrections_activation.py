@@ -48,11 +48,13 @@ def complete_backfill(
 
 
 def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: int) -> float:
-    """Return the bounded-window weekly correction figure for one full version.
+    """Return the bounded-window weekly chat-message correction figure for one full version.
 
     Only ``correction`` facts count; ``unreadable`` and ``not_correction`` never do.
+    Chat messages alone count, so two versions compare like for like even when
+    the newer one has read comments and decision answers the older never did.
     """
-    from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION
+    from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION, MESSAGE_SUBJECT_PREFIX
     from infra.database import get_db
 
     version_filter, version_params = version_match_sql("e", version)
@@ -61,9 +63,12 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
         row = db.execute(
             f"""SELECT COUNT(*) FROM outcome_events e
                WHERE e.event_name=:event AND e.retracted_at IS NULL AND e.ts >= :since
-                 AND {version_filter}
+                 AND {version_filter} AND e.subject_key LIKE :message_prefix || '%'
                  AND json_extract(e.attributes, '$.label')=:label""",
-            {**version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION},
+            {
+                **version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION,
+                "message_prefix": MESSAGE_SUBJECT_PREFIX,
+            },
         ).fetchone()
         return int(row[0]) / weeks
     finally:
@@ -96,12 +101,14 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
             logger.warning("corrections activation conductor notice skipped: {}", gap)
         return
     old = activation["before_count"]
+    installed = f"Corrections classifier version {version.version} was installed and activated. "
     if old is None:
-        detail = f"Corrections are now counted for the last {activation['weeks']} weeks."
+        detail = installed + f"Corrections are now counted for the last {activation['weeks']} weeks."
     else:
-        detail = (
-            f"Corrections for the last {activation['weeks']} weeks were re-read with classifier "
-            f"version {version.version}; the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
+        detail = installed + (
+            f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
+            f"the weekly figure for chat-message corrections moved from {old:.1f} to {activation['after_count']:.1f}. "
+            "It compares chat messages only, so a change in which sources are read does not move it."
         )
     from events.delivery import deliver_to_thread
 

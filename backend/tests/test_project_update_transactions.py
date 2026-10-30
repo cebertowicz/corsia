@@ -181,3 +181,10 @@ def test_project_refusals_preserve_rows_and_release_the_writer(
     assert response.status_code == status, response.text
     assert _stored(project_db) == before
     assert not _writer_locked(project_db)
+
+
+def test_integration_client_does_not_start_usage_rollup_writer(integration_client):
+    """The session app must not refresh mutable rollups across per-test databases."""
+    from api import usage_rollup
+
+    assert integration_client.application_loop not in usage_rollup._refreshing

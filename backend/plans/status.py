@@ -109,8 +109,11 @@ def node_detail(db, plan_row, node_id: str, *, actor, clock: str | None = None) 
     node = next((n for n in facts["nodes"] if n["id"] == node_id), None)
     if durable is None or node is None:
         raise PlanError(f"node {node_id!r} is not in this plan; read plan_read() for its rows")
+    from plans import intent_words
+
     return {
         **dict(durable),
+        **intent_words.detail(db, durable),
         **node,
         "ages": _ages(node, clock),
         "execution_time": node["node_cost"]["own"]["execution"],
@@ -289,7 +292,7 @@ def _overview(db, plan_row, facts: dict) -> dict[str, Any]:
             break
     open_rows = [_condition(n) for n in facts["leaves"] if n["state"] not in _TERMINAL]
     progress = facts["progress"]
-    return {
+    overview = {
         "plan": {"id": plan["id"], "revision": plan["revision"], "state": plan["state"]},
         "progress": {
             "done": progress.get("done"), "total": progress.get("total"),
@@ -302,6 +305,9 @@ def _overview(db, plan_row, facts: dict) -> dict[str, Any]:
         "as_of": facts["clock"],
         "full_read": "plan_read(mode='full')",
     }
+    if wait := facts["display"].get("wait"):
+        overview["wait"] = wait
+    return overview
 
 
 def _brief(node: dict, facts: dict) -> dict[str, Any]:
@@ -322,11 +328,14 @@ def _brief(node: dict, facts: dict) -> dict[str, Any]:
 def _severity(conditions: list[str], facts: dict) -> str:
     """What the plan needs, judged from its rows: a wait is neutral, a block is not.
 
-    What the user owes outranks a pause (pause contract rule 5). The internal
+    What the user owes outranks a node pause, but a paused plan defers its own
+    asks, so its rows carry none (``plan_defers_asks``). The internal
     ``plans.not_moving`` predicate stays agent-facing and does not add UI state.
     """
     if facts["stuck"] is not None:
-        return "not_moving"
+        # EW1/EW5: only an outside wait, with nothing owed by the user, is waiting.
+        waiting = facts["display"].get("wait") and not facts["stuck"].get("need_you")
+        return "waiting" if waiting else "not_moving"
     if any(n.get("requires_user_action") for n in facts["leaves"]):
         return "needs_input"
     if facts["plan"]["state"] == "paused":

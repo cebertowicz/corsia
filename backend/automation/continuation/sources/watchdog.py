@@ -11,7 +11,6 @@ from plans import public
 T1_DEFAULT_BUDGET_SECONDS = int(
     os.getenv("CORSIA_T1_DEFAULT_BUDGET_SECONDS", "3600")
 )
-T1_MAX_CYCLES = 3
 
 
 def _parse(value: str) -> datetime:
@@ -111,17 +110,16 @@ class WatchdogSource:
                 continue
             transition = f"{active_since}:cycle:{cycle}"
             dedupe_key = f"{self.kind}:{thread_id}:{row['id']}:{transition}"
+            # Only a settled cycle stops here. A live row is re-requested, so enqueue
+            # returns it and the runner drives it once due (a startup-spread row included).
             if db.execute(
                 """SELECT 1 FROM continuation_triggers
                    WHERE kind='t1_watchdog' AND subject_id=? AND dedupe_key=?
-                     AND state IN ('pending','deferred','delivered','failed',
-                                   'stalled','cancelled','suppressed')
+                     AND state IN ('delivered','failed','stalled','cancelled','suppressed')
                    LIMIT 1""",
                 (row["id"], dedupe_key),
             ).fetchone() is not None:
                 continue
-            outcome = "stalled" if cycle >= T1_MAX_CYCLES else None
-            reason = "cycle_cap_reached" if outcome else "watchdog_due"
             requests.append(
                 TriggerRequest(
                     kind=self.kind,
@@ -129,8 +127,7 @@ class WatchdogSource:
                     scope_id=_scope(thread_id, db),
                     subject_id=row["id"],
                     transition=transition,
-                    outcome=outcome,
-                    reason=reason,
+                    reason="watchdog_due",
                     details={
                         "node_id": row["id"],
                         "node_revision": row["revision"],
@@ -206,12 +203,9 @@ class WatchdogSource:
     ) -> None:
         """Append one idempotent watchdog audit without changing node state."""
 
-        if trigger.subject_id is None or outcome == "deferred":
+        if trigger.subject_id is None:
             return
-        event = {
-            "stalled": "watchdog_escalated",
-            "cancelled": "watchdog_cancelled",
-        }.get(outcome, "watchdog_wake")
+        event = "watchdog_cancelled" if outcome == "cancelled" else "watchdog_wake"
         public.record_runner_event(
             trigger.subject_id,
             event,

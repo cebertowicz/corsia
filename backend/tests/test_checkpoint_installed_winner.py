@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 from dataclasses import replace
 
 import pytest
+from core import fork_runtime
 
-from core.checkpoint_types import (
-    CheckpointRequest,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import CheckpointRequest
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 
@@ -81,8 +84,8 @@ def _admission(
             first_included_seq=None,
             started_at="t1",
         ),
-        ProviderCheckpointRequest(
-            checkpoint_id=checkpoint_id,
+        CheckpointProviderForkRequest(
+            fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
             instruction="Write one checkpoint.",
@@ -121,7 +124,7 @@ async def test_shared_hard_wait_adopts_installed_race_winner_without_stale_write
     async def invoke(_request, _cancel):
         nonlocal provider_calls
         provider_calls += 1
-        return ProviderCheckpointResult("stale candidate", None)
+        return ProviderForkResult("stale candidate", None)
 
     def create_with_winner(request):
         nonlocal raced
@@ -163,7 +166,7 @@ async def test_shared_hard_wait_adopts_installed_race_winner_without_stale_write
     assert continuation.checkpoint_id == "installed-winner"
     assert continuation.payload == {"checkpoint_id": "installed-winner"}
     assert provider_calls == 0
-    assert checkpoint_runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
     assert scope.checkpoint_id is None
     assert await cancel_waiting_checkpoint(scope) is None
     db = get_db()
@@ -200,8 +203,8 @@ async def test_oversized_race_winner_allows_only_one_newer_fold(
     raced = False
 
     async def invoke(request, _cancel):
-        provider_ids.append(request.checkpoint_id)
-        return ProviderCheckpointResult("newer fold", None)
+        provider_ids.append(request.fork_id)
+        return ProviderForkResult("newer fold", None)
 
     def create_with_winner(request):
         nonlocal raced

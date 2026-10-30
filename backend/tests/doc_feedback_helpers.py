@@ -56,6 +56,7 @@ def add_comment(
     replacement: str | None = None,
     submit: bool = False,
     client_id: str | None = None,
+    delivery_policy: str = feedback_batches.IMMEDIATE,
 ) -> tuple[dict, dict]:
     """Create and batch one comment in one transaction."""
     with write_transaction(db, scope="test_add_feedback_comment") as connection:
@@ -71,10 +72,11 @@ def add_comment(
             to_off=None if parent_id else 13,
             replacement=replacement,
             client_id=client_id or str(uuid.uuid4())[:12],
+            announce=author_kind != "user",
             db=connection,
         )
         feedback = feedback_batches.record_comment(
-            connection, row, created=created, submit=submit,
+            connection, row, created=created, submit=submit, delivery_policy=delivery_policy,
         )
     return row, feedback
 
@@ -99,3 +101,13 @@ def linked_comment_ids(db, batch_id: str) -> list[str]:
             (batch_id,),
         ).fetchall()
     ]
+
+
+def add_person_comment(db, artifact_id: str, *, client_id: str | None = None) -> tuple[dict, dict]:
+    """Create and immediately deliver a person's comment as the post-response task does."""
+    row, feedback = add_comment(
+        db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id=client_id,
+    )
+    if feedback["batch_ids"]:
+        feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id))
+    return row, feedback

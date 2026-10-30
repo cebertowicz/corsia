@@ -4,88 +4,182 @@
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>CORSIA</title>
+	<!-- Generated from the app design tokens by desktop/scripts/gen-shell-tokens.mjs. -->
+	<link rel="stylesheet" href="tokens.css" />
 	<style>
-		:root {
-			color-scheme: dark light;
-			font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
-			--surface-dark: rgba(20, 20, 22, 0.55);
-			--surface-light: rgba(255, 255, 255, 0.55);
-			--text-dark: #e8e8ed;
-			--text-light: #1a1a1e;
-			--muted-dark: #8e8e93;
-			--muted-light: #6e6e73;
-			--card-dark: rgba(28, 28, 31, 0.65);
-			--card-light: rgba(255, 255, 255, 0.7);
-			--border-dark: rgba(255, 255, 255, 0.08);
-			--border-light: rgba(0, 0, 0, 0.08);
-			--accent-bg: rgba(139, 92, 246, 0.15);
-			--accent-border: rgba(139, 92, 246, 0.4);
-			--accent-text-dark: #b29bff;
-			--accent-text-light: #6d4ce6;
-		}
+		:root { color-scheme: dark light; font-family: var(--font-sans); }
 		* { box-sizing: border-box; }
 		html, body { height: 100%; margin: 0; -webkit-font-smoothing: antialiased; }
-		html[data-theme="dark"] body { background: var(--surface-dark); color: var(--text-dark); }
-		html[data-theme="light"] body { background: var(--surface-light); color: var(--text-light); }
+		body { background: color-mix(in srgb, var(--bg-primary) 55%, transparent); color: var(--text-primary); }
 		.app {
 			min-height: 100vh;
 			display: flex;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
-			padding: 80px 32px 48px;
+			padding: var(--space-8) var(--space-7);
 			text-align: center;
 		}
 		.mark {
-			width: 96px;
-			height: 96px;
-			margin-bottom: 28px;
+			width: calc(var(--space-8) * 2);
+			height: calc(var(--space-8) * 2);
+			margin-bottom: var(--space-6);
 			pointer-events: none;
 			user-select: none;
 			-webkit-user-drag: none;
 		}
-		h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
-		.failure, .background-approval { width: 100%; max-width: 420px; margin-top: 24px; }
-		.failure-card {
-			border-radius: 12px;
-			padding: 20px;
-			-webkit-backdrop-filter: blur(40px) saturate(180%);
-			backdrop-filter: blur(40px) saturate(180%);
+		h1 {
+			max-width: calc(var(--space-8) * 12);
+			margin: 0;
+			font-size: var(--text-title2);
+			font-weight: var(--fw-semibold);
+			letter-spacing: var(--ls-title);
+			line-height: var(--lh-tight);
+			text-wrap: balance;
 		}
-		html[data-theme="dark"] .failure-card { background: var(--card-dark); border: 1px solid var(--border-dark); }
-		html[data-theme="light"] .failure-card { background: var(--card-light); border: 1px solid var(--border-light); }
-		.failure-copy { margin: 0; font-size: 14px; line-height: 1.5; }
-		.failure-copy + .failure-copy { margin-top: 8px; }
-		html[data-theme="dark"] .failure-copy, html[data-theme="dark"] .log-label { color: var(--muted-dark); }
-		html[data-theme="light"] .failure-copy, html[data-theme="light"] .log-label { color: var(--muted-light); }
-		.log-label { display: block; margin-top: 16px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
-		.log-path { display: block; margin-top: 6px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; }
-		.actions { display: flex; justify-content: center; gap: 16px; margin-top: 20px; }
-		.approval-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; }
-		.approval-check { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; border: 1px solid var(--accent-border); border-radius: 50%; color: var(--accent-text-dark); font-size: 13px; }
-		html[data-theme="light"] .approval-check { color: var(--accent-text-light); }
-		html[data-theme] .approval-check[data-state="off"] { color: transparent; }
-		.approval-description { margin: 8px 0 16px; font-size: 14px; line-height: 1.5; }
-		html[data-theme="dark"] .approval-description { color: var(--muted-dark); }
-		html[data-theme="light"] .approval-description { color: var(--muted-light); }
-		.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-		.approval-action { flex: none; }
+		.line {
+			max-width: calc(var(--space-8) * 8);
+			margin: var(--space-2) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
+			text-wrap: pretty;
+		}
+		.log {
+			max-width: calc(var(--space-8) * 12);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		/* The data folder move's one percentage, in the update screen's look. */
+		.move-percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+		.move-bar { width: calc(var(--space-8) * 8); max-width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }
+		.move-bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-hero-plus) linear; }
+		@media (prefers-reduced-motion: reduce) { .move-bar i { transition: none; } }
+		.move-percent[hidden], .move-bar[hidden] { display: none; }
+		.note {
+			max-width: calc(var(--space-8) * 8);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		.details {
+			max-width: calc(var(--space-8) * 12);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		.details summary { cursor: pointer; }
+		.fresh-list {
+			max-width: calc(var(--space-8) * 10);
+			margin: var(--space-3) 0 0;
+			padding: 0;
+			list-style: none;
+			color: var(--text-secondary);
+			font-family: var(--font-mono);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+			overflow-wrap: anywhere;
+		}
+		.details p { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+		.log code {
+			display: block;
+			margin-top: var(--space-1);
+			overflow-wrap: anywhere;
+			font-family: var(--font-mono);
+		}
+		.spinner {
+			width: var(--space-5);
+			height: var(--space-5);
+			margin-top: var(--space-5);
+			border: var(--space-1) solid var(--border);
+			border-top-color: var(--accent-line);
+			border-radius: var(--radius-circle);
+			animation: spin var(--dur-hero-plus) linear infinite;
+		}
+		@keyframes spin { to { transform: rotate(360deg); } }
+
+		.actions, .background-approval {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: var(--space-1);
+			margin-top: var(--space-6);
+		}
+		.approval-row {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: var(--space-2);
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
+		}
+		.approval-check {
+			display: inline-flex;
+			flex: none;
+			width: var(--space-5);
+			height: var(--space-5);
+			align-items: center;
+			justify-content: center;
+			border: var(--space-1) solid var(--accent-line);
+			border-radius: var(--radius-circle);
+			color: transparent;
+			font-size: var(--text-footnote);
+			line-height: 1;
+		}
+		.approval-check[data-state="on"] {
+			border-color: var(--accent-fill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
+		}
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		button {
-			height: 36px;
-			padding: 0 16px;
-			border: 1px solid var(--accent-border);
-			border-radius: 8px;
-			background: var(--accent-bg);
-			color: var(--accent-text-dark);
-			font: 500 13px/1 inherit;
+			border: 0;
+			font: inherit;
 			cursor: pointer;
-			transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease;
+			transition: background var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap);
 		}
-		html[data-theme="light"] button { color: var(--accent-text-light); }
-		button:hover:not(:disabled) { background: rgba(139, 92, 246, 0.25); border-color: #8b5cf6; }
-		button:focus-visible { outline: 3px solid rgba(139, 92, 246, 0.35); outline-offset: 3px; }
-		button:disabled { cursor: wait; opacity: 0.5; }
-		@media (prefers-reduced-motion: reduce) { button { transition: none; } }
+		.primary {
+			height: calc(var(--space-7) + var(--space-2));
+			padding: 0 var(--space-5);
+			border-radius: var(--radius-pill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
+		}
+		.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
+		.secondary {
+			height: var(--space-7);
+			padding: 0 var(--space-2);
+			border-radius: var(--radius-sm);
+			background: transparent;
+			color: var(--accent-text);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
+		}
+		.secondary:hover:not(:disabled) { background: var(--accent-wash); }
+		button:disabled { cursor: wait; opacity: 0.3; }
+		button:focus-visible { outline: var(--space-1) solid var(--accent-wash); outline-offset: var(--space-1); }
+		[hidden] { display: none !important; }
+		@media (prefers-reduced-motion: reduce) {
+			button { transition: none; }
+			.spinner { animation: none; }
+		}
 	</style>
 	<script>
 		(function () {
@@ -99,65 +193,392 @@
 </head>
 <body>
 	<div class="app" data-tauri-drag-region>
-		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
+		<div id="mark" class="mark" aria-hidden="true" data-tauri-drag-region></div>
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
+		<p id="line" class="line" hidden></p>
+		<ul id="fresh-list" class="fresh-list" aria-label="What moves" hidden></ul>
+		<p id="note" class="note" hidden></p>
+		<div id="move-percent" class="move-percent" aria-hidden="true" hidden></div>
+		<div id="move-bar" class="move-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><i></i></div>
+		<details id="details" class="details" hidden><summary>Details</summary><p id="details-text"></p></details>
+		<p id="log" class="log" hidden>Service log<code id="log-path"></code></p>
+		<div id="spinner" class="spinner"></div>
 		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
-			<p id="approval-description" class="approval-description">Turn this on so your agents keep working when you close this window.</p>
-			<div class="failure-card approval-row">
+			<div class="approval-row">
 				<span id="approval-check" class="approval-check" data-state="off"><span aria-hidden="true">✓</span><span id="approval-state" class="visually-hidden">Off</span></span>
-				<span class="failure-copy">Keep CORSIA running when the window is closed</span>
-				<button id="open-login-items" class="approval-action" type="button">Open Login Items</button>
+				<span>Keep CORSIA running when the window is closed</span>
 			</div>
+			<button id="open-login-items" class="primary" type="button">Open Login Items</button>
 		</section>
-		<section id="failure" class="failure" hidden aria-labelledby="status">
-			<div class="failure-card">
-				<p id="failure-description" class="failure-copy">CORSIA couldn’t start.</p>
-				<p id="failure-reason" class="failure-copy" hidden></p>
-				<span class="log-label">Service log</span>
-				<code id="log-path" class="log-path"></code>
-				<div class="actions">
-					<button id="failure-login-items" type="button" hidden>Open Login Items</button>
-					<button id="retry" type="button">Try again</button>
-				</div>
-			</div>
-		</section>
+		<div id="actions" class="actions" hidden>
+			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
+			<button id="quit" class="secondary" type="button" hidden>Quit</button>
+			<button id="retry" class="primary" type="button">Retry</button>
+			<button id="start-fresh" class="secondary" type="button" hidden>Start fresh instead</button>
+			<button id="save-report" class="secondary" type="button" hidden>Save a report</button>
+			<button id="set-up-local" class="secondary" type="button" hidden>Set up this computer instead</button>
+		</div>
 	</div>
+
+	<!-- Generated from the app living-mark module by desktop/scripts/gen-shell-logo.mjs. Reduced motion shows it still. -->
+	<script src="living-logo.js"></script>
+	<script>
+		window.livingLogo?.createLivingLogo(document.getElementById('mark'), { entry: 'play' });
+	</script>
 
 	<script>
 		(async () => {
 			const invoke = window.__TAURI__?.core?.invoke;
 			const status = document.getElementById('status');
-			const failure = document.getElementById('failure');
+			const line = document.getElementById('line');
+			const note = document.getElementById('note');
+			const details = document.getElementById('details');
+			const detailsText = document.getElementById('details-text');
+			const log = document.getElementById('log');
+			const logPath = document.getElementById('log-path');
+			const spinner = document.getElementById('spinner');
+			const actions = document.getElementById('actions');
 			const backgroundApproval = document.getElementById('background-approval');
 			const approvalCheck = document.getElementById('approval-check');
 			const approvalState = document.getElementById('approval-state');
 			const openLoginItems = document.getElementById('open-login-items');
-			const logPath = document.getElementById('log-path');
-			const reason = document.getElementById('failure-reason');
 			const retry = document.getElementById('retry');
-			const failureDescription = document.getElementById('failure-description');
+			const saveReport = document.getElementById('save-report');
+			const setUpLocal = document.getElementById('set-up-local');
 			const failureLoginItems = document.getElementById('failure-login-items');
+			const quit = document.getElementById('quit');
+			const startFreshButton = document.getElementById('start-fresh');
+			const freshList = document.getElementById('fresh-list');
+			const ADOPTION_COPY = {
+				questionTitle: 'Use the CORSIA already on this computer?',
+				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, stops whatever is still running, then backs up your data and restarts CORSIA from the app. Your data and work folder stay where they are.`,
+
+				waitingTitle: 'Giving running work up to a minute to finish…',
+				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
+				waitingRestartTitle: 'Your existing CORSIA is restarting. This app will continue when it’s back.',
+				backingUpTitle: 'Backing up your data…',
+				// Shown while a Quit waits for the switch to be undone: the app closes only once the existing install runs again.
+				quitPending: 'CORSIA will close once your existing CORSIA is running again as before.',
+
+				failureTitle: 'CORSIA couldn’t switch over',
+				// Four outcomes, from the backend rather than the reason text: never stopped, stopped
+				// and restored, not known to be running (also what a plain string means), or switched
+				// over and still starting. The reason text only ever goes under Details, except a
+				// refusal written for the person, which tells them what to do and is the line.
+				// "Still running" is said only when the backend proved the install loaded.
+				failureLead: {
+					untouched: 'Nothing was changed.',
+					untouchedRunning: 'Nothing was changed. Your existing CORSIA is still running.',
+					restored: 'Your existing CORSIA is running again, as it was.',
+				},
+				mayNotBeRunning: 'Your existing CORSIA may not be running.',
+				// An unconfirmed install names the one action the app runs to put it back.
+				recoveries: {
+					start_again: { line: 'Choose Start it again.', button: 'Start it again', working: 'Starting your existing CORSIA…', note: 'If that doesn’t work, restart this computer.' },
+					reopen: { line: 'Choose Reopen CORSIA to put it back.', button: 'Reopen CORSIA', working: 'Reopening CORSIA…', note: '' },
+					// A start or restart that did not work: the only honest next step is to look again.
+					try_again: { line: 'Choose Retry.', button: 'Retry', working: 'Starting CORSIA…', note: '' },
+					// Refusals that are a whole line, each with the one action that fixes its cause. The line is the
+					// backend's message as written, so these carry only the button.
+					start_it: { button: 'Start it', working: 'Starting your existing CORSIA…', note: '' },
+					restart_it: { button: 'Restart it', working: 'Restarting your existing CORSIA…', note: '' },
+				},
+				switched: { title: 'CORSIA switched over and is still starting.', button: 'Check again' },
+			};
+			// The one-time move of CORSIA's data folder, and what a skipped move says.
+			const MOVE_COPY = {
+				title: 'Moving CORSIA’s data',
+				line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background will stop; ask the agent to run it again if you still need it.',
+				// A move that stopped after it showed: why, what the person can do, then CORSIA starts where it was.
+				skipped: {
+					stays: 'Your data stays where it is.',
+					terminal: 'A terminal window is open in CORSIA’s old data folder. Close it.',
+					namedApp: (app) => `${app} has CORSIA’s old data folder open. Quit ${app}, or restart this computer.`,
+					otherApp: 'Another app has CORSIA’s old data folder open. Quit it, or restart this computer.',
+					jobsStopped: 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
+					tryAgain: 'CORSIA tries again the next time it opens.',
+				},
+				skippedLine: (told) => {
+					const copy = MOVE_COPY.skipped;
+					const why = told.reason === 'terminal' ? copy.terminal
+						: told.reason === 'other_app' ? (told.app ? copy.namedApp(told.app) : copy.otherApp)
+						: null;
+					return [copy.stays, why, told.jobs_stopped ? copy.jobsStopped : null, copy.tryAgain].filter(Boolean).join(' ');
+				},
+			};
+			const movePercent = document.getElementById('move-percent');
+			const moveBar = document.getElementById('move-bar');
+			// One percentage for the whole move; `null` hides it.
+			function showMoveProgress(percent) {
+				const showing = Number.isInteger(percent);
+				movePercent.hidden = !showing;
+				moveBar.hidden = !showing;
+				if (!showing) return;
+				const shown = Math.max(0, Math.min(100, percent));
+				movePercent.textContent = `${shown}%`;
+				moveBar.setAttribute('aria-valuenow', String(shown));
+				moveBar.setAttribute('aria-label', MOVE_COPY.title);
+				moveBar.firstElementChild.style.width = `${shown}%`;
+			}
+			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
+			const FRESH_COPY = {
+				offerTitle: 'Start CORSIA fresh?',
+				offerLine: (reason, preview) => `${reason} ${FRESH_COPY.previewLine(preview)}`,
+				insteadButton: 'Start fresh instead',
+				offerButton: 'Start fresh',
+				previewLine: (preview) => `Start fresh stops your earlier install, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				checkingFolders: 'Checking folders…',
+				checkFoldersAgain: 'Check folders again',
+				previewFailureLine: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
+				confirmCode: (folders) => `Its code folder stays where it is: ${folders.join(', ')}.`,
+				confirmWork: (folders) => `${folders.length === 1 ? 'Its work folder stays' : 'Its work folders stay'} where ${folders.length === 1 ? 'it is' : 'they are'}: ${folders.join(', ')}.`,
+				movingTitle: 'Moving your earlier install into a backup…',
+				quitPending: 'CORSIA will close once everything is in one place.',
+				doneButton: 'Set up CORSIA',
+				failureTitle: 'CORSIA couldn’t start fresh',
+				// The earlier install's pieces went away before Start fresh could move them.
+				goneTitle: 'CORSIA is ready to set up',
+				// Only when the app's own call failed and the backend's account of it never arrived.
+				unknownFailure: 'CORSIA stopped partway. Quit and open CORSIA again, and it will put everything back.',
+				againButton: 'Retry',
+				reopenButton: 'Reopen CORSIA',
+			};
 			let quitFailure = false;
+			let adoptionPrompt = false;
+			// What the primary button does on a Start fresh card, or null on every other card.
+			let freshAction = null;
+			let freshRunning = false;
+			// What the failure screen's button runs: { kind, failure }, or null for Retry.
+			let adoptionRecovery = null;
+			// What the primary button does on the card that is showing: the failed launch of a saved remote, or the
+			// failed attempt to set this computer up. Null is the plain "start the local service" retry.
+			let retryAction = null;
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
 
-			async function showFailure(why, quitting = false) {
+			function showStarting() {
+				quitFailure = false;
+				adoptionPrompt = false;
+				adoptionRecovery = null;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				retryAction = null;
+				setUpLocal.hidden = true;
+				status.textContent = 'Starting CORSIA…';
+				line.hidden = true;
+				note.hidden = true;
+				details.hidden = true;
+				log.hidden = true;
+				spinner.hidden = false;
+				actions.hidden = true;
+				backgroundApproval.hidden = true;
+				quit.hidden = true;
+				saveReport.hidden = true;
+			}
+
+			function freshPreviewExtra(preview) {
+				return [
+					FRESH_COPY.previewLine(preview),
+					preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+					preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+				].filter(Boolean).join(' ');
+			}
+
+			async function showExistingInstall(workDir, previewFailure = null) {
+				clearInterval(approvalPoll);
+				adoptionPrompt = true;
+				adoptionRecovery = null;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				status.textContent = ADOPTION_COPY.questionTitle;
+				line.textContent = ADOPTION_COPY.questionLine(workDir);
+				line.hidden = false;
+				note.textContent = previewFailure ? 'CORSIA couldn’t check what Start fresh will move. Take over is still available.' : '';
+				note.hidden = !note.textContent;
+				detailsText.textContent = previewFailure?.details ?? previewFailure?.message ?? '';
+				details.hidden = !detailsText.textContent;
+				details.open = false;
+				log.hidden = true;
+				spinner.hidden = true;
+				backgroundApproval.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				saveReport.hidden = true;
+				retry.hidden = false;
+				retry.textContent = 'Take over';
+				startFreshButton.textContent = previewFailure ? FRESH_COPY.checkFoldersAgain : FRESH_COPY.checkingFolders;
+				startFreshButton.hidden = false;
+				startFreshButton.disabled = !previewFailure;
+				startFreshButton.onclick = previewFailure ? () => showExistingInstall(workDir) : null;
+				actions.hidden = false;
+				retry.disabled = false;
+				retry.focus();
+				if (previewFailure) return;
+				try {
+					const preview = await invoke('start_fresh_preview');
+					if (!adoptionPrompt || freshRunning) return;
+					note.textContent = freshPreviewExtra(preview);
+					note.hidden = false;
+					freshList.replaceChildren(...preview.moves.map((item) => Object.assign(document.createElement('li'), { textContent: item })));
+					freshList.hidden = preview.moves.length === 0;
+					startFreshButton.textContent = FRESH_COPY.insteadButton;
+					startFreshButton.disabled = false;
+					startFreshButton.onclick = () => runFresh(() => showExistingInstall(workDir));
+				} catch (error) {
+					if (adoptionPrompt && !freshRunning) showExistingInstall(workDir, error);
+				}
+			}
+
+			// The backend names the phase and the window picks the approved line for it. The count is
+			// display only: one that could not be read is `null`, which shows no line, never "0 tasks".
+			function showAdoptionProgress(progress) {
+				if (!progress) return;
+				line.hidden = true;
+				saveReport.hidden = true;
+				// A Quit that is waiting on the switch says so, for the three phases it waits through.
+				note.textContent = progress.quit_pending === true ? (freshRunning ? FRESH_COPY.quitPending : ADOPTION_COPY.quitPending) : '';
+				note.hidden = !note.textContent;
+				const moving = progress.phase === 'moving_data';
+				showMoveProgress(moving ? progress.percent : null);
+				spinner.hidden = moving;
+				if (moving) {
+					status.textContent = MOVE_COPY.title;
+					line.textContent = MOVE_COPY.line;
+					line.hidden = false;
+				} else if (progress.phase === 'move_skipped') {
+					status.textContent = 'Starting CORSIA…';
+					line.textContent = MOVE_COPY.skippedLine(progress);
+					line.hidden = false;
+				} else if (progress.phase === 'waiting') {
+					status.textContent = ADOPTION_COPY.waitingTitle;
+					if (Number.isInteger(progress.running) && progress.running > 0) {
+						line.textContent = ADOPTION_COPY.waitingCount(progress.running);
+						line.hidden = false;
+					}
+				} else if (progress.phase === 'waiting_restart') {
+					status.textContent = ADOPTION_COPY.waitingRestartTitle;
+				} else if (progress.phase === 'backing_up') {
+					status.textContent = ADOPTION_COPY.backingUpTitle;
+				} else if (progress.phase === 'starting') {
+					status.textContent = 'Starting CORSIA…';
+				} else if (progress.phase === 'moving_to_backup') {
+					status.textContent = FRESH_COPY.movingTitle;
+				} else if (progress.phase === 'starting_existing') {
+					status.textContent = ADOPTION_COPY.recoveries.start_again.working;
+				}
+			}
+
+			// `failure` is the backend's { message, outcome, recovery, advice }; a plain string claims
+			// nothing about the existing install, so it offers the relaunch that is always safe.
+			async function showAdoptionFailure(failure) {
+				const given = failure && typeof failure === 'object' ? failure : {};
+				const reason = typeof failure === 'string' ? failure : given.message;
+				const detail = typeof reason === 'string' && reason ? reason : 'CORSIA couldn’t switch over.';
+				const outcome = given.outcome;
+				const settled = outcome === 'untouched' || outcome === 'restored';
+				// A refusal that names an action the app can run (start it, restart it) offers that action.
+				const offered = outcome === 'untouched' && (given.recovery === 'start_it' || given.recovery === 'restart_it');
+				const kind = offered ? given.recovery : settled ? null : outcome === 'switched' ? 'check' : given.recovery === 'start_again' || given.recovery === 'try_again' ? given.recovery : 'reopen';
+				quitFailure = false;
+				adoptionPrompt = false;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				adoptionRecovery = kind ? { kind, failure: { message: detail, outcome, recovery: given.recovery } } : null;
+				backgroundApproval.hidden = true;
+				const recovery = ADOPTION_COPY.recoveries[kind];
+				if (kind === 'check') {
+					status.textContent = ADOPTION_COPY.switched.title;
+					line.hidden = true;
+					note.hidden = true;
+				} else {
+					status.textContent = ADOPTION_COPY.failureTitle;
+					const lead = settled ? ADOPTION_COPY.failureLead[outcome === 'untouched' && given.running === true ? 'untouchedRunning' : outcome] : `${ADOPTION_COPY.mayNotBeRunning} ${recovery.line}`;
+					// A standalone line is the whole line: a lead about the existing install would contradict it.
+					line.textContent = given.standalone === true ? detail : given.advice === true && settled ? `${lead} ${detail}` : lead;
+					line.hidden = false;
+					note.textContent = recovery?.note ?? '';
+					note.hidden = !note.textContent;
+				}
+				detailsText.textContent = detail;
+				details.hidden = given.advice === true && settled;
+				details.open = false;
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				saveReport.hidden = true;
+				retry.hidden = false;
+				retry.textContent = kind === 'check' ? ADOPTION_COPY.switched.button : recovery ? recovery.button : 'Retry';
+				actions.hidden = false;
+				try { logPath.textContent = await invoke('get_service_log_path'); } catch { logPath.textContent = 'Service log location unavailable'; }
+				retry.disabled = false;
+				retry.focus();
+			}
+
+			// The failure screen's button: each recovery is an action the app runs, never an instruction.
+			async function runRecovery({ kind, failure }) {
+				showStarting();
+				status.textContent = ADOPTION_COPY.recoveries[kind]?.working ?? 'Starting CORSIA…';
+				try {
+					if (kind === 'start_again') {
+						await invoke('start_existing_again');
+						await showAdoptionFailure({ message: failure.message, outcome: 'restored' });
+					} else if (kind === 'reopen') {
+						await invoke('reopen_app');
+					} else if (kind === 'start_it' || kind === 'restart_it') {
+						await invoke(kind === 'start_it' ? 'start_source_install' : 'restart_source_install');
+						await runAdoption();
+					} else if (kind === 'try_again') {
+						await runAdoption();
+					} else {
+						const startup = await invoke('check_service_started');
+						if (startup.state === 'ready') continueToService(startup);
+						else await showAdoptionFailure({ message: failure.message, outcome: 'switched' });
+					}
+				} catch (error) {
+					await showAdoptionFailure(error);
+				}
+			}
+
+			async function showFailure(why, quitting = false, again = null) {
 				clearInterval(approvalPoll);
 				quitFailure = quitting;
-				failure.dataset.mode = quitting ? 'quit' : 'startup';
-				failureDescription.textContent = quitting ? "CORSIA couldn't stop its background service." : 'CORSIA couldn’t start.';
-				failureLoginItems.hidden = !quitting;
+				adoptionRecovery = null;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				adoptionPrompt = false;
+				retryAction = quitting ? null : again;
+				setUpLocal.hidden = true;
+				saveReport.hidden = quitting;
+				retry.hidden = false;
+				note.hidden = true;
+				details.hidden = true;
+				retry.textContent = 'Retry';
 				backgroundApproval.hidden = true;
 				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
-				reason.textContent = typeof why === 'string' ? why : '';
-				reason.hidden = !reason.textContent;
+				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : 'CORSIA couldn’t start on this computer. Choose Retry. If it keeps failing, restart this computer.';
+				line.hidden = !line.textContent;
+				if (!quitting && typeof why === 'string' && why) {
+					detailsText.textContent = why;
+					details.hidden = false;
+				}
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = !quitting;
+				failureLoginItems.className = quitting ? 'primary' : 'secondary';
+				quit.hidden = false;
+				retry.className = quitting ? 'secondary' : 'primary';
+				actions.hidden = false;
 				try {
 					logPath.textContent = await invoke('get_service_log_path');
 				} catch {
 					logPath.textContent = 'Service log location unavailable';
 				}
-				failure.hidden = false;
 				retry.disabled = false;
 				retry.focus();
 			}
@@ -177,7 +598,20 @@
 			}
 
 			async function showBackgroundApproval() {
-				failure.hidden = true;
+				quitFailure = false;
+				adoptionRecovery = null;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				retryAction = null;
+				note.hidden = true;
+				details.hidden = true;
+				line.textContent = 'Turn this on so your agents keep working when you close this window.';
+				line.hidden = false;
+				log.hidden = true;
+				spinner.hidden = true;
+				actions.hidden = true;
+				saveReport.hidden = true;
 				status.textContent = 'Keep CORSIA running';
 				backgroundApproval.hidden = false;
 				approvalCheck.dataset.state = 'off';
@@ -198,29 +632,209 @@
 				}, 1000);
 			}
 
-			async function start() {
+			// Runs a command that answers like start_local_service: the local service is ready, or needs approval.
+			async function startLocal(command, again) {
 				if (continuationStarted) return;
-				status.textContent = 'Starting CORSIA…';
-				failure.hidden = true;
-				backgroundApproval.hidden = true;
+				showStarting();
 				retry.disabled = true;
 				if (!invoke) {
-					await showFailure();
+					await showFailure(undefined, false, again);
 					return;
 				}
+				// A relaunch may be waiting for the stop an earlier run left draining; the window shows it.
+				const stopFollowing = followProgress();
 				try {
-					const startup = await invoke('start_local_service');
-					if (startup.state === 'ready') {
-						continueToService(startup);
-					} else {
-						await showBackgroundApproval();
-					}
+					await showStartup(await invoke(command));
 				} catch (error) {
-					await showFailure(error);
+					await showFailure(error, false, again);
+				} finally {
+					stopFollowing();
+				}
+			}
+
+			// Draws how a local start answered; the app's own start at launch is drawn through here too.
+			async function showStartup(startup) {
+				if (startup.state === 'ready') {
+					continueToService(startup);
+				} else if (startup.state === 'adoption_offered') {
+					await showExistingInstall(startup.workspace);
+				} else if (startup.state === 'adoption_failed') {
+					await showAdoptionFailure(startup.failure);
+				} else if (startup.state === 'existing_install') {
+					await showFreshOffer(startup.reason, startup.details);
+				} else if (startup.state === 'start_fresh_failed') {
+					showFreshFailure(startup.failure);
+				} else if (startup.state === 'disk_image') {
+					status.textContent = 'Move CORSIA to Applications';
+					line.textContent = 'Drag CORSIA into your Applications folder, then open it from there.';
+					line.hidden = false; spinner.hidden = true; retry.hidden = true; quit.hidden = false; saveReport.hidden = true; actions.hidden = false;
+				} else {
+					await showBackgroundApproval();
+				}
+			}
+
+			// The app's own start at launch runs before any page awaits it; until its outcome is drawn or the page
+			// starts something itself, the page shows that start's phase too (the data folder move, an undo).
+			let stopLaunchFollowing = () => {};
+
+			// Shows the backend's phase once a second until the returned function is called.
+			function followProgress() {
+				const launchFollowing = stopLaunchFollowing;
+				stopLaunchFollowing = () => {};
+				launchFollowing();
+				let polling = true;
+				const progressPoll = setInterval(async () => {
+					try {
+						const progress = await invoke('adoption_progress');
+						// A reading that lands after the result is on screen must not replace it.
+						if (polling) showAdoptionProgress(progress);
+					} catch { /* the next reading replaces this one */ }
+				}, 1000);
+				return () => {
+					polling = false;
+					clearInterval(progressPoll);
+					showMoveProgress(null);
+				};
+			}
+
+			// Takes over the existing install. Every outcome, a refusal included, lands on the failure screen.
+			async function runAdoption() {
+				showStarting();
+				status.textContent = ADOPTION_COPY.waitingTitle;
+				const stopFollowing = followProgress();
+				try {
+					const startup = await invoke('adopt_existing_install');
+					if (startup.state === 'ready') continueToService(startup);
+					else await showAdoptionFailure('CORSIA couldn’t switch over.');
+				} catch (error) {
+					await showAdoptionFailure(error);
+				} finally {
+					stopFollowing();
+				}
+			}
+
+			const start = () => startLocal('start_local_service', null);
+
+			// One Start fresh card: a title, a line, an optional note and list, and the primary button's action.
+			function showFreshCard({ title, text, extra = '', items = [], button, action = null, why = '' }) {
+				showStarting();
+				spinner.hidden = true;
+				status.textContent = title;
+				line.textContent = text;
+				line.hidden = !text;
+				note.textContent = extra;
+				note.hidden = !extra;
+				freshList.replaceChildren(...items.map((item) => Object.assign(document.createElement('li'), { textContent: item })));
+				freshList.hidden = items.length === 0;
+				detailsText.textContent = why;
+				details.hidden = !why;
+				details.open = false;
+				quit.hidden = false;
+				retry.hidden = !button;
+				retry.textContent = button ?? '';
+				retry.className = 'primary';
+				freshAction = action;
+				actions.hidden = false;
+				retry.disabled = false;
+				if (button) retry.focus(); else quit.focus();
+			}
+
+			// An earlier install this app can't open: offer to set it aside.
+			async function showFreshOffer(reason, details) {
+				clearInterval(approvalPoll);
+				const said = typeof reason === 'string' ? reason : '';
+				const why = typeof details === 'string' ? details : '';
+				showStarting();
+				try {
+					const preview = await invoke('start_fresh_preview');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: FRESH_COPY.offerLine(said, preview),
+						extra: [
+							preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+							preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+						].filter(Boolean).join(' '),
+						items: preview.moves,
+						button: FRESH_COPY.offerButton,
+						action: () => runFresh(() => showFreshOffer(reason, details)),
+						why,
+					});
+				} catch (error) {
+					const previewDetails = error && typeof error === 'object'
+						? error.details ?? error.message ?? ''
+						: String(error ?? '');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: said,
+						extra: FRESH_COPY.previewFailureLine,
+						button: FRESH_COPY.checkFoldersAgain,
+						action: () => showFreshOffer(reason, details),
+						why: previewDetails,
+					});
+				}
+			}
+
+			async function runFresh(retryChoice) {
+				if (freshRunning) return;
+				freshRunning = true;
+				showStarting();
+				status.textContent = FRESH_COPY.movingTitle;
+				const stopFollowing = followProgress();
+				try {
+					await invoke('start_fresh');
+				} catch (error) {
+					showFreshFailure(error, retryChoice);
+					return;
+				} finally {
+					stopFollowing();
+					freshRunning = false;
+				}
+				await start();
+			}
+
+			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With nothing
+			// left to move, setup goes on; with every file where it was, Retry returns to the original choice and preview;
+			// otherwise reopening finishes the undo.
+			function showFreshFailure(error, retryChoice = start) {
+				const given = error && typeof error === 'object'
+					? error
+					: { message: FRESH_COPY.unknownFailure, details: String(error ?? ''), restored: false };
+				const gone = given.nothing_to_move === true;
+				const [button, action] = gone
+					? [FRESH_COPY.doneButton, start]
+					: given.restored ? [FRESH_COPY.againButton, retryChoice] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
+				const title = gone ? FRESH_COPY.goneTitle : FRESH_COPY.failureTitle;
+				showFreshCard({ title, text: given.message, why: given.details ?? '', button, action });
+			}
+
+			// Set up this computer instead, and Pair again: the saved remote is forgotten, then this computer's own
+			// CORSIA starts. The pairing flow is the one Welcome and Settings already offer from there.
+			const setUpThisComputer = () => startLocal('disconnect_remote', setUpThisComputer);
+
+			// Retry on a failed remote: the saved remote is connected once more, and the outcome arrives as the
+			// same state pushes as at launch.
+			async function retrySavedRemote() {
+				if (!invoke) {
+					await showFailure(undefined, false, start);
+					return;
+				}
+				retry.disabled = true;
+				setUpLocal.disabled = true;
+				try {
+					await invoke('retry_saved_remote');
+				} catch (error) {
+					await showFailure(error, false, start);
+				} finally {
+					setUpLocal.disabled = false;
 				}
 			}
 
 			async function retryFailure() {
+				if (freshRunning) return;
+				if (freshAction) return freshAction();
+				if (adoptionRecovery) return runRecovery(adoptionRecovery);
+				if (adoptionPrompt) return runAdoption();
+				if (retryAction) return retryAction();
 				if (!quitFailure) return start();
 				retry.disabled = true;
 				status.textContent = 'Stopping CORSIA…';
@@ -231,13 +845,80 @@
 				}
 			}
 
-			window.__corsiaShowServiceFailure = showFailure;
-			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
-			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
+			function showRemoteState(state) {
+				clearInterval(approvalPoll);
+				quitFailure = false;
+				adoptionPrompt = false;
+				adoptionRecovery = null;
+				freshAction = null;
+				startFreshButton.hidden = true;
+				freshList.hidden = true;
+				note.hidden = true;
+				details.hidden = true;
+				quit.hidden = true;
+				retryAction = state.kind === 'key_changed' ? setUpThisComputer : retrySavedRemote;
+				backgroundApproval.hidden = true;
+				log.hidden = true;
+				failureLoginItems.hidden = true;
+				spinner.hidden = state.kind !== 'connecting';
+				saveReport.hidden = true;
+				retry.hidden = false;
+				const localReturn = window.__CORSIA_SHELL__?.localConfigured === true
+					? { button: 'Use this computer instead', ending: 'then Connect to another computer in Settings › System to pair again.' }
+					: { button: 'Set up this computer instead', ending: 'then Connect to CORSIA on another computer to pair again.' };
+				setUpLocal.textContent = localReturn.button;
+				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
+				if (state.kind === 'connecting') {
+					status.textContent = `Connecting to ${state.name}…`;
+					line.hidden = true;
+					actions.hidden = true;
+					return;
+				}
+				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
+				if (state.kind === 'unreachable') {
+					line.textContent = {
+						server: `${state.name} is on the network, but CORSIA there isn’t letting this computer connect. On that computer, open CORSIA and check that Let other devices connect is on in Settings › System, then try again. If it still fails, choose ${localReturn.button}, ${localReturn.ending}`,
+						local: `This computer couldn’t finish opening ${state.name}. Choose Retry. If it keeps failing, quit and reopen CORSIA.`
+					}[state.cause] ?? 'This computer can’t reach it right now. Check your network, then try again.';
+				} else if (state.kind === 'incompatible') {
+					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;
+				} else if (state.kind === 'key_changed') {
+					line.textContent = `It isn’t the computer this app paired with. That happens when CORSIA is reset or reinstalled there. If nobody did that, check ${state.name} before you pair again.`;
+				} else {
+					line.textContent = `${state.name} has an older CORSIA. Update it, then try again.`;
+				}
+				line.hidden = false;
+				retry.className = 'primary';
+				retry.textContent = state.kind === 'key_changed' ? 'Pair again' : 'Retry';
+				retry.disabled = false;
+				actions.hidden = false;
+			}
+
+			if (invoke) stopLaunchFollowing = followProgress();
+			const drawn = (draw) => (...given) => {
+				const launchFollowing = stopLaunchFollowing;
+				stopLaunchFollowing = () => {};
+				launchFollowing();
+				return draw(...given);
+			};
+			window.__corsiaShowRemoteState = drawn(showRemoteState);
+			window.__corsiaShowServiceFailure = drawn(showFailure);
+			window.__corsiaShowQuitFailure = drawn(() => showFailure(undefined, true));
+			window.__corsiaShowStartup = drawn(showStartup);
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			quit.addEventListener('click', () => invoke?.('quit_app'));
 			retry.addEventListener('click', retryFailure);
-			if (window.location.hash === '#background-approval') showBackgroundApproval();
+			saveReport.addEventListener('click', async () => {
+				try {
+					await invoke?.('save_setup_report');
+				} catch {
+					line.textContent = 'CORSIA couldn’t save the report. Try again.';
+					line.hidden = false;
+				}
+			});
+			setUpLocal.addEventListener('click', setUpThisComputer);
+			// Start fresh gets its handler only when the current preview is valid.
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>

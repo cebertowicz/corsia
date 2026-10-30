@@ -37,8 +37,14 @@ case "$*" in
     fi
     exit 0;;
   "auth login"*)
-    echo "! First copy your one-time code: ABCD-1234"
-    echo "Open this URL to continue in your web browser: https://github.com/login/device"
+    case "${LOGIN_MODE:-prompt}" in
+      colored_prompt) printf '\033[33m!\033[0m First copy your one-time code: \033[1mABCD-\r1234\033[0m\n' >&2;;
+      unrecognized) printf 'GitHub CLI is waiting for a browser response\n' >&2;;
+      early_exit) printf 'GitHub CLI could not start device login\n' >&2; exit 1;;
+      *)
+        echo "! First copy your one-time code: ABCD-1234"
+        echo "Open this URL to continue in your web browser: https://github.com/login/device";;
+    esac
     i=0
     while [ ! -f "$APPROVE" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done
     [ -f "$APPROVE" ] || exit 1
@@ -132,6 +138,29 @@ def _set_person(login: str | None) -> None:
 # -- add ------------------------------------------------------------------------------------------------
 
 
+def test_person_github_lookup_never_uses_the_corsia_runtime(monkeypatch):
+    from connections import _BINARY_CANDIDATES, binary_from_config
+    from tools import managed_runtime
+
+    monkeypatch.setitem(_BINARY_CANDIDATES, "github", ("gh", []))
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(managed_runtime, "installed_command_path", lambda _command: "/corsia/gh")
+
+    assert binary_from_config("github", {}) is None
+
+
+def test_agent_github_lookup_uses_only_the_corsia_runtime_fallback(monkeypatch):
+    from connections import _BINARY_CANDIDATES, agent_binary_from_config
+    from tools import managed_runtime
+
+    monkeypatch.setitem(_BINARY_CANDIDATES, "github", ("gh", []))
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(managed_runtime, "installed_command_path", lambda _command: "/corsia/gh")
+
+    assert agent_binary_from_config({}) == "/corsia/gh"
+    assert github_agent._agent_binary({}) == "/corsia/gh"
+
+
 def test_add_reads_needs_auth_and_locks_shell(agent):
     account = _add()
     view = github_agent.view()
@@ -195,6 +224,98 @@ async def test_signin_exposes_only_user_code(agent):
         assert "Open this URL" not in json.dumps(shown)
     finally:
         await account_controls.cancel_signin(account["id"])
+
+
+def test_signin_prompt_accepts_gh_291_colored_stderr_bytes():
+    """Match gh's stderr device-flow form when terminal formatting reaches the pipe."""
+    from connections import github_agent_home
+
+    observed = b"\x1b[33m!\x1b[0m First copy your one-time code: \x1b[1mABCD-\r1234\x1b[0m\n"
+    assert github_agent_home.signin_prompt(observed.decode()) == {
+        "user_code": "ABCD-1234", "verification_uri": github_agent_home.DEVICE_URL,
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_returns_the_pinned_corsia_binary(agent, monkeypatch):
+    from tools import github_agent_account, managed_runtime
+
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda _kind: agent.gh)
+
+    result = json.loads(await github_agent_account.GitHubAgentAccountTool().execute(action="install"))
+
+    assert result == {
+        "state": "installed", "binary": str(agent.gh),
+        "notice": "CORSIA installed GitHub CLI from GitHub; only CORSIA's agents use this copy.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_reports_managed_runtime_failure(agent, monkeypatch):
+    from tools import github_agent_account, managed_runtime
+
+    def unavailable(_kind):
+        raise managed_runtime.ManagedRuntimeError("download failed")
+
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", unavailable)
+
+    result = json.loads(await github_agent_account.GitHubAgentAccountTool().execute(action="install"))
+
+    assert result == {"state": "failed", "reason": "download failed"}
+
+
+@pytest.mark.asyncio
+async def test_connect_reads_gh_291_colored_stderr_prompt(agent, monkeypatch):
+    from connections import account_controls
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    monkeypatch.setenv("LOGIN_MODE", "colored_prompt")
+    tool = GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    try:
+        assert connected["signin"]["user_code"] == "ABCD-1234"
+        assert connected["signin"]["verification_uri"] == "https://github.com/login/device"
+    finally:
+        await account_controls.cancel_signin(connected["signin"]["account_id"])
+
+
+@pytest.mark.asyncio
+async def test_connect_and_check_name_an_unrecognized_prompt(agent, monkeypatch):
+    from connections import account_controls
+    from tools import github_agent_account
+
+    monkeypatch.setenv("LOGIN_MODE", "unrecognized")
+    monkeypatch.setattr(github_agent_account, "_PROMPT_SECONDS", 0.01)
+    tool = github_agent_account.GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    account_id = connected["signin"]["account_id"]
+    try:
+        assert connected["signin"] == {
+            "account_id": account_id, "route": "browser", "status": "waiting",
+            "cause": "prompt_unrecognized", "next": github_agent_account._PROMPT_NEXT,
+        }
+        checked = json.loads(await tool.execute(action="check"))
+        assert checked["signin"] == connected["signin"]
+    finally:
+        await account_controls.cancel_signin(account_id)
+
+
+@pytest.mark.asyncio
+async def test_connect_and_check_name_early_login_exit(agent, monkeypatch):
+    from tools import github_agent_account
+
+    monkeypatch.setenv("LOGIN_MODE", "early_exit")
+    tool = github_agent_account.GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    account_id = connected["signin"]["account_id"]
+    assert connected["signin"] == {
+        "account_id": account_id, "route": "browser", "status": "failed",
+        "cause": "vendor_login_failed", "next": github_agent_account._LOGIN_FAILURE_NEXT,
+        "ref": connected["signin"]["ref"],  # the failure's log reference
+    }
+    assert connected["signin"]["ref"].startswith("signin-")
+    checked = json.loads(await tool.execute(action="check"))
+    assert checked["signin"] == connected["signin"]
 
 
 @pytest.mark.asyncio
@@ -516,6 +637,8 @@ async def test_bash_spawn_reads_one_view(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(host_access_gate, "consume_current_action_permit", consume)
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda *a, **k: [])
     monkeypatch.setattr(shell, "controlled_fast_forward_policy", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)

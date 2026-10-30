@@ -6,13 +6,17 @@ is open and at least one of these holds:
 
 - an armed watch (every plan watch is agent-, external-, event- or
   deadline-owned: a blocker only the user clears stays a hold, never a watch,
-  ``plans.blocked_wait``);
-- an unmet dependency: an edge present while its prerequisite is not accepted;
+  ``plans.blocked_wait``), except a task its agent set aside
+  (``plans.scheduled_wait``): that is the agent's own choice, not a wait;
+- an unmet dependency: an edge of its own present while its prerequisite is
+  not accepted. An edge an open ancestor hands down (``plans.node_waits``)
+  is that ancestor's wait, counted on it once; its roll-up spans the steps;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
-User-owned holds (the user's pause, a blocker on the user) and whole-plan
-pauses are the user's time, so they are cut out; so is anything after the
-node settles. Causes that
+The user's time is cut out, whoever armed the wait: user-owned holds (the
+user's pause, a blocker on the user), whole-plan pauses, and a decision on the
+node while its review step is ``review_requested`` (until the step leaves
+review or is archived); so is anything after the node settles. Causes that
 overlap count once. An interval still open runs to ``now``.
 
 Nothing is stored. Intervals are rebuilt from the append-only
@@ -32,6 +36,7 @@ from datetime import datetime
 from typing import Callable
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
+from plans import decision_projection
 from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
 from plans.status_time import parse
 
@@ -142,9 +147,13 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     queries = (
         ("live", "SELECT node_id,depends_on_node_id,created_at FROM plan_node_dependencies "
                  "WHERE node_id IN ({marks})"),
-        ("watches", "SELECT plan_node_id AS node_id,status,armed_at,"
-                    "COALESCE(resolved_at,expired_at,CASE WHEN status<>'armed' THEN updated_at END)"
-                    " AS ended_at FROM expected_event_watches WHERE plan_node_id IN ({marks})"),
+        ("watches", "SELECT w.plan_node_id AS node_id,w.status,w.armed_at,"
+                    "COALESCE(w.resolved_at,w.expired_at,CASE WHEN w.status<>'armed' THEN w.updated_at END)"
+                    " AS ended_at FROM expected_event_watches w WHERE w.plan_node_id IN ({marks})"
+                    # A set-aside task (operator_scheduled.is_set_aside) is not waiting.
+                    " AND NOT EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=w.plan_node_id"
+                    " AND e.event='watch_armed' AND json_extract(e.payload_json,'$.watch_id')=w.id"
+                    " AND json_extract(e.payload_json,'$.scheduled.reason') IS NOT NULL)"),
         ("holds", "SELECT node_id,created_at,cleared_at FROM plan_node_holds "
                   "WHERE owner_kind='user' AND node_id IN ({marks})"),
     )
@@ -165,27 +174,48 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     return facts
 
 
-def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: float):
-    """Each prerequisite's not-yet-accepted intervals, in one chunked query."""
+def _unmet_and_decision_time(
+    connection, prerequisites: list[str], review_steps: dict[str, list[str]],
+    rows_in, now: float,
+):
+    """Each prerequisite's unmet spans and each source's decision time, one state-history query.
+
+    Decision time is the union of its review nodes' ``review_requested``
+    stretches, clipped where a review node was archived.
+    """
+    node_ids = sorted(set(prerequisites) | {step for steps in review_steps.values() for step in steps})
     by_id: dict[str, dict] = {}
     for row in rows_in(
         connection,
-        """SELECT n.id,n.created_at,n.state,e.prior_state,e.new_state,e.created_at AS at
+        """SELECT n.id,n.created_at,n.state,n.archived_at,
+                  e.prior_state,e.new_state,e.created_at AS at
            FROM plan_nodes n
            LEFT JOIN plan_node_events e ON e.node_id=n.id AND e.event='state_transition'
            WHERE n.id IN ({marks}) ORDER BY e.created_at,e.rowid""",
-        prerequisites,
+        node_ids,
     ):
         entry = by_id.setdefault(str(row["id"]), {"node": dict(row), "transitions": []})
         if row["at"] is not None:
             entry["transitions"].append({**dict(row), "created_at": row["at"]})
-    return {
-        node_id: _spans_where(
-            _state_spans(entry["node"], entry["transitions"], now),
-            lambda state: state not in _ACCEPTED_STATES,
-        )
+    spans = {
+        node_id: _state_spans(entry["node"], entry["transitions"], now)
         for node_id, entry in by_id.items()
     }
+    unmet = {
+        node_id: _spans_where(spans[node_id], lambda state: state not in _ACCEPTED_STATES)
+        for node_id in prerequisites if node_id in spans
+    }
+
+    def in_review(step: str) -> list[Interval]:
+        asked = _spans_where(spans.get(step, []), lambda state: state == "review_requested")
+        archived = _at(by_id[step]["node"]["archived_at"]) if step in by_id else None
+        return asked if archived is None else intersect(asked, [(0.0, archived)])
+
+    decision_time = {
+        source_id: union([span for step in steps for span in in_review(step)])
+        for source_id, steps in review_steps.items()
+    }
+    return unmet, decision_time
 
 
 def _plan_paused(connection, plan_ids: list[str], rows_in: Callable, now: float):
@@ -239,11 +269,14 @@ def own_waiting_intervals(
         sorted({str(fact["node"]["plan_id"]) for fact in facts.values() if "node" in fact}),
         rows_in, clock,
     )
+    review_steps = decision_projection.review_steps(node_ids, db=connection)
     prerequisites = sorted({
         str(row["depends_on"]) for fact in facts.values() for row in fact["edges"]
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
-    unmet = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
+    unmet, decision_time = _unmet_and_decision_time(
+        connection, prerequisites, review_steps, rows_in, clock,
+    )
     result: dict[str, list[Interval]] = {}
     for node_id, fact in facts.items():
         if "node" not in fact:
@@ -259,7 +292,7 @@ def own_waiting_intervals(
         if linked is not None:
             review = _spans_where(spans, lambda state: state == "review_requested")
             causes += intersect(review, [(linked, clock)])
-        user_time = [
+        user_time = decision_time.get(node_id, []) + [
             (start, _at(row["cleared_at"]) or clock)
             for row in fact["holds"] if (start := _at(row["created_at"])) is not None
         ] + paused.get(str(fact["node"]["plan_id"]), [])
@@ -268,4 +301,42 @@ def own_waiting_intervals(
             user_time,
         )
         result[node_id] = union(waited)
+    return result
+
+
+def thread_intervals(
+    connection, thread_ids, since: datetime, until: datetime, rows_in: Callable,
+) -> dict[str, list[Interval]]:
+    """Each thread's waiting intervals within ``[since, until]``: the union over its own plan's nodes.
+
+    Only the thread's own plan counts; a caller wanting delegated work passes
+    the descendant threads too. A wait still open at ``until`` ends there, and
+    a thread with no waiting reads ``[]``. A node made after ``until``, or
+    settled and last touched before ``since``, cannot overlap the window, so
+    it is skipped before the interval reads.
+    """
+    threads = sorted({str(value) for value in thread_ids})
+    result: dict[str, list[Interval]] = {thread_id: [] for thread_id in threads}
+    start, end = since.timestamp(), until.timestamp()
+    if not threads or end <= start:
+        return result
+    owner: dict[str, str] = {}
+    for row in rows_in(
+        connection,
+        """SELECT n.id,n.state,n.created_at,n.updated_at,p.owner_id FROM plans p
+           JOIN plan_nodes n ON n.plan_id=p.id
+           WHERE p.owner_kind='thread' AND p.owner_id IN ({marks})""",
+        threads,
+    ):
+        made, touched = _at(row["created_at"]), _at(row["updated_at"])
+        if made is not None and made >= end:
+            continue
+        if str(row["state"]) in _TERMINAL_STATES and touched is not None and touched <= start:
+            continue
+        owner[str(row["id"])] = str(row["owner_id"])
+    found: dict[str, list[Interval]] = defaultdict(list)
+    for node_id, waited in own_waiting_intervals(connection, sorted(owner), until, rows_in).items():
+        found[owner[node_id]] += waited
+    for thread_id, waited in found.items():
+        result[thread_id] = intersect(waited, [(start, end)])
     return result

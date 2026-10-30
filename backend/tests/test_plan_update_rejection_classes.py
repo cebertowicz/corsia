@@ -13,6 +13,8 @@ import json
 import pytest
 
 from infra.database import get_db
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from plans import admission, service
 from tests.event_routing_helpers import mk_session
 from tests.plan_execution_helpers import (
@@ -71,8 +73,19 @@ async def test_class2_add_without_kind_defaults_to_task(isolated_db):
     db = get_db()
     plan, _task = _scene(db, thread_id)
 
+    intent = "Create the new work."
+    _init_messages_fts(db)
+    accept_thread_input(
+        thread_id, role="user", content=intent, intent="apply_now", message_id="add-no-kind-authority", db=db,
+    )
+    db.execute(
+        "UPDATE messages SET active_turn_id='turn-add-no-kind' WHERE id='add-no-kind-authority'"
+    )
     result = await _update(db, thread_id, _body(
-        plan.id, "add", {"title": "New work", "acceptance_criteria": "Done"},
+        plan.id, "add", {
+            "title": "New work", "acceptance_criteria": "Done", "size": "unknown",
+            "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}],
+        },
         "add-no-kind",
     ))
 

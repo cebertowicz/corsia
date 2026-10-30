@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 PLAN_WAKE_IDLE_SECONDS = 180
 PLAN_WAKE_BACKOFF = 2.0
-PLAN_WAKE_MAX_CYCLES = 3
+#: Production (2026-10-08..22) long Turns: p50 464s, p75 902s, p90 1,690s;
+#: 600s gives a median long Turn about one reminder and a p90 about three.
+PLAN_WAKE_IN_TURN_SECONDS = 600
 
 ARMED = "armed"
 CANCELLED = "cancelled"
@@ -40,8 +42,6 @@ class PlanWake:
     last_open_count: int
     last_signal_hash: str
     last_settled_events: int
-    wakes_in_window: int
-    window_started_at: str | None
     provider_reset_at: str | None
     provider_reset_turn_id: str | None
 
@@ -65,8 +65,6 @@ def row_to_wake(row: dict) -> PlanWake:
         last_open_count=row["last_open_count"],
         last_signal_hash=row["last_signal_hash"],
         last_settled_events=row["last_settled_events"],
-        wakes_in_window=row["wakes_in_window"],
-        window_started_at=row["window_started_at"],
         provider_reset_at=row["provider_reset_at"],
         provider_reset_turn_id=row["provider_reset_turn_id"],
     )
@@ -262,18 +260,20 @@ def _rearm_due_wake(
     signal: PlanLivenessSignal,
     cycle: int,
     db,
+    *,
+    seconds: float | None = None,
 ) -> bool:
-    """Move the exact due wake to its next deadline without a claim gap."""
+    """Move the exact due wake to its next deadline without a claim gap.
+
+    ``seconds`` overrides the idle backoff spacing (the flat in-Turn interval).
+    """
 
     if signal.count <= 0:
         return False
     now = _now()
-    deadline = _iso(
-        now
-        + timedelta(
-            seconds=PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
-        )
-    )
+    if seconds is None:
+        seconds = PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
+    deadline = _iso(now + timedelta(seconds=seconds))
     cursor = db.execute(
         """UPDATE plan_liveness_wakes
            SET status='armed',deadline=?,cycle=?,last_open_count=?,
@@ -305,7 +305,6 @@ async def sweep_plan_wakes(
     now_iso: str,
     *,
     db=None,
-    is_idle=None,
     signal_resolver=None,
     deliver=None,
 ) -> dict:
@@ -318,7 +317,6 @@ async def sweep_plan_wakes(
         now_iso,
         db=db,
         sources=[LivenessSource(signal_resolver)],
-        is_idle=is_idle,
         deliver=deliver,
     )
 

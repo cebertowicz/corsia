@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from core.checkpoint_codex_root import RegisteredRollout
+from core.fork_codex_root import RegisteredRollout
 
 PROVIDER_THREAD_ID = "01a0c52d-18a0-7271-975c-844daef602a5"
 # Not a word, so the tail measures well above the idle minimum.
@@ -100,7 +100,7 @@ def _patch_idle_environment(monkeypatch, target, binary: str) -> tuple[list, lis
         "llm.resolution.resolve_execution_target", lambda _model, db=None: target,
     )
     monkeypatch.setattr(
-        "core.checkpoint_render.checkpoint_binary", lambda _target, _db: binary,
+        "core.fork_render.fork_binary", lambda _target, _db: binary,
     )
     monkeypatch.setattr(
         checkpoint_runtime, "_launch_checkpoint",
@@ -186,8 +186,8 @@ async def test_claude_code_idle_fold_is_admitted_warm_by_claude_message_id(
         effort="high",
     )
     monkeypatch.setattr(
-        "core.checkpoint_cc_fork._registered_identity",
-        lambda tid: ("live-session", invocation, None, str(transcript))
+        "core.fork_cc._registered_identity",
+        lambda tid: ("live-session", invocation, None, str(transcript), None, None, invocation.confinement)
         if tid == thread_id else None,
     )
     launched, events = _patch_idle_environment(
@@ -230,8 +230,8 @@ async def test_claude_message_split_across_rows_folds_after_its_whole_group(
         model="sonnet", effort="high",
     )
     monkeypatch.setattr(
-        "core.checkpoint_cc_fork._registered_identity",
-        lambda tid: ("live-session", invocation, None, str(transcript))
+        "core.fork_cc._registered_identity",
+        lambda tid: ("live-session", invocation, None, str(transcript), None, None, invocation.confinement)
         if tid == thread_id else None,
     )
     launched, events = _patch_idle_environment(
@@ -246,7 +246,7 @@ async def test_claude_message_split_across_rows_folds_after_its_whole_group(
 
 def test_only_the_last_row_sharing_a_harness_id_is_a_warm_boundary(isolated_db) -> None:
     """The proof cuts after the id's whole group, so an earlier row would over-cut."""
-    from core.checkpoint_render import _durable_warm_boundary
+    from core.fork_render import _durable_warm_boundary
 
     thread_id = "cc-group"
     last_id = _seed_settled_turn(
@@ -310,7 +310,7 @@ async def test_codex_idle_fold_is_admitted_warm_by_codex_item_id(
     row_id = _seed_settled_turn(isolated_db, thread_id, "codex/test", "codex", item_id)
     rollout = _codex_rollout(tmp_path / "sessions" / "2026" / "09" / "21", item_id)
     monkeypatch.setattr(
-        "core.checkpoint_codex_fork._registered_rollout",
+        "core.fork_codex._registered_rollout",
         lambda tid: RegisteredRollout(PROVIDER_THREAD_ID, rollout, "high", None) if tid == thread_id else None,
     )
     launched, events = _patch_idle_environment(
@@ -360,7 +360,7 @@ def test_codex_boundary_with_an_item_id_is_never_proven_by_the_row_id() -> None:
 
 def test_reconstructed_transcript_still_proves_an_id_carrying_row_by_row_uuid() -> None:
     """After a cold resume or harness switch CORSIA wrote the transcript itself."""
-    from core.checkpoint_cc_boundary_records import boundary_prefix_from_stream
+    from core.fork_cc_boundary_records import boundary_prefix_from_stream
     from history.types import DurableBoundaryMessage
     from subagents.cc_transcript_projection import _assistant_message_id, _stable_uuid
 
@@ -415,7 +415,7 @@ async def test_unproven_warm_capture_is_its_own_idle_refusal(
     _seed_settled_turn(isolated_db, thread_id, "codex/test", "codex", "msg_not_in_rollout")
     rollout = _codex_rollout(tmp_path / "sessions" / "2026" / "09" / "21", row_id_only)
     monkeypatch.setattr(
-        "core.checkpoint_codex_fork._registered_rollout",
+        "core.fork_codex._registered_rollout",
         lambda tid: RegisteredRollout(PROVIDER_THREAD_ID, rollout, "high", None),
     )
     launched, events = _patch_idle_environment(

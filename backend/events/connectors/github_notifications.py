@@ -38,7 +38,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE, SIGNED_OUT
 from events.connectors import github_notifications_feed as feed
+from events.connectors.github_read_budget import budget
 import infra.webhook_delivery_log as webhook_delivery_log
 
 log = logging.getLogger(__name__)
@@ -94,8 +96,12 @@ def _parse_time(value: Any) -> datetime | None:
 
 
 def poller_status() -> dict[str, Any]:
-    """The poller's state, reason, last success, last error and skipped-thread count."""
-    return {**_status, "last_error": dict(_status["last_error"] or {}) or None}
+    """The poller's state, reason, last success, last error and skipped-thread count,
+    and the read budget both GitHub pollers share (``read_budget``)."""
+    return {
+        **_status, "last_error": dict(_status["last_error"] or {}) or None,
+        "read_budget": budget.status(),
+    }
 
 
 def _set_state(state: str, reason: str | None = None) -> None:
@@ -113,12 +119,8 @@ def _set_state(state: str, reason: str | None = None) -> None:
 
 
 def _is_signed_out(result: subprocess.CompletedProcess) -> bool:
-    """Whether ``gh auth status`` explicitly reports no authenticated GitHub host."""
-    output = f"{result.stdout}\n{result.stderr}".lower()
-    return result.returncode != 0 and (
-        "not logged into any github hosts" in output
-        or "not logged in to any github hosts" in output
-    )
+    """Whether the sign-in probe explicitly reports no account on github.com."""
+    return result.returncode != 0 and bool(SIGNED_OUT.search(f"{result.stdout}\n{result.stderr}"))
 
 
 def disabled_reason(runner: feed.GhRunner) -> str | None:
@@ -128,7 +130,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception as exc:  # noqa: BLE001 — status failures must keep their own cause
@@ -178,7 +180,8 @@ async def _admit(event_type: str, payload: dict[str, Any]) -> bool:
     comment_id = payload["comment"].get("id")
     try:
         await admit_github_delivery_async(
-            event_type, payload, f"gh-notifications:{event_type}:{comment_id}",
+            event_type, payload,
+            f"{webhook_delivery_log.NOTIFICATIONS_DELIVERY_PREFIX}{event_type}:{comment_id}",
             source="notifications",
         )
         return True
@@ -276,9 +279,9 @@ def _record_failure(error_class: str, failures: int) -> tuple[int, int]:
 async def notifications_poll_loop(runner: feed.GhRunner | None = None) -> None:
     """Poll until shut down, or until a static reason turns the poller off."""
     if runner is None:
-        from reviewer.gh_api import run_gh
+        from connections.github_broker import default_broker
 
-        runner = run_gh
+        runner = default_broker()
     failures = 0
     while True:
         delay, failures = await run_cycle(runner, failures)

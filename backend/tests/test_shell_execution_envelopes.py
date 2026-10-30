@@ -17,6 +17,14 @@ _SHELL_TURN = TurnIdentity("shell-envelope-turn", 1)
 
 
 @pytest.fixture
+def mac_shell_platform(monkeypatch):
+    """Select the Safehouse path without changing the host's global platform."""
+    from tests.shell_platform_helpers import use_mac_shell
+
+    use_mac_shell(monkeypatch)
+
+
+@pytest.fixture
 def short_system_temp():
     with tempfile.TemporaryDirectory(dir="/tmp") as directory:
         yield Path(directory)
@@ -25,8 +33,9 @@ def short_system_temp():
 def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
     monkeypatch,
 ) -> None:
-    from tools import shell_guard
+    from tools import shell_guard, shell_environment
 
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("SAFEHOUSE_ADD_DIRS", "/private")
     monkeypatch.setenv("SAFEHOUSE_WORKDIR", "/private")
@@ -47,7 +56,7 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
 
     env = shell_guard.safehouse_subprocess_env("thread-1")
 
-    assert env["PATH"] == "/usr/bin:/bin"
+    assert env["PATH"].startswith("/usr/bin:/bin:")  # the inherited PATH keeps its order; CORSIA's tools come after
     assert env["SSH_AUTH_SOCK"] == "/private/tmp/agent.sock"
     assert env["CORSIA_THREAD_ID"] == "thread-1"
     assert "SAFEHOUSE_ADD_DIRS" not in env
@@ -65,6 +74,27 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
     assert "CORSIA_PROCESS_OWNER_MARKER" not in env
     assert env["TOKENIZERS_PARALLELISM"] == "false"
     assert env["AGENT_BROWSER_ARGS"] == "--no-sandbox"
+
+
+@pytest.mark.parametrize("platform,expected", [("darwin", "--no-sandbox"), ("linux", None)])
+def test_browser_sandbox_environment_is_platform_specific(monkeypatch, platform, expected) -> None:
+    from tools import shell_environment
+
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
+    assert shell_environment.safehouse_subprocess_env("thread-1").get("AGENT_BROWSER_ARGS") == expected
+
+
+def test_script_and_shell_use_same_linux_browser_environment(monkeypatch) -> None:
+    from automation import script_sandbox
+    from tools import shell_environment
+
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
+    shell_env = shell_environment.safehouse_subprocess_env("thread-1")
+    script_env = script_sandbox.safehouse_subprocess_env("thread-1")
+    assert "AGENT_BROWSER_ARGS" not in shell_env
+    assert script_env == shell_env
 
 
 def test_external_agent_argv_strips_browser_import_settings(tmp_path, monkeypatch) -> None:
@@ -129,9 +159,9 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
     assert (
         "--env-pass=CORSIA_THREAD_ID,CORSIA_PROCESS_OWNER_MARKER,"
         "CORSIA_TOOL_INVOCATION_ID,AGENT_BROWSER_ARGS,"
-        "GH_CONFIG_DIR,GIT_CONFIG_COUNT,"
-        + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7))
-        + ",CORSIA_GWS_HOME" in argv
+        "npm_config_cache,PIP_CACHE_DIR,UV_CACHE_DIR,CORSIA_EVENT_TRACE,"
+        "CORSIA_SCRIPT_GITHUB_SOCKET,GH_CONFIG_DIR,GIT_CONFIG_COUNT,"
+        + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7)) in argv
     )
     assert not any(part == "--env" or part.startswith("--env=") for part in argv)
     assert argv[argv.index("--") + 1 :] == [
@@ -258,11 +288,15 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     assert f'(deny file-write* (literal "{profile.resolve(strict=False)}"))' in leased
     state_root_text = str(state_root.resolve(strict=False))
     assert state_root_text in protected
-    # Only the credential folder inside the state root is closed under a lease.
+    # Credential and browser profile roots remain closed under a lease.
     keys_deny = (
         f'(deny file-read* file-write* (subpath "{state_root.resolve() / "keys"}"))'
     )
+    browser_profile_deny = (
+        f'(deny file-read* file-write* (subpath "{state_root.resolve() / "browser-profile"}"))'
+    )
     assert keys_deny in leased
+    assert browser_profile_deny in leased
     assert f'(subpath "{state_root_text}")' not in leased
     assert str((Path.home() / ".corsia").resolve(strict=False)) not in leased
     assert (
@@ -274,13 +308,17 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     assert "(allow process-info* (target same-sandbox))" in leased
     assert '(regex #"^/dev/(r?disk|rdisk)' not in leased
     assert "(deny signal)" in leased
-    # The only outbound denies are the generated-projection AF_UNIX denies.
+    # Browser listener and daemon boundaries remain closed in both profiles.
+    from host_access.browser_ports import sandbox_rules
+    browser_rules = sandbox_rules()
+    assert browser_rules in protected and browser_rules in leased
     assert all(
-        "(remote unix-socket (subpath " in line
+        "(remote unix-socket (subpath " in line or line in browser_rules.splitlines()
         for line in protected.splitlines()
         if line.startswith("(deny network-outbound")
     )
-    assert "(deny network-outbound" not in leased
+    assert all(line in browser_rules.splitlines() for line in leased.splitlines()
+               if line.startswith("(deny network-outbound"))
 
     # Invariant 1: the reviewed process cannot rewrite or re-enter the
     # process-private profile/Safehouse authority that confines this action.
@@ -303,6 +341,8 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny signal)",
         "(deny mach-priv-task-port)",
         keys_deny,
+        browser_profile_deny,
+        *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }
     assert denied_lines == expected_denied_lines
     for executable in (
@@ -344,6 +384,106 @@ def test_protected_profile_scopes_unix_sockets_to_corsia_roots(
     assert "network-outbound (remote ip" not in rules
     assert "network-bind (local ip)" not in rules
     assert len(os.fsencode(temp_root / "server.sock")) < 104
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("grant", ["add-dirs", "workdir"])
+def test_safehouse_nested_read_write_deny_overrides_granted_root(
+    short_system_temp, grant,
+) -> None:
+    from tools import shell_guard
+
+    if os.environ.get("CORSIA_THREAD_ID"):
+        _safehouse_integration_unavailable("agent shells cannot nest Safehouse")
+    safehouse = shell_guard.shutil.which("safehouse")
+    if safehouse is None:
+        _safehouse_integration_unavailable("Agent Safehouse is unavailable")
+    root = (short_system_temp / "workspace").resolve()
+    denied = root / "denied"
+    denied.mkdir(parents=True)
+    secret = denied / "existing"
+    secret.write_text("denied content", encoding="utf-8")
+    readable = root / "readable"
+    readable.write_text("allowed content", encoding="utf-8")
+    profile = short_system_temp / "deny.sb"
+    profile.write_text(f'(deny file-read* file-write* (subpath "{denied}"))\n', encoding="utf-8")
+    options = [f"--workdir={root}" if grant == "workdir" else "--workdir="]
+    if grant == "add-dirs":
+        options.append(f"--add-dirs={root}")
+
+    def touch(path: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [safehouse, *options, "--trust-workdir-config=false",
+             f"--append-profile={profile}", "--", "/usr/bin/touch", str(path)],
+            cwd=root, capture_output=True, text=True, timeout=20,
+        )
+
+    for path, content, allowed in (
+        (readable, "allowed content", True),
+        (secret, "denied content", False),
+    ):
+        result = subprocess.run(
+            [safehouse, *options, "--trust-workdir-config=false",
+             f"--append-profile={profile}", "--", "/bin/cat", str(path)],
+            cwd=root, capture_output=True, text=True, timeout=20,
+        )
+        if allowed:
+            assert result.returncode == 0 and content in result.stdout, result.stderr
+        else:
+            assert result.returncode != 0, "nested deny did not prevent the read"
+            assert content not in result.stdout
+
+    # Check writes independently of read denial, which can stop touch at stat.
+    profile.write_text(f'(deny file-write* (subpath "{denied}"))\n', encoding="utf-8")
+    control = root / "allowed"
+    result = touch(control)
+    assert result.returncode == 0 and control.exists(), result.stderr
+    target = denied / "forbidden"
+    result = touch(target)
+    assert result.returncode != 0, "nested deny did not prevent the write"
+    assert not target.exists()
+
+
+@pytest.mark.integration
+def test_safehouse_protected_shell_denies_workspace_projection_writes(
+    short_system_temp, monkeypatch,
+) -> None:
+    from infra import config
+    from tools import sandbox_config, shell_guard
+
+    if os.environ.get("CORSIA_THREAD_ID"):
+        _safehouse_integration_unavailable("agent shells cannot nest Safehouse")
+    if shell_guard.shutil.which("safehouse") is None:
+        _safehouse_integration_unavailable("Agent Safehouse is unavailable")
+    workspace = (short_system_temp / "workspace").resolve()
+    context = workspace / ".corsia" / "context"
+    skills = workspace / ".corsia" / "skills"
+    for directory in (context, skills):
+        directory.mkdir(parents=True)
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
+    profile = short_system_temp / "protected.sb"
+    profile.write_text(
+        shell_guard.execution_envelope_profile("projection probe", workspace, profile, leased=False),
+        encoding="utf-8",
+    )
+
+    def touch(path: Path) -> subprocess.CompletedProcess[str]:
+        command = f"/usr/bin/touch {shlex.quote(str(path))}"
+        return subprocess.run(
+            shell_guard.safehouse_argv(command, workspace, profile),
+            cwd=workspace, capture_output=True, text=True,
+            env=shell_guard.safehouse_subprocess_env(None), timeout=20,
+        )
+
+    control = workspace / "allowed"
+    result = touch(control)
+    assert result.returncode == 0 and control.exists(), result.stderr
+    for directory in (context, skills):
+        target = directory / "forbidden"
+        result = touch(target)
+        assert result.returncode != 0, f"write succeeded: {target}"
+        assert not target.exists()
 
 
 @pytest.mark.integration
@@ -1061,6 +1201,7 @@ class _Process:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 @pytest.mark.parametrize("leased", [False, True])
 async def test_bash_uses_direct_safehouse_argv_and_backend_selected_envelope(
     leased,
@@ -1181,6 +1322,7 @@ async def test_bash_uses_direct_safehouse_argv_and_backend_selected_envelope(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 @pytest.mark.parametrize("project_id", ["project-1", None])
 async def test_background_bash_transfers_profile_lifetime_to_process_owner(
     project_id,
@@ -1303,6 +1445,7 @@ async def test_background_bash_transfers_profile_lifetime_to_process_owner(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 async def test_background_spawn_failure_keeps_profile_cleanup_with_bash(
     monkeypatch,
     tmp_path,
@@ -1373,6 +1516,7 @@ async def test_background_spawn_failure_keeps_profile_cleanup_with_bash(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 async def test_bash_fails_closed_without_safehouse(monkeypatch, tmp_path) -> None:
     from tools import shell
 

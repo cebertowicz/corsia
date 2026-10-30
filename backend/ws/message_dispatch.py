@@ -76,7 +76,10 @@ async def _handle_message(
         await _send_error(ws, thread_id or "", "Missing input_id for message")
         return
     input_id = input_id.strip()
-    if not thread_id or (not content and not attachments):
+    from infra.reply_context import has_comment_candidates
+
+    if not thread_id or (not content and not attachments
+                         and not has_comment_candidates(data.get("reply_context"))):
         await _send_error(
             ws, thread_id or "", "Malformed message input",
             input_id=input_id,
@@ -130,6 +133,8 @@ async def _send_native_input(
         metadata["edited"] = True
     if "viewing_document" in data:
         metadata["viewing_document"] = data["viewing_document"]
+    if "reply_context" in data:
+        metadata["reply_context"] = data["reply_context"]
 
     async def _after_persist_before_dispatch(_final_target: ExecutionTarget) -> None:
         if is_retry:
@@ -177,7 +182,7 @@ async def _send_native_input(
             ws, thread_id, e.detail, metadata=e.metadata, input_id=input_id,
         )
     except Exception as e:
-        logger.error(f"Native WebSocket turn failed for {thread_id}: {e}")
+        logger.exception("Native WebSocket turn failed for {}", thread_id)
         await _send_error(ws, thread_id, f"Turn failed: {e}", input_id=input_id)
 
 
@@ -251,7 +256,7 @@ async def handle_cc_main_message(
         )
         return
     except Exception as e:
-        logger.error(f"CC main-chat turn failed for {thread_id}: {e}")
+        logger.exception("CC main-chat turn failed for {}", thread_id)
         await _send_error(
             ws,
             thread_id,
@@ -314,7 +319,7 @@ async def handle_codex_main_message(
         )
         return
     except Exception as e:
-        logger.error(f"Codex main-chat turn failed for {thread_id}: {e}")
+        logger.exception("Codex main-chat turn failed for {}", thread_id)
         await _send_error(
             ws,
             thread_id,

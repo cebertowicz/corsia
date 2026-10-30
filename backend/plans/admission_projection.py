@@ -121,7 +121,7 @@ def _indexes(node_ids: list[str], *, db) -> tuple[dict, dict, dict, dict]:
         for row in rows:
             watches[node_id].append(
                 {
-                    **node_waits.watch_cause(row),
+                    **node_waits.named_watch_cause(row),
                     "reason": blocked_wait.watch_reason(row),
                     "owner_kind": row["blocked_owner_kind"] or "external",
                     "owner_id": row["blocked_owner_id"],
