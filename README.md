@@ -229,7 +229,7 @@ An agent you don't watch needs real capabilities, or it stops to ask you at ever
 
 - **Sandboxed by default.** Shell commands run inside Agent Safehouse, and file tools reach only allowed paths.
 - **Leases for anything outside.** To reach beyond the workspace, an agent applies for a short **host-access lease** that states the purpose, the exact resources and the effects. A reviewer checks the request, then every command run under it, and blocks any that is harmful or clearly unrelated to that purpose. If the reviewer can't reach a verdict, the answer is no. Every request, verdict and reviewed command is kept.
-- **Some things no lease opens:** credentials and SSH keys, CORSIA's own state and sandbox, and system startup files.
+- **Some things no lease opens:** the keys CORSIA stores, the agents' browser sign-ins, and the sandbox itself.
 - **Agents can't approve their own access.** A lease is approved by a signed-in person or, if you turn it on, by the automatic reviewer. A lease that launches an outside agent always needs a person.
 - **Credentials stay masked.** Credential values are masked before file contents reach a model.
 
