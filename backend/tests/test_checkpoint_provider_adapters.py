@@ -329,6 +329,99 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     assert len(calls) == 2
 
 
+@pytest.mark.asyncio
+async def test_native_cold_fold_fits_a_small_local_window(monkeypatch):
+    """A 41,681-token local seat must still fold under pressure.
+
+    A fixed 16,384 output allowance reserved twice (reply, then its round
+    trip) left under 7k of input, so every cold fold on a 32 GiB local-only
+    install failed with "minimum meaningful cold fork input does not fit".
+    Once it fit, re-counting a ~6.8k-token reasoning reply as UTF-8 bytes
+    overflowed the loop, so the round trip counts what the provider measured.
+    """
+    from cache_warm_fixtures import make_exact_replay_selection
+    from core import fork_native as native
+    from core.checkpoint_fork_kind import CHECKPOINT_TOOL_NAME
+    from core.fork_types import ColdForkSource
+    from prompts.checkpoint import build_checkpoint_system_prompt
+
+    window = 41_681
+    turns = [
+        [("user", f"ask {i} " + "history " * 100), ("assistant", "answer " * 100)]
+        for i in range(60)
+    ]
+    # Its writer has no bundled tokenizer, so cold input counts UTF-8 bytes.
+    turns.append([("user", "latest ask " + "detail " * 1_500), ("assistant", "done")])
+    selection = make_exact_replay_selection("thread-1", turns)
+    request = replace(
+        _request(None),
+        cold_source=ColdForkSource(selection.tail, ()),
+        target=replace(_target(), context_window=window),
+        instruction=build_checkpoint_system_prompt(),
+    )
+    calls, edits = [], []
+
+    async def completion(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return LLMResponse(
+                content=None,
+                reasoning_content="considering the edit " * 1_300,
+                tool_calls=[ToolCallRequest(
+                    id="call-1", name=CHECKPOINT_TOOL_NAME, arguments={"op": "add"},
+                )],
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 5_500, "completion_tokens": 6_800},
+            )
+        return LLMResponse(
+            content="checkpoint narrative",
+            usage={"prompt_tokens": 12_310, "completion_tokens": 400},
+        )
+
+    class Tools:
+        def get_definitions(self):
+            return [{"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}}]
+
+        async def execute(self, name, arguments):
+            edits.append((name, arguments))
+            return "ok"
+
+    agent = SimpleNamespace(max_iterations=5, tools=Tools())
+    monkeypatch.setattr(native, "_get_agent", lambda: _async_value(agent))
+    monkeypatch.setattr(native, "_chat_completion", completion)
+    monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
+
+    result = await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+
+    assert result.raw_body == "checkpoint narrative"
+    assert result.diagnostic is None
+    assert edits == [(CHECKPOINT_TOOL_NAME, {"op": "add"})]
+    assert [call["max_tokens"] for call in calls] == [window // 5] * 2
+
+
+def test_native_round_trip_counts_from_the_provider_measurement():
+    """After a measured call, later input is that measurement plus what was added."""
+    from core import fork_native_tools as loop
+    from core.token_estimation import measure_request
+
+    request = replace(_request(None), target=replace(_target(), context_window=41_681))
+    reply = {"role": "assistant", "content": None, "reasoning_content": "think " * 5_000}
+    messages = [{"role": "system", "content": "fold"}, reply]
+    measured = loop.measured_input(
+        request, messages, [], {"prompt_tokens": 9_000, "completion_tokens": 7_000},
+    )
+    tool_reply = {"role": "tool", "tool_call_id": "call-1", "content": "ok"}
+    added = measure_request(
+        {"messages": [*messages, tool_reply], "tools": []}, target=request.target,
+    ).tokens - measured.rendered_input_tokens
+
+    room = loop.input_room(request, [*messages, tool_reply], [], measured=measured)
+
+    assert measured.provider_input_tokens == 16_000
+    assert room.counted == 16_000 + added
+    assert loop.measured_input(request, messages, [], {"prompt_tokens": 9_000}) is None
+
+
 def test_native_cold_admission_keeps_room_for_its_output_budget():
     """A cold input admitted with framing margin also passes the loop check."""
     from core import fork_native as native

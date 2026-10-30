@@ -57,15 +57,47 @@ class InputRoom(NamedTuple):
     unusable: str | None = None
 
 
-def input_room(request, messages, tools, reserve: int = 0) -> InputRoom:
+class MeasuredInput(NamedTuple):
+    """The provider's count of a fork's last call plus its reply, anchored to
+    the rendered estimate of those same messages, as a warm source is."""
+
+    provider_input_tokens: int
+    rendered_input_tokens: int
+
+
+def measured_input(request, messages, tools, usage) -> MeasuredInput | None:
+    """Anchor the next call on what the provider measured for the last one.
+
+    ``messages`` already ends with that reply. A cold count is a UTF-8 byte
+    bound for a writer with no bundled tokenizer, several times its real
+    tokens, so re-counting the reply's reasoning overflowed a small window the
+    provider itself had room for.
+    """
+    from core.checkpoint_native_admission import effective_input_tokens
+    from core.token_estimation import measure_request
+
+    measured = effective_input_tokens(usage)
+    completion = usage.get("completion_tokens") if isinstance(usage, dict) else None
+    if measured is None or isinstance(completion, bool) or not isinstance(completion, int):
+        return None
+    if completion < 0:
+        return None
+    rendered = measure_request({"messages": messages, "tools": tools}, target=request.target)
+    return MeasuredInput(measured + completion, rendered.tokens)
+
+
+def input_room(
+    request, messages, tools, reserve: int = 0, measured: MeasuredInput | None = None,
+) -> InputRoom:
     """Measure this fork's whole next input, including its private tool work.
 
-    ``reserve`` keeps that much room free beyond the reply allowance.
+    ``reserve`` keeps that much room free beyond the reply allowance. Once a
+    call has been measured, later input counts from that measurement.
     """
     from core.token_estimation import measure_request
 
     bound = request.target.context_window - request.max_output_tokens - reserve
-    source = request.warm_source
+    source = measured if measured is not None else request.warm_source
     if source is None:
         # Cold must count exactly what its admission counted, or an admitted
         # fold is refused (or overflows) inside the loop that runs it.
@@ -90,29 +122,31 @@ def input_room(request, messages, tools, reserve: int = 0) -> InputRoom:
     return InputRoom(provider_input + count.tokens - rendered_input, bound)
 
 
-def input_fits(request, messages, tools, reserve: int = 0) -> bool:
-    room = input_room(request, messages, tools, reserve)
+def input_fits(
+    request, messages, tools, reserve: int = 0, measured: MeasuredInput | None = None,
+) -> bool:
+    room = input_room(request, messages, tools, reserve, measured)
     return room.unusable is None and room.counted <= room.bound
 
 
-async def input_fits_off_loop(request, messages, tools, reserve: int = 0) -> bool:
+async def input_fits_off_loop(
+    request, messages, tools, reserve: int = 0, measured: MeasuredInput | None = None,
+) -> bool:
     """Run ``input_fits`` on a worker thread; tokenizing a full fold is slow."""
-    return await asyncio.to_thread(input_fits, request, messages, tools, reserve)
+    return await asyncio.to_thread(input_fits, request, messages, tools, reserve, measured)
 
 
-def _append_assistant_message(messages: list[dict[str, Any]], response: Any) -> None:
-    messages.append(
-        {
-            "role": "assistant",
-            "content": response.content,
-            "tool_calls": _tool_call_dicts(response),
-            **(
-                {"reasoning_content": response.reasoning_content}
-                if response.reasoning_content is not None
-                else {}
-            ),
-        }
-    )
+def assistant_message(response: Any) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": response.content,
+        "tool_calls": _tool_call_dicts(response),
+        **(
+            {"reasoning_content": response.reasoning_content}
+            if response.reasoning_content is not None
+            else {}
+        ),
+    }
 
 
 async def run_tool_calls(
@@ -124,16 +158,17 @@ async def run_tool_calls(
     tools: list[dict[str, Any]],
     *,
     kind: ForkKind,
+    measured: MeasuredInput | None = None,
 ) -> bool:
     """Run a Native fork batch while retaining every completed effect.
 
     A result that would not fit the remaining room is never sent: its effect
     stands, and the fork sees its kind's short instruction to finish. Only when even that does not fit does the batch fail.
     """
-    _append_assistant_message(messages, response)
+    messages.append(assistant_message(response))
     completed: list[CompletedToolCall] = []
     try:
-        if not await input_fits_off_loop(request, messages, tools):
+        if not await input_fits_off_loop(request, messages, tools, 0, measured):
             return False
         for call in response.tool_calls:
             if call.name not in kind.tool_allowlist:
@@ -167,13 +202,15 @@ async def run_tool_calls(
                 "content": result,
             }
             messages.append(reply)
-            if not await input_fits_off_loop(request, messages, tools):
-                room = await asyncio.to_thread(input_room, request, messages, tools)
+            if not await input_fits_off_loop(request, messages, tools, 0, measured):
+                room = await asyncio.to_thread(
+                    input_room, request, messages, tools, 0, measured,
+                )
                 reply["content"] = (
                     f"Error: this result ({len(result)} characters) is "
                     + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
-                if not await input_fits_off_loop(request, messages, tools):
+                if not await input_fits_off_loop(request, messages, tools, 0, measured):
                     return False
         return True
     except CompletedToolFailure:
