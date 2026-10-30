@@ -147,7 +147,7 @@ class TestFirstModelChoice:
 
         facts = await first_run_wake.setup_facts("claude-code/sonnet")
 
-        assert set(facts) == {"first_run_path", "your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"}
+        assert set(facts) == {"first_run_path", "your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key", "auto_approve"}
         assert facts["host_access_reviewer"] == {
             "unavailable": first_run_wake.UNAVAILABLE_READS["host_access_reviewer"],
         }
@@ -211,7 +211,7 @@ class TestFirstModelChoice:
         from onboarding import first_run_wake
 
         reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
-        assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"))
+        assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key", "auto_approve"))
 
 
 class TestOnlyAnUnreadWakeChanges:
@@ -265,7 +265,7 @@ class TestAppPath:
 
         app_facts = {
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
-            "agents_found": ["hermes"], "local_download": {"state": "stopped"}, "local_eligible": False,
+            "agents_found": ["hermes"], "local_download": {"state": "stopped"}, "local_eligible": False, "auto_approve": True,
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
             "pays_for": [],
             "bound_model": None,
@@ -317,6 +317,7 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
+        monkeypatch.setattr(first_run_wake, "get_host_access_auto_approve", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
         })
@@ -331,6 +332,7 @@ class TestAppPath:
         assert facts["sources_missing"] == expected_missing
         assert facts["local_download"] == expected_download
         assert facts["local_eligible"] is True
+        assert facts["auto_approve"] is False
         assert facts["tool_attempts"] == {
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
@@ -464,6 +466,7 @@ class TestAppPath:
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready", "local_eligible")),
         ("local_download", ("local_download",)),
+        ("auto_approve", ("auto_approve",)),
         ("setup_handoff", ("tool_attempts",)),
         ("setup_picks", ("pays_for",)),
         ("web_search_ready", ("web_search_ready",)),
@@ -489,6 +492,8 @@ class TestAppPath:
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
         elif failed == "local_download":
             monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
+        elif failed == "auto_approve":
+            monkeypatch.setattr(first_run_wake, "get_host_access_auto_approve", fail)
         elif failed == "web_search_ready":
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "setup_handoff":

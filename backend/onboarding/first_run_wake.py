@@ -14,6 +14,8 @@ import logging
 from dataclasses import replace
 from typing import Any
 
+from infra.settings import get_host_access_auto_approve
+
 log = logging.getLogger(__name__)
 
 FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
@@ -23,7 +25,7 @@ APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "local_eligible", "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
+    "local_eligible", "auto_approve", "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
     "setup", "user_profile",
 })
 APP_PLAN_FACT_KEYS = APP_FACT_KEYS | {"connected_app_count", "email_calendar_ready"}
@@ -39,6 +41,7 @@ UNAVAILABLE_READS = {
     "sources_missing": "tool model_sources, once, without recheck",
     "agents_found": "none; skip the import step unless its consent decision is available",
     "local_download": "corsia_api GET /api/providers/local/setup",
+    "auto_approve": "none; corsia_api hides host-access fields, so say nothing about its state",
     "local_eligible": "tool model_sources, once, without recheck: the local model row's eligible",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
@@ -150,9 +153,7 @@ def _app_local_download() -> dict[str, Any]:
 
 
 def _app_local_eligible(snapshot: dict[str, Any]) -> bool:
-    """Whether this computer can run a local model, from the source snapshot's local model row."""
-    row: dict[str, Any] = next((item for item in snapshot["sources"] if item.get("source") == "omlx"), {})
-    return row.get("eligible") is True
+    return any(item.get("source") == "omlx" and item.get("eligible") is True for item in snapshot["sources"])
 
 
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
@@ -241,6 +242,7 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
         "setup": lambda: setup_decisions.setup_plan(self_check_passed=True, probe_web_search=False),
         "host_access_reviewer": lambda: run_in_db(host_access_reviewer_status),
         "web_search_key": lambda: run_in_db(_web_search_key),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     return {"first_run_path": path, **facts}
 
@@ -260,11 +262,12 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "setup_picks": lambda: run_in_db(_app_setup_picks),
         "setup": lambda: _app_setup(model),
         "user_profile": lambda: run_off_db(_app_user_profile),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     snapshot = reads.pop("model_sources")
     harness_ready: list[str] | dict[str, str]
     github_ready: bool | dict[str, str]
-    local_eligible: bool | dict[str, str]
+    local_eligible: bool | dict[str, str] = _unavailable("local_eligible")
     if isinstance(snapshot, dict) and "unavailable" not in snapshot:
         harness_ready = _app_harness_ready(snapshot)
         local_eligible = _app_local_eligible(snapshot)
@@ -274,7 +277,6 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         harness_ready = _unavailable("harness_ready")
         sources_missing = _unavailable("sources_missing")
         github_ready = _unavailable("github_ready")
-        local_eligible = _unavailable("local_eligible")
     handoff = reads["setup_handoff"]
     picks = reads["setup_picks"]
     pays_for: list[str] | dict[str, str] = (
@@ -297,6 +299,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
         "local_eligible": local_eligible,
+        "auto_approve": reads["auto_approve"],
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
         "web_search_ready": reads["web_search_ready"],

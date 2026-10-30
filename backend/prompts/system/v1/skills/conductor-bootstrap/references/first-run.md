@@ -22,7 +22,7 @@ The `onboarding.first_run` event is your first input on this install. The person
 
 > Agents run in a sandbox on this Mac. When one needs something outside it, like installing an app or reading a folder you haven't shared, it asks for stated actions, for a stated time.
 > - A reviewer model checks every request against the task the agent says you gave it, and checks every action again while access is open.
-> - Without **Auto-approve** (Settings › System, off), a request the reviewer approves comes to you for your approval; with it on, an approved request is granted. Either way the reviewer rejects over-broad or avoidable requests and dangerous commands.
+> - Without **Auto-approve** (Settings › System), a request the reviewer approves comes to you for your approval; with it on, an approved request is granted. Either way the reviewer rejects over-broad or avoidable requests and dangerous commands.
 > - Some things are never open to agents, even with your approval: CORSIA's private data, stored keys and passwords, and your credentials.
 
 **Friction in CORSIA itself** follows your friction rule; note each one you hit before task 5 sets up GitHub and file them once it's done.
@@ -36,6 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
+- `auto_approve`: whether Auto-approve is on (true/false).
 - `web_search_key`: whether a key is saved, for task 4's post.
 
 A fact marked `unavailable` names its read, made once when needed.
@@ -80,7 +81,7 @@ Objective: the machine is set up for agent work, and the person chose how host a
 
 1. **Host access.** Post the explanation above if you haven't yet.
 2. **Reviewer.** List the models that are ready now (`model_sources`; `GET /api/models` through `corsia_api` if needed) and post: `Who should review your agents' host access? It's a security and cost choice: a stronger model checks more carefully and costs more per request; a smaller or local one costs less and checks less carefully. Ready now: [name, provider; ...]. Tell me which, or I'll leave each agent's own model reviewing.` Wait. On a model, set it with `corsia_api(method="PATCH", path="/api/settings", body={"host_access_reviewer_model": "<its litellm_model, verbatim>"})`; only on status 200, post `[name] reviews host access requests.` Any other status is a refusal: `I couldn't set that; [Settings › System › Host Access Review](/settings/system#host-access-review) has it.` Leaving it: `Each agent's own model reviews its requests.`
-3. **Auto-approve.** Post `Auto-approve is off. You can turn it on in [Settings › System › Host Access Review](/settings/system#host-access-review).` Never enable it yourself or send its setting through `corsia_api`.
+3. **Auto-approve.** Post its state from `auto_approve`. True: `Auto-approve is on: requests the reviewer accepts start without waiting for you. To approve each yourself, turn it off in [Settings › System › Host Access Review](/settings/system#host-access-review).` False: `Auto-approve is off. You can turn it on in [Settings › System › Host Access Review](/settings/system#host-access-review).` `unavailable`: post nothing. Never change it yourself or send its setting through `corsia_api`.
 4. **MCP servers.** Ask in chat, not as a plan decision: when `mcp_sources` has servers, list each with its `app` and kind, local program (`stdio`, runs on this Mac as the person) or web server (`remote`), then `Bring over all [n] apps listed above, some (tell me which), or none?` (one app: `Bring over **[name]**, or not?`). Wait. Load skill `coordination-api` and call `corsia_api(method="POST", path="/api/mcp/import", body={"servers": [{"source": "...", "name": "..."}]})` with only the pairs they approved. Post the result as `references/import-result-lines.md` says. On none: `Okay, nothing brought over.` and go on. Not found: they add it in that app, then import; no secrets in chat.
 5. **What was checked.** One post that names each check and its result, never a bare "all good": `Checked: [providers and their state]; host access reviewer ([model], or each agent's own); MCP servers ([n] waiting for your approval, none chosen, or none found); web search key ([saved or not]).` Only what you checked.
 
