@@ -1,7 +1,24 @@
 #!/bin/sh
 set -eu
 
-resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+source_path="$0"
+while [ -L "$source_path" ]; do
+  source_dir="$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd -P)"
+  source_path="$(readlink "$source_path")"
+  case "$source_path" in /*) ;; *) source_path="$source_dir/$source_path" ;; esac
+done
+resources="$(CDPATH= cd -- "$(dirname -- "$source_path")/.." && pwd -P)"
+case "${1:-status} ${2:-}" in
+  "redeploy "*|"service install"|"service install "*)
+    printf '%s\n' 'This command is for source checkouts; the CORSIA app manages its own updates and service.' >&2
+    exit 1
+    ;;
+esac
+case "${1:-status}" in
+  start|stop|restart|status|logs|open|service|redeploy|prepare-redeploy|restart-prepared|discard-prepared|ensure-current-release|delegate|doc|context|providers|perf|user|token|local|sources|agent)
+    exec "$resources/scripts/corsia" "$@"
+    ;;
+esac
 export PATH="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1

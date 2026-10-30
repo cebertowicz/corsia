@@ -27,6 +27,9 @@ use tauri::{ipc::CapabilityBuilder, Manager};
 
 mod adoption;
 mod app_paths;
+mod cli_link;
+#[cfg(all(test, unix))]
+mod cli_link_tests;
 mod classify;
 mod discovery;
 mod first_run;
@@ -597,6 +600,16 @@ fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, serv
 
 fn local_service_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<ServiceStartup, String> {
     grant_local_service_origin(app, service, port)?;
+    #[cfg(all(unix, not(test)))]
+    {
+        let app_dir = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if let (Ok(home), Ok(resources), Some(app_dir)) = (app.path().home_dir(), bundled_resource_dir(app), app_dir) {
+            match adoption::retired_cli(&app_dir) {
+                Ok(retired) => cli_link::repoint_existing(&home, &resources.join("bin/corsia"), retired.as_deref()),
+                Err(error) => log::warn!("could not inspect adoption record for CLI links: {error}"),
+            }
+        }
+    }
     Ok(ServiceStartup::Ready { url: service_url(port) })
 }
 
