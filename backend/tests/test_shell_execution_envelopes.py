@@ -331,7 +331,11 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         for line in leased.splitlines()
         if line.strip().startswith("(deny ")
     }
+    from tools.host_path_policy import current_protected_host_path_policy
+    from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
+    workspace = current_protected_host_path_policy().workspace
     expected_denied_lines = {
+        *workspace_git_rules(workspace_git_paths(workspace)),
         f'(deny file-write* (literal "{profile.resolve(strict=False)}"))',
         (
             f"(deny file-write* process-exec "

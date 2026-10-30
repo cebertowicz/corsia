@@ -50,6 +50,7 @@ def git(
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            errors="surrogateescape",
             timeout=timeout,
             env={**os.environ, "LC_ALL": "C", "LANG": "C"},
         )
@@ -212,7 +213,7 @@ def is_tool_output_dir(path: Path) -> bool:
 
 
 def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:
-    """Return ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
+    """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
     worktree's untracked and ignored files are scratch, not unshipped work.
@@ -220,7 +221,12 @@ def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | N
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
     ]
-    result = git(worktree, ["status", "--porcelain=v2", *files])
+    index = git(worktree, ["ls-files", "--stage", "-z"])
+    if index.returncode != 0:
+        raise ReaperGitError(f"index failed: {git_detail(index)}")
+    if any(record.startswith("160000 ") for record in index.stdout.split("\0")):
+        return "submodule"
+    result = git(worktree, ["status", "--porcelain=v2", "--ignore-submodules=all", *files])
     if result.returncode != 0:
         raise ReaperGitError(f"status failed: {git_detail(result)}")
     reasons: set[str] = set()

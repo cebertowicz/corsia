@@ -32,7 +32,7 @@ from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
-_GIT_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false")
+_GIT_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false")
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
@@ -131,7 +131,7 @@ def _locked(handle: int) -> Iterator[Any]:
 
 def _changed(repo: Path, specs: list[str]) -> list[str]:
     """Repo-relative paths under ``specs`` with uncommitted changes; a fault raises."""
-    out = _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--", *specs) if specs else ""
+    out = _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all", "--", *specs) if specs else ""
     return [record[3:] for record in out.split("\0") if record]
 
 

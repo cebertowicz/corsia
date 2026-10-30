@@ -40,8 +40,11 @@ def _git_output(worktree: Path, args: list[str]) -> bytes:
 
 
 def _selected(worktree: Path) -> list[Path]:
+    index = _git_output(worktree, ["ls-files", "--stage", "-z"])
+    if any(record.startswith(b"160000 ") for record in index.split(b"\0")):
+        raise SalvageError("worktree contains a submodule")
     status = _git_output(worktree, [
-        "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignored=matching",
+        "status", "--porcelain=v2", "-z", "--ignore-submodules=all", "--untracked-files=all", "--ignored=matching",
     ])
     records = iter(os.fsdecode(status).split("\0"))
     selected: list[Path] = []
@@ -121,7 +124,7 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float, origin: 
         # The person's diff settings (external tool, textconv, color) would
         # write display output instead of a patch that applies.
         patch = _git_output(worktree, [
-            "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color",
+            "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=all",
         ])
         if patch:
             (destination / "changes.patch").write_bytes(patch)
