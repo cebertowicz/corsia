@@ -60,6 +60,7 @@ frontend/.qa/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/.build-macos/
+desktop/.rust-toolchain/
 desktop/bundle/
 
 # Retired local PostHog runtime residue can remain in pre-OSS self-hosting

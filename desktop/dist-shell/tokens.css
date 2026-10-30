@@ -23,13 +23,17 @@
   --ls-cap:    0.08em;
   --ls-title: -0.01em;
 
+  --focus-ring: 0 0 0 3px var(--accent-wash);
+
   --space-1: 4px;
+  --chip-inline-padding: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
   --space-7: 32px;
+  --touch-target: 44px;
   --space-8: 48px;
 
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
@@ -68,11 +72,10 @@
   --text-secondary: #adadb2;
   --text-muted: #adadb2;
   --text-tertiary: #919196;
-  --accent: #8b5cf6;
-  --accent-hover: #b29bff;
-  --accent-subtle: rgba(139, 92, 246, 0.12);
-  --accent-bg: rgba(139, 92, 246, 0.08);
-  --accent-bg-hover: rgba(139, 92, 246, 0.14);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
   --green-border: rgba(52, 211, 153, 0.25);
@@ -95,7 +98,19 @@
   --radius-pill: 999px;
   --radius-circle: 50%;
   --sidebar-width: 280px;
+  --transcript-max-width: 760px;
+  --needs-you-tile-max-width: 480px;
+  --artifact-tile-size: 36px;
+  --plan-state-icon-size: 18px;
   --header-height: 60px;
+  --list-row-min-height: 38px;
+  --button-pad-x-sm: 10px;
+  /* Shared notice geometry preserves the established toast treatment without raw component values. */
+  --toast-detail-icon-offset: 3px;
+  --toast-close-inline-padding: 2px;
+  --toast-action-underline-offset: 2px;
+  --project-mark-size: 9px;
+  --project-mark-ring: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --header-bottom: calc(var(--header-height) + var(--safe-top));
@@ -114,21 +129,25 @@
   --hl-string: #98c379;
   --hl-comment: #5c6370;
   --hl-number: #d19a66;
+  /* The categorical violet: identity and kind colours that must stay apart from blue (never the accent). */
   --purple: #8b5cf6;
+  --purple-2: #b29bff;
+  --purple-text: #bba8ff;
+  --purple-bg: rgba(139, 92, 246, 0.10);
+  --purple-line: rgba(139, 92, 246, 0.28);
 
-  --violet: var(--purple);
-  --violet-2: #b29bff;
-  --violet-text: #bba8ff;
-  --violet-bg: rgba(139, 92, 246, 0.10);
-  --violet-line: rgba(139, 92, 246, 0.28);
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
+     default *is* a project colour: the corsia project's own accent, #007faa. Every value below is exactly what
+     `accentRoles('#007faa', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
+     a project painted #007faa look the same. Under a project scope +layout replaces --accent and every role from
+     accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
+  --accent-text: #009cd0;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
+  --accent-fill: var(--accent);
+  --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 45%, transparent);
   --violet-brand: #8b5cf6;
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
-  --accent-fill: var(--violet-text);
-  --accent-on-fill: #0a0a0b;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
   --teal-line: rgba(45, 212, 191, 0.28);
@@ -139,12 +158,15 @@
   --amber-bg: rgba(245, 158, 11, 0.10);
   --amber-line: rgba(245, 158, 11, 0.28);
 
-  --glass-blur: blur(40px) saturate(180%);
+  --glass-blur-radius: 40px;
+  /* Three sigma keeps a backdrop blur's sampling edge outside a visible glass card. */
+  --glass-blur-reach: calc(var(--glass-blur-radius) * 3);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(180%);
   --glass-blur-soft: blur(8px) saturate(120%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-scrim: rgba(0, 0, 0, 0.28);
   --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);
@@ -155,6 +177,7 @@
   --lg-row-hover: color-mix(in srgb, var(--text-primary) 6%, transparent);
   --header-gradient-top: var(--glass-thin);
   --shadow-chip: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --shadow-focus: 0 0 0 3px var(--accent-wash);
 }
 
 [data-theme="light"] {
@@ -172,17 +195,16 @@
   --text-secondary: #46464b;
   --text-muted: #46464b;
   --text-tertiary: #636368;
-  --accent: #7c5cf6;
-  --accent-hover: #6d4ce6;
-  --accent-subtle: rgba(124, 92, 246, 0.08);
-  --accent-bg: rgba(124, 92, 246, 0.10);
-  --accent-bg-hover: rgba(124, 92, 246, 0.16);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: #f0fdf4;
   --green-border: rgba(34, 197, 94, 0.3);
   --green-text: #166534;
   --red-text: #b91c1c;
-  --amber-text: #92400e;
+  --amber-text: #a3480a;
   --yellow: #fbbf24;
   --red: #f87171;
   --red-bg: #fef2f2;
@@ -205,22 +227,20 @@
   --hl-string: #059669;
   --hl-comment: #9ca3af;
   --hl-number: #d97706;
-  --purple: #8b5cf6;
+  --purple: #7c5cf6;
+  --purple-2: #6d4ce6;
+  --purple-text: #5b3fd0;
+  --purple-bg: rgba(124, 92, 246, 0.08);
+  --purple-line: rgba(124, 92, 246, 0.32);
 }
 
 [data-theme="light"] {
-  --violet: #7c5cf6;
-  --violet-2: #6d4ce6;
-  --violet-text: #5b3fd0;
-  --violet-bg: rgba(124, 92, 246, 0.08);
-  --violet-line: rgba(124, 92, 246, 0.32);
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
-  --accent-fill: var(--violet-text);
+  --accent-text: #006a8e;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
+  --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
+  --accent-selection: color-mix(in srgb, #007faa 35%, transparent);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);
@@ -230,7 +250,7 @@
   --amber: #d97706;
   --amber-bg: rgba(217, 119, 6, 0.08);
   --amber-line: rgba(217, 119, 6, 0.32);
-  --glass-blur: blur(40px) saturate(118%);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(118%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 84%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 89%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
