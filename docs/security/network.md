@@ -21,7 +21,7 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 | Way | What it does | What to know |
 |---|---|---|
-| A private tailnet (for example `tailscale serve --bg http://127.0.0.1:1956`) | Gives your devices an HTTPS address that reaches the local server | Only devices on your tailnet can reach it. CORSIA doesn't set this up or check it |
+| A private tailnet (for example `tailscale serve --bg http://127.0.0.1:1956`) | Gives your devices an HTTPS address that reaches the local server | Only devices on your tailnet can reach it. Agents can walk you through it (`backend/prompts/system/v1/skills/conductor-bootstrap/references/remote-access.md`); CORSIA doesn't check how your tailnet is configured |
 | **Devices** pairing | A separate TLS listener with a certificate CORSIA generates (`backend/infra/devices_identity.py`); it announces itself on the local network | Only signed-in person sessions; only private addresses unless you set an outside address; managed only from the main computer |
 | A server setup on a network you don't control | Anyone on that network can reach the sign-in page | Sign-in is password only, with growing delays after failures and no second factor. Don't do this |
 

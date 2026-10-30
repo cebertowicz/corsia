@@ -16,7 +16,7 @@ How people and programs sign in to CORSIA, how agents act, and what a project or
 | Password change | Ends every browser session of that account; API tokens stay valid | `backend/infra/accounts.py` |
 | First run | Before the first account exists, setup routes accept any program on the same computer; they close once the account is created | `backend/infra/local_connection.py` |
 
-The token can be sent as a `?token=` query parameter or an `Authorization: Bearer` header. The server's access log drops query strings, so tokens don't reach the log.
+An unknown token and an expired one get the same answer, "Invalid or expired session". The token can be sent as a `?token=` query parameter or an `Authorization: Bearer` header. The server's access log drops query strings, so tokens don't reach the log.
 
 **Local storage** is readable by any script running on the CORSIA page. CORSIA serves its own page only; a cross-site scripting flaw in it would expose the session token.
 
