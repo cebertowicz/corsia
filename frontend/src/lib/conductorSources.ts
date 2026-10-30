@@ -55,6 +55,8 @@ export interface ModelSource {
 	local_state?: string;
 	setup_error_code?: string;
 	setup_error_reference?: string;
+	/** The catalog's local load refusal, when available. */
+	detail?: string | null;
 	bytes_to_free?: number;
 	/** CORSIA's own local service exists, online or offline. */
 	corsia_omlx?: boolean;
