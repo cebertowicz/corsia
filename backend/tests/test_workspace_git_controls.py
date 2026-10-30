@@ -74,7 +74,7 @@ def test_nested_git_clean_filter_with_fsmonitor_disabled(tmp_path):
 
 def test_reaper_keeps_gitlinks_without_running_nested_git(tmp_path):
     from infra.worktree_reaper_checks import _status_verdict
-    from infra.worktree_reaper_probe import status_skip_reason
+    from infra.worktree_reaper_probe import status_skip_reason, worktree_git_env
     from infra.worktree_reaper_salvage import SalvageError, _selected
 
     repo = tmp_path / 'workspace'
@@ -92,15 +92,16 @@ def test_reaper_keeps_gitlinks_without_running_nested_git(tmp_path):
     script.chmod(0o755)
     git(nested, 'config', 'core.fsmonitor', str(script))
     (nested / 'tracked').write_text('changed')
-    assert status_skip_reason(repo) == 'submodule'
+    git_env = worktree_git_env(repo, repo / '.git', repo)
+    assert status_skip_reason(repo, git_env) == 'submodule'
     assert _status_verdict(None, None, repo, 'submodule', 0, 0) == 'submodule'
     with pytest.raises(SalvageError, match='submodule'):
-        _selected(repo)
+        _selected(repo, git_env)
     assert not marker.exists()
 
 
 def test_reaper_status_survives_a_non_utf8_index_path(tmp_path):
-    from infra.worktree_reaper_checks import _status_reason
+    from infra.worktree_reaper_probe import status_skip_reason, worktree_git_env
 
     repo = tmp_path / 'workspace'
     init(repo)
@@ -113,7 +114,59 @@ def test_reaper_status_survives_a_non_utf8_index_path(tmp_path):
         ['git', 'update-index', '--index-info'], cwd=repo,
         input=f'100644 {blob} 0\t'.encode() + b'\xffname\n', check=True,
     )
-    assert _status_reason(repo, False) == 'dirty'
+    assert status_skip_reason(repo, worktree_git_env(repo, repo / '.git', repo)) == 'dirty'
+
+
+def worktree_with_rewritten_commondir(tmp_path):
+    """Return a repository and worktree whose admin commondir names agent-written config."""
+    repo = tmp_path / 'workspace'
+    init(repo)
+    (repo / '.gitattributes').write_text('tracked filter=demo\n')
+    (repo / 'tracked').write_text('one')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'root')
+    worktree = tmp_path / 'worktree'
+    git(repo, 'worktree', 'add', '-q', str(worktree))
+    admin = Path(git(worktree, 'rev-parse', '--absolute-git-dir').stdout.strip())
+    common = tmp_path / 'agent-common'
+    shutil.copytree(repo / '.git', common)
+    marker = tmp_path / 'ran'
+    monitor, clean = tmp_path / 'monitor', tmp_path / 'clean'
+    monitor.write_text(f'#!/bin/sh\ntouch {shlex.quote(str(marker))}\n')
+    clean.write_text(f'#!/bin/sh\ntouch {shlex.quote(str(marker))}\ncat\n')
+    monitor.chmod(0o755)
+    clean.chmod(0o755)
+    git(common.parent, 'config', '--file', str(common / 'config'), 'core.fsmonitor', str(monitor))
+    git(common.parent, 'config', '--file', str(common / 'config'), 'filter.demo.clean', str(clean))
+    (admin / 'commondir').write_text(f'{common}\n')
+    git(worktree, 'status', '--porcelain')
+    assert marker.exists(), 'control did not exercise the rewritten commondir'
+    marker.unlink()
+    os.utime(worktree / 'tracked', (1, 1))
+    return repo, worktree, admin, marker
+
+
+def test_reaper_reads_ignore_a_rewritten_commondir(tmp_path):
+    from infra.worktree_reaper_probe import status_skip_reason, worktree_git_env
+    from infra.worktree_reaper_salvage import salvage_worktree
+
+    repo, worktree, admin, marker = worktree_with_rewritten_commondir(tmp_path)
+    assert status_skip_reason(worktree, worktree_git_env(repo, admin, worktree)) is None
+    (worktree / 'tracked').write_text('two')
+    os.utime(worktree / 'tracked', (2, 2))
+    (worktree / 'notes').write_text('keep')
+    copied = salvage_worktree(repo, worktree, admin, 'worktree', 0, worktree)
+    assert (copied / 'files' / 'notes').read_text() == 'keep'
+    assert (copied / 'changes.patch').exists()
+    assert not marker.exists()
+
+
+def test_reaper_removal_child_status_ignores_a_rewritten_commondir(tmp_path):
+    from infra.worktree_reaper_remove import remove_worktree
+
+    repo, worktree, _admin, marker = worktree_with_rewritten_commondir(tmp_path)
+    assert remove_worktree(repo, worktree, 'worktree') == 'removed'
+    assert not marker.exists()
 
 
 def test_workspace_git_rules_and_no_repository(tmp_path):

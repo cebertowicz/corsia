@@ -24,6 +24,7 @@ from infra.worktree_reaper_probe import (
     list_worktrees,
     open_pr_branches,
     status_skip_reason,
+    worktree_git_env,
 )
 from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
 
@@ -101,9 +102,10 @@ class CheckContext:
         return None
 
 
-def _status_reason(path: Path, merged: bool) -> str | None:
+def _status_reason(ctx: CheckContext, candidate: Candidate, merged: bool) -> str | None:
+    git_env = worktree_git_env(ctx.repo, candidate.admin, candidate.path)
     try:
-        return status_skip_reason(path, tracked_only=merged)
+        return status_skip_reason(candidate.path, git_env, tracked_only=merged)
     except ReaperGitError:
         return "status_error"
 
@@ -162,7 +164,7 @@ def candidate_verdict(
     ):
         return "recent"
     verdict = _status_verdict(
-        ctx, candidate.entry, candidate.path, _status_reason(candidate.path, merged),
+        ctx, candidate.entry, candidate.path, _status_reason(ctx, candidate, merged),
         candidate.idle_since, threshold_seconds,
     )
     if isinstance(verdict, str):
@@ -213,7 +215,7 @@ def recheck_before_removal(
         except ReaperGitError:
             return "status_error"
     verdict = _status_verdict(
-        ctx, entry, candidate.path, _status_reason(candidate.path, merged), idle,
+        ctx, entry, candidate.path, _status_reason(ctx, candidate, merged), idle,
         threshold_seconds,
     )
     if isinstance(verdict, str):
