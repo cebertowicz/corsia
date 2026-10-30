@@ -184,7 +184,9 @@ class TestSelfRestartEndpoint:
 
         assert response.status_code == 200
         assert response.json()["operation_id"] == operation_id
-        run_in_db.assert_awaited_once()
+        from automation import self_restart
+
+        assert sum(call.args[0] is self_restart.try_acquire_steering for call in run_in_db.await_args_list) == 1
         assert _rows(
             "SELECT id, status, phase FROM self_restart_requests WHERE id=?",
             (operation_id,),
@@ -913,7 +915,7 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
 
 
 async def test_interrupted_update_startup_proves_the_previous_version_is_running(
-    isolated_db, monkeypatch
+    isolated_db, monkeypatch, tmp_path
 ):
     """A proven rollback waits for the harness before it schedules its notice."""
     from automation import restart, restart_startup, update_failure_notice
@@ -928,7 +930,7 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
     monkeypatch.setattr(restart_startup, "drive_startup_continuity", AsyncMock())
     monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
     monkeypatch.setattr(
-        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+        "infra.platform_paths.app_bundle_root", lambda: tmp_path / "CORSIA.app"
     )
     rid = sr.try_acquire(
         "t-1", "steve", "oldsha", "dev", "update",
@@ -1025,7 +1027,7 @@ def test_packaged_update_waits_for_the_post_swap_shell_to_confirm_health(
     ],
 )
 def test_packaged_update_with_an_unverifiable_version_fails_closed(
-    isolated_db, monkeypatch, target_version, running_version, reason,
+    isolated_db, monkeypatch, tmp_path, target_version, running_version, reason,
 ):
     """A packaged bundle must prove its stamped target before it can complete."""
     from automation import restart_startup
@@ -1033,7 +1035,7 @@ def test_packaged_update_with_an_unverifiable_version_fails_closed(
 
     monkeypatch.setattr("infra.build_info.app_version", lambda: running_version)
     monkeypatch.setattr(
-        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+        "infra.platform_paths.app_bundle_root", lambda: tmp_path / "CORSIA.app"
     )
     rid = sr.try_acquire(
         "t-1", "steve", "oldsha", "dev", "update",

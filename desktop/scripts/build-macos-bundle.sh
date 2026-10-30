@@ -217,6 +217,9 @@ install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
   "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
 "$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
 "$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"
+# Seal the finished source build so ServiceManagement can register its agent.
+# This uses no certificate; release signing replaces the ad-hoc signature later.
+"$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

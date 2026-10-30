@@ -1933,6 +1933,26 @@ print_backend_status
     assert "Process: legacy process PID 4321" in result.stdout
 
 
+def test_backend_status_reports_source_and_frontend_dirty_states() -> None:
+    result = _run_bash(
+        """
+    ok() { :; }
+    fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+    BACKEND_PORT=9999
+    source scripts/corsia.d/runtime.sh
+    curl() {
+        printf '%s' '{"frontend":{"full_hash":"abc123","dirty":true},"backend":{"full_hash":"abc123","dirty":true,"current_head":{"full_hash":"abc123","dirty":false}}}'
+    }
+    service_managed() { return 1; }
+    backend_pids() { :; }
+    print_backend_status
+    """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Dirty state: backend dirty, frontend dirty, checkout clean" in result.stdout
+
+
 def test_backend_status_rejects_mixed_runtime_revisions() -> None:
     result = _run_bash(
         """
