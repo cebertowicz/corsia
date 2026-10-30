@@ -18,6 +18,7 @@ from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from core.workflow_verdict_rules import Evaluation, Verdict
 from core.workflow_verdict_types import split_subject
 from infra.outcome_events import record_outcome_event
+from infra.send_types import SendRejected
 from tools.workflow_task_fields import version_short_hash
 
 # Calibration enables this only in a later slice. A code constant keeps production evaluation
@@ -79,6 +80,8 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
                         {"subject": plan.subject, "verdict": verdict.word, "reason": verdict.reason},
                         message_id=f"verdict:wake:{plan.subject}", db=connection,
                     )
-                except ValueError:  # an unavailable owner: the verdict stays recorded, with no wake
-                    logger.warning("verdict_wake: owner {} unavailable for {}", evaluation.owner, plan.subject)
+                # An owner gone, being deleted, or whose model can't take input refuses only its own wake: the
+                # savepoint rolls that back and the verdict stays recorded, so one owner never undoes the batch.
+                except (ValueError, SendRejected) as refused:
+                    logger.warning("verdict_wake: owner {} refused for {}: {}", evaluation.owner, plan.subject, refused)
     return recorded

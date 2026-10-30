@@ -41,7 +41,7 @@ from core.workspace_layout import thread_tray_owners
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
 from tools.filesystem_gate import join_and_resolve
 
-SENT_BACK, WITHOUT_RESTART = "sent_back", "without_restart"
+SENT_BACK, RESTARTED = "sent_back", "restarted"
 OBSERVED = "observed"  # both measures are read straight from the plan: a row fact, not an owner's label
 WITH, WITHOUT = "with", "without"
 NO_STEP = "none"
@@ -134,7 +134,7 @@ def _kpi_rows(sent_back: bool, restarted: bool, at: str) -> dict[str, tuple[KpiR
     def pair(value: bool) -> tuple[KpiRow, ...]:
         return KpiRow("num", OBSERVED, float(value), at), KpiRow("den", OBSERVED, 1.0, at)
 
-    return {SENT_BACK: pair(sent_back), WITHOUT_RESTART: pair(not restarted)}
+    return {SENT_BACK: pair(sent_back), RESTARTED: pair(restarted)}
 
 
 def read_arms(db: sqlite3.Connection, open_trial: OpenTrial) -> Arms:
@@ -177,6 +177,8 @@ def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workfl
     Mental model, "What decides one lesson": the workflow owner's declared deciding measures (at most two,
     fixed before the trial starts) decide when there are any; otherwise sent back and finished without a
     restart decide. Cost only breaks ties. Corrections are too rare to decide one trial, so they are not here.
+    Finished without a restart is read as its complement, the restarted share, so its margin is a quarter of
+    the share that went wrong, as for sent back, not of a share near 1 (DECISION-LOG 2026-10-30).
     """
     declared: tuple[PlannedMeasure, ...] = ()
     refusals, minimum = (), DEFAULT_MINIMUM
@@ -187,7 +189,7 @@ def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workfl
     role = "shown" if any(measure.role == "quality" for measure in declared) else "quality"
     measures = (*declared,
                 PlannedMeasure(SENT_BACK, role, "lower", "kpi", 0, floor=CORRECTION_FLOOR),
-                PlannedMeasure(WITHOUT_RESTART, role, "higher", "kpi", 0, floor=CORRECTION_FLOOR),
+                PlannedMeasure(RESTARTED, role, "lower", "kpi", 0, floor=CORRECTION_FLOOR),
                 PlannedMeasure(COST, "spend", "lower", "builtin", 0))
     subject = open_trial.subject
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
