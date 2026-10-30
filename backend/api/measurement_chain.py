@@ -16,7 +16,7 @@ accept-with-follow-up successor is new work and does not pull in its source.
 
 from __future__ import annotations
 
-from plans.public import delegation_edge_sql, newest_attachment_sql
+from plans.public import TERMINAL_STATES, delegation_edge_sql, newest_attachment_sql
 
 
 def _walk(attempts: str, chain: str, attempt_roots: str, chain_roots: str, stops: str) -> str:
@@ -58,7 +58,9 @@ def chain_ctes(*, only_tasks: bool = False, seeded: bool = False) -> str:
     outcomes (failed, closed, corrected, or accepted outside the scope), that no accepted task's chain reaches
     and that were not sent back for a revision, are also walked as ``seed_chain(task_id, node_id, plan_id)``
     by the same recursion, each as ``seeds(task_id, settled_at)`` (its first terminal time, the cut-off a
-    caller reads its usage to). A seed's walk stops at accepted tasks and at other seeds' attempts; the accepted
+    caller reads its usage to, from the first acceptance for an accepted one). Whether a task is reached is read by
+    walking up from it to its first accepted attempt (through parents and delegating nodes), so it never depends on
+    which tasks are in ``:task_ids``. A seed's walk stops at accepted tasks and at other seeds' attempts; the accepted
     walk is unchanged, since seeds are only nodes it does not reach.
     """
     seed = "AND a.task_id IN (SELECT value FROM json_each(:task_ids))" if only_tasks else ""
@@ -70,14 +72,30 @@ def chain_ctes(*, only_tasks: bool = False, seeded: bool = False) -> str:
         "SELECT node_id FROM attempts")
     if not seeded:
         return accepted
-    return accepted + """
-        , seeds(task_id, settled_at) AS (
-          SELECT n.id, COALESCE((SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.node_id=n.id AND e.new_state=n.state), n.updated_at)
+    terminal = ",".join(f"'{state}'" for state in sorted(TERMINAL_STATES))
+    return accepted + f"""
+        , seed_candidates(task_id, settled_at) AS (
+          SELECT n.id, COALESCE((SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.node_id=n.id
+            AND (e.new_state=n.state OR (n.state IN ('accepted','accepted_with_followup')
+              AND e.new_state IN ('accepted','accepted_with_followup')))), n.updated_at)
           FROM plan_nodes n WHERE n.id IN (SELECT value FROM json_each(:task_ids))
-            AND n.state IN ('accepted','accepted_with_followup','failed','closed')
-            AND n.id NOT IN (SELECT id FROM outcome_rows) AND n.id NOT IN (SELECT node_id FROM chain)
+            AND n.state IN ({terminal}) AND n.id NOT IN (SELECT id FROM outcome_rows)
             AND NOT EXISTS (SELECT 1 FROM plan_nodes r WHERE r.follow_up_of=n.id
               AND EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=r.id AND e.event='revision_created'))
+        ), above(task_id, node_id) AS (
+          SELECT task_id, task_id FROM seed_candidates
+          UNION
+          SELECT a.task_id, c.parent_id FROM above a JOIN plan_nodes c ON c.id=a.node_id
+          WHERE c.parent_id IS NOT NULL AND a.node_id NOT IN (SELECT node_id FROM attempts)
+          UNION
+          SELECT a.task_id, d.id FROM above a JOIN plan_nodes c ON c.id=a.node_id AND c.parent_id IS NULL
+          CROSS JOIN plans p ON p.id=c.plan_id
+          CROSS JOIN plan_nodes d ON d.id={newest_attachment_sql('p')} AND d.spawned_thread_id IS NOT NULL
+          WHERE {delegation_edge_sql('d', 'p')} AND a.node_id NOT IN (SELECT node_id FROM attempts)
+        ), seeds(task_id, settled_at) AS (
+          SELECT task_id, settled_at FROM seed_candidates WHERE task_id NOT IN (
+            SELECT a.task_id FROM above a JOIN attempts t ON t.node_id=a.node_id
+            JOIN outcome_rows o ON o.id=t.task_id WHERE o.period IS NOT NULL)
         )""" + _walk(
         "seed_attempts", "seed_chain", "SELECT task_id, task_id FROM seeds",
         "SELECT a.task_id, a.node_id, m.plan_id FROM seed_attempts a JOIN plan_nodes m ON m.id=a.node_id",

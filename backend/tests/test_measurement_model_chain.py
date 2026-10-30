@@ -260,3 +260,36 @@ def test_a_seed_stops_at_another_seeds_attempts(db):
     _call(db, "outer", SONNET)
     _call(db, "inner")
     assert _seeded(db, {"outer", "inner"}) == {"outer": pytest.approx(2), "inner": pytest.approx(4)}
+
+
+def test_whether_a_task_is_a_seed_does_not_depend_on_which_tasks_are_read(db):
+    _node(db, "step")
+    _node(db, "nested", parent="step", state="failed")
+    _fail(db, "nested")
+    _call(db, "step", SONNET)
+    _call(db, "nested")
+    assert _seeded(db, {"nested"}) == {}  # the accepted step's chain holds it, though that step is not read
+    assert _seeded(db, {"step", "nested"}) == {"step": pytest.approx(6)}
+
+
+def test_a_seed_is_reached_through_a_worker_plan_by_the_node_that_delegated_to_it(db):
+    _node(db, "step", worker="w1")
+    _worker(db, "w1", "w1plan", "plan")
+    _attach(db, "step", "w1plan")
+    _node(db, "leaf", "w1plan", state="failed")
+    _fail(db, "leaf")
+    _call(db, "leaf", thread="w1")
+    assert _seeded(db, {"leaf"}) == {}
+
+
+def test_a_seed_accepted_then_accepted_with_followup_is_read_to_its_first_acceptance(db):
+    _node(db, "kept", state="accepted_with_followup", at=None)
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+                   "VALUES ('fix-kept','kept','test','correction_created',?)", (BEFORE,))
+        for state, at in (("accepted", BEFORE), ("accepted_with_followup", SETTLED)):
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES (?,'kept','test',?,'active',?,?)", (f"end-{state}", state, state, at))
+    _call(db, "kept", at="2026-09-29T06:00:00Z")
+    _call(db, "kept", at="2026-09-29T18:00:00Z")  # after the first acceptance, before the later transition
+    assert _seeded(db, {"kept"}) == {"kept": pytest.approx(4)}

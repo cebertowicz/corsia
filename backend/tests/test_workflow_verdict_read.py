@@ -343,6 +343,16 @@ def test_a_nested_failed_phase_run_is_priced_in_the_nested_run_only(db) -> None:
     assert costs["outer"] == pytest.approx(figures["o1"]) and costs["inner"] == pytest.approx(2 * figures["o1"])
 
 
+@pytest.mark.parametrize("outer_state", ["accepted", "active"])
+def test_a_run_nested_under_an_accepted_step_is_unknown_whether_or_not_the_outer_run_is_settled(db, outer_state) -> None:
+    node(db, "outer", kind="phase", state=outer_state)
+    step(db, "o1", "outer", 1)
+    node(db, "inner", kind="phase", workflow="decision-brief", parent="o1", state="failed")
+    step(db, "i1", "inner", 2, state="failed")
+    costs, _ = run_costs(db)
+    assert costs["inner"] is None  # the accepted step's chain holds the inner run's calls
+
+
 def test_phase_runs_price_late_calls_gaps_unpriceable_calls_and_empty_runs(db) -> None:
     node(db, "late", kind="phase", state="failed")
     step(db, "late1", "late", 1, state="failed")
