@@ -25,7 +25,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 **Not sent:**
 
 - **Product analytics.** The server records product events in a local database on your machine (`backend/infra/product_events.py`). The web app includes an analytics library that sends nothing unless both an analytics key and an analytics host are set when the app is built (`frontend/src/lib/product_events.ts`); neither is set by this repository's build and release scripts. `CORSIA_ANALYTICS_DISABLE=1` turns off the local recording too.
-- **Live System notices.** The code can fetch signed notices from this repository, but only with signing keys shipped in the release. At this commit none ship, so the feed is off (`backend/infra/bulletins.py`).
+- **Live System bulletins.** The code can fetch signed notices from this repository, but only with signing keys shipped in the release. At this commit none ship, so the feed is off (`backend/infra/bulletins.py`).
 - **Crash reports.** None are collected.
 
 ## Local only
@@ -34,7 +34,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 
 | | |
 |---|---|
-| Where | One chat, in its model settings; or a whole project |
+| Where | One chat, in its model settings; or a whole project, where the setting is called **Local models only** |
 | Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`); a leased command is a [separate case](host-access.md#approval-modes) |
 | What it allows | Models whose every endpoint is a loopback address on this machine, and models on a server you marked **Trusted device** in its provider settings (the mark is yours to set; it isn't checked). An External endpoint counts as local only with that mark, even if it runs on your machine (`backend/llm/locality.py`) |
 | Inherited by | Every worker the chat starts, and their workers |

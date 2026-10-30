@@ -51,7 +51,7 @@ From Terminal, read-only (desktop app on macOS; see [Data and privacy](data-and-
 
 ```bash
 sqlite3 -readonly "$HOME/Library/Application Support/CORSIA/state/corsia.db" \
-  "SELECT created_at, tool_name, verdict, reason FROM host_access_action_reviews ORDER BY created_at DESC LIMIT 20;"
+  "SELECT created_at, tool_name, redacted_descriptor, verdict, reason FROM host_access_action_reviews ORDER BY created_at DESC LIMIT 20;"
 ```
 
 The last 20 commands reviewed under leases, with each verdict and its reason.

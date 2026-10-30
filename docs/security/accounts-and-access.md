@@ -40,6 +40,7 @@ What an agent can reach through tools:
 | Other conversations | Any conversation's messages by its id, in any project, except an [isolated worker's](untrusted-content.md#isolated-workers) (`backend/tools/query_projects.py`) |
 | Connected apps | Those whose reach includes its project ([Connected apps](connected-apps.md)) |
 | Host access | Only through a reviewed lease ([Host access](host-access.md)) |
+| CORSIA's own API | The CORSIA agent and project conductors only. Their `corsia_api` tool calls API routes inside the server with no token, as the account, and the tool doesn't hold a conductor to its project. Every route is open except a person-only list: sign-in and tokens, host-access approval, stored keys, answering your decisions, naming conductors, account sign-ins, webhooks, and handlers that record you as the actor (`backend/tools/conductor_api_policy.py`) |
 
 ## What a project does and doesn't separate
 
