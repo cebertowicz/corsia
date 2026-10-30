@@ -97,7 +97,10 @@ def signed_in_default(provider: str, *, db=None, models: tuple[str, ...] = ()) -
         if account['state'] != 'signed_in':
             account = set_account_state(account['id'], 'signed_in', expected_revision=account['revision'], db=connection)
         receipt = capture_receipt(provider, account_id=account['id'], db=connection)
-        discovered = {row['id']: {} for row in connection.execute('SELECT id FROM models WHERE harness=?', (provider,))}
+        # An account's discovery is keyed by the model's litellm id, which is the catalog id except for a
+        # row built to mislead; list both so a test row of either kind runs.
+        discovered = {key: {} for row in connection.execute(
+            'SELECT id, litellm_model FROM models WHERE harness=?', (provider,)) for key in (row['id'], row['litellm_model'])}
         discovered.update({model: {} for model in models})
         assert mark_discovery(account['id'], receipt=receipt, status='ready', models=discovered, db=connection)
         connection.commit()

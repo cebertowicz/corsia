@@ -82,7 +82,7 @@ def fenced(payload: object) -> str:
 
 
 @pytest.fixture
-def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
+def world(signed_in_defaults, tmp_path, monkeypatch, _cc_runtime_cleanup):
     """The project, owner, skill, declarations and fake binary; yields its handles."""
     import connections.models as cm
     from automation import script_runner, worker_runner
@@ -120,7 +120,6 @@ def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
     binary = tmp_path / "fake_claude"
     binary.write_text(_FAKE.format(python=sys.executable, reply=str(reply)))
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
     monkeypatch.setattr(cm, "get_connection", lambda provider, db=None: {"config": {"binary": str(binary)}})
     driven: list[str] = []
 

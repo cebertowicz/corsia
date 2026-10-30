@@ -6,6 +6,7 @@ from llm_reviewer_fixtures import (  # noqa: F401
     _disable_analytics,
     _reviewer_catalog,
     _reviewer_model_env,
+    reviewer_accounts,
 )
 
 
@@ -54,6 +55,7 @@ class TestReviewerModelSelection:
         assert model == "claude-opus-4-8"
 
 
+@pytest.mark.usefixtures('reviewer_accounts')
 class TestRetryLogic:
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")
     @patch("reviewer.reviewer_runner.set_failure")

@@ -96,6 +96,13 @@ async def test_codex_review_records_confinement_before_first_input(child_db, nat
     from subagents import codex_confinement
     monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock())
     _seed_parent(child_db)
+    # A Codex review runs on a signed-in Codex Default that lists its model.
+    from connections.models import upsert_connection
+    from vendor_account_fixtures import signed_in_default
+
+    upsert_connection(type="cli", provider="codex", status="available",
+                      config={"binary": "/bin/synthetic"}, db=child_db)
+    signed_in_default("codex", db=child_db, models=("codex/gpt-5-codex",))
     receipt = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
         {"model": "codex/gpt-5-codex", "confinement": "untrusted", "read_paths": [reviewed_dir]},
