@@ -27,6 +27,28 @@ function press(input: HTMLTextAreaElement, init: KeyboardEventInit) {
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); vi.unstubAllGlobals(); });
 
 describe('CommentThread reply field', () => {
+	it('replies to an opened resolved thread without losing focus or caret', async () => {
+		host = document.createElement('div'); document.body.appendChild(host);
+		const onReply = vi.fn().mockResolvedValue(undefined);
+		component = mount(CommentThread, { target: host, props: { comment: { ...comment, resolved: true }, onReply, flat: true } });
+		flushSync();
+		host.querySelector<HTMLButtonElement>('.ct-res-head')!.click(); flushSync();
+		const input = openReply(); expect(input).toBeTruthy(); input.focus();
+		type(input, 'Hello'); input.setSelectionRange(2, 2);
+		expect(document.activeElement).toBe(input);
+		expect(input.selectionStart).toBe(2);
+		press(input, {});
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Hello'));
+		expect(host.querySelector('.ct-res-head')).toBeTruthy();
+	});
+
+	it('hides the reply field on an opened read-only resolved thread', () => {
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { comment: { ...comment, resolved: true }, readOnly: true, flat: true } });
+		flushSync(); host.querySelector<HTMLButtonElement>('.ct-res-head')!.click(); flushSync();
+		expect(host.querySelector('.ct-input')).toBeNull();
+	});
+
 	it('is a textarea: a long reply wraps instead of scrolling sideways', () => {
 		render();
 		expect(openReply().tagName).toBe('TEXTAREA');
