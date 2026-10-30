@@ -8,10 +8,11 @@ afterEach(() => { token.set(null); vi.unstubAllGlobals(); });
 
 it('selects only the refused model named by the setup flight', async () => {
  let model: string | null = 'owner/setup-model';
+ let state = 'start_failed';
  token.set('test-session');
  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
   const url = String(input);
-  if (url === '/api/providers/local/setup') return json({ model });
+  if (url === '/api/providers/local/setup') return json({ model, state });
   if (url.includes('/network-servers/own/models')) return json({ loaded: [], available: [
    { id: 'other-model', pinned: true, keep_line: 'Other refusal' },
    { id: 'setup-model', pinned: true, keep_line: 'Setup refusal' },
@@ -22,6 +23,13 @@ it('selects only the refused model named by the setup flight', async () => {
  }));
  await refreshSetupLocalModels();
  expect(get(localLoadRefusal)?.model.id).toBe('setup-model');
+ state = 'failed';
+ await refreshSetupLocalModels();
+ expect(get(localLoadRefusal)).toBeUndefined();
+ state = 'setup_failed';
+ await refreshSetupLocalModels();
+ expect(get(localLoadRefusal)).toBeUndefined();
+ state = 'start_failed';
  model = null;
  await refreshSetupLocalModels();
  expect(get(localLoadRefusal)).toBeUndefined();

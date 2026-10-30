@@ -13,7 +13,7 @@ async function settledSetup(page: Page) {
 test('@surface:first-run restart offers retry for the downloaded model without a refusal line', async ({ page }, testInfo) => {
  await page.route('**/api/setup/progress', route => route.fulfill({ json: { setup_completed: false, status: { local_started: true, local_eligible: true, macos_supported: true } } }));
  await page.route('**/api/providers/sources**', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'stopped' }] } }));
- await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { state: 'ready', model: 'owner/local-model' } }));
+ await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { state: 'start_failed', model: 'owner/local-model' } }));
  await page.route('**/api/models?thread_id=**', route => route.fulfill({ json: { models: [] } }));
  await page.route('**/api/settings/providers**', route => route.fulfill({ json: { providers: [{ name: 'omlx', type: 'network' }] } }));
  await page.route('**/api/settings/network-servers**', route => {
@@ -32,11 +32,29 @@ test('@surface:first-run restart offers retry for the downloaded model without a
  await expect(page.getByText('Load failed', { exact: true })).toBeVisible();
 });
 
+test('@surface:first-run retry resumes a partial download even when listed as available', async ({ page }) => {
+ let loads = 0;
+ page.on('request', request => { if (request.url().includes('/models/load')) loads++; });
+ await page.route('**/api/setup/progress', route => route.fulfill({ json: { setup_completed: false, status: { local_started: true, local_eligible: true, macos_supported: true } } }));
+ await page.route('**/api/providers/sources**', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'failed', reason_code: 'not_running' }] } }));
+ await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { state: 'failed', model: 'owner/local-model' } }));
+ await page.route('**/api/models?thread_id=**', route => route.fulfill({ json: { models: [] } }));
+ await page.route('**/api/settings/providers**', route => route.fulfill({ json: { providers: [{ name: 'omlx', type: 'network' }] } }));
+ await page.route('**/api/settings/network-servers**', route => route.fulfill({ json: route.request().url().includes('/models') ? { loaded: [], available: [{ id: 'local-model', pinned: true, starting: false }] } : { servers: [{ id: 'own', provider: 'omlx', corsia_omlx: true }] } }));
+ await page.goto('/?token=' + encodeURIComponent(TEST_SESSION_TOKEN));
+ await expect(page.locator('[data-setup-page="models"]')).toBeVisible();
+ await expect(page.getByText('Downloaded', { exact: true })).toHaveCount(0);
+ const request = page.waitForRequest(req => req.url().includes('/api/providers/local/setup') && req.method() === 'POST');
+ await page.getByRole('button', { name: 'Retry' }).click();
+ await request;
+ expect(loads).toBe(0);
+});
+
 test('@surface:first-run setup shows a local load refusal and retries', async ({ page }, testInfo) => {
  const line = 'Not loaded: needs 12 GB, 8 GB free for a model now';
  const retryError = 'Load refused by server';
  let attempts = 0;
- await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { model: 'owner/local-model' } }));
+ await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { state: 'start_failed', model: 'owner/local-model' } }));
  await page.route('**/api/models?thread_id=**', route => route.fulfill({ json: { models: attempts >= 2 ? [{ id: 'local-model', name: 'local-model', connection: 'omlx', status: 'ready' }] : [] } }));
  await page.route('**/api/setup/progress', route => route.fulfill({ json: { setup_completed: false, status: { local_started: true, local_eligible: true, macos_supported: true } } }));
  await page.route('**/api/providers/sources**', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'stopped' }] } }));

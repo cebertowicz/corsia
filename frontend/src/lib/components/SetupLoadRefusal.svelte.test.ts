@@ -22,7 +22,7 @@ it('shows the existing refusal and keeps it visible when another load is refused
   const url = String(input);
   if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_started: true, local_eligible: true, macos_supported: true } });
   if (url.includes('/sources')) return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'stopped' }] });
-  if (url === '/api/providers/local/setup') return json({ model: 'owner/local-model' });
+  if (url === '/api/providers/local/setup') return json({ state: 'start_failed', model: 'owner/local-model' });
   if (url.includes('/host-resources/check-load')) return json({ ok: false, free_gb: 8, after_load_gb: -4, safe_reserve_gb: 4, warning: 'Memory warning' });
   if (url.includes('/network-servers/own/models/load')) { loads.push(String(init?.body)); refused = true; return json({ detail: 'Retry failed' }, 500); }
   if (url.includes('/network-servers/own/models')) return json({ loaded: [], available: [{ id: 'local-model', size_bytes: 12 * 1024 ** 3, pinned: true, starting: false, keep_line: refused ? null : line }] });

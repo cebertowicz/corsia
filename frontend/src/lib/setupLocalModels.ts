@@ -46,7 +46,7 @@ export async function refreshSetupLocalModels(): Promise<void> {
  const session = get(token);
  const flight = session ? await fetch('/api/providers/local/setup', { headers: { Authorization: `Bearer ${session}` } }).then((r) => r.ok ? r.json() : null).catch(() => null) : null;
  // Mirrors LocalModel.model: oMLX identifies a repository by its final component.
- setupModelId.set(typeof flight?.model === 'string' ? flight.model.split('/').pop() ?? null : null);
+ setupModelId.set(flight?.state === 'start_failed' && typeof flight.model === 'string' ? flight.model.split('/').pop() ?? null : null);
  await Promise.all([loadNetworkServers(), loadProviders()]);
  const server = get(networkServers).find((item) => item.corsia_omlx);
  const provider = get(providers).find((item) => item.name === 'omlx');
