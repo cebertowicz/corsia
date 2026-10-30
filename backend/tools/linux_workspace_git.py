@@ -61,12 +61,16 @@ def prepare_workspace_git(workspace: Path | None) -> tuple[Path, ...]:
     doesn't happen (an enclosing repository, or init fails) it makes an empty ``.git`` instead.
     A git dir without ``HEAD`` — that empty fallback, or a marker pointing nowhere — gets no
     placeholders, so the mount plan freezes just that directory.
-    No Git process runs when ``.git`` exists. Existing files are never overwritten; a write
+    A symlinked ``.git`` refuses the launch before any Git runs. No Git process runs when
+    ``.git`` exists. Existing files are never overwritten; a write
     that fails raises, so a command never runs with a control path open.
     """
     paths = workspace_git_paths(workspace)
     if not paths:
         return paths
+    if paths[0].is_symlink():
+        # The sandbox mounts the link's target, so a shell could swap the link itself for a planted repository.
+        raise _refuse(paths[0], 'it is a symlink. Replace it with the directory it points at, or with a gitdir: file')
     if not os.path.lexists(paths[0]):
         from infra.guidance_git import workspace_repository
 

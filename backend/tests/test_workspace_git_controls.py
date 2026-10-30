@@ -398,6 +398,24 @@ def test_a_symlinked_placeholder_refuses_the_launch(tmp_path, monkeypatch):
     assert str(refused.value).startswith('Couldn\'t protect the workspace Git path')
 
 
+@pytest.mark.parametrize('dangling', [False, True])
+def test_a_symlinked_marker_refuses_the_launch_before_any_git(tmp_path, monkeypatch, dangling):
+    from infra import guidance_git
+
+    target = tmp_path / 'target'
+    init(target)
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    (workspace / '.git').symlink_to(tmp_path / 'gone' if dangling else target / '.git')
+    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
+    monkeypatch.setattr(guidance_git, '_git_bytes', lambda *a, **k: pytest.fail('Git ran on a refused launch'))
+    with pytest.raises(RuntimeError, match='gitdir: file') as refused:
+        launch()
+    assert captured == {}
+    assert (workspace / '.git').is_symlink() and not (target / '.git' / 'commondir').exists()
+    assert str(refused.value).startswith('Couldn\'t protect the workspace Git path')
+
+
 def test_a_marker_that_points_nowhere_writes_no_placeholders(tmp_path, monkeypatch):
     workspace = tmp_path / 'workspace'
     workspace.mkdir()

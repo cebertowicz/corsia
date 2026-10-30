@@ -880,6 +880,19 @@ def test_branch_pin_support_rejects_shared_or_non_files_git_metadata(tmp_path):
     assert "reftable" in branch_pin_support_error(reftable).lower()
 
 
+def test_branch_pin_support_tells_a_local_commondir_from_a_shared_one(tmp_path):
+    from infra.project_repo_policy import branch_pin_support_error
+
+    local = _git_repo(tmp_path / "local")
+    (local / ".git" / "commondir").write_text(".\n", encoding="utf-8")
+    shared = _git_repo(tmp_path / "shared")
+    common = _git_repo(tmp_path / "common")
+    (shared / ".git" / "commondir").write_text(f"{common / '.git'}\n", encoding="utf-8")
+
+    assert branch_pin_support_error(local) is None
+    assert "different Git or common directory" in branch_pin_support_error(shared)
+
+
 def test_unsupported_pinned_repo_quarantines_metadata_when_layout_times_out(
     tmp_path,
     monkeypatch,
