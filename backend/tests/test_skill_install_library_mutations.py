@@ -65,6 +65,8 @@ def test_workflow_install_update_and_local_edits(library_skill):
     second = b"workflow:\n  steps:\n  - id: second\n"
     assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": second}) == ["corsia.yaml"]
     assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": sidecar}) == []
+    invalid = b"workflow:\n  extra: value\n  steps:\n  - id: first\n"
+    assert changed_paths(current, "workflow", skill, "test", {"corsia.yaml": invalid}) == ["corsia.yaml"]
     result = update_skill_bundle(workspace, "workflow", skill, {"corsia.yaml": second}, "test", origin,
                                  author_thread_id="owner", thread_id="owner")
     assert result["outcome"] == "updated"

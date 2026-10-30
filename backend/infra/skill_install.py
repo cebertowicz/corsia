@@ -68,6 +68,32 @@ class InvalidSidecar(ValueError):
     """An upstream sidecar cannot be safely installed."""
 
 
+def upstream_workflow(name: str, files: Mapping[str, bytes]) -> dict[str, Any]:
+    """The one reading of a bundle's ``workflow:`` that install, update and its preview share;
+    ``{}`` when there is none, and ``InvalidSidecar`` when it cannot be installed."""
+    sidecars = [data for path, data in files.items() if path.casefold() == SIDECAR_FILE]
+    if len(sidecars) > 1:
+        raise InvalidSidecar("multiple corsia.yaml files differ only by case")
+    if not sidecars:
+        return {}
+    try:
+        parsed, errors = parse_sidecar(sidecars[0].decode("utf-8"))
+    except UnicodeDecodeError:
+        raise InvalidSidecar("corsia.yaml must be UTF-8") from None
+    if errors or parsed is None:
+        raise InvalidSidecar("; ".join(errors))
+    if "workflow" not in parsed:
+        return {}
+    workflow = {"workflow": parsed["workflow"]}
+    value = parsed["workflow"]
+    unknown = [f"corsia.workflow.{key} is an unknown key" for key in value
+               if key not in {"steps", "result"}] if isinstance(value, dict) else []
+    errors = [*unknown, *validate_workflow(workflow, skill_name=name)]
+    if errors:
+        raise InvalidSidecar("; ".join(errors))
+    return workflow
+
+
 def _saved(saved: SaveResult) -> dict[str, str]:
     """The item's state, then the save's own outcome and line unchanged, as every guidance save reports them.
     Only ``stale`` (a file appeared at the destination) and ``refused`` write nothing."""
@@ -93,25 +119,7 @@ def _bundle_files(
     skill_md = installed_skill_text(name, upstream_skill_md, description)
     if skill_md is None:
         return None
-    workflow: dict[str, Any] = {}
-    sidecars = [data for path, data in other_files.items() if path.casefold() == SIDECAR_FILE]
-    if len(sidecars) > 1:
-        raise InvalidSidecar("multiple corsia.yaml files differ only by case")
-    if sidecars:
-        try:
-            parsed, errors = parse_sidecar(sidecars[0].decode("utf-8"))
-        except UnicodeDecodeError:
-            raise InvalidSidecar("corsia.yaml must be UTF-8") from None
-        if errors or parsed is None:
-            raise InvalidSidecar("; ".join(errors))
-        if "workflow" in parsed:
-            workflow = {"workflow": parsed["workflow"]}
-            value = parsed["workflow"]
-            unknown = [f"corsia.workflow.{key} is an unknown key" for key in value
-                       if key not in {"steps", "result"}] if isinstance(value, dict) else []
-            errors = [*unknown, *validate_workflow(workflow, skill_name=name)]
-            if errors:
-                raise InvalidSidecar("; ".join(errors))
+    workflow = upstream_workflow(name, other_files)
     files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: _sidecar(origin, workflow).encode("utf-8")}
     # Names are compared case-folded: on a case-insensitive volume ``Corsia.yaml`` is the sidecar.
     taken = {relative.casefold() for relative in files}

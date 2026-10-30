@@ -223,6 +223,21 @@ def test_import_keeps_workflow_but_drops_upstream_handler(home):
     assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
 
 
+@pytest.mark.parametrize(("text", "detail"), [
+    ("workflow:\n  extra: value\n", "corsia.workflow.extra is an unknown key"),
+    ("workflow: [first]\n", "corsia.workflow must be a mapping"),
+])
+def test_import_with_an_invalid_workflow_fails_with_its_reason_and_writes_nothing(home, text, detail):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "bad-flow", "bad-flow", "carries a bad workflow")
+    (folder / "corsia.yaml").write_text(text)
+
+    result = _install(home, _ids(_offers(home), "bad-flow"))[0]
+    assert (result["outcome"], result["reason"]) == ("failed", "invalid_sidecar")
+    assert detail in result["detail"]
+    assert not (workspace / "skills" / "bad-flow").exists()
+
+
 def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monkeypatch):
     from infra import skill_install
 

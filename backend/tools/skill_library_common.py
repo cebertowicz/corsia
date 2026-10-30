@@ -126,21 +126,19 @@ def changed_paths(
     current: dict[str, bytes] | None, name: str, skill_md: bytes, description: str, bundle: dict[str, bytes],
 ) -> list[str]:
     """Name visible files whose installed bytes change, arrive, or disappear in an update."""
-    from infra.skill_install import installed_skill_text
-
     from core.skill_sidecar import parse_sidecar
+    from infra.skill_install import InvalidSidecar, installed_skill_text, upstream_workflow
 
-    def workflow(data: bytes | None) -> object:
-        if data is None:
-            return None
-        try:
-            parsed, _ = parse_sidecar(data.decode("utf-8"))
-        except UnicodeDecodeError:
-            return None
-        return parsed.get("workflow") if parsed else None
-
+    try:
+        # The write's own reading, so an invalid upstream shows as a change the write then refuses.
+        incoming: object = upstream_workflow(name, bundle).get("workflow")
+    except InvalidSidecar as error:
+        incoming = {"invalid": str(error)}
+    try:
+        installed, _ = parse_sidecar((current or {}).get("corsia.yaml", b"").decode("utf-8"))
+    except UnicodeDecodeError:
+        installed = None
     installed_skill = installed_skill_text(name, skill_md, description)
-    upstream_sidecar = next((data for path, data in bundle.items() if path.casefold() == "corsia.yaml"), None)
     new_files = {"SKILL.md": installed_skill.encode("utf-8") if installed_skill is not None else skill_md,
                  **{path: data for path, data in bundle.items() if path.casefold() != "corsia.yaml"}}
     dropped = (set(current or {}) - set(new_files)) - {"corsia.yaml"}
@@ -148,7 +146,7 @@ def changed_paths(
         path for path, data in new_files.items()
         if current is None or current.get(path) != data
     }
-    if workflow((current or {}).get("corsia.yaml")) != workflow(upstream_sidecar):
+    if (installed or {}).get("workflow") != incoming:
         changed.add("corsia.yaml")
     return sorted(changed | dropped)
 
