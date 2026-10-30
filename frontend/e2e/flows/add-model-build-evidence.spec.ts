@@ -12,7 +12,7 @@ const builds = [
   { name: 'Gemma', repository: 'org/Gemma-oQ4e', download_size_bytes: 20e9, download_size_gb: 20, context_window: 131072, quantization_bits: 4, smarts_level: 4, tokens_per_second: 90, disk: { state: 'ready' }, section: 'faster' },
 ];
 type Scenario = 'loaded' | 'owned' | 'available' | 'downloading' | 'failed' | 'small';
-type Download = { repository: string; name: string; percent: number; failed: boolean; downloaded: boolean } | null;
+type Download = { repository: string; name: string; percent: number; failed: boolean; downloaded: boolean; finishing?: boolean } | null;
 async function fixture(page: Page, state: Scenario) {
   const running = state === 'downloading' || state === 'failed';
   let download: Download = running ? { repository: builds[0].repository, name: builds[0].name, percent: 40, failed: state === 'failed', downloaded: false } : null;
@@ -359,6 +359,64 @@ test('Add model failure, retry, delete and complete journey', async ({ page }, i
 
   const deleteRoute = `DELETE /api/providers/local/downloads/${encodeURIComponent(qwen.repository)}`;
   expect(state.calls).toEqual([deleteRoute, 'POST /api/providers/local/downloads', 'POST /api/providers/local/downloads', deleteRoute, 'POST /api/providers/local/downloads']);
+});
+
+test('Add model finishing sequence', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium-desktop');
+  test.setTimeout(240_000);
+  const [qwen] = builds;
+  const flight = { repository: qwen.repository, name: qwen.name, percent: 40, failed: false, downloaded: false };
+  for (const viewport of [{ name: '1440', width: 1440, height: 900 }, { name: '393', width: 393, height: 852 }]) {
+    for (const theme of ['light', 'dark'] as const) {
+      const context = await browser.newContext({ baseURL: `http://127.0.0.1:${process.env.CORSIA_E2E_FRONTEND_PORT ?? '5178'}`, viewport, colorScheme: theme });
+      const page = await context.newPage();
+      const announce = await liveSocket(page);
+      const state = await fixture(page, 'downloading');
+      await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
+      const card = page.locator('[data-server-card="omlx-local"]');
+      await card.locator('.pr-expand').click();
+      await card.getByRole('button', { name: 'Add model', exact: true }).click();
+      const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+      const gemmaDownload = sheet.getByRole('button', { name: /^Download Gemma oQ4e$/ });
+      const shot = (step: string) => shots ? page.screenshot({ path: `${shots}/finishing-${step}-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' }) : undefined;
+
+      // Downloading: progress and Cancel on the build, the other models wait.
+      await expect(sheet).toContainText('Downloading 40%');
+      await expect(gemmaDownload).toBeDisabled();
+      await shot('1-downloading');
+
+      // Bytes on disk, CORSIA adding it: still in flight, nothing to cancel, the other models still wait.
+      state.setDownload({ ...flight, percent: 100, finishing: true });
+      await announce();
+      await expect(sheet).toContainText('Loading on this computer…');
+      await expect(sheet).toContainText('Qwen3.8 Flash Next is downloading.');
+      await expect(sheet.getByRole('button', { name: /Cancel download/ })).toHaveCount(0);
+      await expect(gemmaDownload).toBeDisabled();
+      await shot('2-finishing');
+
+      // Adding fails: the existing failure row, and the other models can download again.
+      state.setDownload({ ...flight, failed: true, downloaded: true });
+      await announce();
+      await expect(sheet).toContainText('Downloaded, but couldn’t be added. Retry to finish adding it.');
+      await expect(gemmaDownload).toBeEnabled();
+      await shot('3-failed');
+
+      // Retry, finish again, and it is added: on this computer, no Download.
+      await sheet.getByRole('button', { name: /Retry download of Qwen3.8 Flash Next oQ4e-mtp/ }).click();
+      await expect(sheet).toContainText('Downloading 40%');
+      state.setDownload({ ...flight, percent: 100, finishing: true });
+      await announce();
+      await expect(sheet).toContainText('Loading on this computer…');
+      state.finish(qwen.repository);
+      await announce();
+      await expect(sheet).not.toContainText('Loading on this computer…');
+      await expect(sheet).toContainText('on this computer');
+      await expect(sheet.getByRole('button', { name: /^Download Qwen3.8 Flash Next oQ4e-mtp$/ })).toHaveCount(0);
+      await expect(gemmaDownload).toBeEnabled();
+      await shot('4-added');
+      await context.close();
+    }
+  }
 });
 
 test('Add model unknown disk retry', async ({ page }, info) => {
