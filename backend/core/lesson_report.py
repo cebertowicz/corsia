@@ -219,10 +219,10 @@ def detail_request(lesson_id: str | None, version: str | None, cursor: str | Non
 def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[str, Any],
                  reads: list[dict[str, Any]], boundaries: list[dict[str, Any]],
                  deliveries: list[dict[str, Any]], offset: int,
-                 fingerprint: str, query: dict[str, Any], plans: dict[str, FrozenPlan]) -> dict[str, Any]:
+                 fingerprint: str, query: dict[str, Any], trial_plans: dict[str, FrozenPlan]) -> dict[str, Any]:
     """Page references for one exact behavior without expanding the list surface."""
     offers, identity = period["offers"], (row["id"], row["version"])
-    plan = plans.get(row["version"])
+    plan = trial_plans.get(row["version"])
     reviews = [{"kind": "review", "value": review} for review in row["reviews"]]
     delivered = [{"kind": "delivered", "value": receipt} for receipt in deliveries
                  if (receipt["lesson_id"], receipt["behavioral_sha256"]) == identity]
@@ -367,7 +367,7 @@ def read_report(
                            "next_call": "lesson_report(scope=\"all\")"})
             return result
         return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
-                            deliveries=deliveries, offset=offset, fingerprint=fingerprint, query=query, plans=data.get("trial_plans", {}))
+                            deliveries=deliveries, offset=offset, fingerprint=fingerprint, query=query, trial_plans=data.get("trial_plans", {}))
     visible_inventory = _list_inventory(inventory, now, state)
     limit = 5 if preview else 20
     if offset > len(visible_inventory):
