@@ -24,17 +24,29 @@ def test_the_review_label_maps_to_a_gate_event() -> None:
     assert map_github_event("pull_request", _labeled(LABEL_REVIEW)) == "webhook.github.pr_labeled"
 
 
-def test_removing_the_label_is_not_an_event() -> None:
+def test_removing_the_label_is_no_gate_trigger() -> None:
     from events.github_mapper import map_github_event
+    from events.reviewer_route import GATE_TRIGGER_EVENTS
 
-    assert map_github_event("pull_request", {**_labeled(LABEL_REVIEW), "action": "unlabeled"}) is None
+    event = map_github_event("pull_request", {**_labeled(LABEL_REVIEW), "action": "unlabeled"})
+    assert event == "webhook.github.pr_unlabeled" and event not in GATE_TRIGGER_EVENTS
 
 
-def test_any_other_label_stays_unmapped() -> None:
+def test_any_other_label_approves_no_fork_head() -> None:
     from events.github_mapper import map_github_event
+    from events.ingress import handle_event
 
-    assert map_github_event("pull_request", _labeled("bug")) is None
     assert map_github_event("pull_request", {"action": "labeled", "label": None}) is None
+    event = map_github_event("pull_request", _labeled("bug"))
+    assert event == "webhook.github.pr_labeled"
+
+    async def fake_route(internal_event, payload, delivery_id=None):
+        return None
+
+    with patch("events.ingress.route_leg", fake_route), \
+         patch("events.connectors.github_reviewer_fork_hold.approve_labeled_head") as approve:
+        asyncio.run(handle_event(event, _labeled("bug")))
+    approve.assert_not_called()
 
 
 def test_the_label_event_is_a_gate_trigger_that_does_not_wake_the_owner() -> None:

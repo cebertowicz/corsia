@@ -15,7 +15,7 @@ from core.workflow_verdicts import (
     parse_ts,
 )
 from core.workflow_verdict_types import (
-    Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, Verdict, WorkflowHistory,
+    Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, Verdict, WorkflowHistory, subject_of,
 )
 from infra.measure_validation import deciding_refusal
 
@@ -104,7 +104,7 @@ def _validated_confidence(history: WorkflowHistory) -> tuple[float, str | None]:
 
 def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     """Freeze definitions, baseline eligibility, and validated confidence at first use."""
-    subject = f"workflow:{history.ref}@{version}"
+    subject = subject_of("workflow", history.ref, version)
     started = history.first_use(version)
     first_use = parse_ts(started)
     in_force = definitions_in_force(history.definitions, started)
@@ -269,7 +269,7 @@ def compute(snapshot: Snapshot) -> list[Evaluation]:
     now, evaluations = parse_ts(snapshot.now), []
     for history in snapshot.workflows:
         for version in history.versions():
-            subject = f"workflow:{history.ref}@{version}"
+            subject = subject_of("workflow", history.ref, version)
             if (snapshot.subjects is not None and subject not in snapshot.subjects) or subject in snapshot.reached:
                 continue
             existing = snapshot.plans.get(subject)
