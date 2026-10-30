@@ -22,15 +22,14 @@
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
-
-	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
+	import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	/** Image comments (DCOL-FR13.6): the thumbnail heads the list; tags and cards share number, colour, hover and selected-scroll state. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
-		state: SurfaceState;
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing }: {
+		state: CommentSurfaceState;
+		onThreadMissing?: (remaining: string[]) => void;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
 		bounds?: HTMLElement | null;
@@ -136,7 +135,7 @@
 	// What is shown follows `sheet.state`: the surface's own state, or the one a closing sheet still shows through its outro.
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
-		if (showing?.kind === 'thread') return comments.filter((comment) => comment.id === showing.id);
+		if (showing?.kind === 'thread') return comments.filter((comment) => showing.ids ? showing.ids.includes(comment.id) : comment.id === showing.id);
 		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || held.kept(comment) || held.leaving.has(comment.id)));
 		// An image's comments read in number order, like its tags.
 		return image ? [...shown].sort(byNumber) : shown;
@@ -145,7 +144,10 @@
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
-		if (!followed) onClose();
+		if (!followed) {
+			if (surfaceState.ids && onThreadMissing) onThreadMissing(comments.map((comment) => comment.id));
+			else onClose();
+		}
 	});
 	// Where the followed card last sat. A comment that is resolved or has lost its text has no place in the text any more, but its
 	// card stays open there: closing it would take the refusal reason and any reply being typed with it.

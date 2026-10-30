@@ -6,7 +6,7 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 /**
  * The comment margin marker: each marker sits inside the rail the content padding reserves (24px for a fine
  * pointer, 44px otherwise; at phone width the 44px hit box reaches 20px into the text's edge, the text keeping
- * the 24px inset), its whole hit box opens its own thread or list, no two markers overlap, and its
+ * the 24px inset), its whole hit box opens its own threads, no two markers overlap, and its
  * glyph, count and focus ring meet contrast in both themes. Everything here reads public DOM geometry (rects, elementFromPoint, selection, computed style);
  * nothing reaches into CodeMirror's private fields.
  */
@@ -164,7 +164,7 @@ async function settle(page: Page) {
 		const before = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 		const after = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
-		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running').length, steady: before === after };
+		return { transformed, running: document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length, steady: before === after };
 	}), { message: 'setup: the canvas is loaded, still and untransformed' }).toEqual({ transformed: [], running: 0, steady: true });
 }
 
@@ -305,9 +305,9 @@ async function probeEveryMarker(page: Page, info: TestInfo, opened: Opened, them
 			const message = `${label} marker ${keys}: ${name} opens something (hit ${point.hit}, at ${fmt(point.x)},${fmt(point.y)})`;
 			await expect.poll(() => surfaceOpen(page, opened.ids).then((s) => s.drawer || s.cards.length > 0), { message }).toBe(true);
 			const surface = await surfaceOpen(page, opened.ids);
-			if (ids.length === 1) expect.soft(surface.cards, `${label} marker ${keys}: ${name} opens its thread`).toContain(ids[0]);
-			else expect.soft(surface.drawer, `${label} marker ${keys}: ${name} opens the list`).toBe(true);
-			opens.push(`${name}:${ids.length === 1 ? surface.cards.includes(ids[0]) : surface.drawer}`);
+			expect.soft(surface.cards.sort(), `${label} marker ${keys}: ${name} opens its threads`).toEqual([...ids].sort());
+			expect.soft(surface.drawer, `${label} marker ${keys}: no drawer`).toBe(false);
+			opens.push(`${name}:${ids.every((id) => surface.cards.includes(id))}`);
 			await closeSurface(page, layerBefore);
 			current = await reveal(page, index);
 		}
@@ -602,7 +602,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		const count = all.findIndex((marker) => marker.ids.length > 1);
 		await buttons.nth(count).focus();
 		await page.keyboard.press('Enter');
-		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+		await expect.poll(() => surfaceOpen(page, opened.ids).then((s) => s.cards.sort())).toEqual([...all[count].ids].sort());
 		await closeSurface(page);
 		expect(await active(), 'a count marker gets focus back too').toBe(all[count].ids.join(','));
 		// Tab order is document order.
