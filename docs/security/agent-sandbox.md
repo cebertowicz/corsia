@@ -4,7 +4,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 
 **In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. The workspace, not the project, is the boundary.
 
-## Two layers
+## Layers
 
 | Layer | What it covers | Strength | Source |
 |---|---|---|---|
@@ -36,6 +36,7 @@ The project is not a boundary. `backend/tools/filesystem_gate.py` states it in c
 | CORSIA's state folder (database, logs, keys, the agents' browser profile) and its checkout's private files | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
+| Writes to the workspace's Git settings and hooks (`.git/config`, `.git/hooks`), because the server runs Git there outside the sandbox | Operating system for the shell, CORSIA code for file tools |
 | Raw disk devices | Operating system |
 | Reading or signalling processes outside the command's own sandbox (the server, other threads) | Operating system |
 | The clipboard (macOS) | Operating system |

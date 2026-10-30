@@ -4,9 +4,7 @@ The main pages under `docs/`, by topic. Start with the repository [README](../RE
 
 ## Security
 
-What agents can reach, what stops them, how strong each control is, and where it doesn't hold. Start with the overview, then [Known limits](security/limits.md).
-
-The [security model](security/README.md) is the place to start, and it lists every security page.
+What agents can reach, what stops them, how strong each control is, and where it doesn't hold. Start with the [security model](security/README.md), which lists every security page, then [Known limits](security/limits.md).
 
 Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 
