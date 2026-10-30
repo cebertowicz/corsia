@@ -121,6 +121,22 @@ def test_agent_cannot_create_workspace_git_controls_in_a_real_shell(linux_box, m
                          capture_output=True, text=True, timeout=20).stdout.strip() == '1'
 
 
+def test_a_bare_repository_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
+    from infra.guidance_git import workspace_repository
+
+    box = linux_box
+    run = shell_workspace_git_runner(box, monkeypatch)
+    assert run('true').returncode == 0
+    result = run("rm .git/HEAD && mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
+                 "&& printf '[core]\\n\\trepositoryformatversion = 0\\n\\tworktree = .\\n' > config")
+    print(f'plant: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode == 0, result.stderr
+    assert subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=str(box.workspace),
+                          capture_output=True, timeout=20).returncode == 0
+    repo, reason = workspace_repository(box.workspace)
+    assert repo is None and 'bare repository' in reason
+
+
 def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linux_box, monkeypatch):
     """With no repository of its own the workspace gets an empty marker no shell can fill in."""
     box = linux_box

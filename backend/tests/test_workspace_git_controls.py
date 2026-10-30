@@ -382,7 +382,7 @@ def test_a_failed_placeholder_write_refuses_the_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(os, 'open', blocked)
     with pytest.raises(RuntimeError, match='commondir') as refused:
         launch()
-    assert 'Read-only file system' in str(refused.value)
+    assert 'free disk space' in str(refused.value) and 'Read-only file system' not in str(refused.value)
     assert captured == {}
 
 
@@ -395,7 +395,7 @@ def test_a_symlinked_placeholder_refuses_the_launch(tmp_path, monkeypatch):
         launch()
     assert captured == {}
     assert (workspace / '.git' / 'commondir').is_symlink()
-    assert str(refused.value).startswith('Couldn\'t protect the workspace Git path')
+    assert str(refused.value).startswith('Couldn’t protect the workspace Git path')
 
 
 @pytest.mark.parametrize('dangling', [False, True])
@@ -413,10 +413,12 @@ def test_a_symlinked_marker_refuses_the_launch_before_any_git(tmp_path, monkeypa
         launch()
     assert captured == {}
     assert (workspace / '.git').is_symlink() and not (target / '.git' / 'commondir').exists()
-    assert str(refused.value).startswith('Couldn\'t protect the workspace Git path')
+    assert str(refused.value).startswith('Couldn’t protect the workspace Git path')
 
 
 def test_a_marker_that_points_nowhere_writes_no_placeholders(tmp_path, monkeypatch):
+    from tools.linux_sandbox import protected_mounts
+
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
     (workspace / '.git').write_text('not a gitdir pointer\n')
@@ -424,6 +426,52 @@ def test_a_marker_that_points_nowhere_writes_no_placeholders(tmp_path, monkeypat
     launch()
     assert not (workspace / 'commondir').exists() and not (workspace / 'config.worktree').exists()
     assert workspace / '.git' in captured['readonly_overlays']
+    controls = [path for path in workspace_git_paths(workspace)[1:] if path.suffix != '.lock']
+    assert protected_mounts([workspace], [], controls)[workspace] is True
+
+
+def plant_bare_layout(workspace, proof):
+    """Write at the workspace root what makes Git take it for a bare repository, with a filter that runs on add."""
+    (workspace / 'objects').mkdir()
+    (workspace / 'refs').mkdir()
+    (workspace / 'HEAD').write_text('ref: refs/heads/main\n')
+    (workspace / 'config').write_text(
+        '[core]\n\trepositoryformatversion = 0\n\tworktree = .\n'
+        f'[filter "planted"]\n\tclean = "touch {proof}; cat"\n'
+    )
+    (workspace / '.gitattributes').write_text('*.txt filter=planted\n')
+    (workspace / 'a.txt').write_text('x\n')
+
+
+@pytest.mark.parametrize('state', ['deleted HEAD', 'empty marker'])
+def test_a_bare_layout_at_the_workspace_root_is_never_adopted(tmp_path, state):
+    from infra.guidance_git import GitFault, _git, workspace_repository
+
+    workspace = tmp_path / 'workspace'
+    proof = tmp_path / 'filter-ran'
+    if state == 'deleted HEAD':
+        init(workspace)
+        (workspace / '.git' / 'HEAD').unlink()
+    else:
+        (workspace / '.git').mkdir(parents=True)
+    plant_bare_layout(workspace, proof)
+    assert subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=workspace).returncode == 0
+    repo, reason = workspace_repository(workspace)
+    assert repo is None and 'bare repository' in reason
+    with pytest.raises(GitFault, match='bare repository'):
+        _git(workspace, 'add', 'a.txt')
+    assert not proof.exists()
+
+
+def test_a_save_makes_a_real_repository_beside_a_bare_layout(tmp_path):
+    from infra.guidance_git import workspace_repository
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    plant_bare_layout(workspace, tmp_path / 'filter-ran')
+    assert workspace_repository(workspace, create=True) == (workspace.resolve(), None)
+    assert (workspace / '.git' / 'HEAD').is_file()
+    assert workspace_repository(workspace) == (workspace.resolve(), None)
 
 
 def test_a_separate_git_dir_gets_the_placeholders_in_its_metadata_dir(tmp_path, monkeypatch):
