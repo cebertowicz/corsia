@@ -152,64 +152,12 @@ async def test_setup_loads_its_own_model_on_an_empty_seat_past_the_memory_check(
     assert calls["loads"] == ["new-model"]
 
 
-#: oMLX 0.7.1rc1's load route answers 500 with these words when free memory is what's short.
-_OMLX_REFUSALS = (
-    "Cannot load new-model: projected memory 22 GB would exceed the static memory ceiling 20 GB",
-    "Model 'new-model' (22 GB) does not fit under the dynamic memory ceiling (20 GB). Free memory.",
-    "Model 'new-model' ran out of GPU memory while loading: failed. Free memory and retry.",
-)
-#: Its words for a model too big for a ceiling that freeing memory doesn't move.
-_OMLX_TOO_LARGE = (
-    "Model 'new-model' (22 GB) does not fit under the static memory ceiling (20 GB). Use a smaller model.",
-    "Model 'new-model' (22 GB) does not fit under the metal_cap memory ceiling (20 GB). Use a smaller model.",
-    "Model 'new-model' (22 GB) does not fit under the memory ceiling (20 GB). Use a smaller model.",
-)
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("message", _OMLX_REFUSALS)
-async def test_setup_past_the_memory_check_still_hears_omlx_refuse(calls, message) -> None:
-    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["can_load"] = {"ok": False, "free_gb": 4}
-    calls["load"] = {"ok": False, "status": 500, "message": message}
-
-    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
-
-    assert outcome["status"] == "refused" and outcome["verdict"] == "no_memory"
-    # The row keeps its live memory line, the same cause setup reports.
-    assert outcome["line"] and local_keep_loaded.failures("server") == {}
-
-
-@pytest.mark.asyncio
-async def test_omlx_refusing_a_load_the_verdict_passed_is_still_a_memory_refusal(calls) -> None:
-    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["load"] = {"ok": False, "status": 500, "message": _OMLX_REFUSALS[0]}
-
-    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
-
-    assert outcome["status"] == "refused" and outcome["verdict"] == "no_memory"
-    # The live line is silent while the model reads as fitting, so the row needs this one.
-    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
-
-
-@pytest.mark.asyncio
-async def test_omlx_refusing_a_load_beside_a_model_names_that_model(calls, monkeypatch) -> None:
-    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["load"] = {"ok": False, "status": 500, "message": _OMLX_REFUSALS[0]}
-
-    async def loaded(_cfg):
-        return [{"identifier": "other", "size_bytes": 5 * GIB}]
-
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
-
-    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
-
-    assert outcome["verdict"] == "no_room" and outcome["neighbour_id"] == "other"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("message", ("model files are damaged", *_OMLX_TOO_LARGE))
-async def test_setup_past_the_memory_check_keeps_a_load_failure_that_isnt_memory(calls, message) -> None:
+@pytest.mark.parametrize("message", (
+    "model files are damaged",
+    "Cannot load new-model: projected memory 22 GB would exceed the dynamic memory ceiling 20 GB",
+))
+async def test_setup_past_the_memory_check_shows_any_omlx_refusal_as_a_load_failure(calls, message) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
     calls["load"] = {"ok": False, "status": 500, "message": message}
