@@ -22,12 +22,12 @@ flowchart TB
     Q -->|no, eligible| T[Start turn]
     Q -->|no, held| H[Wait for<br/>hold to clear]
     H -->|eligible| T
-    Q -->|yes, apply_now| B[Attempt delivery at<br/>a safe boundary]
-    Q -->|yes, queue_after_turn| W[Remains queued]
+    Q -->|yes,<br/>apply_now| B[Attempt delivery at<br/>a safe boundary]
+    Q -->|yes,<br/>queue_after_turn| W[Remains queued]
     B -->|delivered| T2[Delivered into<br/>running turn]
     B -->|does not fit| W
-    W -->|later apply_now claims prefix| B
-    W -->|eligible after settlement| T
+    W -->|later apply_now<br/>claims prefix| B
+    W -->|eligible after<br/>settlement| T
     T --> F[Finish turn]
     T2 --> F
     F -->|if present| N[Next queued input]
