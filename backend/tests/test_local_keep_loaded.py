@@ -152,11 +152,17 @@ async def test_setup_loads_its_own_model_on_an_empty_seat_past_the_memory_check(
     assert calls["loads"] == ["new-model"]
 
 
-#: oMLX 0.7.1rc1's load route answers 500 with these words for its memory refusals.
+#: oMLX 0.7.1rc1's load route answers 500 with these words when free memory is what's short.
 _OMLX_REFUSALS = (
-    "Cannot load new-model: projected memory 22 GB would exceed the dynamic memory ceiling 20 GB",
-    "Model 'new-model' (22 GB) does not fit under the memory ceiling (20 GB). Use a smaller model.",
+    "Cannot load new-model: projected memory 22 GB would exceed the static memory ceiling 20 GB",
+    "Model 'new-model' (22 GB) does not fit under the dynamic memory ceiling (20 GB). Free memory.",
     "Model 'new-model' ran out of GPU memory while loading: failed. Free memory and retry.",
+)
+#: Its words for a model too big for a ceiling that freeing memory doesn't move.
+_OMLX_TOO_LARGE = (
+    "Model 'new-model' (22 GB) does not fit under the static memory ceiling (20 GB). Use a smaller model.",
+    "Model 'new-model' (22 GB) does not fit under the metal_cap memory ceiling (20 GB). Use a smaller model.",
+    "Model 'new-model' (22 GB) does not fit under the memory ceiling (20 GB). Use a smaller model.",
 )
 
 
@@ -202,14 +208,15 @@ async def test_omlx_refusing_a_load_beside_a_model_names_that_model(calls, monke
 
 
 @pytest.mark.asyncio
-async def test_setup_past_the_memory_check_keeps_a_load_failure_that_isnt_memory(calls) -> None:
+@pytest.mark.parametrize("message", ("model files are damaged", *_OMLX_TOO_LARGE))
+async def test_setup_past_the_memory_check_keeps_a_load_failure_that_isnt_memory(calls, message) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
-    calls["load"] = {"ok": False, "status": 500, "message": "model files are damaged"}
+    calls["load"] = {"ok": False, "status": 500, "message": message}
 
     outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
-    assert outcome == {"status": "failed", "detail": "model files are damaged"}
+    assert outcome == {"status": "failed", "detail": message}
     assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
 
 

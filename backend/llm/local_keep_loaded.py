@@ -21,7 +21,7 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 | doesn't fit now | none (derived live) | not-loaded line, if pinned | none |
 | setup's own model past the verdict on an empty seat | none, unless oMLX refuses it (then as below) | live verdicts | as the load ends |
 | loaded | none | live verdicts | ``model.load.completed`` |
-| oMLX refuses the load for memory, and the row has a live not-loaded line | none (derived live) | not-loaded line | ``model.load.failed`` with ``error`` |
+| oMLX refuses the load for free memory, and the row has a live not-loaded line | none (derived live) | not-loaded line | ``model.load.failed`` with ``error`` |
 | load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
 | person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
 | CORSIA restarts | cleared (memory) | live verdicts only: oMLX reloads pins at start | none |
@@ -126,11 +126,6 @@ def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: 
             "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
-#: The words of oMLX's memory refusals. Its load route answers 500 for every failure, so
-#: only the message tells them apart.
-_OMLX_NO_MEMORY = ("memory ceiling", "out of GPU memory")
-
-
 def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dict | None:
     """The refusal this load gets from the one fit verdict, or None when it fits."""
     others = [int(item.get("size_bytes") or 0) or None for item in loaded]
@@ -143,12 +138,14 @@ def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dic
 
 
 def _failed_load(key: tuple[str, str], result: dict, refusal: dict, not_loaded: str) -> dict:
-    """Report a failed load: ``refusal`` when oMLX refused for memory, else a plain failure.
+    """Report a failed load: ``refusal`` when oMLX refused for free memory, else a plain failure.
 
     A refusal that carries a line leaves the row to its live memory line, as a verdict's does.
     """
+    from llm.providers.omlx_load_refusals import refused_for_free_memory
+
     detail = result.get("message") or "Load failed"
-    no_memory = any(words in detail for words in _OMLX_NO_MEMORY)
+    no_memory = refused_for_free_memory(detail)
     if not (no_memory and refusal["line"]):
         _FAILED[key] = not_loaded
     return refusal if no_memory else {"status": "failed", "detail": detail}
@@ -161,7 +158,7 @@ async def keep_loaded(
 
     Setup's ``force_pin`` pins its one model whatever the verdict, so oMLX loads it unchecked
     at its next start. On an empty seat this load goes the same way: oMLX's memory guard decides,
-    and a model it won't load gets the verdict's refusal. Settings downloads keep the guard.
+    and a model it refuses for free memory gets the verdict's refusal. Settings downloads keep the guard.
     Every outcome is a row state: a guarded pin that does not fit leaves the model downloaded
     and unpinned, while a failed forced pin is visible on the row. A completed download is never
     undone here. ``pin_if_fits=False`` loads without pinning, for a model already the person's.
