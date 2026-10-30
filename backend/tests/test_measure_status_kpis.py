@@ -59,11 +59,16 @@ async def test_kpis_true_returns_each_synced_kpi_current_and_last_complete_week(
 @pytest.mark.asyncio
 async def test_kpis_read_only_the_two_periods_they_return(owner, monkeypatch) -> None:
     seed_kpis(owner)
-    calls = []
+    starts = set()
     real = agent_kpis.evaluate
-    monkeypatch.setattr(agent_kpis, "evaluate", lambda *args, **kwargs: calls.append(args[2:4]) or real(*args, **kwargs))
+
+    def spy(spec, events, start, *args, **kwargs):
+        starts.add(start.date().isoformat())
+        return real(spec, events, start, *args, **kwargs)
+
+    monkeypatch.setattr(agent_kpis, "evaluate", spy)
     await MeasureStatusTool().execute(_thread_id="owner", kpis=True)
-    assert {start.date().isoformat() for start, _ in calls} == {"2026-01-12", "2026-01-19"}
+    assert starts == {"2026-01-12", "2026-01-19"}
 
 
 @pytest.mark.asyncio
