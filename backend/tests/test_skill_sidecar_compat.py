@@ -83,7 +83,7 @@ def test_effective_workflows_from_scanned_sidecar_skills(tmp_path, monkeypatch):
     workflows = _effective(monkeypatch, thread)
 
     assert sorted(workflows) == ["thread-flow"]
-    assert workflows["thread-flow"].required_steps == ("ship",)
+    assert [step["id"] for step in workflows["thread-flow"].steps if step.get("required")] == ["ship"]
     assert workflows["thread-flow"].skill is thread[0]
     assert workflows["thread-flow"].version is None
 
@@ -102,7 +102,27 @@ def test_effective_workflows_follow_a_sidecar_skill(tmp_path, monkeypatch):
 
     workflows = _effective(monkeypatch, scan_scope(tmp_path, "thread", "t"))
 
-    assert workflows["sidecar-flow"].required_steps == ("only",)
+    assert [step["id"] for step in workflows["sidecar-flow"].steps] == ["only"]
+
+
+def test_a_library_origin_key_beside_the_workflow_still_resolves(tmp_path, monkeypatch):
+    """A skill installed from the library records its ``origin:`` beside ``workflow:``."""
+    folder = tmp_path / "skills" / "library-flow"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text(
+        "---\nname: library-flow\ndescription: Library skill.\nmetadata:\n"
+        "  corsia-data: corsia.yaml\n  corsia-format: '1'\n---\n# Library\n",
+        encoding="utf-8",
+    )
+    (folder / "corsia.yaml").write_text(
+        "origin:\n  library: corsia-library\n  name: library-flow\n  version: 1.2.0\n"
+        "workflow:\n  steps:\n    - {id: only, required: true, check: done}\n",
+        encoding="utf-8",
+    )
+
+    workflows = _effective(monkeypatch, scan_scope(tmp_path, "thread", "t"))
+
+    assert [step["id"] for step in workflows["library-flow"].steps] == ["only"]
 
 
 def test_packaged_decision_brief_version_covers_its_recorded_sidecar():

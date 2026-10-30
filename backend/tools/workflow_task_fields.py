@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from core.skill_sidecar import SIDECAR_FILE
-from core.skill_validation import declares_sidecar
+from core.skill_validation import declares_sidecar, parse_frontmatter
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.database import get_db
@@ -20,22 +20,20 @@ from plans.public import PlanInputError
 
 @dataclass(frozen=True)
 class Workflow:
-    """The prompt-relevant subset of one effective workflow skill."""
+    """The plan-relevant subset of one effective workflow skill."""
 
-    required_steps: tuple[str, ...]
+    #: The definition's steps, as written; a ``workflow:`` key makes a step a child phase.
+    steps: tuple[dict[str, Any], ...] = ()
     version: str | None = None
     skill: Any = None
-    #: Step id -> the workflow its ``workflow:`` key names; that step runs as a child phase.
-    nested: dict[str, str] = field(default_factory=dict)
-
-
-_PROMPTING_OPERATIONS = frozenset({"add", "insert", "accept", "accept_with_follow_up", "fail", "close_node"})
+    #: The plain steps a phase add builds its run from (:func:`with_referenced_version`).
+    run: tuple[dict[str, Any], ...] = ()
 
 
 async def operation_workflows(actor, operation: str, params: dict[str, Any]) -> dict[str, Workflow]:
-    """The workflows a plan mutation prompts from; a creation's referenced version is read off the DB."""
+    """The workflows a creation reads; its referenced version and run are read off the DB."""
 
-    if operation not in _PROMPTING_OPERATIONS:
+    if operation not in {"add", "insert"}:
         return {}
 
     def resolve() -> dict[str, Workflow]:
@@ -46,9 +44,7 @@ async def operation_workflows(actor, operation: str, params: dict[str, Any]) -> 
             db.close()
 
     workflows = await run_in_db(resolve)
-    if operation in {"add", "insert"}:
-        workflows = await run_off_db(with_referenced_version, params, workflows)
-    return workflows
+    return await run_off_db(with_referenced_version, params, workflows)
 
 
 def effective_workflows(actor, db) -> dict[str, Workflow]:
@@ -72,31 +68,23 @@ def effective_workflows(actor, db) -> dict[str, Workflow]:
         steps = workflow.get("steps") if isinstance(workflow, dict) else None
         if not isinstance(steps, list):
             continue
-        required = tuple(
-            step["id"]
-            for step in steps
-            if isinstance(step, dict)
-            and step.get("required") is True
-            and isinstance(step.get("id"), str)
-        )
-        nested = {
-            step["id"]: step["workflow"]
-            for step in steps
-            if isinstance(step, dict)
-            and isinstance(step.get("id"), str)
-            and isinstance(step.get("workflow"), str)
-        }
-        workflows[skill.name] = Workflow(required_steps=required, skill=skill, nested=nested)
+        steps = tuple(step for step in steps if isinstance(step, dict) and isinstance(step.get("id"), str))
+        workflows[skill.name] = Workflow(steps=steps, skill=skill)
     return workflows
 
 
 def with_referenced_version(
     params: dict[str, Any], workflows: dict[str, Workflow],
 ) -> dict[str, Workflow]:
-    """Blocking. Resolve the version of only the workflow ``params`` references.
+    """Blocking. Resolve the version of only the workflow ``params`` references, and a phase's run.
 
     Run it off the database connection: an editable skill's version costs Git
-    subprocesses. A creation without a known ``workflow_ref`` runs no Git.
+    subprocesses, and a step's instruction is read from its SKILL.md. A creation
+    without a known ``workflow_ref`` runs no Git.
+
+    Raises:
+        PlanInputError: A step names a workflow that isn't available or already runs
+            above it, or an instruction heading its SKILL.md doesn't have.
     """
 
     reference = params.get("workflow_ref")
@@ -104,7 +92,77 @@ def with_referenced_version(
     workflow = workflows.get(name)
     if workflow is None or workflow.skill is None:
         return workflows
-    return {**workflows, name: replace(workflow, version=_workflow_version(workflow.skill))}
+    run = _run(name, workflows, (name,)) if params.get("kind") == "phase" else ()
+    return {**workflows, name: replace(workflow, version=_workflow_version(workflow.skill), run=run)}
+
+
+def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+    """Blocking. The plain steps a phase running ``name`` is built from, nested runs included."""
+
+    workflow = workflows[name]
+    body: str | None = None
+    run = []
+    for step in workflow.steps:
+        step_id = step["id"]
+        difficulty = step.get("difficulty")
+        built: dict[str, Any] = {
+            "id": step_id, "title": step.get("title"), "check": step.get("check"),
+            "required": step.get("required") is True,
+            "after": [value.strip() for value in step.get("after") or () if isinstance(value, str)],
+            "difficulty": difficulty.get("default") if isinstance(difficulty, dict) else None,
+        }
+        heading = step.get("instruction")
+        if isinstance(heading, str):
+            if body is None:
+                body = _skill_body(name, step_id, workflow.skill)
+            built["instruction"] = _section(body, heading)
+            if built["instruction"] is None:
+                raise PlanInputError(
+                    f"step {step_id} names instruction {heading.strip()!r}, which {name}'s SKILL.md doesn't have"
+                )
+        nested = step.get("workflow")
+        if isinstance(nested, str):
+            if nested in trail:
+                raise PlanInputError(
+                    f"step {step_id} names workflow {nested}, which already runs above it: "
+                    + " -> ".join((*trail, nested))
+                )
+            if nested not in workflows:
+                raise PlanInputError(f"step {step_id} names workflow {nested}, which isn't available here")
+            inner = workflows[nested].skill
+            built.update(
+                workflow=nested, version=None if inner is None else _workflow_version(inner),
+                steps=_run(nested, workflows, (*trail, nested)),
+            )
+        run.append(built)
+    return tuple(run)
+
+
+def _skill_body(name: str, step_id: str, skill) -> str:
+    """The SKILL.md body (frontmatter removed) a step's instruction is copied from."""
+    try:
+        return parse_frontmatter(Path(skill.body_path).read_text(encoding="utf-8"))[1]
+    except (OSError, ValueError) as exc:
+        raise PlanInputError(f"step {step_id}'s instruction can't be read from {name}'s SKILL.md") from exc
+
+
+def _section(body: str, heading: str) -> str | None:
+    """The heading's section: from it through the line before the next heading of its level or higher."""
+    wanted = heading.strip()
+    level = len(wanted) - len(wanted.lstrip("#"))
+    lines = body.splitlines()
+    start, fenced = None, False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        hashes = 0 if fenced else len(line) - len(line.lstrip("#"))
+        if not hashes or line[hashes:hashes + 1] not in (" ", ""):
+            continue
+        if start is None and level and line.strip() == wanted:
+            start = index
+        elif start is not None and hashes <= level:
+            return "\n".join(lines[start:index]).strip()
+    return None if start is None else "\n".join(lines[start:]).strip()
 
 
 def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:
@@ -131,8 +189,16 @@ def creation_version(params: dict[str, Any], workflows: dict[str, Workflow]) -> 
     return None if workflow is None else workflow.version
 
 
+def creation_run(params: dict[str, Any], workflows: dict[str, Workflow]) -> tuple[dict[str, Any], ...]:
+    """The plain steps a phase add builds under itself; empty for anything else."""
+
+    reference = params.get("workflow_ref")
+    workflow = workflows.get(reference.strip()) if isinstance(reference, str) else None
+    return () if workflow is None else workflow.run
+
+
 def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
-    """Prompt, without blocking, for required workflow steps absent from a run."""
+    """Say a creation's workflow version is unknown, or that its workflow already runs above it."""
 
     node = result.get("node")
     if not isinstance(node, dict):
@@ -157,116 +223,6 @@ def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
                 )
                 break
             parent_id = parent["parent_id"]
-    phase = _phase_for_node(db, str(node["id"]))
-    missing = _missing_required_steps(db, phase, workflows)
-    if missing is None:
-        _append_notice(result, _unavailable_workflow_notice(phase))
-    elif missing:
-        _append_notice(
-            result, "Required steps not in this run: " + ", ".join(missing) + "."
-        )
-
-
-def append_close_notice(
-    result: dict,
-    *,
-    node_id: str,
-    db,
-    workflows: dict[str, Workflow],
-) -> None:
-    """Prompt when a run's final task closes before a required step exists.
-
-    A nested phase that closes ends its own run and may end its parent's, so
-    both runs are checked, each line naming its workflow.
-    """
-
-    node = db.execute("SELECT kind,parent_id FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
-    nested = node is not None and node["kind"] == "phase" and node["parent_id"] is not None
-    phases = [_phase_for_node(db, node_id)]
-    if nested:
-        phases.append(_phase_for_node(db, str(node["parent_id"])))
-    notices = []
-    for phase in phases:
-        if phase is None or not _run_steps_are_terminal(db, str(phase["id"])):
-            continue
-        missing = _missing_required_steps(db, phase, workflows)
-        run = f"this {phase['workflow_ref']} run" if nested else "this run"
-        if missing is None:
-            notices.append(_unavailable_workflow_notice(phase))
-        else:
-            notices.extend(f"Required step {step} has no task in {run}." for step in missing)
-    if notices:
-        result["notice"] = " ".join(notices)
-
-
-def _phase_for_node(db, node_id: str):
-    node = db.execute(
-        "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?", (node_id,)
-    ).fetchone()
-    if node is None:
-        return None
-    if node["kind"] == "phase":
-        return node
-    if node["parent_id"] is None:
-        return None
-    phase = db.execute(
-        "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?",
-        (node["parent_id"],),
-    ).fetchone()
-    return phase if phase is not None and phase["kind"] == "phase" else None
-
-
-def _missing_required_steps(
-    db, phase, workflows: dict[str, Workflow],
-) -> tuple[str, ...] | None:
-    """Return missing steps from the currently delivered skill, if available.
-
-    These notices follow the currently delivered skill; recorded workflow fields
-    govern task and phase reporting.
-    """
-
-    if phase is None or not isinstance(phase["workflow_ref"], str):
-        return ()
-    workflow = workflows.get(phase["workflow_ref"])
-    if workflow is None:
-        return None
-    # A step is planned by a task of this run, or, for a step that names a
-    # workflow, by a child phase running exactly that workflow.
-    planned = {
-        row["workflow_step"]
-        for row in db.execute(
-            "SELECT kind,workflow_ref,workflow_step FROM plan_nodes WHERE parent_id=? "
-            "AND archived_at IS NULL AND kind IN ('task','phase')",
-            (phase["id"],),
-        ).fetchall()
-        if isinstance(row["workflow_step"], str)
-        and isinstance(row["workflow_ref"], str)
-        and row["workflow_ref"] == (
-            phase["workflow_ref"] if row["kind"] == "task"
-            else workflow.nested.get(row["workflow_step"])
-        )
-    }
-    return tuple(step for step in workflow.required_steps if step not in planned)
-
-
-def _unavailable_workflow_notice(phase) -> str:
-    return (
-        f"Workflow {phase['workflow_ref']} is no longer available; "
-        "required steps not checked."
-    )
-
-
-def _run_steps_are_terminal(db, phase_id: str) -> bool:
-    """Whether every step of a run has finished: its tasks and its nested phases."""
-    rows = db.execute(
-        "SELECT state,archived_at FROM plan_nodes WHERE parent_id=? AND kind IN ('task','phase')",
-        (phase_id,),
-    ).fetchall()
-    return bool(rows) and all(
-        row["archived_at"] is not None
-        or row["state"] in {"accepted", "accepted_with_followup", "failed", "closed"}
-        for row in rows
-    )
 
 
 def _workflow_version(skill) -> str | None:

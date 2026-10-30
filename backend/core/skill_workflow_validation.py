@@ -17,6 +17,7 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "after",
         "replaces",
         "workflow",
+        "instruction",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
@@ -44,6 +45,8 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
             errors.append(
                 f"{label}.difficulty.default must be one of routine, standard, hard"
             )
+    if "instruction" in step and text_value(step["instruction"]) is None:
+        errors.append(f"{label}.instruction must be a non-empty string")
     quality = step.get("quality")
     if quality is not None and (
         not isinstance(quality, list) or any(not isinstance(item, dict) for item in quality)
