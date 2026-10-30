@@ -220,7 +220,12 @@ def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | N
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
     ]
-    result = git(worktree, ["status", "--porcelain=v2", *files])
+    index = git(worktree, ["ls-files", "--stage", "-z"])
+    if index.returncode != 0:
+        raise ReaperGitError(f"index failed: {git_detail(index)}")
+    if any(record.startswith("160000 ") for record in index.stdout.split("\0")):
+        return "submodule"
+    result = git(worktree, ["status", "--porcelain=v2", "--ignore-submodules=all", *files])
     if result.returncode != 0:
         raise ReaperGitError(f"status failed: {git_detail(result)}")
     reasons: set[str] = set()

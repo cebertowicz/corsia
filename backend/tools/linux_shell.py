@@ -81,6 +81,14 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
     rw = [*get_sandbox_add_dirs_rw(thread_id, policies=policies), *repo_rw]
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
           *agent_tool_ro_dirs(), *repo_ro]
+    workspace_git = path_policy.workspace_git_paths()
+    if workspace_git:
+        marker, config, _lock, _worktree_config, hooks = workspace_git
+        if marker.is_dir() and any(marker.is_relative_to(root) for root in rw):
+            rw.append(marker)
+        elif not marker.is_dir():
+            overlays.append(marker)
+        overlays.extend((config, hooks))
     overlays.extend(WORKSPACE / path for path in GENERATED_WORKSPACE_PROJECTIONS)
     for unsupported in list_unsupported_pinned_repos(policies):
         overlays.extend(unsupported.metadata_roots)
