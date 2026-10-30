@@ -285,13 +285,16 @@ def split_node(
             from plans.boundary_fields import _user_step_description
 
             _user_step_description({"kind": "task", "assignee": "user", "description": description})
+        from plans import workflow_fields
+
+        # A split part of a workflow step is that step, under the step's rules.
+        step = (workflow_fields.same_step_fields(connection, source) if source["workflow_step"] is not None
+                else {field: source[field] for field in workflow_fields.NOT_A_STEP})
         sibling = service._create_node(
             connection, source["plan_id"], kind="task", title=title,
             acceptance_criteria=acceptance_criteria, parent_id=source["parent_id"],
             order_key=source["order_key"] + 1, description=description,
-            workflow_ref=source["workflow_ref"],
-            workflow_version=source["workflow_version"],
-            workflow_step=source["workflow_step"], difficulty=source["difficulty"], size=size,
+            size=size, **step,
             intent=intent,
             intent_node_id=(None if intent is not None else intent_word_store.canonical(connection, source["id"])["id"]),
             checkpoint_exception=False, assignee=source["assignee"],
