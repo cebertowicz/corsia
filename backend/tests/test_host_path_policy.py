@@ -258,7 +258,9 @@ def test_the_api_token_remains_hard_floor_denied(tmp_path) -> None:
 
     assert policy.denial(token, for_write=False)
     assert policy.ordinary_denial(token, for_write=False)
-    assert str(token) not in policy.sandbox_rules()
+    assert "No host-access lease can open it." in policy.ordinary_denial(token, for_write=False)
+    assert policy.hard_floor_denial(token)
+    assert f'(deny file-read* file-write* (subpath "{token}"))' in policy.hard_floor_sandbox_rules()
 
 
 def test_hard_floor_denials_say_that_no_lease_will_open_them(tmp_path) -> None:
@@ -475,7 +477,7 @@ def test_private_roots_stay_protected_mode_only_while_credentials_are_hard_floor
     assert "keys" not in policy.hard_floor_sandbox_rules().replace(
         str(tmp_path / "state" / "keys"), ""
     )
-    assert str(corsia_file.parent) not in policy.hard_floor_sandbox_rules()
+    assert f'(subpath "{corsia_file.parent}")' not in policy.hard_floor_sandbox_rules()
 
 
 def test_rename_of_an_ancestor_is_pinned_for_every_protected_path_in_a_granted_root(

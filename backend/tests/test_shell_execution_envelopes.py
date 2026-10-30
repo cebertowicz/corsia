@@ -295,10 +295,14 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     browser_profile_deny = (
         f'(deny file-read* file-write* (subpath "{state_root.resolve() / "browser-profile"}"))'
     )
+    api_token_deny = (
+        f'(deny file-read* file-write* (subpath "{Path.home().resolve() / ".corsia" / ".api-token"}"))'
+    )
     assert keys_deny in leased
     assert browser_profile_deny in leased
+    assert api_token_deny in leased
     assert f'(subpath "{state_root_text}")' not in leased
-    assert str((Path.home() / ".corsia").resolve(strict=False)) not in leased
+    assert f'(subpath "{(Path.home() / ".corsia").resolve(strict=False)}")' not in leased
     assert (
         str((Path.home() / ".config" / "safehouse").resolve(strict=False)) not in leased
     )
@@ -346,6 +350,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny mach-priv-task-port)",
         keys_deny,
         browser_profile_deny,
+        api_token_deny,
         *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }
     assert denied_lines == expected_denied_lines
