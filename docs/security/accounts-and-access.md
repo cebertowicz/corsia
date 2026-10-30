@@ -24,7 +24,7 @@ An unknown token and an expired one get the same answer, "Invalid or expired ses
 
 `corsia token create` issues an API token for scripts and outside tools. API tokens **don't expire**. Revoke one with `corsia token revoke <label>`. `corsia token list` shows them, without their values.
 
-An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
+An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Those checks are on the API; a leased command is a [separate case](host-access.md#approval-modes). Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
 
 `corsia token create --write-delegate-file` writes the token to `~/.corsia/.api-token`, readable only by your user. Agent shells can't read `~/.corsia` (checked for this page).
 

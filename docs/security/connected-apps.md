@@ -26,7 +26,7 @@ On Linux, CORSIA starts local tool servers only through Agent Safehouse, which i
 | **All projects** | Every agent in every project, and outside projects |
 | **Selected** | Only agents in the projects you pick (and outside projects, if you include them) |
 
-A delegated worker never gets an app its parent can't use. An agent can propose a new app, but it stays **awaiting approval** until you approve it in Settings; an unapproved proposal expires after 7 days (`backend/connections/app_reach.py`). Only a signed-in person can approve an app or change its reach; an agent's attempt is refused and recorded (`backend/api/connected_apps.py`, `connected_app_access.py`).
+A delegated worker never gets an app its parent can't use. An agent can propose a new app, but it stays **awaiting approval** until you approve it in Settings; an unapproved proposal expires after 7 days (`backend/connections/app_reach.py`). Only a signed-in person can approve an app or change its reach; an agent's attempt is refused and recorded (`backend/api/connected_apps.py`, `connected_app_access.py`). That check is on the API; a leased command is a [separate case](host-access.md#approval-modes).
 
 ## Google
 

@@ -35,7 +35,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 | | |
 |---|---|
 | Where | One chat, in its model settings; or a whole project |
-| Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`) |
+| Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`); a leased command is a [separate case](host-access.md#approval-modes) |
 | What it allows | Models whose every endpoint is a loopback address on this machine, and models on a server you marked **Trusted device** in its provider settings (the mark is yours to set; it isn't checked). An External endpoint counts as local only with that mark, even if it runs on your machine (`backend/llm/locality.py`) |
 | Inherited by | Every worker the chat starts, and their workers |
 | Messages to other chats | A Local only chat messaging a chat on a cloud model must confirm the message holds nothing sensitive. The agent makes that confirmation: Model judgment |

@@ -37,6 +37,8 @@ flowchart TB
 
 Two kinds of request always need you, whatever the setting: an exception to a repository's policy (a pinned branch or a protected main checkout), and launching another AI agent command-line tool. Only a signed-in person session can turn Auto-approve or the reviewer fallback on or off, approve, reject or revoke; agent and API tokens can't (`backend/api/system.py`, `backend/infra/auth.py`). One exception: a project's conductor agent may choose which model reviews, but not clear that choice.
 
+These person-only checks are on CORSIA's API. A leased command that writes the database directly doesn't pass through them, so for Auto-approve and every other person-only setting in these pages, the only stop under a lease is the reviewer's instruction not to change access-control settings.
+
 A rejected application is final. There is no button for you to approve it anyway; the agent can apply again with a changed request.
 
 ## What the reviewers are told to block, and what they aren't
