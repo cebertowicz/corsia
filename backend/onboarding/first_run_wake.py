@@ -377,16 +377,16 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
         if facts is None:
             facts = await read_app_facts(model)
         else:
-            live = await _read_facts({"auto_approve": lambda: run_in_db(get_host_access_auto_approve)})
-            facts = {**facts, "bound_model": await run_in_db(_bound_model, model), **live}
-            from onboarding import setup_decisions
+            # The snapshot predates the person's choices: re-read the Auto-approve switch they can change.
+            facts = {**facts, "bound_model": await run_in_db(_bound_model, model),
+                     **await _read_facts({"auto_approve": lambda: run_in_db(get_host_access_auto_approve)})}
+            from onboarding import setup_decisions  # consent names the provider picked after setup
             harness_ready = facts.get("harness_ready", [])
             ready = {"claude-code" if source == "claude_code" else source
                      for source in harness_ready} if isinstance(harness_ready, list) else set()
             setup = facts.get("setup")
             cached_decisions = setup.get("setup_decisions") if isinstance(setup, dict) else None
-            # An unavailable marker stays as it is: it sends the agent to the live read, and a
-            # partial list beside it would pass for the complete one.
+            # An unavailable marker stays as it is: a partial list beside it would pass for the complete one.
             if isinstance(cached_decisions, list):
                 card = await run_in_db(setup_decisions.import_card, model, ready)
                 decisions = [item for item in cached_decisions if item.get("title") != IMPORT_DECISION_TITLE]

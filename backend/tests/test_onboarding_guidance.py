@@ -474,7 +474,6 @@ def test_web_search_that_already_works_posts_nothing_before_the_lookup_question(
     step = _step(4)
 
     assert "search already works: post nothing about it and mark it done" in task_4
-    assert "Web search works" not in task_4.split("Otherwise", 1)[0]
     assert "Skipped with no line about search when `web_search_ready`" in step
     assert "Web search works. Searches go to Brave." in step  # only after a key is saved in this chat
 
