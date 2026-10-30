@@ -21,7 +21,7 @@ from typing import IO
 from uuid import uuid4
 
 from core.workspace_scaffolding import atomic_rename_noreplace_at
-from tools.host_path_policy import skip_credential_roots
+from tools.host_path_policy import credential_paths_beneath
 
 
 class FilesystemBindingError(PermissionError):
@@ -595,6 +595,7 @@ def _walk_bound_directory(
     relative_root: Path,
     *,
     skip_directory: Callable[[Path], bool],
+    refused: frozenset[Path],
     take_entry: Callable[[], bool] | None,
 ) -> Generator[BoundTreeFile, None, bool]:
     names: list[str] = []
@@ -605,11 +606,9 @@ def _walk_bound_directory(
                     return True
                 names.append(entry.name)
     except OSError as exc:
-        raise FilesystemBindingError(
-            f"Search directory changed before traversal: {relative_root}"
-        ) from exc
+        raise FilesystemBindingError(f"Search directory changed before traversal: {relative_root}") from exc
 
-    for name in sorted(names):
+    for name in sorted(name for name in names if relative_root / name not in refused):
         relative = relative_root / name
         try:
             entry_stat = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -629,7 +628,7 @@ def _walk_bound_directory(
                 ) from exc
             try:
                 if (yield from _walk_bound_directory(
-                    child_fd, relative, skip_directory=skip_directory, take_entry=take_entry,
+                    child_fd, relative, skip_directory=skip_directory, refused=refused, take_entry=take_entry,
                 )):
                     return True
             finally:
@@ -648,11 +647,11 @@ def walk_bound_files(
     skip_directory: Callable[[Path], bool] = frozenset[Path]().__contains__,
     take_entry: Callable[[], bool] | None = None,
 ) -> Iterator[Iterator[BoundTreeFile]]:
-    """Yield regular files beneath a no-follow directory root, pruning directories whose
-    relative path ``skip_directory`` refuses and any credential root; a refused ``take_entry`` ends it."""
+    """Yield regular files beneath a no-follow directory root, skipping any credential root (file
+    or directory) and directories ``skip_directory`` refuses; a refused ``take_entry`` ends it."""
     with open_bound_directory(root) as root_fd:
         files = _walk_bound_directory(
-            root_fd, Path(), take_entry=take_entry, skip_directory=skip_credential_roots(root, skip_directory))
+            root_fd, Path(), take_entry=take_entry, skip_directory=skip_directory, refused=credential_paths_beneath(root))
         try:
             yield files
         finally:

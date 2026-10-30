@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-from collections.abc import Callable
 from typing import Iterable
 
 from tools.host_path_resolution import (
@@ -107,7 +106,8 @@ class ProtectedHostPathPolicy:
         The System hard floor covers protected credentials and a lease never
         opens it. Add a root here only with the project owner's approval.
         """
-        return (self.state_root / "keys", self.state_root / "browser-profile", self.home / ".corsia" / ".api-token")
+        from scripts.corsia_api import token_file  # the token file's one location rule
+        return (self.state_root / "keys", self.state_root / "browser-profile", token_file(self.home))
 
     @property
     def control_files(self) -> tuple[Path, ...]:
@@ -389,12 +389,11 @@ def denial_guidance_prefix(text: str) -> str:
     return f"{guidance}\n" if guidance else ""
 
 
-def skip_credential_roots(root: Path, skip_directory: Callable[[Path], bool]) -> Callable[[Path], bool]:
-    """Extend ``skip_directory`` to refuse credential roots beneath ``root``; fails closed."""
+def credential_paths_beneath(root: Path) -> frozenset[Path]:
+    """Credential roots (directories or files) strictly beneath ``root``, relative to it."""
     base = canonical(root)
-    pruned = {
+    return frozenset(
         canonical(path).relative_to(base)
         for path in current_protected_host_path_policy().credential_roots
         if canonical(path).is_relative_to(base) and canonical(path) != base
-    }
-    return lambda relative: relative in pruned or skip_directory(relative)
+    )

@@ -42,7 +42,7 @@
     "backend/subagents/codex_runtime.py": 2306,
     "backend/subagents/codex_runtime_events.py": 658,
     "backend/tools/delegation.py": 453,
-    "backend/tools/filesystem_effects.py": 659,
+    "backend/tools/filesystem_effects.py": 658,
     "backend/tools/grep.py": 455,
     "backend/tools/host_access_gate.py": 1015,
     "backend/tools/shell.py": 500,
