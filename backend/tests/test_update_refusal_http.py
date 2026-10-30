@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from auth_fixtures import OWNER_TOKEN
+from automation.update_log import record_update_log
 
 
 @pytest.mark.asyncio
@@ -70,7 +71,7 @@ BACKEND_PORT={port}
     script.chmod(0o755)
     try:
         with log.open("w") as out:
-            assert self_restart.record_update_log(operation_id, str(log))
+            assert record_update_log(operation_id, str(log))
             child = spawn_restart_lifecycle(script, ["restart-prepared"], {
                 **os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port),
             }, operation_id, out, caller_credential=OWNER_TOKEN)

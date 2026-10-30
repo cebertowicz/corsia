@@ -267,10 +267,10 @@ async def _launch_settings_restart(
         log_path = _update_log_path(operation_id) if prepared else restart_log_path("restart.log")
         with log_path.open("a" if prepared else "w") as log_fh:
             if prepared:
-                from automation import self_restart
+                from automation.update_log import record_update_log
                 from infra.db_async import run_in_db
 
-                await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
+                await run_in_db(record_update_log, operation_id, str(log_path))
             process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,

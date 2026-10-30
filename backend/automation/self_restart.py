@@ -299,12 +299,8 @@ def transition_operation(
 def adopt_for_resume(*, db=None) -> str | None:
     """Adopt a hold that survived the bounce so this startup can settle it.
 
-    Any pre-bounce phase is adopted, not just ``restarting``: the instance that
-    owned those phases is gone, so this startup is the only actor left that can
-    carry the operation to an ending. Without this the hold is never advanced,
-    ``complete_operation`` can never apply, and because an operational hold
-    deliberately never TTL-releases, every thread's ingress stays queued for the
-    life of the process.
+    Adopt any pre-bounce phase: its owner is gone and operational holds do not
+    expire. Otherwise startup cannot complete it and ingress stays queued.
     """
     with write_transaction(db, scope="restart_operation") as connection:
         row = _active_row(connection)
@@ -317,18 +313,6 @@ def adopt_for_resume(*, db=None) -> str | None:
         if not transition_operation(operation_id, expected=phase, target="resuming", db=connection):
             return None
         return operation_id
-
-
-def record_update_log(operation_id: str, log_path: str, *, db=None) -> bool:
-    """Attach an already-created log to the exact in-flight update."""
-    with write_transaction(db, scope="restart_operation") as connection:
-        detail = _merged_detail(connection, operation_id, json.dumps({"log_path": log_path}))
-        result = connection.execute(
-            "UPDATE self_restart_requests SET failure_detail=? "
-            "WHERE id=? AND kind='update' AND status='in_flight'",
-            (detail, operation_id),
-        )
-        return result.rowcount == 1
 
 
 def complete_operation(

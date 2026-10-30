@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 
 from automation import restart, restart_startup, self_restart
+from automation.update_log import record_update_log
 from auth_fixtures import OWNER_TOKEN
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -189,7 +190,7 @@ app_mode_swap_staged_update /disposable/staged
     try:
         log_path = tmp_path / f"update-{operation_id}.log"
         with log_path.open("w") as log:
-            assert await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
+            assert await run_in_db(record_update_log, operation_id, str(log_path))
             child = spawn_restart_lifecycle(
                 script, ["restart-prepared"],
                 {**os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port)},
