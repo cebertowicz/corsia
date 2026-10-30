@@ -10,6 +10,7 @@ import re
 import subprocess
 from typing import Any
 
+from infra.git_local_config_guard import guarded_run
 from infra.product_events import emit_product_event
 from infra.project_repo_policy import RepoPolicy, list_registered_repo_policies
 from tools.base import Tool
@@ -31,15 +32,9 @@ def _git(
     check: bool = True,
     timeout: float = 120,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one direct Git command with repository hooks disabled."""
+    """Run one direct Git command that ignores programs the repository's config names."""
     try:
-        result = subprocess.run(
-            ["git", "-c", "core.hooksPath=/dev/null", *args],
-            cwd=str(repo),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        result = guarded_run(repo, args, timeout=timeout)
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         raise WorktreeCreateError(f"{operation} failed: {exc}") from exc
     if check and result.returncode != 0:

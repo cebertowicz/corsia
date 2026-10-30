@@ -26,6 +26,14 @@ _SHELL_CONTEXT = {
 }
 
 
+def _git_subcommand(command):
+    """The git subcommand of ``command``, past any leading ``-c key=value`` options."""
+    args = list(command[1:])
+    while args[:1] == ["-c"]:
+        args = args[2:]
+    return args[0] if args else None
+
+
 def _git_repo(path: Path, branch: str = "main") -> Path:
     subprocess.run(
         [
@@ -911,7 +919,7 @@ def test_unsupported_pinned_repo_quarantines_metadata_when_layout_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_layout(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if _git_subcommand(command) == "config":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 

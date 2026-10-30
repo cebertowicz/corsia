@@ -15,6 +15,7 @@ from collections.abc import Callable
 from core.project_context import resolve_project_paths
 from infra.config import WORKSPACE
 from infra.database import get_db
+from infra.git_local_config_guard import guarded_run
 from infra.git_state_cache import cached_current_branch, cached_layout_error
 from infra.project_repo_lock_recovery import recover_stale_git_index_lock
 from infra.project_repo_policy_writes import (
@@ -320,9 +321,7 @@ def _run_git(
 ) -> subprocess.CompletedProcess[str]:
     """Run one bounded Git command; a timeout raises the retryable RepoGitTimeout."""
     try:
-        return subprocess.run(
-            ["git", *argv], cwd=str(repo), capture_output=True, text=True, timeout=timeout,
-        )
+        return guarded_run(repo, argv, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         raise RepoGitTimeout(f"{operation} timed out: {exc}") from exc
     except (FileNotFoundError, OSError) as exc:
@@ -441,10 +440,8 @@ def repo_checkout_state(repo_path: Path) -> RepoCheckoutState:
 
 
 def _run_branch_mutation(repo: Path, args: list[str], *, operation: str) -> None:
-    """Run a direct-argv Git mutation with all repository hooks disabled."""
-    result = _run_git(
-        repo, ["-c", "core.hooksPath=/dev/null", *args], operation=operation, timeout=30,
-    )
+    """Run a direct-argv Git mutation (hooks are disabled by the guard)."""
+    result = _run_git(repo, args, operation=operation, timeout=30)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:240]
         raise ValueError(f"{operation} failed: {detail or 'git failed'}")
