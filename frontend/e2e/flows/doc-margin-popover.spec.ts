@@ -41,7 +41,19 @@ test('@flow:doc-margin-popover numbered markers show only their threads in the c
 			expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport);
 			await scroll.evaluate((el) => { el.scrollTop = el.scrollHeight; });
 			await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+			await scroll.evaluate((el) => { el.scrollTop = 0; });
 		}
+		const settled = () => surface.evaluate((el) => {
+			const ancestors: Element[] = [];
+			for (let node: Element | null = el; node; node = node.parentElement) ancestors.push(node);
+			const animations = new Set([...el.getAnimations({ subtree: true }), ...ancestors.flatMap((node) => node.getAnimations())]);
+			const finite = [...animations].filter((animation) => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity).length;
+			const opacities = ancestors.map((node) => Number(getComputedStyle(node).opacity));
+			const header = el.querySelector('h3');
+			return { finite, minimumOpacity: Math.min(...opacities), headerBackground: header ? getComputedStyle(header).backgroundColor : null, surfaceBackground: getComputedStyle(el).backgroundColor };
+		});
+		await expect.poll(async () => { const state = await settled(); return { finite: state.finite, minimumOpacity: state.minimumOpacity }; }).toEqual({ finite: 0, minimumOpacity: 1 });
+		console.log(`SETTLED ${width} ${group.length} ${JSON.stringify(await settled())}`);
 		const directory = process.env.CORSIA_MARGIN_EVIDENCE_DIR;
 		if (directory) await page.screenshot({ path: path.join(directory, `margin-${width}-${group.length}.png`), fullPage: true });
 		await page.keyboard.press('Escape');
