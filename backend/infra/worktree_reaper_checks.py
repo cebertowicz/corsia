@@ -126,7 +126,7 @@ def _status_verdict(
     ctx: CheckContext, entry: WorktreeEntry | None, path: Path, status: str | None,
     idle: float, threshold: float,
 ) -> str | RemovalVerdict | None:
-    if status is None or status == "status_error":
+    if status is None or status in ("status_error", "submodule"):
         return status
     if ctx.now - idle < threshold:
         return status

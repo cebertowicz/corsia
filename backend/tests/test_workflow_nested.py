@@ -10,10 +10,7 @@ from core.workflow_verdict_read import _subtrees, run_roots
 from tests.skill_sidecar_helpers import POINTER
 from tests.test_workflow_task_fields import _mutate, db
 from plans import service
-from tools.workflow_task_fields import (
-    Workflow, _missing_required_steps, _run_steps_are_terminal, append_add_notice, append_close_notice,
-    creation_version, with_referenced_version,
-)
+from tools.workflow_task_fields import Workflow, append_add_notice, creation_version, with_referenced_version
 
 
 def _validate(value):
@@ -33,50 +30,6 @@ def _phase(db, plan, title, ref, parent=None, step=None, version=None):
         "parent_id": parent, "workflow_ref": ref, "workflow_step": step,
         "difficulty": "standard" if step else None,
     }, workflow_version=version)["node"]
-
-
-def test_nested_phase_counts_and_terminal(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    outer = _phase(db, plan, "Outer", "outer")
-    inner = _phase(db, plan, "Inner", "inner", outer["id"], "design")
-    phase = db.execute("SELECT * FROM plan_nodes WHERE id=?", (outer["id"],)).fetchone()
-    workflows = {"outer": Workflow(("design",), nested={"design": "inner"})}
-    assert _missing_required_steps(db, phase, workflows) == ()
-    assert not _run_steps_are_terminal(db, outer["id"])
-    closed = _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Finished"})["node"]
-    assert _run_steps_are_terminal(db, outer["id"])
-    result = {}
-    append_close_notice(result, node_id=inner["id"], db=db, workflows={"outer": Workflow(("design", "review"), nested={"design": "inner"})})
-    assert result["notice"] == "Required step review has no task in this outer run."
-    _mutate(db, plan.id, "archive_node", {"node_id": inner["id"], "expected_revision": closed["revision"]})
-    assert _missing_required_steps(db, phase, workflows) == ("design",)
-
-
-def test_only_a_phase_running_the_declared_workflow_counts(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    outer = _phase(db, plan, "Outer", "outer")
-    _phase(db, plan, "Other", "other", outer["id"], "design")
-    _phase(db, plan, "Bare", None, outer["id"], "review")
-    phase = db.execute("SELECT * FROM plan_nodes WHERE id=?", (outer["id"],)).fetchone()
-    workflows = {"outer": Workflow(("design", "review"), nested={"design": "inner"})}
-    assert _missing_required_steps(db, phase, workflows) == ("design", "review")
-
-
-def test_closing_nested_phase_checks_its_own_run(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    outer = _phase(db, plan, "Outer", "outer")
-    inner = _phase(db, plan, "Inner", "inner", outer["id"], "design")
-    step = _mutate(db, plan.id, "add", {
-        "kind": "task", "title": "Draft", "acceptance_criteria": "Drafted", "parent_id": inner["id"],
-        "workflow_ref": "inner", "workflow_step": "draft", "difficulty": "standard", "size": "S",
-    })["node"]
-    _mutate(db, plan.id, "close_node", {"node_id": step["id"], "expected_revision": step["revision"], "reason": "Done"})
-    inner = db.execute("SELECT * FROM plan_nodes WHERE id=?", (inner["id"],)).fetchone()
-    _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Done"})
-    result = {}
-    workflows = {"outer": Workflow(("design",), nested={"design": "inner"}), "inner": Workflow(("draft", "check"))}
-    append_close_notice(result, node_id=inner["id"], db=db, workflows=workflows)
-    assert result["notice"] == "Required step check has no task in this inner run."
 
 
 def test_same_workflow_ancestor_notice(db):

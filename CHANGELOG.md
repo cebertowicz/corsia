@@ -8,7 +8,9 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
 - CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+- Each thread in a document's Comments panel is its own card, with space between cards.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
@@ -121,11 +123,12 @@ Released 2026-10-30.
 ### Documents and collaboration
 
 - A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
+- A file an agent names by its path in the workspace or a repository shows as a document chip you can open, and a reply shows a chip for every file it names, however many.
 - Agent replies to your document comments now show as one notice above the message box until you read them.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
 - Agents can suggest individual additions to a document without replacing the text they follow.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
-- Fixed: numbered comment icons in a document open the comments beside the text.
+- Numbered comment icons in a document open the comment beside its text, or in the comment sheet on a phone.
 - Links in document comments open from the document's folder, as links in the document itself do, so `notes.md` opens the file beside the document. A link written from the workspace root, such as `shared/x.md`, no longer opens from a comment.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Relative links inside a document's table cells open the linked file instead of saying the document is missing.
