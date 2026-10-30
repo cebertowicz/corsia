@@ -140,6 +140,13 @@ def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dic
     return _refusal(verdict, size, room, pinned, loaded)
 
 
+def _failed_load(result: dict, refusal: dict | None) -> dict:
+    """What a failed load reports: the verdict's refusal only when oMLX refused for memory too."""
+    if refusal and result.get("status") == _OMLX_NO_MEMORY:
+        return refusal
+    return {"status": "failed", "detail": result.get("message") or "Load failed"}
+
+
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
 ) -> dict:
@@ -208,9 +215,7 @@ async def keep_loaded(
                 log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
-                if refusal and result.get("status") == _OMLX_NO_MEMORY:
-                    return refusal
-                return {"status": "failed", "detail": result.get("message") or "Load failed"}
+                return _failed_load(result, refusal)
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
