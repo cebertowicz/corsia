@@ -182,6 +182,23 @@ describe('SetupScreen owned-job polling', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
+	it.each(['load_refused', 'other'] as const)('shows only a refusal catalog line before account creation (%s)', async (cause) => {
+		token.set(null); user.set(null);
+		let localState = 'downloading';
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-download') return json({ state: localState, model: 'Qwen', cause, catalog_line: 'Not loaded: exact catalog line', fix: 'Try again.' });
+			return json({});
+		}));
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync(); await settle();
+		localState = 'start_failed';
+		await vi.advanceTimersByTimeAsync(3000); await tick();
+		expect(host.textContent?.includes('Not loaded: exact catalog line')).toBe(cause === 'load_refused');
+	});
+
 	it('runs Save a report from a local start failure', async () => {
 		const invoke = vi.fn(async () => undefined);
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke }); localFailure = true;

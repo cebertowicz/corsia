@@ -69,7 +69,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		const cause = source?.setup_error_code ?? startError;
 		const reference = source?.setup_error_reference ?? startReference;
 		const meta = startError ? startFix ?? '' : source?.fix ?? '';
-		return { ...row, meta, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
+		return { ...row, meta, detail: source?.detail ?? undefined, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'never_local_host' && pick.message ? pick.message
