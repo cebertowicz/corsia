@@ -103,6 +103,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Switching the model in a project's agent chat or the CORSIA agent chat shows the switching icon next to the model name until the switch finishes or fails, including after you reload.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
 - The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
+- The chat no longer jumps up and back down while an agent works and its thinking, tool steps and waiting dots change.
 - The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
 - The host-access request card now says what host access is before asking you to approve it.
 - The local model chosen in setup stays loaded afterwards.

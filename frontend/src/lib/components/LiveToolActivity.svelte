@@ -4,6 +4,7 @@
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
 	import { renderMarkdown } from '$lib/markdown';
+	import { holdHeight } from '$lib/actions/holdHeight';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -16,6 +17,13 @@
 		expandedTools: Set<string>;
 		onToggleToolBlock: (id: string) => void;
 	} = $props();
+
+	/** Collapsing a tool step is the person's own change of height; the slot below lets go of its floor for it. */
+	let collapses = $state(0);
+	function toggleTool(id: string): void {
+		collapses++;
+		onToggleToolBlock(id);
+	}
 
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
 	const activeTools = $derived((boundThreadId && $activeToolsByThread.get(boundThreadId)) || []);
@@ -60,6 +68,9 @@
 	);
 </script>
 
+{#if showLiveTools || isStreaming}
+<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. -->
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${collapses}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -80,7 +91,7 @@
 					blockKey="live-block"
 					live
 					expandedTools={expandedTools}
-					onToggle={onToggleToolBlock}
+					onToggle={toggleTool}
 				/>
 			</div>
 			{#if showQuietGapIndicator}
@@ -114,8 +125,11 @@
 		</div>
 	</div>
 {/if}
+</div>
+{/if}
 
 <style>
+	.live-slot { display: flow-root; }
 	.message { max-width: 760px; margin: 0 auto 20px; overflow-x: hidden; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
 	@keyframes fadeInUp {
