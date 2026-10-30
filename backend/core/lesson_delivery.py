@@ -4,7 +4,7 @@ A trial stays in its owner's ``SKILL.md`` and never enters cached context.
 When a plan task starts, each eligible trial is drawn with or without for that
 task, and the with half is returned in the plan result: the trial's index line
 when its target is read on demand (a skill or a new file), or the lesson body
-when its target is already in this thread's context. Every resolved trial
+when its target is already in this thread's context or is the matching workflow step. Every resolved trial
 leaves one receipt per task in ``guidance_loads``. A trial the task-start count
 cap or token cap leaves out, a body whose target this thread
 does not receive or already has its section, or one whose draw could not be
@@ -68,7 +68,7 @@ class TrialDelivery:
     source_data: bytes
     target: str
     payload: str
-    #: The section an in-context body adds; None for an index line.
+    #: The section an in-context body adds; None for index lines and step bodies.
     section: str | None = None
     omission_reason: str | None = None
 
@@ -79,18 +79,35 @@ def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with"
     return "with" if digest[0] & 1 else "without"
 
 
-def _delivery(row: SkillRow) -> TrialDelivery:
+def _delivery(row: SkillRow, binding: tuple[str, frozenset[str]] | None) -> TrialDelivery:
     """Build a delivery from the validation snapshot the skill scan already took."""
     trial, data = row.trial, row.source_data
     if trial is None or data is None:
         raise ValueError(f"trial row has no validation snapshot: {row.path}")
-    return delivery_for_trial(trial, row.path, data)
+    return delivery_for_trial(trial, row.path, data, binding)
 
 
-def _step_binding(trial) -> tuple[str, frozenset[str]] | None:
-    """Find the workflow steps whose instruction the trial adds to."""
-    from core.skill_validation import validate_skill_file
-    from infra.config import WORKSPACE
+def step_bindings(skills: list[SkillRow]) -> dict[tuple[str, str], tuple[str, frozenset[str]]]:
+    """Build bindings from effective skills; shadowed or unreadable targets remain unbound as on dev."""
+    groups: dict[tuple[str, str], tuple[str, set[str]]] = {}
+    for skill in skills:
+        workflow = (skill.corsia or {}).get("workflow")
+        steps = workflow.get("steps") if isinstance(workflow, dict) else None
+        if not isinstance(steps, list) or skill.source_data is None:
+            continue
+        body = skill.source_data.decode("utf-8")
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            instruction, step_id = step.get("instruction"), step.get("id")
+            if isinstance(instruction, str) and isinstance(step_id, str) and has_section(body, instruction):
+                key = (str(skill.path), section_key(instruction))
+                groups.setdefault(key, (skill.name, set()))[1].add(step_id)
+    return {key: (name, frozenset(ids)) for key, (name, ids) in groups.items()}
+
+
+def trial_step_binding(trial, bindings: dict[tuple[str, str], tuple[str, frozenset[str]]], workspace: Path) -> tuple[str, frozenset[str]] | None:
+    """Look up a trial's target and section in the effective skill bindings."""
     from tools.filesystem_gate import resolve_path
 
     metadata = trial.lesson.case_metadata
@@ -98,26 +115,18 @@ def _step_binding(trial) -> tuple[str, frozenset[str]] | None:
     if not isinstance(target, str) or not isinstance(heading, str) or not is_skill_file(Path(target)):
         return None
     try:
-        skill = validate_skill_file(resolve_path(target, workspace=Path(WORKSPACE)))
-    except (OSError, ValueError, UnicodeError):
+        path = resolve_path(target, workspace=workspace)
+    except (OSError, ValueError):
         return None
-    workflow = (skill.corsia or {}).get("workflow")
-    steps = workflow.get("steps") if isinstance(workflow, dict) else None
-    if not skill.ok or not skill.name or not isinstance(steps, list):
-        return None
-    ids = frozenset(step["id"] for step in steps if isinstance(step, dict)
-                    and isinstance(step.get("id"), str) and isinstance(step.get("instruction"), str)
-                    and section_key(step["instruction"]) == section_key(heading)
-                    and has_section(skill.body, step["instruction"]))
-    return (skill.name, ids) if ids else None
+    return bindings.get((str(path), section_key(heading)))
 
 
-def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
+def delivery_for_trial(trial, path: Path, data: bytes, binding: tuple[str, frozenset[str]] | None = None) -> TrialDelivery:
     """Build exactly the payload admission and task-start delivery both budget."""
     lesson = trial.lesson
     metadata = lesson.case_metadata
     target = str(metadata.get("new_target_path") or metadata.get("target_file") or "")
-    if _step_binding(trial) is not None:
+    if binding is not None:
         payload = (
             f"[Trial addition to this step's instruction in {target}; "
             f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
@@ -193,8 +202,8 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
     omitted: dict[tuple[str, str], TrialDelivery] = {}
     spent = 0
     context: set[str] | None = None
-    for row in admitted_rows:
-        trial = _delivery(row)
+    for row, binding in admitted_rows:
+        trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key in admitted or key in omitted:
             continue
@@ -214,8 +223,8 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
             continue
         spent += cost
         admitted[key] = trial
-    for row in capped_rows:
-        trial = _delivery(row)
+    for row, binding in capped_rows:
+        trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key not in admitted:
             omitted.setdefault(key, replace(trial, omission_reason=OMIT_COUNT_CAP))

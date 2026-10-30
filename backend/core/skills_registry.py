@@ -186,21 +186,22 @@ def _ordered_index_rows(
 def trial_delivery_rows(
     *, thread_id: str, project_id: str | None, workspace: Path, db,
     workflow_ref: str | None = None, workflow_step: str | None = None,
-) -> tuple[list[SkillRow], list[SkillRow]]:
-    """Return eligible and cap-omitted trial snapshots in scope precedence order."""
-    from core.lesson_delivery import START_TRIAL_CAP, _step_binding
+) -> tuple[list[tuple[SkillRow, tuple[str, frozenset[str]] | None]], list[tuple[SkillRow, tuple[str, frozenset[str]] | None]]]:
+    """Return eligible and cap-omitted trial snapshots and their bindings."""
+    from core.lesson_delivery import START_TRIAL_CAP, step_bindings, trial_step_binding
 
     resolved = resolve_effective_skills(
         thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
     )
+    bindings = step_bindings(resolved.included)
     split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
     rows = _scope_order(split.per_task, resolved.precedence)
     eligible = []
     for row in rows:
         trial = getattr(row, "trial", None)
-        binding = _step_binding(trial) if trial is not None else None
+        binding = trial_step_binding(trial, bindings, workspace) if trial is not None else None
         if binding is None or (workflow_ref == binding[0] and workflow_step in binding[1]):
-            eligible.append(row)
+            eligible.append((row, binding))
     return eligible[:START_TRIAL_CAP], eligible[START_TRIAL_CAP:]
 
 

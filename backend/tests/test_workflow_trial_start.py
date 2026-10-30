@@ -17,7 +17,7 @@ async def test_handoff_includes_trial_with_instruction_and_check(isolated_db, tm
     row = replace(row, trial=replace(row.trial, lesson=lesson))
     workspace = tmp_path / "workspace"
     monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve(), tmp_path.resolve()])
-    monkeypatch.setattr("core.skills_registry.trial_delivery_rows", lambda **kwargs: ([row], [])
+    monkeypatch.setattr("core.skills_registry.trial_delivery_rows", lambda **kwargs: ([(row, ("ship", frozenset({"review"})))], [])
                         if kwargs["workflow_step"] == "review" else ([], []))
     monkeypatch.setattr("core.lesson_delivery.draw", lambda *_: "with")
     await run.update("start", {"node_id": draft, "expected_revision": run.revision(draft)})

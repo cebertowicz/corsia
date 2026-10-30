@@ -158,10 +158,21 @@ def admit(
     rendered = lesson_files.read_trial(text)
     assert rendered is not None
     additive_only(replace(decision, case_metadata=rendered.lesson.case_metadata))
-    payload = delivery_for_trial(rendered, write_path, text.encode()).payload
+    payload = delivery_for_trial(rendered, write_path, text.encode(), _binding(db, place, rendered)).payload
     if _text_tokens(payload, None) > START_TOKEN_CAP:
         return Admission(identity, capture_id, "over-budget", case_metadata=pending)
     return Admission(identity, capture_id, None, text, destination_path=write_path)
+
+
+def _binding(db, place: ThreadPlace, trial):
+    """Use the thread's effective skills when budgeting the trial payload."""
+    from core.lesson_delivery import step_bindings, trial_step_binding
+    from core.skills_registry import resolve_effective_skills
+    from infra.config import WORKSPACE
+
+    workspace = Path(WORKSPACE)
+    resolved = resolve_effective_skills(thread_id=place.thread_id, project_id=place.project_id, workspace=workspace, db=db)
+    return trial_step_binding(trial, step_bindings(resolved.included), workspace)
 
 
 def _section_taken(
