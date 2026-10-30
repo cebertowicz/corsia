@@ -94,6 +94,18 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
     assert mac.omlx.asks() == 1 and mac.downloads == [] and mac.omlx.puts() == []
 
 
+def test_get_started_keeps_failure_when_fake_load_fails(monkeypatch):
+    mac = _mac(monkeypatch, 32)
+    mac.keep_outcome = {"status": "failed", "detail": "fake load failed"}
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    asyncio.run(_prepared())
+
+    result = asyncio.run(_flown())
+
+    assert not result["ok"] and result["cause"] == "load_failed"
+    assert local_setup.setup_status()["state"] == "start_failed"
+
+
 @pytest.mark.parametrize("gib", FITTING)
 def test_get_started_downloads_the_pick_and_every_reader_sees_that_model(monkeypatch, gib):
     mac = _mac(monkeypatch, gib)
