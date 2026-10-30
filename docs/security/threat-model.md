@@ -45,13 +45,17 @@ These are not defended against. Each is stated so you can decide.
 ## Where each control sits
 
 ```mermaid
-flowchart LR
+flowchart TB
     R[Agent request] --> T{Which tool}
     T -->|shell| SB[Sandbox: OS]
-    T -->|file tools| FG[Path checks: CORSIA code]
-    T -->|outside workspace| L[Lease: you or reviewer model]
-    L --> AR[Each command: reviewer model]
-    T -->|send email or invite| G[Send gate: CORSIA code]
-    T -->|read email| ES[Local screen: model, labels only]
-    T -->|web, tool servers| X[Not screened]
+    T -->|file tools| FG[Path checks:<br/>CORSIA code]
+    T -->|send email<br/>or invite| G[Send gate:<br/>CORSIA code]
+    T -->|outside<br/>workspace| L[Lease: you or<br/>reviewer model]
+    L --> AR[Each command:<br/>reviewer model]
+    T -->|read email| ES[Local screen:<br/>model, labels only]
+    T -->|web, tool<br/>servers| X[Not screened]
+    %% invisible links only set the rows, to keep the diagram narrow
+    SB ~~~ L
+    FG ~~~ ES
+    G ~~~ X
 ```

@@ -949,7 +949,7 @@ fn start_service_in<R: tauri::Runtime>(
         if stop.is_some() {
             set_adoption_phase(service, Some(adoption::Phase::Waiting { running: None }));
         }
-        let started = earlier_install_service(&home, &app_dir, &resources).start(stop);
+        let started = earlier_install_service(&home, &app_dir, &resources).0.start(stop);
         set_adoption_phase(service, None);
         started
     });
@@ -1898,15 +1898,17 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     local_service_ready(app, &service, port).map_err(|error| switched(&error))
 }
 
-/// The earlier install's service, stopped through its own checkout when this app could adopt it.
-fn earlier_install_service(home: &Path, app_dir: &Path, resources: &Path) -> start_fresh::LaunchdService {
+/// The earlier install's service, stopped through its own checkout when this app could adopt it,
+/// and that checkout's `scripts/corsia`, which the person's `corsia` links may still point at.
+fn earlier_install_service(home: &Path, app_dir: &Path, resources: &Path) -> (start_fresh::LaunchdService, Option<PathBuf>) {
     let source = match first_run::plan(home, app_dir) {
-        Ok(first_run::FirstRun::Adoptable { source }) => {
-            Some(SourceLifecycle::new(source, Bundled::in_resources(resources)))
-        }
+        Ok(first_run::FirstRun::Adoptable { source }) => Some(source),
         _ => None,
     };
-    start_fresh::LaunchdService::new(home, source, Bundled::in_resources(resources).python)
+    let cli = source.as_ref().map(|source| source.cli.clone());
+    let backend_dir = source.as_ref().map(|source| source.working_directory.clone());
+    let lifecycle = source.map(|source| SourceLifecycle::new(source, Bundled::in_resources(resources)));
+    (start_fresh::LaunchdService::new(home, lifecycle, backend_dir, Bundled::in_resources(resources).python), cli)
 }
 
 /// What Start fresh would move and which folders stay, for the confirmation, or why it can't run.
@@ -1933,7 +1935,7 @@ fn start_fresh_blocking(app: &tauri::AppHandle) -> Result<String, start_fresh::S
     let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
     let app_dir = default_app_dir(app).map_err(untouched)?;
     let resources = bundled_resource_dir(app).map_err(untouched)?;
-    let mut old = earlier_install_service(&home, &app_dir, &resources);
+    let (mut old, retired) = earlier_install_service(&home, &app_dir, &resources);
     service.adoption_cancel_requested.store(false, Ordering::Release);
     service.adoption_in_progress.store(true, Ordering::Release);
     let result = start_fresh::start_fresh(
@@ -1951,6 +1953,13 @@ fn start_fresh_blocking(app: &tauri::AppHandle) -> Result<String, start_fresh::S
     if start_fresh::quit_after(service.adoption_cancel_requested.load(Ordering::Acquire), &result) {
         lifecycle::request_quit(app);
     }
+    // The checkout stays where it is, so a link to it still resolves: replace it as Take over does.
+    #[cfg(all(unix, not(test)))]
+    if let (Ok(_), Some(retired)) = (&result, &retired) {
+        cli_link::repoint_existing(&home, &resources.join("bin/corsia"), cli_link::Repair::Adoption(retired));
+    }
+    #[cfg(any(not(unix), test))]
+    let _ = &retired;
     result.map(|backup| start_fresh::shown(&home, &backup))
 }
 

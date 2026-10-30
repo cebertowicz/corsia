@@ -13,6 +13,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Each thread in a document's Comments panel is its own card, with space between cards.
 - Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
 - Setup stops saying it failed, in the model picker and in your first chat, once the local model it couldn’t load has loaded.
+- Start fresh now stops an earlier install that runs without a background service, and points the `corsia` command at CORSIA, as Take over does.
+- Take over now waits for an earlier install that runs without a background service to stop serving before it moves any of its data, and moves nothing if it doesn't.
 - Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models

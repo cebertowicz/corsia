@@ -8,7 +8,7 @@
 use std::{
     io::ErrorKind,
     net::TcpStream,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     thread,
     time::{Duration, Instant, SystemTime},
@@ -65,6 +65,21 @@ pub fn port_refuses(port: u16) -> bool {
         TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(250)),
         Err(error) if error.kind() == ErrorKind::ConnectionRefused
     )
+}
+
+/// True when a process listening on the loopback `port` runs from `directory`: the proof
+/// `scripts/corsia` asks before it manages a listener. A listener it cannot attribute is
+/// not taken to be the checkout's.
+pub fn listener_runs_from(port: u16, directory: &Path) -> bool {
+    let lsof = |args: &[&str]| Command::new("/usr/sbin/lsof").args(args).output().ok();
+    let Ok(directory) = directory.canonicalize() else { return false };
+    let Some(listeners) = lsof(&["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"]) else { return false };
+    String::from_utf8_lossy(&listeners.stdout).split_whitespace().any(|pid| {
+        lsof(&["-a", "-p", pid, "-d", "cwd", "-Fn"])
+            .and_then(|out| String::from_utf8_lossy(&out.stdout).lines().find_map(|line| line.strip_prefix('n').map(PathBuf::from)))
+            .and_then(|cwd| cwd.canonicalize().ok())
+            .is_some_and(|cwd| cwd == directory)
+    })
 }
 
 /// Open the database exclusively and truncate its WAL; fails while any process holds it.
