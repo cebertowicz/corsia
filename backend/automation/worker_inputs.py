@@ -23,6 +23,8 @@ from typing import Any
 
 from loguru import logger
 
+from infra.backend_git import git_argv
+
 #: The request facts a ``start_worker`` rule's worker reads (named in the tool's description).
 STAGING_FACT = "staging_path"
 HEAD_REPO_FACT = "head_repo"
@@ -111,14 +113,14 @@ def write_head(source: tuple[Path, str, str], dest: Path) -> None:
     """Write the head tree into ``dest/head`` from the repository's object store, never
     fetching: a commit not already there refuses the start."""
     cwd, repo, sha = source
-    present = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=cwd,
+    present = subprocess.run(git_argv("cat-file", "-e", f"{sha}^{{commit}}"), cwd=cwd,
                              capture_output=True, timeout=_GIT_TIMEOUT)
     if present.returncode:
         raise StartRefused(f"refused: commit {sha[:12]} is not in {repo}'s object store; "
                            "fetch it there and request again")
     head = dest / "head"
     head.mkdir(parents=True)
-    with subprocess.Popen(["git", "archive", "--format=tar", sha], cwd=cwd,
+    with subprocess.Popen(git_argv("archive", "--format=tar", sha), cwd=cwd,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as archive:
         assert archive.stdout is not None
         try:
