@@ -5,7 +5,8 @@ When a plan task starts, each eligible trial is drawn with or without for that
 task, and the with half is returned in the plan result: the trial's index line
 when its target is read on demand (a skill or a new file), or the lesson body
 when its target is already in this thread's context or is the matching workflow step. Every resolved trial
-leaves one receipt per task in ``guidance_loads``. A trial the task-start count
+leaves one receipt per task in ``guidance_loads``, except a trial tied to a step
+at any other task, which leaves none. A trial the task-start count
 cap or token cap leaves out, a body whose target this thread
 does not receive or already has its section, or one whose draw could not be
 recorded, gets a receipt with no variant: it is in neither arm, never counted

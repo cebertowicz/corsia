@@ -53,6 +53,31 @@ async def test_person_step_and_reviewer_refusals(isolated_db, tmp_path, monkeypa
     assert "hand it to a reviewer" in result
 
 
+@pytest.mark.asyncio
+async def test_a_sent_back_step_stays_the_same_step_under_the_same_rules(isolated_db, tmp_path, monkeypatch):
+    steps = (
+        "    - {id: review, by: reviewer, required: true, check: Review passes, difficulty: {default: routine}}\n"
+        "    - {id: ship, required: true, check: Shipped, after: [review], difficulty: {default: routine}}\n"
+    )
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    reply = await run.start("ship")
+    review, ship = (step["id"] for step in reply["steps"])
+    await run.update("start", {"node_id": review, "expected_revision": run.revision(review)})
+    await run.update("request_review", {"node_id": review, "expected_revision": run.revision(review), "evidence": "owner says done"})
+    result = await run.update("reject", {"node_id": review, "expected_revision": run.revision(review), "feedback": "needs a real check"})
+
+    round_two = result["revision"]["node_id"]
+    source, revised = (run.rows("SELECT * FROM plan_nodes WHERE id=?", node)[0] for node in (review, round_two))
+    assert {field: revised[field] for field in ("workflow_ref", "workflow_version", "workflow_step", "difficulty")} == {
+        field: source[field] for field in ("workflow_ref", "workflow_version", "workflow_step", "difficulty")
+    }
+    assert run.rows("SELECT depends_on_node_id FROM plan_node_dependencies WHERE node_id=?", ship) == [
+        {"depends_on_node_id": round_two},
+    ]
+    args = {"node_id": round_two, "expected_revision": run.revision(round_two)}
+    assert "can't be skipped" in await run.update("close_node", {**args, "reason": "skip"})
+    assert "hand it to a reviewer" in await run.update("mark_done", {**args, "evidence": "done", "verification_result": "passed"})
+
 
 @pytest.mark.asyncio
 async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, monkeypatch):
