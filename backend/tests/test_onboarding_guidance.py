@@ -436,26 +436,47 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     assert "Do you have a GitHub account?" not in step
 
 
-def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_cloud_parts():
+def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn_it_off():
     step = _step(8)
+    posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder (unless you turn on Auto-approve, below)" in step
-    assert "delet" not in step
-    assert "Keep sensitive files outside your work folder so agents need these checks to reach them." in step
-    assert "Auto-approve" in step and "Local only" in step and "\"Local models only\" in its project settings" in step
-    assert "only in that chat" in step and "every command the agent runs with that access" in step
-    assert "and it ends when its time is up" in step and "A reviewer model checks the request" in step
-    assert "application" not in step and "every request waits for your yes" in step
-    assert "anything that would change a repository's rules still asks you" in step
-    assert "**Safeguards:** no safeguard is perfect." in step and "several would have to fail" not in step and "its own macOS user account" in step
-    assert "unless Local only is on for a chat, the agents it starts can run on cloud models" in step
-    assert "the toggle at the top of the model picker, which the model button in the message box opens" in step
-    assert "It needs a local model that's ready, and the chat has to be switched to it" in step
-    assert "A chat on a cloud model sends what you say to that provider" in step
-    assert "must never reach a cloud model" in step
-    assert "helpers" not in step
+    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder, unless Auto-approve is on" in step
+    assert "delet" not in step and "Keep sensitive files outside" not in step
+    assert "**Auto-approve is on.** A reviewer model checks each request" in step
+    assert "every command that uses it" in step and "Most requests start without asking you" in step
+    assert "turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review" in step
+    assert "Anything that would change a repository's rules still asks you" in step
+    assert "No safeguard is perfect" in step and "its own macOS user account" in step
+    assert "safe" not in posted.replace("safeguard", "") and "secure" not in posted
+    assert "A chat on a cloud model sends what you say to that provider" in posted
+    assert "Apps you connect, like your email, follow their own privacy terms" in posted
+    assert "helpers" not in step and "application" not in step
     assert "Claim no safeguard beyond those stated here" in step
+    assert len(posted) < 1900
+
+
+def test_local_model_talk_in_step_8_shows_only_when_this_computer_can_run_one():
+    step = _step(8)
+    posted, local = step.split("Only when `local_eligible` is true", 1)
+    local = local.split("Claim no safeguard", 1)[0]
+
+    assert "Local only" not in posted and "local model" not in posted.lower() and "Local models only" not in posted
+    assert "Keeping work off cloud models" in local and "unless Local only is on" in local
+    assert "use the toggle at the top of the picker" in local and "It needs a local model that's ready" in local
+    assert "must never reach a cloud model" in local and '"Local models only"' in local
+    assert "`local_eligible` (this computer can run a local model; any other value" in FIRST_RUN_APP.read_text(encoding="utf-8")
+
+
+def test_web_search_that_already_works_posts_nothing_before_the_lookup_question():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    first_run = (FIRST_RUN_APP.parent / "first-run.md").read_text(encoding="utf-8")
+    step = _step(4)
+
+    assert "Skipped with no line about search when `web_search_ready`" in step
+    assert "Web search works. Searches without a key" not in app and "Web search already works" not in first_run
+    assert "Web search works. Searches go to Brave." in step  # only after a key is saved in this chat
+    assert "Web search works. You can open" not in first_run
 
 
 def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():

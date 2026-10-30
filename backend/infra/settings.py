@@ -103,6 +103,13 @@ def get_host_access_auto_approve() -> bool:
     return get_agent_defaults().get("host_access_auto_approve") is True
 
 
+def default_host_access_auto_approve_on(db: sqlite3.Connection, *, fresh: bool) -> None:
+    """Turn Auto-approve on for a fresh install; a stored choice, on or off, is left as it is."""
+    defaults = (get_setting("agents", db=db) or {}).get("defaults", {})
+    if fresh and "host_access_auto_approve" not in defaults:
+        save_setting_merge("agents", {"defaults": {"host_access_auto_approve": True}}, db=db)
+
+
 def get_host_access_reviewer_fallback(*, db=None) -> bool:
     """Return whether the requester's model reviews when the chosen reviewer cannot run."""
     agents = get_setting("agents", db=db) or {}

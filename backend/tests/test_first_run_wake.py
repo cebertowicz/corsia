@@ -265,7 +265,7 @@ class TestAppPath:
 
         app_facts = {
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
-            "agents_found": ["hermes"], "local_download": {"state": "stopped"},
+            "agents_found": ["hermes"], "local_download": {"state": "stopped"}, "local_eligible": False,
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
             "pays_for": [],
             "bound_model": None,
@@ -312,6 +312,7 @@ class TestAppPath:
             "sources": [
                 {"source": "claude-code", **source_rows[0]},
                 {"source": "codex", **source_rows[1]},
+                {"source": "omlx", "state": "needs_setup", "eligible": True},
             ],
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
@@ -329,6 +330,7 @@ class TestAppPath:
 
         assert facts["sources_missing"] == expected_missing
         assert facts["local_download"] == expected_download
+        assert facts["local_eligible"] is True
         assert facts["tool_attempts"] == {
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
@@ -337,6 +339,17 @@ class TestAppPath:
         assert facts["bound_model"] is None
         assert facts["agents_found"] == ["openclaw"]
         assert set(facts) == first_run_wake.APP_FACT_KEYS
+
+    @pytest.mark.parametrize(("omlx_row", "expected"), [
+        ({"source": "omlx", "eligible": False}, False),
+        ({"source": "omlx"}, False),
+        (None, False),
+    ])
+    def test_a_computer_that_cannot_run_a_local_model_reads_not_eligible(self, omlx_row, expected):
+        from onboarding import first_run_wake
+
+        rows = [omlx_row] if omlx_row else [{"source": "codex", "eligible": True}]
+        assert first_run_wake._app_local_eligible({"sources": rows}) is expected
 
     @pytest.mark.parametrize("present, expected", [
         ((), []),
@@ -449,7 +462,7 @@ class TestAppPath:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
-        ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
+        ("model_sources", ("harness_ready", "sources_missing", "github_ready", "local_eligible")),
         ("local_download", ("local_download",)),
         ("setup_handoff", ("tool_attempts",)),
         ("setup_picks", ("pays_for",)),

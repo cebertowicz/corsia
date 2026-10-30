@@ -88,7 +88,7 @@ Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, search already works: post nothing about it and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 
@@ -115,7 +115,7 @@ Read your setup tasks first and continue each from where it stands. Re-check wha
 
 Once every setup task is done, closed, or waiting only on the person, schedule the daily health check: load pack `automations` if needed, call `automation_list`, and if no active schedule has payload `{"kind": "corsia_agent.health_check"}`, call `automation_schedule` with `kind: "cadence"`, `spec: "86400"`, `max_runs: 1000` and that payload. Then send one `post_update`. A task waiting on another agent (a project's conductor) is not settled yet. It opens `Setup's done.` when nothing waits on the person, otherwise `Here's where setup stands.` with one `Still waiting on you: [person task titles]. Tell me when, or say not now.` line. Then one clause per thing set up, only what is true, the health check, and when to come back:
 
-> Setup's done. [Project]'s conductor proposed how it should run: [document]. Web search works. You can open CORSIA on your phone at [address].
+> Setup's done. [Project]'s conductor proposed how it should run: [document]. You can open CORSIA on your phone at [address].
 > Once a day I check that your models, tools and keys still work, and I tell you only when something needs you.
 > Come back when [the next thing that will need them: a proposal to approve or a decision], and it will be waiting here.
 

@@ -32,7 +32,7 @@ import sqlite3
 from datetime import timedelta
 
 import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
-from infra import user_profile
+from infra import settings as settings_store, user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
 from infra.passwords import hash_password, verify_password
@@ -146,12 +146,7 @@ def _create_account(
                 f"'{name}' owns none of the existing data. Create the first "
                 f"account as one of: {', '.join(owners)}. Add others after."
             )
-        if require_first and not owners:
-            from infra.settings import get_setting, save_setting_merge
-
-            defaults = (get_setting("agents", db=conn) or {}).get("defaults", {})
-            if "host_access_auto_approve" not in defaults:
-                save_setting_merge("agents", {"defaults": {"host_access_auto_approve": True}}, db=conn)
+        settings_store.default_host_access_auto_approve_on(conn, fresh=require_first and not owners)
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
