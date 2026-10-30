@@ -260,10 +260,11 @@ async def _launch_settings_restart(
     caller_token: str | None = None,
 ) -> object:
     """Launch the detached lifecycle process or compensate its failed handoff."""
-    log_path = restart_log_path("restart.log")
+    log_path: Path | None = None
     try:
+        log_path = restart_log_path("restart.log")
         with log_path.open("w") as log_fh:
-            return spawn_restart_lifecycle(
+            process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
                 restart_env,
@@ -280,7 +281,7 @@ async def _launch_settings_restart(
                 operation_id,
                 error="settings restart launch failed",
                 failure_code="launch_failed",
-                failure_detail=json.dumps({"log_path": str(log_path)}),
+                failure_detail=json.dumps({"log_path": str(log_path)}) if log_path else None,
             )
         except Exception:
             release_failed = True
@@ -295,6 +296,7 @@ async def _launch_settings_restart(
         if release_failed:
             detail += f" {_RELEASE_FAILURE_NOTE}"
         raise HTTPException(500, detail) from exc
+    return process
 
 
 async def prelaunch_settings_restart(

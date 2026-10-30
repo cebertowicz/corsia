@@ -158,12 +158,14 @@ bootout_service_and_wait() {
     fi
     if [ "$bootout_status" -eq 124 ]; then
         fail "$label bootout did not complete after ${SERVICE_PID_EXIT_WAIT_SECONDS}s; no replacement was started"
+        _corsia_unconfirmed_bootout=true
         return 2
     fi
     if service_is_loaded; then
         return 1
     fi
     fail "$label bootout did not confirm teardown completed; launchd no longer reports the job and no replacement was started"
+    _corsia_unconfirmed_bootout=true
     return 2
 }
 
