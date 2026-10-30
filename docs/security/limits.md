@@ -53,7 +53,7 @@ Every known limit of CORSIA's security, with what it means for you and what to d
 | Limit | What it means | What to do |
 |---|---|---|
 | The Python lock pins versions, not hashes ([Supply chain](supply-chain.md)) | A replaced package file on the index wouldn't be caught | — |
-| Updates check no signatures ([Supply chain](supply-chain.md)) | Whoever can push to the branch you track decides what your install runs next | Leave automatic updates off and update when you choose; read what changed first |
+| Source-install updates check no signatures ([Supply chain](supply-chain.md#updates)) | Whoever can push to the branch you track decides what a source install runs next | Leave automatic updates off and update when you choose; read what changed first |
 | Signing the desktop app is a manual step outside the release workflow ([Supply chain](supply-chain.md#the-desktop-app-and-releases)) | The repository doesn't show whether a download was signed and notarized | Check a download with `spctl` before opening it, or build from source |
 | With the skill library on, agents install skills without asking ([Supply chain](supply-chain.md#shared-skills-and-setups)) | A library skill can instruct an agent to do anything that agent can already do | Leave community improvements off if you don't want that |
 | Vulnerability checks are manual ([Supply chain](supply-chain.md)) | Known-vulnerable dependencies aren't flagged automatically | Run `scripts/security-audit.sh` |
