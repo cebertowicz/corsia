@@ -31,6 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
+- An update no longer says it didn't start when it has started but its connection drops.
 - An update on a large database now waits while CORSIA upgrades its data instead of giving up after a minute and going back to a version that can no longer open it, and an update nobody confirms no longer leaves a restart pending.
 - Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
