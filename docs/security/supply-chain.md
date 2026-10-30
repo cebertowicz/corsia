@@ -2,7 +2,7 @@
 
 Where CORSIA's code and its dependencies come from, what is pinned or signed, how updates arrive, and what agents can install.
 
-**In short:** dependencies are pinned to exact versions but not to hashes. No signed desktop app is published. Updates pull the branch you installed from, without signature checks, and run only when you start them or turn on automatic updates. Shared skills are pinned to a commit and checked file by file.
+**In short:** dependencies are pinned to exact versions but not to hashes. The release workflow builds an unsigned desktop app, and signing is a separate step run by hand, so the repository doesn't show whether a given download is signed. Updates pull the branch you installed from, without signature checks, and run only when you start them or turn on automatic updates. Shared skills are checked file by file against the library's index; the library's own items follow its `main` branch, and items from other repositories are pinned to a commit.
 
 ## Dependencies
 
@@ -23,8 +23,8 @@ No automated dependency-update service (Dependabot or Renovate) is configured.
 ## The desktop app and releases
 
 - The release workflow (`.github/workflows/release-macos.yml`) builds an **unsigned** app. Signing and notarization happen in a separate script run by hand (`desktop/scripts/sign-macos-bundle.sh`).
-- **No signed desktop app is published yet.** A GitHub pre-release named `dev-channel` carries a desktop download; this page didn't check whether it is signed or notarized. Treat it as unsigned.
-- Release tags (`v0.1.0` to `v0.3.0`) are not signed. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
+- Nothing in the repository records whether a published download (such as the GitHub pre-release named `dev-channel`) was signed and notarized before upload. Check a download yourself before trusting it (below), or build from source.
+- Release tags `v0.1.0` to `v0.3.0` are annotated tags with no signature (`git verify-tag` answers "no signature found"). The `v0.4.1-dev.*` tags are lightweight: they name a commit and carry no signature of their own. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
 
 ## Updates
 
@@ -41,7 +41,7 @@ Anyone who can push to the branch you track can change what your install runs on
 The skill library is a separate public repository. It is **off** until you agree to use community improvements in your profile (`backend/tools/skill_library.py`). Once on:
 
 - Agents can search it and install a skill into their own conversation without asking you.
-- Each item is pinned to a Git commit, and each file is checked against a recorded SHA-256 (`backend/library/items.py`).
+- The library's own items are read from its `main` branch, and each file is checked against the SHA-256 recorded in the library's index, which is read from `main` too. The check catches a file that doesn't match the index, not a change by someone who can push to the library. Items the index lists from other repositories are pinned to a Git commit (`backend/library/items.py`, `backend/library/index.py`).
 - CORSIA checks daily for newer versions but never updates an installed copy on its own.
 - Contributions from outside the project aren't open yet, and no review checklist for library items is published.
 
@@ -72,7 +72,15 @@ grep -c "hash=sha256" backend/requirements.lock
 In your CORSIA checkout (`~/.corsia` for an install from source):
 
 ```bash
-git cat-file -p v0.3.0 | grep -c "BEGIN PGP"
+git verify-tag v0.3.0
 ```
 
-`0` means the release tag carries no signature (checked for this page).
+`error: no signature found` means the tag carries no signature of any kind (checked for this page). For a tag that `git cat-file -t` reports as `commit` rather than `tag`, there is no tag object to sign; this command then checks nothing.
+
+On macOS, for a downloaded desktop app:
+
+```bash
+spctl --assess --type execute --verbose /Applications/CORSIA.app
+```
+
+`accepted` with `source=Notarized Developer ID` means the app is signed and notarized; `rejected` means macOS doesn't accept it (checked for this page on an installed app). Use the path where you put the app.

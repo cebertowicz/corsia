@@ -2,7 +2,7 @@
 
 A **host-access lease** lets one agent run commands outside the [sandbox](agent-sandbox.md) for a short time and a stated purpose. This page covers the whole path: the request, the review, approval, the check on every command, expiry, what no lease opens, and what happens when something fails.
 
-**Read this first:** the reviewers are models told to let the agent's work proceed. They default to allow. They assume the applicant is your own agent doing a task you gave it, and they cannot check that you actually gave it. They stop three things: exposing secrets, changing access controls, and destroying data the purpose doesn't need. They are **not** a defense against an agent that has been tricked into asking for your ordinary personal files with a plausible reason.
+**Read this first:** the reviewers are models told to let the agent's work proceed. They default to allow. They assume the applicant is your own agent doing a task you gave it, and they cannot check that you actually gave it. They are instructed to block only three things: exposing secrets, changing access controls, and destroying data the purpose doesn't need, and as models they can miss those. They are **not** a defense against an agent that has been tricked into asking for your ordinary personal files with a plausible reason.
 
 ## The path
 
@@ -25,7 +25,7 @@ flowchart TB
 | Step | What happens | Strength | Source |
 |---|---|---|---|
 | Apply | The agent states a purpose (up to 2,000 characters), the exact resources, a plan of up to 20 steps, the effects, and a duration of at most 30 minutes | CORSIA code checks the shape and limits | `backend/infra/host_access_leases.py`, `backend/tools/host_access.py` |
-| Application review | A model reviews the application in one fresh call that sees only the application, not the agent's conversation | Model judgment | `backend/host_access/reviewer.py`, `backend/host_access/review_policy.py` |
+| Application review | A model reviews the application in a fresh call that sees only the application, not the agent's conversation; a malformed verdict is retried once | Model judgment | `backend/host_access/reviewer.py`, `backend/host_access/review_policy.py` |
 | Approval | You approve or reject it in the app; or, if Auto-approve is on, the reviewer's allow is the approval | CORSIA code requires a signed-in person session; Your setting | `backend/infra/auth.py` (`require_human_user`) |
 | Each command | Every leased shell command, every file-tool call on a path outside the sandbox, and every process control call is reviewed before it runs | Model judgment | `backend/host_access/reviewer.py` |
 | Run | The command runs with only the hard floor and the sandbox's self-protection in place | Operating system for the floor | `backend/tools/shell_guard.py` |
@@ -39,7 +39,7 @@ Two kinds of request always need you, whatever the setting: an exception to a re
 
 A rejected application is final. There is no button for you to approve it anyway; the agent can apply again with a changed request.
 
-## What the reviewers stop, and what they don't
+## What the reviewers are told to block, and what they aren't
 
 Both reviewers run on fixed instructions in `backend/host_access/review_policy.py`. Quoted in substance:
 

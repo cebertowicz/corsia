@@ -12,7 +12,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 | A local model server on this machine | The same, but it stays on the machine | Every turn on a local model | — |
 | Web search: Brave with your key, otherwise a keyless search library that queries public search engines | The search text | When an agent searches | Don't give agents a reason to search; there is no setting that removes the tool |
 | Any website | Whatever the agent puts in the request | Agent's choice, through the `web_fetch` tool, the agents' browser or the shell | Not limited |
-| Your email, calendar and file providers (Google, Microsoft, mail hosts) | Reads, drafts, and sends you approved | When an agent uses those tools | Disconnect the account |
+| Your email, calendar and file providers (Google, Microsoft, mail hosts) | Reads, drafts, changes, and sends that passed the send gate ([Connected apps](connected-apps.md#sending-email-and-invites)) | When an agent uses those tools | Disconnect the account |
 | Tool servers you add | What the agent passes to the tool | When an agent calls the tool | Remove the app |
 | GitHub, if you connect it | Pull requests, comments, pushes | When an agent uses it | Disconnect it |
 | GitHub, for update checks | An anonymous request: `git fetch` of your branch's upstream for a source install; the release manifest for the desktop app | While the app is open, at most once every five minutes | No setting at this commit |
@@ -36,7 +36,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 |---|---|
 | Where | One chat, in its model settings; or a whole project |
 | Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`) |
-| What it allows | Only models whose every endpoint is a loopback address on this machine. A model added as an External endpoint never counts as local, even if it runs on your machine (`backend/llm/locality.py`) |
+| What it allows | Models whose every endpoint is a loopback address on this machine, and models on a server you marked **Trusted device** in its provider settings (the mark is yours to set; it isn't checked). An External endpoint counts as local only with that mark, even if it runs on your machine (`backend/llm/locality.py`) |
 | Inherited by | Every worker the chat starts, and their workers |
 | Messages to other chats | A Local only chat messaging a chat on a cloud model must confirm the message holds nothing sensitive. The agent makes that confirmation: Model judgment |
 | Reviewer | The lease reviewer must also be a model the chat may use |
@@ -53,7 +53,7 @@ Local only does **not** stop the chat's agent from using the web, email, tool se
 | The agents' browser profile (cookies, logins of sites agents use) | The state folder | No |
 | Your context files, skills, documents, each chat's working files | The workspace folder (default `~/corsia`) | No |
 
-The state folder is `~/Library/Application Support/CORSIA/state` for the desktop app on macOS, `~/Library/Application Support/CORSIA/source-state` for a source install on macOS, and `~/.local/state/corsia/state` on Linux. `CORSIA_STATE_DIR` overrides it (`backend/infra/platform_paths.py`).
+The state folder is `~/Library/Application Support/CORSIA/state` for the desktop app on macOS, `~/Library/Application Support/CORSIA/source-state` for a source install on macOS, and `$XDG_STATE_HOME/corsia/state` on Linux (`~/.local/state/corsia/state` when `XDG_STATE_HOME` isn't set). `CORSIA_STATE_DIR` overrides it on every platform (`backend/infra/platform_paths.py`).
 
 **At rest:** CORSIA adds no encryption of its own. Turn on FileVault (macOS) or disk encryption (Linux) to protect the disk when the machine is off or locked. While you are signed in, anything running as your user can read these files.
 
@@ -61,8 +61,8 @@ The state folder is `~/Library/Application Support/CORSIA/state` for the desktop
 
 ## Removing everything
 
-1. Stop CORSIA: `corsia stop`. If you installed the background service, also run `corsia service uninstall`.
-2. Delete the state folder (above).
+1. Stop CORSIA: `corsia stop`. For a source install with the background service, also run `corsia service uninstall` (the desktop app refuses this command; it manages its own service).
+2. Delete the state folder: the path above for your platform, or `CORSIA_STATE_DIR` if you set it.
 3. Delete the workspace folder (default `~/corsia`).
 4. Delete the checkout (`~/.corsia`) or the app.
 5. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.

@@ -30,7 +30,7 @@ An API token can do almost everything a signed-in person can. A few actions acce
 
 ## How agents act
 
-Agents don't sign in. CORSIA's tools run inside the server, which knows which conversation called them. An agent's shell has no CORSIA token, and API calls from it to `127.0.0.1:1956` are refused without one.
+Agents don't sign in. CORSIA's tools run inside the server, which knows which conversation called them. An agent's shell has no CORSIA token, so from it `127.0.0.1:1956` answers only the routes that take none, listed in [Network](network.md#what-listens), the machine-only ones included.
 
 What an agent can reach through tools:
 

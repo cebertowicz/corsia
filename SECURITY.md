@@ -4,4 +4,4 @@ CORSIA runs agents on your own computer, as your user, with a shell, file tools,
 
 ## Reporting a vulnerability
 
-REPORTING-ROUTE-PENDING
+There is no private reporting route yet. Don't post vulnerability details anywhere public: not in an issue, a pull request, a discussion or a comment. Instead, open an issue that asks for a private contact and contains no details of the vulnerability.

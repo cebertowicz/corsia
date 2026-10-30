@@ -50,7 +50,7 @@ iCloud, Yahoo and similar hosts connect with an app password you create at the h
 
 ## Sending email and invites
 
-CORSIA's email and invite tools send only through a draft you have seen. The send is refused by CORSIA code, not a model, unless all of these hold (`backend/tools/action_gate.py`):
+CORSIA's email and invite tools send only the conversation's open draft, unchanged, and only after you have written in the conversation since its last change. CORSIA can't tell whether you read the draft. The send is refused by CORSIA code, not a model, unless all of these hold (`backend/tools/action_gate.py`):
 
 1. The call runs inside a live turn that you started or wrote into.
 2. The draft is this conversation's own open draft, and its text is exactly what the draft tool recorded.

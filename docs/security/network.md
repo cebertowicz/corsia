@@ -6,7 +6,7 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 | Listener | Address | Port | Who can use it | Source |
 |---|---|---|---|---|
-| CORSIA server (web app and API) | `127.0.0.1` in a local setup; all interfaces (`0.0.0.0`) in a server setup | 1956 by default | Anyone who can reach the address; every API call needs a signed-in session or token | `backend/infra/bind_host.py`, `backend/infra/auth.py` |
+| CORSIA server (web app and API) | `127.0.0.1` in a local setup; all interfaces (`0.0.0.0`) in a server setup | 1956 by default | Anyone who can reach the address; API calls need a signed-in session or token, except the routes listed below | `backend/infra/bind_host.py`, `backend/infra/auth.py` |
 | Local model server (oMLX), when CORSIA manages one | Follows the CORSIA server's choice | Its own port | Requests need oMLX's own key | `backend/llm/providers/omlx_supervisor_config.py` |
 | Devices listener, off unless you turn it on | All interfaces | 47901, or the next free one up to 47910 | Signed-in person sessions only, from private network addresses unless you configure an outside address | `backend/infra/devices_listener.py` |
 | Tool-server sign-in callback | `127.0.0.1` | Chosen at sign-in | The sign-in flow that opened it | `backend/tools/mcp_oauth_listener.py` |
@@ -15,7 +15,15 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 **An install with no machine setup file** (`~/.corsia/config.json`) binds to all interfaces, the older default. A setup file that predates the choice is rewritten once with the all-interface bind it already had. An inconsistent file fails closed and names the fix. If you run from source and aren't sure, check with the command below and run `corsia setup local`.
 
-**Loopback is not a trust boundary for agents.** Agent shells run on the same machine, so they can reach `127.0.0.1:1956`. Every API route still needs a token, and agent shells don't have one. The few routes that trust a direct loopback connection are first-run setup routes that close once an account exists, sign-in callbacks that need a matching pending sign-in, tool bridges that need a per-session token, and Devices management, which also needs a signed-in person (`backend/infra/local_connection.py`).
+**Routes that take no session or token.** Checked in code at this commit:
+
+| Who can call it | Routes |
+|---|---|
+| Anyone who can reach the server | `/api/health`, `/api/version`, `/api/auth/status`, `/api/auth/login`, `/api/upload/limits`, `/api/models/{id}/profile`, `/api/devices/outside-address`, `/api/devices/identity` (signs a caller's challenge to prove this server's certificate key), and the web app's own files |
+| Anyone, with a check of its own | Webhooks (`/webhooks/…`): the sender's signature. Device pairing (`/api/devices/pair/…`): only while you have pairing open, with its pairing code. Sign-in callbacks: a matching sign-in you started |
+| Only programs on this machine, through a direct loopback connection | First-run setup routes, which close once an account exists. Also, at any time: whether an update or restart is running (`/api/system/operation-active`), stopping the local model servers CORSIA manages (`/api/system/stop-local-model`), and the corrections classifier's status and download (`/api/setup/classifier…`) |
+
+**Loopback is not a trust boundary for agents.** Agent shells run on the same machine, so they can reach `127.0.0.1:1956`. They have no token, so every other route refuses them. The machine-only routes above don't need one: an agent shell can call them, including stopping CORSIA's local model servers (`backend/api/setup.py`, `backend/api/system.py`, `backend/infra/local_connection.py`).
 
 ## Other devices and remote access
 

@@ -1,6 +1,6 @@
 # Documentation
 
-Every page under `docs/`, in reading order. Start with the repository [README](../README.md) for what CORSIA is and how to install it.
+The main pages under `docs/`, by topic. Start with the repository [README](../README.md) for what CORSIA is and how to install it.
 
 ## Security
 
@@ -23,7 +23,7 @@ What agents can reach, what stops them, how strong each control is, and where it
 | [Known limits](security/limits.md) | Every known limit, its consequence and what to do |
 | [FAQ](security/faq.md) | The hard questions, answered |
 
-To report a vulnerability, see [`SECURITY.md`](../SECURITY.md).
+Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 
 ## Features and internals
 

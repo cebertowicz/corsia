@@ -50,13 +50,13 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Read and write anything in the workspace, every project included | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included, unless an agents' GitHub account is set up), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
-| Write outside the workspace and registered repositories | Refused | Operating system |
+| Write outside the workspace and registered repositories | Refused, except temporary folders (`/tmp`, the system temp folder that holds per-conversation package caches), `~/.ssh/known_hosts`, and some developer-tool caches Agent Safehouse allows (such as `~/.npm`, `~/.cargo`, `~/.rustup`) | Operating system |
 | Run `sudo`, `su`, `shutdown`, disk erase, `curl … \| sh` | Refused | CORSIA code, and the OS for the privileged binaries |
 | Use your loaded SSH keys through the SSH agent (for `git push`, `ssh`) | Allowed | — |
 | Make any outbound network request | Allowed, not limited | — |
 | Read a provider API key CORSIA stores | Refused; values are not in the shell's environment | Operating system and CORSIA code |
 | See a credential that sits in a workspace file | Masked in most cases; see [Secrets](secrets.md) for what masking misses | CORSIA code |
-| Send an email or calendar invite | Only after you have seen the draft and written back | CORSIA code |
+| Send an email or calendar invite | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said | CORSIA code |
 | Reach outside the workspace | Only through a lease | CORSIA code to require it; Model judgment to review it |
 | Approve its own lease | No; you approve, or the reviewer model does when Auto-approve is on ([Host access](host-access.md)) | CORSIA code; Model judgment under Auto-approve |
 
@@ -67,7 +67,7 @@ The full list, with what to do about each, is in [Known limits](limits.md).
 1. **Agents run as you.** The sandbox narrows what a command can touch; it is not a container or a separate user. A sandbox flaw exposes what your user can reach.
 2. **The workspace is the boundary, not the project.** Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
-4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They stop secret exposure, changes to access controls and needless destruction. They will usually allow a plausible request to read your ordinary personal files.
+4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block only secret exposure, changes to access controls and needless destruction, and a model can miss those. They will usually allow a plausible request to read your ordinary personal files.
 5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments and tool results are not screened. Labelled content still reaches the agent.
 6. **Stored keys are not encrypted.** They sit in a file only your user can read, outside every agent's reach. Anything running as your user outside CORSIA can read them.
 7. **No outside security audit.** Nobody outside the project has tested these controls.
@@ -90,4 +90,4 @@ The full list, with what to do about each, is in [Known limits](limits.md).
 | [Known limits](limits.md) | Every known limit, its consequence and what to do |
 | [FAQ](faq.md) | The hard questions, answered |
 
-To report a vulnerability, see [`SECURITY.md`](../../SECURITY.md).
+Before reporting a vulnerability, read [`SECURITY.md`](../../SECURITY.md).

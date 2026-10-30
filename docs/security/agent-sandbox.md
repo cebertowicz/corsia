@@ -16,7 +16,9 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 ## What's allowed
 
-**Read and write:** the whole workspace (every project, shared files, every thread's working folder) and every registered repository. A registered repository's main checkout is read-only; its verified worktrees under `.worktrees/` are read and write.
+**Read and write:** the whole workspace (every project, shared files, every thread's working folder) and every registered repository. A registered repository whose base checkout is protected keeps that main checkout read-only, with its verified worktrees under `.worktrees/` read and write; an unprotected repository is read and write throughout.
+
+**Writable outside the workspace, from the shell (macOS):** temporary folders (`/tmp` and the system temp folder, which holds each conversation's package caches), `~/.ssh/known_hosts`, and some developer-tool caches that Agent Safehouse allows, such as `~/.npm`, `~/.cargo` and `~/.rustup`. On Linux, each thread gets its own `/tmp` (below).
 
 **Read only, from the shell:** system files such as `/etc`, and some tool settings in your home folder: `~/.gitconfig`, most of `~/.config`, `~/.cache`, `~/.npm`, `~/.cargo`. The file tools don't reach these.
 
@@ -32,7 +34,7 @@ The project is not a boundary. `backend/tools/filesystem_gate.py` states it in c
 |---|---|
 | The rest of your home folder: Documents, Desktop, Downloads, Pictures, Music, Movies, shell history and startup files, `~/Library` data (Mail, Messages, cookies, browser data, Keychains), `~/.ssh` private keys, `~/.aws`, `~/.docker`, `~/.kube`, `~/.gnupg`, `~/.netrc`, other AI tools' folders | Operating system |
 | CORSIA's state folder (database, logs, keys, the agents' browser profile) and its checkout's private files | Operating system |
-| Writes anywhere outside the workspace and registered repositories, including your home folder and `/` | Operating system |
+| Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
 | Raw disk devices | Operating system |
 | Reading or signalling processes outside the command's own sandbox (the server, other threads) | Operating system |
@@ -63,7 +65,7 @@ The Linux behavior on this page is read from code and its tests, not run for thi
 
 ## Repositories and worktrees
 
-A registered repository's main checkout is read-only to agents. Work happens in linked worktrees under `.worktrees/`, which CORSIA verifies belong to that repository before granting write access. A small set of Git operations on the main checkout (such as a fast-forward of its branch) runs through a controlled path. A repository can pin a branch or protect its base; an agent that needs an exception asks for it in a lease, and a person decides.
+When a registered repository's base checkout is protected, that main checkout is read-only to agents and work happens in linked worktrees under `.worktrees/`, which CORSIA verifies belong to that repository before granting write access. A small set of Git operations on the main checkout (such as a fast-forward of its branch) runs through a controlled path. A repository can pin a branch or protect its base; an agent that needs an exception asks for it in a lease, and a person decides.
 
 ## Check it yourself
 
