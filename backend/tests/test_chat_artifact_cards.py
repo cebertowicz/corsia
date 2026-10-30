@@ -25,7 +25,7 @@ from plans import service
 from plans.boundary import PlanActor, mutate
 from registry import service as registry_service
 from registry.chat_cards import ask_cards
-from registry.path_cards import MAX_CARDS, reference_cards, targets, workspace_path
+from registry.path_cards import reference_cards, targets, workspace_path
 from tests.plan_ask_helpers import document_ask
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -482,6 +482,61 @@ def test_the_ask_reads_seek_an_index_instead_of_scanning(db):
         assert plan and not [line for line in plan if line.startswith("SCAN")], plan
 
 
+def test_relative_file_cards_resolve_workspace_without_registration(db, ws, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (ws / "notes").mkdir()
+    (repo / "notes").mkdir()
+    (ws / "notes" / "plan.md").write_text("workspace unique")
+    (repo / "notes" / "plan.md").write_text("repository unique")
+    for i in range(10):
+        (ws / f"file{i}.md").write_text(str(i))
+    before = db.total_changes
+    text = "See notes/plan.md and `notes/plan.md` " + " ".join(f"file{i}.md" for i in range(10))
+    cards = reference_cards(db, text, [repo.resolve(), ws.resolve()], "user", origin=ws.resolve())
+    assert len(cards) == 11
+    assert cards[0]["artifact_id"] is None and cards[0]["path"] == str((ws / "notes/plan.md").resolve())
+    assert all(c["artifact_id"] is None and c["opens"] for c in cards)
+    assert db.total_changes == before
+
+
+def test_thread_cards_choose_workspace_origin_over_repository(db, ws, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "plan.md").write_text("repository")
+    (ws / "plan.md").write_text("workspace")
+    _message(db, 1, text="Open `plan.md`.")
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (ws.resolve(), [("repo", repo.resolve())]))
+    card = _page(db)["m1"]["cards"][0]
+    assert card["path"] == str((ws / "plan.md").resolve())
+    assert Path(card["path"]).read_text() == "workspace"
+
+
+def test_candidates_after_versions_and_numeric_filenames_make_cards(db, ws):
+    (ws / "real.md").write_text("real")
+    (ws / "3.42").write_text("numeric filename")
+    text = " ".join(f"3.{i}" for i in range(50)) + " real.md"
+
+    cards = reference_cards(db, text, [ws.resolve()], "user")
+
+    assert [card["name"] for card in cards] == ["3.42", "real.md"]
+
+
+def test_more_than_forty_existing_files_make_cards(db, ws):
+    names = [f"file{i}.md" for i in range(50)]
+    for name in names:
+        (ws / name).write_text(name)
+
+    cards = reference_cards(db, " ".join(names), [ws.resolve()], "user")
+
+    assert [card["name"] for card in cards] == names
+
+
+def test_relative_candidates_exclude_url_and_fenced_text():
+    assert targets("read notes/one.md and `notes/two.md` https://example.com/notes/no.md\n```\nnotes/hidden.md\n```") == ["notes/one.md", "notes/two.md"]
+    assert targets("[notes/label.md](notes/actual.md) [site](https://example.com/file.md)") == ["notes/actual.md"]
+
+
 # Reference cards: the registered files a message names.
 
 @pytest.fixture
@@ -501,6 +556,12 @@ def _registered(db, root: Path, name: str, thread="owner") -> str:
     return str(registry_service.register_write_strict(thread, str(path), title=name, db=db)["id"])
 
 
+def test_relative_path_uses_explicit_origin_or_first_scoped_root():
+    roots = ["/repo", "/workspace"]
+    assert workspace_path("notes/plan.md", roots, "/workspace") == "/workspace/notes/plan.md"
+    assert workspace_path("notes/plan.md", roots) == "/repo/notes/plan.md"
+
+
 @pytest.mark.parametrize("case", VECTORS["cases"], ids=lambda c: c["href"] or "empty")
 def test_the_path_rules_match_the_client_vectors(case):
     assert workspace_path(case["href"], VECTORS["roots"]) == case["expected"]
@@ -516,16 +577,68 @@ def test_only_links_and_bare_paths_outside_code_are_candidates():
     assert targets(text) == ["shared/plan.md", "/workspace/notes/a.md"]
 
 
-def test_a_message_gets_a_card_per_registered_file_it_names_and_none_for_others(db, ws):
+def test_a_message_gets_cards_for_accessible_named_files_without_registering(db, ws):
     kept = _registered(db, ws, "plan.md")
     (ws / "unregistered.md").write_text("x")
     strangers = _registered(db, ws, "theirs.md", thread="stranger")
     text = f"[plan](plan.md) [no](unregistered.md) [theirs](theirs.md) [gone](missing.md) {ws}/plan.md"
 
-    cards, more = reference_cards(db, text, [ws.resolve()], "user")
+    before = db.total_changes
+    cards = reference_cards(db, text, [ws.resolve()], "user")
 
-    assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [("artifact", kept, "plan.md")]
-    assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
+    assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [
+        ("artifact", kept, "plan.md"), ("artifact", None, "unregistered.md"),
+    ]
+    assert cards[1]["path"] == str((ws / "unregistered.md").resolve())
+    assert strangers not in {c["artifact_id"] for c in cards}
+    assert db.total_changes == before
+    assert registry_service.resolve_file_identity(str(ws / "unregistered.md"), db=db) is None
+
+
+def test_file_lookup_prepares_once_and_reuses_identity_for_both_queries(db, ws, monkeypatch):
+    from registry.path_access import lookup_file
+
+    path = ws / "plain.md"
+    path.write_text("plain")
+    prepare = registry_service.prepare_file_identity
+    from registry import file_identity_reads
+
+    resolve = file_identity_reads._read
+    find = file_identity_reads.find_workspace
+    prepared_inputs = []
+    query_inputs = []
+
+    def counted_prepare(value, **kwargs):
+        if isinstance(value, str):
+            prepared_inputs.append(value)
+        return prepare(value, **kwargs)
+
+    def counted_resolve(value, **kwargs):
+        query_inputs.append(value)
+        return resolve(value, **kwargs)
+
+    def counted_find(value, **kwargs):
+        query_inputs.append(value)
+        return find(value, **kwargs)
+
+    monkeypatch.setattr(registry_service, "prepare_file_identity", counted_prepare)
+    monkeypatch.setattr(file_identity_reads, "_read", counted_resolve)
+    monkeypatch.setattr(file_identity_reads, "find_workspace", counted_find)
+    found = lookup_file(str(path), [ws.resolve()], db=db)
+    assert found.allowed and found.is_file and not found.has_identity
+    assert prepared_inputs == [str(path.resolve())]
+    assert len(query_inputs) == 2 and query_inputs[0] is query_inputs[1]
+    assert isinstance(query_inputs[0], registry_service.FileIdentity)
+
+
+def test_file_only_card_has_exact_payload_without_registry_lifecycle(db, ws):
+    path = ws / "plain.md"
+    path.write_text("plain")
+    assert reference_cards(db, "plain.md", [ws.resolve()], "user") == [{
+        "kind": "artifact", "artifact_id": None, "title": "plain.md",
+        "type": "document", "icon": "file-text", "name": "plain.md",
+        "path": str(path.resolve()), "available": True, "opens": True,
+    }]
 
 
 def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
@@ -542,7 +655,7 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
         calls += 1
         return lookup_file(*args, **kwargs)
 
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     monkeypatch.setattr("registry.path_cards.lookup_file", counted)
 
     page = _page(db)
@@ -553,14 +666,61 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
     assert [card["title"] for card in page["m3"]["cards"]] == ["plan.md"]
 
 
-def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, ws):
-    names = [f"f{i}.md" for i in range(MAX_CARDS + 3)]
+def test_page_memoizes_unregistered_and_retired_classification(db, ws, monkeypatch):
+    from registry import file_identity_reads
+
+    (ws / "plain.md").write_text("plain")
+    retired = _registered(db, ws, "retired.md")
+    db.execute("UPDATE artifact_identities SET state='retired' WHERE id=?", (retired,))
+    for index in range(1, 4):
+        _message(db, index, text="plain.md retired.md")
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (ws.resolve(), []))
+    original = file_identity_reads.find_workspace
+    calls = []
+
+    def counted(path, **kwargs):
+        calls.append(path)
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(file_identity_reads, "find_workspace", counted)
+    page = _page(db)
+    assert sorted(Path(path.canonical).name for path in calls) == ["plain.md", "retired.md"]
+    assert all([card["title"] for card in page[f"m{i}"]["cards"]] == ["plain.md"] for i in range(1, 4))
+
+
+def test_scope_roots_matches_document_opener(db, ws, tmp_path, monkeypatch):
+    from doceditor import document_scope
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(document_scope, "resolve_project", lambda *_a: (ws, [("repo", repo)]))
+    origin, bases = document_scope.scope_roots("project", db)
+    assert origin == ws.resolve()
+    assert bases == document_scope.scope_bases("project", db) == [repo, ws.resolve()]
+
+
+def test_file_identity_lookup_uses_index(db):
+    plan = db.execute(
+        "EXPLAIN QUERY PLAN SELECT * FROM artifact_identities WHERE integration=? AND type=? AND external_id=?",
+        ("workspace", "document", "workspace://test/file.md"),
+    ).fetchall()
+    assert all("SEARCH" in row["detail"] for row in plan)
+
+
+def test_a_retired_named_file_does_not_return_as_unregistered(db, ws):
+    artifact_id = _registered(db, ws, "retired.md")
+    db.execute("UPDATE artifact_identities SET state='retired' WHERE id=?", (artifact_id,))
+    cards = reference_cards(db, "retired.md", [ws.resolve()], "user")
+    assert cards == []
+
+
+def test_a_message_shows_all_matched_cards(db, ws):
+    names = [f"f{i}.md" for i in range(11)]
     for name in names:
         _registered(db, ws, name)
 
-    cards, more = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
+    cards = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
 
-    assert (len(cards), more) == (MAX_CARDS, 3)
+    assert [(c["name"], c["path"]) for c in cards] == [(name, str(ws / name)) for name in names]
 
 
 def _marked(cards) -> list[tuple[str, str, list[str]]]:
@@ -578,7 +738,7 @@ def test_an_asked_artifact_is_covered_by_its_ask_in_its_turn_and_never_dropped(d
     _message(db, 4, "user", text="thanks")
     _message(db, 5, turn="turn-2", text="Still on [design](design.md).")
     _ask(db, plan_id, node_id, ask)
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -598,7 +758,7 @@ def test_the_cover_holds_for_a_cleared_ask(db, ws, monkeypatch):
     _message(db, 101, turn="turn-1", text="See [design](design.md).", at="2026-10-01T10:00:05+00:00")
     _ask(db, plan_id, node_id, ask)
     clear_attention(ask, outcome="answer", db=db)
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
 
     page = _page(db)
 
@@ -616,7 +776,7 @@ def test_a_reference_on_the_asks_own_message_is_marked_covered_by_it(db, ws, mon
     thread = db.execute("SELECT * FROM threads WHERE id='owner'").fetchone()
     display, _m, _o = page_messages(db, "owner", 50, None)
 
-    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a, **_k: (ws.resolve(), []))
     attach_cards(db, "owner", "user", thread, display)
 
     hold = display[0]["cards"][0]["hold_id"]
@@ -630,7 +790,7 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
     png = str(registry_service.register_write_strict("owner", str(ws / "shot.png"), title="Shot", db=db)["id"])
     doc = _registered(db, ws, "plan.md")
 
-    cards, _ = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
+    cards = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
 
     by_id = {c["artifact_id"]: c for c in cards}
     assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)

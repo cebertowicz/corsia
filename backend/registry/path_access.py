@@ -1,9 +1,8 @@
 """One answer to "which registered file does this path name, inside this scope?".
 
-``GET /api/files/revision`` and the chat's reference cards both ask it, so the
-rule that a path must sit under a scope root (or be a read-only context file,
-a workspace skill or a workspace role file), be a real file, and resolve to its
-registered identity has a single home.
+Chat reference cards use this lookup. Document reads and the revision route share
+``path_allowed`` for scope checks, including shared context files, workspace skills
+and role files, with their own identity and read semantics.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ class FileLookup(NamedTuple):
     allowed: bool
     is_file: bool
     artifact: dict[str, Any] | None
+    has_identity: bool = False
 
 
 def shared_context_path(path: Path, *, db=None) -> bool:
@@ -89,6 +89,8 @@ def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
         return FileLookup(candidate, False, False, None)
     if not candidate.is_file():
         return FileLookup(candidate, True, False, None)
-    return FileLookup(
-        candidate, True, True, registry_service.resolve_file_identity(str(candidate), db=db),
-    )
+    identity = registry_service.prepare_file_identity(str(candidate), db=db)
+    if identity is None:
+        return FileLookup(candidate, True, True, None)
+    artifact, has_identity = registry_service.inspect_file_identity(identity, db=db)
+    return FileLookup(candidate, True, True, artifact, has_identity)
