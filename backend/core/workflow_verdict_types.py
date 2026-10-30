@@ -97,6 +97,8 @@ class FrozenPlan:
     policy_version: str = POLICY_VERSION
     confidence: float = DEFAULT_CONFIDENCE
     confidence_reason: str | None = None
+    # Shown, never read by a rule: per deciding measure, its minimum detectable change at looks 1, 2 and 3.
+    mdc: Mapping[str, tuple[float | None, ...]] = field(default_factory=dict)
 
     def encoded(self) -> str:
         """The plan as the ``measurement.verdict.planned`` text; refusals keep only the KPI names."""
@@ -113,7 +115,8 @@ class FrozenPlan:
         return cls(data["subject"], data["version"], data["baseline"], tuple(data["skipped"]),
                    tuple(PlannedMeasure(*item) for item in data["measures"]), int(data["minimum"]),
                    tuple((name, "") for name in data["refusals"]), int(data["seed"]), data["policy_version"],
-                   float(data.get("confidence", DEFAULT_CONFIDENCE)), data.get("confidence_reason"))
+                   float(data.get("confidence", DEFAULT_CONFIDENCE)), data.get("confidence_reason"),
+                   {name: tuple(values) for name, values in data.get("mdc", {}).items()})
 
 
 @dataclass(frozen=True)

@@ -8,18 +8,22 @@ import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from math import sqrt
+from statistics import NormalDist
 
 from loguru import logger
 import pytest
 
 import core.workflow_verdict_evaluator as evaluator
+import core.workflow_verdicts as verdicts
+from core.workflow_verdict_looks import OBRIEN_FLEMING, look_confidence, minimum_detectable_change
 from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
     decide_arms, freeze_plan,
 )
 from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MINUTES, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
@@ -420,7 +424,9 @@ def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> Non
 
 def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_version_is_kept() -> None:
     def arm(version: str, cost: float, **kw) -> list[Run]:
-        return _priced(version, 1, cost, count=18, **kw) + _priced(version, 1, cost, count=2, state="failed", **kw)
+        # A failed run carries no corrections: with one each, corrections per outcome (20 over 18) varies with how
+        # many failed runs a resample draws, and look 1's 99.31% reads it as unclear rather than no worse.
+        return _priced(version, 1, cost, count=18, **kw) + _priced(version, 0, cost, count=2, state="failed", **kw)
 
     result = verdict(history(arm("v1", 1.0, started=40, ended=30), arm("v2", 0.5)))
     assert (result.word, result.reason) == ("keep", "no_worse")
@@ -628,6 +634,91 @@ def test_a_refused_wake_keeps_every_verdict_and_reaches_the_owner_once_fixed(mon
     assert [line.strip() for line in logged] == [
         f"verdict_wake: owner capped refused for {batch[0].subject}: model's cap can't fit a checkpoint"]
     assert [wake[0] for wake in wakes] == ["owner", "capped"]
+
+
+def test_each_look_is_judged_at_its_obrien_fleming_confidence() -> None:
+    assert [round(look_confidence(0.8, look), 4) for look in (1, 2, 3)] == [0.9931, 0.9438, 0.8231]
+    assert [round(look_confidence(0.9, look), 4) for look in (1, 2, 3)] == [0.9992, 0.9824, 0.9068]
+    assert [round(look_confidence(0.95, look), 4) for look in (1, 2, 3)] == [0.9999, 0.9948, 0.9520]
+    assert set(OBRIEN_FLEMING) == {verdicts.DEFAULT_CONFIDENCE, *verdicts.RAISED_CONFIDENCES}
+    with pytest.raises(ValueError, match="O'Brien-Fleming"):
+        look_confidence(0.85, 1)
+
+
+@pytest.mark.parametrize("confidence", sorted(OBRIEN_FLEMING))
+def test_obrien_fleming_constants_hold_the_trials_level_over_the_three_looks(confidence) -> None:
+    """Re-derive the method recorded beside the constants: the chance that any look excludes zero on a version
+    that changed nothing is one minus the confidence (|B(t)| < c at t = 1/4, 1/2, 1, Brownian motion)."""
+    import numpy as np
+    from scipy.stats import multivariate_normal
+
+    times = np.array([0.25, 0.5, 1.0])
+    edge = np.full(3, OBRIEN_FLEMING[confidence])
+    quiet = multivariate_normal(np.zeros(3), np.minimum.outer(times, times), abseps=1e-9, releps=1e-9,
+                                maxpts=3_000_000).cdf(edge, lower_limit=-edge)
+    assert 1 - quiet == pytest.approx(1 - confidence, abs=2e-3)
+
+
+def test_the_bootstrap_tail_expands_with_the_smaller_sides_run_count() -> None:
+    assert [round(verdicts._tail(0.2, count), 4) for count in (20, 40, 80)] == [0.0866, 0.0934, 0.0967]
+    assert verdicts._tail(0.2, 1) == verdicts._tail(0.2, 2)
+
+
+def test_interval_takes_its_tails_from_the_smaller_side(monkeypatch) -> None:
+    seen: list[tuple[float, int]] = []
+
+    def tail(alpha: float, n: int) -> float:
+        seen.append((alpha, n))
+        return alpha / 2
+
+    monkeypatch.setattr(verdicts, "_tail", tail)
+    sample = verdicts._Sample(1.0, 1.0, 1)
+    verdicts._interval({GROUP: [sample] * 30}, {GROUP: [sample] * 20}, [GROUP], 1, 0.8)
+    assert seen == [(pytest.approx(0.2), 20)]
+
+
+def test_minimum_detectable_change_is_hand_computed_per_look_and_none_under_two_baseline_runs() -> None:
+    old = runs("v1", [0, 2], count=20, started=60, ended=30)  # per-run values 0 and 2: spread sqrt(20/19)
+    spread = sqrt(20 / 19)
+    z_power = NormalDist().inv_cdf(0.8)
+    frozen = freeze_plan(history(old, runs("v2", 1, count=20)), "v2")
+    # z(1 - a/2) at a look is c / sqrt(information fraction): 2.7008, 1.9098, 1.3504 for c = 1.3504
+    expected = [(2.7008 + z_power) * spread * sqrt(2 / 20), (1.9098 + z_power) * spread * sqrt(2 / 40),
+                (1.3504 + z_power) * spread * sqrt(2 / 80)]
+    assert frozen.mdc[CORRECTIONS] == pytest.approx(expected, rel=1e-3)
+    assert MINUTES not in frozen.mdc  # shown, never deciding
+    assert FrozenPlan.decoded(frozen.encoded()).mdc == frozen.mdc
+    assert minimum_detectable_change(0.8, 1, None, 20) is None
+    sparse = runs("v1", 1, count=1, started=60, ended=30) + runs("v1", 1, count=19, state="failed", started=60, ended=30)
+    one_run = freeze_plan(history(sparse, runs("v2", 1, count=20)), "v2")
+    assert one_run.baseline == "v1" and one_run.mdc[CORRECTIONS] == (None, None, None)
+
+
+def test_no_baseline_freezes_none_never_zero_and_no_rule_reads_the_figure() -> None:
+    new_only = freeze_plan(history(runs("v2", 1, count=20)), "v2")
+    assert new_only.baseline is None and set(new_only.mdc[CORRECTIONS]) == {None}
+    source = history(runs("v1", 1, count=80, started=60, ended=30), runs("v2", [0, 0, 3, 3, 4], count=40))
+    frozen = plan_for(source)
+    bare = replace(frozen, mdc={name: (0.0, 0.0, 0.0) for name in frozen.mdc})
+    assert decide(source, replace(frozen, mdc={}), NOW) == decide(source, bare, NOW)
+
+
+def test_a_clear_difference_at_80_percent_waits_for_the_stricter_first_look() -> None:
+    """Judged at 80% at every look this version is reverted at look 1 (n=20); at look 1's 99.31% it is not clear,
+    so it waits, and look 2's 94.38% still finds the same harm."""
+    old = runs("v1", 1, count=80, started=60, ended=30)
+    first = verdict(history(old, runs("v2", [0, 0, 3, 3, 4], count=20)))
+    assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
+    second = verdict(history(old, runs("v2", [0, 0, 3, 3, 4], count=40)))
+    assert (second.word, second.reason, second.look) == ("revert", "quality_worse", 2)
+
+
+def test_calibration_script_simulates_versions_that_changed_nothing_without_a_database(capsys) -> None:
+    script = calibration_script()
+    assert script.main(["--null-trials", "2", "--seed", "7"]) == 0
+    assert capsys.readouterr().out.startswith("null trials 2: false calls ")
+    assert script.main(["--null-trials", "2", "--fixed-baseline"]) == 0
+    assert script.null_trial((7, 80, False)) == script.null_trial((7, 80, False))  # seeded, so splittable
 
 
 def test_writes_stay_off_by_default() -> None:

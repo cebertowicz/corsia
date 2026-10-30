@@ -25,6 +25,7 @@ from api.measurement_queries import RESTART_REASONS_SQL
 from core.context_source_paths import project_id_for_root
 from core.lesson_files import TrialFile, read_trial
 from core.workflow_step_binding import declared_binding
+from core.workflow_verdict_looks import planned_mdc
 from core.workflow_verdict_read import (
     OPEN_BATCH_LIMIT, REACHED_EVENT, json_ids, node_terminal_at, price_snapshot, recorded_verdicts, terminal_times,
     workflow_definitions,
@@ -35,7 +36,7 @@ from core.workflow_verdict_rules import (
 )
 from core.workflow_verdict_types import subject_of
 from core.workflow_verdicts import (
-    CORRECTION_FLOOR, COST, DEFAULT_MINIMUM, KpiRow, PlannedMeasure, Run, parse_ts,
+    CORRECTION_FLOOR, COST, DEFAULT_CONFIDENCE, DEFAULT_MINIMUM, KpiRow, PlannedMeasure, Run, parse_ts,
 )
 from core.workspace_layout import thread_tray_owners
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
@@ -171,8 +172,10 @@ def _settled_first(runs: Sequence[Run]) -> tuple[Run, ...]:
                                                run.run_id)))
 
 
-def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workflow: str | None) -> FrozenPlan:
-    """The plan fixed at the trial's first use: the measures, the minimum per half and the seed.
+def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workflow: str | None,
+                without: Sequence[Run], now: datetime) -> FrozenPlan:
+    """The plan fixed at the trial's first use: the measures, the minimum per half, the seed and the minimum
+    detectable change from the without half as it stands (often empty, then None).
 
     Mental model, "What decides one lesson": the workflow owner's declared deciding measures (at most two,
     fixed before the trial starts) decide when there are any; otherwise sent back and finished without a
@@ -194,7 +197,8 @@ def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workfl
     subject = open_trial.subject
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     # Confidence stays at the default: no CORSIA metadata key for a raised level exists yet to read.
-    return FrozenPlan(subject, open_trial.sha, WITHOUT, (), measures, minimum, refusals, seed)
+    return FrozenPlan(subject, open_trial.sha, WITHOUT, (), measures, minimum, refusals, seed,
+                      mdc=planned_mdc(measures, without, minimum, DEFAULT_CONFIDENCE, now))
 
 
 def trial_owner(db: sqlite3.Connection, open_trial: OpenTrial) -> str | None:
@@ -247,8 +251,8 @@ def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_
         binding, _in_skills = declared_binding(item.trial, {})
         workflow = None if binding is None else binding.workflow
         existing = plans.get(item.subject)
-        plan = existing or freeze_plan(item, definitions.get(workflow or "", ()), workflow)
         halves = priced[item.subject]
+        plan = existing or freeze_plan(item, definitions.get(workflow or "", ()), workflow, halves.without_runs, now)
         verdict = decide_arms(plan, TwoArms(halves.without_runs, halves.with_runs, matched=True), now,
                               inputs=halves.inputs())
         evaluations.append(Evaluation(item.subject, trial_owner(db, item), plan, verdict, existing is None))
