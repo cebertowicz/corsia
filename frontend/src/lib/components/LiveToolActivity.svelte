@@ -61,8 +61,8 @@
 </script>
 
 {#if isStreaming}
-<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. A reply committing to the transcript takes its height out of the slot into its row, so the floor lets go. -->
-<div class="live-slot" use:holdHeight={`${boundThreadId}:${$replyCommitsByThread.get(boundThreadId ?? '') ?? 0}`}>
+<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. A reply committing to the transcript takes its height out of the slot into its row, and the person expanding or collapsing a step changes it themselves; both let the floor go. -->
+<div class="live-slot" use:holdHeight={`${boundThreadId}:${$replyCommitsByThread.get(boundThreadId ?? '') ?? 0}:${expandedTools.size}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">

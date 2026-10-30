@@ -11,6 +11,8 @@ beforeEach(() => {
 		observe() {}
 		disconnect() {}
 	});
+	vi.stubGlobal('requestAnimationFrame', (callback: () => void) => { callback(); return 1; });
+	vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -34,28 +36,25 @@ describe('holdHeight', () => {
 		expect(node.style.minHeight).toBe('170px');
 	});
 
-	it('lets go when the key changes, as when the person collapses a step', () => {
+	it('lets go when the key changes and holds again from the height after the change, even if no resize follows', () => {
 		const node = slot();
 		const action = holdHeight(node, 'a');
 		notify();
 		action.update('a');
 		expect(node.style.minHeight).toBe('100px');
-		action.update('b');
-		expect(node.style.minHeight).toBe('');
 		height = 40;
+		action.update('b');
+		expect(node.style.minHeight).toBe('40px');
+		height = 10;
 		notify();
 		expect(node.style.minHeight).toBe('40px');
 	});
 
-	it('lets go when the person clicks inside it, since expanding or collapsing a step is their own change of height', () => {
+	it('is not released by a click inside it, so selecting text or following a link keeps the floor', () => {
 		const node = slot();
 		holdHeight(node, 'a');
 		notify();
-		expect(node.style.minHeight).toBe('100px');
 		node.dispatchEvent(new Event('click'));
-		expect(node.style.minHeight).toBe('');
-		height = 40;
-		notify();
-		expect(node.style.minHeight).toBe('40px');
+		expect(node.style.minHeight).toBe('100px');
 	});
 });

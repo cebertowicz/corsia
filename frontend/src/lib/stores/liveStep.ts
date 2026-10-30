@@ -7,6 +7,8 @@ export const replyCommitsByThread = writable<Map<string, number>>(new Map());
 /**
  * A step's reasoning and reply have become a transcript row: empty the live slot of them and, when there was a
  * reply, count it, in the same synchronous turn, so the slot sees the row arrive and its content leave as one change.
+ * A step with no reply leaves the slot held: its tools fold into a row shorter than they stood live, so letting go
+ * there would drop the transcript under the reader.
  */
 export function commitLiveStep(threadId: string, content: unknown): void {
 	setThreadReasoning(threadId, '');
