@@ -27,14 +27,19 @@ from core.cost_identity import ModelIdentity
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 
 
-def _bound(params: dict[str, Any], task_ids: Collection[str] | None) -> dict[str, Any]:
-    """The query binds, with the task ids a caller narrowed the read to."""
+def _bound(params: dict[str, Any], task_ids: Collection[str] | None, run_ids: Collection[str] | None = None) -> dict[str, Any]:
+    """The query binds, with the task ids a caller narrowed the read to and the runs it seeds."""
     bound = query_params(params)
+    if run_ids is not None:
+        bound = {**bound, "run_ids": json.dumps(sorted(run_ids))}
     return bound if task_ids is None else {**bound, "task_ids": json.dumps(sorted(task_ids))}
 
 
 # The accepted tasks and the nodes of their chains: ``task_id, period, settled_at, node_id``.
 _CHAIN_ROWS = "(SELECT o.id AS task_id,o.period,o.settled_at,c.node_id FROM outcome_rows o JOIN chain c ON c.task_id=o.id)"
+# Those and the seeded runs' (``chain_ctes(seeded_runs=True)``): no period, usage read to the run's own terminal time.
+_SEEDED_CHAIN_ROWS = (f"({_CHAIN_ROWS[1:-1]} UNION ALL "
+                      "SELECT s.task_id,NULL,s.settled_at,c.node_id FROM seeds s JOIN chain c ON c.task_id=s.task_id)")
 
 
 def _cost_sql(chain_rows: str) -> str:
@@ -45,9 +50,11 @@ def _cost_sql(chain_rows: str) -> str:
     )
 
 
-def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | None = None) -> str:
+def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | None = None,
+                      run_ids: Collection[str] | None = None) -> str:
     """Walk the chains of the prepared periods' accepted tasks (or only ``task_ids``) once into a temporary table
-    the readers below can share.
+    the readers below can share. ``run_ids`` also seeds those of them that are terminal but not accepted outcomes
+    (failed, closed, corrected), each read to its own terminal time.
 
     Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces its
     rows, so the caller empties it when done.
@@ -55,7 +62,7 @@ def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | No
     The table is created once per connection, before any write (see ``create_tables``), and refilled, never dropped:
     creating or dropping a table changes the connection's schema, which expires every statement it has prepared, so
     each would be planned again on its next run, whichever job sends it."""
-    prefix, source, bound = _chain_source(params, task_ids, None)
+    prefix, source, bound = _chain_source(params, task_ids, None, run_ids)
     db.execute(CHAIN_DDL)
     db.execute(f"DELETE FROM {CHAIN_TABLE}")
     db.execute(f"INSERT INTO {CHAIN_TABLE} {prefix} SELECT task_id,period,settled_at,node_id FROM {source}", bound)
@@ -67,12 +74,15 @@ def clear_chain(db) -> None:
     db.execute(f"DELETE FROM {CHAIN_TABLE}")
 
 
-def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None) -> tuple[str, str, dict[str, Any]]:
+def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None,
+                  run_ids: Collection[str] | None = None) -> tuple[str, str, dict[str, Any]]:
     """The CTE prefix, the chain rows to select from and the binds: the walk itself, unless a table already holds it."""
     if chain_rows is not None:
         return "", chain_rows, {}
-    prefix = scope_cte() + outcome_ctes(query_params(params)["grain"], limited_to_range=False) + chain_ctes(only_tasks=task_ids is not None)
-    return prefix, _CHAIN_ROWS, _bound(params, task_ids)
+    walk = {"seeded_runs": True} if run_ids is not None else {}
+    prefix = (scope_cte() + outcome_ctes(query_params(params)["grain"], limited_to_range=False)
+              + chain_ctes(only_tasks=task_ids is not None, **walk))
+    return prefix, _CHAIN_ROWS if run_ids is None else _SEEDED_CHAIN_ROWS, _bound(params, task_ids, run_ids)
 
 
 def query_model_costs(

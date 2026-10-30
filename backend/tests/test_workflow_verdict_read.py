@@ -230,7 +230,7 @@ def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:
     assert runs_of(read)[0]["run"].kpi_rows == {"escapes": (row,)}
 
 
-def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -> None:
+def test_cost_prices_every_terminal_run_once_and_is_unknown_never_zero_only_when_a_call_cannot_be_priced(db) -> None:
     node(db, "priced")
     usage(db, "u1", "priced")
     node(db, "nested")
@@ -240,17 +240,33 @@ def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -
     node(db, "half")
     usage(db, "u4", "half")
     node(db, "broke", parent="half", workflow=None, state="failed")
+    usage(db, "u4b", "broke")
     node(db, "failed", state="failed")
     usage(db, "u5", "failed")
+    usage(db, "u5-late", "failed")
+    db.execute("UPDATE llm_usage SET created_at='2026-10-06T00:00:00Z' WHERE id='u5-late'")  # after it failed
+    node(db, "gap", state="failed")
+    usage(db, "u6", "gap")
+    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+               "VALUES ('gap-event','gap','test','usage_recording_failed','2026-10-02T00:00:00Z')")
+    node(db, "odd", state="closed")
+    usage(db, "u7", "odd", model="codex/gpt-5.6-terra")
+    db.execute("UPDATE llm_usage SET source='external_harness:codex' WHERE id='u7'")  # no proven price
+    node(db, "empty", state="closed")
     priced = price_snapshot(db, read_snapshot(db, now=NOW))
     runs, _ = runs_of(priced)
     from core.workflow_verdict_read import history_grain
     params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
               "grain": history_grain(datetime(2026, 10, 1).date(), NOW)}
     by_task = {row["task_id"]: row["dollars"] for row in query_model_costs(db, params, IdentityResolver(db))}
-    assert runs["priced"].cost == pytest.approx(by_task["priced"]) and by_task["priced"] > 0
+    one_call = by_task["priced"]
+    assert runs["priced"].cost == pytest.approx(one_call) and one_call > 0
     assert runs["nested"].cost == pytest.approx(by_task["nested"] + by_task["child"])
-    assert runs["half"].cost is None and runs["failed"].cost is None
+    # The failed child's call sits in its accepted ancestor's chain: counted once, in the run that holds it.
+    assert runs["half"].cost == pytest.approx(by_task["half"]) == pytest.approx(2 * one_call)
+    assert runs["failed"].cost == pytest.approx(one_call)  # its own call; the one after it failed is not its cost
+    assert runs["empty"].cost == 0.0
+    assert runs["gap"].cost is None and runs["odd"].cost is None
     assert db.execute("SELECT COUNT(*) FROM temp.measurement_task_chain").fetchone()[0] == 0
 
 

@@ -182,11 +182,10 @@ def _blocked(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run]) ->
                                                         for row in (run.kpi_rows or {}).get(measure.name, ())))
                 if side and labelled * 2 < len(side):
                     return call("not_comparable", "coverage_under_half", kpi=measure.name)
-    if measure.name == COST:
-        if any(not run.outcome for run in runs):
-            return call("unknown", "failed_run_unpriced")
-        if any(run.cost is None for run in runs):
-            return call("unknown", "cost_unknown")
+    # Cost per outcome of a side with no outcome is undefined: unknown, never 0.
+    if measure.name == COST and (any(run.cost is None for run in runs)
+                                 or any(side and not any(run.outcome for run in side) for side in (new, old))):
+        return call("unknown", "cost_unknown")
     return None
 
 

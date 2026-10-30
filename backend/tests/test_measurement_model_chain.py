@@ -200,3 +200,42 @@ def test_a_recording_failure_anywhere_in_the_chain_marks_the_task(db):
     assert query_recording_gaps(db, PARAMS) == set()
     db.execute(failed, ("before", "work", BEFORE))
     assert query_recording_gaps(db, PARAMS) == {"task"}
+
+
+# The chain walk as shipped before ``seeded_runs``: every existing caller must still run exactly this text.
+_CHAIN_WALK = """
+        , attempts(task_id, node_id) AS (
+          SELECT id, id FROM outcome_rows
+          UNION
+          SELECT a.task_id, n.follow_up_of FROM attempts a JOIN plan_nodes n ON n.id=a.node_id
+          WHERE n.follow_up_of IS NOT NULL
+            AND EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=n.id AND e.event='revision_created')
+        ), chain(task_id, node_id, plan_id) AS (
+          SELECT a.task_id, a.node_id, m.plan_id FROM attempts a JOIN outcome_rows o ON o.id=a.task_id
+          JOIN plan_nodes m ON m.id=a.node_id
+          WHERE o.period IS NOT NULL {seed}
+          UNION
+          SELECT c.task_id, n.id, n.plan_id FROM chain c
+          JOIN plan_nodes n ON n.plan_id=c.plan_id AND n.parent_id=c.node_id
+          WHERE n.id NOT IN (SELECT node_id FROM attempts)
+          UNION
+          SELECT c.task_id, r.id, r.plan_id FROM chain c
+          CROSS JOIN plan_nodes d ON d.id=c.node_id AND d.spawned_thread_id IS NOT NULL
+          CROSS JOIN plans p ON {delegation_edge_sql('d', 'p')}
+          CROSS JOIN plan_nodes r ON r.plan_id=p.id AND r.parent_id IS NULL
+          WHERE c.node_id={newest_attachment_sql('p')}
+            AND r.id NOT IN (SELECT node_id FROM attempts)
+        )
+    """
+_ONLY_TASKS = "AND a.task_id IN (SELECT value FROM json_each(:task_ids))"
+
+
+def test_the_default_chain_walk_text_is_unchanged_and_seeded_runs_only_add_to_it() -> None:
+    from api.measurement_chain import chain_ctes
+    from plans.public import delegation_edge_sql, newest_attachment_sql
+
+    shipped = (_CHAIN_WALK.replace("{delegation_edge_sql('d', 'p')}", delegation_edge_sql("d", "p"))
+               .replace("{newest_attachment_sql('p')}", newest_attachment_sql("p")))
+    assert chain_ctes() == shipped.replace("{seed}", "")
+    assert chain_ctes(only_tasks=True) == shipped.replace("{seed}", _ONLY_TASKS)
+    assert "seeds(task_id" in chain_ctes(seeded_runs=True) and "seeds(task_id" not in chain_ctes()
