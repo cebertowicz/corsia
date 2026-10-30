@@ -96,7 +96,7 @@
 	{/if}
 	<SettingsRow
 		name="Auto-approve"
-		sub="When the reviewer allows an application, activate it immediately without asking you. Per-action review and hard safety limits still apply. Repository-policy exceptions still require your approval."
+		sub="With this on, most requests the reviewer approves can start without asking you. Turn this off to approve those requests yourself. Per-action review and hard safety limits still apply. Repository-policy exceptions still require your approval."
 		wrap
 	>
 		{#snippet actions()}
