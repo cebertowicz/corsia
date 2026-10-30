@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterator
 
 from loguru import logger
 
+from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_path
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
 from infra.guidance_messages import (
@@ -32,7 +33,7 @@ from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
-_GIT_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", "-c", "safe.bareRepository=explicit")
+_GIT_CONFIG = (*GIT_CONFIG_ARGS, "-c", "commit.gpgsign=false", "-c", "safe.bareRepository=explicit")
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
@@ -47,7 +48,6 @@ class _LockBusy(GitFault):
 
 
 # SaveResult stays importable from here for existing callers.
-
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
                data: bytes | None = None, ok: tuple[int, ...] = (0,)) -> bytes:
