@@ -19,6 +19,11 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// delegates the stop to launchd, and the bundled plist has no `ExitTimeOut`.
 const PID_EXIT_TIMEOUT: Duration = Duration::from_secs(25);
 const PROOF_POLL: Duration = Duration::from_millis(100);
+/// How long launchd may take to unlist a source job after a plain bootout: the `ExitTimeOut` the
+/// source's generated plist sets (120 s) plus the 5 s margin its own stop adds. launchd keeps the
+/// job listed until its process has exited, which can take the whole `ExitTimeOut`, so a shorter
+/// wait would report a failed stop while launchd is still ending the job.
+pub const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
 
 /// The process id launchd reports for a loaded job, or none when it has none.
 pub fn launchd_pid(target: &str) -> Option<u32> {

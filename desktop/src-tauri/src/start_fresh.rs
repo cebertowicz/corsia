@@ -35,7 +35,6 @@ use crate::{
 const JOURNAL: &str = "start-fresh.json";
 pub const BACKUPS_FOLDER: &str = "CORSIA backups";
 const PLIST: &str = "Library/LaunchAgents/com.corsia.prod.plist";
-const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
 
 /// One rename, from where the earlier install had it to its place in the backup.
@@ -755,7 +754,7 @@ impl LaunchdService {
         states.push(app_paths::app_dir_for_home(home).join(app_paths::STATE_DIRECTORY));
         let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
         let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
-        Self { source, launchd, timeout: STOP_TIMEOUT }
+        Self { source, launchd, timeout: release_proof::BOOTOUT_TIMEOUT }
     }
 }
 

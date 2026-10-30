@@ -641,7 +641,6 @@ service_stop() {
                 "$(current_drain_url "$port")" "$CORSIA_RESTART_OPERATION_ID" \
                 || :
         fi
-        # The desktop app matches this wording (BOOTOUT_EXIT_1_LINE in desktop/src-tauri/src/source_lifecycle.rs); keep them together.
         fail "$label stop failed (bounded bootout exit $bootout_status)"
         return 1
     fi
