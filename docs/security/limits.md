@@ -22,7 +22,7 @@ Every known limit of CORSIA's security, with what it means for you and what to d
 | Masking misses values with no recognizable name or shape, and transformed output ([Secrets](secrets.md)) | Some credentials in workspace files can reach the model provider | Keep keys in **Settings → Keys**, not in workspace files |
 | Masking doesn't stop commands from using a value ([Secrets](secrets.md)) | `source .env && curl …` uses and can send the real key | Same |
 | An isolated worker on Claude Code reads files without masking ([Untrusted content](untrusted-content.md)) | Credentials in the folders it reads reach the model unmasked | Don't point isolated workers at folders holding keys |
-| Your loaded SSH keys and GitHub CLI login are usable from agent shells ([Agent sandbox](agent-sandbox.md)) | Agents can `git push` and call GitHub as you | Remove keys from your SSH agent, or set up a separate agents' GitHub account |
+| Your loaded SSH keys and GitHub CLI login are usable from agent shells ([Agent sandbox](agent-sandbox.md)) | Agents can `git push` and call GitHub as you | Remove keys from your SSH agent, or set up a separate agents' GitHub account. Agent shells can read that account's token, so give it access only to the repositories agents need |
 
 ## Sending and connected apps
 

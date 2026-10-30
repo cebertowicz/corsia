@@ -31,7 +31,7 @@ Everything above except the logs is in `corsia.db`, the SQLite database in CORSI
 The records are rows in an ordinary, unencrypted database file owned by your user. They aren't signed, chained or copied elsewhere.
 
 - **An agent's shell can't reach them**: the state folder is outside the sandbox ([Agent sandbox](agent-sandbox.md)).
-- **A leased command can.** A lease can open the state folder ([Host access](host-access.md#what-no-lease-opens)). The reviewers are told to stop needless destruction, but nothing else stops a leased command from editing or deleting audit rows.
+- **A leased command can.** A lease can open the state folder ([Host access](host-access.md#what-no-lease-opens)). The reviewers are told that writing to the database or to files is allowed when the purpose calls for it, and to stop only destruction the purpose doesn't need. A leased command with a plausible purpose can edit or delete audit rows, and nothing else stops it.
 - **Any other program running as your user can**, as can you.
 
 If you need a record an agent can't change, copy it off the machine yourself.

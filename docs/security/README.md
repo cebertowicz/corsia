@@ -1,6 +1,6 @@
 # Security model
 
-CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. Everything here describes the code at the commit you are reading; the pages name the source files so you can check.
+CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. These pages were last checked against the code at commit `43a8c7780`, and that check did not cover every claim; "at this commit" on these pages means that commit. Nothing rechecks them automatically, so a later change can leave a page out of date. The pages name the source files so you can check.
 
 **Who this is for:** someone deciding whether to let agents work on their machine. If you only read one page, read this one and [Known limits](limits.md).
 
@@ -49,7 +49,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 |---|---|---|
 | Read and write anything in the workspace, every project included | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
-| Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included, unless an agents' GitHub account is set up), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
+| Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
 | Write outside the workspace and registered repositories | Refused, except temporary folders (`/tmp`, the system temp folder that holds per-conversation package caches), `~/.ssh/known_hosts`, and some developer-tool caches Agent Safehouse allows (such as `~/.npm`, `~/.cargo`, `~/.rustup`) | Operating system |
 | Run `sudo`, `su`, `shutdown`, disk erase, `curl … \| sh` | Refused | CORSIA code, and the OS for the privileged binaries |
 | Use your loaded SSH keys through the SSH agent (for `git push`, `ssh`) | Allowed | — |

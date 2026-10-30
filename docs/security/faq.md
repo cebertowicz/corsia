@@ -33,7 +33,8 @@ On macOS: [Agent Safehouse](https://github.com/eugene1g/agent-safehouse), an ind
 ## Secrets
 
 **9. Can an agent read my API keys, SSH keys, cookies, Keychain, `.env` files?**
-- Keys CORSIA stores: no, not even with a lease.
+- Keys in CORSIA's key store: no, not even with a lease.
+- The agents' GitHub account token, if you set that account up: yes. It is outside the key store and agent shells can read it, so they can use `gh` and `git` as that account ([Secrets](secrets.md#where-keys-live)).
 - SSH private keys, Keychains, your browsers' cookies: not without a lease, and a lease reviewer is told to block reading keychain and auth files. It can **use** keys loaded in your SSH agent.
 - The agents' own browser cookies: no, not even with a lease.
 - `.env` files: yes, if they are in the workspace. Values the masker recognizes are hidden from the model, but commands can still use them.
@@ -64,7 +65,7 @@ No product analytics or crash reports are sent. CORSIA does make anonymous reque
 Not by CORSIA. Use FileVault or Linux disk encryption. See [Data and privacy](data-and-privacy.md#whats-stored-and-where).
 
 **17. How do I remove everything?**
-Stop CORSIA, delete the state folder, the workspace and the checkout or app, and revoke its access in your Google or Microsoft account. See [Data and privacy](data-and-privacy.md#removing-everything).
+Stop CORSIA; delete the state folder, the workspace, the checkout or app, and the agents' GitHub account folder if you set that account up; then revoke CORSIA's access in your Google or Microsoft account and that account's GitHub CLI access in GitHub. See [Data and privacy](data-and-privacy.md#removing-everything).
 
 ## Prompt injection
 

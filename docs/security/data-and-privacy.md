@@ -65,14 +65,15 @@ The state folder is `~/Library/Application Support/CORSIA/state` for the desktop
 2. Delete the state folder: the path above for your platform, or `CORSIA_STATE_DIR` if you set it.
 3. Delete the workspace folder (default `~/corsia`).
 4. Delete the checkout (`~/.corsia`) or the app.
-5. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.
-6. Revoke CORSIA's access in your Google or Microsoft account settings, and sign out of any tool servers you connected.
+5. If you set up an agents' GitHub account, delete its folder (default `~/.config/corsia-gh-agent`), which holds a live token, and revoke that account's GitHub CLI access in its GitHub settings.
+6. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.
+7. Revoke CORSIA's access in your Google or Microsoft account settings, and sign out of any tool servers you connected.
 
 Data you sent to cloud model providers and other services is held under their policies. Deleting CORSIA doesn't remove it.
 
 ## Check it yourself
 
-From a terminal on the machine (run for this page on the pinned commit):
+From a terminal on the machine (run for this page at the commit named in the [overview](README.md)):
 
 ```bash
 grep -n "^PUBLIC_KEYS" backend/infra/bulletins.py   # PUBLIC_KEYS: tuple[str, ...] = (): no notice keys, feed off
