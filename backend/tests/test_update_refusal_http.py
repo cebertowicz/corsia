@@ -20,6 +20,7 @@ from automation.self_restart import record_update_log
     ("unhealthy", False, False, "current backend is not healthy"),
     ("ownership", True, True, "foreign service ownership"),
     ("missing", True, True, "There is no staged update"),
+    ("identity", True, True, "Backend is healthy, but its pre-restart identity could not be read"),
 ])
 async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path, monkeypatch, case, healthy, claimed_healthy, reason):
     from api.drain import router
@@ -64,9 +65,17 @@ app_mode_hold_update_lock() {{ return {1 if case == 'lock' else 0}; }}
 is_backend_running() {{ return {0 if healthy else 1}; }}
 app_mode_staged_path() {{ printf '%s' '/disposable/no-stage'; }}
 app_mode_previous_path() {{ printf '%s' '/disposable/no-previous'; }}
+serving_checkout_root() {{ printf '%s' '/disposable'; }}
+frontend_release_paths() {{ printf '/disposable/no-frontend\\t/disposable/stage\\t/disposable/prepared\\t/disposable/backup\\t/disposable/absent'; }}
+service_installed() {{ return 1; }}
+require_port_served_by_this_checkout() {{ :; }}
+drain_and_wait() {{ :; }}
+cancel_failed_drain() {{ :; }}
+current_drain_url() {{ :; }}
+read_backend_start_iso() {{ return 1; }}
 FORCE=false
 BACKEND_PORT={port}
-{ 'app_mode_restart_prepared' if case == 'missing' else 'app_mode_swap_staged_update /disposable/staged' }
+{ 'restart_prepared' if case == 'identity' else 'app_mode_restart_prepared' if case == 'missing' else 'app_mode_swap_staged_update /disposable/staged' }
 ''')
     script.chmod(0o755)
     try:
@@ -84,6 +93,8 @@ BACKEND_PORT={port}
     assert row["status"] == "failed", log.read_text()
     assert row["failure_code"] == "update_refused"
     assert reason in row["error"]
+    if case == "identity":
+        assert row["error"] == reason
     assert json.loads(row["failure_detail"])["backend_healthy"] is claimed_healthy
     assert reason in project_update_operation(row)["log_tail"]
     assert not self_restart.restart_holds_new_work()
