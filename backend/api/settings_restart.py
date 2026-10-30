@@ -261,9 +261,7 @@ async def _launch_settings_restart(
     log_path: Path | None = None
     try:
         log_path = restart_log_path("restart.log")
-        with log_path.open("a") as log_fh:
-            log_fh.write(f"\n--- lifecycle operation {operation_id} ---\n")
-            log_fh.flush()
+        with log_path.open("w") as log_fh:
             process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,

@@ -920,7 +920,6 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
     """A proven rollback waits for the harness before it schedules its notice."""
     from automation import restart, restart_startup, update_failure_notice
     from automation import self_restart as sr
-    from infra.config import LOGS_DIR
     from loguru import logger
 
     events: list[str] = []
@@ -948,7 +947,6 @@ async def test_interrupted_update_startup_proves_the_previous_version_is_running
     assert json.loads(operation["failure_detail"]) == {
         "reason": "mismatch", "target_version": "0.4.2", "running_version": "0.4.1",
         "previous_version": "0.4.1",
-        "log_path": str(LOGS_DIR / "restart.log"),
     }
     assert sr.restart_holds_new_work() is False
     assert events == []

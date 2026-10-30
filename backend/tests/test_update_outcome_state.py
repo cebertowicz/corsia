@@ -161,10 +161,7 @@ async def test_drain_setup_failure_keeps_its_exception_class(isolated_db, quiet_
     row = _row(operation_id)
     assert row["status"] == "failed"
     assert row["failure_code"] == "drain_failed"
-    from infra.config import LOGS_DIR
-    assert json.loads(row["failure_detail"]) == {
-        "exception": "KeyError", "log_path": str(LOGS_DIR / "restart.log"),
-    }
+    assert json.loads(row["failure_detail"]) == {"exception": "KeyError"}
 
 
 @pytest.mark.asyncio
@@ -181,10 +178,7 @@ async def test_an_immediately_exiting_restart_script_names_launch_failed(isolate
 
     row = _row(operation_id)
     assert row["failure_code"] == "launch_failed"
-    from infra.config import LOGS_DIR
-    assert json.loads(row["failure_detail"]) == {
-        "exit_code": 3, "log_path": str(LOGS_DIR / "restart.log"),
-    }
+    assert json.loads(row["failure_detail"]) == {"exit_code": 3}
 
 
 @pytest.mark.asyncio
