@@ -202,40 +202,61 @@ def test_a_recording_failure_anywhere_in_the_chain_marks_the_task(db):
     assert query_recording_gaps(db, PARAMS) == {"task"}
 
 
-# The chain walk as shipped before ``seeded_runs``: every existing caller must still run exactly this text.
-_CHAIN_WALK = """
-        , attempts(task_id, node_id) AS (
-          SELECT id, id FROM outcome_rows
-          UNION
-          SELECT a.task_id, n.follow_up_of FROM attempts a JOIN plan_nodes n ON n.id=a.node_id
-          WHERE n.follow_up_of IS NOT NULL
-            AND EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=n.id AND e.event='revision_created')
-        ), chain(task_id, node_id, plan_id) AS (
-          SELECT a.task_id, a.node_id, m.plan_id FROM attempts a JOIN outcome_rows o ON o.id=a.task_id
-          JOIN plan_nodes m ON m.id=a.node_id
-          WHERE o.period IS NOT NULL {seed}
-          UNION
-          SELECT c.task_id, n.id, n.plan_id FROM chain c
-          JOIN plan_nodes n ON n.plan_id=c.plan_id AND n.parent_id=c.node_id
-          WHERE n.id NOT IN (SELECT node_id FROM attempts)
-          UNION
-          SELECT c.task_id, r.id, r.plan_id FROM chain c
-          CROSS JOIN plan_nodes d ON d.id=c.node_id AND d.spawned_thread_id IS NOT NULL
-          CROSS JOIN plans p ON {delegation_edge_sql('d', 'p')}
-          CROSS JOIN plan_nodes r ON r.plan_id=p.id AND r.parent_id IS NULL
-          WHERE c.node_id={newest_attachment_sql('p')}
-            AND r.id NOT IN (SELECT node_id FROM attempts)
-        )
-    """
-_ONLY_TASKS = "AND a.task_id IN (SELECT value FROM json_each(:task_ids))"
+def _fail(db, node: str, at: str = SETTLED) -> None:
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                   "VALUES (?,?,'test','failed','active','failed',?)", (f"fail-{node}", node, at))
 
 
-def test_the_default_chain_walk_text_is_unchanged_and_seeded_runs_only_add_to_it() -> None:
-    from api.measurement_chain import chain_ctes
-    from plans.public import delegation_edge_sql, newest_attachment_sql
+def _seeded(db, task_ids: set[str]) -> dict[str, float]:
+    """Each chain's dollars for ``task_ids``, accepted and seeded, walked once as the verdict reads them."""
+    from api.measurement_model_cost import clear_chain, materialize_chain
 
-    shipped = (_CHAIN_WALK.replace("{delegation_edge_sql('d', 'p')}", delegation_edge_sql("d", "p"))
-               .replace("{newest_attachment_sql('p')}", newest_attachment_sql("p")))
-    assert chain_ctes() == shipped.replace("{seed}", "")
-    assert chain_ctes(only_tasks=True) == shipped.replace("{seed}", _ONLY_TASKS)
-    assert "seeds(task_id" in chain_ctes(seeded_runs=True) and "seeds(task_id" not in chain_ctes()
+    chain = materialize_chain(db, PARAMS, task_ids, seeded=True)
+    try:
+        rows = query_model_costs(db, PARAMS, IdentityResolver(db), task_ids=task_ids, chain_rows=chain)
+    finally:
+        clear_chain(db)
+    dollars: Counter = Counter()
+    for row in rows:
+        dollars[row["task_id"]] += row["dollars"]
+    return dict(dollars)
+
+
+def test_a_failed_task_no_accepted_chain_reaches_is_a_seed_read_to_its_own_terminal_time(db):
+    _node(db, "lost", state="failed")
+    _fail(db, "lost")
+    _call(db, "lost")
+    _call(db, "lost", SONNET, at=AFTER)
+    assert _seeded(db, {"lost"}) == {"lost": pytest.approx(4)}
+    assert _chains(db) == {}
+
+
+def test_seeds_never_change_an_accepted_tasks_chain_nor_count_what_it_holds_twice(db):
+    _node(db, "top")
+    _node(db, "broke", parent="top", state="failed")
+    _fail(db, "broke")
+    _call(db, "top", SONNET)
+    _call(db, "broke", SONNET)  # under the accepted task: its chain holds the call, nothing seeds it again
+    assert {key: row["dollars"] for key, row in _chains(db).items()} == {("top", SONNET): pytest.approx(4)}
+    assert _seeded(db, {"top", "broke"}) == {"top": pytest.approx(4)}
+
+
+def test_a_sent_back_task_is_only_walked_from_its_revision(db):
+    _node(db, "sent", state="closed")
+    _fail(db, "sent")
+    _node(db, "again", state="failed", follow_up_of="sent", revision=True)
+    _fail(db, "again")
+    _call(db, "sent")
+    _call(db, "again", SONNET)
+    assert _seeded(db, {"sent", "again"}) == {"again": pytest.approx(6)}
+
+
+def test_a_seed_stops_at_another_seeds_attempts(db):
+    _node(db, "outer", state="closed")
+    _fail(db, "outer")
+    _node(db, "inner", parent="outer", state="failed")
+    _fail(db, "inner")
+    _call(db, "outer", SONNET)
+    _call(db, "inner")
+    assert _seeded(db, {"outer", "inner"}) == {"outer": pytest.approx(2), "inner": pytest.approx(4)}
