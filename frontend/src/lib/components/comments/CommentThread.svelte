@@ -248,7 +248,7 @@
 			</div>
 		{/if}
 	</div>
-{:else if comment.resolved && !replyText.trim() && !leaving}
+{:else if comment.resolved && (!replyText.trim() || resolvedOpen) && !leaving}
 	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -260,6 +260,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} />
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if !readOnly}<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
