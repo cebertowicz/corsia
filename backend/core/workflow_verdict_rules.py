@@ -152,7 +152,7 @@ def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
         if not cheaper:
             return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
         if any(c.reason == SMALL_HARM for c in quality):
-            return Verdict("revert", "cheaper_not_near_zero", look, tuple(calls))
+            return Verdict("revert", "cheaper_small_harm", look, tuple(calls))
         return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})
     # Mental model, "How it's decided": an unclear result keeps the current version, never the cheaper one.
     if look == 3:

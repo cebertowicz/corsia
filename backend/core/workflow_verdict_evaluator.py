@@ -17,6 +17,7 @@ from loguru import logger
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from core.workflow_verdict_rules import Evaluation, Verdict
 from infra.outcome_events import record_outcome_event
+from tools.workflow_task_fields import version_short_hash
 
 # Calibration enables this only in a later slice. A code constant keeps production evaluation
 # read-only until an explicit reviewed change.
@@ -69,11 +70,12 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
                 from events.delivery import enqueue_event_wake
 
                 kind, _, target = plan.subject.partition(":")  # "workflow:<ref>@<version>", "lesson:<id>@<sha>"
+                name, _, version = target.partition("@")
                 action = "keep the change" if verdict.word == "keep" else "revert the change"
                 try:
                     enqueue_event_wake(
                         evaluation.owner, REACHED_EVENT,
-                        f"{kind.capitalize()} {target.partition('@')[0]} verdict reached: {action}.",
+                        f"{kind.capitalize()} {name} ({version_short_hash(version)}) verdict reached: {action}.",
                         {"subject": plan.subject, "verdict": verdict.word, "reason": verdict.reason},
                         message_id=f"verdict:wake:{plan.subject}", db=connection,
                     )
