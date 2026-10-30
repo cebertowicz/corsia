@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +73,10 @@ async def _own_kpis(user_id: str, project: str | None, thread_id: str) -> list[d
     from api.measurement_scope import resolve_grain
 
     try:
-        return _kpi_summary(await run_bulk(_read, user_id, project or "all", thread_id, resolve_grain("weeks", "UTC")))
+        weeks = resolve_grain("weeks", "UTC")
+        # Only the two periods the summary keeps are read: the last complete week and the current one.
+        grain = replace(weeks, periods=weeks.periods[-1:], starts=weeks.starts[-2:])
+        return _kpi_summary(await run_bulk(_read, user_id, project or "all", thread_id, grain))
     except HTTPException as exc:
         return f"Error: {exc.detail}"
 

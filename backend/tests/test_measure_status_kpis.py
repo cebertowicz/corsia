@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from api import measurement_agent_kpis as agent_kpis
 from infra.database import get_db
 from infra.measure_registry import WorkflowOwner
 from tests.test_agent_kpi_api import definition, fact
@@ -53,6 +54,16 @@ async def test_kpis_true_returns_each_synced_kpi_current_and_last_complete_week(
         "period": "2026-01-19", "value": 1, "n": 1, "unknown": 0, "status": "ok"}
     assert isinstance(items["current"]["partial"], bool)
     assert late["last_complete"]["value"] == 0.5 and late["current"]["value"] == 0
+
+
+@pytest.mark.asyncio
+async def test_kpis_read_only_the_two_periods_they_return(owner, monkeypatch) -> None:
+    seed_kpis(owner)
+    calls = []
+    real = agent_kpis.evaluate
+    monkeypatch.setattr(agent_kpis, "evaluate", lambda *args, **kwargs: calls.append(args[2:4]) or real(*args, **kwargs))
+    await MeasureStatusTool().execute(_thread_id="owner", kpis=True)
+    assert {start.date().isoformat() for start, _ in calls} == {"2026-01-12", "2026-01-19"}
 
 
 @pytest.mark.asyncio
