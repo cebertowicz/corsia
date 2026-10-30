@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 
 from infra.thread_updates import PlanUpdateKind, record_plan_update
@@ -61,11 +60,9 @@ def _duplicate_open_block(connection, node_id: str, payload: Mapping) -> bool:
 
 def _deferred_person_step(connection, node_id: str) -> bool:
     """Whether the node is a workflow person step built with its card held for its dependencies."""
-    row = connection.execute(
-        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created' "
-        "ORDER BY created_at,id LIMIT 1", (node_id,),
-    ).fetchone()
-    created = json.loads(row["payload_json"] or "{}") if row is not None else {}
+    from plans.workflow_fields import creation_payload
+
+    created = creation_payload(connection, node_id)
     return created.get("workflow_by") == "person" and created.get("person_step") is False
 
 

@@ -110,7 +110,9 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
         description = step.get("instruction")
         if by == "person":
             from plans.boundary_fields import PERSON_STEP_DESCRIPTION_LIMIT
-            description = f"{description or title}\n\nCheck: {check}"
+            description = description or title
+            if step.get("check"):
+                description += f"\n\nCheck: {check}"
             if len(description) > PERSON_STEP_DESCRIPTION_LIMIT:
                 raise service.PlanInputError(
                     f"step {step['id']}: a person step's instruction must fit "
@@ -172,11 +174,16 @@ def _open_step(db, node_id: str):
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or node["state"] in service._TERMINAL_STATES:
         return None, {}
+    return node, creation_payload(db, node_id)
+
+
+def creation_payload(db, node_id: str) -> dict[str, Any]:
+    """A node's creation-event payload, where a workflow step's flags are recorded."""
     row = db.execute(
         "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created' "
         "ORDER BY created_at,id LIMIT 1", (node_id,),
     ).fetchone()
-    return node, (json.loads(row["payload_json"] or "{}") if row is not None else {})
+    return json.loads(row["payload_json"] or "{}") if row is not None else {}
 
 
 def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:

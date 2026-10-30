@@ -30,17 +30,17 @@ def test_by_validation():
 async def test_person_step_and_reviewer_refusals(isolated_db, tmp_path, monkeypatch):
     steps = (
         "    - {id: review, by: reviewer, required: true, check: Review passes, difficulty: {default: routine}}\n"
-        "    - {id: person, by: person, title: Approve draft, check: Draft approved, instruction: '## Review', after: [review], difficulty: {default: routine}}\n"
+        "    - {id: person, by: person, title: Sign the release form, check: Form signed, instruction: '## Review', after: [review], difficulty: {default: routine}}\n"
         "    - {id: plain, difficulty: {default: routine}}\n"
     )
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
     reply = await run.start("ship")
-    reviewer, person, plain = reply["steps"]
+    reviewer = reply["steps"][0]
     assert [entry.get("by") for entry in reply["steps"]] == ["reviewer", "person", None]
     rows = run.children(reply["node"]["id"])
     assert rows[1]["assignee"] == "user"
     assert "Read it twice." in rows[1]["description"]
-    assert "Check: Draft approved" in rows[1]["description"]
+    assert "Check: Form signed" in rows[1]["description"]
     assert "Already tried:" not in rows[1]["description"]
     created = run.rows("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'", reviewer["id"])
     assert json.loads(created[0]["payload_json"])["workflow_by"] == "reviewer"
@@ -58,13 +58,15 @@ async def test_person_step_and_reviewer_refusals(isolated_db, tmp_path, monkeypa
 async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, monkeypatch):
     steps = (
         "    - {id: review, by: reviewer, difficulty: {default: routine}}\n"
-        "    - {id: approval, title: Approve draft, by: person, check: Draft approved, difficulty: {default: routine}}\n"
+        "    - {id: signature, title: Sign the release form, by: person, check: Form signed, difficulty: {default: routine}}\n"
+        "    - {id: payment, title: Pay the filing fee, by: person, difficulty: {default: routine}}\n"
     )
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
     reply = await run.start("ship")
     reviewer = reply["steps"][0]["id"]
-    person = run.children(reply["node"]["id"])[1]
-    assert person["description"] == "Approve draft\n\nCheck: Draft approved"
+    rows = run.children(reply["node"]["id"])
+    assert rows[1]["description"] == "Sign the release form\n\nCheck: Form signed"
+    assert rows[2]["description"] == "Pay the filing fee"
     await run.update("start", {"node_id": reviewer, "expected_revision": run.revision(reviewer)})
     result = await run.update("fail", {
         "node_id": reviewer, "expected_revision": run.revision(reviewer), "evidence": "Review failed",
@@ -104,7 +106,7 @@ async def test_person_step_after_earlier_steps_is_asked_when_they_finish(isolate
     steps = (
         "    - {id: first, by: person, title: Pick scope, difficulty: {default: routine}}\n"
         "    - {id: draft, check: Draft exists, difficulty: {default: routine}}\n"
-        "    - {id: approve, by: person, title: Approve draft, after: [draft], difficulty: {default: routine}}\n"
+        "    - {id: approve, by: person, title: Sign the release form, after: [draft], difficulty: {default: routine}}\n"
     )
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
     reply = await run.start("ship")
