@@ -59,7 +59,8 @@ def resolution_touches(root: Path, path: Path, *, loop_touches: bool = True) -> 
 
 
 def contains(root: Path, path: Path) -> bool:
-    return path == root or path.is_relative_to(root)
+    """Return whether ``path`` is ``root`` or under it, ignoring case as a default macOS volume does."""
+    return Path(str(path).casefold()).is_relative_to(str(root).casefold())
 
 
 # macOS reports a sandbox refusal as ``<prog>: <path>: Operation not permitted``.
