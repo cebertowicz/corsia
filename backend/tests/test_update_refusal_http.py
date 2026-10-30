@@ -11,14 +11,14 @@ import uvicorn
 from fastapi import FastAPI
 
 from auth_fixtures import OWNER_TOKEN
-from automation.update_log import record_update_log
+from automation.self_restart import record_update_log
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case,healthy,claimed_healthy,reason", [
     ("lock", True, True, "another update or start"),
     ("unhealthy", False, False, "current backend is not healthy"),
-    ("ownership", True, False, "foreign service ownership"),
+    ("ownership", True, True, "foreign service ownership"),
     ("missing", True, True, "There is no staged update"),
 ])
 async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path, monkeypatch, case, healthy, claimed_healthy, reason):
@@ -46,7 +46,7 @@ async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path
     serving = asyncio.create_task(server.serve(sockets=[listener]))
     root = Path(__file__).resolve().parents[2]
     corsia_text = (root / "scripts/corsia").read_text()
-    fail = next(line for line in corsia_text.splitlines() if line.startswith("fail() {"))
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
     app_mode = root / "scripts/corsia.d/app_mode.sh"
     runtime = root / "scripts/corsia.d/runtime.sh"
     script = tmp_path / "corsia"
@@ -94,7 +94,7 @@ def test_failure_after_preflight_is_not_reported_as_refusal(tmp_path, monkeypatc
 
     root = Path(__file__).resolve().parents[2]
     text = (root / "scripts/corsia").read_text()
-    fail = next(line for line in text.splitlines() if line.startswith("fail() {"))
+    fail = "fail() {" + text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
     app_mode = root / "scripts/corsia.d/app_mode.sh"
     runtime = root / "scripts/corsia.d/runtime.sh"
     script = tmp_path / "corsia"

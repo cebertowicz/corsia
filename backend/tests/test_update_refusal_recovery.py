@@ -1,12 +1,13 @@
 """Refusals settle only the update that owns the lifecycle process."""
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
-from automation.update_log import record_update_log
+from automation.self_restart import record_update_log
 
 
 @pytest.mark.asyncio
@@ -118,10 +119,11 @@ async def test_acquired_update_owns_log_through_later_failure(isolated_db, monke
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_appends_to_preparation_log(tmp_path, monkeypatch):
+async def test_lifecycle_appends_to_preparation_log(isolated_db, tmp_path, monkeypatch):
     from pathlib import Path
     from types import SimpleNamespace
     from api import settings_restart
+    from automation import self_restart
     from infra import config
 
     monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
@@ -131,6 +133,7 @@ async def test_lifecycle_appends_to_preparation_log(tmp_path, monkeypatch):
         return object()
     monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
     operation_id = "c" * 32
+    assert self_restart.try_acquire(None, "owner", None, None, "update", kind="update", operation_id=operation_id)
     env = {"CORSIA_RESTART_OPERATION_ID": operation_id}
     settings_restart._prepare_current_release(Path("/tmp/corsia"), env)
     await settings_restart._launch_settings_restart(operation_id, True, Path("/tmp/corsia"), env, ["restart-prepared"], lambda name: tmp_path / name)
@@ -150,7 +153,9 @@ def test_lifecycle_refusal_logs_before_delete_even_when_backend_unreachable(tmp_
     curl.chmod(0o755)
     monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
     script = tmp_path / "corsia"
-    script.write_text('#!/bin/bash\n_corsia_lifecycle_refuse "Prepared frontend build is missing"\n')
+    corsia_text = (Path(__file__).resolve().parents[2] / "scripts/corsia").read_text()
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    script.write_text(f'#!/bin/bash\nRED=""; NC=""\n{fail}\nfail "Prepared frontend build is missing"\nexit 1\n')
     script.chmod(0o755)
     log = tmp_path / ("update-" + "a" * 32 + ".log")
     with log.open("w") as out:

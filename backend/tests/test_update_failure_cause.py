@@ -141,7 +141,7 @@ async def test_update_log_attachment_failure_releases_hold_before_launch(
     isolated_db, monkeypatch, tmp_path, raised_error
 ):
     from api import settings_restart
-    from automation import update_log
+    from automation import self_restart
     from infra.database import get_db
 
     log_path = tmp_path / "update.log"
@@ -155,7 +155,7 @@ async def test_update_log_attachment_failure_releases_hold_before_launch(
     def fail_attachment(*_args):
         raise raised_error
 
-    monkeypatch.setattr(update_log, "record_update_log", fail_attachment)
+    monkeypatch.setattr(self_restart, "record_update_log", fail_attachment)
     with pytest.raises(type(raised_error)):
         await settings_restart.prelaunch_settings_restart(
             {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
@@ -171,12 +171,10 @@ async def test_update_log_attachment_failure_releases_hold_before_launch(
 
 
 @pytest.mark.asyncio
-async def test_update_log_attachment_rejected_does_not_launch(monkeypatch, tmp_path):
+async def test_update_log_attachment_rejected_does_not_launch(isolated_db, monkeypatch, tmp_path):
     from api import settings_restart
-    from automation import update_log
 
     monkeypatch.setattr(settings_restart, "_update_log_path", lambda _id: tmp_path / "update.log")
-    monkeypatch.setattr(update_log, "record_update_log", lambda *_args: False)
     spawn = AsyncMock()
     monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
     compensate = AsyncMock()

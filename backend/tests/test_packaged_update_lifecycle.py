@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 
 from automation import restart, restart_startup, self_restart
-from automation.update_log import record_update_log
+from automation.self_restart import record_update_log
 from auth_fixtures import OWNER_TOKEN
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -167,8 +167,11 @@ async def test_pre_stop_refusal_fails_through_real_shell_and_http(isolated_db, t
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
     serving = asyncio.create_task(server.serve(sockets=[listener]))
-    app_mode = Path(__file__).resolve().parents[2] / "scripts/corsia.d/app_mode.sh"
-    runtime = Path(__file__).resolve().parents[2] / "scripts/corsia.d/runtime.sh"
+    root = Path(__file__).resolve().parents[2]
+    corsia_text = (root / "scripts/corsia").read_text()
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    app_mode = root / "scripts/corsia.d/app_mode.sh"
+    runtime = root / "scripts/corsia.d/runtime.sh"
     from infra import config
     monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     script = tmp_path / "corsia"
@@ -181,7 +184,8 @@ service_is_loaded() {{ return 1; }}
 require_no_unmanaged_backend() {{ :; }}
 app_mode_hold_update_lock() {{ :; }}
 is_backend_running() {{ return 1; }}
-fail() {{ printf '%s\\n' "$*"; }}
+RED=""; NC=""
+{fail}
 FORCE=false
 BACKEND_PORT={port}
 app_mode_swap_staged_update /disposable/staged

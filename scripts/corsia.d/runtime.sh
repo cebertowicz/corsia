@@ -924,6 +924,7 @@ bounce_server() {
         # A failed stop leaves the old backend serving with no bounce coming to
         # settle the operation, so the hold has to come off here. Past this
         # point the backend is down and startup owns the surviving operation.
+        _corsia_update_stopping=1
         if ! stop_backend; then
             [ "$drain_attempted" = false ] \
                 || cancel_failed_drain "$(current_drain_url)" || :
@@ -1332,31 +1333,7 @@ ensure_current_frontend_release() {
         "$checkout" "Frontend startup refused" ensure_current_frontend_release_locked
 }
 
-# Pre-stop checks are read-only. Capture their existing diagnostic as the
-# reason passed directly to the detached owner's existing cleanup.
-update_preflight_check() {
-    local output error error_file status=0 reason
-    error_file="$(mktemp "${TMPDIR:-/tmp}/corsia-preflight.XXXXXX" 2>&1)" || {
-        printf '%s\n' "$error_file" >&2
-        if declare -F _corsia_lifecycle_refuse > /dev/null; then
-            _corsia_lifecycle_refuse "$error_file"
-        fi
-        return 1
-    }
-    output="$("$@" 2>"$error_file")" || status=$?
-    error="$(< "$error_file")"
-    rm -f "$error_file"
-    [ -z "$output" ] || printf '%s\n' "$output"
-    [ -z "$error" ] || printf '%s\n' "$error" >&2
-    [ "$status" -ne 0 ] || return 0
-    if declare -F _corsia_lifecycle_refuse > /dev/null; then
-        reason="${output}${output:+${error:+$'\n'}}${error}"
-        [ -n "$reason" ] || reason="Update didn't finish"
-        _corsia_lifecycle_refuse "$reason"
-    fi
-    return 1
-}
-
+# Pre-stop checks run in the owning shell so their failure reason is retained.
 # Drain while the old release is intact. The lifecycle owner invokes frontend
 # activation only after it has confirmed that no old backend remains.
 restart_prepared() {
@@ -1370,19 +1347,16 @@ restart_prepared() {
         if [ ! -d "$stage" ]; then
             reason="Prepared frontend build is missing"
             fail "$reason"
-            if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
             return 1
         fi
         if [ ! -e "$prepared" ]; then
             reason="Prepared frontend ownership marker is missing"
             fail "$reason"
-            if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
             return 1
         fi
         if [ -e "$backup" ] || [ -e "$absent" ]; then
             reason="Prepared frontend rollback path already exists"
             fail "$reason"
-            if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
             return 1
         fi
     fi
@@ -1391,25 +1365,24 @@ restart_prepared() {
     # Revalidation inside the bounce remains intentional across the drain gap.
     if service_installed; then
         if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
-            update_preflight_check require_manager_service_definition || return 1
+            require_manager_service_definition || return 1
         else
-            update_preflight_check require_owned_service_definition || return 1
+            require_owned_service_definition || return 1
         fi
         if service_is_loaded; then
             if is_backend_running || [ -n "$(backend_pids)" ]; then
-                update_preflight_check require_loaded_service_owns_port || return 1
+                require_loaded_service_owns_port || return 1
             fi
         else
-            update_preflight_check require_no_unmanaged_backend "$BACKEND_PORT" || return 1
+            require_no_unmanaged_backend "$BACKEND_PORT" || return 1
         fi
     else
-        update_preflight_check require_port_served_by_this_checkout || return 1
+        require_port_served_by_this_checkout || return 1
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
-            if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
             return 1
         fi
         # Update is the only path that pulls, so refusing here on an incomplete

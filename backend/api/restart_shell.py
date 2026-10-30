@@ -29,11 +29,11 @@ _corsia_lifecycle_is_update=false
 [ "${2:-}" != restart-prepared ] || _corsia_lifecycle_is_update=true
 readonly _corsia_lifecycle_is_update
 _corsia_lifecycle_done=false
+_corsia_update_stopping=
 _corsia_unconfirmed_bootout=false
 _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
-    local refusal_reason="${1:-}"
-    [ -z "$refusal_reason" ] || _corsia_lifecycle_status=1
+    local refusal_reason="${_corsia_lifecycle_refusal_reason:-}"
     trap - EXIT HUP INT TERM
     export -n _corsia_cleanup_token _corsia_cleanup_port \
         _corsia_cleanup_operation _corsia_cleanup_curl
@@ -44,21 +44,9 @@ _corsia_lifecycle_cleanup() {
     local -a _corsia_cleanup_refusal_args=()
     local backend_healthy=false
     if [ "$_corsia_lifecycle_status" -ne 0 ] && [ "$_corsia_lifecycle_is_update" = true ] \
-        && [ -n "$refusal_reason" ]; then
+        && [ -z "${_corsia_update_stopping:-}" ] && [ -n "$refusal_reason" ]; then
         printf 'Update refused: %s\n' "$refusal_reason"
-        if declare -F is_backend_running > /dev/null && is_backend_running \
-            && { (
-                declare -F service_is_loaded > /dev/null && service_is_loaded \
-                    && declare -F require_owned_service_definition > /dev/null \
-                    && require_owned_service_definition \
-                    && declare -F require_loaded_service_owns_port > /dev/null \
-                    && require_loaded_service_owns_port
-            ) > /dev/null 2>&1 || (
-                declare -F service_is_loaded > /dev/null && ! service_is_loaded \
-                    && declare -F backend_pids > /dev/null && [ -n "$(backend_pids)" ] \
-                    && declare -F require_port_served_by_this_checkout > /dev/null \
-                    && require_port_served_by_this_checkout
-            ) > /dev/null 2>&1; }; then
+        if declare -F is_backend_running > /dev/null && is_backend_running; then
             backend_healthy=true
         fi
         _corsia_cleanup_refusal_args=(--data-urlencode 'failure_code=update_refused'
@@ -87,7 +75,6 @@ _corsia_lifecycle_cleanup() {
     fi
     exit "$_corsia_lifecycle_status"
 }
-_corsia_lifecycle_refuse() { _corsia_lifecycle_cleanup "$1"; }
 trap _corsia_lifecycle_cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT

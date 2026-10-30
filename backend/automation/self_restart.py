@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from statistics import median
+from automation.restart_queries import usual_update_seconds as usual_update_seconds
 import uuid
 import json
 
 from automation.restart_rule import ACTIVE_PHASES, HOLD_PHASES, IN_FLIGHT_TTL_SECONDS
-from automation.restart_rule import parse as _parse
 from automation.restart_rule import row_is_active
 from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
 from infra.database import get_db, write_transaction
@@ -116,28 +115,6 @@ def latest_update_operation(*, db=None) -> dict | None:
             connection.close()
 
 
-def usual_update_seconds(*, db=None) -> int | None:
-    """Return the median duration of the ten most recent completed updates."""
-    connection = db or get_db()
-    try:
-        rows = connection.execute(
-            "SELECT requested_at,settled_at FROM self_restart_requests "
-            "WHERE kind='update' AND status='complete' "
-            "ORDER BY requested_at DESC,id DESC LIMIT 10"
-        ).fetchall()
-        durations = [
-            (settled - requested).total_seconds()
-            for row in rows
-            if (requested := _parse(row["requested_at"])) is not None
-            and (settled := _parse(row["settled_at"])) is not None
-            and settled >= requested
-        ]
-        return int(median(durations)) if durations else None
-    finally:
-        if db is None:
-            connection.close()
-
-
 def mark_conductor_told(operation_id: str, *, db=None) -> bool:
     """Record exactly one successful corsia-agent notification."""
     with write_transaction(db, scope="restart_operation") as connection:
@@ -223,9 +200,6 @@ def try_acquire(
             return None
         if claim is not None and not claim(connection):
             return None
-        detail = {}
-        if previous_version:
-            detail["previous_version"] = previous_version
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
@@ -242,7 +216,7 @@ def try_acquire(
                 trigger,
                 target_version,
                 changes,
-                json.dumps(detail) if detail else None,
+                json.dumps({"previous_version": previous_version}) if previous_version else None,
                 _target_phase,
                 now,
                 now,
@@ -250,6 +224,18 @@ def try_acquire(
             ),
         )
     return operation_id
+
+
+def record_update_log(operation_id: str, log_path: str, *, db=None) -> bool:
+    """Attach an already-created log to the exact in-flight update."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        detail = _merged_detail(connection, operation_id, json.dumps({"log_path": log_path}))
+        result = connection.execute(
+            "UPDATE self_restart_requests SET failure_detail=? "
+            "WHERE id=? AND kind='update' AND status='in_flight'",
+            (detail, operation_id),
+        )
+        return result.rowcount == 1
 
 
 def try_acquire_steering(
@@ -299,8 +285,12 @@ def transition_operation(
 def adopt_for_resume(*, db=None) -> str | None:
     """Adopt a hold that survived the bounce so this startup can settle it.
 
-    Adopt any pre-bounce phase: its owner is gone and operational holds do not
-    expire. Otherwise startup cannot complete it and ingress stays queued.
+    Any pre-bounce phase is adopted, not just ``restarting``: the instance that
+    owned those phases is gone, so this startup is the only actor left that can
+    carry the operation to an ending. Without this the hold is never advanced,
+    ``complete_operation`` can never apply, and because an operational hold
+    deliberately never TTL-releases, every thread's ingress stays queued for the
+    life of the process.
     """
     with write_transaction(db, scope="restart_operation") as connection:
         row = _active_row(connection)

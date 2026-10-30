@@ -39,7 +39,7 @@ _PREPARE_EXIT_CODES = {
 
 
 def _update_log_path(operation_id: str | None = None) -> Path:
-    """Return an immutable per-attempt log path for one Update request."""
+    """Return the per-attempt log path for one Update request."""
     from infra.config import LOGS_DIR
 
     return LOGS_DIR / f"update-{operation_id or uuid.uuid4().hex}.log"
@@ -267,7 +267,7 @@ async def _launch_settings_restart(
         log_path = _update_log_path(operation_id) if prepared else restart_log_path("restart.log")
         with log_path.open("a" if prepared else "w") as log_fh:
             if prepared:
-                from automation.update_log import record_update_log
+                from automation.self_restart import record_update_log
                 from infra.db_async import run_in_db
 
                 attached = await run_in_db(record_update_log, operation_id, str(log_path))

@@ -343,9 +343,6 @@ app_mode_restart_prepared() {
         return "$status"
     else
         fail "There is no staged update to install at $staged"
-        if declare -F _corsia_lifecycle_refuse > /dev/null; then
-            _corsia_lifecycle_refuse "There is no staged update to install at $staged"
-        fi
         return 1
     fi
 }
@@ -353,26 +350,24 @@ app_mode_restart_prepared() {
 app_mode_swap_staged_update() {
     local staged="$1" drain_attempted=false swap_status reason
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-update}"
-    update_preflight_check require_owned_service_definition || return 1
+    require_owned_service_definition || return 1
     if service_is_loaded; then
         if is_backend_running || [ -n "$(backend_pids)" ]; then
-            update_preflight_check require_loaded_service_owns_port || return 1
+            require_loaded_service_owns_port || return 1
         fi
     else
-        update_preflight_check require_no_unmanaged_backend "$BACKEND_PORT" || return 1
+        require_no_unmanaged_backend "$BACKEND_PORT" || return 1
     fi
     # Held through the stop, the swap and the new app's proof, or the rollback.
     if ! app_mode_hold_update_lock; then
         reason="Update stopped: another update or start of CORSIA is in progress, so the staged update was kept at $staged and CORSIA was left as it was"
         fail "$reason"
-        if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
         return 1
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The staged update was kept at $staged; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
-            if declare -F _corsia_lifecycle_refuse > /dev/null; then _corsia_lifecycle_refuse "$reason"; fi
             return 1
         fi
         drain_attempted=true
@@ -380,6 +375,7 @@ app_mode_swap_staged_update() {
             "update and restart" "$BACKEND_PORT" legacy-settings-update \
             || warn "Drain did not complete; updating anyway"
     fi
+    _corsia_update_stopping=1
     if service_is_loaded \
         && ! bootout_service_and_wait "$(service_domain)" "$(service_label)"; then
         if service_is_loaded; then

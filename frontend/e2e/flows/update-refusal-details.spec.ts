@@ -16,8 +16,7 @@ test('refused update shows its reason and own log in Settings Details', async ({
 	// launch the lifecycle shell. The real refusal endpoint settles this operation.
 	execFileSync(python, ['-c', `
 from pathlib import Path
-from automation.self_restart import try_acquire
-from automation.update_log import record_update_log
+from automation.self_restart import record_update_log, try_acquire
 from infra.config import LOGS_DIR
 operation = '${operation}'
 log_path = LOGS_DIR / ('update-' + operation + '.log')
@@ -35,6 +34,7 @@ assert record_update_log(operation, str(log_path))
 	expect(status.operation).toMatchObject({ operation_id: operation, status: 'failed', failure_code: 'update_refused', error: reason, log_tail: `${log}\n` });
 
 	await openAppPastLanding(page);
+	await page.getByRole('alert').getByRole('button', { name: 'Dismiss' }).click();
 	await openSettings(page);
 	await page.getByRole('button', { name: 'System', exact: true }).click();
 	const card = page.locator('[data-settings-anchor="update"]');

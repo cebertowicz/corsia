@@ -70,7 +70,10 @@ def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, re
     curl.chmod(0o755)
     monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
     script = tmp_path / "corsia"
-    script.write_text('#!/bin/bash\n_corsia_lifecycle_refuse "The staged update is missing"\n')
+    from pathlib import Path
+    corsia_text = (Path(__file__).resolve().parents[2] / "scripts/corsia").read_text()
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    script.write_text(f'#!/bin/bash\nRED=""; NC=""\n{fail}\nfail "The staged update is missing"\nexit 1\n')
     script.chmod(0o755)
     log = tmp_path / "update.log"
     with log.open("w") as out:
