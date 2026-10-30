@@ -102,7 +102,7 @@ export async function addNetworkServer(
 	// carries its own auth. Optional so the existing oMLX-by-IP call stays exactly
 	// as it was.
 	extra?: { base_url?: string; dialect?: string; api_key?: string; model_ids?: string[] },
-): Promise<{ ok: boolean; server_id?: string; status?: string; models?: number; message?: string }> {
+): Promise<{ ok: boolean; server_id?: string; status?: string; message?: string }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings/network-servers?token=${t()}`, {
 			method: 'POST',

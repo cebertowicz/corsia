@@ -16,14 +16,14 @@ let component: ReturnType<typeof mount> | null = null;
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 function button(text: string) { const result = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text); if (!result) throw new Error(`Missing button ${text}`); return result; }
 
-async function openSetup(count: number, reachable = true, modelStatus = 'ready', declared = false, testedApi = false) {
-	let added = false;
+async function openSetup(count: number, reachable = true, modelStatus = 'ready', declared = false, testedApi = false, resumeServer = false, sourceReady = true) {
+	let added = resumeServer;
 	token.set('test-session'); user.set({ id: 'user', name: 'Ada' });
 	if (testedApi) testedProviders.set(['anthropic']);
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_started: true, local_eligible: false, macos_supported: null } });
-		if (url.includes('/sources')) return json({ sources: [] });
+		if (url.includes('/sources')) return json({ sources: added ? [{ source: 'external:server-1', name: 'My server', state: sourceReady ? 'ready' : 'unverified' }] : [] });
 		if (url.includes('/api/settings/network-servers') && init?.method === 'POST') {
 			if (!reachable) return json({ detail: 'Could not reach the endpoint' }, 400);
 			if (declared) expect(JSON.parse(String(init.body)).model_ids).toEqual(['declared-model']);
@@ -37,7 +37,7 @@ async function openSetup(count: number, reachable = true, modelStatus = 'ready',
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
 	flushSync(); await settle(); await settle();
-	if (testedApi) return;
+	if (testedApi || resumeServer) return;
 	button('Add provider').click(); await settle();
 	([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Other provider by address')) as HTMLButtonElement).click(); await settle();
 	const input = document.querySelector('input[placeholder="https://host.example.com/compatible-mode/v1"]') as HTMLInputElement;
@@ -62,6 +62,16 @@ describe('own endpoint during setup', () => {
 		expect(button('Start using CORSIA').disabled).toBe(false);
 		expect(host.textContent).toContain('My server · added');
 		expect(get(testedProviders)).toEqual([]);
+	});
+	it('recognizes a ready server when setup resumes', async () => {
+		await openSetup(1, true, 'ready', false, false, true);
+		expect(button('Start using CORSIA').disabled).toBe(false);
+		expect(host.textContent).toContain('My server · added');
+	});
+	it('does not count a selectable model whose source is not ready', async () => {
+		await openSetup(1, true, 'ready', false, false, true, false);
+		expect(button('Start using CORSIA').disabled).toBe(true);
+		expect(button('Add provider')).toBeTruthy();
 	});
 	it('keeps the test-call label for a tested API provider', async () => {
 		await openSetup(0, true, 'ready', false, true);

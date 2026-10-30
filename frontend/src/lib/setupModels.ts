@@ -1,7 +1,6 @@
 import type { Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
-import { get } from 'svelte/store';
-import { networkServers } from '$lib/stores/networkServers';
+import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
 
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string };
@@ -16,16 +15,17 @@ export function setupModelWorks(model: SetupModel): boolean {
 }
 
 /** True when a subscription, a tested API provider or the local model is ready to answer. Setup only reports this; the person picks the model. */
-export function hasReadySetupModel(models: SetupModel[], tested: TestedProvider[] = [], addedEndpoints: string[] = []): boolean {
+export function hasReadySetupModel(models: SetupModel[], tested: TestedProvider[] = []): boolean {
 	return models.some((row) => setupModelWorks(row) && (
 		row.connection === 'claude-code' || row.connection === 'codex' || row.connection === 'omlx'
 		|| tested.some((test) => row.connection === test.source || row.provider === test.source)
-		|| addedEndpoints.some((id) => row.litellm_model?.startsWith(`external@${id}/`))
 	));
 }
 
-export function setupProviderName(source: string): string {
-	return get(networkServers).find((server) => server.id === source)?.instance_name ?? source;
+/** A ready source counts only when the scoped catalog offers its exact server. */
+export function readySetupEndpoint(sources: ModelSource[], models: SetupModel[]): ModelSource | undefined {
+	return sources.find((source) => source.source.startsWith('external:') && sourceIsReady(source)
+		&& models.some((row) => row.litellm_model?.startsWith(`external@${source.source.slice('external:'.length)}/`) && setupModelWorks(row)));
 }
 
 /** Read the same scope the CORSIA agent will use, never the unscoped catalog. */

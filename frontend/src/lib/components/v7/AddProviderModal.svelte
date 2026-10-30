@@ -8,10 +8,9 @@
 	interface Props {
 		onClose: () => void;
 		onSelectCloud: (p: ProviderEntry) => void;
-		onAddedEndpoint?: (serverId: string) => void;
 	}
 
-	const { onClose, onSelectCloud, onAddedEndpoint }: Props = $props();
+	const { onClose, onSelectCloud }: Props = $props();
 
 	type Mode = 'menu' | 'remote' | 'endpoint';
 	let mode = $state<Mode>('menu');
@@ -76,7 +75,6 @@
 			actionError = r.message ?? 'Failed to reach that endpoint';
 			return;
 		}
-		if (r.server_id) onAddedEndpoint?.(r.server_id);
 		await loadHostGroups();
 		onClose();
 	}
