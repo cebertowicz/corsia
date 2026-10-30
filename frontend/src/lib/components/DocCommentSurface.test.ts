@@ -490,8 +490,8 @@ describe('DocCommentSurface suggestions', () => {
 		await vi.waitFor(() => expect(document.body.querySelector('h3')?.textContent).toBe('Text changed'));
 		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
 		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': 'The text changed on the server' } });
-		// The popover lists by group, so the card that turned orphaned is a new one.
-		expect(card()).not.toBe(before);
+		// The heading changed, but the card did not move: anything typed in it stays where it was.
+		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		expect(accept().textContent).toBe('Accept');
