@@ -44,6 +44,14 @@ def _git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def _status_reason(repo: Path, worktree: Path) -> str | None:
+    admin = worktree_reaper_probe.admin_dir(worktree)
+    assert admin is not None
+    return worktree_reaper_probe.status_skip_reason(
+        worktree, worktree_reaper_probe.worktree_git_env(repo, admin, worktree),
+    )
+
+
 class FakeProbe(ProcessProbe):
     """Process probe with scripted answers; everything else is real."""
 
@@ -210,7 +218,7 @@ def test_gate_scratch_and_generated_build_info_are_disposable(repo, path, patter
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("generated\n")
 
-    assert worktree_reaper_probe.status_skip_reason(wt) is None
+    assert _status_reason(repo, wt) is None
 
 
 @pytest.mark.parametrize("name", ["node_modules", ".venv"])
@@ -224,7 +232,7 @@ def test_symlinked_dependency_entry_is_disposable(repo, tmp_path, name):
     status = _git(wt, "status", "--porcelain=v2", "--ignored=matching")
 
     assert f"! {name}" in status
-    assert worktree_reaper_probe.status_skip_reason(wt) is None
+    assert _status_reason(repo, wt) is None
 
 
 @pytest.mark.parametrize(
@@ -248,7 +256,7 @@ def test_non_allowlisted_ignored_paths_remain_data(repo, path, pattern, contents
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"{contents}\n")
 
-    assert worktree_reaper_probe.status_skip_reason(wt) == "ignored_data"
+    assert _status_reason(repo, wt) == "ignored_data"
 
 
 # --- each skip reason -------------------------------------------------------
@@ -259,6 +267,12 @@ def _prepare(repo: Path, kind: str) -> Path:
         _git(repo, "worktree", "lock", str(wt))
     elif kind == "git_lock":
         (_admin(wt) / "index.lock").write_text("")
+    elif kind == "worktree_config":
+        monitor = repo.parent / "monitor"
+        monitor.write_text(f"#!/bin/sh\ntouch '{repo.parent / 'ran'}'\n")
+        monitor.chmod(0o755)
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        (_admin(wt) / "config.worktree").write_text(f"[core]\n\tfsmonitor = {monitor}\n")
     elif kind == "dirty":
         (wt / "README").write_text("changed\n")
     elif kind == "untracked":
@@ -271,7 +285,9 @@ def _prepare(repo: Path, kind: str) -> Path:
 
 
 @pytest.mark.parametrize(
-    "kind", ["locked", "git_lock", "recent", "dirty", "untracked", "ignored_data"],
+    "kind", [
+        "locked", "git_lock", "worktree_config", "recent", "dirty", "untracked", "ignored_data",
+    ],
 )
 def test_each_unsafe_state_is_skipped_with_its_reason(repo, kind):
     wt = _prepare(repo, kind)
@@ -283,6 +299,10 @@ def test_each_unsafe_state_is_skipped_with_its_reason(repo, kind):
     assert wt.is_dir()
     if kind == "git_lock":
         assert (_admin(wt) / "index.lock").exists()
+    if kind == "worktree_config":
+        assert not (repo.parent / "ran").exists()
+        _git(wt, "status", "--porcelain")
+        assert (repo.parent / "ran").exists(), "control did not exercise the worktree's config"
 
 
 def test_live_process_skip_reason_is_recorded(repo):
@@ -1037,11 +1057,11 @@ def test_salvage_reads_the_quarantined_tree(repo, monkeypatch):
     original = worktree_reaper_salvage.salvage_worktree
     read_from: list[Path] = []
 
-    def spy(repo_path, worktree, name, now, origin):
+    def spy(repo_path, worktree, admin, name, now, origin):
         read_from.append(worktree)
         # A late write to the old path no longer lands in the tree being copied.
         assert not wt.exists() and worktree.is_dir()
-        return original(repo_path, worktree, name, now, origin)
+        return original(repo_path, worktree, admin, name, now, origin)
 
     monkeypatch.setattr(worktree_reaper, "salvage_worktree", spy)
     report = _run(repo)
