@@ -52,7 +52,7 @@ def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
     return failure
 
 
-def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> Path | None:
+def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
     """Pull, validate, and stage the serving checkout before any restart."""
     try:
         result = subprocess.run(
@@ -92,7 +92,7 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
                 _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"),
             ) from exc
     if result.returncode == 0:
-        return log_path if log_path.is_file() else None
+        return
 
     summary = terminal_update_summary(stdout, stderr)
     failure = HTTPException(
@@ -187,7 +187,7 @@ async def _begin_settings_drain(operation_id: str, mode: str) -> None:
 
 
 
-async def _await_preparation(task: asyncio.Task[Path | None]) -> Path | None:
+async def _await_preparation(task: asyncio.Task[None]) -> None:
     """Await one owned preparation worker before propagating caller cancellation."""
     pending_cancel: asyncio.CancelledError | None = None
     while not task.done():
@@ -201,7 +201,7 @@ async def _await_preparation(task: asyncio.Task[Path | None]) -> Path | None:
         if not task.cancelled():
             task.exception()
         raise pending_cancel
-    return task.result()
+    task.result()
 
 
 async def _prepare_owned_release(
@@ -215,12 +215,7 @@ async def _prepare_owned_release(
         asyncio.to_thread(_prepare_current_release, corsia_script, restart_env)
     )
     try:
-        log_path = await _await_preparation(task)
-        if isinstance(log_path, Path) and log_path.is_file():
-            from automation import self_restart
-            from infra.db_async import run_in_db
-
-            await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
+        await _await_preparation(task)
     except asyncio.CancelledError as error:
         await _compensate_cancelled_acquire(acquired_ids, error)
         raise
@@ -271,6 +266,11 @@ async def _launch_settings_restart(
     try:
         log_path = _update_log_path(operation_id) if prepared else restart_log_path("restart.log")
         with log_path.open("a" if prepared else "w") as log_fh:
+            if prepared:
+                from automation import self_restart
+                from infra.db_async import run_in_db
+
+                await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
             process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,

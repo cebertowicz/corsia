@@ -29,6 +29,36 @@ async def test_disk_space_failure_does_not_link_a_log_that_was_never_created(iso
     assert list(tmp_path.glob("update-*.log")) == []
 
 
+@pytest.mark.asyncio
+async def test_lifecycle_open_records_log_after_preparation_write_fails(isolated_db, tmp_path, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from api import settings_restart
+    from automation import self_restart
+    from infra import config
+
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
+    monkeypatch.setattr(settings_restart.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="prepared", stderr=""))
+    monkeypatch.setattr(Path, "write_text", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk write failed")))
+    operation_id = await settings_restart._acquire_settings_restart({"id": "owner"}, "update", [])
+    expected_log = settings_restart._update_log_path(operation_id)
+    env = {"CORSIA_RESTART_OPERATION_ID": operation_id}
+    await settings_restart._prepare_owned_release(operation_id, [operation_id], Path("corsia"), env)
+    assert not expected_log.exists()
+    assert not json.loads(self_restart.operation_by_id(operation_id)["failure_detail"] or "{}").get("log_path")
+
+    def spawn(_script, _args, _env, op_id, log_file, **_kwargs):
+        detail = json.loads(self_restart.operation_by_id(op_id)["failure_detail"])
+        assert detail["log_path"] == str(expected_log)
+        log_file.write("refused\n")
+        return object()
+
+    monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
+    await settings_restart._launch_settings_restart(operation_id, True, Path("corsia"), env, [], lambda _: tmp_path / "restart.log")
+    assert expected_log.read_text() == "refused\n"
+    assert list(tmp_path.glob("*.log")) == [expected_log]
+
+
 @pytest.mark.parametrize("reachable", [True, False])
 def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, reachable):
     import os
