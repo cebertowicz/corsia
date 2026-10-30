@@ -178,10 +178,10 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 27693,
+      "bytes": 27263,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "3c94e6dbff0914bada7717c23daf36f59b1dff7779fff7d52f62f1a56f3fa049"
+      "sha256": "d3e1a1aa1197a94b9a82862c07c6c3e429f846a20852521074262ef7f1b9fecf"
     },
     {
       "bytes": 1259,
@@ -196,10 +196,10 @@
       "sha256": "5390c727704a7c73f755e813fd583eb7473da73918e242cfc10d9cd9ab08bf24"
     },
     {
-      "bytes": 17746,
+      "bytes": 17551,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "63434d597c3b9bab967d08d5e885be1bab7cbfe29e9e636a911e4c96c33afa8d"
+      "sha256": "cd4b8e3eae164ce0d5ac2048f7fb4937dc9c70f779c7b7d94de9e209b1f286c8"
     },
     {
       "bytes": 991,
