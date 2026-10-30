@@ -1,13 +1,10 @@
-"""Reference cards: the registered artifacts a message's text links to or names.
+"""Reference cards for registered artifacts and existing scoped files named in text.
 
-The server half of ``frontend/src/lib/linkTargetResolver.ts``. The client turns a
-clicked link into a path and opens the artifact; here the same turning runs over
-a message's text so a card can stand for each file the message names. The path
-rules (``link_target_path``, ``normalize_path``, ``workspace_path``) are ports of
-the client's, held to each other by ``testdata/link-target-vectors.json``, which
-both test suites read.
-
-An accessible registered artifact or existing scoped file becomes a card.
+The client link resolver and these card paths share decoding and normalization
+vectors in ``testdata/link-target-vectors.json``. Their allowed roots differ: the
+client opens workspace links, while cards can also refer to scoped files.
+Relative card paths use the explicit workspace origin when supplied, otherwise
+the inherited first-scoped-root fallback.
 """
 
 from __future__ import annotations
@@ -59,7 +56,7 @@ def normalize_path(root: str, target: str) -> str | None:
 
 
 def workspace_path(href: str, roots: Sequence[str], origin: str | None = None) -> str | None:
-    """The scoped path a link names: absolute under a root, or relative to its workspace origin."""
+    """Resolve under a scoped root, using the workspace origin or first root for relative paths."""
     target = link_target_path(href)
     if not target or not roots:
         return None

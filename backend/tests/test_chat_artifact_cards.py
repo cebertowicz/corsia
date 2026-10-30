@@ -556,6 +556,12 @@ def _registered(db, root: Path, name: str, thread="owner") -> str:
     return str(registry_service.register_write_strict(thread, str(path), title=name, db=db)["id"])
 
 
+def test_relative_path_uses_explicit_origin_or_first_scoped_root():
+    roots = ["/repo", "/workspace"]
+    assert workspace_path("notes/plan.md", roots, "/workspace") == "/workspace/notes/plan.md"
+    assert workspace_path("notes/plan.md", roots) == "/repo/notes/plan.md"
+
+
 @pytest.mark.parametrize("case", VECTORS["cases"], ids=lambda c: c["href"] or "empty")
 def test_the_path_rules_match_the_client_vectors(case):
     assert workspace_path(case["href"], VECTORS["roots"]) == case["expected"]

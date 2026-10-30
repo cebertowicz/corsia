@@ -242,7 +242,6 @@ describe('MessageArtifactCards', () => {
 		strip.dispatchEvent(new Event('scroll'));
 		expect(strip.hasAttribute('data-before')).toBe(false);
 	});
-
 });
 
 describe('UpdateCard ask row', () => {
