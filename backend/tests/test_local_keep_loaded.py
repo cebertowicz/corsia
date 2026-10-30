@@ -187,6 +187,21 @@ async def test_omlx_refusing_a_load_the_verdict_passed_is_still_a_memory_refusal
 
 
 @pytest.mark.asyncio
+async def test_omlx_refusing_a_load_beside_a_model_names_that_model(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["load"] = {"ok": False, "status": 500, "message": _OMLX_REFUSALS[0]}
+
+    async def loaded(_cfg):
+        return [{"identifier": "other", "size_bytes": 5 * GIB}]
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome["verdict"] == "no_room" and outcome["neighbour_id"] == "other"
+
+
+@pytest.mark.asyncio
 async def test_setup_past_the_memory_check_keeps_a_load_failure_that_isnt_memory(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}

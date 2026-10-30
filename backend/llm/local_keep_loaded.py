@@ -19,8 +19,9 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
 | pins full | none (derived live) | pins-full line | none |
 | doesn't fit now | none (derived live) | not-loaded line, if pinned | none |
-| setup's own model past the verdict on an empty seat | none, unless oMLX refuses it (then as load refused) | live verdicts | as the load ends |
+| setup's own model past the verdict on an empty seat | none, unless oMLX refuses it (then as below) | live verdicts | as the load ends |
 | loaded | none | live verdicts | ``model.load.completed`` |
+| oMLX refuses the load for memory, and the row has a live not-loaded line | none (derived live) | not-loaded line | ``model.load.failed`` with ``error`` |
 | load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
 | person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
 | CORSIA restarts | cleared (memory) | live verdicts only: oMLX reloads pins at start | none |
@@ -220,7 +221,7 @@ async def keep_loaded(
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
-                refused = refusal or _refusal("no_memory", size_bytes, model_room_bytes(), held, loaded)
+                refused = refusal or _refusal("no_room" if loaded else "no_memory", size_bytes, model_room_bytes(), held, loaded)
                 return _failed_load(key, result, refused, not_loaded)
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
