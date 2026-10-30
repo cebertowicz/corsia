@@ -1,6 +1,7 @@
 import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
-import { setupMode } from '$lib/stores/setupMode';
+import { noticeSuppressed, updateToastSuppressed } from './noticeSuppression';
+export { updateToastSuppressed } from './noticeSuppression';
 import { toasts } from '$lib/stores/toast';
 import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
@@ -11,7 +12,6 @@ import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe
 import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
 import type { UpdateSchedule, UpdateStatus } from './types';
 
-const BASE = '';
 const POLL_MS = 1_000;
 export type { UpdateSchedule, UpdateStatus } from './types';
 export const updateStatus = writable<UpdateStatus | null>(null);
@@ -24,7 +24,6 @@ export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
 export const updateConfirmed = writable<{ operationId: string; version: string | null } | null>(null);
-export const updateToastSuppressed = writable(false);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
 /** The server is down or coming back: the composer cannot send. */
@@ -82,7 +81,7 @@ function dismissNotice(forSuppression = false): void {
 function showNotice(status: UpdateStatus): void {
 	latestNoticeStatus = status;
 	const version = status.target_version;
-	if (get(updateToastSuppressed) || get(setupMode) === 'flow') {
+	if (get(noticeSuppressed)) {
 		dismissNotice();
 		return;
 	}
@@ -91,11 +90,10 @@ function showNotice(status: UpdateStatus): void {
 	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
 
-derived([updateToastSuppressed, setupMode], ([$suppressed, $setupMode]) => $suppressed || $setupMode === 'flow')
-	.subscribe((suppressed) => {
-		if (suppressed) dismissNotice(true);
-		else if (latestNoticeStatus) showNotice(latestNoticeStatus);
-	});
+noticeSuppressed.subscribe((suppressed) => {
+	if (suppressed) dismissNotice(true);
+	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
+});
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
 function dropProgressToast(): void {
@@ -178,7 +176,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	const authToken = get(token);
 	if (!authToken) return;
 	try {
-		const response = await fetch(`${BASE}/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
+		const response = await fetch(`/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
 			headers: { Authorization: `Bearer ${authToken}` },
 			cache: 'no-store',
 		});
@@ -231,7 +229,7 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 		return false;
 	}
 	try {
-		const response = await fetch(`${BASE}/api/system/update-schedule`, {
+		const response = await fetch('/api/system/update-schedule', {
 			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch), cache: 'no-store',
 		});
