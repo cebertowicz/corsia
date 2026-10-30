@@ -6,6 +6,6 @@
  export function setOpen(value: boolean) { open = value; }
 </script>
 
-<Popover anchor={new DOMRect(400, 400, 50, 20)} {open} onClose={() => { open = false; }} placement="bottom" keepSide sideKey={key}>
+<Popover anchor={new DOMRect(400, 400, 50, 20)} {open} onClose={() => { open = false; }} placement="bottom" sideKey={key}>
  <span>Comment</span>
 </Popover>

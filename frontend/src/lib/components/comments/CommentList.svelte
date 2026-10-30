@@ -59,13 +59,16 @@
 		return rank(a.id) - rank(b.id);
 	}) : comments);
 	const rows = $derived(groupRows(ordered, groupOf ?? (() => null)));
+	/** The card holding focus keeps its section: moving to another would remount it and take the person out of its reply box. */
+	let heldId = $state<string | null>(null);
 	function holdCardOrder(event: FocusEvent) {
-		if (heldOrder !== null) return;
-		if ((event.target as HTMLElement)?.closest('[data-comment-id]')) heldOrder = comments.map((comment) => comment.id);
+		const target = event.target as HTMLElement | null;
+		heldId = target?.closest<HTMLElement>('[data-thread]')?.dataset.thread ?? null;
+		if (target?.closest('[data-comment-id]')) heldOrder ??= comments.map((comment) => comment.id);
 	}
 	function releaseCardOrder(event: FocusEvent) {
 		const card = (event.target as HTMLElement)?.closest('[data-comment-id]');
-		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) heldOrder = null;
+		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) { heldOrder = null; heldId = null; }
 	}
 	function leaveCard(event: FocusEvent) {
 		const card = event.currentTarget as HTMLElement;
@@ -73,8 +76,8 @@
 	}
 	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
 	const reviews = $derived(comments.filter((comment) => comment.review && !comment.resolved));
-	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && !comment.orphaned));
-	const orphaned = $derived(comments.filter((comment) => !comment.resolved && !!comment.orphaned));
+	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && (!comment.orphaned || comment.id === heldId)));
+	const orphaned = $derived(comments.filter((comment) => !comment.resolved && !!comment.orphaned && comment.id !== heldId));
 	const resolved = $derived(comments.filter((comment) => comment.resolved));
 </script>
 

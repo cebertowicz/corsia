@@ -9,7 +9,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', keepSide = false, sideKey, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', sideKey, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -30,15 +30,14 @@
 		initialFocus?: string;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
-		/** Keep the opening placement until the card closes or its semantic anchor changes. */
-		keepSide?: boolean;
+		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, the window resizes, or this changes. */
 		sideKey?: unknown;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
 	let opener = $state<HTMLElement | null>(null);
 	let style = $state('left: 12px; top: 12px;');
-	/** A live anchor whose text is not drawn, or is scrolled out of the area, hides its surface; it returns when the text does. */
+	/** A live anchor whose text is not drawn, or is scrolled out of the area, hides its surface; it returns when the text does. Other activity leaves a surface holding focus in place, clamped into the area. */
 	let hidden = $state(true);
 	type Side = 'left' | 'right' | 'above' | 'below' | 'avoid-above' | 'avoid-below';
 	let rememberedSide: Side | null = null;
@@ -52,13 +51,15 @@
 			right: Math.min(window.innerWidth, edge?.right ?? window.innerWidth), bottom: Math.min(window.innerHeight, edge?.bottom ?? window.innerHeight),
 		};
 	}
-	function position() {
+	function position(event?: Event) {
 		const rect = rectFor(anchor);
 		const live = typeof anchor === 'function';
 		if (!surface) return;
-		if (!rect) { if (live) hidden = true; return; }
+		// Hiding a card makes it inert, which would throw the person out of the box they are typing in, so only their own scroll or resize hides it.
+		const engaged = event?.type !== 'scroll' && event?.type !== 'resize' && surface.contains(document.activeElement);
+		if (!rect) { if (live && !engaged) hidden = true; return; }
 		const area = region();
-		if (rect.bottom < area.top || rect.top > area.bottom || rect.right < area.left || rect.left > area.right) {
+		if (!engaged && (rect.bottom < area.top || rect.top > area.bottom || rect.right < area.left || rect.left > area.right)) {
 			if (live) hidden = true; else dismiss();
 			return;
 		}
@@ -74,41 +75,41 @@
 		const width = Math.min(naturalWidth, area.right - area.left - 2 * gap);
 		const height = Math.min(naturalHeight, area.bottom - area.top - 2 * gap);
 		const avoided = avoidRect?.();
-		let left = rect.left;
-		let top = rect.bottom + gap;
+		const under = placement === 'bottom-end' || (placement === 'bottom' && rect.left + width > area.right - gap) ? rect.right - width : rect.left;
+		const spots: Record<Side, [number, number]> = {
+			below: [under, rect.bottom + gap],
+			above: [under, rect.top - height - gap],
+			right: [rect.right + gap, rect.top],
+			left: [rect.left - width - gap, rect.top],
+			'avoid-below': [under, (avoided?.bottom ?? rect.bottom) + gap],
+			'avoid-above': [under, (avoided?.top ?? rect.top) - height - gap],
+		};
+		const overflowsBelow = rect.bottom + gap + height > area.bottom - gap;
+		const fitsAbove = rect.top - gap - height >= area.top + gap;
 		let side: Side = 'below';
 		if (placement === 'bottom' || placement === 'bottom-end') {
-			if (placement === 'bottom-end' || left + width > area.right - gap) left = rect.right - width;
 			// Below the anchor when it fits; otherwise above it, never clamped up over the anchor.
-			if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) { top = rect.top - height - gap; side = 'above'; }
+			if (overflowsBelow && fitsAbove) side = 'above';
 		} else if (rect.right + gap + width <= area.right - gap) {
 			// Beside the anchor, never over it.
-			left = rect.right + gap; top = rect.top; side = 'right';
+			side = 'right';
 		} else if (rect.left - gap - width >= area.left + gap) {
-			left = rect.left - width - gap; top = rect.top; side = 'left';
+			side = 'left';
 		} else if (avoided && avoided.bottom + gap + height <= area.bottom - gap) {
 			// For an image region, use empty canvas below the image before covering another tag.
-			top = avoided.bottom + gap; side = 'avoid-below';
+			side = 'avoid-below';
 		} else if (avoided && avoided.top - gap - height >= area.top + gap) {
 			// When the lower canvas is full, use the empty canvas above the image instead.
-			top = avoided.top - height - gap; side = 'avoid-above';
-		} else if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) {
+			side = 'avoid-above';
+		} else if (overflowsBelow && fitsAbove) {
 			// No room beside or outside the avoided rectangle: above the anchor. Otherwise it stays below it, clamped into the canvas.
-			top = rect.top - height - gap; side = 'above';
+			side = 'above';
 		}
-		if (keepSide) {
-			const key = sideKey ?? anchor;
-			if (key !== rememberedKey) { rememberedKey = key; rememberedSide = null; }
-			rememberedSide ??= side;
-			side = rememberedSide;
-			left = placement === 'bottom-end' || (placement === 'bottom' && rect.left + width > area.right - gap) ? rect.right - width : rect.left;
-			if (side === 'right') { left = rect.right + gap; top = rect.top; }
-			else if (side === 'left') { left = rect.left - width - gap; top = rect.top; }
-			else if (side === 'above') top = rect.top - height - gap;
-			else if (side === 'avoid-above') top = (avoided?.top ?? rect.top) - height - gap;
-			else if (side === 'avoid-below') top = (avoided?.bottom ?? rect.bottom) + gap;
-			else top = rect.bottom + gap;
-		}
+		// The side holds once chosen: growing while the person types clamps the surface rather than flipping it away from where they are looking.
+		const key = sideKey ?? anchor;
+		if (key !== rememberedKey || event?.type === 'resize') { rememberedKey = key; rememberedSide = null; }
+		rememberedSide ??= side;
+		let [left, top] = spots[rememberedSide];
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));
 		left = Math.max(area.left + gap, Math.min(left, area.right - width - gap));
 		style = `left: ${left}px; top: ${top}px; max-width: ${width}px;`;
@@ -139,7 +140,7 @@
 	$effect(() => {
 		void anchor;
 		void sideKey;
-		if (open) void tick().then(position);
+		if (open) void tick().then(() => position());
 	});
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
 	function onPointer(event: PointerEvent) { if (open && surface && event.target instanceof Node && !surface.contains(event.target)) dismiss(); }
