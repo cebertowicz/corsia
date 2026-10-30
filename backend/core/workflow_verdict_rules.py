@@ -11,7 +11,7 @@ from typing import Mapping, Sequence
 
 from core.workflow_verdicts import (
     BLOCKED, BUILTIN_WINDOW_DAYS, CORRECTION_FLOOR, CORRECTIONS, COST, DEFAULT_MINIMUM, MINUTES, MIXED,
-    DEFAULT_CONFIDENCE, RAISED_CONFIDENCES, MeasureCall, PlannedMeasure, Run, measure_call,
+    DEFAULT_CONFIDENCE, RAISED_CONFIDENCES, SMALL_HARM, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
 from core.workflow_verdict_types import (
@@ -133,13 +133,6 @@ def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verd
     return Verdict("not_enough_data", known[0], 0, tuple(calls), inputs)
 
 
-def _near_zero(call: MeasureCall) -> bool:
-    """A neutral result has no directional interval and stays inside the measure's declared margin."""
-    if call.difference is None or call.interval is None or call.margin is None:
-        return False
-    return call.interval[0] <= 0 <= call.interval[1] and abs(call.difference) < call.margin
-
-
 def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
     """Apply the keep-only-for-improvement-or-cheaper rule at one look."""
     quality = [c for c in calls if c.role == "quality" and c.call not in BLOCKED]
@@ -158,8 +151,8 @@ def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
         cheaper = any(c.call == "better" for c in spend)
         if not cheaper:
             return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
-        if not all(_near_zero(c) for c in quality):
-            return Verdict("revert", "cheaper_not_near_zero", look, tuple(calls))
+        if any(c.reason == SMALL_HARM for c in quality):
+            return Verdict("revert", "cheaper_small_harm", look, tuple(calls))
         return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})
     # Mental model, "How it's decided": an unclear result keeps the current version, never the cheaper one.
     if look == 3:
