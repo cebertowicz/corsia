@@ -128,13 +128,28 @@ def changed_paths(
     """Name visible files whose installed bytes change, arrive, or disappear in an update."""
     from infra.skill_install import installed_skill_text
 
+    from core.skill_sidecar import parse_sidecar
+
+    def workflow(data: bytes | None) -> object:
+        if data is None:
+            return None
+        try:
+            parsed, _ = parse_sidecar(data.decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
+        return parsed.get("workflow") if parsed else None
+
     installed_skill = installed_skill_text(name, skill_md, description)
-    new_files = {"SKILL.md": installed_skill.encode("utf-8") if installed_skill is not None else skill_md, **bundle}
+    upstream_sidecar = next((data for path, data in bundle.items() if path.casefold() == "corsia.yaml"), None)
+    new_files = {"SKILL.md": installed_skill.encode("utf-8") if installed_skill is not None else skill_md,
+                 **{path: data for path, data in bundle.items() if path.casefold() != "corsia.yaml"}}
     dropped = (set(current or {}) - set(new_files)) - {"corsia.yaml"}
     changed = {
         path for path, data in new_files.items()
         if current is None or current.get(path) != data
     }
+    if workflow((current or {}).get("corsia.yaml")) != workflow(upstream_sidecar):
+        changed.add("corsia.yaml")
     return sorted(changed | dropped)
 
 
@@ -162,6 +177,8 @@ def write_result(result: dict[str, str]) -> dict[str, Any]:
         return {"error": "history_off", "message": "guidance history is off for this folder, so nothing changed; turn history back on first"}
     if result.get("reason") == "invalid_destination":
         return {"error": "invalid_destination", "message": "this skill's folder is not a valid destination for you, so nothing changed; report it to the conductor"}
+    if result.get("reason") == "invalid_sidecar":
+        return {"error": "invalid_sidecar", "message": f"the library sidecar is invalid: {result.get('detail')}; report it to the library maintainer"}
     if result.get("reason") == "save_error":
         return {"error": "save_error", "message": "the skill could not be saved; retry later"}
     return {"error": "invalid_item", "message": "the library item could not be written without changing your existing skills"}

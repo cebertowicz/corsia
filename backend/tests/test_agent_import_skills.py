@@ -211,14 +211,15 @@ def test_install_writes_the_description_that_was_shown(home):
     assert len(shown) <= 500
 
 
-def test_an_upstream_sidecar_is_dropped_and_only_origin_is_written(home):
+def test_import_keeps_workflow_but_drops_upstream_handler(home):
     roots, workspace = home
     folder = _skill(roots.codex / "skills" / "with-handler", "with-handler", "carries a handler")
     (folder / "corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\nworkflow:\n  steps: []\n")
 
     assert _install(home, _ids(_offers(home), "with-handler"))[0]["outcome"] == "installed"
     sidecar = yaml.safe_load((workspace / "skills" / "with-handler" / "corsia.yaml").read_text())
-    assert list(sidecar) == ["origin"]
+    assert set(sidecar) == {"origin", "workflow"}
+    assert sidecar["workflow"] == {"steps": []}
     assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
 
 

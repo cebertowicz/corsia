@@ -17,8 +17,10 @@ from core.skill_sidecar import (
     SIDECAR_FILE,
     SIDECAR_FORMAT,
     installed_digest,
+    parse_sidecar,
 )
 from core.skill_validation import parse_frontmatter
+from core.skill_workflow_validation import validate_workflow
 from infra.guidance_git import SaveResult, save_guidance
 from infra.guidance_messages import saver_author
 from infra.guidance_targets import GuidanceTarget
@@ -57,9 +59,13 @@ def installed_skill_text(name: str, upstream: bytes, description: str) -> str | 
     return "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n" + body
 
 
-def _sidecar(origin: Mapping[str, str]) -> str:
-    """The installed sidecar holds only the import origin; an upstream one could carry a handler."""
-    return yaml.safe_dump({"origin": dict(origin)}, sort_keys=False, allow_unicode=True)
+def _sidecar(origin: Mapping[str, str], workflow: dict[str, Any]) -> str:
+    """Keep only the local origin and validated upstream workflow."""
+    return yaml.safe_dump({"origin": dict(origin), **workflow}, sort_keys=False, allow_unicode=True)
+
+
+class InvalidSidecar(ValueError):
+    """An upstream sidecar cannot be safely installed."""
 
 
 def _saved(saved: SaveResult) -> dict[str, str]:
@@ -87,7 +93,26 @@ def _bundle_files(
     skill_md = installed_skill_text(name, upstream_skill_md, description)
     if skill_md is None:
         return None
-    files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: _sidecar(origin).encode("utf-8")}
+    workflow: dict[str, Any] = {}
+    sidecars = [data for path, data in other_files.items() if path.casefold() == SIDECAR_FILE]
+    if len(sidecars) > 1:
+        raise InvalidSidecar("multiple corsia.yaml files differ only by case")
+    if sidecars:
+        try:
+            parsed, errors = parse_sidecar(sidecars[0].decode("utf-8"))
+        except UnicodeDecodeError:
+            raise InvalidSidecar("corsia.yaml must be UTF-8") from None
+        if errors or parsed is None:
+            raise InvalidSidecar("; ".join(errors))
+        if "workflow" in parsed:
+            workflow = {"workflow": parsed["workflow"]}
+            value = parsed["workflow"]
+            unknown = [f"corsia.workflow.{key} is an unknown key" for key in value
+                       if key not in {"steps", "result"}] if isinstance(value, dict) else []
+            errors = [*unknown, *validate_workflow(workflow, skill_name=name)]
+            if errors:
+                raise InvalidSidecar("; ".join(errors))
+    files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: _sidecar(origin, workflow).encode("utf-8")}
     # Names are compared case-folded: on a case-insensitive volume ``Corsia.yaml`` is the sidecar.
     taken = {relative.casefold() for relative in files}
     for relative, data in other_files.items():
@@ -101,7 +126,7 @@ def _bundle_files(
         taken.add(relative.casefold())
         files[relative] = data
     installed_origin = {**origin, "installed_digest": installed_digest(files)}
-    files[SIDECAR_FILE] = _sidecar(installed_origin).encode("utf-8")
+    files[SIDECAR_FILE] = _sidecar(installed_origin, workflow).encode("utf-8")
     return files
 
 
@@ -178,7 +203,10 @@ def install_skill_bundle(
     """Install one imported skill with no overwrite and a single guidance save; ``outcome`` is
     installed, already_here or failed, plus the save's ``history_outcome`` and ``guidance_history``
     line whenever the save ran."""
-    files = _bundle_files(name, upstream_skill_md, other_files, description, origin)
+    try:
+        files = _bundle_files(name, upstream_skill_md, other_files, description, origin)
+    except InvalidSidecar as exc:
+        return {"outcome": FAILED, "reason": "invalid_sidecar", "detail": str(exc)}
     if files is None:
         logger.warning("skill install failed at bundle rewrite for {}", name)
         return {"outcome": FAILED}
@@ -247,7 +275,10 @@ def update_skill_bundle(
     if previous is None or adopted_at is None:
         return {"outcome": NOT_INSTALLED if not target.exists() else FAILED,
                 **({"reason": "unreadable_bundle"} if target.exists() else {})}
-    files = _bundle_files(name, upstream_skill_md, other_files, description, {**origin, "adopted_at": adopted_at})
+    try:
+        files = _bundle_files(name, upstream_skill_md, other_files, description, {**origin, "adopted_at": adopted_at})
+    except InvalidSidecar as exc:
+        return {"outcome": FAILED, "reason": "invalid_sidecar", "detail": str(exc)}
     if files is None:
         return {"outcome": FAILED, "reason": "invalid_item"}
     writes = {target / relative: data for relative, data in files.items()}
