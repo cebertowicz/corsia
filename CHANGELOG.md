@@ -12,7 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 Released 2026-10-30.
 
-- The Mac app is signed and notarized by Apple, so macOS opens it without an unidentified-developer warning, and it updates itself.
+- The Mac app is signed and notarized by Apple, so macOS opens it without an unidentified-developer warning.
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
 - On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No local model we tested handles CORSIA's first-run work reliably on 24 GB.
