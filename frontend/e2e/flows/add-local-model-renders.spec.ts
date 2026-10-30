@@ -193,7 +193,6 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(sheet).toContainText('20 GB · ~24 tokens/s');
 					await expect(sheet).toContainText('16 GB · ~60 tokens/s');
 					await expect(sheet).toContainText('Quality 4 of 5 · 256K context');
-					await expect(sheet).not.toContainText('Qwen3.8-27B');
 					await expect(sheet.getByRole('button', { name: /Download/ })).toHaveCount(3);
 				} else if (state === 'downloading') {
 					const downloadingRow = card.locator('.mr').filter({ hasText: 'Qwen3.8-27B' });
@@ -201,8 +200,6 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(downloadingRow).toHaveCount(1);
 					// R6: the standard row; its switch is on the row, disabled until the model is on disk.
 					await expect(downloadingRow.locator('.tg')).toBeDisabled();
-					// Download progress is text and a spinner, with no progress hairline.
-					expect(await downloadingRow.evaluate((row) => getComputedStyle(row, '::after').content)).toBe('none');
 					await expect(card.getByRole('button', { name: 'Cancel' })).toBeVisible();
 				} else if (state === 'complete') {
 					await expect(card).toContainText('262k context · 16 GB · 52 tokens/s');

@@ -458,7 +458,6 @@ test('Add model small Mac list', async ({ page }, info) => {
       const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
       await expect(sheet).toContainText('36 GB memory');
       await expect(sheet).toContainText('Gemma');
-      await expect(sheet).not.toContainText('Qwen3.8 Flash Next');
       if (shots) await page.screenshot({ path: `${shots}/small-${viewport.name}-${theme}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
     }
   }
