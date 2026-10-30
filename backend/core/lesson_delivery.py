@@ -22,7 +22,7 @@ from typing import Literal
 
 from loguru import logger
 
-from core.lesson_files import has_section
+from core.lesson_files import has_section, section_key
 from core.lesson_index import NON_SYSTEM_DESCRIPTION_LIMIT, line_for
 from core.skill_registry_types import SkillRow
 from core.skill_validation import is_skill_file
@@ -87,11 +87,43 @@ def _delivery(row: SkillRow) -> TrialDelivery:
     return delivery_for_trial(trial, row.path, data)
 
 
+def _step_binding(trial) -> tuple[str, frozenset[str]] | None:
+    """Find the workflow steps whose instruction the trial adds to."""
+    from core.skill_validation import validate_skill_file
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import resolve_path
+
+    metadata = trial.lesson.case_metadata
+    target, heading = metadata.get("target_file"), metadata.get("target_section")
+    if not isinstance(target, str) or not isinstance(heading, str) or not is_skill_file(Path(target)):
+        return None
+    try:
+        skill = validate_skill_file(resolve_path(target, workspace=Path(WORKSPACE)))
+    except (OSError, ValueError, UnicodeError):
+        return None
+    workflow = (skill.corsia or {}).get("workflow")
+    steps = workflow.get("steps") if isinstance(workflow, dict) else None
+    if not skill.ok or not skill.name or not isinstance(steps, list):
+        return None
+    ids = frozenset(step["id"] for step in steps if isinstance(step, dict)
+                    and isinstance(step.get("id"), str) and isinstance(step.get("instruction"), str)
+                    and section_key(step["instruction"]) == section_key(heading)
+                    and has_section(skill.body, step["instruction"]))
+    return (skill.name, ids) if ids else None
+
+
 def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
     """Build exactly the payload admission and task-start delivery both budget."""
     lesson = trial.lesson
     metadata = lesson.case_metadata
     target = str(metadata.get("new_target_path") or metadata.get("target_file") or "")
+    if _step_binding(trial) is not None:
+        payload = (
+            f"[Trial addition to this step's instruction in {target}; "
+            f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
+            f"{trial.body.strip()}"
+        )
+        return TrialDelivery(lesson.id, trial.behavioral_sha256, path.resolve(), data, target, payload)
     if not target or metadata.get("new_target_path") or is_skill_file(Path(target)):
         target = target or str(path.resolve())
         return TrialDelivery(
@@ -144,15 +176,18 @@ def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
     return None
 
 
-def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
+def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
     """Split eligible trials into delivered and omitted, in ordinary skill order."""
     from core.skills_registry import trial_delivery_rows
     from infra.config import WORKSPACE
 
     project = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+    node = db.execute("SELECT workflow_ref, workflow_step FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
     admitted_rows, capped_rows = trial_delivery_rows(
         thread_id=thread_id, project_id=None if project is None else project["project_id"],
         workspace=Path(WORKSPACE), db=db,
+        workflow_ref=None if node is None else node["workflow_ref"],
+        workflow_step=None if node is None else node["workflow_step"],
     )
     admitted: dict[tuple[str, str], TrialDelivery] = {}
     omitted: dict[tuple[str, str], TrialDelivery] = {}
@@ -235,7 +270,7 @@ def start_trials(
     """
     from infra.database import write_transaction
 
-    admitted, omitted = _resolve(db, thread_id)
+    admitted, omitted = _resolve(db, thread_id, node_id)
     recorded, prior_with = _receipts(
         db, thread_id=thread_id, node_id=node_id, trials=[*admitted, *omitted],
     )
