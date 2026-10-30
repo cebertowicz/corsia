@@ -124,13 +124,13 @@ def test_a_turned_off_corsia_omlx_is_not_resolved(monkeypatch) -> None:
 
 
 async def _known_disk_model(_config):
-    return [{"identifier": MODEL.model}]
+    return [{"id": MODEL.model, "loaded": False}]
 
 
 def _route_with_known_model(monkeypatch) -> None:
     _corsia_server(monkeypatch, [{"id": "server", "status": "online"}])
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_loaded", _no_loaded)
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", _known_disk_model)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", _known_disk_model)
     monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
     monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: None)
 
@@ -171,12 +171,29 @@ async def test_delete_clears_an_available_record_missing_from_disk(monkeypatch, 
         return []
 
     changed: list[bool] = []
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", missing_from_disk)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: changed.append(True))
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
     assert local_downloads.get(MODEL.model) is None
     assert changed == [True]
+
+
+@pytest.mark.asyncio
+async def test_delete_keeps_the_record_when_disk_status_is_unreadable(monkeypatch, tmp_path) -> None:
+    _route_with_known_model(monkeypatch)
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    local_downloads.write(local_downloads.Download(MODEL))
+
+    async def unreadable(_config):
+        return None
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", unreadable)
+
+    with pytest.raises(HTTPException) as raised:
+        await provider_local_models.delete_download(MODEL.repository, {})
+    assert raised.value.status_code == 503
+    assert local_downloads.get(MODEL.model) is not None
 
 
 @pytest.mark.asyncio
@@ -282,7 +299,6 @@ async def test_recommendations_remove_available_records_missing_from_disk(monkey
 
     result, _sections = await provider_local_models._recommendations()
 
-    assert result["downloads"] == [local_downloads.Download(failed_model, status="failed").view()]
     assert local_downloads.get(MODEL.model) is None
     assert local_downloads.get(failed_model.model) is not None
 
@@ -293,7 +309,7 @@ async def test_recommendations_leave_records_when_disk_listing_fails(monkeypatch
         return {"id": "server"}
 
     async def unavailable_disk_listing(_config):
-        raise RuntimeError("offline")
+        return None
 
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(MODEL))
@@ -301,11 +317,10 @@ async def test_recommendations_leave_records_when_disk_listing_fails(monkeypatch
     monkeypatch.setattr(provider_local_models, "_server", server)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
-    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", unavailable_disk_listing)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_models_status", unavailable_disk_listing)
 
-    result, _sections = await provider_local_models._recommendations()
+    await provider_local_models._recommendations()
 
-    assert result["downloads"] == [local_downloads.Download(MODEL).view()]
     assert local_downloads.get(MODEL.model) is not None
 
 
@@ -345,7 +360,6 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     result, _sections = await provider_local_models._recommendations()
 
     assert result["memory_gb"] == 64
-    assert result["memory_room_gb"] == 22
     assert result["disk_free_gb"] == 20
     assert result["recommended_repository"] == MODEL.repository
     assert result["models"] == [{
@@ -590,5 +604,4 @@ async def test_models_are_unique_fitting_rows_in_omlx_order(monkeypatch, tmp_pat
     assert [m["repository"] for m in result["models"]] == [
         "Jundot/slow-smart", "Jundot/plain", "Jundot/fast-smart",
     ]
-    assert all("fits_now" not in model for model in result["models"])
     assert result["recommended_repository"] == "Jundot/slow-smart"

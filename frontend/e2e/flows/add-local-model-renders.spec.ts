@@ -18,9 +18,7 @@ const recommendations = {
 	state: 'ready',
 	memory_gb: 64,
 	disk_free_gb: 20,
-	downloads: [],
 	recommended_repository: 'google/gemma-4-31b-it',
-	memory_room_gb: 40,
 	models: [
 		{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_bytes: 20 * 1000 ** 3, download_size_gb: 20, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, smarts_level: 4, tokens_per_second: 24, resident_bytes: 22 * 1024 ** 3, disk: { state: 'ready' } },
 		{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144, quantization_bits: 4, relative_speed: 1.0, smarts_level: 3, tokens_per_second: 60, resident_bytes: 18 * 1024 ** 3, disk: { state: 'ready' } },

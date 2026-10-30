@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from api import provider_local_models as route
-from llm.local_model import LocalModel, recommend
+from llm.local_model import LocalModel, fitting_models, omlx_sections, recommend
 
 GIB = 1024**3
 
@@ -32,6 +32,15 @@ def test_recommended_comes_only_from_best():
     assert recommend(sections, 64 * GIB) is None
     assert recommend({'best': [bigger], 'faster': [best]}, 64 * GIB, obtainable=lambda _: False) is None
     assert recommend({'best': [bigger]}, 64 * GIB) == bigger
+
+
+def test_a_build_in_two_sections_is_labeled_by_best_whatever_order_omlx_sends():
+    shared = LocalModel('org/Shared-oQ4e', 10 * GIB, 32768, resident_bytes=20 * GIB)
+    fast = LocalModel('org/Fast-oQ2e', 5 * GIB, 32768, resident_bytes=10 * GIB)
+    sections = {'faster': [fast, shared], 'best': [shared]}
+    assert omlx_sections(sections) == {shared.repository: 'best', fast.repository: 'faster'}
+    assert fitting_models(sections, 64 * GIB) == [shared, fast]
+    assert recommend(sections, 64 * GIB) == shared
 
 
 @pytest.mark.asyncio
@@ -71,6 +80,5 @@ async def test_recommendations_use_total_room_and_include_loaded_build(monkeypat
     assert views[loaded.repository]['on_disk'] is True
     assert views[other.repository]['on_disk'] is False
     assert too_large.repository not in views
-    assert 'fits_now' not in views[other.repository]
     assert result['memory_in_use_gb'] == 40
     assert result['recommended_repository'] == loaded.repository

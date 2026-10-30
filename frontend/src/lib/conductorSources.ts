@@ -140,7 +140,7 @@ export type LocalModelRecommendation = {
 	repository: string;
 	download_size_gb: number;
 	context_window: number;
-	/** Structured oMLX recommender facts; display wording belongs to localModelRecommendationMeta. */
+	/** Structured oMLX recommender facts. */
 	quantization_bits?: number;
 	relative_speed?: number;
 	/** oMLX's quality estimate, 0.5 to 5 dots, and its estimated decode speed. */
@@ -165,12 +165,8 @@ export type LocalModelRecommendations = {
 	message?: string;
 	/** Recommendations annotated with this computer's fit and disk state. */
 	models?: LocalModelRecommendation[];
-	/** Durable Settings download records for the add-model sheet. */
-	downloads?: LocalModelDownload[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
-	/** Total room for models, after the load reserve. */
-	memory_room_gb?: number;
 	/** Memory occupied by currently loaded models. */
 	memory_in_use_gb?: number;
 	/** The first eligible build from oMLX's best list, if any. */

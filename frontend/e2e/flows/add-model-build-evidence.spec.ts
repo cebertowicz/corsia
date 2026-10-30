@@ -24,7 +24,7 @@ async function fixture(page: Page, state: Scenario) {
   await page.route('**/api/settings/network-servers/omlx-local/jobs/active?**', route => route.fulfill({ json: { jobs: [] } }));
   await page.route('**/api/system/host-resources?**', route => route.fulfill({ json: { device_name: 'This Mac', total_gb: state === 'small' ? 36 : 256, free_gb: state === 'small' ? 30 : 120, models_used_gb: state === 'loaded' ? 104 : 0, other_used_gb: 0, safe_free_gb: 100, safe_reserve_gb: 16, by_provider: {} } }));
   await page.route('**/api/providers/sources', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: true, corsia_omlx_online: true, settings_download: download }] } }));
-  await page.route('**/api/providers/local/recommendations', route => route.fulfill({ json: { state: 'ready', memory_gb: state === 'small' ? 36 : 256, memory_in_use_gb: state === 'loaded' ? 104 : 0, memory_room_gb: state === 'small' ? 31.5 : 240, disk_free_gb: 200, models, downloads: [], recommended_repository: state === 'small' ? null : builds[0].repository } }));
+  await page.route('**/api/providers/local/recommendations', route => route.fulfill({ json: { state: 'ready', memory_gb: state === 'small' ? 36 : 256, memory_in_use_gb: state === 'loaded' ? 104 : 0, disk_free_gb: 200, models, recommended_repository: state === 'small' ? null : builds[0].repository } }));
   await page.route('**/api/providers/local/downloads**', async route => {
     if (route.request().method() !== 'GET') calls.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
     if (route.request().method() === 'POST') {
@@ -366,7 +366,7 @@ test('Add model unknown disk retry', async ({ page }, info) => {
   await fixture(page, 'available');
   await page.route('**/api/providers/local/recommendations', route => route.fulfill({ json: {
     state: 'ready', models: [{ ...builds[0], disk: { state: 'unknown' }, on_disk: false }],
-    recommended_repository: builds[0].repository, downloads: [],
+    recommended_repository: builds[0].repository,
   } }));
   await page.route('**/api/providers/local/downloads', route => route.fulfill({ status: 409, json: { detail: "Couldn't check free disk space. Try again." } }));
   await loginByUrl(page); await openSettings(page); await openSettingsSection(page, 'Providers');
@@ -463,7 +463,7 @@ test('Add model robustness states', async ({ page }, info) => {
         // Registered after the fixture, so it answers first.
         await page.route('**/api/providers/local/recommendations', route => state === 'error'
           ? route.fulfill({ status: 503, body: '' })
-          : route.fulfill({ json: { state: 'ready', memory_gb: 256, memory_in_use_gb: 0, memory_room_gb: 240, downloads: [], ...answers[state]() } }));
+          : route.fulfill({ json: { state: 'ready', memory_gb: 256, memory_in_use_gb: 0, ...answers[state]() } }));
         await loginByUrl(page);
         await openSettings(page);
         await openSettingsSection(page, 'Providers');

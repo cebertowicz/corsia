@@ -64,7 +64,7 @@ describe('AddLocalModelSheet', () => {
 
 	it('uses the backend Mac-room verdict rather than a frontend memory comparison', async () => {
 		const row = (name: string) => ({ name, repository: `Jundot/${name}`, resident_bytes: 20.004 * 1024 ** 3, ...ready });
-		await render({ state: 'ready', memory_room_gb: 20, models: [row('Fits')] });
+		await render({ state: 'ready', models: [row('Fits')] });
 		expect(document.body.textContent).toContain('Fits');
 		expect(document.body.textContent).not.toContain('Short');
 		expect(document.body.textContent).not.toContain('of memory');
@@ -115,7 +115,7 @@ describe('AddLocalModelSheet', () => {
 
 	it('shows fitting models and hides those that exceed Mac room', async () => {
 		const row = (name: string, resident_gb: number) => ({ name, repository: `Jundot/${name}`, download_size_gb: 12, context_window: 32768, resident_bytes: resident_gb * 1024 ** 3, ...ready });
-		await render({ state: 'ready', memory_room_gb: 68, recommended_repository: 'Jundot/Small', models: [row('Small', 40)] });
+		await render({ state: 'ready', recommended_repository: 'Jundot/Small', models: [row('Small', 40)] });
 		const rows = [...document.body.querySelectorAll('.model')];
 		expect(rows.map((item) => item.querySelector('h3')?.textContent)).toEqual(['Small']);
 		expect(rows[0].textContent).toContain('Recommended');
@@ -125,7 +125,7 @@ describe('AddLocalModelSheet', () => {
 
 	it('shows an empty state when no model fits Mac room', async () => {
 		// The backend's nothing-fits answer names no pick (test_provider_local_models covers that side).
-		await render({ state: 'ready', memory_room_gb: 9.4, recommended_repository: null, models: [] });
+		await render({ state: 'ready', recommended_repository: null, models: [] });
 		expect(document.body.textContent).toContain('No recommended models fit this computer.');
 		expect(document.body.querySelectorAll('.model')).toHaveLength(0);
 		expect(document.body.textContent).not.toContain('Recommended');
@@ -201,7 +201,7 @@ describe('AddLocalModelSheet', () => {
 	});
 
 	it('hides a model that exceeds Mac room and its download action', async () => {
-		await render({ state: 'ready', memory_gb: 256, memory_room_gb: 123.4, recommended_repository: null, models: [] });
+		await render({ state: 'ready', memory_gb: 256, recommended_repository: null, models: [] });
 		expect(document.body.textContent).not.toContain('Needs 174 GB of memory');
 		expect([...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Download'))).toBe(false);
 		expect(document.body.textContent).not.toContain('Recommended');
@@ -209,10 +209,10 @@ describe('AddLocalModelSheet', () => {
 
 	it('shows no memory line when the model fits, oMLX gives no figure, or only the download is large', async () => {
 		const row = (resident_bytes?: number, download_size_gb = 12) => ({ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb, context_window: 32768, resident_bytes, ...ready });
-		await render({ state: 'ready', memory_room_gb: 123, models: [row(20 * 1024 ** 3)] });
+		await render({ state: 'ready', models: [row(20 * 1024 ** 3)] });
 		expect(host.textContent).not.toContain('of memory');
 		await unmount(component!); host.remove();
-		await render({ state: 'ready', memory_room_gb: 20, models: [row(undefined, 400)] });
+		await render({ state: 'ready', models: [row(undefined, 400)] });
 		expect(host.textContent).not.toContain('of memory');
 	});
 

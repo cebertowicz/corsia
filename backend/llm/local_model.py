@@ -236,22 +236,30 @@ async def ask_recommender(server_id: str) -> LocalModel | None:
 
 def fits(model: LocalModel, room_bytes: int) -> bool:
     """Compare a row with the supplied room; an unknown loaded size counts as fitting."""
-    from infra.host_resources import GIB, fits_now as fits
+    from infra.host_resources import GIB, fits_now
 
-    return model.resident_bytes is None or fits(model.resident_bytes / GIB, room_bytes / GIB)
+    return model.resident_bytes is None or fits_now(model.resident_bytes / GIB, room_bytes / GIB)
+
+
+def _omlx_rows(sections: dict[str, list[LocalModel]]) -> list[tuple[str, LocalModel]]:
+    """oMLX's rows with their section, "best" first, each model once; ``unlock`` rows need more memory than this Mac has."""
+    seen: set[str] = set()
+    rows = []
+    for name in ("best", *(name for name in sections if name not in ("best", "unlock"))):
+        for model in sections.get(name, []):
+            if model.repository not in seen:
+                seen.add(model.repository)
+                rows.append((name, model))
+    return rows
+
+
+def omlx_sections(sections: dict[str, list[LocalModel]]) -> dict[str, str]:
+    """Each repository's oMLX section, by the same precedence as the list order and the badge."""
+    return {model.repository: name for name, model in _omlx_rows(sections)}
 
 
 def _in_omlx_order(sections: dict[str, list[LocalModel]]) -> list[LocalModel]:
-    """oMLX's rows, "best" first, each model once; ``unlock`` rows need more memory than this Mac has."""
-    seen: set[str] = set()
-    rows = []
-    for models in (sections.get("best", []),
-                   *(models for name, models in sections.items() if name not in ("best", "unlock"))):
-        for model in models:
-            if model.repository not in seen:
-                seen.add(model.repository)
-                rows.append(model)
-    return rows
+    return [model for _name, model in _omlx_rows(sections)]
 
 
 def fitting_models(sections: dict[str, list[LocalModel]], room_bytes: int) -> list[LocalModel]:
