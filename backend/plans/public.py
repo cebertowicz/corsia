@@ -236,6 +236,7 @@ from plans.decision_lifecycle import withdraw_for_owner_thread_in_transaction
 from plans.delegate_attach import (
     choose as choose_delegated_step,
     choose_for_send as choose_reused_worker_step,
+    is_doing_open_step,
     send_note as reused_worker_note,
     hand_over as hand_over_delegated_step,
     plan_task as delegated_plan_task,

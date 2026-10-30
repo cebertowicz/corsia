@@ -7,7 +7,7 @@ import time
 from functools import partial
 from typing import Any
 
-from core.lesson_delivery import attach_at_start, attach_plan_result
+from core.lesson_delivery import attach_at_worker_read, attach_plan_result
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
@@ -109,7 +109,7 @@ def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
                 return restriction.payload()
             addressed = public.addressed_to(page, other, db=db)
             if read.get("node_id"):
-                attach_at_start(db, addressed, thread_id=thread_id, node_id=read["node_id"])
+                attach_at_worker_read(db, addressed, thread_id=thread_id, node_id=read["node_id"])
             return addressed
         return page
     finally:
