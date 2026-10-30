@@ -423,6 +423,18 @@ def test_packaged_cli_help_lists_app_commands(app, args):
     assert not app.launchd_calls()
 
 
+def test_packaged_cli_unknown_command_fails_with_usage(app):
+    entry = app.bundle / "Contents" / "Resources" / "bin" / "corsia"
+    entry.parent.mkdir(parents=True)
+    shutil.copy(REPO / "desktop" / "scripts" / "corsia", entry)
+    result = app.run("stauts", script=entry)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Unknown command 'stauts'" in result.stderr
+    assert "Usage: corsia <command>" in result.stderr
+    assert not app.launchd_calls()
+
+
 @pytest.fixture
 def app(tmp_path):
     # Orphaned at once, so launchd (PID 1) reaps one that bootout stops, as it

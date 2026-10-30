@@ -559,6 +559,11 @@ case "${1:-status}" in
         ;;
     *)
         if is_app_mode; then
+            help_status=0
+            case "$1" in
+                help|-h|--help) ;;
+                *) echo "Unknown command '$1'" >&2; exec 1>&2; help_status=2 ;;
+            esac
             echo "Usage: corsia <command>"
             echo ""
             echo "Commands:"
@@ -569,9 +574,14 @@ case "${1:-status}" in
             echo "  status              Show CORSIA status"
             echo "  logs                Tail the backend log"
             echo "  service start|stop|restart|status  Manage the app service"
-            echo "  init, setup, bind-host, remote-address  Set up CORSIA"
-            echo "  event, artifact, mcp  Work with CORSIA integrations"
-            exit 0
+            echo "  init                First-run setup — configure workspace path"
+            echo "  setup               Choose local or server exposure"
+            echo "  bind-host           Print the interface CORSIA listeners bind"
+            echo "  remote-address      Print the saved outside address while devices can connect"
+            echo "  event               Emit a declared event from a local program."
+            echo "  artifact            Artifact registry lifecycle (resolve/register/update/reconcile/relocate/rehome/release)."
+            echo "  mcp                 Configure external MCP tools"
+            exit "$help_status"
         fi
         echo "Usage: corsia <command> [--force]"
         echo ""
