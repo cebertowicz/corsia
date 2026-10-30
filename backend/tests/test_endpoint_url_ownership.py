@@ -514,11 +514,13 @@ def test_the_catalog_fetch_keeps_each_reported_window(monkeypatch) -> None:
     from llm.external_provider import fetch_external_models
 
     listing = {"data": [{"id": "served", "object": "model", "max_model_len": 32768},
-                        {"id": "id-only", "object": "model"}]}
+                        {"id": "id-only", "object": "model"},
+                        {"id": "trained", "object": "model", "max_position_embeddings": 131072,
+                         "meta": {"n_ctx_train": 131072}}]}
     _patch_httpx(monkeypatch, _Router({("GET", "/v1/models"): _resp(200, listing)}))
 
     assert asyncio.run(fetch_external_models(_OPENAI_BASE, "openai", None)) == {
-        "served": 32768, "id-only": None,
+        "served": 32768, "id-only": None, "trained": None,
     }
 
 

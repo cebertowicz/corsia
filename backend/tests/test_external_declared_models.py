@@ -15,7 +15,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from llm.external_declared_models import clean_model_ids, discoverable_model_ids
+from llm.external_declared_models import clean_model_ids, discoverable_models
 from omlx_provider_fixtures import _patch_httpx, _resp, _Router
 
 _BASE = "https://token-plan.example.com/compatible-mode/v1"
@@ -60,7 +60,7 @@ def _discover(monkeypatch, listed, declared):
         return dict.fromkeys(listed)
 
     monkeypatch.setattr(ep, "fetch_external_models", fetch)
-    return list(asyncio.run(discoverable_model_ids(_BASE, "openai", None, declared)))
+    return list(asyncio.run(discoverable_models(_BASE, "openai", None, declared)))
 
 
 def test_an_empty_list_yields_the_declared_ids(monkeypatch) -> None:
@@ -100,6 +100,27 @@ def test_discovery_reconciles_the_declared_ids_of_an_unlisted_endpoint(monkeypat
     monkeypatch.setattr(ep, "_reconcile_external_models", reconcile)
     assert asyncio.run(ep.discover_external_models("ns-tp")) == {"ok": True}
     assert reconciled == [["glm-5.3"]]
+
+
+def test_discovery_hands_each_reported_window_to_reconcile(monkeypatch) -> None:
+    from llm import external_provider as ep
+
+    server = {"id": "ns-tp", "status": "online", "dialect": "openai"}
+    windows: list = []
+
+    async def fetch(*_a):
+        return {"served": 32768}
+
+    def reconcile(*args):
+        windows.append(args[-1])
+        return {"ok": True}
+
+    monkeypatch.setattr(ep, "_external_discovery_config",
+                        lambda sid: (server, _BASE, None, {"declared_models": ["glm-5.3"]}))
+    monkeypatch.setattr(ep, "fetch_external_models", fetch)
+    monkeypatch.setattr(ep, "_reconcile_external_models", reconcile)
+    assert asyncio.run(ep.discover_external_models("ns-tp")) == {"ok": True}
+    assert windows == [{"served": 32768, "glm-5.3": None}]
 
 
 # ── the health sweep ─────────────────────────────────────────────────────────

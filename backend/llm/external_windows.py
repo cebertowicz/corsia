@@ -11,6 +11,21 @@ _REFERENCE_NAMESPACES: dict[str, tuple[str, ...]] = {
     "aliyuncs.com": ("dashscope",),
 }
 
+# Keys a ``/v1/models`` entry uses for the window the server serves (vLLM's
+# ``max_model_len``, llama.cpp's ``n_ctx``, gateways' ``context_length``).
+# Training lengths such as ``max_position_embeddings`` or ``n_ctx_train`` are
+# not what the server accepts, so they never count.
+_SERVING_WINDOW_KEYS = (
+    "max_context_window", "context_length", "context_window", "max_model_len", "n_ctx",
+)
+
+
+def reported_window(entry: dict) -> int | None:
+    """The serving window a ``/v1/models`` entry reports at its top level, if any."""
+    from llm.model_metadata import extract_context_length
+
+    return extract_context_length({key: entry.get(key) for key in _SERVING_WINDOW_KEYS})
+
 
 def discovered_window(
     user_window: int | None, reported: int | None, host: str, model_id: str,

@@ -57,14 +57,14 @@ def declared_model_ids(meta: dict | None) -> list[str]:
     return [m for m in value if isinstance(m, str) and m]
 
 
-def merge_model_ids(
+def merge_models(
     listed: dict[str, int | None], declared: list[str],
 ) -> dict[str, int | None]:
     """Listed ids first, with their reported windows, then declared ids the endpoint did not list."""
     return {**listed, **{m: None for m in declared if m not in listed}}
 
 
-async def discoverable_model_ids(
+async def discoverable_models(
     api_base: str, dialect: str, api_key: str | None, declared: list[str],
 ) -> dict[str, int | None]:
     """Everything discovery should catalog, each id with its reported window or None."""
@@ -76,7 +76,7 @@ async def discoverable_model_ids(
         if not declared or exc.response.status_code not in LIST_UNSUPPORTED:
             raise
         listed = {}
-    return merge_model_ids(listed, declared)
+    return merge_models(listed, declared)
 
 
 async def declared_model_refusal(

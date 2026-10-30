@@ -143,7 +143,7 @@ async def fetch_external_models(
 ) -> dict[str, int | None]:
     """The model ids an external endpoint lists via ``/v1/models``, in order, each
     with the context window its entry reports (vLLM's ``max_model_len``), or None."""
-    from llm.model_metadata import extract_context_length
+    from llm.external_windows import reported_window
     from llm.network_endpoints import models_probe_url
 
     headers = auth_headers(dialect, api_key)
@@ -155,7 +155,7 @@ async def fetch_external_models(
     for m in (data.get("data") or []):
         mid = m.get("id") if isinstance(m, dict) else None
         if isinstance(mid, str) and mid:
-            listed[mid] = extract_context_length(m)
+            listed[mid] = reported_window(m)
     return listed
 
 
@@ -319,7 +319,7 @@ async def discover_external_models(server_id: str) -> dict:
     none); a context window an entry reports is kept. Mirrors the managed
     discovery's stale-row cleanup."""
     from infra.db_async import run_in_db
-    from llm.external_declared_models import discoverable_model_ids
+    from llm.external_declared_models import discoverable_models
     from llm.external_discovery_result import finish_external_discovery
     from llm.external_reasoning import discovery_shapes
     from llm.server_observation import observe_discovery
@@ -345,7 +345,7 @@ async def discover_external_models(server_id: str) -> dict:
     # committed meanwhile supersedes it, failures included.
     target = (dialect, api_base, api_key)
     try:
-        windows = await discoverable_model_ids(
+        windows = await discoverable_models(
             api_base, dialect, api_key, (caps or {}).get("declared_models") or [],
         )
         model_ids = list(windows)
