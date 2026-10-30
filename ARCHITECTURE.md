@@ -580,10 +580,8 @@ cannot be attributed is refused rather than assumed. A backend verifies the
 installed definition only when launchd started it, which
 `CORSIA_SERVICE_GENERATION` in its environment is what says.
 
-On a person's own source install, an agent may edit that checkout directly
-when they ask for it; `corsia restart` serves the edits. Otherwise agents work
-in linked feature worktrees created from the standalone worker clone, and
-never develop in, repoint, or switch a maintainer's serving checkout. Tests
+Which checkout an agent may edit is set in `AGENTS.md`; a maintainer's linked
+worktrees are created from the standalone worker clone. Tests
 and evals run against disposable state seeded into an explicit
 `CORSIA_STATE_DIR` (`scripts/seed-worktree-db`), never against the operational
 database. The backend log lives in that instance's state root, so two checkouts
