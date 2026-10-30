@@ -1,10 +1,10 @@
 # Plans
 
-A plan is a thread's structured record of what it has committed to do, what it is waiting on and what it has asked the person. This page covers the task lifecycle, waits, decisions and liveness, and what can go wrong.
+A plan is a structured record of commitments, waits and questions for the person. This page covers the task lifecycle, waits, decisions and liveness, and what can go wrong.
 
 ## What it is
 
-- **Plan:** one per thread. It is either active or paused.
+- **Plan:** a structured record owned by a thread or a scope. A given owner has at most one plan. The schema records active, paused, complete and archived states (`backend/infra/plan_schema.py`).
 - **Node:** one unit in a plan. A task is a node with acceptance criteria: the observable evidence that has to exist before it counts as done.
 - **Decision:** a question for the person, recorded on the plan with options and a recommendation.
 - **Wait:** a task set aside until a time, an event, another task or a milestone.
@@ -72,7 +72,7 @@ A thread with actionable plan work can receive a liveness wake. The initial idle
 - **No plan, no outcome.** Work done without a plan task is not counted as an outcome and has no acceptance record.
 - **Acceptance is only as good as the criteria.** The system records that criteria were stated and a task was accepted; it does not judge whether the criteria were the right ones.
 - **A wait can end without its event.** The deadline prompts a wake saying the event did not arrive; delivery can fail, and the owner still has to act.
-- **A paused plan stops agent-driven work.** Agents cannot unpause it. Scheduled wakes, connected events and worker completions are set aside in a digest; messages from a person or another agent, decision answers and restart continuations can still reach the thread (`backend/plans/pause_authority.py`).
+- **A paused plan stops agent-driven work.** Agents cannot unpause it. Scheduled wakes, connected events and worker completions are set aside in a digest when no input in the batch is allowed to start a turn; messages from a person or another agent, decision answers and restart continuations can still reach the thread (`backend/plans/pause_authority.py`).
 - **Terminal states are final.** A mistaken `closed` or `failed` cannot be undone; add a new task.
 
 ## Where it lives

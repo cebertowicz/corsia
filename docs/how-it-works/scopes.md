@@ -44,12 +44,12 @@ The workspace scaffold creates `context`, `skills`, `shared`, `projects` and `.t
 
 ### Who coordinates a scope
 
-Each scope can have one designated coordinator, called a conductor:
+Workspace and project scopes can each have one designated coordinator:
 
 - Workspace: the CORSIA agent, stored as a setting.
 - Project: the project's conductor thread, stored on the project record (`backend/infra/conductor.py`).
 
-A conductor receives a role template on top of the shared rules (`backend/core/conductor_templates.py`). Tool-driven roster changes in a scope require a live conductor in that same scope (`backend/core/agent_roster_mutations.py`).
+A project conductor receives a role template on top of the shared rules (`backend/core/conductor_templates.py`). Tool-driven roster changes require the designated coordinator in the same scope (`backend/core/agent_roster_mutations.py`).
 
 ### Crossing scopes
 
@@ -57,7 +57,7 @@ Same-scope routing is the default. A server-bound native delegation send can cro
 
 ### Where the state root sits
 
-Conversations, plans and settings are not in the workspace folders. They live in the state root described in [Architecture](architecture.md). A scope is therefore a folder plus database rows that refer to it.
+Conversations, plans and settings live in the state root described in [Architecture](architecture.md), separate from the scope's context files. Legacy installs can keep that state root inside the workspace. A scope is therefore a folder plus database rows that refer to it.
 
 ## What can go wrong
 

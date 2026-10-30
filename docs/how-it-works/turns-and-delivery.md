@@ -26,10 +26,11 @@ flowchart TB
     Q -->|yes, queue_after_turn| W[Remains queued]
     B -->|delivered| T2[Delivered into<br/>running turn]
     B -->|does not fit| W
-    W -->|eligible| T
+    W -->|later apply_now claims prefix| B
+    W -->|eligible after settlement| T
     T --> F[Finish turn]
     T2 --> F
-    F --> N[Next queued input]
+    F -->|if present| N[Next queued input]
 ```
 
 ### One way in
@@ -39,7 +40,7 @@ The `send_thread_input` entry point admits ordinary sends through a single datab
 ### When a turn is already running
 
 - **`apply_now`:** the system attempts to deliver the input to the running turn at a safe boundary. The native loop can claim queued input after a tool batch (`backend/core/turn_iteration.py`, `backend/core/turn_safe_boundary.py`). Codex accepts input into a running turn through its `turn/steer` request; Claude Code runs with a streaming input format. A live input that does not fit is released back to the queue (`backend/infra/input_render.py`). See [Models and harnesses](models-and-harnesses.md).
-- **`queue_after_turn`:** the input waits until this turn settles, then can start a later turn when admission permits.
+- **`queue_after_turn`:** the input normally waits until this turn settles, then can start a later turn when admission permits. A later `apply_now` input can bring an earlier queued input along in the FIFO prefix claimed at a safe boundary (`backend/infra/thread_inputs.py`).
 
 In both cases the input keeps its place in the queue.
 
@@ -54,7 +55,7 @@ When a turn is stopped by a plan limit or vendor usage limit, the system can que
 Recovery is a single pass at boot, not a periodic repair loop (`backend/infra/thread_recovery.py`).
 
 - A turn recorded as running by an earlier boot is ended with the error "backend restarted while Turn was running". It is not resumed mid-turn.
-- A provider write that had started but whose outcome was never recorded is marked **ambiguous**. It is not replayed, because replaying could repeat a side effect.
+- A queued input whose provider write started but whose outcome was never recorded for the interrupted turn is marked **ambiguous**. It is not replayed, because replaying could repeat a side effect.
 - Recovery attempts to start a new turn for threads with unclaimed queued inputs; normal admission and hold rules still apply.
 
 ### Liveness

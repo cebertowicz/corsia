@@ -4,11 +4,11 @@ A thread is one conversation. An agent is an enabled persistent-agent thread, ty
 
 ## What it is
 
-- **Thread:** a conversation with its own history, plan, model and skills. Every turn runs in a thread.
+- **Thread:** a conversation with its own history, model and skills, and optionally a plan. Every turn runs in a thread.
 - **Agent:** a thread whose agent setting is enabled. The roster edit path requires a responsibility when enabling it; an agent is meant to outlive any one task and own an area of work.
-- **Temporary worker:** a thread created to do one bounded task for a parent thread. It is hidden from the person and has its own plan; its return can be handled through that plan.
+- **Temporary worker:** a thread created to do one bounded task for a parent thread. It is hidden from the person and can have its own plan; its return can be handled through that plan.
 - **Roster:** the set of agents in a scope, with each one's responsibility, paths, domains, status and notes (`agent_roster` fields in `backend/core/agent_roster_mutations.py`).
-- **Conductor:** the one designated coordinator of a scope. See [Scopes](scopes.md).
+- **Conductor:** the designated coordinator of a project. The workspace coordinator is the CORSIA agent. See [Scopes](scopes.md).
 
 ```mermaid
 flowchart TB
@@ -29,7 +29,7 @@ A long-lived responsibility and a one-off task have different needs. A responsib
 
 ### Registering an agent
 
-An agent is a thread with the roster fields set. Two paths change the roster: the person through the API, and the scope's designated conductor through a tool. Both go through one function, and the tool path requires the acting thread to be the live conductor of the same scope as the target (`backend/core/agent_roster_mutations.py`). Each change is journaled to every scope whose roster map it changed (`backend/infra/passive_changes.py`).
+An agent is a thread with the roster fields set. Two paths change the roster: the person through the API, and the scope's designated coordinator through a tool. Both go through one function, and the tool path requires the acting thread to be the designated coordinator of the same scope as the target (`backend/core/agent_roster_mutations.py`). Each change is journaled to every scope whose roster map it changed (`backend/infra/passive_changes.py`).
 
 ### Addressing another thread
 
@@ -52,7 +52,7 @@ Claude Code runs as a separate process per thread. The backend caps how many are
 
 - **Claude Code spawn refused at the cap.** The tool returns the error with working-thread details. The caller can wait or retry; the refused spawn is not queued.
 - **A worker with no model.** `delegate_task` refuses without an explicit model. An unavailable model can hold input for recovery or fail it with a visible reason; it is not replaced. See [Models and harnesses](models-and-harnesses.md).
-- **Roster edits from the wrong place.** A tool edit from a thread that is not the live conductor of the target's scope is refused.
+- **Roster edits from the wrong place.** A tool edit from a thread that is not the designated coordinator of the target's scope is refused.
 - **Parent and child drift.** A child is its own thread with its own history. It knows what its brief and its own context sources tell it; a brief that leaves out something the child needs produces work that misses it.
 
 ## Where it lives

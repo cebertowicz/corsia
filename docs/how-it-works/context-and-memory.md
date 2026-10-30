@@ -5,7 +5,7 @@ Context is what an agent is told at the start of a turn. Memory is what outlives
 ## What it is
 
 - **Context source:** a file or generated block delivered to the model, such as the platform's System rules, a project charter, a thread's own bootloader, or the skills index.
-- **Installed context:** the exact set of sources a conversation was started with, retained until its next install boundary.
+- **Installed context:** sources retained from an install boundary, including static sources and the responsibility map; other turn-specific context can change.
 - **Checkpoint:** a structured summary of a thread's earlier history. When history nears the model's context limit, the checkpoint replaces the older messages in what the model sees.
 - **Continuity entries:** the checkpoint's contents, in 13 named fields such as active constraints, decisions, facts, open questions and next actions (`backend/core/continuity_types.py`). Retiring entries in three fields (active constraints, approvals and preferences, decisions) requires evidence.
 - **Knowledge base:** durable notes an agent writes and searches, kept as Markdown files.
@@ -19,7 +19,7 @@ Models have a fixed window, and conversations outgrow it. Without a deliberate m
 
 ### Delivery order
 
-Static sources are delivered broadest first (`backend/core/dynamic_context_registry.py`):
+Context sources are collected in this order (`backend/core/dynamic_context_registry.py`):
 
 1. The platform's System rules
 2. Workspace context
@@ -27,7 +27,7 @@ Static sources are delivered broadest first (`backend/core/dynamic_context_regis
 4. Role context: agent, conductor template, conductor, CORSIA agent
 5. The thread's own bootloader
 6. The skills index
-7. The roster of other agents
+7. The roster of other agents, appended separately and retained when its installed snapshot applies
 
 The guidance manifest records the sources a turn was started with and their versions where known (`backend/core/guidance_manifest.py`). Recording never blocks a turn; a failure is stored as a status on the turn.
 
