@@ -567,6 +567,30 @@ def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
                      {"message_id": f"verdict:wake:{frozen.subject}", "db": db})]
 
 
+def test_a_refused_wake_keeps_every_verdict_in_the_batch(monkeypatch) -> None:
+    from events import delivery
+    from infra.send_types import SendRejected
+
+    def refuse(thread_id, *args, **kwargs):
+        if thread_id == "gone":
+            raise SendRejected(409, "thread is being deleted")
+
+    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
+    monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
+    db = sqlite3.connect(":memory:")
+    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    first = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
+    second = history(runs("v1", 1, started=40, ended=30), runs("v3", 2))
+    batch = [Evaluation(plan.subject, owner, plan, decide(source, plan, NOW), True)
+             for owner, source, plan in (("gone", first, plan_for(first)), ("owner", second, plan_for(second, "v3")))]
+    logged: list[str] = []
+    sink = logger.add(logged.append, level="WARNING", format="{message}")
+    assert evaluator.write_verdicts(db, batch, wake_owners=True) == 2
+    logger.remove(sink)
+    assert [line.strip() for line in logged] == [
+        f"verdict_wake: owner gone refused for {batch[0].subject}: thread is being deleted"]
+
+
 def test_writes_stay_off_by_default() -> None:
     db = sqlite3.connect(":memory:")
     db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
