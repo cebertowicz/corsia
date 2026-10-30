@@ -34,15 +34,6 @@ PREFIX = "external@"
 DIALECTS = ("openai", "anthropic")
 _ANTHROPIC_VERSION = "2023-06-01"
 
-# litellm's model table keys each provider's models under its own namespace.
-# The endpoint's host is the only evidence of which provider serves a model --
-# the dialect is just the wire format -- so a window is looked up only where the
-# host names the provider, and only by exact model id. Anything else stays
-# unknown rather than borrowing another provider's number.
-_REFERENCE_NAMESPACES: dict[str, tuple[str, ...]] = {
-    "aliyuncs.com": ("dashscope",),
-}
-
 
 def catalog_model_id(server_id: str, pmid: str) -> str:
     """A row's ``provider_model_id``: qualified by its endpoint.
@@ -147,25 +138,6 @@ def _capability_overrides(server: dict) -> dict:
     }
 
 
-def reference_context_window(host: str, model_id: str) -> int | None:
-    """The provider-published input window for ``model_id`` on ``host``, if known."""
-    host = (host or "").lower().rstrip(".")
-    namespaces = next(
-        (ns for suffix, ns in _REFERENCE_NAMESPACES.items()
-         if host == suffix or host.endswith("." + suffix)),
-        (),
-    )
-    if not namespaces:
-        return None
-    import litellm
-
-    for namespace in namespaces:
-        window = (litellm.model_cost.get(f"{namespace}/{model_id}") or {}).get("max_input_tokens")
-        if isinstance(window, int) and window > 0:
-            return window
-    return None
-
-
 async def fetch_external_models(
     api_base: str, dialect: str, api_key: str | None
 ) -> dict[str, int | None]:
@@ -218,11 +190,10 @@ def _upsert_external_model(
     shapes: dict[str, dict | None] | None = None,
     reported_window: int | None = None,
 ) -> str:
+    from llm.external_windows import discovered_window
+
     litellm_model = f"{PREFIX}{server_id}/{pmid}"
-    # The user's per-server window wins; then the one this server reports for the
-    # model; otherwise the provider's published one.
-    window = (caps.get("context_window") or reported_window
-              or reference_context_window(host, pmid))
+    window = discovered_window(caps.get("context_window"), reported_window, host, pmid)
     display_name = pmid.split("/")[-1] or pmid
     metadata = {
         "server_id": server_id,

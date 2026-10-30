@@ -28,14 +28,14 @@ def model_table(monkeypatch):
 
 
 def test_window_comes_from_the_hosts_own_provider_namespace(model_table) -> None:
-    from llm.external_provider import reference_context_window
+    from llm.external_windows import reference_context_window
 
     assert reference_context_window(_ALIBABA_HOST, "qwen-flash") == 997_952
     assert reference_context_window(_ALIBABA_HOST.upper(), "glm-5.1") == 202_745
 
 
 def test_no_window_is_borrowed_across_providers_or_hosts(model_table) -> None:
-    from llm.external_provider import reference_context_window
+    from llm.external_windows import reference_context_window
 
     assert reference_context_window(_ALIBABA_HOST, "qwen-plus") is None
     assert reference_context_window("api.example.com", "qwen-flash") is None
