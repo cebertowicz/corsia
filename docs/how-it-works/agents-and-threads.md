@@ -1,11 +1,11 @@
 # Agents and threads
 
-A thread is one conversation. An agent is a thread that has been given a standing responsibility. This page covers how the two relate, how a thread hands work to a worker, what limits apply, and what can go wrong.
+A thread is one conversation. An agent is an enabled persistent-agent thread, typically given a standing responsibility. This page covers how the two relate, how a thread hands work to a worker, what limits apply, and what can go wrong.
 
 ## What it is
 
 - **Thread:** a conversation with its own history, plan, model and skills. Every turn runs in a thread.
-- **Agent:** a thread whose roster record is enabled and carries a responsibility. An agent is meant to outlive any one task and own an area of work.
+- **Agent:** a thread whose agent setting is enabled. The roster edit path requires a responsibility when enabling it; an agent is meant to outlive any one task and own an area of work.
 - **Temporary worker:** a thread created to do one bounded task for a parent thread. It is hidden from the person and has its own plan; its return can be handled through that plan.
 - **Roster:** the set of agents in a scope, with each one's responsibility, paths, domains, status and notes (`agent_roster` fields in `backend/core/agent_roster_mutations.py`).
 - **Conductor:** the one designated coordinator of a scope. See [Scopes](scopes.md).
@@ -46,12 +46,12 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 
 ### Limits on live processes
 
-Claude Code runs as a separate process per thread. The backend caps how many are working at once, how long a finished one stays warm, and how many idle ones are kept. Defaults are seeded into settings at first start and can be changed there: 8 working, 600 seconds to retire, 8 idle (`backend/infra/subagent_caps.json`, `backend/infra/subagent_caps.py`). Only working processes count against the cap. At the cap, a new Claude Code spawn is refused with an error naming up to five working threads and a count of any others, rather than queueing or spawning more. A retired thread cold-resumes on its next input, as after a backend restart (`backend/subagents/cc_idle_retirement.py`).
+Claude Code runs as a separate process per thread. The backend caps how many are working at once and periodically retires eligible idle processes by age and count. Defaults are seeded into settings and can be changed there: 8 working, a 600-second idle threshold, and 8 idle (`backend/infra/subagent_caps.json`, `backend/infra/subagent_caps.py`). Only working processes count against the cap. At the cap, a new Claude Code spawn is refused with an error naming up to five working threads and a count of any others, rather than queueing or spawning more. A retired thread cold-resumes on its next input, as after a backend restart (`backend/subagents/cc_idle_retirement.py`).
 
 ## What can go wrong
 
 - **Claude Code spawn refused at the cap.** The tool returns the error with working-thread details. The caller can wait or retry; the refused spawn is not queued.
-- **A worker with no model.** `delegate_task` refuses without an explicit model. A model that is unavailable fails visibly; it is not replaced. See [Models and harnesses](models-and-harnesses.md).
+- **A worker with no model.** `delegate_task` refuses without an explicit model. An unavailable model can hold input for recovery or fail it with a visible reason; it is not replaced. See [Models and harnesses](models-and-harnesses.md).
 - **Roster edits from the wrong place.** A tool edit from a thread that is not the live conductor of the target's scope is refused.
 - **Parent and child drift.** A child is its own thread with its own history. It knows what its brief and its own context sources tell it; a brief that leaves out something the child needs produces work that misses it.
 

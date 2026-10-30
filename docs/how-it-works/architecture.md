@@ -18,7 +18,7 @@ flowchart TB
     BE -->|native loop| LLM[Model providers]
     BE -->|spawns| CC[Claude Code]
     BE -->|spawns| CX[Codex]
-    CC -->|MCP bridge| BE
+    CC -->|MCP bridge when configured| BE
     CX -->|tools| BE
 ```
 
@@ -26,14 +26,14 @@ flowchart TB
 
 - **Central input admission.** The backend admits inputs from a user, another agent or an external event, so it can order them and recover queued work after a crash. Delivery guarantees in [Turns and delivery](turns-and-delivery.md) depend on this.
 - **Files for context, database for state.** Instructions, skills and shared documents are plain files in the workspace, so a person and an agent edit them the same way and version them with Git. Conversations, plans, routing and settings are rows, because they need transactions.
-- **Agents reach CORSIA through tools.** Claude Code and Codex call back into the backend through its tool interface, so a plan update or a delegation goes through the same code whichever harness made it.
+- **Agents reach CORSIA through tools.** Managed Claude Code and Codex sessions can call into the backend through its tool interface, so a plan update or a delegation goes through the same code whichever harness made it. A confined Claude Code worker uses read-only native tools instead.
 
 ## How it works
 
 ### Where state lives
 
 - **Workspace folder:** context files, skills, shared documents and project folders. See [Scopes](scopes.md).
-- **State root:** `corsia.db`, `analytics.duckdb` and `uploads/`. A separate `otel_logs.db` holds logs. `CORSIA_STATE_DIR` sets the root when present; otherwise a platform-specific state directory is used. On macOS the default differs between a source install and the packaged app (`backend/infra/platform_paths.py`).
+- **State root:** `corsia.db`, `analytics.duckdb` and `uploads/`. A separate `otel_logs.db` holds logs. `CORSIA_STATE_DIR` can set the root; otherwise the bootstrap's root or a platform-specific default is used. Legacy bootstraps retain their workspace-local state, and incompatible overrides are refused. On macOS the default differs between a source install and the packaged app (`backend/infra/config.py`, `backend/infra/platform_paths.py`).
 - **Database:** SQLite in WAL mode, with a busy timeout and `synchronous=NORMAL` (`backend/infra/database.py`).
 - **Analytics:** DuckDB, optional. If the package is missing, analytics turn off and the backend starts anyway (`backend/infra/product_events.py`).
 
@@ -41,7 +41,7 @@ flowchart TB
 
 The schema version is stored in the database (`PRAGMA user_version`) and compared with the code's version (`backend/infra/schema.py`) at every start.
 
-- An empty database gets the current schema.
+- An empty database with version zero or the current version gets the current schema. An empty database marked with another version is refused.
 - An older database is migrated forward in place by registered steps (`backend/infra/database_migrations.py`).
 - A database with no registered path to the current version, or written by a newer build, is refused with a named error rather than guessed at.
 

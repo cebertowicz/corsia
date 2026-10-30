@@ -57,7 +57,7 @@ When the destination needs a new checkpoint, the pending switch can start one be
 
 ### Account rollover
 
-When an account reaches a usage limit, a thread can move to another account, but only if the person turned rollover on. The destination must run the same model, be ready, and report usage as allowed; unknown usage is not enough (`backend/connections/account_rollover.py`). A move happens before the next queued input is claimed.
+When an account reaches a usage limit, or a project's policy no longer permits it, a thread can move to another account if rollover is enabled. The destination must run the same model, be ready, and report usage as allowed; unknown usage is not enough (`backend/connections/account_rollover.py`). A move happens before the next queued input is claimed.
 
 ## What can go wrong
 
