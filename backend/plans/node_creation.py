@@ -290,7 +290,7 @@ def create_node(
     """Validate and insert a node without opening another transaction.
 
     ``required_step`` marks a workflow run's required step in its creation
-    event, the one record ``plans.workflow_fields.is_required`` reads.
+    event, the one record ``plans.workflow_fields.refuse_required_skip`` reads.
     """
     (
         base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,

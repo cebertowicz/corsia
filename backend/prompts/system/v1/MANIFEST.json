@@ -274,10 +274,10 @@
       "sha256": "a6718ac8f889a40c8e35681fb6d8ff6e5e6827dc5969db97b482ec4cf3ee7fa2"
     },
     {
-      "bytes": 3279,
+      "bytes": 3311,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "f8a6634d2ac89f2d2f5d98306fa615410a219581d31c767fc4a8d70a597228a7"
+      "sha256": "0a5eb25d78b32e150adb9882a23ff06b79e8753f5c122b68d8116887ce7e4cd1"
     },
     {
       "bytes": 1529,
@@ -394,10 +394,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7839,
+      "bytes": 7457,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "025def871783119ef99a1a0160d4422ae9fa72015c1107d847a495f750dbe736"
+      "sha256": "8f77af6d0c1582d95c2b2ca0c50cb64079126315296b8d983a6880dee30e301a"
     },
     {
       "bytes": 10651,
