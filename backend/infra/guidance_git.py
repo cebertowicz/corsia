@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterator
 from loguru import logger
 
 from infra.guidance_cas import stale_path
-from infra.guidance_history_paths import digest, file_version, find_commit
+from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
 from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
     commit_message, is_person_author, recorded_reason,
@@ -29,7 +29,6 @@ from infra.guidance_messages import (
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
-from tools.workspace_git_paths import is_empty_git_dir
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
@@ -74,7 +73,7 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None,
 # Public digest and path helpers remain re-exported from guidance_history_paths.
 
 def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path | None, str | None]:
-    """The workspace's own repository, never an enclosing one; only a guidance save and a Linux shell launch pass ``create``, and with it an empty ``.git`` directory counts as absent because that is the marker the launch leaves when it cannot init."""
+    """The workspace's own repository, never an enclosing one; a guidance save or Linux shell launch passes ``create``, where an empty ``.git`` counts as absent."""
     workspace = workspace.resolve(strict=False)
     try:
         if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):

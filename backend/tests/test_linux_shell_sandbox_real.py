@@ -1,5 +1,6 @@
 """Real bubblewrap twins of shell and script enforcement, in Ubuntu's unit job."""
 from __future__ import annotations
+from dataclasses import replace
 import os
 from pathlib import Path
 import shlex
@@ -75,6 +76,8 @@ def shell_workspace_git_runner(box, monkeypatch):
     from connections import github_agent
     from tools import linux_shell
 
+    policy = replace(box.policy, workspace=box.workspace)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
     monkeypatch.setattr(github_agent, 'default_home', lambda: box.home / '.config/gh')
     monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [box.workspace])
     monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
@@ -99,8 +102,11 @@ def test_agent_cannot_create_workspace_git_controls_in_a_real_shell(linux_box, m
     assert git_dir.is_dir() and (git_dir / 'HEAD').is_file()
     assert (git_dir / 'commondir').read_text() == '.\n'
     assert (git_dir / 'config.worktree').read_bytes() == b''
-    for command in ('mkdir .git', 'ln -s /tmp .git', 'touch .git/commondir', 'touch .git/config.worktree',
-                    'printf x > .git/config', 'printf x > .git/hooks/pre-commit'):
+    for command in ('ln -snfT /tmp .git', 'touch .git/commondir', 'touch .git/config.worktree',
+                    'printf x > .git/config', 'printf x > .git/hooks/pre-commit', 'mv .git moved',
+                    'rm -f .git/commondir', 'rm -f .git/config.worktree',
+                    'cp .git/config .git/config.lock && mv .git/config.lock .git/config',
+                    'cp .git/commondir .git/commondir.new && mv .git/commondir.new .git/commondir'):
         result = run(command)
         print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
         assert result.returncode != 0, command
@@ -124,11 +130,15 @@ def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linu
     assert result.returncode == 0, result.stderr
     marker = box.workspace / '.git'
     assert marker.is_dir() and not any(marker.iterdir())
-    for command in ('mkdir .git', 'touch .git/commondir', 'touch .git/config.worktree', 'printf x > .git/config'):
+    for command in ('mkdir .git', 'touch .git/commondir', 'touch .git/config.worktree', 'printf x > .git/config',
+                    'rmdir .git', 'mv .git moved'):
         result = run(command)
         print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
         assert result.returncode != 0, command
     assert not any(marker.iterdir())
+    result = run('touch new-entry')
+    assert result.returncode == 0, result.stderr
+    assert (box.workspace / 'new-entry').exists()
 
 
 def test_personal_gh_home_hidden_with_agent_account(linux_box, monkeypatch):
