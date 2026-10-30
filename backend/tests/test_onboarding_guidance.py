@@ -469,10 +469,12 @@ def test_local_model_talk_in_step_8_shows_only_when_this_computer_can_run_one():
 
 
 def test_web_search_that_already_works_posts_nothing_before_the_lookup_question():
-    app = FIRST_RUN_APP.read_text(encoding="utf-8")
     first_run = (FIRST_RUN_APP.parent / "first-run.md").read_text(encoding="utf-8")
+    task_4 = first_run.split("## Task 4:", 1)[1].split("## Task 5:", 1)[0]
     step = _step(4)
 
+    assert "search already works: post nothing about it and mark it done" in task_4
+    assert "Web search works" not in task_4.split("Otherwise", 1)[0]
     assert "Skipped with no line about search when `web_search_ready`" in step
     assert "Web search works. Searches go to Brave." in step  # only after a key is saved in this chat
 
