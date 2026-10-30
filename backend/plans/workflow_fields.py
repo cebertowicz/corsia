@@ -186,6 +186,21 @@ def creation_payload(db, node_id: str) -> dict[str, Any]:
     return json.loads(row["payload_json"] or "{}") if row is not None else {}
 
 
+NOT_A_STEP = {"workflow_ref": None, "workflow_version": None, "workflow_step": None, "difficulty": None}
+
+
+def same_step_fields(db, source) -> dict[str, Any]:
+    """The creation fields of a send-back's revision: the same step, tried again, under the same rules."""
+    if source["workflow_step"] is None:
+        return NOT_A_STEP
+    created = creation_payload(db, source["id"])
+    return {
+        **{field: source[field] for field in NOT_A_STEP},
+        "required_step": created.get("workflow_required") is True,
+        "workflow_by": created.get("workflow_by", "agent"),
+    }
+
+
 def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
     """Require a harvested worker return before a reviewer step is marked done or accepted."""
     from plans import delegation_harvest

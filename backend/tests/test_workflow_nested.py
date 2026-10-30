@@ -167,13 +167,23 @@ def test_nested_versions_use_each_reference(db, monkeypatch, tmp_path):
 
 def test_nested_runs_are_distinct_measurement_subtrees():
     nodes = [
-        {"id": "outer", "parent_id": None, "kind": "phase", "workflow_ref": "outer", "assignee": None},
-        {"id": "outer-task", "parent_id": "outer", "kind": "task", "workflow_ref": "outer", "assignee": None},
-        {"id": "inner", "parent_id": "outer", "kind": "phase", "workflow_ref": "inner", "assignee": None},
-        {"id": "inner-task", "parent_id": "inner", "kind": "task", "workflow_ref": "inner", "assignee": None},
+        {"id": "outer", "parent_id": None, "follow_up_of": None, "kind": "phase", "workflow_ref": "outer", "assignee": None},
+        {"id": "outer-task", "parent_id": "outer", "follow_up_of": None, "kind": "task", "workflow_ref": "outer", "assignee": None},
+        {"id": "inner", "parent_id": "outer", "follow_up_of": None, "kind": "phase", "workflow_ref": "inner", "assignee": None},
+        {"id": "inner-task", "parent_id": "inner", "follow_up_of": None, "kind": "task", "workflow_ref": "inner", "assignee": None},
     ]
     roots = run_roots(nodes)
     assert {node["id"] for node in roots} == {"outer", "inner"}
     trees = _subtrees(nodes, (node["id"] for node in roots))
     assert [node["id"] for node in trees["outer"]] == ["outer-task"]
     assert [node["id"] for node in trees["inner"]] == ["inner-task"]
+
+
+def test_a_sent_back_task_outside_a_run_stays_one_run():
+    nodes = [
+        {"id": "task", "parent_id": None, "follow_up_of": None, "workflow_ref": "sample"},
+        {"id": "revision", "parent_id": None, "follow_up_of": "task", "workflow_ref": "sample"},
+        {"id": "second", "parent_id": None, "follow_up_of": "revision", "workflow_ref": "sample"},
+        {"id": "other", "parent_id": None, "follow_up_of": "task", "workflow_ref": "another"},
+    ]
+    assert [node["id"] for node in run_roots(nodes)] == ["task", "other"]

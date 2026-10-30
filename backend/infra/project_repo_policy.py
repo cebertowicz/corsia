@@ -216,11 +216,6 @@ def branch_pin_support_error(repo_path: Path) -> str | None:
             "directory; linked worktrees and submodules share Git metadata "
             "outside the registered checkout"
         )
-    if (git_dir / "commondir").exists():
-        return (
-            "branch pinning requires repository-local Git metadata; this checkout "
-            "uses a shared common Git directory"
-        )
     if (git_dir / "reftable").exists():
         return (
             "Git ref storage `reftable` is not supported by branch pinning; "

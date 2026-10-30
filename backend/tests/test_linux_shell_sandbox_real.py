@@ -1,5 +1,6 @@
 """Real bubblewrap twins of shell and script enforcement, in Ubuntu's unit job."""
 from __future__ import annotations
+from dataclasses import replace
 import os
 from pathlib import Path
 import shlex
@@ -68,6 +69,92 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
         return subprocess.run(argv_for(command, **kwargs), capture_output=True, text=True, timeout=20)
     return SimpleNamespace(home=home, workspace=workspace, repo=repo, state=state,
                            policy=policy, run=run, argv_for=argv_for, env=env)
+
+
+def shell_workspace_git_runner(box, monkeypatch):
+    """Run commands through the real Linux shell path, so the backend prepares the workspace Git paths."""
+    from connections import github_agent
+    from tools import linux_shell
+
+    policy = replace(box.policy, workspace=box.workspace)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(github_agent, 'default_home', lambda: box.home / '.config/gh')
+    monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [box.workspace])
+    monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
+    monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
+    account = github_agent.AgentAccountView(state='needs_auth')
+
+    def run(command):
+        argv = linux_shell.shell_argv(command, box.workspace, thread_id='one', policies=[],
+                                      env=box.env, agent_account=account)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    return run
+
+
+def test_agent_cannot_create_workspace_git_controls_in_a_real_shell(linux_box, monkeypatch):
+    box = linux_box
+    run = shell_workspace_git_runner(box, monkeypatch)
+    assert not (box.workspace / '.git').exists()
+    result = run('git status --porcelain')
+    print(f'first launch: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode == 0, result.stderr
+    git_dir = box.workspace / '.git'
+    assert git_dir.is_dir() and (git_dir / 'HEAD').is_file()
+    assert (git_dir / 'commondir').read_text() == '.\n'
+    assert (git_dir / 'config.worktree').read_bytes() == b''
+    for command in ('ln -snfT /tmp .git', 'touch .git/commondir', 'touch .git/config.worktree',
+                    'printf x > .git/config', 'printf x > .git/hooks/pre-commit', 'mv .git moved',
+                    'rm -f .git/commondir', 'rm -f .git/config.worktree',
+                    'cp .git/config .git/config.lock && mv .git/config.lock .git/config',
+                    'cp .git/commondir .git/commondir.new && mv .git/commondir.new .git/commondir'):
+        result = run(command)
+        print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, command
+    assert (git_dir / 'commondir').read_text() == '.\n'
+    assert (git_dir / 'config.worktree').read_bytes() == b''
+    assert 'x' not in (git_dir / 'config').read_text()
+    assert not (git_dir / 'hooks' / 'pre-commit').exists()
+    result = run('git -c user.name=T -c user.email=t@example.invalid commit --allow-empty -m x')
+    print(f'agent commit: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode == 0, result.stderr
+    assert subprocess.run(['git', '-C', str(box.workspace), 'rev-list', '--count', 'HEAD'],
+                         capture_output=True, text=True, timeout=20).stdout.strip() == '1'
+
+
+def test_a_bare_repository_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
+    from infra.guidance_git import workspace_repository
+
+    box = linux_box
+    run = shell_workspace_git_runner(box, monkeypatch)
+    assert run('true').returncode == 0
+    result = run("rm .git/HEAD && mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
+                 "&& printf '[core]\\n\\trepositoryformatversion = 0\\n\\tworktree = .\\n' > config")
+    print(f'plant: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode == 0, result.stderr
+    assert subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=str(box.workspace),
+                          capture_output=True, timeout=20).returncode == 0
+    repo, reason = workspace_repository(box.workspace)
+    assert repo is None and 'bare repository' in reason
+
+
+def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linux_box, monkeypatch):
+    """With no repository of its own the workspace gets an empty marker no shell can fill in."""
+    box = linux_box
+    subprocess.run(['git', 'init', '--quiet'], cwd=str(box.home), check=True, timeout=30)
+    run = shell_workspace_git_runner(box, monkeypatch)
+    result = run('true')
+    assert result.returncode == 0, result.stderr
+    marker = box.workspace / '.git'
+    assert marker.is_dir() and not any(marker.iterdir())
+    for command in ('mkdir .git', 'touch .git/commondir', 'touch .git/config.worktree', 'printf x > .git/config',
+                    'rmdir .git', 'mv .git moved'):
+        result = run(command)
+        print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, command
+    assert not any(marker.iterdir())
+    result = run('touch new-entry')
+    assert result.returncode == 0, result.stderr
+    assert (box.workspace / 'new-entry').exists()
 
 
 def test_personal_gh_home_hidden_with_agent_account(linux_box, monkeypatch):

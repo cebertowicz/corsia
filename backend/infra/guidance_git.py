@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterator
 from loguru import logger
 
 from infra.guidance_cas import stale_path
-from infra.guidance_history_paths import digest, file_version, find_commit
+from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
 from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
     commit_message, is_person_author, recorded_reason,
@@ -32,7 +32,7 @@ from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
-_GIT_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false")
+_GIT_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", "-c", "safe.bareRepository=explicit")
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
@@ -73,10 +73,10 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None,
 # Public digest and path helpers remain re-exported from guidance_history_paths.
 
 def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path | None, str | None]:
-    """The workspace's own repository, never an enclosing one; only a guidance save passes ``create``."""
+    """The workspace's own repository, never an enclosing one; a guidance save or Linux shell launch passes ``create``, where an empty ``.git`` counts as absent."""
     workspace = workspace.resolve(strict=False)
     try:
-        if (workspace / ".git").exists():
+        if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):
             top = Path(_git(workspace, "rev-parse", "--show-toplevel").strip()).resolve(strict=False)
             return (workspace, None) if top == workspace else (None, "the workspace Git directory resolves elsewhere")
         if _git(workspace, "rev-parse", "--show-toplevel", ok=(0, 128)).strip():
