@@ -14,7 +14,9 @@ Before changing code:
 ADRs and subsystem specs are archived historical evidence. They do not authorize
 work, define current contracts, or pass a review gate.
 
-Work on a feature branch in a linked worktree based on `dev`. Never develop in
-or switch the serving checkout, and never test against the operational
+Work on a feature branch based on `dev`. On a person's own source install,
+editing that checkout directly is fine when they ask for it; `corsia restart`
+serves the edits. Otherwise use a linked worktree, and never develop in or
+switch a maintainer's serving checkout. Never test against the operational
 database.
 Use the project `sdlc-process` skill for preflight, review, and merge procedure.
