@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -23,7 +24,6 @@ from infra.git_local_config_guard import (
     build_guard,
     guard_for,
     guarded_run,
-    read_config,
 )
 from infra.project_repo_policy import RepoPolicy, repo_checkout_state
 from tools.worktrees import WorktreeCreateTool
@@ -252,7 +252,7 @@ def test_person_uploadpack_still_wins_over_a_local_one(tmp_path: Path, person_co
 
 
 @pytest.mark.parametrize("argv", [
-    ["fetch", "origin"], ["fetch", "origin", "dev"], ["fetch", "--", "origin"],
+    ["fetch"], ["fetch", "origin"], ["fetch", "origin", "dev"], ["fetch", "--", "origin"],
 ])
 def test_local_uploadpack_is_not_run_wherever_the_remote_is_named(
     tmp_path: Path, argv: list[str],
@@ -504,7 +504,7 @@ def test_submodule_state_is_kept_out_of_fetch_and_status() -> None:
     assert _submodule_argv(["fetch", "origin"], plain) == [
         "fetch", "--no-recurse-submodules", "origin",
     ]
-    local = GitGuard((), upload_pack_remotes=frozenset({"origin"}))
+    local = GitGuard((), local_upload_pack=True)
     assert _submodule_argv(["fetch", "--", "origin"], local) == [
         "fetch", "--no-recurse-submodules", "--upload-pack=git-upload-pack", "--", "origin",
     ]
@@ -640,14 +640,94 @@ def test_a_helper_list_without_local_entries_is_left_alone() -> None:
     assert not [a for a in guard.config_args() if a.startswith("credential.")]
 
 
-def test_fixed_overrides_apply_even_when_the_config_cannot_be_read(tmp_path: Path) -> None:
-    assert read_config(tmp_path / "missing") is None
-    guard = guard_for(tmp_path / "missing")
-    assert guard.config_args() == [
+def test_an_empty_config_keeps_the_fixed_overrides() -> None:
+    assert build_guard([], {}).config_args() == [
         "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
         "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
     ]
-    assert guard == build_guard(None, {})
+
+
+def test_a_config_git_cannot_read_stops_the_call_with_gits_own_failure(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    marker, command = _touch(tmp_path, "unreadable")
+    _git(repo, "config", "core.fsmonitor", command)
+    (repo / ".git" / "config").write_text("not a config\n", encoding="utf-8")
+    done = guarded_run(repo, ["status", "--porcelain"], timeout=60)
+    assert done.returncode != 0 and "config" in done.stderr
+    assert done.args == ["git", "status", "--porcelain"]
+    assert not _ran(marker)
+
+
+def test_a_config_read_that_hangs_stops_the_call(tmp_path: Path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    calls: list[list[str]] = []
+
+    def _hang(command, *args, **kwargs):
+        calls.append(command)
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr("infra.git_local_config_guard.subprocess.run", _hang)
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        guarded_run(repo, ["status", "--porcelain"], timeout=7)
+    assert raised.value.cmd == ["git", "status", "--porcelain"]
+    assert len(calls) == 1, "the real command must not run after the read gave up"
+
+
+def test_a_local_config_based_hook_is_not_run(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    marker, command = _touch(tmp_path, "hook")
+    _git(repo, "config", "hook.planted.command", command)
+    _git(repo, "config", "hook.planted.event", "post-checkout")
+    _git(repo, "worktree", "add", "-b", "plain", str(tmp_path / "plain"))
+    if not _ran(marker):
+        pytest.skip("this Git has no config-based hooks")
+    done = guarded_run(repo, ["worktree", "add", "-b", "guarded", str(tmp_path / "guarded")], timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert not _ran(marker)
+
+
+def _lfs_repo(tmp_path: Path) -> Path:
+    if shutil.which("git-lfs") is None:
+        pytest.skip("git-lfs is not installed")
+    repo = _repo(tmp_path)
+    _git(repo, "config", "lfs.url", "https://lfs.invalid/x")
+    _git(repo, "lfs", "install", "--local")
+    _git(repo, "lfs", "track", "*.bin")
+    (repo / "big.bin").write_text("payload\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "lfs")
+    return repo
+
+
+def test_a_local_lfs_transfer_agent_is_not_run_by_a_worktree_add(tmp_path: Path) -> None:
+    repo = _lfs_repo(tmp_path)
+    marker, script = _script(tmp_path, "transfer")
+    _git(repo, "config", "lfs.customtransfer.planted.path", str(script))
+    _git(repo, "config", "lfs.standalonetransferagent", "planted")
+    shutil.rmtree(repo / ".git" / "lfs" / "objects")
+    _git(repo, "worktree", "add", "--detach", str(tmp_path / "plain"), "HEAD", check=False)
+    assert _ran(marker), "the plant must work against plain Git or the test proves nothing"
+    guarded_run(repo, ["worktree", "add", "--detach", str(tmp_path / "guarded"), "HEAD"], timeout=60)
+    assert not _ran(marker)
+
+
+def test_a_local_lfs_extension_is_not_run_and_the_content_still_passes(tmp_path: Path) -> None:
+    repo = _lfs_repo(tmp_path)
+    marker = tmp_path / "marker-extension"
+    script = tmp_path / "extension.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    script.chmod(0o755)
+    _git(repo, "config", "lfs.extension.planted.clean", str(script))
+    _git(repo, "config", "lfs.extension.planted.smudge", str(script))
+    _git(repo, "config", "lfs.extension.planted.priority", "0")
+    (repo / "big.bin").write_text("changed\n", encoding="utf-8")
+    _git(repo, "add", "--renormalize", ".")
+    assert _ran(marker), "the plant must work against plain Git or the test proves nothing"
+    (repo / "big.bin").write_text("changed again\n", encoding="utf-8")
+    done = guarded_run(repo, ["status", "--porcelain"], timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert "big.bin" in done.stdout
+    assert not _ran(marker)
 
 
 def test_neutral_values_and_the_persons_effective_values() -> None:

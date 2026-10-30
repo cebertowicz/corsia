@@ -959,7 +959,7 @@ async def test_update_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if _git_subcommand(command) == "config":
+        if _git_subcommand(command) == "config" and "--list" not in command:
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -997,7 +997,7 @@ async def test_add_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if _git_subcommand(command) == "config":
+        if _git_subcommand(command) == "config" and "--list" not in command:
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 

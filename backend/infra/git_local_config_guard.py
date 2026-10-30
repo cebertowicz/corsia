@@ -10,8 +10,13 @@ beats every file, so each such local value is overridden:
   one, so their ssh command, credential helper or git-lfs filters keep working;
 * otherwise with a neutral value that runs nothing.
 
-Nothing is refused. ``git config --list`` failing degrades only the extra
-neutralisation: the fixed overrides below still apply and the command still runs.
+Nothing an agent can run is refused. A config that cannot be read stops the call
+rather than running it unguarded: a broken config would fail the real command too,
+so only a read that was made to fail or hang notices.
+
+This is a second layer behind the sandbox rules that stop an agent writing a
+registered repository's config. It covers values already there, for the keys
+named below, and it cannot see a value written after it reads.
 
 A submodule carries its own config, which no override of the parent reaches, so
 fetch and status are given command-line flags that keep submodules out of the
@@ -34,6 +39,9 @@ _FILTER_RE = re.compile(r"^filter\.(?P<name>.+)\.(?P<part>clean|smudge|process)$
 _HELPER_RE = re.compile(r"^credential\.(?:.+\.)?helper$")
 _UPLOADPACK_RE = re.compile(r"^remote\.(?P<name>.+)\.uploadpack$")
 _VCS_RE = re.compile(r"^remote\..+\.vcs$")
+_LFS_TRANSFER_RE = re.compile(r"^lfs\.customtransfer\..+\.path$")
+_LFS_EXTENSION_RE = re.compile(r"^lfs\.extension\..+\.(?:clean|smudge)$")
+_HOOK_RE = re.compile(r"^hook\..+\.command$")
 # Standard git-lfs filter commands only run the trusted ``git-lfs`` binary; a
 # repository that installed LFS locally keeps its filters.
 _LFS_FILTERS = frozenset({
@@ -58,7 +66,7 @@ class GitGuard:
 
     config: tuple[tuple[str, str], ...]
     env: dict[str, str] = field(default_factory=dict)
-    upload_pack_remotes: frozenset[str] = frozenset()
+    local_upload_pack: bool = False
 
     def config_args(self) -> list[str]:
         """Return the ``-c`` arguments for every override a ``-c`` can express."""
@@ -81,17 +89,12 @@ class GitGuard:
         return env
 
 
-def read_config(repo: Path) -> list[ConfigEntry] | None:
-    """Return every effective config entry with its scope, or None if unreadable."""
-    try:
-        done = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "config", "--list", "--show-scope", "-z"],
-            cwd=str(repo), capture_output=True, timeout=_CONFIG_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if done.returncode != 0:
-        return None
+def read_config(repo: Path) -> list[ConfigEntry]:
+    """Return every effective config entry with its scope; raises what ``subprocess.run`` raises."""
+    done = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "config", "--list", "--show-scope", "-z"],
+        cwd=str(repo), capture_output=True, timeout=_CONFIG_TIMEOUT_SECONDS, check=True,
+    )
     parts = done.stdout.decode("utf-8", "surrogateescape").split("\0")
     entries = []
     for scope, item in zip(parts[0::2], parts[1::2]):  # records: scope NUL key LF value NUL
@@ -109,6 +112,7 @@ def _ssh_neutral(environ: dict[str, str]) -> str:
 _NEUTRAL_KEYS = {
     "core.askpass": "",
     "core.alternaterefscommand": "true",  # Git cannot unset a key; ``true`` lists no tips
+    "lfs.standalonetransferagent": "",
     "merge.verifysignatures": "false",
     "gpg.program": "gpg",
     "gpg.openpgp.program": "gpg",
@@ -125,6 +129,12 @@ def _neutral(key: str, value: str | None, environ: dict[str, str]) -> str | None
         return _NEUTRAL_KEYS[key]
     if _FILTER_RE.match(key) and value not in _LFS_FILTERS:
         return ""  # an empty filter command means no filter
+    if _LFS_TRANSFER_RE.match(key):
+        return ""  # git-lfs reads these overrides from the environment Git gives it
+    if _LFS_EXTENSION_RE.match(key):
+        return "cat"  # an extension is a pipe, so the content still passes through
+    if _HOOK_RE.match(key):
+        return "true"  # Git 2.54 runs these whatever core.hooksPath says
     if key.lower().startswith("alias.remote-"):
         return ""  # Git starts a remote helper as ``git remote-<name>``, which aliases answer
     if _VCS_RE.match(key) and value and "/" in value:
@@ -170,17 +180,17 @@ def _helper_overrides(local: list[ConfigEntry], person: list[ConfigEntry]) -> li
 
 
 def build_guard(
-    entries: list[ConfigEntry] | None, environ: dict[str, str] | None = None,
+    entries: list[ConfigEntry], environ: dict[str, str] | None = None,
 ) -> GitGuard:
     """Compute the overrides for one repository's config; fixed ones come first."""
     environ = dict(os.environ if environ is None else environ)
-    person = [e for e in entries or [] if e.scope in _PERSON_SCOPES]
-    local = [e for e in entries or [] if e.scope in _LOCAL_SCOPES]
+    person = [e for e in entries if e.scope in _PERSON_SCOPES]
+    local = [e for e in entries if e.scope in _LOCAL_SCOPES]
     config = [
         ("core.hooksPath", "/dev/null"), ("core.fsmonitor", "false"),
         ("protocol.ext.allow", _ext_policy(person)),
         # A submodule has its own config this call never reads, so no command
-        # may recurse into it. Fixed, so it holds with an unreadable config too.
+        # may recurse into it.
         ("submodule.recurse", "false"),
         *_single_overrides(local, person, environ),
         *_helper_overrides(local, person),
@@ -199,16 +209,14 @@ def build_guard(
     # The first remote.<name>.uploadpack wins, so a person's own value already
     # beats the repository's; only an unshadowed local one needs a fetch option.
     shadowed = {e.key for e in person}
-    remotes = frozenset(
-        m["name"] for e in local if (m := _UPLOADPACK_RE.match(e.key)) and e.key not in shadowed
-    )
-    if remotes:
+    local_upload_pack = any(_UPLOADPACK_RE.match(e.key) and e.key not in shadowed for e in local)
+    if local_upload_pack:
         env["GIT_NO_LAZY_FETCH"] = "1"  # the fetch of a missing object takes no option
-    return GitGuard(tuple(config), env, remotes)
+    return GitGuard(tuple(config), env, local_upload_pack)
 
 
 def guard_for(repo: Path) -> GitGuard:
-    """Return the guard for ``repo``; an unreadable config keeps only the fixed overrides."""
+    """Return the guard for ``repo``; raises when its config cannot be read."""
     return build_guard(read_config(repo))
 
 
@@ -216,7 +224,7 @@ def _submodule_argv(argv: list[str], guard: GitGuard) -> list[str]:
     """Keep submodules out of the call: their own config is never read here.
 
     Fetch never recurses and uses the stock upload-pack when the repository
-    names its own; every caller names the remote, so a bare fetch is not covered.
+    names its own, whichever remote the call reaches.
     Status ignores submodule state, because it spawns a child
     process inside each populated submodule, where that submodule's own
     filters would otherwise run. The command-line flag is used rather than
@@ -226,7 +234,7 @@ def _submodule_argv(argv: list[str], guard: GitGuard) -> list[str]:
         return argv
     if argv[0] == "fetch":
         extra = ["--no-recurse-submodules"]
-        if any(arg in guard.upload_pack_remotes for arg in argv[1:]):
+        if guard.local_upload_pack:
             extra.append("--upload-pack=git-upload-pack")
     elif argv[0] == "status":
         extra = ["--ignore-submodules=dirty"]
@@ -238,18 +246,23 @@ def _submodule_argv(argv: list[str], guard: GitGuard) -> list[str]:
 def guarded_run(repo: Path, argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
     """Run ``git <argv>`` in ``repo`` with the repository's program-naming config overridden.
 
-    Raises what ``subprocess.run`` raises, so callers keep their own handling.
+    Raises what ``subprocess.run`` raises, so callers keep their own handling. A
+    config Git refuses to read comes back as that failed result.
 
     A timeout names the caller's own arguments only: the override list can carry
     the person's credential helper or ssh command value, and callers format this
     exception's text into a message an agent reads.
     """
-    guard = guard_for(repo)
     try:
+        guard = guard_for(repo)
         return subprocess.run(
             ["git", *guard.config_args(), *_submodule_argv(argv, guard)],
             cwd=str(repo), capture_output=True, text=True, timeout=timeout,
             env=guard.environment(),
+        )
+    except subprocess.CalledProcessError as exc:
+        return subprocess.CompletedProcess(
+            ["git", *argv], exc.returncode, "", exc.stderr.decode("utf-8", "replace"),
         )
     except subprocess.TimeoutExpired as exc:
         # ``from None``: the cause's args carry the same argv, and a traceback

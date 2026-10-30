@@ -940,6 +940,8 @@ def test_branch_pin_support_does_not_require_show_ref_format(tmp_path, monkeypat
 
     def _older_git(args, **_kwargs):
         assert "--show-ref-format" not in args
+        if "--list" in args:
+            return subprocess.CompletedProcess(args, 0, b"", b"")
         if "config" in args:
             return subprocess.CompletedProcess(args, 1, "", "")
         return subprocess.CompletedProcess(
