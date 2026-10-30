@@ -21,7 +21,7 @@ describe('ProviderLocalModelControls', () => {
 		token.set('tok');
 		const onAddProvider = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: false }] }) })));
-		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider, corsiaManaged: true } });
+		component = mount(ProviderLocalModelControls, { target: host, props: { onAdd: vi.fn(), onAddProvider, corsiaManaged: true } });
 		await tick(); await tick(); flushSync();
 
 		expect(host.textContent).toContain('Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.');
@@ -37,7 +37,7 @@ describe('ProviderLocalModelControls', () => {
 		document.body.appendChild(host);
 		token.set('tok');
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: false, never_local: true }] }) })));
-		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
+		component = mount(ProviderLocalModelControls, { target: host, props: { onAdd: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
 		await tick(); await tick(); flushSync();
 
 		expect(host.textContent).not.toContain('24 GB');
@@ -49,7 +49,7 @@ describe('ProviderLocalModelControls', () => {
 		document.body.appendChild(host);
 		token.set('tok');
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: true }] }) })));
-		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn() } });
+		component = mount(ProviderLocalModelControls, { target: host, props: { onAdd: vi.fn(), onAddProvider: vi.fn() } });
 		await tick(); await tick(); flushSync();
 
 		expect(host.querySelector('button')).toBeNull();

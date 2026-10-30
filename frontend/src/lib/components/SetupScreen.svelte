@@ -98,7 +98,7 @@
 	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
-			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
+			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : [`Downloading ${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), accentMeta: !localFailed && local?.local_state !== 'starting' }] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
 	const aiRows = $derived.by((): AiRow[] => {

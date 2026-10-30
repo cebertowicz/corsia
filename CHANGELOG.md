@@ -39,6 +39,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Chat, Files, and project and workspace messages use clearer, consistent names.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Clearer wording for sign-in, saved keys, host access and project errors.
+- Compare local model builds that fit this computer, see which are already on this computer, and download a build directly.
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Connections from paired devices work again.
 - Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
