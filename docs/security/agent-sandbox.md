@@ -50,7 +50,7 @@ The command refusals match text. A command built to avoid the pattern (a script 
 
 ## The shell's environment
 
-The sandboxed shell starts with `bash --noprofile --norc`, so your shell startup files don't run. Environment variables whose names look like secrets (`*API_KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*PRIVATE_KEY*`) are removed. What remains is ordinary: `HOME`, `PATH`, `USER`, `SHELL`, `TMPDIR`, the thread's ID, per-thread package caches, and `SSH_AUTH_SOCK`.
+The sandboxed shell starts with `bash --noprofile --norc`, so your shell startup files don't run. A command doesn't inherit the server's environment: it starts from a short allowed list of variables, and anything else stays out, whatever its name. That list is ordinary: `HOME`, `PATH`, `USER`, `SHELL`, `TMPDIR`, the thread's ID, per-thread package caches, `SSH_AUTH_SOCK` and, if you set one up, the agents' GitHub account settings.
 
 ## macOS
 

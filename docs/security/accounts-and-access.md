@@ -16,7 +16,7 @@ How people and programs sign in to CORSIA, how agents act, and what a project or
 | Password change | Ends every browser session of that account; API tokens stay valid | `backend/infra/accounts.py` |
 | First run | Before the first account exists, setup routes accept any program on the same computer; they close once the account is created | `backend/infra/local_connection.py` |
 
-An unknown token and an expired one get the same answer, "Invalid or expired session". The token can be sent as a `?token=` query parameter or an `Authorization: Bearer` header. The server's access log drops query strings, so tokens don't reach the log.
+Most API routes accept the token as a `?token=` query parameter or an `Authorization: Bearer` header, and answer an unknown token and an expired one the same way, "Invalid or expired session". Some routes take one form only: sign-out and the routes built on `require_user_header_only` (`backend/infra/auth.py`) take only the header, and a few, such as `GET /api/threads`, take only the query parameter and answer a bad token with a bare 401. The server's access log drops query strings, so tokens don't reach the log.
 
 **Local storage** is readable by any script running on the CORSIA page. CORSIA serves its own page only; a cross-site scripting flaw in it would expose the session token.
 
@@ -24,7 +24,7 @@ An unknown token and an expired one get the same answer, "Invalid or expired ses
 
 `corsia token create` issues an API token for scripts and outside tools. API tokens **don't expire**. Revoke one with `corsia token revoke <label>`. `corsia token list` shows them, without their values.
 
-An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
+An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Those checks are on the API; a leased command is a [separate case](host-access.md#approval-modes). Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
 
 `corsia token create --write-delegate-file` writes the token to `~/.corsia/.api-token`, readable only by your user. Agent shells can't read `~/.corsia` (checked for this page).
 
@@ -40,6 +40,7 @@ What an agent can reach through tools:
 | Other conversations | Any conversation's messages by its id, in any project, except an [isolated worker's](untrusted-content.md#isolated-workers) (`backend/tools/query_projects.py`) |
 | Connected apps | Those whose reach includes its project ([Connected apps](connected-apps.md)) |
 | Host access | Only through a reviewed lease ([Host access](host-access.md)) |
+| CORSIA's own API | The CORSIA agent and project conductors only. Their `corsia_api` tool calls API routes inside the server with no token, as the account, and the tool doesn't hold a conductor to its project. Every route is open except a person-only list: sign-in and tokens, host-access approval, stored keys, answering your decisions, naming conductors, account sign-ins, webhooks, and handlers that record you as the actor (`backend/tools/conductor_api_policy.py`) |
 
 ## What a project does and doesn't separate
 

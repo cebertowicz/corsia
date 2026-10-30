@@ -9,19 +9,23 @@ Where CORSIA keeps keys, who can read them, how credential values are kept away 
 | Provider API keys, the web search key, connected-account tokens (Google, Microsoft, mail hosts), tool-server keys and their sign-in grants | The **key store**: one file, `keys/values.json`, in CORSIA's state folder | The CORSIA server process, and anything else running as your user outside CORSIA |
 | Names, labels and dates of those keys | CORSIA's database | The server; the person in **Settings → Keys** |
 | Claude Code and Codex logins | Those tools' own folders (`~/.claude`, `~/.codex`) | Those tools; not agent shells |
+| The agents' GitHub account token, if you set that account up | `hosts.yml` in the account's own folder, under `~/.config/corsia-gh-agent` by default (`CORSIA_GH_AGENT_CONFIG_DIR` moves it). Not in the key store | **Agent shells, read only**, so agents can use `gh` and `git` as that account; anything else running as your user |
 | Your session and API tokens | Only a SHA-256 digest is stored; see [Accounts and access](accounts-and-access.md) | — |
 
 The key store file is created with mode `0600` in a `0700` folder. **It is not encrypted.** Any program running as your user outside CORSIA can read it, as can anyone who can read your disk while you're signed in. Source: `backend/infra/key_store.py`, `backend/infra/key_store_values.py`.
 
-Values never go into the database or the settings table, so a database backup or a settings read can't carry one. Code decides what uses each key: only fixed readers in the server (provider calls, connected accounts, tool-server launch) resolve a value, and nothing turns a key's name into its value for an agent.
+The agents' GitHub token is the one credential CORSIA stores that agent shells can read. Masking hides it in output, but a command can use it or send it anywhere, and no lease is needed. Give that account access only to the repositories agents need. Source: `backend/connections/github_agent_home.py`, `backend/tools/shell_environment.py`.
+
+Key store values never go into the database or the settings table, so a database backup or a settings read can't carry one. Code decides what uses each key: only fixed readers in the server (provider calls, connected accounts, tool-server launch) resolve a value, and nothing turns a key's name into its value for an agent.
 
 ## Who can't read them
 
 | Path to a key | Blocked by | Strength |
 |---|---|---|
 | An agent's shell reading the key store | The key store is on the hard floor; no lease opens it | Operating system |
+| A leased command leaving something behind that runs later outside the sandbox and reads the store | The reviewers, told to block changes to the code and settings that govern a lease ([Host access](host-access.md#what-no-lease-opens)) | Model judgment |
 | An agent's file tools reading it | Outside the workspace | CORSIA code |
-| The shell's environment | Variables named like secrets are removed before a command starts | CORSIA code |
+| The shell's environment | A command starts from a short allowed list of variables; anything else stays out, whatever its name | CORSIA code |
 | A command that passes a literal value where a credential goes (a credential-named variable, flag, header or URL field) | Refused before it runs | CORSIA code |
 | A leased command that tries to read `.env`, keychain or auth files | The reviewers are told to block it | Model judgment |
 
@@ -38,6 +42,8 @@ Every result a CORSIA tool returns passes through a credential masker before it 
 **What masking misses**, each tested for this page:
 
 - A value with no credential-looking name and no known shape, such as a random string on its own line.
+- A placeholder word after a credential name, such as `test`, `example` or `changeme`. A real password with one of those values stays visible.
+- In Markdown, a value that is one plain lowercase word after a credential name. In code, a bare name assigned to a credential name. Both read as ordinary text, so they stay visible.
 - Transformed output. If a command base64-encodes or reverses a file, the result isn't masked.
 - Anything a command *does* with the value. Masking changes what the model sees, not what runs. `source .env && curl -H "Authorization: Bearer $TOKEN" …` uses the real value, and the command could send it anywhere.
 - An isolated worker on Claude Code reads files with Claude Code's own read tool, which doesn't pass through CORSIA's masker. See [Untrusted content](untrusted-content.md).

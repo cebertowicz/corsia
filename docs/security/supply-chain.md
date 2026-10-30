@@ -28,21 +28,31 @@ No automated dependency-update service (Dependabot or Renovate) is configured.
 
 ## Updates
 
-Updates run when you start one, or at a time you choose if you turn on automatic updates (off by default; `backend/infra/settings.py`). An update (`scripts/corsia.d/runtime.sh`):
+Updates run when you start one, or at a time you choose if you turn on automatic updates (off by default; `backend/infra/settings.py`). What an update checks depends on how you installed CORSIA.
+
+**Source install** (`scripts/corsia.d/runtime.sh`):
 
 1. Runs `git pull --ff-only` on the branch the checkout tracks, from the GitHub repository it was cloned from. It refuses if the branch has diverged. It checks no signatures.
 2. Runs `pip install -r backend/requirements.lock` and `npm install` as above.
 3. Rebuilds and restarts.
 
-Anyone who can push to the branch you track can change what your install runs on its next update.
+Anyone who can push to the branch you track can change what a source install runs on its next update.
+
+**Desktop app** (`desktop/src-tauri/src/update_stage.rs`): the app reads the release manifest from GitHub and downloads the archive it names. Before replacing the installed app, it:
+
+1. Checks the archive's minisign signature against the updater public key built into the app (`desktop/src-tauri/tauri.conf.json`).
+2. Refuses a version that isn't newer than the installed one, or that doesn't match the manifest.
+3. Verifies the new app's code signature, refuses one with no Developer ID, and requires the same signing identifier, Team ID and designated requirement as the installed app.
+
+Changing what the desktop app runs on its next update takes both the updater signing key and the Developer ID signing identity.
 
 ## Shared skills and setups
 
-The skill library is a separate public repository. It is **off** until you agree to use community improvements in your profile (`backend/tools/skill_library.py`). Once on:
+The skill library is a separate public repository. Agents can't use it until you agree to use community improvements in your profile (`backend/tools/skill_library.py`). CORSIA still downloads the public index at startup and daily with the library off, and no setting stops that (`backend/library/producer.py`). Once on:
 
 - Agents can search it and install a skill into their own conversation without asking you.
 - The library's own items are read from its `main` branch, and each file is checked against the SHA-256 recorded in the library's index, which is read from `main` too. The check catches a file that doesn't match the index, not a change by someone who can push to the library. Items the index lists from other repositories are pinned to a Git commit (`backend/library/items.py`, `backend/library/index.py`).
-- CORSIA checks daily for newer versions but never updates an installed copy on its own.
+- Agents are told of newer versions, but CORSIA never updates an installed copy on its own.
 - Contributions from outside the project aren't open yet, and no review checklist for library items is published.
 
 A skill is instructions, and its bundle can include scripts. An installed skill can tell an agent to do anything that agent can already do.

@@ -25,7 +25,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 **Not sent:**
 
 - **Product analytics.** The server records product events in a local database on your machine (`backend/infra/product_events.py`). The web app includes an analytics library that sends nothing unless both an analytics key and an analytics host are set when the app is built (`frontend/src/lib/product_events.ts`); neither is set by this repository's build and release scripts. `CORSIA_ANALYTICS_DISABLE=1` turns off the local recording too.
-- **Live System notices.** The code can fetch signed notices from this repository, but only with signing keys shipped in the release. At this commit none ship, so the feed is off (`backend/infra/bulletins.py`).
+- **Live System bulletins.** The code can fetch signed notices from this repository, but only with signing keys shipped in the release. At this commit none ship, so the feed is off (`backend/infra/bulletins.py`).
 - **Crash reports.** None are collected.
 
 ## Local only
@@ -34,8 +34,8 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 
 | | |
 |---|---|
-| Where | One chat, in its model settings; or a whole project |
-| Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`) |
+| Where | One chat, in its model settings; or a whole project, where the setting is called **Local models only** |
+| Who can change it | Only you, from a signed-in session (`backend/api/thread_mutations.py`); a leased command is a [separate case](host-access.md#approval-modes) |
 | What it allows | Models whose every endpoint is a loopback address on this machine, and models on a server you marked **Trusted device** in its provider settings (the mark is yours to set; it isn't checked). An External endpoint counts as local only with that mark, even if it runs on your machine (`backend/llm/locality.py`) |
 | Inherited by | Every worker the chat starts, and their workers |
 | Messages to other chats | A Local only chat messaging a chat on a cloud model must confirm the message holds nothing sensitive. The agent makes that confirmation: Model judgment |
@@ -65,14 +65,15 @@ The state folder is `~/Library/Application Support/CORSIA/state` for the desktop
 2. Delete the state folder: the path above for your platform, or `CORSIA_STATE_DIR` if you set it.
 3. Delete the workspace folder (default `~/corsia`).
 4. Delete the checkout (`~/.corsia`) or the app.
-5. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.
-6. Revoke CORSIA's access in your Google or Microsoft account settings, and sign out of any tool servers you connected.
+5. If you set up an agents' GitHub account, delete its folder (default `~/.config/corsia-gh-agent`), which holds a live token, and revoke that account's GitHub CLI access in its GitHub settings.
+6. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.
+7. Revoke CORSIA's access in your Google or Microsoft account settings, and sign out of any tool servers you connected.
 
 Data you sent to cloud model providers and other services is held under their policies. Deleting CORSIA doesn't remove it.
 
 ## Check it yourself
 
-From a terminal on the machine (run for this page on the pinned commit):
+From a terminal on the machine (run for this page at the commit named in the [overview](README.md)):
 
 ```bash
 grep -n "^PUBLIC_KEYS" backend/infra/bulletins.py   # PUBLIC_KEYS: tuple[str, ...] = (): no notice keys, feed off

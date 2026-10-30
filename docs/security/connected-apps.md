@@ -26,7 +26,7 @@ On Linux, CORSIA starts local tool servers only through Agent Safehouse, which i
 | **All projects** | Every agent in every project, and outside projects |
 | **Selected** | Only agents in the projects you pick (and outside projects, if you include them) |
 
-A delegated worker never gets an app its parent can't use. An agent can propose a new app, but it stays **awaiting approval** until you approve it in Settings; an unapproved proposal expires after 7 days (`backend/connections/app_reach.py`). Only a signed-in person can approve an app or change its reach; an agent's attempt is refused and recorded (`backend/api/connected_apps.py`, `connected_app_access.py`).
+A delegated worker never gets an app its parent can't use. An agent can propose a new app, but it stays **awaiting approval** until you approve it in Settings; an unapproved proposal expires after 7 days (`backend/connections/app_reach.py`). Only a signed-in person can approve an app or change its reach; an agent's attempt is refused and recorded (`backend/api/connected_apps.py`, `connected_app_access.py`). That check is on the API; a leased command is a [separate case](host-access.md#approval-modes).
 
 ## Google
 
@@ -70,7 +70,7 @@ CORSIA's email and invite tools send only the conversation's open draft, unchang
 Agents can drive a headless Chrome. Each CORSIA account has one saved browser profile, shared by all of that account's agents (`backend/host_access/browser_launch.py`).
 
 - If you sign in to a site in it, every agent of yours can use that sign-in.
-- The profile, which holds its cookies, is in the hard floor: no agent shell can read it, leased or not.
+- The profile, which holds its cookies, is in the hard floor: no agent shell can read it directly, leased or not ([the indirect route](host-access.md#what-no-lease-opens)).
 - Pages it visits are not screened.
 - It identifies as an ordinary Chrome browser to sites.
 

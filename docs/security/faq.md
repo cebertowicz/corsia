@@ -33,9 +33,10 @@ On macOS: [Agent Safehouse](https://github.com/eugene1g/agent-safehouse), an ind
 ## Secrets
 
 **9. Can an agent read my API keys, SSH keys, cookies, Keychain, `.env` files?**
-- Keys CORSIA stores: no, not even with a lease.
+- Keys in CORSIA's key store: not directly, even with a lease. A leased command can leave something behind that runs later outside the sandbox and can read them; only the reviewers stand in the way ([Host access](host-access.md#what-no-lease-opens)).
+- The agents' GitHub account token, if you set that account up: yes. It is outside the key store and agent shells can read it, so they can use `gh` and `git` as that account ([Secrets](secrets.md#where-keys-live)).
 - SSH private keys, Keychains, your browsers' cookies: not without a lease, and a lease reviewer is told to block reading keychain and auth files. It can **use** keys loaded in your SSH agent.
-- The agents' own browser cookies: no, not even with a lease.
+- The agents' own browser cookies: same as CORSIA's key store.
 - `.env` files: yes, if they are in the workspace. Values the masker recognizes are hidden from the model, but commands can still use them.
 
 See [Secrets](secrets.md).
@@ -64,7 +65,7 @@ No product analytics or crash reports are sent. CORSIA does make anonymous reque
 Not by CORSIA. Use FileVault or Linux disk encryption. See [Data and privacy](data-and-privacy.md#whats-stored-and-where).
 
 **17. How do I remove everything?**
-Stop CORSIA, delete the state folder, the workspace and the checkout or app, and revoke its access in your Google or Microsoft account. See [Data and privacy](data-and-privacy.md#removing-everything).
+Stop CORSIA; delete the state folder, the workspace, the checkout or app, and the agents' GitHub account folder if you set that account up; then revoke CORSIA's access in your Google or Microsoft account and that account's GitHub CLI access in GitHub. See [Data and privacy](data-and-privacy.md#removing-everything).
 
 ## Prompt injection
 
@@ -78,7 +79,7 @@ Yes. Outbound access is not limited. See [Network](network.md#outbound).
 Unknown. No rate is published, and it depends on your local model. You can measure it on your own model with the synthetic set in the repository. See [Untrusted content](untrusted-content.md#what-is-screened).
 
 **21. Can I trust a skill from the library? What does your review actually check?**
-Every file is checked against the hash in the library's index, so you get what the library currently publishes. The library's own items follow its `main` branch, so whoever can push there decides what the next install gets; items from other repositories are pinned to a commit. No review checklist is published, and outside contributions aren't open yet. A skill can tell an agent to do anything that agent can already do. The library is off until you agree to use community improvements. See [Supply chain](supply-chain.md#shared-skills-and-setups).
+Every file is checked against the hash in the library's index, so you get what the library currently publishes. The library's own items follow its `main` branch, so whoever can push there decides what the next install gets; items from other repositories are pinned to a commit. No review checklist is published, and outside contributions aren't open yet. A skill can tell an agent to do anything that agent can already do. Agents can't use the library until you agree to use community improvements. See [Supply chain](supply-chain.md#shared-skills-and-setups).
 
 ## The reviewer
 
@@ -89,7 +90,7 @@ Partly, yes. The reviewer is a separate call that sees only the request, not the
 Down: an application is blocked, and a command under an active lease is denied. Wrong: nothing catches it except you. No measurement of wrong approvals or wrong blocks is published; the README reports how often it said yes and no in one week. See [Host access](host-access.md#when-something-fails).
 
 **24. Can an agent approve its own access, or talk the reviewer into it?**
-It can't approve: approval needs a signed-in person session, or the reviewer's own allow when **Auto-approve** is on, a setting only a person can change. It can try to talk the reviewer into it, and the reviewer is built to say yes to a plausible purpose (question 18). It can also miss what it is told to block, so it is **not** a defense against a tricked agent asking for ordinary personal files with a good story. See [Host access](host-access.md).
+Not through CORSIA's API: approval needs a signed-in person session, or the reviewer's own allow when **Auto-approve** is on, and only a person session can change that setting there. A leased command could write the setting to the database directly, and only the reviewer's instruction against changing access-control settings stops that. An agent can also try to talk the reviewer into it, and the reviewer is built to say yes to a plausible purpose (question 18). It can also miss what it is told to block, so it is **not** a defense against a tricked agent asking for ordinary personal files with a good story. See [Host access](host-access.md).
 
 **25. What does automatic approval change, and what's the safe default?**
 The setting is **Auto-approve**, under **Settings → System → Host access review**. With it on, an application the reviewer allows becomes active at once; the model's verdict is the only approval. With it off, every allowed application waits for you. Off is the safe setting. See [Host access](host-access.md#approval-modes).
