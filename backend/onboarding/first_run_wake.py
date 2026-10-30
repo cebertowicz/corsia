@@ -42,7 +42,7 @@ UNAVAILABLE_READS = {
     "agents_found": "none; skip the import step unless its consent decision is available",
     "local_download": "corsia_api GET /api/providers/local/setup",
     "auto_approve": "none; corsia_api hides host-access fields, so say nothing about its state",
-    "local_eligible": "tool model_sources, once, without recheck: the local model row's eligible",
+    "local_eligible": "none; say nothing about local models",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
     "setup_picks": "setup progress picks saved on the subscriptions screen",
@@ -377,8 +377,8 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
         if facts is None:
             facts = await read_app_facts(model)
         else:
-            facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
-            # Consent names the person-selected provider, which was unknown in setup.
+            live = await _read_facts({"auto_approve": lambda: run_in_db(get_host_access_auto_approve)})
+            facts = {**facts, "bound_model": await run_in_db(_bound_model, model), **live}
             from onboarding import setup_decisions
             harness_ready = facts.get("harness_ready", [])
             ready = {"claude-code" if source == "claude_code" else source

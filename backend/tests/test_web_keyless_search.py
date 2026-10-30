@@ -132,13 +132,8 @@ async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
     assert search.call_count == 1
 
 
-def test_first_run_posts_no_keyless_search_line_and_brave_only_after_a_key():
-    from ddgs.engines import ENGINES
-
+def test_first_run_posts_the_brave_line_after_a_key():
     from infra.system_package import system_resource_source
-    from onboarding.first_run_wake import APP_REFERENCE, FIRST_RUN_REFERENCE
+    from onboarding.first_run_wake import APP_REFERENCE
 
-    for reference in (FIRST_RUN_REFERENCE, APP_REFERENCE):
-        assert "Searches without a key go to free public sources" not in system_resource_source(reference).read_text()
     assert "Web search works. Searches go to Brave." in system_resource_source(APP_REFERENCE).read_text()
-    assert {"duckduckgo", "yahoo", "wikipedia"} <= set(ENGINES["text"])

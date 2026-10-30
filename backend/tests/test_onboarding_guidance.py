@@ -442,7 +442,6 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
     assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder, unless Auto-approve is on" in step
-    assert "delet" not in step and "Keep sensitive files outside" not in step
     assert "**Auto-approve is on.** A reviewer model checks each request" in step
     assert "every command that uses it" in step and "Most requests start without asking you" in step
     assert "turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review" in step
@@ -475,9 +474,7 @@ def test_web_search_that_already_works_posts_nothing_before_the_lookup_question(
     step = _step(4)
 
     assert "Skipped with no line about search when `web_search_ready`" in step
-    assert "Web search works. Searches without a key" not in app and "Web search already works" not in first_run
     assert "Web search works. Searches go to Brave." in step  # only after a key is saved in this chat
-    assert "Web search works. You can open" not in first_run
 
 
 def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():

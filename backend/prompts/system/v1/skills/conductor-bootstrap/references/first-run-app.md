@@ -72,7 +72,7 @@ The server posts `references/first-run-opening.md` as your first message, with `
    > - spend money
    > - open files outside your work folder, unless Auto-approve is on
    >
-   > **Auto-approve is on.** A reviewer model checks each request for access outside your work folder, and every command that uses it. Most requests start without asking you, so agents keep working while you're away. Access covers one chat and ends on time. Anything that would change a repository's rules still asks you.
+   > **Auto-approve is on.** A reviewer model checks each request for access outside your work folder, and every command that uses it. Most requests start without asking you, so agents keep working while you're away. Access covers one chat and ends when its time is up. Anything that would change a repository's rules still asks you.
    > To approve each request yourself instead, turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.
    >
    > Your keys, passwords and sign-ins, and CORSIA's own data, stay closed to agents. No safeguard is perfect: if this computer holds very sensitive information, turn Auto-approve off, or give CORSIA its own macOS user account.
