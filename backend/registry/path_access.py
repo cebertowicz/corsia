@@ -1,8 +1,9 @@
 """One answer to "which registered file does this path name, inside this scope?".
 
 ``GET /api/files/revision`` and the chat's reference cards both ask it, so the
-rule that a path must sit under a scope root (or be a workspace context file),
-be a real file, and resolve to its registered identity has a single home.
+rule that a path must sit under a scope root (or be a read-only context file,
+a workspace skill or a workspace role file), be a real file, and resolve to its
+registered identity has a single home.
 """
 
 from __future__ import annotations
@@ -10,7 +11,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from core.workspace_context_sources import is_workspace_context_path
+from core.context_source_paths import role_file_label
+from core.role_context_sources import ROLE_ORDER
+from core.skill_scanning import skill_files
+from core.workspace_context_sources import is_read_only_context_path
+from core.workspace_layout import resolve_workspace_root
 from infra import config
 from registry import service as registry_service
 
@@ -24,12 +29,29 @@ class FileLookup(NamedTuple):
     artifact: dict[str, Any] | None
 
 
+def shared_context_path(path: Path, *, db=None) -> bool:
+    """Whether every scope reads ``path``: a read-only context file, or a workspace skill or role file.
+
+    Only the files the loaders deliver to every scope qualify: a role file
+    they read, and a ``SKILL.md`` in the workspace or a role's skill folder.
+    Anything else under those folders stays with the workspace scope, as does
+    saving any of them.
+    """
+    if is_read_only_context_path(path, config.WORKSPACE, db=db):
+        return True
+    root = resolve_workspace_root(config.WORKSPACE).resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    if role_file_label(resolved, root) is not None:
+        return True
+    if resolved.name != "SKILL.md":
+        return False
+    skill_roots = (root, *(root / "context" / "roles" / role for role in ROLE_ORDER))
+    return any(resolved in skill_files(skill_root) for skill_root in skill_roots)
+
+
 def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    """Whether ``path`` is under a scope root or is a workspace context file."""
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
-    )
+    """Whether ``path`` is under a scope root or is a context file every scope reads."""
+    return any(path == b or b in path.parents for b in bases) or shared_context_path(path, db=db)
 
 
 class ReadRefused(Exception):

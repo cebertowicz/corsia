@@ -107,7 +107,7 @@ async def test_discover_external_models_inserts_rows(isolated_db, monkeypatch):
     monkeypatch.setattr(ne, "build_api_base", lambda s: "http://127.0.0.1:9000/v1")
 
     async def _fake_fetch(api_base, dialect, api_key):
-        return ["qwen3-8b", "llama-3-70b"]
+        return dict.fromkeys(["qwen3-8b", "llama-3-70b"])
 
     monkeypatch.setattr(ep, "fetch_external_models", _fake_fetch)
 

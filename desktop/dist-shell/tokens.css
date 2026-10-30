@@ -105,6 +105,8 @@
   --header-height: 60px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
+  /* Inset between a segmented radiogroup's track and its options (Settings Theme, Add model Sort). */
+  --segment-inset: 2px;
   /* Shared notice geometry preserves the established toast treatment without raw component values. */
   --toast-detail-icon-offset: 3px;
   --toast-close-inline-padding: 2px;

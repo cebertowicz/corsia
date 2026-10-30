@@ -10,10 +10,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from api.local_model_guard import require_local_model_host
 from infra.auth import require_user_header_only
 from infra.db_async import run_in_db
-from infra.host_resources import model_room_bytes
+from infra.host_resources import pin_room_bytes
 from llm import local_downloads, local_setup_operation
 from llm.local_model import (
-    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fits_now, omlx_has_recommender, order_models, pick_for_setup,
+    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fitting_models, omlx_has_recommender, omlx_sections,
+    recommend,
 )
 from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
@@ -22,6 +23,7 @@ from llm.local_setup_disk import download_disk_space
 from llm.local_sources import corsia_omlx_server
 
 router = APIRouter(prefix="/api/providers/local", tags=["providers"])
+UNREADABLE_DISK = "Couldn’t check which models are on this computer."
 
 
 async def _server() -> dict[str, Any]:
@@ -37,56 +39,54 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
     if not await asyncio.to_thread(local_memory_ok):
         from llm.local_setup_prepare import NO_LOCAL_MODEL
 
-        downloads = [item.view() for item in local_downloads.all()]
-        return {"state": "low_memory", "message": NO_LOCAL_MODEL, "models": [], "downloads": downloads}, {}
+        return {"state": "low_memory", "message": NO_LOCAL_MODEL, "models": []}, {}
     server = await _server()
-    from llm.providers.omlx_lifecycle import list_disk_models
+    from llm.providers.omlx_lifecycle import read_models_status
 
-    try:
-        disk_models = await list_disk_models({"server_id": server["id"]})
-    except Exception:
-        disk_models = None
-    if isinstance(disk_models, list):
-        local_downloads.reconcile({row["identifier"] for row in disk_models
-                                   if isinstance(row, dict) and isinstance(row.get("identifier"), str)})
-    downloads = [item.view() for item in local_downloads.all()]
+    status = await read_models_status({"server_id": server["id"]})
+    on_disk = {row["id"] for row in status or [] if isinstance(row, dict) and row.get("id")}
+    if status is not None:
+        local_downloads.reconcile(on_disk)
     if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
         return {
             "state": "update_required",
             "message": f"Update oMLX to {OMLX_PIN} or later to add a local model.",
-            "models": [], "downloads": downloads,
+            "models": [],
         }, {}
+    if status is None:
+        raise HTTPException(503, UNREADABLE_DISK)
     try:
         sections = await ask_recommendations(str(server["id"]))
     except PickUnavailable as exc:
         raise HTTPException(503, "Couldn’t check which models fit this computer.") from exc
     model_dir = await download_dir(str(server["id"]))
 
-    # The room setup's pick and the preload check judge a model against, read once so the
-    # order, the recommended row and the memory lines agree.
-    room_bytes = model_room_bytes()
-    ordered = order_models(sections, room_bytes)
+    # The Add model sheet judges the Mac's total room, independent of models loaded now.
+    room_bytes = pin_room_bytes()
+    ordered = fitting_models(sections, room_bytes)
 
     def model_view(model: LocalModel) -> dict[str, Any]:
         space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
-        return {**model.view(), "disk": space, "fits_now": fits_now(model, room_bytes)}
+        return {**model.view(), "disk": space, "on_disk": model.model in on_disk}
 
     views = [model_view(model) for model in ordered]
+    section_by_repo = omlx_sections(sections)
+    for view in views:
+        view["section"] = section_by_repo.get(view["repository"])
     disk_free_bytes = next(
         (item["disk"].get("free_bytes") for item in views if isinstance(item["disk"].get("free_bytes"), int)),
         None,
     )
-    # Recommended is only ever a model that fits now: with nothing that fits, no row is recommended.
-    recommended = pick_for_setup(sections, room_bytes)
-    if recommended is not None and not fits_now(recommended, room_bytes):
-        recommended = None
+    by_repository = {view["repository"]: view for view in views}
+    recommended = recommend(sections, room_bytes, obtainable=lambda model:
+                            by_repository[model.repository]["on_disk"]
+                            or by_repository[model.repository]["disk"]["state"] != "insufficient")
     return {
         "state": "ready",
         "models": views,
-        "downloads": downloads,
         "recommended_repository": recommended.repository if recommended is not None else None,
         "memory_gb": round(host_ram_bytes() / 1024**3),
-        "memory_room_gb": round(room_bytes / 1024**3, 2),
+        "memory_in_use_gb": round(sum(int(row.get("estimated_size") or 0) for row in status if isinstance(row, dict) and row.get("loaded") is True) / 1024**3),
         "disk_free_gb": round(disk_free_bytes / 1000**3) if isinstance(disk_free_bytes, int) else None,
     }, sections
 
@@ -153,12 +153,15 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
     if setup is not None and setup.model == model_id:
         raise HTTPException(409, "Couldn't delete this model: CORSIA keeps it to run when no other model is available.")
     server = await _server()
-    from llm.providers.omlx_lifecycle import list_disk_models, list_loaded
+    from llm.providers.omlx_lifecycle import list_loaded, read_models_status
     loaded = await list_loaded({"server_id": server["id"]})
     if any(row.get("identifier") == model_id for row in loaded):
         raise HTTPException(409, "Couldn't delete this model while it is loaded. Unload it first, then try again.")
-    disk_models = await list_disk_models({"server_id": server["id"]})
-    if not any(row.get("identifier") == model_id for row in disk_models):
+    # An unreadable status is not "not on disk": forgetting the record then would report a delete that never ran.
+    status = await read_models_status({"server_id": server["id"]})
+    if status is None:
+        raise HTTPException(503, UNREADABLE_DISK)
+    if not any(isinstance(row, dict) and row.get("id") == model_id and row.get("loaded") is False for row in status):
         if local_downloads.get(model_id) is not None:
             local_downloads.forget(model_id)
             from infra.state.ws import notify_models_changed

@@ -16,6 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A local model that cannot load during setup now says why and lets you try again.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - A message you send with chat comments shows them right away, including when you send comments with no text, and the commented message keeps their marks.
+- A model on your own server that reports its context window, such as one served by vLLM, can be used as soon as you add the server.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
@@ -39,6 +40,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Chat, Files, and project and workspace messages use clearer, consistent names.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Clearer wording for sign-in, saved keys, host access and project errors.
+- Compare local model builds that fit this computer, see which are already on this computer, and download a build directly.
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Connections from paired devices work again.
 - Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
@@ -74,6 +76,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
 - On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
+- Open any file a chat's agent was given, straight from the chat.
 - Plan and decision messages use clearer, consistent wording.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
@@ -116,6 +119,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - The update screen shows how many agents have paused while it waits for them.
 - Update notices wait until setup is finished, when Updates can be opened.
+- Update refusals show their reason and the update's own log in Settings.
 - Update settings show the changes for the update currently on offer.
 - Updates show the data upgrade step while your data is being upgraded.
 - When a plan isn't moving, its note names each wait that is overdue.

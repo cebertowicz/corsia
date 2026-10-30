@@ -61,6 +61,21 @@ def host_available_ram_bytes() -> int:
     return int(psutil.virtual_memory().available)
 
 
+def memory_reading() -> str:
+    """This machine's memory as the fit verdict reads it, for the log line beside a refusal.
+
+    The page breakdown shows which pages ``available`` left out, so a refusal
+    on a machine that looked free can be explained from the log alone.
+    """
+    import psutil
+
+    vm = psutil.virtual_memory()
+    pages = ", ".join(f"{name} {getattr(vm, name) / GIB:.1f}"
+                      for name in ("free", "inactive", "active", "wired") if hasattr(vm, name))
+    return (f"available {vm.available / GIB:.1f} of {vm.total / GIB:.1f} GiB, "
+            f"reserve {load_reserve_bytes(vm.total) / GIB:.1f} GiB ({pages})")
+
+
 def load_reserve_bytes(total_bytes: int) -> int:
     """The memory a model load must leave free: an eighth of RAM, at most ``SAFE_RESERVE_BYTES``.
 

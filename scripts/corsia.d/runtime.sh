@@ -924,6 +924,7 @@ bounce_server() {
         # A failed stop leaves the old backend serving with no bounce coming to
         # settle the operation, so the hold has to come off here. Past this
         # point the backend is down and startup owns the surviving operation.
+        _corsia_update_stopping=1
         if ! stop_backend; then
             [ "$drain_attempted" = false ] \
                 || cancel_failed_drain "$(current_drain_url)" || :
@@ -1332,20 +1333,30 @@ ensure_current_frontend_release() {
         "$checkout" "Frontend startup refused" ensure_current_frontend_release_locked
 }
 
+# Pre-stop checks run in the owning shell so their failure reason is retained.
 # Drain while the old release is intact. The lifecycle owner invokes frontend
 # activation only after it has confirmed that no old backend remains.
 restart_prepared() {
-    local checkout fe stage prepared backup absent original_force
+    local checkout fe stage prepared backup absent original_force reason
     local drain_attempted=false
     checkout="$(serving_checkout_root)"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
 
     if [ -d "$fe" ]; then
-        [ -d "$stage" ] || { fail "Prepared frontend build is missing"; return 1; }
-        [ -e "$prepared" ] || { fail "Prepared frontend ownership marker is missing"; return 1; }
+        if [ ! -d "$stage" ]; then
+            reason="Prepared frontend build is missing"
+            fail "$reason"
+            return 1
+        fi
+        if [ ! -e "$prepared" ]; then
+            reason="Prepared frontend ownership marker is missing"
+            fail "$reason"
+            return 1
+        fi
         if [ -e "$backup" ] || [ -e "$absent" ]; then
-            fail "Prepared frontend rollback path already exists"
+            reason="Prepared frontend rollback path already exists"
+            fail "$reason"
             return 1
         fi
     fi
@@ -1370,7 +1381,8 @@ restart_prepared() {
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
-            fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            fail "$reason"
             return 1
         fi
         # Update is the only path that pulls, so refusing here on an incomplete

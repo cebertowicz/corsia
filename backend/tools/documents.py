@@ -31,6 +31,7 @@ from registry import service as registry_service
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
+from tools.document_comment_listing import select_comment_threads
 from tools.document_regions import REGION_SCHEMA, region_result
 
 
@@ -116,16 +117,23 @@ class DocCommentsListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "List comments for a document artifact or registered document path."
+        return ('List a document\'s open comment threads with their replies; closed ones are counted, '
+                'status="all" includes them, comment_id returns one thread.')
 
     @property
     def parameters(self) -> dict[str, Any]:
         return _tool_schema({
             "artifact_id": {"type": ["string", "null"]},
             "doc_path": {"type": ["string", "null"]},
+            "status": {"type": "string", "enum": ["open", "all"], "default": "open"},
+            "comment_id": {"type": ["string", "null"]},
         })
 
     async def execute(self, **kwargs: Any) -> str:
+        status = kwargs.get("status", "open")
+        if status not in ("open", "all"):
+            return "Error: status must be 'open' or 'all'"
+        comment_id = kwargs.get("comment_id")
         context = _require_context(kwargs)
         if isinstance(context, str):
             return context
@@ -149,10 +157,10 @@ class DocCommentsListTool(Tool):
                     allow_register=False,
                 )
                 if aid is None:
-                    return {"found": False, "comments": []}
+                    return {"found": False, "comments": [], "closed_count": 0}
                 comments, anchors_checked = anchored_threads(aid, path, db)
-                return {"found": True, "artifact_id": aid, "comments": comments,
-                        "anchors_checked": anchors_checked}
+                return {"found": True, "artifact_id": aid, "anchors_checked": anchors_checked,
+                        **select_comment_threads(comments, status, comment_id)}
             finally:
                 db.close()
 

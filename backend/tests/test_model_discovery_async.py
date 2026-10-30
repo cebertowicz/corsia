@@ -94,7 +94,7 @@ async def test_external_catalog_reconciliation_does_not_block_event_loop(
     monkeypatch.setattr(endpoints, "build_api_base", lambda _sid: "http://external/v1")
 
     async def fetch(*_args, **_kwargs):
-        return ["qwen"]
+        return {"qwen": None}
 
     monkeypatch.setattr(provider, "fetch_external_models", fetch)
     monkeypatch.setattr(
