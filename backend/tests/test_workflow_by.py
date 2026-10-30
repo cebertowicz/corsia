@@ -80,6 +80,23 @@ async def test_a_sent_back_step_stays_the_same_step_under_the_same_rules(isolate
 
 
 @pytest.mark.asyncio
+async def test_a_split_part_of_a_step_is_under_the_same_rules(isolated_db, tmp_path, monkeypatch):
+    steps = "    - {id: review, by: reviewer, required: true, check: Review passes, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    review = (await run.start("ship"))["steps"][0]["id"]
+    result = await run.update("split", {
+        "node_id": review, "expected_revision": run.revision(review),
+        "title": "Review the appendix", "acceptance_criteria": "Appendix reviewed", "size": "S",
+    })
+
+    part = result["node"]["id"]
+    assert run.rows("SELECT workflow_step FROM plan_nodes WHERE id=?", part) == [{"workflow_step": "review"}]
+    args = {"node_id": part, "expected_revision": run.revision(part)}
+    assert "can't be skipped" in await run.update("close_node", {**args, "reason": "skip"})
+    assert "hand it to a reviewer" in await run.update("mark_done", {**args, "evidence": "done", "verification_result": "passed"})
+
+
+@pytest.mark.asyncio
 async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, monkeypatch):
     steps = (
         "    - {id: review, by: reviewer, difficulty: {default: routine}}\n"
