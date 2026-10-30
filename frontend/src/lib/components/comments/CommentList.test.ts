@@ -23,6 +23,23 @@ it('holds document order through focus changes inside a card and updates after l
 	expect(ids()).toEqual(['b', 'a']);
 });
 
+it('keeps a focused card in the section it was in, whichever way its text changes', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, orphaned: boolean) => ({ id, anchor: id, orphaned, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment('a', false), comment('b', true)] } });
+	flushSync();
+	const reply = (id: string) => host.querySelector<HTMLTextAreaElement>(`[data-comment-id="${id}"] .ct-input, [data-thread="${id}"] .ct-input`)!;
+	const placed = reply('a'), stranded = reply('b');
+	stranded.focus(); flushSync();
+	expect(reply('b')).toBe(stranded);
+	component.$set({ comments: [comment('a', false), comment('b', false)] }); flushSync();
+	expect(reply('b')).toBe(stranded);
+	placed.focus(); flushSync();
+	component.$set({ comments: [comment('a', true), comment('b', false)] }); flushSync();
+	expect(reply('a')).toBe(placed);
+	expect(document.activeElement).toBe(placed);
+});
+
 it('shows a card quote as plain text, for a placed comment and for one whose text changed', () => {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const comment = (id: string, anchor: string, orphaned = false) => ({ id, anchor, orphaned, author: 'you', text: id, at: 'now', resolved: false, replies: [] });

@@ -61,15 +61,17 @@
 	}) : comments);
 	const rows = $derived(groupRows(ordered, groupOf ?? (() => null)));
 	/** The card holding focus keeps its section: moving to another would remount it and take the person out of its reply box. */
-	let heldId = $state<string | null>(null);
+	let held = $state<{ id: string; orphaned: boolean } | null>(null);
+	const inOrphaned = (comment: Comment) => comment.id === held?.id ? held.orphaned : !!comment.orphaned;
 	function holdCardOrder(event: FocusEvent) {
 		const target = event.target as HTMLElement | null;
-		heldId = target?.closest<HTMLElement>('[data-thread]')?.dataset.thread ?? null;
+		const id = target?.closest<HTMLElement>('[data-thread]')?.dataset.thread ?? null;
+		if (id !== held?.id) held = id ? { id, orphaned: !!comments.find((comment) => comment.id === id)?.orphaned } : null;
 		if (target?.closest('[data-comment-id]')) heldOrder ??= comments.map((comment) => comment.id);
 	}
 	function releaseCardOrder(event: FocusEvent) {
 		const card = (event.target as HTMLElement)?.closest('[data-comment-id]');
-		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) { heldOrder = null; heldId = null; }
+		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) { heldOrder = null; held = null; }
 	}
 	function leaveCard(event: FocusEvent) {
 		const card = event.currentTarget as HTMLElement;
@@ -77,8 +79,8 @@
 	}
 	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
 	const reviews = $derived(comments.filter((comment) => comment.review && !comment.resolved));
-	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && (!comment.orphaned || comment.id === heldId)));
-	const orphaned = $derived(comments.filter((comment) => !comment.resolved && !!comment.orphaned && comment.id !== heldId));
+	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && !inOrphaned(comment)));
+	const orphaned = $derived(comments.filter((comment) => !comment.resolved && inOrphaned(comment)));
 	const resolved = $derived(comments.filter((comment) => comment.resolved));
 </script>
 
