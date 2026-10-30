@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.workflow_verdict_rules import Snapshot
+from core.workflow_verdict_rules import Snapshot, WorkflowHistory
+from core.workflow_verdicts import Run
 from tests.test_workflow_verdict_read import NOW, db, live_workflow_owners, node  # noqa: F401 - shared fixtures
 
 
@@ -19,7 +20,7 @@ def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch)
     from jobs import workflow_verdicts
 
     db = MagicMock()
-    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep"))
+    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
     read = MagicMock(return_value=_snapshot())
     priced = MagicMock(return_value=_snapshot())
     write = MagicMock(return_value=1)
@@ -35,17 +36,34 @@ def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch)
 
     assert report.open_subjects == report.evaluated == report.reached == 1
     assert report.recorded == 0
+    assert report.by_reason == {"quality_better": 1}
     read.assert_called_once()
     priced.assert_called_once_with(db, _snapshot())
     db.close.assert_called_once_with()
     write.assert_not_called()
 
 
+def test_run_counts_separate_all_runs_from_outcomes_by_run_and_version() -> None:
+    from jobs.workflow_verdicts import run_counts
+
+    def run(run_id: str, version: str, state: str, cost: float | None, ended: str | None = "2026-10-02") -> Run:
+        return Run(run_id, version, ("", "", ""), "2026-10-01", ended, state, cost=cost)
+
+    history = WorkflowHistory("demo", None, (
+        run("a", "v1", "accepted", 1.0), run("b", "v1", "failed", None),
+        run("c", "v2", "accepted", None), run("d", "v3", "accepted", 2.0),
+        run("open", "v3", "active", None, None)))
+
+    assert run_counts(Snapshot("2026-10-20", (history,))) == {
+        "settled": 4, "priced": 2, "outcomes": 3, "outcomes_priced": 2,
+        "versions": 3, "versions_priced": 1, "versions_outcomes_priced": 2}
+
+
 def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) -> None:
     from jobs import workflow_verdicts
 
     db = MagicMock()
-    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep"))
+    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
     write = MagicMock(return_value=1)
 
     @contextmanager
