@@ -47,6 +47,14 @@ afterEach(() => {
 });
 
 describe('DocCommentSurface suggestions', () => {
+	it.each([{ kind: 'list' }, { kind: 'thread', id: suggestion.id }] as const)(
+		'exposes the document path on the comment host in $kind view', (state) => {
+			render({ state, target: { ...target, path: '/workspace/shared/conductor/x.md' } });
+			const body = document.body.querySelector('.md-content');
+			expect(body?.closest('[data-doc-path]')?.getAttribute('data-doc-path')).toBe('/workspace/shared/conductor/x.md');
+		},
+	);
+
 	it('lists all comments in a canvas region with resolved/open filters and text navigation', () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }], onFocus });
