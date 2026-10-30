@@ -1,9 +1,10 @@
-import { derived, get } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { loadProviders, providers } from '$lib/stores/providers';
 import { loadNetworkServers, networkServers } from '$lib/stores/networkServers';
 import { loadProviderModelsFor, providerModels } from '$lib/stores/providerModels';
+import { token } from '$lib/stores/auth';
+import { canLoadAnyway, checkAndLoad, type PreloadInfo } from '$lib/stores/providerModelsHost';
 import { loadModel } from '$lib/stores/providerModelCommands';
-import { canLoadAnyway } from '$lib/stores/providerModelsHost';
 import type { ModelSource } from '$lib/conductorSources';
 
 /** Read the pre-account projection; callers preserve their last result on failure. */
@@ -18,22 +19,35 @@ export async function readPreauthLocal(): Promise<ModelSource | undefined> {
  } catch { return undefined; }
 }
 
-/** Settings owns the server and model rows; setup reads the same live refusal. */
-export const localLoadRefusal = derived([networkServers, providers, providerModels], ([$servers, $providers, $models]) => {
+/** The setup flight identifies the model; never choose an unrelated refused row. */
+const setupModelId = writable<string | null>(null);
+export const localLoadRefusal = derived([networkServers, providers, providerModels, setupModelId], ([$servers, $providers, $models, $id]) => {
  const server = $servers.find((item) => item.corsia_omlx);
  const provider = $providers.find((item) => item.name === 'omlx');
- const model = server && $models[`omlx|${server.id}`]?.models.find((item) => canLoadAnyway(item, false));
+ const model = server && $id && $models[`omlx|${server.id}`]?.models.find((item) => item.id === $id && canLoadAnyway(item, false));
  return server && provider && model ? { server, provider, model } : undefined;
 });
 
+export function currentSetupRefusal() { return get(localLoadRefusal); }
+export type SetupRefusal = NonNullable<ReturnType<typeof currentSetupRefusal>>;
+
+/** Use Settings' load action and memory confirmation, preserving the returned error. */
+export async function retrySetupLocalModel(target: SetupRefusal, show: (info: PreloadInfo | null) => void) {
+ let error = '';
+ const loaded = await checkAndLoad(target.model, true, get(token) || '', target.provider.name, async () => {
+  const result = await loadModel(target.provider, target.server, target.model.id);
+  if (!result.ok) error = typeof result.message === 'string' ? result.message : '';
+  return result.ok;
+ }, show);
+ return { loaded, error };
+}
+
 export async function refreshSetupLocalModels(): Promise<void> {
+ const session = get(token);
+ const flight = session ? await fetch('/api/providers/local/setup', { headers: { Authorization: `Bearer ${session}` } }).then((r) => r.ok ? r.json() : null).catch(() => null) : null;
+ setupModelId.set(typeof flight?.model === 'string' ? flight.model.split('/').pop() ?? null : null);
  await Promise.all([loadNetworkServers(), loadProviders()]);
  const server = get(networkServers).find((item) => item.corsia_omlx);
  const provider = get(providers).find((item) => item.name === 'omlx');
  if (server && provider) await loadProviderModelsFor(provider, server);
-}
-
-export async function retrySetupLocalModel(): Promise<void> {
- const refusal = get(localLoadRefusal);
- if (refusal) await loadModel(refusal.provider, refusal.server, refusal.model.id);
 }

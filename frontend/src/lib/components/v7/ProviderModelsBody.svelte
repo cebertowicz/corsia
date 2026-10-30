@@ -16,7 +16,7 @@
 	import { canEditCheckpointWindow, chatPickerWarning } from './modelWarning';
 	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
 	import {
-		canLoadAnyway as canLoadAnywayFor, checkLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
+		canLoadAnyway as canLoadAnywayFor, checkAndLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
 	} from '$lib/stores/providerModelsHost';
 	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -155,20 +155,7 @@
 	}
 	/** Loads the model; false when it did not load, including when the person cancels the memory check. */
 	async function _checkAndLoad(m: ProviderModel): Promise<boolean> {
-		const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
-		if (!isLocal || estimatedGb <= 0) return _doLoad(m);
-		const data = await checkLoad(get(token) || '', estimatedGb, provider.name);
-		if (!data || data.ok || data.remote) return _doLoad(m);
-		return new Promise<boolean>((resolve) => { preloadInfo = {
-			modelName: m.name,
-			estimatedGb,
-			freeGb: data.free_gb ?? 0,
-			afterLoadGb: data.after_load_gb ?? 0,
-			safeReserveGb: data.safe_reserve_gb ?? 0,
-			warning: data.warning ?? 'Loading may exceed safe memory.',
-			onConfirm: async () => { preloadInfo = null; resolve(await _doLoad(m)); },
-			onCancel: () => { preloadInfo = null; resolve(false); },
-		}; });
+		return checkAndLoad(m, isLocal, get(token) || '', provider.name, () => _doLoad(m), (info) => { preloadInfo = info; });
 	}
 	// Turning a local model on loads it, then keeps it loaded (pins) when the pins fit; cancelling the memory check changes nothing.
 	async function turnOnLocal(m: ProviderModel) {

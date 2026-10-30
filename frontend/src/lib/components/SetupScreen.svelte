@@ -20,7 +20,8 @@
 	import { stopLocalServer } from '$lib/conductorSourcesApi';
 	import { createSetupConnect, POLL_MS } from '$lib/setupConnect.svelte';
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
-	import { localLoadRefusal, readPreauthLocal, refreshSetupLocalModels, retrySetupLocalModel } from '$lib/setupLocalModels';
+	import { localLoadRefusal, readPreauthLocal, refreshSetupLocalModels, type SetupRefusal } from '$lib/setupLocalModels';
+	import SetupLocalRetry from './SetupLocalRetry.svelte';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
@@ -55,6 +56,9 @@
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
 	let localPreparing = $state(false);
+	let localRetry: SetupLocalRetry | undefined = $state();
+	let retryTarget = $state<SetupRefusal | null>(null);
+	let retryError = $state('');
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	// toolsOff: tools turned off from a row before the question was answered; nothing is recorded for them.
@@ -116,8 +120,8 @@
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
 		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, keepLine: $localLoadRefusal?.model.keepLine,
-			start: () => void ($localLoadRefusal ? retryLocalLoad() : startLocal()), stop: () => void stopLocal(), check: () => void checkLocal(),
+			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, keepLine: $localLoadRefusal?.model.keepLine ?? retryTarget?.model.keepLine, retryError, retrying: localBusy && !!retryTarget,
+			start: () => void ($localLoadRefusal || retryTarget ? localRetry?.retry() : startLocal()), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		const ready = provider || endpoint;
@@ -309,11 +313,6 @@
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
 	}
-	async function retryLocalLoad() {
-		if (localBusy) return;
-		localBusy = true;
-		try { await retrySetupLocalModel(); await refreshSources(); } finally { localBusy = false; }
-	}
 	async function retrySources() {
 		sourceRetry = { error: sourceError, vendors: CLI_VENDORS.filter((vendor) => !sources.some((row) => row.source === vendor) || connectFlow.awaitingSource(vendor)) };
 		try { await refreshSources(true); } finally { sourceRetry = null; }
@@ -389,6 +388,7 @@
 		<SetupSourceError error={sourceRetry?.error ?? sourceError} retrying={sourceRetry !== null} retry={retrySources} />
 	{/if}
 </SetupShell>
+<SetupLocalRetry bind:this={localRetry} bind:target={retryTarget} bind:busy={localBusy} bind:error={retryError} refresh={refreshSources} />
 <ConfirmDialog open={confirmConnect} title="Connect to another computer instead?" description="This stops the download on this computer." confirmLabel="Stop and connect" cancelLabel="Keep downloading" onConfirm={() => { confirmConnect = false; void connectToAnotherComputer(); }} onCancel={() => { confirmConnect = false; }} />
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}

@@ -63,6 +63,24 @@ export type PreloadInfo = {
 	onCancel: () => void;
 };
 
+/** Run the same memory check and confirmation before loading from any surface. */
+export async function checkAndLoad(
+	m: ProviderModel, isLocal: boolean, session: string, provider: string,
+	load: () => Promise<boolean>, show: (info: PreloadInfo | null) => void,
+): Promise<boolean> {
+	const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
+	if (!isLocal || estimatedGb <= 0) return load();
+	const data = await checkLoad(session, estimatedGb, provider);
+	if (!data || data.ok || data.remote) return load();
+	return new Promise<boolean>((resolve) => show({
+		modelName: m.name, estimatedGb, freeGb: data.free_gb ?? 0,
+		afterLoadGb: data.after_load_gb ?? 0, safeReserveGb: data.safe_reserve_gb ?? 0,
+		warning: data.warning ?? 'Loading may exceed safe memory.',
+		onConfirm: async () => { show(null); resolve(await load()); },
+		onCancel: () => { show(null); resolve(false); },
+	}));
+}
+
 /** The backend's answer to "can this model load now"; null when it can't be asked. */
 export async function checkLoad(token: string, estimatedGb: number, provider: string): Promise<Record<string, any> | null> {
 	try {

@@ -63,7 +63,7 @@ export async function loadModel(
 				body: JSON.stringify({ model: modelId }),
 			});
 			const data = await res.json().catch(() => ({}));
-			return { ok: res.ok, message: data.message };
+			return { ok: res.ok, message: data.message ?? data.detail };
 		} catch (e) {
 			return { ok: false, message: String(e) };
 		}
