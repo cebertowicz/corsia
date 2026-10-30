@@ -19,6 +19,11 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// delegates the stop to launchd, and the bundled plist has no `ExitTimeOut`.
 const PID_EXIT_TIMEOUT: Duration = Duration::from_secs(25);
 const PROOF_POLL: Duration = Duration::from_millis(100);
+/// How long launchd may take to unlist a source job after a plain bootout: the `ExitTimeOut` the
+/// source's generated plist sets (120 s) plus the 5 s margin its own stop adds. launchd keeps the
+/// job listed until its process has exited, which can take the whole `ExitTimeOut`, so a shorter
+/// wait would report a failed stop while launchd is still ending the job.
+pub const BOOTOUT_TIMEOUT: Duration = Duration::from_secs(125);
 
 /// The process id launchd reports for a loaded job, or none when it has none.
 pub fn launchd_pid(target: &str) -> Option<u32> {
@@ -30,6 +35,17 @@ pub fn launchd_pid(target: &str) -> Option<u32> {
         return None;
     }
     pid_from_launchctl_print(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Asks launchd to unload a job, plainly: never `--wait`, which macOS 15 rejects. It returns
+/// at once and launchd keeps the job listed until its process has exited. A non-zero exit is
+/// only logged; the caller's release proof decides whether the job let go.
+pub fn launchctl_bootout(launchctl: &Path, target: &str) -> std::io::Result<()> {
+    let status = Command::new(launchctl).args(["bootout", target]).status()?;
+    if !status.success() {
+        log::warn!("`launchctl bootout` exited {status}; checking whether the install stopped");
+    }
+    Ok(())
 }
 
 pub fn pid_from_launchctl_print(text: &str) -> Option<u32> {
