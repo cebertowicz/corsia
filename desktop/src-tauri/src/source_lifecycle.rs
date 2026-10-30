@@ -1010,6 +1010,9 @@ mod tests {
         home.lifecycle.source.port = None;
         home.lifecycle.source.generation = None;
         home.lifecycle.stop_clock = |_| Some("test-start".into());
+        // It returns the moment the backend stops serving; the long budget only keeps a loaded
+        // machine's slow sleeps from running out the default 300 ms before the fourth look.
+        home.lifecycle.proof_timeout = Duration::from_secs(10);
         home.lifecycle.listener_runs_from = |_, _| ASKED.fetch_add(1, Ordering::Relaxed) < 3;
         assert!(home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).is_ok());
         assert!(ASKED.load(Ordering::Relaxed) >= 4);
