@@ -44,6 +44,25 @@ def test_leased_floor_closes_the_api_token_but_not_the_rest_of_dot_corsia(tmp_pa
     assert token.read_text() == "fixture"
 
 
+def test_leased_floor_keeps_the_folders_above_each_credential_in_place(tmp_path):
+    home, state_root = tmp_path / "home", tmp_path / "state"
+    token = home / ".corsia" / ".api-token"
+    key = state_root / "keys" / "fixture"
+    for secret in (token, key):
+        secret.parent.mkdir(parents=True)
+        secret.write_text("fixture")
+    policy = ProtectedHostPathPolicy(home=home, state_root=state_root)
+    sandbox = "(version 1)(allow default)" + policy.hard_floor_sandbox_rules()
+    allowed = _run_in(sandbox, 'printf ok > "$1/new" && cat "$1/new"', home)
+    _skip_without_nested_sandbox(allowed)
+    assert allowed.returncode == 0 and allowed.stdout == "ok"
+    for secret, folders in ((token, (home / ".corsia", home, tmp_path)), (key, (state_root, tmp_path))):
+        for folder in folders:
+            moved = _run_in(sandbox, f'mv "$1" "$1-x" && cat "$1-x/{secret.relative_to(folder)}"', folder)
+            assert moved.returncode != 0 and "fixture" not in moved.stdout, folder
+            assert secret.read_text() == "fixture"
+
+
 def test_profile_hard_floor_denies_shell_reads_and_writes_through_symlinks(tmp_path):
     state_root = tmp_path / "state"
     profile = state_root / browser_launch.PROFILE_ROOT_NAME

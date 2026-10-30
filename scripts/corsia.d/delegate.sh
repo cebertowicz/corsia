@@ -1,6 +1,6 @@
 # Delegate/doc CLI credential guard (#385).
 
-API_TOKEN_FILE="${CORSIA_API_TOKEN_FILE:-$CORSIA_DIR/.api-token}"
+API_TOKEN_FILE="${CORSIA_API_TOKEN_FILE:-$HOME/.corsia/.api-token}"  # same rule as scripts/corsia_api.token_file
 
 delegate_has_explicit_token() {
     local a
