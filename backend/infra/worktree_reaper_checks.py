@@ -23,6 +23,7 @@ from infra.worktree_reaper_probe import (
     is_ancestor,
     list_worktrees,
     open_pr_branches,
+    has_worktree_config,
     status_skip_reason,
     worktree_git_env,
 )
@@ -159,6 +160,8 @@ def candidate_verdict(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
+    if has_worktree_config(candidate.admin):
+        return "worktree_config"
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
@@ -204,6 +207,8 @@ def recheck_before_removal(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
+    if has_worktree_config(candidate.admin):
+        return "worktree_config"
     idle = idle_since(candidate.path, candidate.admin)
     if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
         return "recent"

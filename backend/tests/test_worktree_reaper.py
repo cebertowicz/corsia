@@ -267,6 +267,12 @@ def _prepare(repo: Path, kind: str) -> Path:
         _git(repo, "worktree", "lock", str(wt))
     elif kind == "git_lock":
         (_admin(wt) / "index.lock").write_text("")
+    elif kind == "worktree_config":
+        monitor = repo.parent / "monitor"
+        monitor.write_text(f"#!/bin/sh\ntouch '{repo.parent / 'ran'}'\n")
+        monitor.chmod(0o755)
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        (_admin(wt) / "config.worktree").write_text(f"[core]\n\tfsmonitor = {monitor}\n")
     elif kind == "dirty":
         (wt / "README").write_text("changed\n")
     elif kind == "untracked":
@@ -279,7 +285,9 @@ def _prepare(repo: Path, kind: str) -> Path:
 
 
 @pytest.mark.parametrize(
-    "kind", ["locked", "git_lock", "recent", "dirty", "untracked", "ignored_data"],
+    "kind", [
+        "locked", "git_lock", "worktree_config", "recent", "dirty", "untracked", "ignored_data",
+    ],
 )
 def test_each_unsafe_state_is_skipped_with_its_reason(repo, kind):
     wt = _prepare(repo, kind)
@@ -291,6 +299,10 @@ def test_each_unsafe_state_is_skipped_with_its_reason(repo, kind):
     assert wt.is_dir()
     if kind == "git_lock":
         assert (_admin(wt) / "index.lock").exists()
+    if kind == "worktree_config":
+        assert not (repo.parent / "ran").exists()
+        _git(wt, "status", "--porcelain")
+        assert (repo.parent / "ran").exists(), "control did not exercise the worktree's config"
 
 
 def test_live_process_skip_reason_is_recorded(repo):

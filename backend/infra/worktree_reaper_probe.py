@@ -199,6 +199,11 @@ def git_lock_files(admin: Path) -> list[str]:
         return [f"<unreadable: {exc.__class__.__name__}>"]
 
 
+def has_worktree_config(admin: Path) -> bool:
+    """Return whether a worktree keeps its own Git config, which the reaper leaves alone."""
+    return os.path.lexists(admin / "config.worktree")
+
+
 def _is_disposable(ignored: str) -> bool:
     parts = [part for part in ignored.rstrip("/").split("/") if part]
     directories = parts if ignored.endswith("/") else parts[:-1]
