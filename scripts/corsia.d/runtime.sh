@@ -1336,7 +1336,13 @@ ensure_current_frontend_release() {
 # reason passed directly to the detached owner's existing cleanup.
 update_preflight_check() {
     local output error error_file status=0 reason
-    error_file="$(mktemp "${TMPDIR:-/tmp}/corsia-preflight.XXXXXX")" || return 1
+    error_file="$(mktemp "${TMPDIR:-/tmp}/corsia-preflight.XXXXXX" 2>&1)" || {
+        printf '%s\n' "$error_file" >&2
+        if declare -F _corsia_lifecycle_refuse > /dev/null; then
+            _corsia_lifecycle_refuse "$error_file"
+        fi
+        return 1
+    }
     output="$("$@" 2>"$error_file")" || status=$?
     error="$(< "$error_file")"
     rm -f "$error_file"

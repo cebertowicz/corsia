@@ -28,6 +28,22 @@ acquire_restart_operation() { return 0; }
 """
 
 
+def test_preflight_temp_failure_reports_its_existing_diagnostic(tmp_path: Path) -> None:
+    reason = tmp_path / "reason"
+    result = _run_bash(
+        """
+source scripts/corsia.d/runtime.sh
+mktemp() { printf 'temporary storage unavailable\\n' >&2; return 1; }
+_corsia_lifecycle_refuse() { printf '%s' "$1" > "$REASON"; }
+update_preflight_check true
+""",
+        env={"REASON": str(reason)},
+    )
+    assert result.returncode == 1
+    assert result.stderr == "temporary storage unavailable\n"
+    assert reason.read_text() == "temporary storage unavailable"
+
+
 def test_seed_disposable_account_preserves_mint_failure_detail() -> None:
     result = _run_bash(
         """
