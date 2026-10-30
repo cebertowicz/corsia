@@ -128,11 +128,25 @@ async def test_a_pinned_model_without_free_memory_leaves_the_line_to_the_row(cal
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
     calls["can_load"] = {"ok": False, "free_gb": 4}
 
-    await local_keep_loaded.keep_loaded("server", MODEL)
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL)
 
+    assert outcome == {"refused": True, "line": "Not loaded: needs 10 GB, 4 GB free for a model now"}
     assert calls["pins"] == [("new-model", {"pinned": True})] and calls["loads"] == []
     # The row derives "Not loaded: needs N GB, M GB free for a model now"; the backend writes no second line.
     assert local_keep_loaded.failures("server") == {}
+
+
+@pytest.mark.asyncio
+async def test_unknown_neighbour_refuses_without_catalog_line(calls, monkeypatch) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    async def loaded(_cfg):
+        return [{"identifier": "other", "size_bytes": None}]
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
+
+    outcome = await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert outcome == {"refused": True, "line": None}
+    assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
 
 
 @pytest.mark.asyncio

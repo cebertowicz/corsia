@@ -29,7 +29,7 @@ afterEach(() => {
 	token.set(null);
 });
 
-async function render({ loaded = [], available = [], checkOk = true, provider = localProvider, loadError }: { loaded?: Row[]; available?: Row[]; checkOk?: boolean; provider?: HostProvider; loadError?: string }) {
+async function render({ loaded = [], available = [], checkOk = true, provider = localProvider }: { loaded?: Row[]; available?: Row[]; checkOk?: boolean; provider?: HostProvider }) {
 	calls = [];
 	token.set('test-token');
 	vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -38,7 +38,6 @@ async function render({ loaded = [], available = [], checkOk = true, provider = 
 		if (url.includes('/network-servers/local-test/models') && method === 'GET') {
 			return { ok: true, json: async () => ({ loaded: loaded.map((model) => ({ ...model, model_id: model.id })), available: available.map((model) => ({ ...model, model_id: model.id })) }) };
 		}
-		if (url.includes('/models/load') && loadError) return { ok: false, json: async () => ({ detail: loadError }) };
 		if (url.includes('/host-resources/check-load')) return { ok: true, json: async () => checkOk ? { ok: true } : { ok: false, free_gb: 8, after_load_gb: -2, safe_reserve_gb: 4, warning: 'Too big' } };
 		if (url.includes('/providers/local/downloads')) return { ok: true, json: async () => [] };
 		if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
@@ -132,12 +131,6 @@ describe('local model lines', () => {
 		anyway.click();
 		await vi.waitFor(() => expect(calls.some((call) => call.url.endsWith('/models/load'))).toBe(true));
 		expect(pinWrites()).toHaveLength(0);
-	});
-
-	it('shows the load endpoint error when retry fails', async () => {
-		await render({ available: [row('pinned-big', 12, { pinned: true, keep_line: NOT_LOADED })], loadError: 'Load refused by server' });
-		[...rowFor('pinned-big').querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Load anyway')!.click();
-		await vi.waitFor(() => expect(document.body.textContent).toContain('Load refused by server'));
 	});
 
 	it("shows the backend's line for a keep attempt that failed, on a model that isn't pinned, without Load anyway", async () => {

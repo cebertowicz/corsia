@@ -16,6 +16,7 @@ const flightShapes = [
 	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check your internet connection, then try again.' },
+	{ state: 'start_failed', cause: 'load_refused', ref: 'local-42', fix: 'Not loaded: needs 12 GB, 8 GB free for a model now' },
 	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.' }
 ] as const;
 

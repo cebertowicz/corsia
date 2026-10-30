@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
-CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
@@ -28,6 +28,9 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"Check your internet connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
+    if cause == "load_refused":
+        action = "press Retry." if retry == RETRY_IN_APP else retry
+        return f"CORSIA couldn't load the model because there isn't enough free memory right now. Close other apps, then {action}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:
@@ -58,6 +61,14 @@ def task_from_payload(payload: object, task_id: str) -> dict | None:
                  if isinstance(task, dict) and task.get("task_id") == task_id), None)
 
 
+class LoadRefused(RuntimeError):
+    """A memory check refused the load, with the catalog line when available."""
+
+    def __init__(self, line: str | None) -> None:
+        self.line = line
+        super().__init__(line or setup_fix("load_refused"))
+
+
 def failure_message(exc: Exception) -> str:
     """A cause the CLI and sources panel can show for any setup failure."""
     if isinstance(exc, HTTPException):
@@ -74,6 +85,8 @@ def failure_cause(exc: Exception) -> str:
     from llm.local_setup_disk import DiskSpaceError
     from llm.local_setup_executable import OwnOmlxUpgradeRequired
 
+    if isinstance(exc, LoadRefused):
+        return "load_refused"
     if isinstance(exc, OwnOmlxUpgradeRequired):
         return "own_omlx_upgrade_required"
     if isinstance(exc, DiskSpaceError):

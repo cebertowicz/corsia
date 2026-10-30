@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 
-from infra.host_resources import load_verdict, model_room_bytes, pin_fits, pin_room_bytes
+from infra.host_resources import GIB, load_verdict, memory_reading, model_room_bytes, not_loaded_line, pin_fits, pin_room_bytes
 from llm.local_model_load import seat_lock
 from infra.product_events import emit_product_event
 from llm.local_model import LocalModel
@@ -92,6 +92,17 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
         download["will_pin"] = pin_fits(int(size), _pinned_bytes(rows), pin_room_bytes())
 
 
+def _log_no_room(size_bytes: float | None, others: list[int | None], room: int) -> None:
+    """Name the verdict's inputs, so a refusal on a machine that looked free can be explained."""
+    log.warning(
+        "Not loading the downloaded local model now: not enough free memory "
+        "(needs %s, room %.1f GiB, beside it %s; %s)",
+        f"{size_bytes / GIB:.1f} GiB" if size_bytes else "an unreported size", room / GIB,
+        [f"{s / GIB:.1f} GiB" if s else "unreported" for s in others] or "nothing",
+        memory_reading(),
+    )
+
+
 async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
     """Load again, in order, each model that was loaded before oMLX exited and fits now.
 
@@ -109,7 +120,7 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
 
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
-) -> None:
+) -> dict | None:
     """Pin a completed download, then load it when it fits now.
 
     Setup uses ``force_pin`` for its one managed model. Settings downloads retain
@@ -166,9 +177,11 @@ async def keep_loaded(
             if any(item["identifier"] == model.model for item in loaded):
                 return
             others = [int(item.get("size_bytes") or 0) or None for item in loaded]
-            if load_verdict(int(size_bytes) if size_bytes else None, others, model_room_bytes()) != "fits_now":
-                log.warning("Not loading the downloaded local model now: not enough free memory")
-                return
+            room = model_room_bytes()
+            if load_verdict(int(size_bytes) if size_bytes else None, others, room) != "fits_now":
+                _log_no_room(size_bytes, others, room)
+                line = not_loaded_line(int(size_bytes), room) if size_bytes and (pinned or row.get("pinned")) else None
+                return {"refused": True, "line": line}
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):

@@ -16,7 +16,7 @@
 	import { canEditCheckpointWindow, chatPickerWarning } from './modelWarning';
 	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
 	import {
-		canLoadAnyway as canLoadAnywayFor, checkAndLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
+		canLoadAnyway as canLoadAnywayFor, checkLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
 	} from '$lib/stores/providerModelsHost';
 	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -26,6 +26,7 @@
 	import ProviderModelsEmpty from './ProviderModelsEmpty.svelte';
 	import LocalSettingsDownloadStatus from './LocalSettingsDownloadStatus.svelte';
 	import ProviderLocalModelControls from './ProviderLocalModelControls.svelte';
+	import AddLocalModelSheet from './AddLocalModelSheet.svelte';
 	import ProviderModelsAvailableControls from './ProviderModelsAvailableControls.svelte';
 	import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
 	import ProviderModelsActionError from './ProviderModelsActionError.svelte';
@@ -41,6 +42,7 @@
 	let preloadInfo = $state<PreloadInfo | null>(null);
 	let detailsFor = $state<ProviderModel | null>(null);
 	let deleteCandidate = $state<ProviderModel | null>(null);
+	let showAddLocal = $state(false);
 
 	let stopLocalUpdates: (() => void) | null = null;
 	let showAllAvailable = $state(false);
@@ -155,7 +157,20 @@
 	}
 	/** Loads the model; false when it did not load, including when the person cancels the memory check. */
 	async function _checkAndLoad(m: ProviderModel): Promise<boolean> {
-		return checkAndLoad(m, isLocal, get(token) || '', provider.name, () => _doLoad(m), (info) => { preloadInfo = info; });
+		const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
+		if (!isLocal || estimatedGb <= 0) return _doLoad(m);
+		const data = await checkLoad(get(token) || '', estimatedGb, provider.name);
+		if (!data || data.ok || data.remote) return _doLoad(m);
+		return new Promise<boolean>((resolve) => { preloadInfo = {
+			modelName: m.name,
+			estimatedGb,
+			freeGb: data.free_gb ?? 0,
+			afterLoadGb: data.after_load_gb ?? 0,
+			safeReserveGb: data.safe_reserve_gb ?? 0,
+			warning: data.warning ?? 'Loading may exceed safe memory.',
+			onConfirm: async () => { preloadInfo = null; resolve(await _doLoad(m)); },
+			onCancel: () => { preloadInfo = null; resolve(false); },
+		}; });
 	}
 	// Turning a local model on loads it, then keeps it loaded (pins) when the pins fit; cancelling the memory check changes nothing.
 	async function turnOnLocal(m: ProviderModel) {
@@ -256,6 +271,11 @@
 	/>
 {/if}
 
+<!-- Outside the list states below: a download starting, failing or finishing swaps them, and the sheet stays open. -->
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} />
+{/if}
+
 {#if pmState.loading && models.length === 0}
 	<ProviderModelsPhase message="Loading models…" />
 {:else if pmState.lastError}
@@ -263,7 +283,7 @@
 {:else if models.length === 0 && !hasLocalDownload}
 	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
 	{#if isCorsiaOmlx}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} corsiaManaged empty />
+		<ProviderLocalModelControls onAdd={() => showAddLocal = true} {onAddProvider} corsiaManaged empty />
 	{/if}
 {:else}
 	{#if actionError}
@@ -336,7 +356,7 @@
 		/>
 	{/if}
 	{#if isCorsiaOmlx}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} corsiaManaged />
+		<ProviderLocalModelControls onAdd={() => showAddLocal = true} {onAddProvider} corsiaManaged />
 	{/if}
 {/if}
 

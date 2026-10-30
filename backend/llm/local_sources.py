@@ -187,7 +187,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     if not settings_flight:
         # A finished setup whose server has since stopped was turned off, not still finishing.
         turned_off = flight is not None and flight["state"] == "ready" and result.get("reason_code") == "not_running"
-        _project_local_flight(result, flight if result["state"] != "ready" and not turned_off else None)
+        refused = flight is not None and flight["state"] == "start_failed" and flight.get("cause") == "load_refused"
+        _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or refused else None)
     return result
 
 
