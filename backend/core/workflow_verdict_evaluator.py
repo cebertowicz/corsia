@@ -1,9 +1,9 @@
-"""Recording slice-1 workflow verdicts inside the evaluator's own transaction.
+"""Recording workflow and lesson verdicts inside the evaluator's own transaction.
 
-The evaluator job is KPI slice 4's (KPI design §4.7); this slice adds no job, schedule or wake. That job reads
-with ``core.workflow_verdict_read`` (``read_snapshot`` on ``run_read``, ``price_snapshot`` on ``run_bulk``),
-computes with ``core.workflow_verdict_rules.compute`` off the database, then calls :func:`write_verdicts` inside
-the ``write_transaction`` it already holds. Nothing here opens a transaction or reads to aggregate.
+The daily job (``jobs.workflow_verdicts``) reads open workflow versions with ``core.workflow_verdict_read``
+(``read_open_snapshot``, then ``price_snapshot``) and open lesson trials with ``core.lesson_trial_verdicts``,
+computes off the database, then calls :func:`write_verdicts` inside the ``write_transaction`` it holds. Nothing
+here opens a transaction or reads to aggregate.
 """
 from __future__ import annotations
 
@@ -12,9 +12,12 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable
 
+from loguru import logger
+
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from core.workflow_verdict_rules import Evaluation, Verdict
 from infra.outcome_events import record_outcome_event
+from tools.workflow_task_fields import version_short_hash
 
 # Calibration enables this only in a later slice. A code constant keeps production evaluation
 # read-only until an explicit reviewed change.
@@ -40,8 +43,8 @@ def detail_text(verdict: Verdict) -> str:
     raise AssertionError("unreachable: a look alone fits")
 
 
-def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluation]) -> int:
-    """Record new frozen plans and reached verdicts on the caller's open transaction; returns verdicts recorded.
+def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluation], *, wake_owners: bool = False) -> int:
+    """Record new frozen plans and reached verdicts; optional wakes are only for newly reached results.
 
     Idempotent through each record's dedupe key, so a reached verdict is never replaced (VR-3).
     """
@@ -61,4 +64,21 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
                                           attributes={"verdict": verdict.word, "reason": verdict.reason,
                                                       "detail": detail_text(verdict)})
             recorded += int(result.inserted)
+            if result.inserted and wake_owners and evaluation.owner is None:
+                logger.warning("verdict_wake: no owner to wake for {}", plan.subject)
+            if result.inserted and wake_owners and evaluation.owner is not None:
+                from events.delivery import enqueue_event_wake
+
+                kind, _, target = plan.subject.partition(":")  # "workflow:<ref>@<version>", "lesson:<id>@<sha>"
+                name, _, version = target.partition("@")
+                action = "keep the change" if verdict.word == "keep" else "revert the change"
+                try:
+                    enqueue_event_wake(
+                        evaluation.owner, REACHED_EVENT,
+                        f"{kind.capitalize()} {name} ({version_short_hash(version)}) verdict reached: {action}.",
+                        {"subject": plan.subject, "verdict": verdict.word, "reason": verdict.reason},
+                        message_id=f"verdict:wake:{plan.subject}", db=connection,
+                    )
+                except ValueError:  # an unavailable owner: the verdict stays recorded, with no wake
+                    logger.warning("verdict_wake: owner {} unavailable for {}", evaluation.owner, plan.subject)
     return recorded
