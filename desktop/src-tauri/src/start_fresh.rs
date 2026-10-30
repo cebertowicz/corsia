@@ -37,6 +37,9 @@ pub const BACKUPS_FOLDER: &str = "CORSIA backups";
 const PLIST: &str = "Library/LaunchAgents/com.corsia.prod.plist";
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
+/// The port a source install's own `scripts/corsia` serves when no launchd plist names one.
+/// `backend/tests/test_default_port.py` holds it equal to the script's.
+const SOURCE_DEFAULT_PORT: u16 = 1956;
 
 /// One rename, from where the earlier install had it to its place in the backup.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -747,6 +750,9 @@ impl LaunchdService {
     pub fn new(home: &Path, source: Option<SourceLifecycle>, python: PathBuf) -> Self {
         let plist = home.join(PLIST);
         let roots = plist_roots(&plist);
+        // An install this app can adopt either has a plist that names its port or is a plain
+        // checkout, started by hand or by `install.sh`, that serves its script's default.
+        let port = roots.port.or_else(|| source.is_some().then_some(SOURCE_DEFAULT_PORT));
         let mut states: Vec<PathBuf> = roots.state.into_iter().collect();
         if let Some((_, state)) = adoption::bootstrap_roots(&home.join(".corsia").join("config.json")) {
             states.push(state);
@@ -760,7 +766,7 @@ impl LaunchdService {
         // Where the data folder move puts an adopted install's data.
         states.push(app_paths::app_dir_for_home(home).join(app_paths::STATE_DIRECTORY));
         let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
-        let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
+        let launchd = SystemLaunchd { plist, port, databases, python };
         Self { source, launchd, timeout: STOP_TIMEOUT }
     }
 }
@@ -1584,5 +1590,69 @@ mod tests {
         service.start(None).unwrap();
         service.start(None).unwrap();
         assert_eq!(service.launchd.bootstraps, 1);
+    }
+
+    /// An install `install.sh` left with no launchd job: a checkout, its bootstrap file and no plist.
+    fn plain_install(home: &Home) -> adoption::SourceInstall {
+        home.write(".corsia/.git/HEAD", "ref: refs/heads/main");
+        home.write(".corsia/scripts/corsia", "#!/bin/sh\n");
+        let state = home.0.join("Library/Application Support/CORSIA/source-state");
+        home.write(
+            ".corsia/config.json",
+            &format!(r#"{{"workspace":{{"root":"{}"}},"state_root":"{}"}}"#, home.0.join("corsia").display(), state.display()),
+        );
+        adoption::source_from_bootstrap(&home.0).unwrap()
+    }
+
+    fn earlier_service(home: &Home, source: Option<adoption::SourceInstall>) -> LaunchdService {
+        let lifecycle = source.map(|source| SourceLifecycle::new(source, crate::source_lifecycle::Bundled::in_resources(&home.0)));
+        LaunchdService::new(&home.0, lifecycle, PathBuf::from("python3"))
+    }
+
+    #[test]
+    fn a_plain_install_is_looked_for_on_the_port_its_own_script_serves() {
+        let home = Home::new("plain-port");
+        let source = plain_install(&home);
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(1956));
+    }
+
+    #[test]
+    fn a_plist_names_the_port_and_an_install_this_app_cannot_adopt_has_none() {
+        let home = Home::new("plist-port");
+        source_install(&home);
+        let source = adoption::source_from_plist(&home.0, &home.0.join(PLIST)).unwrap();
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(47895));
+        assert_eq!(earlier_service(&home, None).launchd.port, Some(47895));
+
+        let bare = Home::new("no-port");
+        assert_eq!(earlier_service(&bare, None).launchd.port, None);
+    }
+
+    #[test]
+    fn a_plain_install_that_answers_is_running_and_is_stopped_only_by_its_own_stop() {
+        let mut service = launchd_service(Some(FakeSource::default()), FakeLaunchd { port: true, ..Default::default() });
+        assert!(service.running().unwrap(), "so a failed Start fresh starts it again");
+        stop(&mut service).unwrap();
+        assert_eq!(service.source.as_ref().unwrap().stops, 1);
+        assert_eq!(service.launchd.bootouts, 0);
+    }
+
+    #[test]
+    fn a_plain_install_that_answers_and_refuses_to_stop_is_put_back_where_it_was() {
+        let home = Home::new("plain-refuses");
+        plain_install(&home);
+        let before = home.files();
+        let source = FakeSource { refuse: true, ..Default::default() };
+        let mut service = launchd_service(Some(source), FakeLaunchd { port: true, ..Default::default() });
+        let mut phases = Vec::new();
+
+        let error = start_fresh(&home.0, &home.app_dir(), &mut service, &mut |phase| phases.push(phase), SystemTime::now())
+            .unwrap_err();
+
+        assert!(error.restored && !error.left_stopped, "{error:?}");
+        assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+        assert_eq!(home.files(), before, "nothing moved");
+        assert_eq!(service.source.as_ref().unwrap().stops, 1);
+        assert_eq!(service.source.as_ref().unwrap().starts, 1, "it was running, so it is started again");
     }
 }
