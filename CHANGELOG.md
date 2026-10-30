@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A local model is no longer shown as ready after its server exits, until it has loaded again.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - A message you send with chat comments shows them right away, including when you send comments with no text, and the commented message keeps their marks.
+- A model on your own server that reports its context window, such as one served by vLLM, can be used as soon as you add the server.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
