@@ -1906,8 +1906,9 @@ fn earlier_install_service(home: &Path, app_dir: &Path, resources: &Path) -> (st
         _ => None,
     };
     let cli = source.as_ref().map(|source| source.cli.clone());
+    let backend_dir = source.as_ref().map(|source| source.working_directory.clone());
     let lifecycle = source.map(|source| SourceLifecycle::new(source, Bundled::in_resources(resources)));
-    (start_fresh::LaunchdService::new(home, lifecycle, Bundled::in_resources(resources).python), cli)
+    (start_fresh::LaunchdService::new(home, lifecycle, backend_dir, Bundled::in_resources(resources).python), cli)
 }
 
 /// What Start fresh would move and which folders stay, for the confirmation, or why it can't run.
