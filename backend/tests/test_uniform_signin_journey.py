@@ -5,6 +5,7 @@ homes; that vendor's sends wait, held ``account_signed_out``, never failed. Sign
 through the real commit path and committing a discovery releases the held input, and the
 launch it gets uses the account's own homes.
 """
+import asyncio
 import json
 import sqlite3
 from pathlib import Path
@@ -51,6 +52,7 @@ async def test_upgraded_send_waits_then_runs_on_the_accounts_own_home(
     from connections.account_runtime import homes_for, thread_launch_homes
     from connections.account_signin_commit import commit_signed_in
     from connections.vendor_accounts import get_account
+    from infra import unavailable_model_recovery as recovery
     from infra.database import get_db
     from infra.input_admission import accept_thread_input
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
@@ -85,12 +87,20 @@ async def test_upgraded_send_waits_then_runs_on_the_accounts_own_home(
     assert notification_owner == []
 
     receipt = capture_receipt(vendor, account_id='ambient', db=db)
+    previous = recovery._TASK
     result = commit_discovery_bundle(
         vendor, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
         [{'selector_id': 'journey', 'available': True}],
         context=SimpleNamespace(receipt=receipt, account_id='ambient'), harness_version='1', db=db)
     assert result.status == 'ready'
-    await drive_thread('journey')
+    # The commit wakes held-input recovery on the app loop and that task releases the input; wait for it
+    # (a rerun coalesces into the task already running) rather than racing it with a drive of our own.
+    for _ in range(12):
+        await asyncio.sleep(0)
+        if recovery._TASK is not previous:
+            break
+    if recovery._TASK is not None:
+        await asyncio.wait_for(asyncio.shield(recovery._TASK), timeout=5)
     assert len(notification_owner) == 1
     claimed = notification_owner[0]
     assert [item.message_id for item in claimed.items] == ['sent']

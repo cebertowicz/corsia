@@ -109,7 +109,7 @@ async def test_ci_budget_tolerates_controlled_process_exit_delay(monkeypatch):
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", ["fresh", "warm", "resume", "fork", "code_mode"])
-async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, scenario):
+async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, isolated_db, scenario):
     code_mode = scenario == "code_mode"
     binary = shutil.which("codex")
     assert binary, "stock Codex CLI is required for this explicitly selected integration test"
