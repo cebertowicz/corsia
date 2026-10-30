@@ -22,7 +22,7 @@
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
-	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
+	import { hasReadySetupModel, setupModelWorks, setupCatalog, recordSetupEndpoint, setupProviderName, type SetupModel } from '$lib/setupModels';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -119,7 +119,7 @@
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
-		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
+		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${setupProviderName(provider.source)} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
@@ -392,7 +392,7 @@
 	{/if}
 </SetupShell>
 <ConfirmDialog open={confirmConnect} title="Connect to another computer instead?" description="This stops the download on this computer." confirmLabel="Stop and connect" cancelLabel="Keep downloading" onConfirm={() => { confirmConnect = false; void connectToAnotherComputer(); }} onCancel={() => { confirmConnect = false; }} />
-{#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
+{#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} onAddedEndpoint={recordSetupEndpoint} />{/if}
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 <style>
 	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
