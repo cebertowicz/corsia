@@ -36,7 +36,7 @@ The project is not a boundary. `backend/tools/filesystem_gate.py` states it in c
 | CORSIA's state folder (database, logs, keys, the agents' browser profile) and its checkout's private files | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
-| Writes to the workspace's Git settings and hooks (`.git/config`, `.git/hooks`), because the server runs Git there outside the sandbox | Operating system for the shell, CORSIA code for file tools |
+| Writes to the workspace's Git settings and hooks (`.git/config`, `.git/hooks`) and its `.git` marker, because the server runs Git there outside the sandbox. Agents can't run `git init` at the workspace root. On Linux, an absent `.git` isn't covered yet | Operating system for the shell, CORSIA code for file tools |
 | Raw disk devices | Operating system |
 | Reading or signalling processes outside the command's own sandbox (the server, other threads) | Operating system |
 | The clipboard (macOS) | Operating system |
