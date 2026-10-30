@@ -21,6 +21,7 @@ RAISED_CONFIDENCES = frozenset({0.9, 0.95})
 BUILTIN_WINDOW_DAYS = 3
 BUILTIN_MARGIN = 0.25
 CORRECTION_FLOOR = 0.02
+SMALL_HARM = "small_harm"  # a no_worse call whose interval sits wholly on the harm side, inside the margin
 # KPI design §4.6: Imported and stronger let a deciding KPI decide; the rest never do.
 ALLOWED_LABELS = frozenset({"observed", "imported", "labeled", "corroborated"})
 OUTCOME_STATES = frozenset({"accepted", "accepted_with_followup"})
@@ -288,6 +289,8 @@ def measure_call(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run]
         return replace(base, call="counted", reason=None, margin=margin)
     interval = _interval(new_g, old_g, groups, seed, confidence)
     call, reason = _call_from(measure.better, difference, interval, margin), None
+    if call == "no_worse" and (interval[0] > 0 if measure.better == "lower" else interval[1] < 0):
+        reason = SMALL_HARM
     if measure.role == "quality" and call != "worse":
         for group in groups:
             if sum(s.n for s in new_g[group]) >= minimum and sum(s.n for s in old_g[group]) >= minimum:

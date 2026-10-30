@@ -63,13 +63,17 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
                                           attributes={"verdict": verdict.word, "reason": verdict.reason,
                                                       "detail": detail_text(verdict)})
             recorded += int(result.inserted)
+            if result.inserted and wake_owners and evaluation.owner is None:
+                logger.warning("verdict_wake: no owner to wake for {}", plan.subject)
             if result.inserted and wake_owners and evaluation.owner is not None:
                 from events.delivery import enqueue_event_wake
 
-                kind = plan.subject.partition(":")[0].capitalize()  # "Workflow" or "Lesson"
+                kind, _, target = plan.subject.partition(":")  # "workflow:<ref>@<version>", "lesson:<id>@<sha>"
+                action = "keep the change" if verdict.word == "keep" else "revert the change"
                 try:
                     enqueue_event_wake(
-                        evaluation.owner, REACHED_EVENT, f"{kind} verdict reached: {verdict.word}.",
+                        evaluation.owner, REACHED_EVENT,
+                        f"{kind.capitalize()} {target.partition('@')[0]} verdict reached: {action}.",
                         {"subject": plan.subject, "verdict": verdict.word, "reason": verdict.reason},
                         message_id=f"verdict:wake:{plan.subject}", db=connection,
                     )
