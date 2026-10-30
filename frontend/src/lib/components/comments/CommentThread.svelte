@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
+	import type { Snippet } from 'svelte';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
 	import { lineDiff } from '$lib/diff';
@@ -42,8 +43,11 @@
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
+		header?: Snippet;
+		/** Keep resolved threads in the drawer's card presentation. */
+		drawerCard?: boolean;
 		focused?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
 		linked?: boolean;
@@ -81,9 +85,9 @@
 		decisionError?: string;
 		/** The document has an owner thread, so a re-open reaches someone and the card may say so. */
 		reopenReachesOwner?: boolean;
-		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		/** Resolved by someone else while this person was replying (docKeptThreads): shown as the full card, not the resolved row. */
 		kept?: boolean;
+		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		replyText?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
@@ -232,7 +236,8 @@
 <svelte:window onvisibilitychange={onVisibilityChange} />
 
 {#if isSuggestion && comment.decision}
-	<div class="ct resolved" class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}">
+	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}">
+		{@render header?.()}
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			{#if comment.decision === 'accepted'}
 				<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -251,7 +256,8 @@
 		{/if}
 	</div>
 {:else if comment.resolved && !kept && !leaving}
-	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
+	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
+		{@render header?.()}
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
@@ -273,6 +279,7 @@
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus ? pressCard : undefined}>
+		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
@@ -385,7 +392,7 @@
 
 	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } }
 
-	.ct.resolved { padding: 0; background: none; cursor: default; gap: 0; }
+	.ct.resolved:not(.drawerCard) { padding: 0; background: none; cursor: default; gap: 0; }
 	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
 	.ct-check { color: var(--green); flex-shrink: 0; }
 	.ct-cross { color: var(--text-secondary); flex-shrink: 0; }

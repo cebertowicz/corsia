@@ -59,6 +59,22 @@ it('shows a card quote as plain text, for a placed comment and for one whose tex
 	expect(jumps).toContain('“Bravo” · Delta, Status');
 	expect(jumps.some((text) => text?.includes('Text changed: “See the spec”'))).toBe(true);
 	expect(host.textContent).not.toContain('**');
+	for (const row of host.querySelectorAll('[data-comment-id]')) {
+		const card = row.querySelector('.ct');
+		expect(card?.classList.contains('flat')).toBe(false);
+		expect(card?.contains(row.querySelector('[data-comment-jump]'))).toBe(true);
+	}
+
+});
+
+it('uses cards in every grouped section', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, extra: Record<string, unknown> = {}) => ({ id, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [], ...extra });
+	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment('review', { review: true }), comment('open'), comment('orphan', { orphaned: true }), comment('resolved', { resolved: true })] } });
+	flushSync();
+	const cards = [...host.querySelectorAll('.ct')];
+	expect(cards).toHaveLength(4);
+	expect(cards.every((card) => !card.classList.contains('flat'))).toBe(true);
 });
 
 it('names a comment on a diagram or table by its label in the jump button, not by its raw source', () => {
