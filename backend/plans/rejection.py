@@ -91,7 +91,7 @@ def reject_submission(
         revision = followups.add_follow_up(
             node_id, title=str(node["title"]), acceptance_criteria=str(node["acceptance_criteria"]),
             description=node["description"], spawn_kind=node["spawn_kind"],
-            inherit_commitment=True, same_step=True, actor_id=actor_id, provenance=provenance,
+            inherit_commitment=True, step="rules", actor_id=actor_id, provenance=provenance,
             db=connection,
         )
         # Before the close drops the submission's edges: what waited on it

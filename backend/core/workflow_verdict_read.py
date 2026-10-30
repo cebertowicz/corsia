@@ -97,8 +97,8 @@ def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None) -> lis
 def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """Nodes carrying a workflow with no ancestor carrying the same workflow (design §3.1).
 
-    A send-back's revision keeps its source's workflow and continues that run. Only a
-    revision does: accept-with-follow-up work never inherits the workflow fields.
+    A send-back's revision and an accepted step's follow-up keep their source's workflow
+    and continue that run.
     """
     by_id = {node["id"]: node for node in nodes}
     roots = []

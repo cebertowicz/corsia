@@ -291,6 +291,37 @@ def _system_workflow_version(skill) -> str | None:
     return f"system:{relative}:{manifest.version}:{'+'.join(digests)}"
 
 
+START_NOTICE = (
+    "[Workflow skill · When you apply it, start one run: plan_update add with kind \"phase\", "
+    "workflow_ref \"{name}\", a difficulty and a size. CORSIA builds the steps; don't add them "
+    "yourself. More: skill task-discipline, Declared workflows.]"
+)
+
+
+async def skill_read_notice(path: Path, data: bytes | None, offset: int | None) -> str | None:
+    """How to start the workflow on a first-page read of a workflow ``SKILL.md``; None for any other read.
+
+    The skill's own text never has to say it, so a workflow written or shared by
+    anyone starts the same way.
+    """
+    from core.skill_validation import is_skill_file
+
+    if data is None or offset not in (None, 1) or not is_skill_file(path):
+        return None
+    return await run_off_db(_start_notice, path)
+
+
+def _start_notice(skill_md: Path) -> str | None:
+    """Blocking. The start line for the workflow this ``SKILL.md`` and its sidecar declare."""
+    from core.skill_validation import validate_skill_file
+
+    validation = validate_skill_file(skill_md)
+    workflow = validation.corsia.get("workflow") if isinstance(validation.corsia, dict) else None
+    if not validation.ok or not isinstance(workflow, dict) or not isinstance(workflow.get("steps"), list):
+        return None
+    return START_NOTICE.format(name=validation.name)
+
+
 def _append_notice(result: dict, notice: str) -> None:
     """Add one visible line without discarding another creation notice."""
 
