@@ -12,7 +12,7 @@ async function caretAtLineEnd(page: Page, quote: string) {
  await line.click({ position: { x: size.width - 4, y: size.height / 2 } });
 }
 
-const actions = ['above', 'far', 'gone', 'inside', 'reply', 'decision', 'comment'] as const;
+const actions = ['above', 'far', 'gone', 'inside', 'reply', 'decision', 'comment', 'resolve'] as const;
 const cases = actions.flatMap(action => [[action, 1440, 900] as const, ...(action === 'above' || action === 'far' || action === 'reply' ? [[action, 393, 852] as const] : [])]);
 
 for (const box of ['draft', 'reply'] as const) for (const [action, width, height] of cases) {
@@ -67,6 +67,11 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
     expect(response.ok(), await response.text()).toBeTruthy();
     await expect(reader.locator('.cm-content')).toContainText('replacement text');
    }
+   if (action === 'resolve') {
+    const response = await request.patch(`/api/comments/${root}`, { params: { token: TEST_TOKEN }, data: { resolved: true } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    await expect.poll(() => changes).toBeGreaterThan(0);
+   }
    if (action === 'comment') {
     await agentComment(request, doc, agent.id, 'other text', 'Remote comment');
     await expect(reader.locator('.cm-comment-anchor').filter({ hasText: 'other text' })).toBeVisible();
@@ -76,6 +81,10 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
    await expect.poll(async () => { const seen = (await input.boundingBox())!; return seen.y >= 0 && seen.y + seen.height <= height; }).toBe(true);
    await expect(reader.locator('[aria-hidden="true"][data-popover]')).toHaveCount(0);
    await input.pressSequentially('!'); await expect(input).toHaveValue('draft! body');
+   // Enough text that the box, then the card, scroll on their own: neither may take the person out of the box.
+   await reader.keyboard.insertText('\nmore'.repeat(40));
+   await expect(input).toBeFocused();
+   await expect(reader.locator('[aria-hidden="true"][data-popover]')).toHaveCount(0);
   } finally { await pair.close(); }
  });
 }

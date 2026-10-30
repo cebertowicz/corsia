@@ -60,28 +60,23 @@
 		return rank(a.id) - rank(b.id);
 	}) : comments);
 	const rows = $derived(groupRows(ordered, groupOf ?? (() => null)));
-	/** The card holding focus keeps its section: moving to another would remount it and take the person out of its reply box. */
-	let held = $state<{ id: string; orphaned: boolean } | null>(null);
-	const inOrphaned = (comment: Comment) => comment.id === held?.id ? held.orphaned : !!comment.orphaned;
 	function holdCardOrder(event: FocusEvent) {
-		const target = event.target as HTMLElement | null;
-		const id = target?.closest<HTMLElement>('[data-thread]')?.dataset.thread ?? null;
-		if (id !== held?.id) held = id ? { id, orphaned: !!comments.find((comment) => comment.id === id)?.orphaned } : null;
-		if (target?.closest('[data-comment-id]')) heldOrder ??= comments.map((comment) => comment.id);
+		if (heldOrder !== null) return;
+		if ((event.target as HTMLElement)?.closest('[data-comment-id]')) heldOrder = comments.map((comment) => comment.id);
 	}
 	function releaseCardOrder(event: FocusEvent) {
 		const card = (event.target as HTMLElement)?.closest('[data-comment-id]');
-		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) { heldOrder = null; held = null; }
+		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) heldOrder = null;
 	}
 	function leaveCard(event: FocusEvent) {
 		const card = event.currentTarget as HTMLElement;
 		if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) onHover?.(null);
 	}
 	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
-	const reviews = $derived(comments.filter((comment) => comment.review && !comment.resolved));
-	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && !inOrphaned(comment)));
-	const orphaned = $derived(comments.filter((comment) => !comment.resolved && inOrphaned(comment)));
-	const resolved = $derived(comments.filter((comment) => comment.resolved));
+	// Cards keep the caller's order and one each block: a thread whose section changes only changes its heading, because moving its card would take the person out of the reply box.
+	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.orphaned ? 'Text changed' : 'Open comments';
+	const current = $derived(comments.filter((comment) => !comment.resolved || keptIds.has(comment.id)));
+	const resolved = $derived(comments.filter((comment) => comment.resolved && !keptIds.has(comment.id)));
 </script>
 
 {#if comments.length === 0}<p class="empty">No comments yet.</p>{/if}
@@ -112,9 +107,7 @@
 			{/each}
 		{/each}
 	{:else}
-	{#if reviews.length}<h3>Review comments</h3>{#each reviews as comment (comment.id)}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} flat hideOrphan={documentOrder} />{/each}{/if}
-	{#if open.length}<h3>Open comments</h3>{#each open as comment (comment.id)}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} flat hideOrphan={documentOrder} />{/each}{/if}
-	{#if orphaned.length}<h3>Text changed</h3>{#each orphaned as comment (comment.id)}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} flat hideOrphan={documentOrder} />{/each}{/if}
+	{#each current as comment, index (comment.id)}{#if sectionOf(comment) !== (current[index - 1] && sectionOf(current[index - 1]))}<h3>{sectionOf(comment)}</h3>{/if}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} flat hideOrphan={documentOrder} />{/each}
 	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} flat hideOrphan={documentOrder} />{/each}</details>{/if}
 	{/if}
 </div>

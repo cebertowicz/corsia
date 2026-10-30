@@ -30,7 +30,7 @@
 		initialFocus?: string;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
-		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, the window resizes, or this changes. */
+		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
 		sideKey?: unknown;
 		children: import('svelte').Snippet;
 	} = $props();
@@ -42,6 +42,7 @@
 	type Side = 'left' | 'right' | 'above' | 'below' | 'avoid-above' | 'avoid-below';
 	let rememberedSide: Side | null = null;
 	let rememberedKey: unknown;
+	let anchorSeen: DOMRect | null | undefined;
 	function rectFor(value: Anchor) { return typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value; }
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
@@ -55,8 +56,12 @@
 		const rect = rectFor(anchor);
 		const live = typeof anchor === 'function';
 		if (!surface) return;
+		// A scroll inside the card or in another pane left the anchor where it was, so there is nothing to answer.
+		if (event?.type === 'scroll' && rect?.top === anchorSeen?.top && rect?.left === anchorSeen?.left) return;
+		anchorSeen = rect;
+		const moved = event?.type === 'scroll' || event?.type === 'resize';
 		// Hiding a card makes it inert, which would throw the person out of the box they are typing in, so only their own scroll or resize hides it.
-		const engaged = event?.type !== 'scroll' && event?.type !== 'resize' && surface.contains(document.activeElement);
+		const engaged = !moved && surface.contains(document.activeElement);
 		if (!rect) { if (live && !engaged) hidden = true; return; }
 		const area = region();
 		if (!engaged && (rect.bottom < area.top || rect.top > area.bottom || rect.right < area.left || rect.left > area.right)) {
@@ -88,7 +93,7 @@
 		const fitsAbove = rect.top - gap - height >= area.top + gap;
 		let side: Side = 'below';
 		if (placement === 'bottom' || placement === 'bottom-end') {
-			// Below the anchor when it fits; otherwise above it, never clamped up over the anchor.
+			// Below the anchor when it fits; otherwise above it.
 			if (overflowsBelow && fitsAbove) side = 'above';
 		} else if (rect.right + gap + width <= area.right - gap) {
 			// Beside the anchor, never over it.
@@ -105,9 +110,9 @@
 			// No room beside or outside the avoided rectangle: above the anchor. Otherwise it stays below it, clamped into the canvas.
 			side = 'above';
 		}
-		// The side holds once chosen: growing while the person types clamps the surface rather than flipping it away from where they are looking.
+		// The side holds until the person moves the anchor: growing while they type clamps the surface rather than flipping it away from where they are looking.
 		const key = sideKey ?? anchor;
-		if (key !== rememberedKey || event?.type === 'resize') { rememberedKey = key; rememberedSide = null; }
+		if (key !== rememberedKey || moved) { rememberedKey = key; rememberedSide = null; }
 		rememberedSide ??= side;
 		let [left, top] = spots[rememberedSide];
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));

@@ -23,21 +23,31 @@ it('holds document order through focus changes inside a card and updates after l
 	expect(ids()).toEqual(['b', 'a']);
 });
 
-it('keeps a focused card in the section it was in, whichever way its text changes', () => {
+it('keeps a card and its reply box where they are when the thread changes section', () => {
 	host = document.createElement('div'); document.body.appendChild(host);
-	const comment = (id: string, orphaned: boolean) => ({ id, anchor: id, orphaned, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	const comment = (id: string, orphaned: boolean, resolved = false) => ({ id, anchor: id, orphaned, author: 'you', text: id, at: 'now', resolved, replies: [] });
 	component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment('a', false), comment('b', true)] } });
 	flushSync();
-	const reply = (id: string) => host.querySelector<HTMLTextAreaElement>(`[data-comment-id="${id}"] .ct-input, [data-thread="${id}"] .ct-input`)!;
-	const placed = reply('a'), stranded = reply('b');
-	stranded.focus(); flushSync();
-	expect(reply('b')).toBe(stranded);
+	const headings = () => [...host.querySelectorAll('h3')].map((heading) => heading.textContent);
+	const replies = () => [...host.querySelectorAll<HTMLTextAreaElement>('.ct-input')];
+	const [first, second] = replies();
+	expect(headings()).toEqual(['Open comments', 'Text changed']);
+	second.focus(); flushSync();
 	component.$set({ comments: [comment('a', false), comment('b', false)] }); flushSync();
-	expect(reply('b')).toBe(stranded);
-	placed.focus(); flushSync();
+	expect(replies()).toEqual([first, second]);
+	expect(document.activeElement).toBe(second);
+	expect(headings()).toEqual(['Open comments']);
+	// Focus has left the reply box for a control in the same card, and WebKit gives no related target: nothing may hang on where focus is.
+	first.focus(); flushSync();
+	first.blur(); flushSync();
 	component.$set({ comments: [comment('a', true), comment('b', false)] }); flushSync();
-	expect(reply('a')).toBe(placed);
-	expect(document.activeElement).toBe(placed);
+	expect(replies()).toEqual([first, second]);
+	expect(headings()).toEqual(['Text changed', 'Open comments']);
+	first.focus(); flushSync();
+	component.$set({ comments: [comment('a', false, true), comment('b', false)], keptIds: new Set(['a']) }); flushSync();
+	expect(replies()).toEqual([first, second]);
+	expect(document.activeElement).toBe(first);
+	expect(first.closest('details')).toBeNull();
 });
 
 it('shows a card quote as plain text, for a placed comment and for one whose text changed', () => {
