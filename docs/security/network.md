@@ -1,0 +1,50 @@
+# Network
+
+What CORSIA listens on, who can reach it, how phones and other devices connect, and what agents can reach going out.
+
+## What listens
+
+| Listener | Address | Port | Who can use it | Source |
+|---|---|---|---|---|
+| CORSIA server (web app and API) | `127.0.0.1` in a local setup; all interfaces (`0.0.0.0`) in a server setup | 1956 by default | Anyone who can reach the address; every API call needs a signed-in session or token | `backend/infra/bind_host.py`, `backend/infra/auth.py` |
+| Local model server (oMLX), when CORSIA manages one | Follows the CORSIA server's choice | Its own port | Requests need oMLX's own key | `backend/llm/providers/omlx_supervisor_config.py` |
+| Devices listener, off unless you turn it on | All interfaces | 47901, or the next free one up to 47910 | Signed-in person sessions only, from private network addresses unless you configure an outside address | `backend/infra/devices_listener.py` |
+| Tool-server sign-in callback | `127.0.0.1` | Chosen at sign-in | The sign-in flow that opened it | `backend/tools/mcp_oauth_listener.py` |
+
+**Local or server.** `corsia setup local` binds to `127.0.0.1`, so only programs on the same machine can connect. `corsia setup server` binds to all interfaces, so any device that can reach the machine can reach the sign-in page. The installer chooses local. The desktop app always binds to `127.0.0.1`.
+
+**An install with no machine setup file** (`~/.corsia/config.json`) binds to all interfaces, the older default. A setup file that predates the choice is rewritten once with the all-interface bind it already had. An inconsistent file fails closed and names the fix. If you run from source and aren't sure, check with the command below and run `corsia setup local`.
+
+**Loopback is not a trust boundary for agents.** Agent shells run on the same machine, so they can reach `127.0.0.1:1956`. Every API route still needs a token, and agent shells don't have one. The few routes that trust a direct loopback connection are first-run setup routes that close once an account exists, sign-in callbacks that need a matching pending sign-in, tool bridges that need a per-session token, and Devices management, which also needs a signed-in person (`backend/infra/local_connection.py`).
+
+## Other devices and remote access
+
+| Way | What it does | What to know |
+|---|---|---|
+| A private tailnet (for example `tailscale serve --bg http://127.0.0.1:1956`) | Gives your devices an HTTPS address that reaches the local server | Only devices on your tailnet can reach it. CORSIA doesn't set this up or check it |
+| **Devices** pairing | A separate TLS listener with a certificate CORSIA generates (`backend/infra/devices_identity.py`); it announces itself on the local network | Only signed-in person sessions; only private addresses unless you set an outside address; managed only from the main computer |
+| A server setup on a network you don't control | Anyone on that network can reach the sign-in page | Sign-in is password only, with growing delays after failures and no second factor. Don't do this |
+
+## Outbound
+
+Outbound network access is **not limited**. Agent shells, the `web_fetch` tool, the agents' browser and tool servers can connect to any address: the internet, your local network (printers, routers, other machines' admin pages) and services on the same machine. Nothing inspects or filters what is sent.
+
+On Linux the sandbox has no network namespace, so the same is true there.
+
+This is the main reason an agent that has been tricked is dangerous: anything it can read, it can send. See [Untrusted content](untrusted-content.md) and [Known limits](limits.md).
+
+## Check it yourself
+
+On macOS, in Terminal (run for this page):
+
+```bash
+netstat -an -p tcp | grep LISTEN
+```
+
+Look for port 1956. `127.0.0.1.1956` means only this machine can connect; `*.1956` means every interface. A `*.47901` line means the Devices listener is on.
+
+```bash
+curl -s http://127.0.0.1:1956/api/health
+```
+
+Answers `{"status":"ok"}` without sign-in, and nothing else.
