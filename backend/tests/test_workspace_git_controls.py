@@ -8,6 +8,8 @@ import subprocess
 
 import pytest
 
+from tools.workspace_git_paths import workspace_git_paths
+
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, check=True, timeout=30)
@@ -103,13 +105,13 @@ def test_workspace_git_rules_and_no_repository(tmp_path):
     init(repo)
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo)
     rules = policy.hard_floor_sandbox_rules()
-    for name in ('config', 'config.lock', 'config.worktree', 'hooks'):
+    for name in ('config', 'config.lock', 'config.worktree', 'commondir', 'hooks'):
         assert str(repo / '.git' / name) in rules
     assert f'(literal "{repo / ".git"}")' in rules
     assert str(repo / '.git' / 'index') not in rules
     empty = tmp_path / 'empty'
     empty.mkdir()
-    assert not ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=empty).workspace_git_paths()
+    assert not workspace_git_paths(empty)
 
 
 def test_workspace_git_controls_in_all_macos_profiles(tmp_path, monkeypatch):
@@ -131,6 +133,24 @@ def test_workspace_git_controls_in_all_macos_profiles(tmp_path, monkeypatch):
         for path in (workspace / '.git', workspace / '.git/config', workspace / '.git/config.lock',
                      workspace / '.git/config.worktree', workspace / '.git/hooks'):
             assert str(path) in rendered
+
+
+def test_broken_head_keeps_workspace_git_rules(tmp_path):
+    from tools.host_path_policy import ProtectedHostPathPolicy
+
+    repo = tmp_path / 'workspace'
+    init(repo)
+    (repo / '.git' / 'HEAD').write_text('broken')
+    rules = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo).hard_floor_sandbox_rules()
+    assert str(repo / '.git' / 'config') in rules
+
+
+def test_separate_git_dir_rules(tmp_path):
+    repo = tmp_path / 'workspace'
+    repo.mkdir()
+    git(repo, 'init', '-q', '--separate-git-dir', str(repo / 'metadata'))
+    paths = workspace_git_paths(repo)
+    assert repo / '.git' in paths and repo / 'metadata' / 'config' in paths and repo / 'metadata' / 'commondir' in paths
 
 
 def test_linux_workspace_git_render(tmp_path, monkeypatch):
@@ -185,7 +205,7 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
                               capture_output=True, text=True, timeout=30)
 
     git_dir = 'metadata' if separate else '.git'
-    for target in (f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/hooks/test'):
+    for target in (f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/commondir', f'{git_dir}/hooks/test'):
         result = run(f'printf x > {shlex.quote(target)}')
         assert result.returncode != 0, target
     linked = run(f'ln {shlex.quote(git_dir + "/config")} alias')

@@ -24,6 +24,7 @@ from tools.host_path_resolution import (
 from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
 from tools.protected_path_rules import ancestor_pins
 from tools.sandbox_git import sandbox_literal
+from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
 
 
 _CONTROL_FILES = (
@@ -251,32 +252,11 @@ class ProtectedHostPathPolicy:
                 return f"{path} — {message}"
         return None
 
-    def workspace_git_paths(self) -> tuple[Path, ...]:
-        """Return the workspace Git marker and its control paths, if present."""
-        if self.workspace is None:
-            return ()
-        from infra.guidance_git import _git, workspace_repository
-
-        repo, _reason = workspace_repository(self.workspace)
-        if repo is None:
-            return ()
-        git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()).resolve(strict=False)
-        common = Path(_git(repo, "rev-parse", "--git-common-dir").strip())
-        if not common.is_absolute():
-            common = repo / common
-        common = common.resolve(strict=False)
-        return (repo / ".git", common / "config", common / "config.lock",
-                git_dir / "config.worktree", common / "hooks")
-
     def hard_floor_sandbox_rules(self) -> str:
         """Render permanent credential and browser boundaries, including under a lease."""
         from tools.host_sandbox_floor import hard_floor_rules
-        paths = self.workspace_git_paths()
-        rules = [hard_floor_rules(self.credential_roots, sandbox_literal)]
-        if paths:
-            rules.extend(f'(deny file-write* (literal "{sandbox_literal(path)}"))' for path in paths[:-1])
-            rules.append(f'(deny file-write* (subpath "{sandbox_literal(paths[-1])}"))')
-        return "\n".join(rules)
+        floor = hard_floor_rules(self.credential_roots, sandbox_literal)
+        return "\n".join([floor, *workspace_git_rules(workspace_git_paths(self.workspace))])
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""
