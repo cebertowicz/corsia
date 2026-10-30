@@ -15,7 +15,11 @@ PLAN_TEXT_LIMIT = 2_000  # infra.outcome_event_attributes: measurement.verdict.p
 
 
 def subject_of(kind: str, name: str, version: str) -> str:
-    """A verdict's subject key, ``<kind>:<name>@<version>`` (workflow or lesson); the one place its format lives."""
+    """A verdict's subject key, ``<kind>:<name>@<version>`` (workflow or lesson).
+
+    The open-set SQL builds the same key to skip reached subjects (``workflow_verdict_read._OPEN_WORKFLOWS_SQL``,
+    ``lesson_trial_verdicts.OPEN_TRIALS_SQL``); change all three together.
+    """
     return f"{kind}:{name}@{version}"
 
 

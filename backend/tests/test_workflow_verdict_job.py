@@ -52,11 +52,12 @@ def test_run_counts_separate_all_runs_from_outcomes_by_run_and_version() -> None
     history = WorkflowHistory("demo", None, (
         run("a", "v1", "accepted", 1.0), run("b", "v1", "failed", None),
         run("c", "v2", "accepted", None), run("d", "v3", "accepted", 2.0),
-        run("open", "v3", "active", None, None)))
+        run("open", "v3", "active", None, None), run("e", "v4", "failed", None)))
 
+    # v4 has no outcome, so it has nothing to price and is not counted as outcomes priced.
     assert run_counts(Snapshot("2026-10-20", (history,))) == {
-        "settled": 4, "priced": 2, "outcomes": 3, "outcomes_priced": 2,
-        "versions": 3, "versions_priced": 1, "versions_outcomes_priced": 2}
+        "settled": 5, "priced": 2, "outcomes": 3, "outcomes_priced": 2,
+        "versions": 4, "versions_priced": 1, "versions_outcomes_priced": 2}
 
 
 def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) -> None:

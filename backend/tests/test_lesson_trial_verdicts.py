@@ -211,7 +211,7 @@ def test_an_open_task_is_a_run_without_facts_and_a_restart_is_a_failed_or_change
                        (f"a{ordinal}", node, ordinal, reason))
     arms = lessons.read_arms(db, trial)
     by_id = {run.run_id: run for run in arms.with_runs}
-    assert [by_id[name].kpi_rows[lessons.WITHOUT_RESTART][0].value for name in ("w-0", "w-1")] == [0.0, 1.0]
+    assert [by_id[name].kpi_rows[lessons.RESTARTED][0].value for name in ("w-0", "w-1")] == [1.0, 0.0]
     assert by_id["open-0"].kpi_rows == {} and by_id["open-0"].terminal_at is None
 
 
@@ -302,6 +302,21 @@ def test_look_three_is_the_last_and_a_tie_reverts(db, workspace) -> None:
     assert judge(plan, rate(80, 3), rate(80, 3)[:79]).word == "collecting"  # one task short of 80 per half
 
 
+def test_a_restart_margin_is_a_quarter_of_the_restarted_share_not_of_the_share_without_one(db, workspace) -> None:
+    def restarts(version: str, flags: list[int]) -> tuple[Run, ...]:
+        end = "2026-10-01T00:00:00+00:00"
+        return tuple(Run(f"{version}{index}", version, ("s", "none", "none"), end, end, "accepted",
+                         kpi_rows=lessons._kpi_rows(False, bool(flag), end)) for index, flag in enumerate(flags))
+
+    plan = plan_of(db, workspace)
+    # 90% finished without a restart falls to 80%: within a quarter of 0.9, but four times a quarter of 0.1.
+    verdict = decide_arms(plan, TwoArms(restarts("without", rate(80, 1)), restarts("with", rate(80, 2)),
+                                        matched=True), NOW)
+    call = next(call for call in verdict.calls if call.name == lessons.RESTARTED)
+    assert call.margin == pytest.approx(0.025)
+    assert call.call == "worse"
+
+
 def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, workspace) -> None:
     trial = trial_at(workspace, db)
     events = Definition("event", "qg.escape", 1, {"attributes": {"pr": "id"}, "dedupe": ["pr"]},
@@ -315,10 +330,10 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
 
     spend = lessons.freeze_plan(trial, [events, kpi("hours", "spend")], "w")
     roles = {measure.name: measure.role for measure in spend.measures}
-    assert roles["hours"] == "spend" and roles[lessons.SENT_BACK] == roles[lessons.WITHOUT_RESTART] == "quality"
+    assert roles["hours"] == "spend" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "quality"
     quality = lessons.freeze_plan(trial, [events, kpi("escapes", "quality")], "w")
     roles = {measure.name: measure.role for measure in quality.measures}
-    assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.WITHOUT_RESTART] == "shown"
+    assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "shown"
 
 
 # --- the owner -------------------------------------------------------------------------------------------------

@@ -30,12 +30,15 @@ class DailyVerdictReport:
     recorded: int
     by_word: dict[str, int] = field(default_factory=dict)
     by_reason: dict[str, int] = field(default_factory=dict)
-    runs: dict[str, int] = field(default_factory=dict)
+    workflow_runs: dict[str, int] = field(default_factory=dict)
     seconds: float = 0.0
 
 
 def run_counts(snapshot: Snapshot) -> dict[str, int]:
-    """How much of the batch's settled history has a cost, by run and by version, all runs and outcomes only."""
+    """How much of the workflow batch's settled history has a cost, by run and by version, all runs and outcomes only.
+
+    A version with no outcome has nothing to price, so it is not counted as outcomes priced.
+    """
     by_version: defaultdict[tuple[str, str], list] = defaultdict(list)
     for history in snapshot.workflows:
         for run in history.runs:
@@ -47,8 +50,9 @@ def run_counts(snapshot: Snapshot) -> dict[str, int]:
             "outcomes": len(outcomes), "outcomes_priced": sum(run.cost is not None for run in outcomes),
             "versions": len(by_version),
             "versions_priced": sum(all(run.cost is not None for run in version) for version in by_version.values()),
-            "versions_outcomes_priced": sum(all(run.cost is not None for run in version if run.outcome)
-                                            for version in by_version.values())}
+            "versions_outcomes_priced": sum(
+                any(run.outcome for run in version) and all(run.cost is not None for run in version if run.outcome)
+                for version in by_version.values())}
 
 
 def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMIT) -> DailyVerdictReport:
@@ -73,6 +77,6 @@ def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMI
                                 dict(by_word), dict(Counter(item.verdict.reason for item in evaluations)),
                                 run_counts(priced), round(time.monotonic() - started, 1))
     logger.info("workflow_verdict_daily: open={} evaluated={} reached={} recorded={} by_word={} by_reason={} "
-                "runs={} seconds={}", report.open_subjects, report.evaluated, report.reached, report.recorded,
-                report.by_word, report.by_reason, report.runs, report.seconds)
+                "workflow_runs={} seconds={}", report.open_subjects, report.evaluated, report.reached, report.recorded,
+                report.by_word, report.by_reason, report.workflow_runs, report.seconds)
     return report
