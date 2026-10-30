@@ -83,7 +83,7 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
           *agent_tool_ro_dirs(), *repo_ro]
     workspace_git = workspace_git_paths(path_policy.workspace)
-    if workspace_git:
+    if workspace_git and workspace_git[0].exists():
         marker, config, _lock, _worktree_config, _commondir, hooks = workspace_git
         if marker.is_dir() and any(marker.is_relative_to(root) for root in rw):
             rw.append(marker)
