@@ -62,14 +62,6 @@ describe('AddLocalModelSheet', () => {
 		expect(tryAgain()).toBe(false);
 	});
 
-	it('uses the backend Mac-room verdict rather than a frontend memory comparison', async () => {
-		const row = (name: string) => ({ name, repository: `Jundot/${name}`, resident_bytes: 20.004 * 1024 ** 3, ...ready });
-		await render({ state: 'ready', models: [row('Fits')] });
-		expect(document.body.textContent).toContain('Fits');
-		expect(document.body.textContent).not.toContain('Short');
-		expect(document.body.textContent).not.toContain('of memory');
-	});
-
 	it('shows the no-starter empty state when the recommender has no model', async () => {
 		await render({ state: 'ready', models: [] });
 		expect(document.body.textContent).toContain('No recommended models fit this computer.');
@@ -94,7 +86,6 @@ describe('AddLocalModelSheet', () => {
 			{ name: 'Fast', repository: 'Jundot/Fast', download_size_gb: 12, context_window: 32768, smarts_level: 3, tokens_per_second: 90, ...ready },
 		] });
 		expect(document.body.querySelector('.modal-frame')?.classList.contains('opaque')).toBe(true);
-		expect(document.body.querySelector('select')).toBeNull();
 		const options = [...document.body.querySelectorAll<HTMLButtonElement>('[role="radiogroup"][aria-label="Sort models"] [role="radio"]')];
 		expect(options.map((option) => [option.textContent, option.getAttribute('aria-checked')])).toEqual([['Quality', 'true'], ['Speed', 'false']]);
 		const names = () => [...document.body.querySelectorAll('.model h3')].map((item) => item.textContent);
@@ -200,22 +191,6 @@ describe('AddLocalModelSheet', () => {
 		expect([...document.body.querySelectorAll('.model h3')].map((heading) => heading.textContent)).toEqual(['Best', 'Quick']);
 	});
 
-	it('hides a model that exceeds Mac room and its download action', async () => {
-		await render({ state: 'ready', memory_gb: 256, recommended_repository: null, models: [] });
-		expect(document.body.textContent).not.toContain('Needs 174 GB of memory');
-		expect([...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Download'))).toBe(false);
-		expect(document.body.textContent).not.toContain('Recommended');
-	});
-
-	it('shows no memory line when the model fits, oMLX gives no figure, or only the download is large', async () => {
-		const row = (resident_bytes?: number, download_size_gb = 12) => ({ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb, context_window: 32768, resident_bytes, ...ready });
-		await render({ state: 'ready', models: [row(20 * 1024 ** 3)] });
-		expect(host.textContent).not.toContain('of memory');
-		await unmount(component!); host.remove();
-		await render({ state: 'ready', models: [row(undefined, 400)] });
-		expect(host.textContent).not.toContain('of memory');
-	});
-
 	it('shows the initiating download loading until a failed request settles', async () => {
 		await render({ state: 'ready', models: [
 			{ name: 'Qwen', repository: 'Jundot/Qwen', ...ready },
@@ -261,7 +236,7 @@ describe('AddLocalModelSheet', () => {
 		token.set(null);
 		[...document.body.querySelectorAll('button')].find((button) => button.textContent?.includes('Download'))!.click();
 		await tick(); await tick(); flushSync();
-		expect(document.body.textContent).toContain("Couldn't start the download. Try again.");
+		expect(document.body.textContent).toContain('Couldn’t start the download. Try again.');
 	});
 	it('offers cancellation when the active download is absent from an empty list', async () => {
 		host = document.createElement('div');

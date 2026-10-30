@@ -200,7 +200,7 @@ export async function startLocalModelDownload(t: string, repository: string): Pr
 		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ repository }),
 	});
-	if (!response.ok) throw await localRouteError(response, "Couldn't start the download. Try again.");
+	if (!response.ok) throw await localRouteError(response, 'Couldn’t start the download. Try again.');
 }
 
 /** Delete a completed Settings-selected local model download. */

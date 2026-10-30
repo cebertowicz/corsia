@@ -67,7 +67,7 @@
 	}
 	async function start(repository: string) {
 		const t = get(token);
-		if (!t) { rowError = { repository, message: "Couldn't start the download. Try again." }; return; }
+		if (!t) { rowError = { repository, message: 'Couldn’t start the download. Try again.' }; return; }
 		if (busy) return;
 		pending = { repository, action: 'start' }; rowError = null;
 		try { await startLocalModelDownload(t, repository); onStarted?.(); await refreshDownload(); }
