@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 
 from automation import restart, restart_startup, self_restart
+from automation.self_restart import record_update_log
 from auth_fixtures import OWNER_TOKEN
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -148,7 +149,7 @@ def test_interrupted_confirmation_settles_without_holding(
     assert self_restart.previous_version(row) == previous
 
 
-async def test_pre_stop_refusal_cancels_through_real_shell_and_http(isolated_db, tmp_path):
+async def test_pre_stop_refusal_fails_through_real_shell_and_http(isolated_db, tmp_path, monkeypatch):
     import os
     import socket
     from pathlib import Path
@@ -166,24 +167,34 @@ async def test_pre_stop_refusal_cancels_through_real_shell_and_http(isolated_db,
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
     serving = asyncio.create_task(server.serve(sockets=[listener]))
-    app_mode = Path(__file__).resolve().parents[2] / "scripts/corsia.d/app_mode.sh"
+    root = Path(__file__).resolve().parents[2]
+    corsia_text = (root / "scripts/corsia").read_text()
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    app_mode = root / "scripts/corsia.d/app_mode.sh"
+    runtime = root / "scripts/corsia.d/runtime.sh"
+    from infra import config
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
 SCRIPT_DIR=/disposable
 source "{app_mode}"
+source "{runtime}"
 require_owned_service_definition() {{ :; }}
 service_is_loaded() {{ return 1; }}
 require_no_unmanaged_backend() {{ :; }}
 app_mode_hold_update_lock() {{ :; }}
 is_backend_running() {{ return 1; }}
-fail() {{ printf '%s\\n' "$*"; }}
+RED=""; NC=""
+{fail}
 FORCE=false
 BACKEND_PORT={port}
 app_mode_swap_staged_update /disposable/staged
 ''')
     script.chmod(0o755)
     try:
-        with (tmp_path / "lifecycle.log").open("w") as log:
+        log_path = tmp_path / f"update-{operation_id}.log"
+        with log_path.open("w") as log:
+            assert await run_in_db(record_update_log, operation_id, str(log_path))
             child = spawn_restart_lifecycle(
                 script, ["restart-prepared"],
                 {**os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port)},
@@ -194,11 +205,15 @@ app_mode_swap_staged_update /disposable/staged
         server.should_exit = True
         await serving
         listener.close()
-    assert "Safe update refused" in (tmp_path / "lifecycle.log").read_text()
-    assert "Lifecycle drain cleanup HTTP 200" in (tmp_path / "lifecycle.log").read_text()
+    assert "Safe update refused" in log_path.read_text()
+    assert "Lifecycle drain cleanup HTTP 200" in log_path.read_text()
     row = await run_in_db(self_restart.operation_by_id, operation_id)
-    assert row["status"] == "cancelled"
-    assert row["failure_code"] != "rolled_back"
+    assert row["status"] == "failed"
+    assert row["failure_code"] == "update_refused"
+    assert "current backend is not healthy" in row["error"]
+    detail = json.loads(row["failure_detail"])
+    assert detail["backend_healthy"] is False
+    assert detail["log_path"] == str(log_path)
     assert not self_restart.restart_holds_new_work()
 
 

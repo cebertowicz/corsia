@@ -28,6 +28,9 @@ acquire_restart_operation() { return 0; }
 """
 
 
+# Pre-stop refusal delivery is covered through the lifecycle HTTP tests.
+
+
 def test_seed_disposable_account_preserves_mint_failure_detail() -> None:
     result = _run_bash(
         """

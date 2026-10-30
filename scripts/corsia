@@ -327,7 +327,12 @@ NC='\033[0m'
 
 ok() { echo -e "  ${GREEN}✅ $1${NC}"; }
 warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
-fail() { echo -e "  ${RED}❌ $1${NC}"; }
+fail() {
+    if [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-false}" = true ] && [ -z "${_corsia_lifecycle_refusal_reason:-}" ]; then
+        _corsia_lifecycle_refusal_reason="$1"
+    fi
+    echo -e "  ${RED}❌ $1${NC}"
+}
 
 status() {
     echo "CORSIA Status"

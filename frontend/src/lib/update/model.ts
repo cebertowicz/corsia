@@ -11,6 +11,7 @@ export type UpdateFailureCode =
 	| 'fetch_failed'
 	| 'build_failed'
 	| 'launch_failed'
+	| 'update_refused'
 	| 'rolled_back'
 	| 'version_unverified'
 	| 'wrong_version_running'

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from statistics import median
+from automation.restart_queries import usual_update_seconds as usual_update_seconds
 import uuid
 import json
 
 from automation.restart_rule import ACTIVE_PHASES, HOLD_PHASES, IN_FLIGHT_TTL_SECONDS
-from automation.restart_rule import parse as _parse
 from automation.restart_rule import row_is_active
 from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
 from infra.database import get_db, write_transaction
@@ -111,28 +110,6 @@ def latest_update_operation(*, db=None) -> dict | None:
             "AND status != 'superseded' ORDER BY requested_at DESC,id DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row is not None else None
-    finally:
-        if db is None:
-            connection.close()
-
-
-def usual_update_seconds(*, db=None) -> int | None:
-    """Return the median duration of the ten most recent completed updates."""
-    connection = db or get_db()
-    try:
-        rows = connection.execute(
-            "SELECT requested_at,settled_at FROM self_restart_requests "
-            "WHERE kind='update' AND status='complete' "
-            "ORDER BY requested_at DESC,id DESC LIMIT 10"
-        ).fetchall()
-        durations = [
-            (settled - requested).total_seconds()
-            for row in rows
-            if (requested := _parse(row["requested_at"])) is not None
-            and (settled := _parse(row["settled_at"])) is not None
-            and settled >= requested
-        ]
-        return int(median(durations)) if durations else None
     finally:
         if db is None:
             connection.close()
@@ -247,6 +224,18 @@ def try_acquire(
             ),
         )
     return operation_id
+
+
+def record_update_log(operation_id: str, log_path: str, *, db=None) -> bool:
+    """Attach an already-created log to the exact in-flight update."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        detail = _merged_detail(connection, operation_id, json.dumps({"log_path": log_path}))
+        result = connection.execute(
+            "UPDATE self_restart_requests SET failure_detail=? "
+            "WHERE id=? AND kind='update' AND status='in_flight'",
+            (detail, operation_id),
+        )
+        return result.rowcount == 1
 
 
 def try_acquire_steering(
