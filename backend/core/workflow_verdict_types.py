@@ -14,6 +14,18 @@ from core.workflow_verdicts import DEFAULT_CONFIDENCE, POLICY_VERSION, MeasureCa
 PLAN_TEXT_LIMIT = 2_000  # infra.outcome_event_attributes: measurement.verdict.planned plan
 
 
+def subject_of(kind: str, name: str, version: str) -> str:
+    """A verdict's subject key, ``<kind>:<name>@<version>`` (workflow or lesson); the one place its format lives."""
+    return f"{kind}:{name}@{version}"
+
+
+def split_subject(subject: str) -> tuple[str, str, str]:
+    """``subject_of`` reversed: kind, name, version. A version is a hash, so the last '@' splits it off."""
+    kind, _, rest = subject.partition(":")
+    name, _, version = rest.rpartition("@")
+    return kind, name, version
+
+
 @dataclass(frozen=True)
 class Definition:
     kind: str
