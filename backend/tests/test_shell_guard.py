@@ -10,6 +10,7 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from tools import shell_guard  # noqa: E402
+from tools.workspace_git_paths import workspace_git_rules  # noqa: E402
 from infra.project_repo_policy import RepoPolicy  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT
 
@@ -68,9 +69,10 @@ def _assert_verified_worktree_grant_keeps_controls_denied(
     ):
         deny = f'(deny file-write* (literal "{path}"))'
         assert profile.index(deny) > profile.index(git_allow)
-    hooks_deny = f'(deny file-write* (subpath "{repo / ".git" / "hooks"}"))'
+    commondir_deny, hooks_deny = workspace_git_rules((repo / ".git" / "commondir", repo / ".git" / "hooks"))
     marker_deny = f'(deny file-write* (literal "{worktree / ".git"}"))'
     assert profile.index(hooks_deny) > profile.index(git_allow)
+    assert profile.index(commondir_deny) > profile.index(git_allow)
     assert profile.index(marker_deny) > profile.index(git_allow)
 
 
