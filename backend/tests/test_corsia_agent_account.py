@@ -840,7 +840,7 @@ def test_clean_default_added_discovery_binds_setup(conductor):
     db.execute("UPDATE connections SET status='needs_auth' WHERE provider='codex'")
     db.commit()
     receipt = receipt_of('codex', work['id'], db=db)
-    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
+    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
         [{'selector_id': 'setup-model', 'available': True, 'resolved_identity': 'setup-model', 'context_window': 200000}],
         context=SimpleNamespace(receipt=receipt, account_id=work['id']), harness_version='1', db=db)
     assert result.status == 'ready'

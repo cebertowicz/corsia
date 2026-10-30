@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 SECRET_ENOUGH = "long-enough-passphrase"
 FACTS = {"your_model": {"display_name": "Sonnet", "local": False}, "setup": {"tasks": []}}
 

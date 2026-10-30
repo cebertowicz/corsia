@@ -179,11 +179,11 @@ def profile_for(provider: str) -> AccountProfile:
 async def sign_out_account(account: dict) -> dict:
     """Run a vendor's sign-out hook for one account, after its state is committed.
 
-    The one caller of every profile's hook. An account with no home of its own
-    (a vendor's Default) is skipped: its ambient login is never touched.
+    The one caller of every profile's hook. An account with no home (a removed
+    tombstone kept from before every account had one) has nothing to sign out.
     """
     if account["source_home"] is None:
-        return {"status": "skipped", "cause": "default_home_untouched"}
+        return {"status": "skipped", "cause": "no_home"}
     return await profile_for(account["provider"]).sign_out(
         account, Path(account["source_home"]), Path(account["runtime_home"]))
 

@@ -19,9 +19,9 @@ def account_sessions_root(thread_id: str, db) -> tuple[Path, object | None] | st
     """The sessions root the thread's transcript was written under, or why not.
 
     Taken from the frozen login of the thread's latest Codex Turn, never from
-    the thread's current account binding. An unstamped Turn or the Default
-    account keeps the managed default root; a custom account must prove a
-    current receipt and resolves its own runtime home, with no fallback.
+    the thread's current account binding. An unstamped Turn with no account
+    keeps the managed default root; an account must prove a current receipt and
+    resolves its own runtime home, with no fallback.
     """
     from connections.account_receipts import receipt_is_current
     from connections.account_runtime import launch_homes
@@ -48,8 +48,6 @@ def account_sessions_root(thread_id: str, db) -> tuple[Path, object | None] | st
         homes = launch_homes(receipt.account_id, db=db)
     except (AccountError, ValueError):
         return "account_provenance_ambiguous"
-    if not homes.custom:
-        return default_codex_sessions_root(), receipt
     if homes.codex_runtime is None or not receipt_is_current(receipt, db=db):
         return "account_provenance_ambiguous"
     return Path(homes.codex_runtime) / "sessions", receipt

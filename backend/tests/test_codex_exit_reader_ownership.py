@@ -11,6 +11,8 @@ from test_codex_inbox_steer import (
     _clear_live, _enqueue, _input_row, _install_live, _seed_live_turn,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.mark.asyncio
 async def test_inbox_preserves_reader_exit_owner_and_queued_successor(isolated_db, monkeypatch):

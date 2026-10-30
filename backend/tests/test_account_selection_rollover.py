@@ -340,7 +340,8 @@ def test_default_claim_requires_its_own_discovery(accounts):  # noqa: F811
 def test_signed_out_default_refuses_a_claim(accounts):  # noqa: F811
     from connections.account_policy import AccountAdmissionError, require_claim
 
-    db, _, _, _ = accounts
+    db, default, _, _ = accounts
+    set_account_state(default["id"], "signed_out", expected_revision=default["revision"], db=db)
     with pytest.raises(AccountAdmissionError) as refused:
         require_claim("codex", thread_id="destination", model="codex/test", db=db)
     assert refused.value.reason == "account_signed_out"
@@ -720,7 +721,7 @@ def test_lifecycle_keeps_binding_model_inputs_and_active_spend(accounts, state, 
     assert batch is not None
     _accept_at_fixed_time(db, "second")
     before = _rows(db)
-    change_state(legacy["id"], state, expected_revision=0, db=db)
+    change_state(legacy["id"], state, expected_revision=get_account(legacy["id"], db=db)["revision"], db=db)
     after = _rows(db)
     assert [(r["id"], r["content"], r["input_order"], r["seq"], r["target_model"], r["delivery_state"])
             for r in after] == [(r["id"], r["content"], r["input_order"], r["seq"], r["target_model"], r["delivery_state"])

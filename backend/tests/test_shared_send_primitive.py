@@ -27,6 +27,8 @@ from shared_send_fixtures import (  # noqa: F401
     delegation_client,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 async def _accept_cc_turn(*_args, **kwargs):
     persist_input_once = kwargs.get("persist_input_once")

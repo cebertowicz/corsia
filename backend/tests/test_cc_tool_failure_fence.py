@@ -8,6 +8,8 @@ import pytest
 
 from test_cc_tool_result_echo_binding import _seed_thread, _tool_use
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 async def _live_with_result_step(db, identity, broadcast, calls, *, with_step=True):
     from subagents.cc_handle_close import finalize

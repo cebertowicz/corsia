@@ -243,6 +243,37 @@ def isolated_db(tmp_path, monkeypatch):
     _reset_db_pool(db_mod)
 
 
+@pytest.fixture
+def admitted_writes(monkeypatch):
+    """For tests that drive a harness stdin transport on a bare session: account binding is not what they assert.
+
+    A session writes only on a bound signed-in account (there is no ambient login to fall back on), and
+    that admission is proved in test_account_operations_homes and test_account_policy_boundaries.
+    """
+    from subagents import codex_requests, vendor_write_admission
+
+    monkeypatch.setattr(codex_requests, "require_session_write", lambda *_args: None)
+    monkeypatch.setattr(vendor_write_admission, "require_session_write", lambda *_args: None)
+
+
+@pytest.fixture
+def signed_in_defaults(request, isolated_db):
+    """A signed-in, home-backed Default for each harness: there is no ambient login to fall back on.
+
+    A module whose launches name models outside the shared catalog lists them, per provider, in
+    ``DISCOVERED_MODELS``: an account runs only the models its own discovery lists.
+    """
+    from infra.database import get_db
+    from vendor_account_fixtures import seed_signed_in_defaults
+
+    db = get_db()
+    try:
+        seed_signed_in_defaults(db, getattr(request.module, 'DISCOVERED_MODELS', {}))
+        db.commit()
+    finally:
+        db.close()
+
+
 class _NoClose:
 
     def __init__(self, c):
@@ -265,6 +296,7 @@ class _NoClose:
 @pytest.fixture
 def main_db(tmp_path, monkeypatch, _cc_runtime_cleanup):
     from auth_fixtures import seed_test_accounts
+    from vendor_account_fixtures import seed_signed_in_defaults
     from infra.schema import SCHEMA_SQL
 
     db_path = tmp_path / "m.db"
@@ -281,6 +313,8 @@ def main_db(tmp_path, monkeypatch, _cc_runtime_cleanup):
         "INSERT INTO threads (id, user_id, model, created_at, updated_at) "
         "VALUES ('main-1', 'steve', 'claude-code/opus', 't', 't')"
     )
+    conn.commit()
+    seed_signed_in_defaults(conn)  # no ambient login: each harness has a signed-in Default
     conn.commit()
     wrapper = _NoClose(conn)
 

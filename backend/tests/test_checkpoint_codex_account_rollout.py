@@ -112,14 +112,15 @@ def test_current_binding_does_not_move_the_root(roots) -> None:
     assert fork._registered_rollout("thread-a").rollout == expected
 
 
-def test_default_and_unstamped_threads_keep_the_legacy_root(roots) -> None:
+def test_no_turn_keeps_the_default_root_and_an_unstamped_account_turn_refuses(roots) -> None:
     db, legacy, _custom, _other, default_root, registered = roots
     expected = _rollout(default_root)
     registered["path"] = str(expected)
 
     assert fork._registered_rollout("thread-a").rollout == expected  # no Turn at all
     _turn(db, legacy["id"], stamp=False)
-    assert fork._registered_rollout("thread-a").rollout == expected  # default, unstamped
+    # The Default is an account with its own home like any other: no receipt, no root.
+    assert fork._registered_rollout("thread-a") == "account_provenance_ambiguous"
 
 
 def test_custom_account_without_a_receipt_refuses(roots) -> None:

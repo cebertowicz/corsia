@@ -361,15 +361,24 @@ def store_success(
     with write_transaction(db, scope="harness_model_catalog") as connection:
         upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
                                timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
-        previous = read_discovery_envelope(provider, db=connection) or {}
-        _save_discovery_envelope(provider, {
-            **previous,
-            "harness_version": harness_version,
-            "source": source,
-            "refreshed_at": timestamp,
-            "attempted_at": timestamp,
-            "last_error": None,
-        }, db=connection)
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=None, db=connection)
+
+
+def record_refresh_attempt(
+    provider: str, *, harness_version: str, source: str, timestamp: str,
+    error: str | None, db,
+) -> None:
+    """Stamp the connection's refresh envelope: the one clock behind stale and backoff checks."""
+    previous = read_discovery_envelope(provider, db=db) or {}
+    _save_discovery_envelope(provider, {
+        **previous,
+        "harness_version": harness_version,
+        "source": source,
+        **({"refreshed_at": timestamp} if error is None else {}),
+        "attempted_at": timestamp,
+        "last_error": error,
+    }, db=db)
 
 
 def store_failure(
@@ -379,14 +388,8 @@ def store_failure(
     """Record failed refresh without replacing last-known model rows."""
     with write_transaction(db, scope="harness_model_catalog") as connection:
         remove_legacy_fallback(provider, db=connection)
-        previous = read_discovery_envelope(provider, db=connection) or {}
-        _save_discovery_envelope(provider, {
-            **previous,
-            "harness_version": harness_version,
-            "source": source,
-            "attempted_at": timestamp,
-            "last_error": error,
-        }, db=connection)
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=error, db=connection)
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -514,7 +517,8 @@ async def refresh_provider(
                                           db=db, binary=binary, account_id=account['id'])
                    for account in accounts if account['state'] == 'signed_in']
         ready = any(result.status == 'ready' for result in results)
-        error = None if ready else (next((result.source_error for result in results if result.source_error), None)
+        error = None if ready else (next((result.source_error or result.cause for result in results
+                                     if result.source_error or result.cause), None)
                                     if results else 'account_not_configured')
         return {'provider': provider, 'reason': reason, 'ok': ready, 'error': error}
     context = await _db_call(capture_discovery_context, provider, account_id=account_id,

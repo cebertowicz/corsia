@@ -229,6 +229,7 @@ async def test_cc_runtime_cold_and_live_paths_forward_fresh_projection(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("signed_in_defaults")  # the queued input needs a signed-in Default: no ambient login
 @pytest.mark.parametrize("mutate_before_restart", [False, True])
 async def test_cc_queued_image_is_idempotent_and_revalidated_on_restart(
     isolated_db,

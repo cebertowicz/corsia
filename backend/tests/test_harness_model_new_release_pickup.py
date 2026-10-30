@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 _VERSION = "1.0.0"
 # Placeholder selectors: the test pins the refresh rule, never a model name.
 _KNOWN = "known-model"
@@ -39,11 +41,13 @@ def _seed_codex(monkeypatch, listed: list[str]) -> list[str]:
     )
     discoveries: list[str] = []
 
-    async def _discover(binary: str) -> dict:
-        discoveries.append(binary)
-        return _codex_payload(*listed)
+    async def _discover(binary: str, context=None):
+        from connections.account_discovery_types import StagedDiscovery
 
-    async def _version(_binary: str) -> str:
+        discoveries.append(binary)
+        return StagedDiscovery(payload=_codex_payload(*listed))
+
+    async def _version(_binary: str, env=None) -> str:
         return _VERSION
 
     # Only Codex: no test may spawn a real harness binary.

@@ -22,6 +22,8 @@ from infra.db_async import run_bulk, run_in_db, run_read
 from infra.db_connection import LaneWriteError
 from tests.plan_writer_authorizer import raw_plan_seed
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 _USER = {"id": "steve", "token_kind": "session"}
 _WEEK = "2026-09-23T12:00:00Z"
 _TARGET = r"(?:main\.|temp\.)?\"?(\w+)\"?"

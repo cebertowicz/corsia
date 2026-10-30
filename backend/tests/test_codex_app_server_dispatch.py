@@ -350,8 +350,8 @@ def test_isolated_codex_home_overlays_a_copy_of_the_clean_environment(monkeypatc
         codex_home="/tmp/isolated-codex-home",
     )
 
-    assert normal.build_env() == clean_env
-    assert normal.build_env() is not clean_env
+    with pytest.raises(RuntimeError, match="account_home_missing"):  # no ambient home to launch in
+        normal.build_env()
     assert detached.build_env() == {
         "PATH": "/usr/bin",
         "CODEX_HOME": "/tmp/isolated-codex-home",
@@ -359,7 +359,7 @@ def test_isolated_codex_home_overlays_a_copy_of_the_clean_environment(monkeypatc
     }
     assert clean_env["CODEX_HOME"] == "/parent/home"
     assert clean_env["CODEX_SQLITE_HOME"] == "/parent/home"
-    assert isolated_homes == [None, None, Path("/tmp/isolated-codex-home")]
+    assert isolated_homes == [Path("/tmp/isolated-codex-home")]
 
 
 async def test_raw_message_observer_sees_unmodeled_items_and_server_requests():
@@ -1178,6 +1178,7 @@ async def test_turn_start_cancel_before_write_is_unaccepted_and_cleans_request()
     assert session._pending == {}
 
 
+@pytest.mark.usefixtures("admitted_writes")
 async def test_turn_start_cancel_after_write_returns_without_waiting_for_drain():
     session = _make_session()
     session.thread_id = "thread-1"
@@ -1211,6 +1212,7 @@ async def test_turn_start_cancel_after_write_returns_without_waiting_for_drain()
     assert session._pending == {}
 
 
+@pytest.mark.usefixtures("admitted_writes")
 async def test_reader_exit_rejects_written_turn_start_without_request_timeout():
     session = _make_session()
     session.thread_id = "thread-1"
@@ -2283,6 +2285,7 @@ async def test_current_schema_context_compaction_item_emits_breach():
     }]
 
 
+@pytest.mark.usefixtures("admitted_writes")
 async def test_turn_steer_uses_request_deadline_without_shortening_other_requests(monkeypatch):
     from subagents import codex_app_server
 

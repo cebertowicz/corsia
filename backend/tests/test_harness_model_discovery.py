@@ -98,8 +98,31 @@ def connections_db(tmp_path, monkeypatch):
     db.close()
 
 
+def _account(prior=None):
+    """The account a discovery runs for: there is no ambient home."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(source_home="/nonexistent/claude-account", prior_discovery=prior)
+
+
+def _codex_context():
+    """The signed-in Codex Default's discovery context, on the isolated database."""
+    from connections.account_discovery_types import capture_discovery_context
+    from vendor_account_fixtures import default_id, signed_in_default
+
+    signed_in_default("codex")
+    return capture_discovery_context("codex", account_id=default_id("codex"))
+
+
+def _staged(payload):
+    from connections.account_discovery_types import StagedDiscovery
+
+    return StagedDiscovery(payload=payload)
+
+
 def _seed_connection(db, provider: str, config: dict | None = None) -> None:
     from connections.models import ConnectionStatus, ConnectionType, upsert_connection
+    from vendor_account_fixtures import signed_in_default
 
     upsert_connection(
         type=ConnectionType.CLI,
@@ -108,6 +131,8 @@ def _seed_connection(db, provider: str, config: dict | None = None) -> None:
         config=config or {"binary": provider},
         db=db,
     )
+    signed_in_default(provider, db=db)  # a refresh asks a signed-in account: no ambient login
+    db.commit()
 
 
 def _claude_payload() -> dict:
@@ -746,19 +771,9 @@ async def test_claude_adapter_uses_stream_json_control_plane_without_a_turn(monk
 
     from connections import claude_discovery
 
-    async def _run_in_db(fn, *args):
-        if fn is claude_discovery._known_claude_context_identities:
-            return {}
-        return {"provider": "claude-code"}  # the sign-in state was recorded
-
-    monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
-    async def _signed_in(_binary):
-        return "unverified", "signed_in"
-
-    monkeypatch.setattr(claude_discovery, "auth_status", _signed_in)
     monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
 
-    payload = await harness_models.discover_claude_models("/bin/claude")
+    payload = (await harness_models.discover_claude_models("/bin/claude", context=_account())).payload
 
     assert [row["value"] for row in payload["models"]] == [
         "default", "claude-fable-5[1m]",
@@ -805,19 +820,12 @@ async def test_claude_adapter_reuses_an_unchanged_known_context_window(monkeypat
         calls += 1
         return _Process()
 
-    async def _run_in_db(fn, *args):
-        if fn is claude_discovery._known_claude_context_identities:
-            return {"claude-fable-5[1m]": "claude-fable-5"}
-        return {"provider": "claude-code"}  # the sign-in state was recorded
-
-    monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
-    async def _signed_in(_binary):
-        return "unverified", "signed_in"
-
-    monkeypatch.setattr(claude_discovery, "auth_status", _signed_in)
+    prior = {"discovery": {"models": {"claude-code/claude-fable-5[1m]": {
+        "resolved_identity": "claude-fable-5", "context_window": 967000}}}}
     monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
 
-    payload = await claude_discovery.discover_claude_models("/bin/claude")
+    payload = (await claude_discovery.discover_claude_models(
+        "/bin/claude", context=_account(prior))).payload
 
     assert payload["models"][1].get("contextUsage") is None
     assert calls == 1
@@ -840,7 +848,7 @@ def _context_probe_call(monkeypatch, responses: list[dict]):
         return _Process()
 
     monkeypatch.setattr(harness_models.asyncio, "create_subprocess_exec", _spawn)
-    return harness_models._discover_claude_context("/bin/claude", "fable[1m]")
+    return harness_models._discover_claude_context("/bin/claude", "fable[1m]", context=_account())
 
 
 @pytest.mark.asyncio
@@ -979,14 +987,15 @@ async def test_repeated_request_ids_cannot_flood_the_message(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_codex_adapter_replaces_stale_isolated_cache_after_online_refresh(
-    monkeypatch, tmp_path,
+    isolated_db, monkeypatch,
 ):
     """A restart must refresh the cache later used by managed execution."""
     import connections.codex_discovery as codex_discovery
 
     calls: list[tuple[str, object]] = []
-    discovery_home = tmp_path / "codex-app-server-home"
-    discovery_home.mkdir()
+    context = _codex_context()
+    discovery_home = Path(context.runtime_home)
+    discovery_home.mkdir(parents=True, exist_ok=True)
     cache = discovery_home / "models_cache.json"
     cache.write_text('{"models":["stale"]}')
     fresh_home: Path | None = None
@@ -1010,14 +1019,16 @@ async def test_codex_adapter_replaces_stale_isolated_cache_after_online_refresh(
             calls.append(("list", None))
             return _codex_payload("gpt-6.1-sol")
 
+        def build_env(self):
+            return {"CODEX_HOME": str(fresh_home)}
+
         async def close(self, timeout: float):
             assert cache.read_text() == '{"models":["stale"]}'
             calls.append(("close", timeout))
 
-    monkeypatch.setattr(codex_discovery, "codex_app_server_home", lambda: discovery_home)
     monkeypatch.setattr(codex_discovery, "CodexAppServerSession", _Session)
 
-    async def _debug(_binary: str):
+    async def _debug(_binary: str, *, env=None):
         calls.append(("debug", None))
         return {"models": [{
             "slug": "gpt-6.1-sol", "context_window": 272000,
@@ -1029,28 +1040,35 @@ async def test_codex_adapter_replaces_stale_isolated_cache_after_online_refresh(
 
     monkeypatch.setattr(codex_discovery, "discover_codex_debug_models", _debug)
 
-    payload = await codex_discovery.discover_codex_models("/bin/codex")
+    staged = await codex_discovery.discover_codex_models("/bin/codex", context=context)
+    payload = staged.payload
 
     assert [row["id"] for row in payload["data"]] == ["gpt-6.1-sol"]
     assert payload["data"][0]["contextMetadata"]["context_window"] == 272000
+    # The commit promotes the staged cache; until then managed sessions keep the last known one.
+    assert cache.read_text() == '{"models":["stale"]}'
+    staged.cache_stage.promote()
+    staged.close()
     assert cache.read_text() == '{"models":["fresh"]}'
     assert fresh_home is not None and not fresh_home.exists()
     assert calls == [
         ("init", {"binary": "/bin/codex", "task": None,
-                  "codex_home": str(fresh_home), "control_only": True}),
+                  "codex_home": str(fresh_home), "control_only": True,
+                  "source_codex_home": context.source_home}),
         ("start", None), ("list", None), ("debug", None), ("close", 10.0),
     ]
 
 
 @pytest.mark.asyncio
 async def test_codex_adapter_restores_prior_cache_after_unconfirmed_refresh(
-    monkeypatch, tmp_path,
+    isolated_db, monkeypatch,
 ):
     """A bundled fallback after failure cannot replace the last-known cache."""
     import connections.codex_discovery as codex_discovery
 
-    discovery_home = tmp_path / "codex-app-server-home"
-    discovery_home.mkdir()
+    context = _codex_context()
+    discovery_home = Path(context.runtime_home)
+    discovery_home.mkdir(parents=True, exist_ok=True)
     cache = discovery_home / "models_cache.json"
     prior = '{"models":["last-known"]}'
     cache.write_text(prior)
@@ -1071,21 +1089,21 @@ async def test_codex_adapter_restores_prior_cache_after_unconfirmed_refresh(
         async def close(self, timeout: float):
             assert cache.read_text() == prior
 
-    monkeypatch.setattr(codex_discovery, "codex_app_server_home", lambda: discovery_home)
     monkeypatch.setattr(codex_discovery, "CodexAppServerSession", _Session)
 
     with pytest.raises(RuntimeError, match="online model refresh"):
-        await codex_discovery.discover_codex_models("/bin/codex")
+        await codex_discovery.discover_codex_models("/bin/codex", context=context)
 
     assert cache.read_text() == prior
 
 
 @pytest.mark.asyncio
-async def test_codex_adapter_cleanup_does_not_mask_discovery_failure(monkeypatch, tmp_path):
+async def test_codex_adapter_cleanup_does_not_mask_discovery_failure(isolated_db, monkeypatch):
     import connections.codex_discovery as codex_discovery
 
-    discovery_home = tmp_path / "codex-app-server-home"
-    discovery_home.mkdir()
+    context = _codex_context()
+    discovery_home = Path(context.runtime_home)
+    discovery_home.mkdir(parents=True, exist_ok=True)
 
     class _Session:
         def __init__(self, **kwargs):
@@ -1100,19 +1118,19 @@ async def test_codex_adapter_cleanup_does_not_mask_discovery_failure(monkeypatch
         async def close(self, timeout: float):
             raise RuntimeError("close unavailable")
 
-    monkeypatch.setattr(codex_discovery, "codex_app_server_home", lambda: discovery_home)
     monkeypatch.setattr(codex_discovery, "CodexAppServerSession", _Session)
 
     with pytest.raises(RuntimeError, match="model/list unavailable"):
-        await codex_discovery.discover_codex_models("/bin/codex")
+        await codex_discovery.discover_codex_models("/bin/codex", context=context)
 
 
 @pytest.mark.asyncio
-async def test_codex_adapter_cancellation_preserves_persistent_cache(monkeypatch, tmp_path):
+async def test_codex_adapter_cancellation_preserves_persistent_cache(isolated_db, monkeypatch):
     import connections.codex_discovery as codex_discovery
 
-    discovery_home = tmp_path / "codex-app-server-home"
-    discovery_home.mkdir()
+    context = _codex_context()
+    discovery_home = Path(context.runtime_home)
+    discovery_home.mkdir(parents=True, exist_ok=True)
     cache = discovery_home / "models_cache.json"
     prior = '{"models":["last-known"]}'
     cache.write_text(prior)
@@ -1130,13 +1148,18 @@ async def test_codex_adapter_cancellation_preserves_persistent_cache(monkeypatch
         async def close(self, timeout: float):
             assert cache.read_text() == prior
 
-    monkeypatch.setattr(codex_discovery, "codex_app_server_home", lambda: discovery_home)
     monkeypatch.setattr(codex_discovery, "CodexAppServerSession", _Session)
 
     with pytest.raises(asyncio.CancelledError):
-        await codex_discovery.discover_codex_models("/bin/codex")
+        await codex_discovery.discover_codex_models("/bin/codex", context=context)
 
     assert cache.read_text() == prior
+
+
+def envelope_version(db, provider):
+    import connections.harness_models as harness_models
+
+    return harness_models.read_discovery_envelope(provider, db=db)["harness_version"]
 
 
 @pytest.mark.asyncio
@@ -1145,10 +1168,10 @@ async def test_refresh_provider_persists_success_and_reports_reason(connections_
 
     _seed_connection(connections_db, "claude-code", {"binary": "/bin/claude"})
 
-    async def _discover(_binary: str):
-        return _claude_payload()
+    async def _discover(_binary: str, context=None):
+        return _staged(_claude_payload())
 
-    async def _version(_binary: str):
+    async def _version(_binary: str, env=None):
         return "2.1.206"
 
     monkeypatch.setitem(
@@ -1162,13 +1185,8 @@ async def test_refresh_provider_persists_success_and_reports_reason(connections_
         "claude-code", reason="startup", db=connections_db
     )
 
-    assert result == {
-        "provider": "claude-code",
-        "ok": True,
-        "reason": "startup",
-        "model_count": 1,
-        "harness_version": "2.1.206",
-    }
+    assert result == {"provider": "claude-code", "ok": True, "reason": "startup", "error": None}
+    assert envelope_version(connections_db, "claude-code") == "2.1.206"
     envelope = harness_models.read_discovery_envelope(
         "claude-code", db=connections_db
     )
@@ -1196,10 +1214,10 @@ async def test_refresh_provider_failure_keeps_cached_rows(connections_db, monkey
         db=connections_db,
     )
 
-    async def _discover(_binary: str):
+    async def _discover(_binary: str, context=None):
         raise RuntimeError("model/list unavailable")
 
-    async def _version(_binary: str) -> str:
+    async def _version(_binary: str, env=None) -> str:
         return "0.145.0"
 
     monkeypatch.setitem(
@@ -1214,11 +1232,12 @@ async def test_refresh_provider_failure_keeps_cached_rows(connections_db, monkey
     )
 
     assert result["ok"] is False
-    assert result["error"] == "model/list unavailable"
+    # The adapter's raw diagnostic is never stored on account evidence: the cause is reported.
+    assert result["error"] == "account_discovery_failed"
     envelope = harness_models.read_discovery_envelope("codex", db=connections_db)
     assert list(_model_rows(connections_db, "codex")) == ["gpt-5.6-sol"]
     assert _model_rows(connections_db, "codex")["gpt-5.6-sol"]["available"] == 1
-    assert envelope["last_error"] == "model/list unavailable"
+    assert envelope["last_error"] == "account_discovery_failed"
 
 
 @pytest.mark.asyncio
@@ -1373,15 +1392,15 @@ async def test_concurrent_refreshes_share_one_provider_process(
     release = asyncio.Event()
     discovery_calls = 0
 
-    async def _version(_binary: str):
+    async def _version(_binary: str, env=None):
         return "0.144.0"
 
-    async def _discover(_binary: str):
+    async def _discover(_binary: str, context=None):
         nonlocal discovery_calls
         discovery_calls += 1
         started.set()
         await release.wait()
-        return _codex_payload("gpt-5.6-sol")
+        return _staged(_codex_payload("gpt-5.6-sol"))
 
     monkeypatch.setattr(harness_models, "binary_version", _version)
     monkeypatch.setitem(
@@ -1416,15 +1435,15 @@ async def test_cancelled_waiter_does_not_pin_completed_single_flight(
     release = asyncio.Event()
     discovery_calls = 0
 
-    async def _version(_binary: str):
+    async def _version(_binary: str, env=None):
         return "0.144.0"
 
-    async def _discover(_binary: str):
+    async def _discover(_binary: str, context=None):
         nonlocal discovery_calls
         discovery_calls += 1
         started.set()
         await release.wait()
-        return _codex_payload("gpt-5.6-sol")
+        return _staged(_codex_payload("gpt-5.6-sol"))
 
     monkeypatch.setattr(harness_models, "binary_version", _version)
     monkeypatch.setitem(
@@ -1437,7 +1456,7 @@ async def test_cancelled_waiter_does_not_pin_completed_single_flight(
         "codex", reason="startup", db=connections_db,
     ))
     await started.wait()
-    shared = harness_models._REFRESH_TASKS["codex"]
+    shared = next(iter(harness_models._REFRESH_TASKS.values()))  # keyed by account generation
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
@@ -1445,71 +1464,9 @@ async def test_cancelled_waiter_does_not_pin_completed_single_flight(
     await shared
     await asyncio.sleep(0)
 
-    assert "codex" not in harness_models._REFRESH_TASKS
+    assert not harness_models._REFRESH_TASKS
     result = await harness_models.refresh_provider(
         "codex", reason="explicit", db=connections_db,
     )
     assert result["reason"] == "explicit"
     assert discovery_calls == 2
-
-
-async def test_claude_status_failure_records_unknown_under_the_failed_paths_fence(monkeypatch):
-    from connections import account_identity, claude_discovery, source_state
-
-    writes = []
-    fence = object()
-
-    async def run_in_db(fn, *args, **kwargs):
-        if fn is account_identity.capture_default_observation:
-            return fence
-        writes.append((fn, args, kwargs))
-        return {"provider": "claude-code"}
-
-    async def spawn(*args, **kwargs):
-        raise OSError('unavailable')
-
-    monkeypatch.setattr(claude_discovery, 'run_in_db', run_in_db)
-    monkeypatch.setattr(claude_discovery.asyncio, 'create_subprocess_exec', spawn)
-    # The read alone writes nothing, so a successful catalog keeps its own fence.
-    assert await claude_discovery.auth_status('/mock/claude') == (source_state.UNVERIFIED, 'unknown')
-    assert writes == []
-    with pytest.raises(claude_discovery.ClaudeCatalogCheckFailed):
-        await claude_discovery._record_failed_sign_in('/mock/claude', 'failed')
-    assert writes[0] == (account_identity.observe_discovered_identity, ('claude-code', {'_login_status': 'unknown'}), {'token': fence})
-
-
-async def test_claude_catalog_of_a_signed_out_cli_is_needs_auth_not_ready(monkeypatch):
-    """A signed-out CLI still lists its static models; that must not read as ready."""
-    from connections import claude_discovery, source_state
-
-    class _Process(_ControlProcess):
-        def __init__(self):
-            response = {"type": "control_response", "response": {
-                "subtype": "success", "request_id": "corsia-model-list", "response": _claude_payload(),
-            }}
-            super().__init__(json.dumps(response).encode() + b"\n")
-
-    async def _spawn(*_cmd, **_kwargs):
-        return _Process()
-
-    recorded: list[str] = []
-
-    async def _run_in_db(fn, *args, **_kwargs):
-        if fn is source_state.apply_check:
-            recorded.append(args[1])
-        return {"provider": "claude-code"}
-
-    async def _signed_out(_binary):
-        return source_state.NEEDS_AUTH, "signed_out"
-
-    async def _must_not_run(*_args, **_kwargs):
-        raise AssertionError("a signed-out source must not be stored ready")
-
-    monkeypatch.setattr(claude_discovery, "run_in_db", _run_in_db)
-    monkeypatch.setattr(claude_discovery.asyncio, "create_subprocess_exec", _spawn)
-    monkeypatch.setattr(claude_discovery, "auth_status", _signed_out)
-    monkeypatch.setattr(claude_discovery, "_record_catalog_success", _must_not_run)
-
-    with pytest.raises(claude_discovery.ClaudeCatalogCheckFailed):
-        await claude_discovery.discover_claude_models("/bin/claude")
-    assert recorded == [source_state.NEEDS_AUTH]

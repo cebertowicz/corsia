@@ -49,6 +49,9 @@ from vendor_account_fixtures import (  # noqa: F401
 )
 
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')  # a signed-in Default per harness: no ambient login
+
+
 def _seed_connection_row(provider):
     from connections.models import upsert_connection
     return upsert_connection(type="cli", provider=provider, status="available", config={"binary": "/bin/test"})
@@ -219,7 +222,7 @@ def _seed_meter_connection(provider: str, **config) -> None:
     upsert_connection(type=ConnectionType.CLI, provider=provider,
                       status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/test", **config})
     if provider == "codex":
-        from connections.vendor_accounts import record_default_identity
+        from vendor_account_fixtures import record_default_identity
 
         db = _db()
         try:
@@ -457,7 +460,8 @@ def test_private_homes_and_identity_survive_lifecycle(isolated_db):
     from connections.vendor_accounts import (AccountError, account_homes, account_identity_key,
                                               add_account, default_account, rename_account, set_account_state)
     _seed_connection_row("codex")
-    assert account_homes(default_account("codex")["id"]) == (None, None)
+    default_source, default_runtime = account_homes(default_account("codex")["id"])  # the Default has private homes too
+    assert default_source != default_runtime
     account = add_account("codex", "Work")
     source, runtime = account_homes(account["id"])
     assert source != runtime
@@ -769,9 +773,9 @@ async def test_unknown_default_receipt_refuses_and_preserves_custom_usage(accoun
     harness_usage.record_limited(reason='default-limit', resets_at=None, source='test', provider='codex', receipt=default_receipt('codex'))
     harness_usage.record_limited(reason='custom-limit', resets_at=None, source='test', provider='codex', receipt=receipt_of('codex', custom['id']))
     custom_before = stored_usage(provider='codex', account_id=custom['id'], db=db)
-    # The Default is observed, but its login could not be read: it has no current login.
-    from connections.vendor_accounts import record_default_identity
-    record_default_identity('codex', {}, db=db)
+    # The Default is signed out: it has no current login to read for.
+    from connections.vendor_accounts import get_account, set_account_state
+    set_account_state(default['id'], 'signed_out', expected_revision=get_account(default['id'], db=db)['revision'], db=db)
     db.commit()
     default_before = stored_usage(provider='codex', account_id=default['id'], db=db)
     await checks._check('codex', default['id'])
@@ -972,7 +976,7 @@ def test_catalog_reads_each_harness_default_by_its_account_id(isolated_db) -> No
     _seed("claude-code")
     _seed("codex")
     rows = project_accounts([{"id": f"{harness}/test", "litellm_model": f"{harness}/test", "connection": harness,
-                              "status": "ready"} for harness in ("claude-code", "codex")])
+                              "status": "ready", "capabilities": {}} for harness in ("claude-code", "codex")])
 
     assert {row["connection"]: next(item["account_id"] for item in row["runs_on"] if item["selected"])
             for row in rows} == {
@@ -1027,7 +1031,7 @@ def test_expired_limit_projects_as_usable_unknown(isolated_db) -> None:
 async def test_recheck_restores_a_limited_account_and_notifies(monkeypatch, provider, _checks_clean):
     _seed(provider)
     if provider == "codex":
-        from connections.vendor_accounts import record_default_identity
+        from vendor_account_fixtures import record_default_identity
         record_default_identity("codex", {"account_fp": "synthetic-usage-check"})
     _limited(provider)
     notified = []
@@ -1055,7 +1059,7 @@ async def test_recheck_restores_a_limited_account_and_notifies(monkeypatch, prov
 async def test_recheck_keeps_a_limit_and_updates_reset(monkeypatch, provider, _checks_clean):
     _seed(provider)
     if provider == "codex":
-        from connections.vendor_accounts import record_default_identity
+        from vendor_account_fixtures import record_default_identity
         record_default_identity("codex", {"account_fp": "synthetic-usage-check"})
     _limited(provider)
     reset = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
@@ -1120,7 +1124,6 @@ async def test_a_new_login_during_the_prior_logins_read_is_read_when_it_ends(mon
     monkeypatch.setattr(checks, "_capture", lambda provider, account_id: SimpleNamespace(receipt=next(logins), is_default=True))
     monkeypatch.setattr(checks, "_binary_for", lambda _provider: asyncio.sleep(0, result="/synthetic/claude"))
     async def read(_binary, receipt, *, context=None):
-        assert context is None
         read_for.append(receipt)
         if receipt == "prior-login":
             prior_running.set()
@@ -1452,22 +1455,3 @@ def test_missing_receipt_is_zero_effect_and_a_receipt_writes_only_its_own_accoun
     assert usage.stored_usage(provider='codex', account_id=custom['id'], db=db) is None
     assert usage.stored_usage(provider='codex', account_id=default['id'], db=db) is None
     assert usage.stored_usage(provider='codex', account_id=other['id'], db=db)['facts'] == {'planType': 'other'}
-
-
-def test_ready_source_check_cannot_release_observed_unknown_default(accounts, monkeypatch):
-    from connections import harness_usage as usage
-    from connections.vendor_accounts import record_default_identity
-    from infra.connection_limit_release import release_after_sign_in
-    from infra.database import write_transaction
-
-    db, default, _, _ = accounts
-    _known_default(db, default)
-    usage.record_limited(provider='codex', reason='plan_limit', source='old', resets_at=None, db=db, receipt=default_receipt('codex', db=db))
-    record_default_identity('codex', {}, db=db)
-    before = usage.stored_usage(provider='codex', db=db, account_id=default_id('codex', db=db))
-    seen = []
-    monkeypatch.setattr('connections.harness_usage_check.schedule_account_check', lambda *_: seen.append('check'))
-    with write_transaction(db, scope='test_unknown_ready'):
-        release_after_sign_in('codex', db=db)
-    assert usage.stored_usage(provider='codex', db=db, account_id=default_id('codex', db=db)) == before
-    assert seen == []

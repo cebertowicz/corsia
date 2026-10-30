@@ -1,4 +1,4 @@
-"""Look up added accounts and report model refresh outcomes during verification."""
+"""Look up accounts and report model refresh outcomes during verification."""
 from __future__ import annotations
 
 from connections import harness_models

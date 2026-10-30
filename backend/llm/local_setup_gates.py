@@ -92,7 +92,7 @@ async def limited_subscription_message() -> str | None:
 
 
 def _verified_default_label(provider: str) -> str | None:
-    """Return the verified ambient account label, never a plan or custom name."""
+    """Return the verified Default account label, never a plan or custom name."""
     from connections.account_profiles import account_label
     from connections.vendor_accounts import get_account, resolve_account_id
     from infra.database import get_db

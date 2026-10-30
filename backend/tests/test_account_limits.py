@@ -53,6 +53,13 @@ from vendor_account_fixtures import (  # noqa: F401
 )
 
 
+@pytest.fixture(autouse=True)
+def _signed_in_defaults(request):
+    """A test on a bare database runs on signed-in Defaults: there is no ambient login to stand in."""
+    if "isolated_db" in request.fixturenames and "accounts" not in request.fixturenames:
+        request.getfixturevalue("signed_in_defaults")
+
+
 @pytest.fixture
 def _no_codex_connection(isolated_db):
     """Each test starts on its own database with no Codex connection."""
@@ -68,9 +75,9 @@ def _no_codex_connection(isolated_db):
 
 def _seed_codex(**config) -> None:
     from connections.models import ConnectionStatus, ConnectionType, upsert_connection
-    from connections.vendor_accounts import default_account, record_default_identity
+    from connections.vendor_accounts import default_account
+    from vendor_account_fixtures import record_default_identity, signed_in_default
     from infra.database import get_db
-    from vendor_account_fixtures import _ready
 
     upsert_connection(
         type=ConnectionType.CLI,
@@ -80,7 +87,7 @@ def _seed_codex(**config) -> None:
     )
     db = get_db()
     record_default_identity("codex", {"account_fp": "synthetic-codex-usage-login"}, db=db)
-    _ready(db, default_account("codex", db=db))
+    signed_in_default("codex", db=db, models=("codex/test",))
 
 
 def _bind_default(session):
@@ -486,11 +493,14 @@ def releases(monkeypatch):
 
 
 def _sign_in(db) -> None:
-    from connections.models import ConnectionStatus, set_connection_status
+    """The account's sign-in: its catalog refresh commits the new login's own usage read."""
+    from connections.claude_discovery import _store_catalog_success
 
-    db.execute("UPDATE connections SET status='needs_auth' WHERE provider='claude-code'")
-    db.commit()
-    set_connection_status("claude-code", ConnectionStatus.AVAILABLE, db=db)
+    receipt = default_receipt("claude-code", db=db)
+    _store_catalog_success(
+        {"rate_limits": {"five_hour": {"utilization": 10}}},
+        account_id=receipt.account_id, receipt=receipt, db=db,
+    )
 
 
 def _claimed(db, thread_id: str, *, spawned_by: str | None = None) -> None:
@@ -803,7 +813,6 @@ def test_status_rows_carry_the_reason_and_reset(_no_codex_connection) -> None:
     from infra.database import get_db
     from llm import model_status
 
-    _seed_codex()
     db = get_db()
     try:
         db.execute(
@@ -823,6 +832,7 @@ def test_status_rows_carry_the_reason_and_reset(_no_codex_connection) -> None:
         ).fetchall()]
     finally:
         db.close()
+    _seed_codex()  # after the model rows exist: the account's discovery names the models it can run
     resets = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     codex_usage.record_limited(reason="usageLimitExceeded", resets_at=resets, source="turn_error", provider="codex", receipt=default_receipt("codex"))
     rows = {r["id"]: r for r in model_status.get_model_status_rows()}
@@ -1051,7 +1061,7 @@ async def test_release_from_a_worker_thread_runs_on_the_captured_loop(isolated_d
     assert [call.args for call in driven.await_args_list] == [("held",)]
 
 
-def test_release_without_an_app_loop_is_never_silent(driven) -> None:
+def test_release_without_an_app_loop_is_never_silent(driven, isolated_db) -> None:
     import infra.app_loop as app_loop
     from infra.connection_limit_drive import schedule_scope_release
 
@@ -1408,7 +1418,7 @@ def test_limit_recorded_during_the_turn_is_never_cleared(provider, model, scope,
     assert verdict["state"] == "limited"
 
 
-def test_allowed_and_sign_in_signals_release_their_scope(isolated_db, monkeypatch) -> None:
+def test_an_allowed_signal_releases_its_scope(isolated_db, monkeypatch) -> None:
     db = get_db()
     _held(db, "thread")
     released = Mock()
@@ -1419,14 +1429,6 @@ def test_allowed_and_sign_in_signals_release_their_scope(isolated_db, monkeypatc
     apply_rate_limit_event({"status": "allowed"}, db=db, receipt=default_receipt('claude-code', db=db))
     assert released.call_args.args == (default_subject("claude-code", "null", db=db),)
 
-    from connections.models import ConnectionStatus, set_connection_status
-
-    _limit(db, _at(30), scope="sonnet")
-    db.execute("UPDATE connections SET status='needs_auth' WHERE provider='claude-code'")
-    db.commit()
-    set_connection_status("claude-code", ConnectionStatus.AVAILABLE, db=db)
-    assert released.call_args.args == (_subject(),)
-    assert harness_usage.connection_availability(SONNET, db=db, account_id=model_default_id(SONNET, db=db)).state == "allowed"
 
 
 def test_required_fold_on_plan_limited_own_connection_holds_then_toggle_on_releases(
@@ -1818,9 +1820,7 @@ def test_switch_off_with_no_full_window_waits_for_the_next_reading(isolated_db, 
     assert _state(db)[0] != "limited_with_reset" and not no_stops.called
 
 
-def test_sign_in_releases_a_plan_hold_and_reads_the_new_account(isolated_db, monkeypatch, no_stops, releases) -> None:
-    checked = Mock()
-    monkeypatch.setattr("connections.harness_usage_check.schedule_account_check", checked)
+def test_sign_in_releases_a_plan_hold_and_reads_the_new_account(isolated_db, no_stops, releases) -> None:
     db = get_db()
     harness_usage.record_usage(provider="claude-code", windows=[_window()], db=db, receipt=default_receipt("claude-code", db=db))
     assert _state(db) == _HELD_RESET
@@ -1829,9 +1829,8 @@ def test_sign_in_releases_a_plan_hold_and_reads_the_new_account(isolated_db, mon
 
     assert _state(db)[0] == "allowed"
     assert releases.call_args.args == (default_subject("claude-code", "null", db=db),)
-    checked.assert_called_once_with("claude-code", default_id("claude-code", db=db), new_login=True)
     window = next(iter(harness_usage.stored_usage(provider="claude-code", db=db, account_id=default_id("claude-code", db=db))["windows"].values()))
-    assert "used_percent" not in window and window["kind"] == "five_hour"
+    assert window["used_percent"] == 10 and window["kind"] == "five_hour"  # the new login's own reading
 
 
 def test_a_no_reset_full_window_holds_without_reset(isolated_db, no_stops) -> None:
@@ -2112,8 +2111,10 @@ def test_same_account_same_reset_new_login_rejects_old_release_probe_and_stop(ac
 def test_one_probe_claim_per_actual_account_scope_and_candidates_follow_binding(accounts):
     from infra.connection_limit_release import LimitProbe, candidate_rows, claim_probe
     from infra.input_admission import accept_thread_input
+    from vendor_account_fixtures import signed_in_default
 
     db, default, x, y = accounts
+    default = signed_in_default('codex', db=db)
     for thread, row in (('destination', x), ('actor', y)):
         _ready(db, row)
         select_account(thread, 'codex', account_id=row['id'], db=db)

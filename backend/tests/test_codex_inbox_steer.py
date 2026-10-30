@@ -6,6 +6,8 @@ import pytest
 
 from subagents.codex_inbox_batch import deliver_live_inbox_batch
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _seed_live_turn(thread_id: str):
     from core.turn_core import BOOT_EPOCH

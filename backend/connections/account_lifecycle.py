@@ -16,10 +16,10 @@ def change_state(account_id: str, state: str, *, expected_revision: int, db=None
 
 
 def sign_out_expired(receipt: ReceiptFence, *, db=None) -> dict:
-    """Sign out the added-account login ``receipt`` names after its Turn ended on the exact expired-login error.
+    """Sign out the account login ``receipt`` names after its Turn ended on the exact expired-login error.
 
-    That error is the definite answer, as it is for the Default source, so a stale
-    successful status read cannot leave the account selectable with no way to sign in.
+    That error is the definite answer, so a stale successful status read cannot
+    leave the account selectable with no way to sign in.
     A newer login on the same account is not the one that expired and stays signed in.
     """
     with write_transaction(db, scope="vendor_account_hold_lifecycle") as connection:

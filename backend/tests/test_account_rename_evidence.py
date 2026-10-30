@@ -44,7 +44,8 @@ def _publish(db, account, model=MODEL):
 
 def test_a_rename_cannot_hide_the_default_vendors_catalog_rows(accounts):
     """The Default's models are the vendor catalog's, so a label edit cannot fence them."""
-    from connections.vendor_accounts import record_default_identity, rename_account
+    from connections.vendor_accounts import rename_account
+    from vendor_account_fixtures import record_default_identity
     from llm.account_catalog import project_accounts
 
     db, legacy, _, _ = accounts
@@ -53,7 +54,7 @@ def test_a_rename_cannot_hide_the_default_vendors_catalog_rows(accounts):
     _publish(db, legacy)
     assert _reason(db, legacy["id"]) is None
 
-    rename_account(legacy["id"], "Renamed", expected_revision=legacy["revision"], db=db)
+    rename_account(legacy["id"], "Renamed", expected_revision=_account(db, legacy["id"])["revision"], db=db)
     db.commit()
 
     assert _reason(db, legacy["id"]) is None
@@ -62,10 +63,11 @@ def test_a_rename_cannot_hide_the_default_vendors_catalog_rows(accounts):
     assert selected["status"] == "ready" and selected["status_reason"] is None
 
 
-def test_the_default_needs_no_published_record_of_its_own(accounts):
-    """Observing the Default invalidates its own record; its rows stay selectable regardless."""
+def test_an_invalidated_default_record_holds_its_rows_like_any_account(accounts):
+    """The Default has no discovery bypass: observing it invalidates its record and a rename changes nothing."""
     from connections.account_evidence import invalidate_discovery
-    from connections.vendor_accounts import record_default_identity, rename_account
+    from connections.vendor_accounts import rename_account
+    from vendor_account_fixtures import record_default_identity
 
     db, legacy, _, _ = accounts
     record_default_identity("codex", {"account_fp": "fp-one"}, db=db)
@@ -73,19 +75,19 @@ def test_the_default_needs_no_published_record_of_its_own(accounts):
     _publish(db, legacy)
     invalidate_discovery(_account(db, legacy["id"]), login_seq=0, auth_state="known", db=db)
     db.commit()
-    assert _reason(db, legacy["id"]) is None
+    assert _reason(db, legacy["id"]) == "account_model_not_discovered"
 
-    rename_account(legacy["id"], "Renamed", expected_revision=legacy["revision"], db=db)
+    rename_account(legacy["id"], "Renamed", expected_revision=_account(db, legacy["id"])["revision"], db=db)
     db.commit()
-    assert _reason(db, legacy["id"]) is None
+    assert _reason(db, legacy["id"]) == "account_model_not_discovered"
 
 
-def test_per_account_discovery_never_gates_the_default_vendors_rows(accounts):
-    """The Default's models are the vendor catalog's: neither a failed probe nor a
-    model list that lacks the row may hide them, while an added account keeps both holds."""
+def test_a_failed_probe_keeps_an_accounts_last_good_models(accounts):
+    """Every account alike: a failed probe cannot hide models its last good discovery named,
+    and an account with no good discovery stays held."""
     from connections.account_evidence import mark_discovery
     from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import record_default_identity
+    from vendor_account_fixtures import record_default_identity
 
     db, legacy, second, _ = accounts
     record_default_identity("codex", {"account_fp": "fp-one"}, db=db)
@@ -100,15 +102,15 @@ def test_per_account_discovery_never_gates_the_default_vendors_rows(accounts):
     assert _reason(db, second["id"]) == "account_model_not_discovered"
 
 
-def test_an_ambient_default_stays_ready_when_its_record_goes_stale(accounts):
-    """A stale per-account record holds an added account and cannot hide the Default's rows.
+def test_a_stale_record_holds_every_account_alike(accounts):
+    """A stale per-account record holds the Default and an added account the same way.
 
-    The same stamp bump ages both accounts' captured receipts; only the account that owns
-    a discovery record loses its rows.
+    The same stamp bump ages both accounts' captured receipts; each loses its rows until
+    its own discovery runs again.
     """
     from connections.account_evidence import mark_discovery
     from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import record_default_identity
+    from vendor_account_fixtures import record_default_identity
     from llm.account_catalog import project_accounts
 
     db, legacy, second, _ = accounts
@@ -127,12 +129,12 @@ def test_an_ambient_default_stays_ready_when_its_record_goes_stale(accounts):
                    (account_id,))
     db.commit()
 
-    assert _reason(db, legacy["id"]) is None
+    assert _reason(db, legacy["id"]) == "account_model_not_discovered"
     assert _reason(db, second["id"]) == "account_model_not_discovered"
     raw = project_accounts([_row()], thread_id="destination", db=db)[0]
     selected = next(item for item in raw["runs_on"] if item["selected"])
     assert selected["account_id"] == legacy["id"]
-    assert selected["status"] == "ready" and selected["status_reason"] is None
+    assert (selected["status"], selected["status_reason"]) == ("unavailable", "account_model_not_discovered")
 
 
 def test_a_rename_cannot_hide_an_added_accounts_models(accounts):
@@ -164,13 +166,15 @@ def test_a_rename_cannot_hide_an_added_accounts_models(accounts):
 @pytest.mark.parametrize("which", ["default", "added"])
 def test_a_rename_does_not_age_a_captured_login_receipt(accounts, which):
     from connections.account_receipts import capture_receipt, receipt_is_current
-    from connections.vendor_accounts import record_default_identity, rename_account
+    from connections.vendor_accounts import rename_account
+    from vendor_account_fixtures import record_default_identity
 
     db, legacy, second, _ = accounts
     if which == "default":
         record_default_identity("codex", {"account_fp": "fp-one"}, db=db)
         db.commit()
-        account, revision = _account(db, legacy["id"]), legacy["revision"]
+        account = _account(db, legacy["id"])
+        revision = account["revision"]
     else:
         _publish(db, second)
         account, revision = second, _account(db, second["id"])["revision"]
@@ -184,13 +188,15 @@ def test_a_rename_does_not_age_a_captured_login_receipt(accounts, which):
 
 
 def test_another_accounts_stale_receipt_still_refuses_a_default_launch(accounts):
-    """The login-0 bypass belongs to this row's own receipt, not to any captured one."""
+    """A launch needs this row's own current receipt, not any captured one."""
     from connections.account_policy import AccountAdmissionError, require_launch
     from connections.account_receipts import capture_receipt, receipt_is_current
-    from connections.account_runtime import LaunchHomes
+    from connections.account_runtime import homes_for
     from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import signed_in_default
 
     db, legacy, second, _ = accounts
+    legacy = signed_in_default("codex", db=db, models=(MODEL,))
     foreign = capture_receipt("codex", account_id=second["id"], db=db)
     set_account_state(second["id"], "signed_in", expected_revision=_account(db, second["id"])["revision"], db=db)
     db.commit()
@@ -198,7 +204,7 @@ def test_another_accounts_stale_receipt_still_refuses_a_default_launch(accounts)
 
     with pytest.raises(AccountAdmissionError) as refused:
         require_launch("codex", account_id=legacy["id"], frozen=True, model=MODEL,
-                       launch=LaunchHomes(legacy["id"], False), receipt=foreign, db=db)
+                       launch=homes_for(legacy), receipt=foreign, db=db)
     assert refused.value.reason == "account_login_unverified"
 
 
@@ -252,27 +258,28 @@ def test_a_second_login_still_ages_the_first_login_evidence(accounts):
     assert _reason(db, second["id"]) == "account_model_not_discovered"
 
 
-def test_a_genuinely_changed_default_login_still_refuses_the_old_turn(accounts):
+def test_a_second_default_login_still_refuses_the_old_turn(accounts):
     from connections.account_policy import AccountAdmissionError, require_launch
     from connections.account_receipts import capture_receipt
-    from connections.account_runtime import LaunchHomes
-    from connections.vendor_accounts import record_default_identity
+    from connections.account_runtime import homes_for
+    from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import signed_in_default
 
     db, legacy, _, _ = accounts
-    record_default_identity("codex", {"account_fp": "fp-one"}, db=db)
-    db.commit()
+    legacy = signed_in_default("codex", db=db, models=(MODEL,))
     captured = capture_receipt("codex", account_id=legacy["id"], db=db)
-    record_default_identity("codex", {"account_fp": "fp-two"}, db=db)
+    set_account_state(legacy["id"], "signed_in", expected_revision=_account(db, legacy["id"])["revision"], db=db)
+    signed_in_default("codex", db=db, models=(MODEL,))
     db.commit()
 
     with pytest.raises(AccountAdmissionError) as refused:
         require_launch("codex", account_id=legacy["id"], frozen=True, model=MODEL,
-                       launch=LaunchHomes(legacy["id"], False), receipt=captured, db=db)
+                       launch=homes_for(_account(db, legacy["id"])), receipt=captured, db=db)
     assert refused.value.reason == "account_login_unverified"
 
 
 def test_an_added_account_never_discovered_still_needs_its_own_evidence(accounts):
-    """The ambient bypass belongs to the built-in Default, not to any home-less row."""
+    """No account is exempt: a home-backed row with no discovery needs its own evidence."""
     from connections.account_evidence import invalidate_discovery
 
     db, _, second, _ = accounts
@@ -280,16 +287,3 @@ def test_an_added_account_never_discovered_still_needs_its_own_evidence(accounts
     db.commit()
 
     assert _reason(db, second["id"]) == "account_model_not_discovered"
-
-
-def test_an_unverified_default_login_still_refuses_its_rows(accounts):
-    from connections.vendor_accounts import record_default_identity, rename_account
-
-    db, legacy, _, _ = accounts
-    record_default_identity("codex", {}, db=db)
-    db.commit()
-    assert _reason(db, legacy["id"]) == 'account_login_unverified'
-
-    rename_account(legacy["id"], "Renamed", expected_revision=_account(db, legacy["id"])["revision"], db=db)
-    db.commit()
-    assert _reason(db, legacy["id"]) == 'account_login_unverified'

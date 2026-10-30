@@ -8,6 +8,8 @@ import pytest
 from subagents.codex_app_server import CodexAppServerSession
 from test_checkpoint_external_adapters import _target
 
+pytestmark = pytest.mark.usefixtures("admitted_writes")  # write projection, not account binding, is under test
+
 
 def target(window=131_072):
     return replace(_target("codex"), context_window=window,

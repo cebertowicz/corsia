@@ -8,6 +8,8 @@ import pytest
 
 from tests.unavailable_model_support import message_row
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 WAITING_FOR_CHOICE = ("queued", "proved_no_write", "no_model_selected", None)
 DIGEST = "context-digest:"
 

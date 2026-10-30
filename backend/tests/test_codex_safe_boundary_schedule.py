@@ -8,6 +8,8 @@ import pytest
 from infra.send_service import request_safe_boundary
 from subagents import codex_inbox_batch, codex_runtime_event_delivery as delivery
 
+pytestmark = pytest.mark.usefixtures("admitted_writes")  # the transport is under test, not account binding
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("expires", [False, True])

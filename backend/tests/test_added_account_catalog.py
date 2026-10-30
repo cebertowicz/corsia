@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vendor_account_fixtures import accounts  # noqa: F401
+from vendor_account_fixtures import accounts, signed_in_default  # noqa: F401
 from test_provider_sources import client  # noqa: F401
 
 
@@ -17,7 +17,7 @@ def _discover(db, provider, account, rows):
     from connections.account_receipts import capture_receipt
 
     receipt = capture_receipt(provider, account_id=account['id'], db=db)
-    return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None), rows,
+    return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}), rows,
         context=SimpleNamespace(receipt=receipt, account_id=account['id']), harness_version='1', db=db)
 
 
@@ -41,7 +41,8 @@ def test_fresh_added_account_lists_models_and_sources_ready(accounts, client, pr
     if provider == 'claude-code':
         account = set_account_state(account['id'], 'signed_in', expected_revision=0)
     assert _discover(db, provider, account, [_row('added-only')]).status == 'ready'
-    assert db.execute('SELECT id FROM models WHERE id=?', (provider + '/added-only',)).fetchone() is None
+    # Every signed-in account's discovery writes the rows it lists (design D3 item 5, Writer).
+    assert db.execute('SELECT id FROM models WHERE id=?', (provider + '/added-only',)).fetchone() is not None
     item = _projected(provider, 'added-only')
     runs = {entry['account_id']: entry for entry in item['runs_on']}
     assert runs[account['id']]['status'] == 'ready'
@@ -99,14 +100,14 @@ def test_provider_gate_refuses_missing_binary_and_no_added_signin(accounts):
     from connections.models import provider_may_run
     from connections.vendor_accounts import get_account, set_account_state
 
-    db, _, first, second = accounts
+    db, default, first, second = accounts
     db.execute("UPDATE connections SET status='not_installed' WHERE provider='codex'")
     db.commit()
     assert not provider_may_run('codex', db=db)
     db.execute("UPDATE connections SET status='needs_auth' WHERE provider='codex'")
     db.commit()
     assert provider_may_run('codex', db=db)
-    for account in (first, second):
+    for account in (default, first, second):  # the Default is an account like the others: no sign-in at all, no run
         current = get_account(account['id'], db=db)
         set_account_state(current['id'], 'signed_out', expected_revision=current['revision'], db=db)
     assert not provider_may_run('codex', db=db)
@@ -126,20 +127,18 @@ def test_existing_ready_discovery_is_projected_without_rediscovery(accounts):
 
 
 def test_default_and_added_accounts_keep_separate_availability(accounts):
-    from connections.harness_models import store_success
-    from connections.vendor_accounts import set_account_state
-
     db, default, account, _ = accounts
-    set_account_state(default['id'], 'signed_in', expected_revision=default['revision'], db=db)
-    store_success('codex', [_row('default-unavailable', False)], harness_version='1', source='codex_cli', timestamp='t', db=db)
-    before = dict(db.execute("SELECT * FROM models WHERE id='codex/default-unavailable'").fetchone())
+    # The Default lists the model unavailable through its own refresh, like any account.
+    _discover(db, 'codex', default, [_row('default-unavailable', False)])
+    assert db.execute("SELECT available FROM models WHERE id='codex/default-unavailable'").fetchone()[0] == 0
     _discover(db, 'codex', account, [_row('added-only'), _row('default-unavailable')])
-    assert dict(db.execute("SELECT * FROM models WHERE id='codex/default-unavailable'").fetchone()) == before
+    # The row is shared: the added account lists it available, so it is (design D3 item 5, Writer and Availability).
+    assert db.execute("SELECT available FROM models WHERE id='codex/default-unavailable'").fetchone()[0] == 1
     extra = {entry['account_id']: entry for entry in _projected('codex', 'added-only')['runs_on']}
     assert (extra[default['id']]['status'], extra[default['id']]['status_reason']) == ('unavailable', 'account_model_not_discovered')
     assert extra[account['id']]['status'] == 'ready'
     shared = {entry['account_id']: entry for entry in _projected('codex', 'default-unavailable')['runs_on']}
-    assert (shared[default['id']]['status'], shared[default['id']]['status_reason']) == ('unavailable', 'account_runtime_pending')
+    assert (shared[default['id']]['status'], shared[default['id']]['status_reason']) == ('unavailable', 'discovered_model_unavailable')
     assert shared[account['id']]['status'] == 'ready'
 
 
@@ -168,7 +167,7 @@ def test_added_only_model_resolves_and_binds_with_default_signed_out(accounts, p
     db, default, account, _ = accounts
     if provider == 'claude-code':
         upsert_connection(type='cli', provider=provider, status='available', config={'binary': '/bin/test'})
-        default = next(item for item in list_accounts(provider=provider, db=db) if item['is_default'])
+        default = signed_in_default(provider, db=db)
         account = add_account(provider, 'Added')
         account = set_account_state(account['id'], 'signed_in', expected_revision=account['revision'])
     db.execute("UPDATE connections SET status='needs_auth' WHERE provider=?", (provider,))
@@ -213,7 +212,7 @@ def test_superseded_discovery_never_projects_rows(accounts):
     db, _, account, _ = accounts
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     set_account_state(account['id'], 'signed_out', expected_revision=account['revision'])
-    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
+    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
         [_row('stale')], context=SimpleNamespace(receipt=receipt, account_id=account['id']),
         harness_version='1', db=db)
     assert result.cause == 'account_refresh_superseded'

@@ -94,6 +94,13 @@ async def _preadmitted_input(thread_id: str, text: str, kwargs: dict) -> dict:
     return kwargs
 
 
+def _own_home(home) -> None:
+    """The directory a test launches in is the signed-in Default's home: an account's launch uses no other."""
+    from tests.vendor_account_fixtures import point_default_home
+
+    point_default_home("claude-code", home)
+
+
 async def feed_main_with_persisted_input(
     thread_id: str,
     text: str,
@@ -106,6 +113,8 @@ async def feed_main_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)
@@ -123,6 +132,8 @@ async def feed_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)
@@ -141,6 +152,8 @@ async def ensure_live_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)

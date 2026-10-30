@@ -655,8 +655,17 @@ def test_unread_catalog_account_head_notifies_once_with_fixed_fallback(held_work
     prior = tuple(db.execute("SELECT content,input_order,active_turn_id,delivery_state,"
                              "write_outcome,delivery_error FROM messages WHERE id='brief'").fetchone())
     assert prior[2:] == (None, 'queued', 'proved_no_write', 'account_model_not_discovered')
-    # Actual stored catalog loss, not a patched readiness result or admission owner.
+    # Actual stored catalog loss, not a patched readiness result or admission owner: the model is in
+    # neither the stored rows nor any account's discovery (the catalog is projected from the accounts').
     db.execute("DELETE FROM models WHERE id='codex/test'")
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import list_accounts
+
+    for account in list_accounts(provider='codex', db=db):
+        receipt = capture_receipt('codex', account_id=account['id'], db=db)
+        if receipt is not None:
+            assert mark_discovery(account['id'], receipt=receipt, status='ready', models={}, db=db)
     db.commit()
     assert stalled_why(db, 'worker') == 'account'
     assert read_account_readiness(['worker'], db=db) == {}
@@ -848,7 +857,10 @@ def test_signed_out_default_refuses_claim_without_changing_lifecycle(accounts):
     from connections.account_policy import AccountAdmissionError, require_claim
     from connections.vendor_accounts import get_account
 
+    from connections.vendor_accounts import set_account_state
+
     db, default, _, _ = accounts
+    set_account_state(default['id'], 'signed_out', expected_revision=default['revision'], db=db)
     with pytest.raises(AccountAdmissionError) as refused:
         require_claim('codex', thread_id='destination', model='codex/test', account_id=default['id'], db=db)
     assert refused.value.reason == 'account_signed_out'

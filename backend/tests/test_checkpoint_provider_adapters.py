@@ -18,8 +18,11 @@ from core.fork_fit import ColdFoldInput
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from llm.router import LLMResponse, ToolCallRequest
-from vendor_account_fixtures import default_receipt
+from vendor_account_fixtures import default_home, default_receipt
 from native_checkpoint_fixtures import cold_source, seed_vendor_checkpoint_thread
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
 
 
 def _target(harness: str = "native") -> ExecutionTarget:
@@ -602,7 +605,7 @@ async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypa
         "thread-1", _boundary(), "source-session", str(transcript),
         transcript.stat().st_size, hashlib.sha256(transcript.read_bytes()).hexdigest(),
         ClaudeInvocation("claude", "bypassPermissions", working_dir="/work/source"),
-        None, "restored seed", vendor_account_receipt=default_receipt("claude-code"),
+        default_home("claude-code"), "restored seed", vendor_account_receipt=default_receipt("claude-code"),
     )
     observed = {}
 

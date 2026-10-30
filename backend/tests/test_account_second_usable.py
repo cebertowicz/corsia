@@ -20,7 +20,7 @@ from connections.account_policy import chosen_account_id, select_account, set_po
 from connections.account_receipts import capture_receipt
 from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, list_accounts, set_account_state
-from vendor_account_fixtures import accounts, default_receipt  # noqa: F401
+from vendor_account_fixtures import accounts, default_receipt, signed_in_default  # noqa: F401
 
 VENDORS = ("codex", "claude-code")
 LIMIT = dict(reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update")
@@ -41,6 +41,7 @@ def _vendor(db, provider):
     db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
                "VALUES (?,'user',?,'destination-project','t','t')", (thread, model))
     db.commit()
+    signed_in_default(provider, db=db, models=(model,))  # the workspace Default, an account like the others
     first, second = (set_account_state(add_account(provider, name)["id"], "signed_in", expected_revision=0)
                      for name in ("First", "Second"))
     if provider == 'codex':
@@ -323,7 +324,7 @@ async def test_a_held_head_moves_when_its_destination_finishes_discovery(account
     harness_usage.record_allowed(provider=provider, source="rate_limit_update", receipt=receipt, db=db)
 
     admitted = await _held_then_destination_usable(db, monkeypatch, v, lambda: commit_discovery_bundle(
-        provider, SimpleNamespace(usage_report=None, cache_stage=None), [{"selector_id": "test", "available": True}],
+        provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}), [{"selector_id": "test", "available": True}],
         context=SimpleNamespace(receipt=receipt, account_id=v.second["id"]), harness_version="test", db=db))
 
     batch = admitted.await_args.args[0]

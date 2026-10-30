@@ -2060,7 +2060,7 @@ async def test_setup_recovers_after_first_discovery_fails(scripted_vendor_clis, 
             return AccountRefreshResult(provider, kwargs['account_id'], status='failed')
         from connections.account_discovery_commit import commit_discovery_bundle
         from infra.db_async import run_in_db
-        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
             [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
             context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
             harness_version='1')
@@ -2112,7 +2112,7 @@ async def test_repeat_unchecked_signin_rechecks_existing_account(scripted_vendor
         from connections.account_discovery_commit import commit_discovery_bundle
         from infra.db_async import run_in_db
 
-        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None),
+        return await run_in_db(commit_discovery_bundle, provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
             [{'selector_id': 'rechecked', 'available': True, 'context_window': 200000}],
             context=SimpleNamespace(receipt=kwargs['expected_receipt'], account_id=kwargs['account_id']),
             harness_version='1')

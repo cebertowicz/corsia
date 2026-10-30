@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 async def _stale_pass() -> None:
     """Run the request-path stale check and wait for it to settle."""
@@ -50,11 +52,13 @@ def _seed_claude_connection(monkeypatch, *, context_payloads: list[bool]) -> lis
     )
     discoveries: list[str] = []
 
-    async def _discover(binary: str) -> dict:
-        discoveries.append(binary)
-        return _claude_payload(with_context=context_payloads[len(discoveries) - 1])
+    async def _discover(binary: str, context=None):
+        from connections.account_discovery_types import StagedDiscovery
 
-    async def _version(_binary: str) -> str:
+        discoveries.append(binary)
+        return StagedDiscovery(payload=_claude_payload(with_context=context_payloads[len(discoveries) - 1]))
+
+    async def _version(_binary: str, env=None) -> str:
         return "2.1.268"
 
     # Claude Code is the only harness here: the shared fixture seeds Codex as
@@ -231,7 +235,7 @@ async def test_failed_discovery_keeps_existing_failure_backoff(isolated_db, monk
 
     discoveries = _seed_claude_connection(monkeypatch, context_payloads=[True])
 
-    async def _fail(binary: str) -> dict:
+    async def _fail(binary: str, context=None) -> dict:
         discoveries.append(binary)
         raise RuntimeError("Claude Code list_models timed out")
 
@@ -244,9 +248,8 @@ async def test_failed_discovery_keeps_existing_failure_backoff(isolated_db, monk
     await _stale_pass()
     await _stale_pass()
     assert discoveries == ["/bin/claude"]
-    assert harness_models.read_discovery_envelope("claude-code")["last_error"] == (
-        "Claude Code list_models timed out"
-    )
+    # The adapter's raw diagnostic is never stored on account evidence: the envelope keeps its cause.
+    assert harness_models.read_discovery_envelope("claude-code")["last_error"] == "account_discovery_failed"
 
     _age_last_attempt(minutes=6)
     await _stale_pass()

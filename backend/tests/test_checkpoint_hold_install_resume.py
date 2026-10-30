@@ -20,6 +20,12 @@ from core.fork_types import (
 from core.checkpoint_types import CheckpointRequest
 from core.turn_core import TurnIdentity
 from codex_process_fixtures import bind_process_group
+from tests.cc_runtime_fixtures import cc_target
+from tests.vendor_account_fixtures import point_default_home
+from tests.vendor_account_fixtures import signed_in_default as _signed_in_default
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"claude-code": (cc_target().catalog_id,), "codex": ("codex/gpt-5-codex",)}
 
 
 class _Pipe:
@@ -66,6 +72,22 @@ async def _reach_wait(task, waiting):
         await asyncio.gather(waiter, return_exceptions=True)
 
 
+def _default_account(db, tmp_path, model) -> None:
+    """The signed-in Default lists ``model`` and holds the published catalog its launch is governed by."""
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.model_cache_stage import ModelCacheStage
+
+    account = _signed_in_default("codex", db=db, models=(model,))
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"models": [{"slug": "gpt-5-codex", "multi_agent_version": None}]}))
+    cache = ModelCacheStage.prepare(catalog, Path(account["runtime_home"]) / "models_cache.json").promote()
+    receipt = capture_receipt("codex", account_id=account["id"], db=db)
+    assert mark_discovery(account["id"], receipt=receipt, status="ready",
+                          models={model: {"available": True}}, cache_receipt=cache, db=db)
+    db.commit()
+
+
 def _seed(db, model):
     from test_checkpoint_external_resume import _seed_completed_turn_without_current_input
 
@@ -94,6 +116,11 @@ def _seed(db, model):
         [(mid, role, content, json.dumps(meta), seq) for mid, role, content, meta, seq in rows],
     )
     db.execute("UPDATE threads SET next_message_seq=11 WHERE id='held-thread'")
+    # The resumed launch freezes the current Turn's login: stamp its input like a real claim.
+    db.execute("UPDATE messages SET active_turn_id='turn-current' WHERE id='u8'")
+    from infra.vendor_login import stamp_initial_claim
+
+    assert stamp_initial_claim(db, "turn-current", "u8") is not None
     db.commit()
 
 
@@ -152,13 +179,9 @@ async def test_cc_held_turn_installs_checkpoint_and_resumes_or_stops_independent
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda *_a, **_k: target)
     monkeypatch.setattr("subagents.codex_runtime_support.resolve_working_dir", lambda *_: str(tmp_path))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    # An added account resumes in its own config home, never the Default root.
+    # The resumed session runs in the account's own config home, never an ambient root.
     root = tmp_path / ("added-home" if added_account else "claude")
-    if added_account:
-        from connections import account_runtime
-
-        monkeypatch.setattr(account_runtime, "launch_homes", lambda account_id, *, db=None:
-            account_runtime.LaunchHomes("added", True, claude_dir=str(root)))
+    point_default_home("claude-code", root)
     db = get_db()
     _seed(db, target.catalog_id)
     register_cc_session("held-thread", "old-provider", checkpoint_generation_id="floor", db=db)
@@ -177,7 +200,10 @@ async def test_cc_held_turn_installs_checkpoint_and_resumes_or_stops_independent
     launches = []
 
     async def start(session):
+        from subagents.vendor_write_admission import prepare_session_launch
+
         assert session is not old_session
+        prepare_session_launch(session, "claude-code")  # the real start binds the account before it spawns
         session._proc = _Process()
         launches.append(session)
 
@@ -301,19 +327,10 @@ async def test_codex_held_turn_installs_checkpoint_and_resumes_or_stops_independ
     from subagents.harness_checkpoint_resume import maintain_external_tool_boundary
 
     target = replace(resolve_execution_target("codex/gpt-5-codex"), context_window=32768)
-    source_home = tmp_path / "codex-source"
-    source_home.mkdir()
-    (source_home / "auth.json").write_text(json.dumps({
-        "auth_mode": "chatgpt", "OPENAI_API_KEY": None,
-        "tokens": {"access_token": "synthetic-fixture-only"},
-    }))
-    (source_home / "models_cache.json").write_text(json.dumps({
-        "models": [{"slug": "gpt-5-codex", "multi_agent_version": None}],
-    }))
-    monkeypatch.setenv("CODEX_HOME", str(source_home))
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda *_a, **_k: target)
     monkeypatch.setattr("subagents.codex_runtime_support.resolve_working_dir", lambda *_: str(tmp_path))
     db = get_db()
+    _default_account(db, tmp_path, target.catalog_id)
     _seed(db, target.catalog_id)
     register_codex_thread("held-thread", "old-provider", checkpoint_generation_id="floor", db=db)
     db.commit()

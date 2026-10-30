@@ -790,8 +790,11 @@ class TestAppServerInterruptConfirmation:
     ):
         import asyncio
 
+        from subagents import vendor_write_admission
         from subagents.codex_app_server import CodexAppServerSession
 
+        # Spawn ordering is under test, not account binding (proved in test_account_operations_homes).
+        monkeypatch.setattr(vendor_write_admission, "prepare_session_launch", lambda *_args: None)
         spawn_entered = asyncio.Event()
         release_spawn = asyncio.Event()
         process = MagicMock(returncode=None)

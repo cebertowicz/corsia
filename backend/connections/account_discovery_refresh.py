@@ -48,7 +48,7 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
                     'resolved_identity': row.get('resolved_identity') or '',
                     'display_name': row.get('display_name') or key.partition('/')[2]}
                     for key, row in prior.items()]
-                await add_accepted_unlisted(staged.payload, previous,
+                staged.unlisted_errors = await add_accepted_unlisted(staged.payload, previous,
                     lambda selector: _discover_claude_context(binary, selector, context=context))
             rows = normalize(staged.payload, harness_version=version,
                              timestamp=datetime.now(timezone.utc).isoformat())

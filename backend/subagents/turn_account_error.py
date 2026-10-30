@@ -1,13 +1,13 @@
-"""A lost sign-in on the added account a Turn ran on signs out the login that Turn captured."""
+"""A lost sign-in on the account a Turn ran on signs out the login that Turn captured."""
 from __future__ import annotations
 
 
 def sign_out_turn_login(turn_id: str | None, provider: str, *, db=None, include_account: bool = False):
-    """Whether the Turn ran on an added ``provider`` account; if so, sign out the login it captured.
+    """Whether the Turn ran on a ``provider`` account; if so, sign out the login it captured.
 
     The Turn's login receipt is the fence: a sign-in made after the Turn started is a
-    newer login this error says nothing about, so it is left signed in. An added account
-    always stamps a receipt when its Turn is claimed, so no receipt means the Default.
+    newer login this error says nothing about, so it is left signed in. Every account
+    stamps a receipt when its Turn is claimed, so no receipt means no account ran it.
     """
     if not turn_id:
         return False

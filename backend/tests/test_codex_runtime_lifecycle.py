@@ -19,6 +19,8 @@ from codex_runtime_fixtures import (
     _seed_runtime_sessions,
 )
 
+DISCOVERED_MODELS = {"codex": ("codex/gpt-5-codex",)}
+
 
 def _successor_turn_id() -> str:
     return str(uuid4())
@@ -2247,7 +2249,7 @@ class TestStop:
 
         assert _run(stop("not-live-sess")) is False
 
-    def test_stop_kills_active_app_server_turn(self, isolated_db):
+    def test_stop_kills_active_app_server_turn(self, isolated_db, signed_in_defaults):
         from subagents import codex_runtime
 
         mock_session = _make_mock_app_session("thread_stop")

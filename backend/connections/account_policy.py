@@ -243,7 +243,7 @@ def admit_account(provider, identity, projects, *, execution, model=None, db):
                             execution=execution, model=model, db=db)
     if reason:
         alternatives = [public_account(item) for item in permitted_accounts(provider, project_ids=projects, db=db)
-                        if item["state"] in ("legacy", "signed_in")]
+                        if item["state"] == "signed_in"]
         raise AccountAdmissionError(reason, alternatives)
     return identity
 
@@ -317,7 +317,7 @@ def require_launch(provider: str, *, thread_id: str | None = None, account_id: s
         identity, projects = _write_choice(provider, thread_id, account_id, turn_id, actor_thread_id, frozen, db=connection)
         admit_account(provider, identity, projects, execution=False, db=connection)
         account = get_account(identity, db=connection) if identity is not None else None
-        if account is not None and account['source_home'] is not None and launch is None:
+        if account is not None and launch is None:
             raise AccountAdmissionError(RUNTIME_PENDING)
         admit_account(provider, identity, projects, execution=True, model=model, db=connection)
         if launch is not None:

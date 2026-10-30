@@ -8,6 +8,8 @@ import pytest
 
 from shared_send_fixtures import prepared_context_with_fit_ledger
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _target(harness: str, selector: str, expected: str | None = None):
     from llm.resolution import ExecutionTarget

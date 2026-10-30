@@ -286,7 +286,9 @@ def test_cc_reviewer_uses_conversation_project_control(
     assert invoke_cc_subagent(
         "review", str(tmp_path), model="opus", source_git_dir=git_dir,
         base_sha=_BASE_SHA, head_sha=_HEAD_SHA,
-        env={"ANTHROPIC_BASE_URL": "https://provider.example.test"},
+        # A reviewer runs inside its account's home; there is no ambient ~/.claude root to fall back on.
+        env={"ANTHROPIC_BASE_URL": "https://provider.example.test",
+             "CLAUDE_CONFIG_DIR": str(tmp_path / "account-home")},
     ) == "[]"
 
     cmd = mock_run.call_args.args[0]
