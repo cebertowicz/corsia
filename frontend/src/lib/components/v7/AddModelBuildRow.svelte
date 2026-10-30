@@ -9,6 +9,8 @@
 		build: LocalModelRecommendation;
 		recommended: boolean;
 		running: boolean;
+		/** The bytes are on disk and CORSIA is adding the model: no Cancel. */
+		finishing: boolean;
 		percent: number;
 		failed: boolean;
 		downloaded: boolean;
@@ -20,7 +22,7 @@
 		onCancel: () => void;
 		onDelete: () => void;
 	}
-	const { group, build, recommended, running, percent, failed, downloaded, busy, pendingAction, otherRunning, error, onDownload, onCancel, onDelete }: Props = $props();
+	const { group, build, recommended, running, finishing, percent, failed, downloaded, busy, pendingAction, otherRunning, error, onDownload, onCancel, onDelete }: Props = $props();
 	const buildName = $derived(build.repository.split('/').at(-1)?.match(/(oQ[\d.]+e(?:-mtp)?|mlx-[\w.]+)$/i)?.[0] ?? '');
 	const size = $derived(typeof build.download_size_gb === 'number' ? `${Math.round(build.download_size_gb)} GB` : '');
 	const speed = $derived(build.tokens_per_second == null ? '' : `~${Math.round(build.tokens_per_second)} tokens/s`);
@@ -41,14 +43,14 @@
 		{#if build.section && build.section !== 'best'}
 			<div class="detail">oMLX: {build.section} list{build.quantization_bits ? ` · ${build.quantization_bits}-bit` : ''}{build.table_on_ssd && build.table_bytes ? ` · ${Math.round(build.table_bytes / 1000 ** 3)} GB on disk while running` : ''}</div>
 		{/if}
-		{#if running}<div class="progress" role="status"><Spinner /> Downloading {percent}%</div>{/if}
+		{#if running}<div class="progress" role="status"><Spinner /> {finishing ? 'Loading on this computer…' : `Downloading ${percent}%`}</div>{/if}
 		{#if failed}<div class="error">{downloaded ? 'Downloaded, but couldn’t be added. Retry to finish adding it.' : 'Couldn’t download this model.'}</div>{/if}
 		{#if need && !build.on_disk && !running && !failed}<div class="detail">{need}</div>{/if}
 		{#if error}<div class="error" role="alert">{error}</div>{/if}
 	</div>
 	<div class="actions">
 		{#if running}
-			<Button size="sm" variant="ghost" ariaLabel={`Cancel download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'cancel'} onclick={onCancel}>Cancel</Button>
+			{#if !finishing}<Button size="sm" variant="ghost" ariaLabel={`Cancel download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'cancel'} onclick={onCancel}>Cancel</Button>{/if}
 		{:else if failed}
 			<Button size="sm" variant="ghost" ariaLabel={`Retry download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'start'} onclick={onDownload}>Retry</Button>
 			<Button size="sm" variant="ghost" ariaLabel={`Delete download of ${group.name} ${buildName}`} disabled={busy} loading={pendingAction === 'delete'} onclick={onDelete}>Delete download</Button>

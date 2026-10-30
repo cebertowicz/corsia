@@ -31,7 +31,9 @@
 	let confirmDelete = $state<{ model: ProviderModel; size: string } | null>(null);
 	let stop: (() => void) | null = null;
 	const groups = $derived(modelGroups(data?.models ?? [], sort, data?.recommended_repository ?? null));
-	const running = $derived(Boolean(download && !download.failed && !download.finishing));
+	// A finishing download is still in flight (CORSIA is adding it) but can no longer be cancelled.
+	const inFlight = $derived(Boolean(download && !download.failed));
+	const running = $derived(inFlight && !download?.finishing);
 	const runningListed = $derived(groups.some((group) => group.builds.some((build) => build.repository === download?.repository)));
 
 	async function refreshList() {
@@ -118,7 +120,7 @@
 	{:else if error}
 		<div class="notice error" role="alert">{error}<Button size="sm" variant="secondary" onclick={retryable ? load : openSettings}>{retryable ? 'Retry' : 'Open settings'}</Button></div>
 	{:else}
-		{#if running}<div class="notice" role="status">{download?.name ?? 'A model'} is downloading. {#if !runningListed}<Button size="sm" variant="ghost" disabled={busy} loading={pending?.action === 'cancel'} onclick={cancel}>Cancel</Button>{/if}</div>{/if}
+		{#if inFlight}<div class="notice" role="status">{download?.name ?? 'A model'} is downloading. {#if running && !runningListed}<Button size="sm" variant="ghost" disabled={busy} loading={pending?.action === 'cancel'} onclick={cancel}>Cancel</Button>{/if}</div>{/if}
 		{#if groups.length === 0}
 			<div class="notice">No recommended models fit this computer.</div>
 		{:else}
@@ -137,9 +139,9 @@
 								<h3>{group.name}</h3>
 								{#each group.builds as build (build.repository)}
 									<AddModelBuildRow {group} {build} recommended={data?.recommended_repository === build.repository}
-										running={running && download?.repository === build.repository} percent={download?.percent ?? 0}
+										running={inFlight && download?.repository === build.repository} finishing={Boolean(download?.finishing)} percent={download?.percent ?? 0}
 										failed={Boolean(download?.failed && download.repository === build.repository)} downloaded={Boolean(download?.downloaded)}
-										{busy} pendingAction={pending?.repository === build.repository ? pending.action : null} otherRunning={running} error={rowError?.repository === build.repository ? rowError.message : ''}
+										{busy} pendingAction={pending?.repository === build.repository ? pending.action : null} otherRunning={inFlight} error={rowError?.repository === build.repository ? rowError.message : ''}
 										onDownload={() => void start(build.repository)} onCancel={() => void cancel()} onDelete={() => deleteBuild(build)} />
 								{/each}
 							</section>

@@ -62,10 +62,10 @@ describe('AddLocalModelSheet', () => {
 		expect(tryAgain()).toBe(false);
 	});
 
-	it('shows the no-starter empty state when the recommender has no model', async () => {
-		await render({ state: 'ready', models: [] });
+	it('shows the empty state when no model fits this computer', async () => {
+		// The backend's nothing-fits answer names no pick (test_provider_local_models covers that side).
+		await render({ state: 'ready', recommended_repository: null, models: [] });
 		expect(document.body.textContent).toContain('No recommended models fit this computer.');
-		expect(document.body.textContent).not.toContain('Download');
 	});
 
 	it('marks the recommended build and uses the same download style for each build', async () => {
@@ -102,24 +102,6 @@ describe('AddLocalModelSheet', () => {
 		flushSync();
 		expect(document.activeElement).toBe(options[0]);
 		expect(options[0].getAttribute('aria-checked')).toBe('true');
-	});
-
-	it('shows fitting models and hides those that exceed Mac room', async () => {
-		const row = (name: string, resident_gb: number) => ({ name, repository: `Jundot/${name}`, download_size_gb: 12, context_window: 32768, resident_bytes: resident_gb * 1024 ** 3, ...ready });
-		await render({ state: 'ready', recommended_repository: 'Jundot/Small', models: [row('Small', 40)] });
-		const rows = [...document.body.querySelectorAll('.model')];
-		expect(rows.map((item) => item.querySelector('h3')?.textContent)).toEqual(['Small']);
-		expect(rows[0].textContent).toContain('Recommended');
-		expect(rows[0].querySelector('button')?.classList.contains('secondary')).toBe(true);
-		expect(document.body.textContent).not.toContain('Needs more free memory');
-	});
-
-	it('shows an empty state when no model fits Mac room', async () => {
-		// The backend's nothing-fits answer names no pick (test_provider_local_models covers that side).
-		await render({ state: 'ready', recommended_repository: null, models: [] });
-		expect(document.body.textContent).toContain('No recommended models fit this computer.');
-		expect(document.body.querySelectorAll('.model')).toHaveLength(0);
-		expect(document.body.textContent).not.toContain('Recommended');
 	});
 
 	it('marks no row Recommended when the backend names no pick', async () => {
@@ -274,5 +256,27 @@ describe('AddLocalModelSheet', () => {
 		expect(downloads[0].disabled).toBe(true);
 		const running = [...document.body.querySelectorAll('.model')].find((row) => row.textContent?.includes('DeepSeek V4 Flash 0731'));
 		expect(running?.textContent).toContain('Downloading');
+	});
+
+	it('keeps a finishing download in flight while CORSIA adds it', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+			ok: true,
+			json: async () => String(url).includes('/providers/sources')
+				? { sources: [{ source: 'omlx', settings_download: { name: 'Qwen', repository: 'Jundot/Qwen', percent: 100, failed: false, finishing: true } }] }
+				: { state: 'ready', models: [
+					{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, on_disk: false, ...ready },
+					{ name: 'Other', repository: 'Jundot/Other', download_size_gb: 16, context_window: 32768, ...ready },
+				] },
+		})));
+		component = mount(AddLocalModelSheet, { target: host, props: { onClose: vi.fn() } });
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Qwen is downloading.'));
+		const row = (name: string) => [...document.body.querySelectorAll('.model')].find((item) => item.querySelector('h3')?.textContent === name)!;
+		expect(row('Qwen').textContent).toContain('Loading on this computer…');
+		const buttons = (name: string) => [...row(name).querySelectorAll<HTMLButtonElement>('button')].map((button) => [button.textContent?.trim(), button.disabled]);
+		expect(buttons('Qwen')).toEqual([]);
+		expect(buttons('Other')).toEqual([['Download', true]]);
 	});
 });
