@@ -323,6 +323,17 @@ def attach_plan_result(db, result: object, thread_id: str, direct_node: bool) ->
         attach_at_start(db, result, thread_id=thread_id, node_id=node_id)
 
 
+def _runs_the_task(db: sqlite3.Connection, thread_id: str, node_id: str) -> bool:
+    """Whether Plans attributes this task to the caller, or the caller is the worker doing this workflow step."""
+    from plans.public import attributed_selection
+
+    selected = attributed_selection(db, thread_id)
+    if selected is not None and str(selected["node_id"]) == node_id:
+        return True
+    node = db.execute("SELECT spawned_thread_id, workflow_step FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
+    return node is not None and node["workflow_step"] is not None and node["spawned_thread_id"] == thread_id
+
+
 def attach_at_start(
     db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
@@ -332,14 +343,14 @@ def attach_at_start(
     Never to a plan wake: a wake can be dropped as stale before any Turn reads
     it, and a receipt for guidance never seen would miscount both arms.
 
-    Only the task Plans still attributes to the caller receives guidance. A
-    failure never fails the plan operation; it is reported in ``facts``.
+    Only the task Plans still attributes to the caller receives guidance, or a
+    workflow step delegated to the caller: a worker starts nothing, so its
+    first read of the step is its start, and that read is a reply a Turn
+    received. A failure never fails the plan operation; it is reported in
+    ``facts``.
     """
-    from plans.public import attributed_selection
-
     try:
-        selected = attributed_selection(db, thread_id)
-        if selected is None or str(selected["node_id"]) != node_id:
+        if not _runs_the_task(db, thread_id, node_id):
             return
         trials = start_trials(
             db, thread_id=thread_id, node_id=node_id,
