@@ -371,7 +371,7 @@ async def invoke_fork(
         raise asyncio.CancelledError
     cold_input = None
     if source is None:
-        source_home = Path(request.vendor_launch.codex_source or request.vendor_launch.warm_home)
+        source_home = Path(request.vendor_launch.codex_source)
         cwd = request.working_dir
         request, cold_input = await asyncio.to_thread(_fit_cold_request, request, cwd, kind=kind)
         if on_cold_input is not None:

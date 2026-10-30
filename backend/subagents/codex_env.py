@@ -267,10 +267,9 @@ def build_session_env(session) -> dict[str, str]:
                 isolated_home=Path(session.codex_home),
                 govern_model_catalog=not session.control_only,
                 confined=getattr(session, "confined", False),
-                **({'projection_receipt': session.vendor_account_receipt,
-                    'catalog_source': getattr(session, 'vendor_catalog_source', None),
-                    'cache_receipt': getattr(session, 'vendor_cache_receipt', None)}
-                   if getattr(session, 'vendor_account_custom', False) else {}),
+                projection_receipt=getattr(session, 'vendor_account_receipt', None),
+                catalog_source=getattr(session, 'vendor_catalog_source', None),
+                cache_receipt=getattr(session, 'vendor_cache_receipt', None),
             )
         )
     raise RuntimeError('account_home_missing')

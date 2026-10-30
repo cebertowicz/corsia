@@ -1143,18 +1143,16 @@ async def test_actual_runtime_stop_cancels_turn_after_concrete_home_failure(vend
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
-@pytest.mark.parametrize('destination,source', [('default','custom'), ('custom','default'), ('x','y')])
+@pytest.mark.parametrize('destination,source', [('custom','default'), ('x','y')])
 def test_cross_account_warm_home_refuses_before_copy(tmp_path, provider, destination, source):
     expected = str(tmp_path / destination)
-    custom = destination != 'default'
-    launch = LaunchHomes(None if not custom else destination, custom,
-        claude_dir=expected if provider == 'claude-code' and custom else None,
+    launch = LaunchHomes(destination,
+        claude_dir=expected if provider == 'claude-code' else None,
         # An added Codex account logs in on ``codex_source`` and transcripts on
         # ``codex_runtime``, and ``homes_for`` refuses them equal: only the
         # transcript home can hold its warm rollout.
-        codex_source=str(tmp_path / destination / 'login') if provider == 'codex' and custom else None,
-        codex_runtime=expected if provider == 'codex' and custom else None,
-        warm_home=expected if not custom else None)
+        codex_source=str(tmp_path / destination / 'login') if provider == 'codex' else None,
+        codex_runtime=expected if provider == 'codex' else None)
     request = SimpleNamespace(warm_source=object(), vendor_launch=launch)
     with pytest.raises(WarmForkUnusable, match='warm_fork_home_mismatch'):
         require_same_operation_home(request, str(tmp_path / source))
@@ -1179,7 +1177,7 @@ def test_added_account_warm_home_is_where_its_own_transcript_lives(vendors, tmp_
     request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider),
         'instruction', None, str(tmp_path), warm_source=SimpleNamespace(vendor_account_receipt=receipt),
         vendor_account_id=row['id'], vendor_account_bound=True))
-    assert request.vendor_launch.custom and request.vendor_account_receipt == receipt
+    assert request.vendor_account_receipt == receipt
     # Claude has one explicit config home; Codex transcripts under its runtime home.
     transcript = row['source_home'] if provider == 'claude-code' else row['runtime_home']
     foreign = row['runtime_home'] if provider == 'claude-code' else row['source_home']

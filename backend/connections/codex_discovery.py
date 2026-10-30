@@ -91,7 +91,6 @@ async def discover_codex_models(binary: str, *, context=None):
         )
         session.vendor_account_id = context.account_id
         session.vendor_account_bound = True
-        session.vendor_account_custom = True
         session.vendor_account_receipt = context.receipt
         session.vendor_discovery_staged = True
         session.vendor_staged_rate_updates = []

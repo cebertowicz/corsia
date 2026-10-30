@@ -142,7 +142,7 @@ def _launched(session, provider, turn_id):
         session.codex_home, session.source_codex_home = homes.codex_runtime, homes.codex_source
         ensure_projection(receipt, home=homes.codex_runtime, kind="live", owner_turn_id=turn_id)
     session.vendor_account_id, session.vendor_account_receipt = account["id"], receipt
-    session.vendor_account_bound, session.vendor_account_custom = True, True
+    session.vendor_account_bound = True
     session.vendor_catalog_model = MODELS[provider]
     return session
 

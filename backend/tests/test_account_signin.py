@@ -1868,9 +1868,14 @@ async def test_account_catalog_usage_leaves_other_accounts_alone(
     releases, _stops, scheduled = _observe(monkeypatch)
 
     if reading == 'write_failed':
-        with pytest.raises(OSError, match='usage write failed'):
-            await harness_models.refresh_provider('claude-code', reason='manual', account_id=default['id'])
-        assert harness_usage.stored_usage(provider='claude-code', account_id=default['id']) == usage_before
+        # Dev's usage-write rule (restored): a failed usage write is logged by type and never
+        # undoes the discovery; the readings were marked stale first, so the old reading is
+        # not left standing as a verified meter and the new 20% is not applied.
+        result = await harness_models.refresh_provider('claude-code', reason='manual', account_id=default['id'])
+        assert result.status == 'ready'
+        after = harness_usage.stored_usage(provider='claude-code', account_id=default['id'])
+        assert usage_before['windows']['claude-code:five_hour:account']['used_percent'] == 100
+        assert 'used_percent' not in after['windows']['claude-code:five_hour:account']
         assert releases == []
     else:
         result = await harness_models.refresh_provider('claude-code', reason='manual', account_id=default['id'])

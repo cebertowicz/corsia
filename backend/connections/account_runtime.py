@@ -14,12 +14,10 @@ from connections.vendor_accounts import get_account
 @dataclass(frozen=True, slots=True)
 class LaunchHomes:
     account_id: str | None
-    custom: bool
     claude_dir: str | None = None
     codex_source: str | None = None
     codex_runtime: str | None = None
     isolated: bool = False
-    warm_home: str | None = None
 
 
 def homes_for(account: dict) -> LaunchHomes:
@@ -29,10 +27,10 @@ def homes_for(account: dict) -> LaunchHomes:
         raise AccountAdmissionError('account_home_mismatch')
     if account['provider'] == 'claude-code':
         # Claude uses its explicit config/source root; runtime_home is unused.
-        return LaunchHomes(str(account['id']), True, claude_dir=str(account['source_home']))
+        return LaunchHomes(str(account['id']), claude_dir=str(account['source_home']))
     if account['runtime_home'] is None or account['runtime_home'] == account['source_home']:
         raise AccountAdmissionError('account_home_mismatch')
-    return LaunchHomes(str(account['id']), True, codex_source=str(account['source_home']),
+    return LaunchHomes(str(account['id']), codex_source=str(account['source_home']),
                        codex_runtime=str(account['runtime_home']))
 
 
@@ -78,12 +76,11 @@ def is_operation_session(session) -> bool:
 
 def session_homes(session, provider: str, account: dict | None) -> LaunchHomes:
     """Describe the process's actual paths, never fill missing paths from current choice."""
-    return LaunchHomes(account['id'] if account else None, bool(account and account['source_home']),
+    return LaunchHomes(account['id'] if account else None,
                        claude_dir=getattr(session, 'claude_dir', None) if provider == 'claude-code' else None,
                        codex_source=getattr(session, 'source_codex_home', None) if provider == 'codex' else None,
                        codex_runtime=getattr(session, 'codex_home', None) if provider == 'codex' else None,
-                       isolated=is_operation_session(session),
-                       warm_home=getattr(session, 'vendor_warm_home', None))
+                       isolated=is_operation_session(session))
 
 
 def _same_path(left, right):
@@ -96,8 +93,8 @@ def validate_launch(account: dict | None, *, launch: LaunchHomes, receipt: Recei
         raise AccountAdmissionError('account_home_mismatch')
     if account is None or not account['source_home']:
         raise AccountAdmissionError('account_home_mismatch')
-    if not launch.custom or model is None:
-        raise AccountAdmissionError('account_home_mismatch' if not launch.custom else 'account_model_not_discovered')
+    if model is None:
+        raise AccountAdmissionError('account_model_not_discovered')
     if not receipt_is_current(receipt, db=db) or cast(ReceiptFence, receipt).account_id != account['id']:
         raise AccountAdmissionError('account_login_unverified')
     if account['provider'] == 'claude-code':

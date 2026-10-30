@@ -324,8 +324,10 @@ def test_isolated_codex_home_overlays_a_copy_of_the_clean_environment(monkeypatc
     }
     isolated_homes = []
 
-    def clean(*, source_home=None, isolated_home=None, govern_model_catalog=False, confined=False):
+    def clean(*, source_home=None, isolated_home=None, govern_model_catalog=False, confined=False,
+              projection_receipt=None, catalog_source=None, cache_receipt=None):
         assert source_home is None
+        assert (projection_receipt, catalog_source, cache_receipt) == (None, None, None)
         assert confined is False
         isolated_homes.append(isolated_home)
         assert govern_model_catalog is True

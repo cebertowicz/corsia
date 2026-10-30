@@ -505,5 +505,6 @@ class TestCodexAppServerSessionEnvGate:
                 with pytest.raises(FileNotFoundError, match="env capture"):
                     asyncio.run(session.start())
 
-        build_env.assert_called_once_with(source_home=Path("/account/codex"), isolated_home=Path("/corsia/codex"), govern_model_catalog=True, confined=False)
+        build_env.assert_called_once_with(source_home=Path("/account/codex"), isolated_home=Path("/corsia/codex"), govern_model_catalog=True, confined=False,
+                                            projection_receipt=None, catalog_source=None, cache_receipt=None)
         assert captured_env == isolated_env
