@@ -208,6 +208,7 @@ describe('delegated rendered-markdown listener', () => {
 		['target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/conductor/target.md'],
 		['../target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
 		['/workspace/shared/target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/target.md'],
+		['shared/target.md', '/workspace/shared/conductor/x.md', '/workspace/shared/conductor/shared/target.md'],
 		['shared/target.md', null, '/workspace/shared/target.md'],
 	])('routes %s from document path %s', async (href, docPath, expected) => {
 		const d = deps();

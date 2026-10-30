@@ -52,6 +52,7 @@
 		onAgree: (id: string, agreed: boolean) => void;
 		onViewed?: (id: string, replyId: string) => Promise<void>;
 		target: DocViewerTarget | null;
+		/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */
 		docPath?: string | null;
 		artifactId: string | null;
 		readOnly?: boolean;
