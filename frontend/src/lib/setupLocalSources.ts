@@ -1,5 +1,4 @@
 import { fetchSources, type ModelSource } from '$lib/conductorSources';
-import { setupCatalog, type SetupModel } from '$lib/setupModels';
 import type { LocalRowState } from '$lib/setupProviderRows';
 
 /** The local download before an account exists, read from the setup service; null when it can't be read, so the last reading stays. */
@@ -14,15 +13,12 @@ export async function readPreauthLocal(): Promise<LocalRowState | null> {
 	} catch { return null; }
 }
 
-/**
- * One signed-in poll of the local model: its row replaces the shown one and nothing else, so the poll never undoes a newer CLI check.
- * The catalog, which says whether the loaded model works, is read only when the row's state moved, not on a percent.
- * Throws when a read fails, so the caller keeps what it shows.
- */
-export async function readLocalSource(session: string, sources: ModelSource[], catalog: SetupModel[]): Promise<{ sources: ModelSource[]; catalog: SetupModel[] }> {
-	const row = (await fetchSources(session)).find((source) => source.source === 'omlx');
-	if (!row) return { sources, catalog };
-	const shown = sources.find((source) => source.source === 'omlx');
-	const next = row.local_state !== shown?.local_state ? await setupCatalog(session) : catalog;
-	return { sources: shown ? sources.map((source) => (source === shown ? row : source)) : [...sources, row], catalog: next };
+/** The local model's row from the sources service; throws when the read fails, so the caller keeps what it shows. */
+export async function readLocalRow(session: string): Promise<ModelSource | undefined> {
+	return (await fetchSources(session)).find((source) => source.source === 'omlx');
+}
+
+/** The shown sources with only the local row replaced, so a poll never undoes a newer CLI check. */
+export function withLocalRow(sources: ModelSource[], row: ModelSource): ModelSource[] {
+	return sources.some((source) => source.source === 'omlx') ? sources.map((source) => (source.source === 'omlx' ? row : source)) : [...sources, row];
 }

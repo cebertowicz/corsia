@@ -23,7 +23,7 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
-	import { readLocalSource, readPreauthLocal } from '$lib/setupLocalSources';
+	import { readLocalRow, readPreauthLocal, withLocalRow } from '$lib/setupLocalSources';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -336,13 +336,13 @@
 		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
-	/** Signed in, the download's percent and end reach every setup page: models_updated comes every 10% and is heard only on the models page. */
+	/** Signed in, the download's percent reaches every setup page: models_updated comes only every 10%. Its state changes arrive by models_updated, heard on every page once signed in. */
 	let pollingLocal = false;
 	async function pollLocalSources() {
 		const current = get(token);
 		if (!current || pollingLocal) return;
 		pollingLocal = true;
-		try { ({ sources, catalog } = await readLocalSource(current, sources, catalog)); }
+		try { const row = await readLocalRow(current); if (row) sources = withLocalRow(sources, row); }
 		catch { /* Keep the last reading until the next one succeeds. */ } finally { pollingLocal = false; }
 	}
 	$effect(() => {
@@ -357,7 +357,7 @@
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
 	onMount(() => {
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
-		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
+		const offModels = on('models_updated', () => { if (get(token)) void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const focus = () => { if (page === 'models') void refreshSources(true); void classifier.retryIfFailed(); };
 		window.addEventListener('focus', focus);

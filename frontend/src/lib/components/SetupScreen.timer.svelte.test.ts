@@ -262,7 +262,7 @@ describe('SetupScreen owned-job polling', () => {
 			expect(host.textContent).toContain('Downloading 61%');
 		});
 
-		it('reads the catalog only when the local state changes, not on a percent', async () => {
+		it('reads only the sources on a poll, never the catalog', async () => {
 			localRow = downloadingRow(8);
 			mountResume(); await settle();
 			const catalogBefore = catalogCalls(), sourcesBefore = sourceCalls();
@@ -271,26 +271,55 @@ describe('SetupScreen owned-job polling', () => {
 			expect(catalogCalls()).toBe(catalogBefore);
 		});
 
-		it('shows the load refusal after Neither with no reload, and stops polling', async () => {
-			localRow = downloadingRow(8);
+		it('hears a load refusal on Your subscriptions after the poll has ended, and keeps it after Neither', async () => {
+			localRow = downloadingRow(95);
 			await openSubscriptions();
-			localRow = refusedRow; await poll();
-			expect(host.textContent).toContain('The model downloaded but would not load.');
+			// The model is listed before it loads: the row has no download state while the load runs, so the poll ends.
+			localRow = { source: 'omlx', name: 'Local model', state: 'ready' }; await poll();
 			expect(vi.getTimerCount()).toBe(0);
-			click('Neither'); await settle();
-			expect(host.textContent).toContain('Providers & models');
+			localRow = { ...refusedRow, local_state: 'start_failed' }; listeners.get('models_updated')?.(); await settle();
 			expect(host.textContent).toContain('The model downloaded but would not load.');
-			expect(host.textContent).not.toContain('Downloading');
+			click('Neither'); await settle();
+			expect(host.textContent).toContain('The model downloaded but would not load.');
 		});
 
 		it('shows Ready with Start enabled after Neither when the download finishes meanwhile', async () => {
 			localRow = downloadingRow(90);
 			await openSubscriptions();
-			localRow = readyRow; catalogModels = [{ id: 'local', connection: 'omlx', status: 'ready' }]; await poll();
+			localRow = readyRow; catalogModels = [{ id: 'local', connection: 'omlx', status: 'ready' }];
+			listeners.get('models_updated')?.(); await settle();
 			click('Neither'); await settle();
 			expect(host.textContent).not.toContain('Downloading');
 			expect(startButton()?.disabled).toBe(false);
 			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it('never undoes a CLI check that lands while a poll is in flight', async () => {
+			localRow = downloadingRow(40);
+			mountResume(); await settle();
+			const signInButtons = () => [...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Sign in').length;
+			expect(signInButtons()).toBe(1);
+			const fetchMock = vi.mocked(globalThis.fetch);
+			const working = fetchMock.getMockImplementation()!;
+			let release!: () => void;
+			const held = new Promise<void>((resolve) => { release = resolve; });
+			let first = true;
+			fetchMock.mockImplementation(async (input, init) => {
+				if (String(input) !== '/api/providers/sources' || !first) return working(input, init);
+				first = false;
+				const stale = await working(input, init);
+				await held;
+				return stale;
+			});
+			await poll();
+			sourceState = 'ready'; localRow = downloadingRow(50);
+			listeners.get('models_updated')?.(); await settle();
+			expect(signInButtons()).toBe(0);
+			release(); await settle();
+			expect(signInButtons()).toBe(0);
+			// The late read carried the older local row; the next tick corrects it.
+			await poll();
+			expect(host.textContent).toContain('Downloading 50%');
 		});
 
 		it('keeps the last reading when one poll fails, so Start does not flicker', async () => {
