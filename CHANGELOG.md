@@ -8,16 +8,54 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
-- Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
-- CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
-- Each thread in a document's Comments panel is its own card, with space between cards.
-- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps. If it still can’t load, setup says there isn’t enough free memory, and Settings says the model couldn’t load.
+## v0.4.2 — Shared workflows from the library, steadier Take over and Start fresh, and long chats on small local models
+
+Released 2026-10-30.
+
+### Workflows and the library
+
+- A workflow installed or updated from the library keeps its steps, instead of arriving as plain skill text.
+- When a phase in a plan picks a workflow, CORSIA adds one task per workflow step, in order, each with that step's instructions and check.
+- A workflow step can name who closes it, and keeps its rules when it is split or sent back.
+- The skill library page now matches how installing and updating from the library works.
+
+### Upgrading
+
+- Take over now waits for an earlier install that runs without a background service, including one set up on its own port, to stop serving before it moves any of its data, and moves nothing if it doesn't.
+- Start fresh now stops an earlier install that runs without a background service, including one set up on its own port, and points the `corsia` command at CORSIA, as Take over does.
+- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
+
+### First run and setup
+
 - Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
 - Setup stops saying it failed, in the model picker and in your first chat, once the local model it couldn’t load has loaded.
-- Start fresh now stops an earlier install that runs without a background service, including one set up on its own port, and points the `corsia` command at CORSIA, as Take over does.
-- Take over now waits for an earlier install that runs without a background service, including one set up on its own port, to stop serving before it moves any of its data, and moves nothing if it doesn't.
-- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
+
+### Providers
+
+- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps. If it still can’t load, setup says there isn’t enough free memory, and Settings says the model couldn’t load.
 - The local model server keeps your server-wide settings when you download a model or run setup again.
+
+### Chat and documents
+
+- Long chats on a local model with a small context window keep going: the checkpoint of earlier conversation now fits the window instead of failing.
+- Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
+- Each thread in a document's Comments panel is its own card, with space between cards.
+
+### Security
+
+- Agent shells can no longer change or create the workspace repository's Git control files.
+- Cleaning up an agent's finished worktree no longer runs a program named in a file the agent could change.
+
+### Command line and documentation
+
+- CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+- New security and how-it-works documentation, with diagrams that read on a phone.
+
+### Known issues
+
+- During an update restart, the count of paused agents can show 0 while agents are still finishing a call to a local model.
+- On a local model with a small context window, a checkpoint reply that runs past its length limit can be cut short without saying so.
+- On a local model without its own tokenizer, the first message after a restart is sized by a cautious estimate, so a checkpoint may come earlier than it needs to.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
