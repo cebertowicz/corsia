@@ -52,7 +52,7 @@ Claude Code runs as a separate process per thread. The backend caps how many are
 
 - **Claude Code spawn refused at the cap.** The tool returns the error with working-thread details. The caller can wait or retry; the refused spawn is not queued.
 - **A worker with no model.** `delegate_task` refuses without an explicit model. An unavailable model can hold input for recovery or fail it with a visible reason; it is not replaced. See [Models and harnesses](models-and-harnesses.md).
-- **Roster edits from the wrong place.** A tool edit from a thread that is not the designated coordinator of the target's scope is refused.
+- **Roster edits from another thread.** A tool edit from a thread that is not the designated coordinator of the target's scope is refused.
 - **Parent and child drift.** A child is its own thread with its own history. It knows what its brief and its own context sources tell it; a brief that leaves out something the child needs produces work that misses it.
 
 ## Where it lives

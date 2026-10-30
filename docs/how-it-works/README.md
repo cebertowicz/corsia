@@ -2,7 +2,7 @@
 
 These pages explain how CORSIA is built and why, for an engineer deciding whether to adopt it or contribute to it. Each page says what a part is, why it exists, how it works, what can go wrong, and where it lives in the code. For a file-by-file map of the code, read [ARCHITECTURE.md](../../ARCHITECTURE.md); these pages explain the ideas behind that map.
 
-These pages describe the implementation in the repository. Check the linked source when using them with a different version.
+These pages were last checked against the code at commit `43a8c7780`, and that check did not cover every claim. First-time setup was read from the code, not run on a real install. Nothing rechecks these pages automatically, so a later change can leave one out of date. Check the linked source when using them with a different version.
 
 ## Reading order
 

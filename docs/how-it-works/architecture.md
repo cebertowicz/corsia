@@ -56,7 +56,7 @@ Startup steps for local models are independent: each failure is logged with a re
 
 ### Network exposure
 
-The backend binds to one interface chosen at setup: `127.0.0.1` for "this computer only" or `0.0.0.0` for "reachable from other devices". An invalid or inconsistent setting fails closed with the command that fixes it. A missing bootstrap uses the legacy all-interface bind, and an older bootstrap without either setting is updated to retain that bind (`backend/infra/bind_host.py`). The default port is 1956 (`backend/infra/default_port.py`).
+The main server binds to one interface chosen at setup: `127.0.0.1` for "this computer only" or `0.0.0.0` for "reachable from other devices". The Devices listener is separate: it is off unless you turn it on, and then it binds all interfaces whichever you chose ([Network](../security/network.md)). A setting that can't be used fails closed with the command that fixes it. A missing bootstrap uses the legacy all-interface bind, and an older bootstrap without either setting is updated to retain that bind (`backend/infra/bind_host.py`). The default port is 1956 (`backend/infra/default_port.py`).
 
 ## What can go wrong
 

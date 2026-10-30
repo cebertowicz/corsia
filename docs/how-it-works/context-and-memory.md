@@ -43,7 +43,7 @@ Tools marked `core` are advertised in full. Other tools are listed by summary in
 
 Pressure checkpoint:
 
-- A pressure checkpoint can start when the tokens remaining in the window fall to a reserve, subject to admission and any checkpoint already in progress. The base reserve is a tenth of the window, held between 8,192 and 32,768 tokens. It can be raised so the checkpoint itself can finish, up to the greater of that base and a quarter of the window (`backend/core/fork_pressure.py`). For a 200,000-token window that is about 28,700 tokens left, roughly 86% full; for a 32,768-token window it is 8,192 left, 75% full.
+- A pressure checkpoint can start when the tokens remaining in the window fall to a reserve, subject to admission and any checkpoint already in progress. The base reserve is a tenth of the window, held between 8,192 and 32,768 tokens. It can be raised so the checkpoint itself can finish, up to the greater of that base and a quarter of the window (`backend/core/fork_pressure.py`). For a 200,000-token window that is roughly 28,700 tokens left, or 86% full; for a 32,768-token window it is 8,192 left, 75% full.
 
 Idle checkpoint:
 
@@ -70,7 +70,7 @@ A skill is a folder with a `SKILL.md`. The skills index in context lists them wi
 - **A context edit seems ignored.** Until an install boundary it is, by design. Trigger one with a checkpoint, a model switch, or a scope change.
 - **A checkpoint loses detail.** It is a summary. Important details can also be recorded in a continuity entry, a plan, a file or the knowledge base, instead of relying only on chat.
 - **Checkpoints cost model calls.** A pending model switch can start a required checkpoint before committing the change.
-- **Small windows checkpoint sooner.** For a 32,768-token window the reserve is a quarter of the window, so the pressure threshold is 75% full, against about 86% for a 200,000-token window.
+- **Small windows checkpoint sooner.** For a 32,768-token window the reserve is a quarter of the window, so the pressure threshold is 75% full, against roughly 86% for a 200,000-token window.
 - **Knowledge search is text matching.** It finds words, not meanings; a differently worded note is missed.
 
 ## Where it lives
