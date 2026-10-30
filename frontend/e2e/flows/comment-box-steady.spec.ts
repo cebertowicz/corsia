@@ -4,9 +4,20 @@ import { agentComment, reviewerSession } from '../support/liveConcurrency';
 import { openLiveDocument, seedLiveDocument, serverText } from '../support/liveDocument';
 import { beginComment, insertPrefix } from '../support/liveCommentProof';
 
-test.use({ video: 'on' });
 const quote = 'target line for comment';
 const text = Array.from({ length: 60 }, (_, i) => i === 25 ? quote : `line ${i} with ordinary text`).join('\n\n');
+
+const nextFrame = (page: Page) => page.evaluate(() => new Promise(requestAnimationFrame));
+
+async function settled(page: Page) {
+ let last = '';
+ await expect.poll(async () => {
+  const box = JSON.stringify(await page.locator('[data-popover]').boundingBox());
+  const still = box === last;
+  last = box;
+  return still;
+ }).toBe(true);
+}
 
 async function place(page: Page, fraction: number) {
  const scroller = page.locator('.cm-scroller');
@@ -39,7 +50,7 @@ for (const kind of ['draft', 'reply'] as const) {
    if (kind === 'draft') await beginComment(page, quote);
    else {
     await page.locator('.cm-comment-anchor').filter({ hasText: quote }).click();
-    await page.waitForTimeout(700);
+    await settled(page);
     const before = (await line.boundingBox())!.y;
     await page.locator('.cm-scroller').evaluate(e => { e.scrollTop -= 100; });
     await expect.poll(async () => (await line.boundingBox())!.y).toBeGreaterThan(before + 50);
@@ -52,13 +63,12 @@ for (const kind of ['draft', 'reply'] as const) {
     return { card, anchor, side: card.y + card.height / 2 < anchor.y + anchor.height / 2 ? 'above' : 'below' };
    };
    const initial = await sample();
-   console.log(`initial ${kind}: ${JSON.stringify(initial)}`);
    expect(initial.side).toBe('below');
    for (let i = 0; i < 9; i++) {
     for (const key of `line ${i}\n`) {
      if (key === '\n') {
       await input.press('Enter');
-      await page.waitForTimeout(200);
+      await nextFrame(page);
       await page.evaluate(() => window.dispatchEvent(new Event('popover-anchor-moved')));
      } else await input.pressSequentially(key);
      const current = await sample();
