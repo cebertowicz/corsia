@@ -35,6 +35,7 @@ use crate::{
 const JOURNAL: &str = "start-fresh.json";
 pub const BACKUPS_FOLDER: &str = "CORSIA backups";
 const PLIST: &str = "Library/LaunchAgents/com.corsia.prod.plist";
+const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
 
 /// One rename, from where the earlier install had it to its place in the backup.
@@ -754,7 +755,7 @@ impl LaunchdService {
         states.push(app_paths::app_dir_for_home(home).join(app_paths::STATE_DIRECTORY));
         let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
         let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
-        Self { source, launchd, timeout: release_proof::BOOTOUT_TIMEOUT }
+        Self { source, launchd, timeout: STOP_TIMEOUT }
     }
 }
 
@@ -767,8 +768,16 @@ impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
     }
 
     /// Wait until `check` passes, or say why it never did.
-    fn wait_for(&mut self, mut check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
-        let deadline = Instant::now() + self.timeout;
+    fn wait_for(&mut self, check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        self.wait_within(self.timeout, check)
+    }
+
+    fn wait_within(
+        &mut self,
+        timeout: Duration,
+        mut check: impl FnMut(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
         loop {
             match check(self) {
                 Ok(()) => return Ok(()),
@@ -793,7 +802,9 @@ impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
             } else {
                 progress(None);
                 self.launchd.bootout()?;
-                return self.wait_for(Self::released);
+                // A plain bootout returns at once and launchd lists the job until its process
+                // has exited, which a source job's `ExitTimeOut` allows 120 s for.
+                return self.wait_within(release_proof::BOOTOUT_TIMEOUT, Self::released);
             }
         }
         // Whatever stopped it, and even when launchd never ran it, a backend still holding a
