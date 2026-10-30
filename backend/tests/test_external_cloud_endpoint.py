@@ -59,7 +59,7 @@ async def _discover(monkeypatch, *, meta: dict | None = None) -> str:
     monkeypatch.setattr(ne, "build_api_base", lambda _sid: _ALIBABA_BASE)
 
     async def _fetch(api_base, dialect, api_key):
-        return ["qwen-flash", "glm-5.1", "qwen-flash-us"]
+        return dict.fromkeys(["qwen-flash", "glm-5.1", "qwen-flash-us"])
 
     monkeypatch.setattr(ep, "fetch_external_models", _fetch)
     result = await ep.discover_external_models(sid)

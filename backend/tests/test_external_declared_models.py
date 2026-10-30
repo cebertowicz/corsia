@@ -57,10 +57,10 @@ def _discover(monkeypatch, listed, declared):
     async def fetch(*_a):
         if isinstance(listed, Exception):
             raise listed
-        return listed
+        return dict.fromkeys(listed)
 
     monkeypatch.setattr(ep, "fetch_external_models", fetch)
-    return asyncio.run(discoverable_model_ids(_BASE, "openai", None, declared))
+    return list(asyncio.run(discoverable_model_ids(_BASE, "openai", None, declared)))
 
 
 def test_an_empty_list_yields_the_declared_ids(monkeypatch) -> None:

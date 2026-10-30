@@ -130,9 +130,10 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
 def _capability_overrides(server: dict) -> dict:
     """Per-server capability defaults the user supplied at add time.
 
-    Generic ``/v1/models`` carries no context-window / capability metadata, so
-    External models inherit these user-supplied defaults (HMC11: unknown models
-    get truth from catalog OR user override). Stored in ``metadata_json``."""
+    Generic ``/v1/models`` carries no capability metadata and often no context
+    window, so External models inherit these user-supplied defaults (HMC11:
+    unknown models get truth from catalog OR user override). Stored in
+    ``metadata_json``."""
     from llm.external_declared_models import declared_model_ids
     from llm.network_discovery import get_server_metadata
 
@@ -167,8 +168,10 @@ def reference_context_window(host: str, model_id: str) -> int | None:
 
 async def fetch_external_models(
     api_base: str, dialect: str, api_key: str | None
-) -> list[str]:
-    """Return the model ids an external endpoint exposes via ``/v1/models``."""
+) -> dict[str, int | None]:
+    """The model ids an external endpoint lists via ``/v1/models``, in order, each
+    with the context window its entry reports (vLLM's ``max_model_len``), or None."""
+    from llm.model_metadata import extract_context_length
     from llm.network_endpoints import models_probe_url
 
     headers = auth_headers(dialect, api_key)
@@ -176,12 +179,12 @@ async def fetch_external_models(
         resp = await client.get(models_probe_url(api_base, dialect=dialect), headers=headers)
         resp.raise_for_status()
         data = resp.json() or {}
-    ids: list[str] = []
+    listed: dict[str, int | None] = {}
     for m in (data.get("data") or []):
         mid = m.get("id") if isinstance(m, dict) else None
         if isinstance(mid, str) and mid:
-            ids.append(mid)
-    return ids
+            listed[mid] = extract_context_length(m)
+    return listed
 
 
 def _external_discovery_config(
@@ -213,10 +216,13 @@ def _upsert_external_model(
     now: str,
     host: str = "",
     shapes: dict[str, dict | None] | None = None,
+    reported_window: int | None = None,
 ) -> str:
     litellm_model = f"{PREFIX}{server_id}/{pmid}"
-    # The user's per-server window wins; otherwise the provider's published one.
-    window = caps.get("context_window") or reference_context_window(host, pmid)
+    # The user's per-server window wins; then the one this server reports for the
+    # model; otherwise the provider's published one.
+    window = (caps.get("context_window") or reported_window
+              or reference_context_window(host, pmid))
     display_name = pmid.split("/")[-1] or pmid
     metadata = {
         "server_id": server_id,
@@ -311,6 +317,7 @@ def _reconcile_external_models(
     host: str = "",
     target: tuple | None = None,
     shapes: dict[str, dict | None] | None = None,
+    reported_windows: dict[str, int | None] | None = None,
 ) -> dict:
     """Apply one authoritative External snapshot in the DB worker pool."""
     from llm import external_discovery_result as outcome
@@ -323,6 +330,7 @@ def _reconcile_external_models(
         for pmid in model_ids:
             result[_upsert_external_model(
                 db, server_id, server, dialect, pmid, caps, now, host, shapes,
+                (reported_windows or {}).get(pmid),
             )] += 1
         result["missing"] = _reconcile_stale_external_models(
             db, server_id, seen, now,
@@ -337,7 +345,8 @@ async def discover_external_models(server_id: str) -> dict:
 
     Observe-only: every listed model is recorded as available. Capability facts
     come from the user-supplied per-server overrides (generic ``/v1/models`` has
-    none). Mirrors the managed discovery's stale-row cleanup."""
+    none); a context window an entry reports is kept. Mirrors the managed
+    discovery's stale-row cleanup."""
     from infra.db_async import run_in_db
     from llm.external_declared_models import discoverable_model_ids
     from llm.external_discovery_result import finish_external_discovery
@@ -365,9 +374,10 @@ async def discover_external_models(server_id: str) -> dict:
     # committed meanwhile supersedes it, failures included.
     target = (dialect, api_base, api_key)
     try:
-        model_ids = await discoverable_model_ids(
+        windows = await discoverable_model_ids(
             api_base, dialect, api_key, (caps or {}).get("declared_models") or [],
         )
+        model_ids = list(windows)
     except Exception as exc:
         result["error"] = f"Connection failed: {exc}"
         await observe_discovery(server, None, exc)
@@ -389,6 +399,7 @@ async def discover_external_models(server_id: str) -> dict:
             urlsplit(api_base).hostname or "",
             target,
             shapes,
+            windows,
         )
     except Exception as exc:
         log.error("external model discovery DB error: %s", exc)
