@@ -539,56 +539,85 @@ def test_reached_verdict_does_not_flip_on_new_data(monkeypatch) -> None:
     assert [e.subject for e in compute(snapshot)] == ["workflow:sdlc-process@v1"]
 
 
+def _wake_db(*owners: tuple[str, str, str | None]) -> sqlite3.Connection:
+    """Outcome events plus the thread and message columns a wake reads; each owner is (id, state, archived_reason)."""
+    db = sqlite3.connect(":memory:")
+    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL + "CREATE TABLE threads (id TEXT PRIMARY KEY, lifecycle_state TEXT, "
+                     "archived_reason TEXT); CREATE TABLE messages (id TEXT PRIMARY KEY);")
+    db.executemany("INSERT INTO threads VALUES (?,?,?)", owners)
+    return db
+
+
+def _accepting(wakes: list):
+    """A wake that is accepted the way the real one is: its message row exists afterwards."""
+    def wake(thread_id, event, summary, details, *, message_id, db):
+        wakes.append((thread_id, event, summary, details, message_id))
+        db.execute("INSERT INTO messages (id) VALUES (?)", (message_id,))
+    return wake
+
+
 def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
     from events import delivery
 
     monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
-    wakes = []
-    monkeypatch.setattr(delivery, "enqueue_event_wake", lambda *args, **kwargs: wakes.append((args, kwargs)))
-    db = sqlite3.connect(":memory:")
-    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    wakes: list = []
+    monkeypatch.setattr(delivery, "enqueue_event_wake", _accepting(wakes))
+    db = _wake_db(("owner", "active", None))
     source = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
     frozen = plan_for(source)
     reached = Evaluation(frozen.subject, "owner", frozen, decide(source, frozen, NOW), True)
 
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 1
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 0
+    assert evaluator.write_verdicts(db, [reached]) == 1
+    assert evaluator.wake_owners(db) == 1
+    assert evaluator.write_verdicts(db, [reached]) == 0
+    assert evaluator.wake_owners(db) == 0
     logged: list[str] = []
     sink = logger.add(logged.append, level="WARNING", format="{message}")
     orphan = history(runs("v1", 1, started=40, ended=30), runs("v3", 2))
     unowned = plan_for(orphan, "v3")
-    assert evaluator.write_verdicts(db, [Evaluation(unowned.subject, None, unowned, decide(orphan, unowned, NOW), True)],
-                                    wake_owners=True) == 1
+    assert evaluator.write_verdicts(db, [Evaluation(unowned.subject, None, unowned, decide(orphan, unowned, NOW), True)]) == 1
+    assert evaluator.wake_owners(db) == 0
     logger.remove(sink)
     assert [line.strip() for line in logged] == [f"verdict_wake: no owner to wake for {unowned.subject}"]
-    assert wakes == [(("owner", "measurement.verdict.reached",
-                       f"Workflow sdlc-process ({frozen.version}) verdict reached: revert the change.",
-                      {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"}),
-                     {"message_id": f"verdict:wake:{frozen.subject}", "db": db})]
+    assert wakes == [("owner", "measurement.verdict.reached",
+                      f"Workflow sdlc-process ({frozen.version}) verdict reached: revert the change.",
+                      {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"},
+                      f"verdict:wake:{frozen.subject}")]
 
 
-def test_a_refused_wake_keeps_every_verdict_in_the_batch(monkeypatch) -> None:
+def test_a_refused_wake_keeps_every_verdict_and_reaches_the_owner_once_fixed(monkeypatch) -> None:
     from events import delivery
     from infra.send_types import SendRejected
 
+    wakes: list = []
+    accept = _accepting(wakes)
+    capped = {"capped"}
+
     def refuse(thread_id, *args, **kwargs):
-        if thread_id == "gone":
-            raise SendRejected(409, "thread is being deleted")
+        if thread_id in capped:
+            raise SendRejected(409, "model's cap can't fit a checkpoint")
+        accept(thread_id, *args, **kwargs)
 
     monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
-    db = sqlite3.connect(":memory:")
-    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
-    first = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
-    second = history(runs("v1", 1, started=40, ended=30), runs("v3", 2))
-    batch = [Evaluation(plan.subject, owner, plan, decide(source, plan, NOW), True)
-             for owner, source, plan in (("gone", first, plan_for(first)), ("owner", second, plan_for(second, "v3")))]
+    db = _wake_db(("capped", "active", None), ("owner", "active", None), ("purged", "purged", None),
+                  ("archived", "archived", "user"))
+    batch = []
+    for owner, version in (("capped", "v2"), ("owner", "v3"), ("purged", "v4"), ("archived", "v5")):
+        source = history(runs("v1", 1, started=40, ended=30), runs(version, 2))
+        plan = plan_for(source, version)
+        batch.append(Evaluation(plan.subject, owner, plan, decide(source, plan, NOW), True))
     logged: list[str] = []
     sink = logger.add(logged.append, level="WARNING", format="{message}")
-    assert evaluator.write_verdicts(db, batch, wake_owners=True) == 2
+    assert evaluator.write_verdicts(db, batch) == 4
+    assert evaluator.wake_owners(db) == 1
+    capped.clear()  # the person raises the cap; the next night's run reaches that owner
+    assert evaluator.wake_owners(db) == 1
+    assert evaluator.wake_owners(db) == 0
     logger.remove(sink)
     assert [line.strip() for line in logged] == [
-        f"verdict_wake: owner gone refused for {batch[0].subject}: thread is being deleted"]
+        f"verdict_wake: owner capped refused for {batch[0].subject}: model's cap can't fit a checkpoint"]
+    assert [wake[0] for wake in wakes] == ["owner", "capped"]
 
 
 def test_writes_stay_off_by_default() -> None:
