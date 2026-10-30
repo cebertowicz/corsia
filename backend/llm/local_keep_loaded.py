@@ -125,8 +125,9 @@ def _refusal(verdict: str, size: float | None, room: int, pinned: bool, loaded: 
             "neighbour_id": loaded[0]["identifier"] if verdict == "no_room" and len(loaded) == 1 else None}
 
 
-#: oMLX's status for a load its memory guard refused.
-_OMLX_NO_MEMORY = 507
+#: The words of oMLX's memory refusals. Its load route answers 500 for every failure, so
+#: only the message tells them apart.
+_OMLX_NO_MEMORY = ("memory ceiling", "out of GPU memory")
 
 
 def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dict | None:
@@ -140,11 +141,16 @@ def _memory_refusal(size: float | None, loaded: list[dict], pinned: bool) -> dic
     return _refusal(verdict, size, room, pinned, loaded)
 
 
-def _failed_load(result: dict, refusal: dict | None) -> dict:
-    """What a failed load reports: the verdict's refusal only when oMLX refused for memory too."""
-    if refusal and result.get("status") == _OMLX_NO_MEMORY:
-        return refusal
-    return {"status": "failed", "detail": result.get("message") or "Load failed"}
+def _failed_load(key: tuple[str, str], result: dict, refusal: dict, not_loaded: str) -> dict:
+    """Report a failed load: ``refusal`` when oMLX refused for memory, else a plain failure.
+
+    A refusal that carries a line leaves the row to its live memory line, as a verdict's does.
+    """
+    detail = result.get("message") or "Load failed"
+    no_memory = any(words in detail for words in _OMLX_NO_MEMORY)
+    if not (no_memory and refusal["line"]):
+        _FAILED[key] = not_loaded
+    return refusal if no_memory else {"status": "failed", "detail": detail}
 
 
 async def keep_loaded(
@@ -155,10 +161,9 @@ async def keep_loaded(
     Setup's ``force_pin`` pins its one model whatever the verdict, so oMLX loads it unchecked
     at its next start. On an empty seat this load goes the same way: oMLX's memory guard decides,
     and a model it won't load gets the verdict's refusal. Settings downloads keep the guard.
-    Every outcome is a row state: a guarded pin that does not fit leaves the model
-    downloaded and unpinned, while a failed forced pin is visible on the row. A
-    completed download is never undone here. ``pin_if_fits=False`` loads without
-    pinning, for a model that is already the person's.
+    Every outcome is a row state: a guarded pin that does not fit leaves the model downloaded
+    and unpinned, while a failed forced pin is visible on the row. A completed download is never
+    undone here. ``pin_if_fits=False`` loads without pinning, for a model already the person's.
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
     from llm.server_observation import observation_generation
@@ -204,7 +209,8 @@ async def keep_loaded(
                 raise RuntimeError("oMLX loaded status unavailable")
             if any(item["identifier"] == model.model for item in loaded):
                 return {"status": "loaded"}
-            refusal = _memory_refusal(size_bytes, loaded, bool(pinned or row.get("pinned")))
+            held = bool(pinned or row.get("pinned"))
+            refusal = _memory_refusal(size_bytes, loaded, held)
             if refusal and (loaded or not force_pin):
                 return refusal
             if refusal:
@@ -214,8 +220,8 @@ async def keep_loaded(
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model: %s", result.get("message"))
                 emit("load.failed", result.get("message") or "Load failed")
-                _FAILED[key] = not_loaded
-                return _failed_load(result, refusal)
+                refused = refusal or _refusal("no_memory", size_bytes, model_room_bytes(), held, loaded)
+                return _failed_load(key, result, refused, not_loaded)
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
