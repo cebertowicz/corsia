@@ -88,6 +88,13 @@ def _preparation_gate() -> asyncio.Lock:
     return gate
 
 
+def _no_routed_wake(target: Any, _db: Any) -> str | None:
+    """Hold a rule-only label from the thread routing chose, never from one a rule adds."""
+    from events.github_mapper import LABEL_RULE_ONLY
+
+    return None if target.relationship == "rule" else LABEL_RULE_ONLY
+
+
 def _prepare_route(
     unit: _Preparation,
     internal_event: str,
@@ -100,6 +107,7 @@ def _prepare_route(
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
     from events.connectors.github_rules import apply_routed_rules
+    from events.github_mapper import label_wakes_nobody
     from events.identity import PrResolutionError
     from events.routing_inputs import structured_tag
 
@@ -113,7 +121,8 @@ def _prepare_route(
         return
     if identity is not None and router._record_source_facts_db(internal_event, identity, payload):
         prepared.reap_payload = payload
-    suppressed = router._self_authored_result(internal_event, payload)
+    rule_only_label = label_wakes_nobody(internal_event, payload)
+    suppressed = None if rule_only_label else router._self_authored_result(internal_event, payload)
     if suppressed is not None:
         prepared.result = suppressed
         return
@@ -134,6 +143,12 @@ def _prepare_route(
                            scope=scope, target_filter=target_filter)
         return
     thread_id, wake_reason = selected
+    if rule_only_label:
+        # Rules still resolve in the routed thread's project; that thread just isn't woken.
+        prepared.thread_id, prepared.identity = thread_id, identity
+        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
+                           scope, _no_routed_wake)
+        return
     facts = scope.envelope.facts if scope and scope.envelope else None
     summary, details = router._summarize(internal_event, payload, external_id, facts)
     if tag_provenance:
