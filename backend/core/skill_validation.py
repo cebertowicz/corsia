@@ -289,6 +289,28 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return dict(parsed), text[body_start:]
 
 
+def instruction_section(body: str, heading: str) -> str | None:
+    """The heading's section: from it through the line before the next heading of its level or higher.
+
+    ``body`` is a SKILL.md body with its frontmatter removed; headings inside code fences don't count.
+    """
+    wanted = heading.strip()
+    level = len(wanted) - len(wanted.lstrip("#"))
+    lines = body.splitlines()
+    start, fenced = None, False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        hashes = 0 if fenced else len(line) - len(line.lstrip("#"))
+        if not hashes or line[hashes:hashes + 1] not in (" ", ""):
+            continue
+        if start is None and level and line.strip() == wanted:
+            start = index
+        elif start is not None and hashes <= level:
+            return "\n".join(lines[start:index]).strip()
+    return None if start is None else "\n".join(lines[start:]).strip()
+
+
 def declares_sidecar(skill_md: str) -> bool:
     """True when the frontmatter declares a ``corsia.yaml`` pointer; unreadable text declares none."""
     import yaml

@@ -4,7 +4,7 @@ A trial stays in its owner's ``SKILL.md`` and never enters cached context.
 When a plan task starts, each eligible trial is drawn with or without for that
 task, and the with half is returned in the plan result: the trial's index line
 when its target is read on demand (a skill or a new file), or the lesson body
-when its target is already in this thread's context. Every resolved trial
+when its target is already in this thread's context or is the matching workflow step. Every resolved trial
 leaves one receipt per task in ``guidance_loads``. A trial the task-start count
 cap or token cap leaves out, a body whose target this thread
 does not receive or already has its section, or one whose draw could not be
@@ -27,6 +27,7 @@ from core.lesson_index import NON_SYSTEM_DESCRIPTION_LIMIT, line_for
 from core.skill_registry_types import SkillRow
 from core.skill_validation import is_skill_file
 from core.token_estimation import _text_tokens
+from core.workflow_step_binding import StepBinding, declared_binding
 
 Variant = Literal["with", "without", "crossover"]
 
@@ -68,7 +69,7 @@ class TrialDelivery:
     source_data: bytes
     target: str
     payload: str
-    #: The section an in-context body adds; None for an index line.
+    #: The section an in-context body adds; None for index lines and step bodies.
     section: str | None = None
     omission_reason: str | None = None
 
@@ -79,19 +80,26 @@ def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with"
     return "with" if digest[0] & 1 else "without"
 
 
-def _delivery(row: SkillRow) -> TrialDelivery:
+def _delivery(row: SkillRow, binding: StepBinding | None) -> TrialDelivery:
     """Build a delivery from the validation snapshot the skill scan already took."""
     trial, data = row.trial, row.source_data
     if trial is None or data is None:
         raise ValueError(f"trial row has no validation snapshot: {row.path}")
-    return delivery_for_trial(trial, row.path, data)
+    return delivery_for_trial(trial, row.path, data, binding)
 
 
-def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
+def delivery_for_trial(trial, path: Path, data: bytes, binding: StepBinding | None = None) -> TrialDelivery:
     """Build exactly the payload admission and task-start delivery both budget."""
     lesson = trial.lesson
     metadata = lesson.case_metadata
     target = str(metadata.get("new_target_path") or metadata.get("target_file") or "")
+    if binding is not None:
+        payload = (
+            f"[Trial addition to this step's instruction in {target}; "
+            f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
+            f"{trial.body.strip()}"
+        )
+        return TrialDelivery(lesson.id, trial.behavioral_sha256, path.resolve(), data, target, payload)
     if not target or metadata.get("new_target_path") or is_skill_file(Path(target)):
         target = target or str(path.resolve())
         return TrialDelivery(
@@ -144,24 +152,38 @@ def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
     return None
 
 
-def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
+def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
     """Split eligible trials into delivered and omitted, in ordinary skill order."""
     from core.skills_registry import trial_delivery_rows
     from infra.config import WORKSPACE
 
     project = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
-    admitted_rows, capped_rows = trial_delivery_rows(
+    node = db.execute("SELECT workflow_ref, workflow_step FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
+    rows, included = trial_delivery_rows(
         thread_id=thread_id, project_id=None if project is None else project["project_id"],
         workspace=Path(WORKSPACE), db=db,
     )
+    skills = {skill.path: skill for skill in included}
+    eligible: list[tuple[SkillRow, StepBinding | None, str | None]] = []
+    for row in rows:
+        binding, effective = (None, False) if row.trial is None else declared_binding(row.trial, skills)
+        if binding is None:
+            eligible.append((row, None, None))
+        elif node is not None and node["workflow_ref"] == binding.workflow and node["workflow_step"] in binding.steps:
+            # A shadowed target's step ran from another file: neither arm, never the index line.
+            eligible.append((row, binding, None if effective else OMIT_TARGET_NOT_IN_CONTEXT))
+    admitted_rows, capped_rows = eligible[:START_TRIAL_CAP], eligible[START_TRIAL_CAP:]
     admitted: dict[tuple[str, str], TrialDelivery] = {}
     omitted: dict[tuple[str, str], TrialDelivery] = {}
     spent = 0
     context: set[str] | None = None
-    for row in admitted_rows:
-        trial = _delivery(row)
+    for row, binding, reason in admitted_rows:
+        trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key in admitted or key in omitted:
+            continue
+        if reason is not None:
+            omitted[key] = replace(trial, omission_reason=reason)
             continue
         if not trial.target or (trial.section is not None and not trial.section):
             omitted[key] = replace(trial, omission_reason=OMIT_MISSING_SECTION)
@@ -179,8 +201,8 @@ def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery
             continue
         spent += cost
         admitted[key] = trial
-    for row in capped_rows:
-        trial = _delivery(row)
+    for row, binding, _reason in capped_rows:
+        trial = _delivery(row, binding)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key not in admitted:
             omitted.setdefault(key, replace(trial, omission_reason=OMIT_COUNT_CAP))
@@ -235,7 +257,7 @@ def start_trials(
     """
     from infra.database import write_transaction
 
-    admitted, omitted = _resolve(db, thread_id)
+    admitted, omitted = _resolve(db, thread_id, node_id)
     recorded, prior_with = _receipts(
         db, thread_id=thread_id, node_id=node_id, trials=[*admitted, *omitted],
     )
