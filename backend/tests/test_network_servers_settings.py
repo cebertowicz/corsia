@@ -220,6 +220,13 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     assert "retired" in body["message"]
 
 
+def test_load_failure_with_empty_message_returns_fallback(client):
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": False, "message": ""})):
+        response = client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": "local-model"})
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Load failed"
+
+
 def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeypatch):
     from llm import local_keep_loaded
 

@@ -10,6 +10,28 @@ async function settledSetup(page: Page) {
  });
 }
 
+test('@surface:first-run restart offers retry for the downloaded model without a refusal line', async ({ page }, testInfo) => {
+ await page.route('**/api/setup/progress', route => route.fulfill({ json: { setup_completed: false, status: { local_started: true, local_eligible: true, macos_supported: true } } }));
+ await page.route('**/api/providers/sources**', route => route.fulfill({ json: { sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'stopped' }] } }));
+ await page.route('**/api/providers/local/setup', route => route.fulfill({ json: { state: 'ready', model: 'owner/local-model' } }));
+ await page.route('**/api/models?thread_id=**', route => route.fulfill({ json: { models: [] } }));
+ await page.route('**/api/settings/providers**', route => route.fulfill({ json: { providers: [{ name: 'omlx', type: 'network' }] } }));
+ await page.route('**/api/settings/network-servers**', route => {
+  const url = route.request().url();
+  if (url.includes('/models/load')) return route.fulfill({ status: 500, json: { detail: 'Load failed' } });
+  return route.fulfill({ json: url.includes('/models') ? { loaded: [], available: [{ id: 'local-model', pinned: true, starting: false }] } : { servers: [{ id: 'own', provider: 'omlx', corsia_omlx: true }] } });
+ });
+ await page.goto('/?token=' + encodeURIComponent(TEST_SESSION_TOKEN));
+ await expect(page.locator('[data-setup-page="models"]')).toBeVisible();
+ await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+ await expect(page.getByText('Downloaded', { exact: true })).toBeVisible();
+ await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+ await settledSetup(page);
+ await page.screenshot({ path: testInfo.outputPath('restart-retry.png') });
+ await page.getByRole('button', { name: 'Retry' }).click();
+ await expect(page.getByText('Load failed', { exact: true })).toBeVisible();
+});
+
 test('@surface:first-run setup shows a local load refusal and retries', async ({ page }, testInfo) => {
  const line = 'Not loaded: needs 12 GB, 8 GB free for a model now';
  const retryError = 'Load refused by server';

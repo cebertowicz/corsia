@@ -120,7 +120,7 @@
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
 		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, keepLine: $localLoadRefusal?.model.keepLine ?? retryTarget?.model.keepLine, retryError, retrying: localBusy && !!retryTarget,
+			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, keepLine: $localLoadRefusal?.model.keepLine ?? retryTarget?.model.keepLine, retryAvailable: !!($localLoadRefusal || retryTarget), retryError, retrying: localBusy && !!retryTarget,
 			start: () => void ($localLoadRefusal || retryTarget ? localRetry?.retry() : startLocal()), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));

@@ -229,7 +229,7 @@ async def load_model(server_id: str, body: ModelBody):
                 "error": (result.get("message") or "Load failed")[:200],
             },
         )
-        raise HTTPException(status, detail=result.get("message", "Load failed"))
+        raise HTTPException(status, detail=result.get("message") or "Load failed")
 
     notify_cached_model_loaded(server_id, body.model, generation)
     import asyncio

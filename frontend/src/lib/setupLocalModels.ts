@@ -3,7 +3,7 @@ import { loadProviders, providers } from '$lib/stores/providers';
 import { loadNetworkServers, networkServers } from '$lib/stores/networkServers';
 import { loadProviderModelsFor, providerModels } from '$lib/stores/providerModels';
 import { token } from '$lib/stores/auth';
-import { canLoadAnyway, checkAndLoad, type PreloadInfo } from '$lib/stores/providerModelsHost';
+import { checkAndLoad, type PreloadInfo } from '$lib/stores/providerModelsHost';
 import { loadModel } from '$lib/stores/providerModelCommands';
 import type { ModelSource } from '$lib/conductorSources';
 
@@ -24,7 +24,7 @@ const setupModelId = writable<string | null>(null);
 export const localLoadRefusal = derived([networkServers, providers, providerModels, setupModelId], ([$servers, $providers, $models, $id]) => {
  const server = $servers.find((item) => item.corsia_omlx);
  const provider = $providers.find((item) => item.name === 'omlx');
- const model = server && $id && $models[`omlx|${server.id}`]?.models.find((item) => item.id === $id && canLoadAnyway(item, false));
+ const model = server && $id && $models[`omlx|${server.id}`]?.models.find((item) => item.id === $id && item.state === 'default' && !item.starting);
  return server && provider && model ? { server, provider, model } : undefined;
 });
 
@@ -45,6 +45,7 @@ export async function retrySetupLocalModel(target: SetupRefusal, show: (info: Pr
 export async function refreshSetupLocalModels(): Promise<void> {
  const session = get(token);
  const flight = session ? await fetch('/api/providers/local/setup', { headers: { Authorization: `Bearer ${session}` } }).then((r) => r.ok ? r.json() : null).catch(() => null) : null;
+ // Mirrors LocalModel.model: oMLX identifies a repository by its final component.
  setupModelId.set(typeof flight?.model === 'string' ? flight.model.split('/').pop() ?? null : null);
  await Promise.all([loadNetworkServers(), loadProviders()]);
  const server = get(networkServers).find((item) => item.corsia_omlx);
