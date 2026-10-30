@@ -59,7 +59,10 @@ for (const theme of ['light', 'dark'] as const) {
 		const target = twins.first();
 		await expect(target).not.toHaveAttribute('data-artifact-id');
 		await expect(twins.last()).toHaveAttribute('data-artifact-id', /.+/);
-		expect((await revision()).artifact_id).toBeNull();
+		const cardCount = await chips.count();
+		const twinIdentity = await twins.last().getAttribute('data-artifact-id');
+		const before = (await revision()).artifact_id;
+		expect(before).toBeNull();
 		const out = process.env.CORSIA_E2E_EVIDENCE_DIR || info.outputPath();
 		fs.mkdirSync(out, { recursive: true });
 		await page.screenshot({ path: path.join(out, `${theme}-${mobile ? '393' : '1440'}-initial.png`), animations: 'disabled' });
@@ -102,19 +105,22 @@ for (const theme of ['light', 'dark'] as const) {
 			else await page.keyboard.press('Enter');
 		}
 		await expect(page.getByText(unique)).toBeVisible();
+		const contentVisible = await page.getByText(unique).isVisible();
 		const opened = await revision();
 		expect(opened.artifact_id).toBeTruthy();
 		await page.screenshot({ path: path.join(out, `${theme}-${mobile ? '393' : '1440'}-opened.png`), animations: 'disabled' });
 		if (mobile) await page.getByRole('button', { name: 'Chat', exact: true }).tap();
 		await expect(target).toBeVisible();
+		const chatVisible = await target.isVisible();
 		fs.writeFileSync(path.join(out, `${theme}-${mobile ? '393' : '1440'}-receipt.json`), JSON.stringify({
 			reference: ref,
-			cards: 12,
-			registeredTwin: true,
-			before: null,
-			afterIdentityPresent: !!opened.artifact_id,
-			contentVisible: true,
-			returnedToChat: true,
+			cards: cardCount,
+			registeredTwinIdentity: twinIdentity,
+			beforeIdentity: before,
+			afterIdentity: opened.artifact_id,
+			contentVisible,
+			chatVisible,
+			navigation: mobile ? 'returned to chat' : 'chat remained visible',
 			method: mobile ? 'emulated touch' : theme === 'light' ? 'Tab/click' : 'Tab/Enter',
 		}, null, 2));
 	});

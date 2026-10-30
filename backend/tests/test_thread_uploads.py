@@ -325,13 +325,14 @@ def test_upload_path_card_controls_and_active_precedence(main_db, monkeypatch):
         mime_type="image/png", size=4, path=image,
     )
     calls = []
-    original = registration_events.upload_path_has_identity
+    original = registration_events.select_upload_path
 
     def counted(path, **kwargs):
-        calls.append(path)
+        if not kwargs["active_only"]:
+            calls.append(path)
         return original(path, **kwargs)
 
-    monkeypatch.setattr(registration_events, "upload_path_has_identity", counted)
+    monkeypatch.setattr(registration_events, "select_upload_path", counted)
     assert lookup_file(str(active), [workspace], db=main_db).artifact["id"] == current["id"]
     assert lookup_file(str(image), [workspace], db=main_db).artifact["id"] == photo["id"]
     assert calls == []
@@ -355,6 +356,52 @@ def test_upload_path_card_controls_and_active_precedence(main_db, monkeypatch):
         ("upload", "image", str(plain.resolve())),
     ).fetchall()
     assert any("idx_artifact_identities_upload_path" in row["detail"] for row in plan)
+
+
+def test_inspect_upload_image_precedence_and_workspace_only_find(main_db):
+    from infra import config
+    from registry import models, service
+    from tests.registry_helpers import seed_artifact
+
+    path = (config.WORKSPACE / ".threads" / "main-1" / "uploads" / "choice" / "file.txt").resolve()
+    for kind in ("upload", "image"):
+        seed_artifact(main_db, artifact_id=kind, integration="upload", type=kind,
+                      external_id=kind, parent_thread_id="main-1", path=str(path))
+    main_db.commit()
+    before = main_db._c.total_changes
+    active, exists = service.inspect_file_identity(str(path), db=main_db)
+    assert exists and active["id"] == "image"
+    assert service.resolve_file_identity(str(path), db=main_db)["id"] == "image"
+    assert service.find_file_identity(str(path), db=main_db) is None
+    assert main_db._c.total_changes == before
+    workspace_owner = service.register_write_strict("main-1", str(path), db=main_db)
+    assert service.inspect_file_identity(str(path), db=main_db)[0]["id"] == workspace_owner["id"]
+    models.retire(workspace_owner["id"], db=main_db)
+    models.retire("image", db=main_db)
+    assert service.inspect_file_identity(str(path), db=main_db)[0]["id"] == "upload"
+    models.retire("upload", tombstone=True, db=main_db)
+    before = main_db._c.total_changes
+    assert service.inspect_file_identity(str(path), db=main_db) == (None, True)
+    assert service.resolve_file_identity(str(path), db=main_db) is None
+    assert service.find_file_identity(str(path), db=main_db)["id"] == workspace_owner["id"]
+    assert main_db._c.total_changes == before
+
+
+def test_inspect_selects_upload_route_once(main_db, monkeypatch):
+    from infra import config
+    from registry import file_identity_reads, service
+
+    path = config.WORKSPACE / ".threads" / "main-1" / "uploads" / "route" / "missing.txt"
+    original = file_identity_reads.uploads_root_for_path
+    calls = []
+
+    def counted(candidate):
+        calls.append(candidate)
+        return original(candidate)
+
+    monkeypatch.setattr(file_identity_reads, "uploads_root_for_path", counted)
+    assert service.inspect_file_identity(str(path), db=main_db) == (None, False)
+    assert calls == [str(path.resolve())]
 
 
 def test_workspace_path_miss_skips_upload_path_lookup(main_db, monkeypatch):

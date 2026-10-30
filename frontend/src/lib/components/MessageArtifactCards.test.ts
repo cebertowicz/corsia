@@ -8,7 +8,6 @@ import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
-
 import { answerSubmissionFailed, answerSubmitted, submittedAnswers } from '$lib/stores/cardAnswers';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
@@ -32,7 +31,6 @@ const tiles = () => [...host.querySelectorAll<HTMLElement>('.tile')];
 beforeEach(() => {
 	host = document.createElement('div');
 	document.body.appendChild(host);
-
 	threadWorkspaces.set({});
 	submittedAnswers.set({});
 });
@@ -182,7 +180,6 @@ describe('MessageArtifactCards', () => {
 
 		expect(host.querySelector('ul')).toBeNull();
 	});
-
 
 	it('renders every supplied file card in the strip', () => {
 		const cards = Array.from({ length: 9 }, (_, i) => ask({ state: undefined, kind: 'artifact', hold_id: undefined, artifact_id: `a${i}`, title: `file${i}.md` }));

@@ -601,8 +601,10 @@ def test_file_lookup_prepares_once_and_reuses_identity_for_both_queries(db, ws, 
     path = ws / "plain.md"
     path.write_text("plain")
     prepare = registry_service.prepare_file_identity
-    resolve = registry_service.resolve_file_identity
-    find = registry_service.find_file_identity
+    from registry import file_identity_reads
+
+    resolve = file_identity_reads._read
+    find = file_identity_reads.find_workspace
     prepared_inputs = []
     query_inputs = []
 
@@ -620,8 +622,8 @@ def test_file_lookup_prepares_once_and_reuses_identity_for_both_queries(db, ws, 
         return find(value, **kwargs)
 
     monkeypatch.setattr(registry_service, "prepare_file_identity", counted_prepare)
-    monkeypatch.setattr(registry_service, "resolve_file_identity", counted_resolve)
-    monkeypatch.setattr(registry_service, "find_file_identity", counted_find)
+    monkeypatch.setattr(file_identity_reads, "_read", counted_resolve)
+    monkeypatch.setattr(file_identity_reads, "find_workspace", counted_find)
     found = lookup_file(str(path), [ws.resolve()], db=db)
     assert found.allowed and found.is_file and not found.has_identity
     assert prepared_inputs == [str(path.resolve())]
@@ -629,12 +631,9 @@ def test_file_lookup_prepares_once_and_reuses_identity_for_both_queries(db, ws, 
     assert isinstance(query_inputs[0], registry_service.FileIdentity)
 
 
-def test_file_only_card_has_exact_payload_without_registry_lifecycle(db, ws, monkeypatch):
-    from registry import path_cards
-
+def test_file_only_card_has_exact_payload_without_registry_lifecycle(db, ws):
     path = ws / "plain.md"
     path.write_text("plain")
-    monkeypatch.setattr(path_cards, "card_for", lambda *_a, **_k: pytest.fail("no registry row exists"), raising=False)
     assert reference_cards(db, "plain.md", [ws.resolve()], "user") == [{
         "kind": "artifact", "artifact_id": None, "title": "plain.md",
         "type": "document", "icon": "file-text", "name": "plain.md",
@@ -668,7 +667,7 @@ def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
 
 
 def test_page_memoizes_unregistered_and_retired_classification(db, ws, monkeypatch):
-    from registry import service
+    from registry import file_identity_reads
 
     (ws / "plain.md").write_text("plain")
     retired = _registered(db, ws, "retired.md")
@@ -676,14 +675,14 @@ def test_page_memoizes_unregistered_and_retired_classification(db, ws, monkeypat
     for index in range(1, 4):
         _message(db, index, text="plain.md retired.md")
     monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (ws.resolve(), []))
-    original = service.find_file_identity
+    original = file_identity_reads.find_workspace
     calls = []
 
     def counted(path, **kwargs):
         calls.append(path)
         return original(path, **kwargs)
 
-    monkeypatch.setattr(service, "find_file_identity", counted)
+    monkeypatch.setattr(file_identity_reads, "find_workspace", counted)
     page = _page(db)
     assert sorted(Path(path.canonical).name for path in calls) == ["plain.md", "retired.md"]
     assert all([card["title"] for card in page[f"m{i}"]["cards"]] == ["plain.md"] for i in range(1, 4))

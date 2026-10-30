@@ -14,9 +14,8 @@ from core.context_source_paths import role_file_label
 from core.role_context_sources import ROLE_ORDER
 from core.skill_scanning import skill_files
 from core.workspace_context_sources import is_read_only_context_path
-from core.workspace_layout import resolve_workspace_root, uploads_root_for_path
+from core.workspace_layout import resolve_workspace_root
 from infra import config
-from registry import registration_events
 from registry import service as registry_service
 
 
@@ -93,8 +92,5 @@ def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
     identity = registry_service.prepare_file_identity(str(candidate), db=db)
     if identity is None:
         return FileLookup(candidate, True, True, None)
-    artifact = registry_service.resolve_file_identity(identity, db=db)
-    has_identity = artifact is not None or registry_service.find_file_identity(identity, db=db) is not None
-    if not has_identity and uploads_root_for_path(identity.canonical) is not None:
-        has_identity = registration_events.upload_path_has_identity(identity.canonical, db=db)
+    artifact, has_identity = registry_service.inspect_file_identity(identity, db=db)
     return FileLookup(candidate, True, True, artifact, has_identity)

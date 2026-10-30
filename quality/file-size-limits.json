@@ -35,7 +35,7 @@
     "backend/infra/send_dispatch.py": 644,
     "backend/llm/isolated_structured.py": 2195,
     "backend/registry/durable_writes.py": 799,
-    "backend/registry/service.py": 545,
+    "backend/registry/service.py": 541,
     "backend/reviewer/on_pr_review.py": 448,
     "backend/subagents/child_thread.py": 560,
     "backend/subagents/codex_app_server.py": 901,
