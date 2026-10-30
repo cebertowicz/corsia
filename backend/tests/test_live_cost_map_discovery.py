@@ -33,24 +33,48 @@ async def test_bundled_map_refresh_uses_real_litellm_functions(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refresh_code_failure_is_logged_and_restores_bundled_map(monkeypatch, caplog):
+async def test_a_malformed_map_keeps_the_bundled_map_and_releases_waiters(monkeypatch, caplog):
+    backup = json.loads(files("litellm").joinpath("model_prices_and_context_window_backup.json").read_text())
     bundled = litellm.model_cost
     monkeypatch.setattr(litellm, "model_cost", bundled)
-    monkeypatch.setattr(live_cost_map.GetModelCostMap, "_get_backup_model_count", lambda: 0)
-    monkeypatch.setattr(live_cost_map.GetModelCostMap, "validate_model_cost_map", lambda *_a: True)
-    monkeypatch.setattr(live_cost_map, "_invalidate_model_cost_lowercase_map", lambda: None)
-    def broken(**_kwargs):
-        raise TypeError("incompatible LiteLLM API")
-
-    monkeypatch.setattr(litellm, "add_known_models", broken)
     client = httpx.AsyncClient
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}, request=request))
+    payload = {**backup, "broken": "not an entry"}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
     monkeypatch.setattr(live_cost_map.httpx, "AsyncClient", lambda **kwargs: client(transport=transport, **kwargs))
 
-    await live_cost_map._refresh()
+    live_cost_map.start_refresh()
+    await live_cost_map.wait_for_refresh()
 
     assert litellm.model_cost is bundled
-    assert any("refresh code broke" in record.message and record.exc_info for record in caplog.records)
+    assert any("refresh broke" in record.message and record.exc_info for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_fetch_keeps_the_bundled_map_and_releases_waiters(monkeypatch, caplog):
+    bundled = litellm.model_cost
+    monkeypatch.setattr(litellm, "model_cost", bundled)
+    monkeypatch.setattr(live_cost_map, "_REFRESH_TIMEOUT", 0.01)
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def get(self, _url):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(live_cost_map.httpx, "AsyncClient", Client)
+
+    live_cost_map.start_refresh()
+    await asyncio.wait_for(live_cost_map.wait_for_refresh(), timeout=5)
+
+    assert litellm.model_cost is bundled
+    assert any("cost map refresh failed" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio

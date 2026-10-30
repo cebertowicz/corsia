@@ -16,7 +16,6 @@ _refresh_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task] = {}
 
 
 async def _refresh() -> None:
-    bundled_map = litellm.model_cost
     try:
         async with asyncio.timeout(_REFRESH_TIMEOUT):
             async with httpx.AsyncClient(timeout=_REFRESH_TIMEOUT) as client:
@@ -26,23 +25,17 @@ async def _refresh() -> None:
     except (httpx.HTTPError, TimeoutError, ValueError) as exc:
         log.warning("LiteLLM cost map refresh failed; using bundled map: %s", exc)
         return
-    except Exception:
-        log.exception("LiteLLM cost map refresh code broke; using bundled map")
-        return
 
-    try:
-        if not GetModelCostMap.validate_model_cost_map(
-            model_map, GetModelCostMap._get_backup_model_count()
-        ):
-            return  # LiteLLM logs the validation failure.
-        model_map = _expand_model_aliases(model_map)
-        # LiteLLM's proxy reload uses the same replacement and cache refresh.
-        litellm.model_cost = model_map
-        _invalidate_model_cost_lowercase_map()
-        litellm.add_known_models(model_cost_map=model_map)
-    except Exception:
-        litellm.model_cost = bundled_map
-        log.exception("LiteLLM cost map refresh code broke; using bundled map")
+    if not GetModelCostMap.validate_model_cost_map(
+        model_map, GetModelCostMap._get_backup_model_count()
+    ):
+        return  # LiteLLM logs the validation failure.
+    # Reads every entry, so a malformed map raises before anything global changes.
+    model_map = _expand_model_aliases(model_map)
+    # LiteLLM's proxy reload uses the same replacement and cache refresh.
+    litellm.model_cost = model_map
+    _invalidate_model_cost_lowercase_map()
+    litellm.add_known_models(model_cost_map=model_map)
 
 
 def start_refresh() -> asyncio.Task:
@@ -50,14 +43,16 @@ def start_refresh() -> asyncio.Task:
     loop = asyncio.get_running_loop()
     task = loop.create_task(_refresh())
     _refresh_tasks[loop] = task
-    task.add_done_callback(_clear_refresh_task)
+    task.add_done_callback(_finish_refresh)
     return task
 
 
-def _clear_refresh_task(task: asyncio.Task) -> None:
+def _finish_refresh(task: asyncio.Task) -> None:
     loop = task.get_loop()
     if _refresh_tasks.get(loop) is task:
         del _refresh_tasks[loop]
+    if not task.cancelled() and (error := task.exception()):
+        log.error("LiteLLM cost map refresh broke; using bundled map", exc_info=error)
 
 
 def refresh_task() -> asyncio.Task | None:
@@ -66,7 +61,7 @@ def refresh_task() -> asyncio.Task | None:
 
 
 async def wait_for_refresh() -> None:
-    """Wait for the startup refresh without cancelling it when a caller stops."""
+    """Wait for the startup refresh: a caller stopping leaves it running, and its failure stays its own."""
     task = refresh_task()
     if task is not None:
-        await asyncio.shield(task)
+        await asyncio.wait([task])

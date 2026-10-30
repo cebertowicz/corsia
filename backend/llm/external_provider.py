@@ -146,14 +146,18 @@ def _capability_overrides(server: dict) -> dict:
     }
 
 
-def reference_context_window(host: str, model_id: str) -> int | None:
-    """The provider-published input window for ``model_id`` on ``host``, if known."""
+def _reference_namespaces(host: str) -> tuple[str, ...]:
     host = (host or "").lower().rstrip(".")
-    namespaces = next(
+    return next(
         (ns for suffix, ns in _REFERENCE_NAMESPACES.items()
          if host == suffix or host.endswith("." + suffix)),
         (),
     )
+
+
+def reference_context_window(host: str, model_id: str) -> int | None:
+    """The provider-published input window for ``model_id`` on ``host``, if known."""
+    namespaces = _reference_namespaces(host)
     if not namespaces:
         return None
     import litellm
@@ -376,9 +380,11 @@ async def discover_external_models(server_id: str) -> dict:
     shapes, levels_error = await discovery_shapes(dialect, api_base, model_ids)
     if levels_error:
         result["reasoning_levels_error"] = levels_error
-    from llm.live_cost_map import wait_for_refresh
+    host = urlsplit(api_base).hostname or ""
+    if _reference_namespaces(host):  # Only these hosts read LiteLLM's map.
+        from llm.live_cost_map import wait_for_refresh
 
-    await wait_for_refresh()
+        await wait_for_refresh()
     try:
         result = await run_in_db(
             _reconcile_external_models,
@@ -386,7 +392,7 @@ async def discover_external_models(server_id: str) -> dict:
             caps or {},
             _now(),
             result,
-            urlsplit(api_base).hostname or "",
+            host,
             target,
             shapes,
         )

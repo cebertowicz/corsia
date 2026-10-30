@@ -43,20 +43,22 @@ def test_no_window_is_borrowed_across_providers_or_hosts(model_table) -> None:
     assert reference_context_window("", "qwen-flash") is None
 
 
-async def _discover(monkeypatch, *, meta: dict | None = None) -> str:
+async def _discover(
+    monkeypatch, *, meta: dict | None = None, host: str = _ALIBABA_HOST, base: str = _ALIBABA_BASE,
+) -> str:
     from llm import external_provider as ep
     from llm import network_discovery as nd
     from llm import network_endpoints as ne
 
     sid = nd.upsert_server(
-        provider="external", instance_id=_ALIBABA_HOST, instance_name="Alibaba",
-        host=_ALIBABA_HOST, port=443, kind="external", dialect="openai",
+        provider="external", instance_id=host, instance_name="Alibaba",
+        host=host, port=443, kind="external", dialect="openai",
         status="online",
     )
     # Registered by URL, as the add form stores it: discovery's stale check
     # reads the stored base the way dispatch does.
-    nd.set_server_metadata(sid, base_url=_ALIBABA_BASE, **(meta or {}))
-    monkeypatch.setattr(ne, "build_api_base", lambda _sid: _ALIBABA_BASE)
+    nd.set_server_metadata(sid, base_url=base, **(meta or {}))
+    monkeypatch.setattr(ne, "build_api_base", lambda _sid: base)
 
     async def _fetch(api_base, dialect, api_key):
         return ["qwen-flash", "glm-5.1", "qwen-flash-us"]
@@ -114,6 +116,26 @@ async def test_discovery_waits_for_live_reference_window(isolated_db, monkeypatc
     release.set()
     sid = await discovery
     assert _windows(sid)["qwen-flash"] == 997_952
+
+
+@pytest.mark.asyncio
+async def test_discovery_of_a_host_without_published_windows_does_not_wait(
+    isolated_db, model_table, monkeypatch,
+):
+    import asyncio
+    from llm import live_cost_map
+
+    async def never():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(live_cost_map, "_refresh", never)
+    refresh = live_cost_map.start_refresh()
+    try:
+        await asyncio.wait_for(
+            _discover(monkeypatch, host="192.168.1.5", base="http://192.168.1.5:8000/v1"), timeout=10,
+        )
+    finally:
+        refresh.cancel()
 
 
 @pytest.mark.asyncio
