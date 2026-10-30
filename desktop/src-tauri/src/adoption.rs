@@ -20,6 +20,9 @@ const JOURNAL: &str = "adoption.json";
 /// The launchd label of the source install's service.
 pub const SOURCE_LABEL: &str = "com.corsia.prod";
 const PLIST: &str = "com.corsia.prod.plist";
+/// The port a source install's own `scripts/corsia` serves when neither a launchd plist nor its
+/// `.env` names one. `backend/tests/test_default_port.py` holds it equal to the script's.
+pub const SOURCE_DEFAULT_PORT: u16 = 1956;
 /// How often a restart in flight is looked at again. How long to wait is the request's own age
 /// (see `RestartLook`), never a limit of the app's.
 const RESTART_POLL: Duration = Duration::from_secs(2);
@@ -161,11 +164,34 @@ pub fn source_from_bootstrap(home: &Path) -> Result<SourceInstall, String> {
 }
 
 impl SourceInstall {
+    /// The port a source install with no plist serves, as its own script resolves it: the last
+    /// `BACKEND_PORT` its `.env` assigns, else the script's default.
+    pub fn plain_port(&self) -> u16 {
+        env_backend_port(&self.env_file).unwrap_or(SOURCE_DEFAULT_PORT)
+    }
+
     pub fn app_port(&self, app_dir: &Path) -> u16 {
         self.port
             .or_else(|| crate::first_run::recorded_port(app_dir))
             .unwrap_or(crate::DEFAULT_SERVICE_PORT)
     }
+}
+
+/// The last `BACKEND_PORT` a shell-sourced `.env` assigns. The script sources the file, so a
+/// later line wins, `export` is allowed, and a value may be quoted or followed by a comment. A
+/// last assignment that is empty or not a port yields none, as the script ignores or refuses it.
+fn env_backend_port(env_file: &Path) -> Option<u16> {
+    let text = fs::read_to_string(env_file).ok()?;
+    let value = text.lines().rev().find_map(|line| {
+        let line = line.trim_start();
+        let line = line.strip_prefix("export").filter(|rest| rest.starts_with([' ', '\t'])).unwrap_or(line);
+        line.trim_start().strip_prefix("BACKEND_PORT=")
+    })?;
+    let value = match value.chars().next()? {
+        quote @ ('"' | '\'') => value[1..].split(quote).next()?,
+        _ => value.split_whitespace().next()?,
+    };
+    value.parse().ok().filter(|port| *port != 0)
 }
 
 /// The roots the source install's bootstrap config records: a v2 file names
@@ -1200,6 +1226,31 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    #[test]
+    fn an_env_names_its_port_the_way_the_script_reads_it() {
+        let home = TempDir::new().unwrap();
+        let env = home.path().join(".env");
+        let port = |text: &str| {
+            fs::write(&env, text).unwrap();
+            env_backend_port(&env)
+        };
+        assert_eq!(env_backend_port(&home.path().join("missing")), None);
+        assert_eq!(port(""), None);
+        assert_eq!(port("OTHER=1\n# BACKEND_PORT=2000\n"), None);
+        assert_eq!(port("BACKEND_PORT=2001"), Some(2001));
+        assert_eq!(port("\n  export BACKEND_PORT=2002  # note\n\n"), Some(2002));
+        assert_eq!(port("export\tBACKEND_PORT=\"2003\"\n"), Some(2003));
+        assert_eq!(port("BACKEND_PORT='2004' # note\n"), Some(2004));
+        assert_eq!(port("BACKEND_PORT=2005\nBACKEND_PORT=2006\n"), Some(2006));
+        assert_eq!(port("BACKEND_PORT=02007\n"), Some(2007));
+        // The last assignment decides, even when it is not a port: the script ignores an empty
+        // one and refuses an invalid one, and neither is the earlier line's port.
+        assert_eq!(port("BACKEND_PORT=2008\nBACKEND_PORT=\n"), None);
+        assert_eq!(port("BACKEND_PORT=2009\nBACKEND_PORT=abc\n"), None);
+        assert_eq!(port("BACKEND_PORT=70000\n"), None);
+        assert_eq!(port("BACKEND_PORT=0\n"), None);
+    }
 
     struct Fake {
         ready_asked: Vec<BTreeSet<String>>,
