@@ -20,6 +20,7 @@
 	import { stopLocalServer } from '$lib/conductorSourcesApi';
 	import { createSetupConnect, POLL_MS } from '$lib/setupConnect.svelte';
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
+	import { localLoadRefusal, readPreauthLocal, refreshSetupLocalModels, retrySetupLocalModel } from '$lib/setupLocalModels';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
@@ -115,8 +116,8 @@
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
 		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
-			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
+			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, keepLine: $localLoadRefusal?.model.keepLine,
+			start: () => void ($localLoadRefusal ? retryLocalLoad() : startLocal()), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		const ready = provider || endpoint;
@@ -211,16 +212,7 @@
 		await localPick.start();
 		await readLocalProgress();
 	}
-	async function readLocalProgress() {
-		try {
-			const response = await fetch('/api/setup/local-download');
-			if (!response.ok) return;
-			const live = await response.json();
-			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
-				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
-		} catch { /* Preserve the last job projection until the next successful read. */ }
-	}
+	async function readLocalProgress() { const next = await readPreauthLocal(); if (next) preauthLocal = next; }
 	async function startLocal() {
 		if (!eligible || localBusy) return;
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
@@ -313,8 +305,14 @@
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
 			connectFlow.sourcesChanged();
 			catalog = await setupCatalog(current);
+			await refreshSetupLocalModels();
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
+	}
+	async function retryLocalLoad() {
+		if (localBusy) return;
+		localBusy = true;
+		try { await retrySetupLocalModel(); await refreshSources(); } finally { localBusy = false; }
 	}
 	async function retrySources() {
 		sourceRetry = { error: sourceError, vendors: CLI_VENDORS.filter((vendor) => !sources.some((row) => row.source === vendor) || connectFlow.awaitingSource(vendor)) };

@@ -13,6 +13,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
 - A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
 - A local model is no longer shown as ready after its server exits, until it has loaded again.
+- A local model that cannot load during setup now says why and lets you try again.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - A message you send with chat comments shows them right away, including when you send comments with no text, and the commented message keeps their marks.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
