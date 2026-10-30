@@ -131,6 +131,26 @@ def test_workspace_git_rules_and_no_repository(tmp_path):
     assert not workspace_git_paths(empty)
 
 
+def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
+    from tools import host_path_policy
+    from tools.host_path_policy import ProtectedHostPathPolicy
+
+    repo = tmp_path / 'workspace'
+    init(repo)
+    git = repo / '.git'
+    policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo)
+    monkeypatch.setattr(host_path_policy, 'current_protected_host_path_policy', lambda: policy)
+    (repo / 'link').symlink_to(git / 'config')
+    paths = (git / 'config', git / 'config.lock', git / 'commondir', git / 'hooks' / 'pre-commit', repo / 'link',
+             repo / '.GIT' / 'CONFIG', repo / '.git' / 'Hooks' / 'pre-commit')
+    for path in paths:
+        assert 'No host-access lease' in policy.ordinary_denial(path, for_write=True)
+        assert 'No host-access lease' in host_path_policy.path_review_classification(path, for_write=True)[1]
+        assert policy.ordinary_denial(path, for_write=False) is None
+    assert policy.ordinary_denial(git / 'index', for_write=True) is None
+    assert policy.ordinary_denial(repo / 'notes.md', for_write=True) is None
+
+
 def test_workspace_git_controls_in_all_macos_profiles(tmp_path, monkeypatch):
     from infra import config
     from tools import host_access_external, safehouse_launch, shell_guard
@@ -222,7 +242,7 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
                               capture_output=True, text=True, timeout=30)
 
     git_dir = 'metadata' if separate else '.git'
-    for target in (f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/commondir', f'{git_dir}/hooks/test'):
+    for target in (f'{git_dir.upper()}/CONFIG', f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/commondir', f'{git_dir}/hooks/test'):
         result = run(f'printf x > {shlex.quote(target)}')
         assert result.returncode != 0, target
     linked = run(f'ln {shlex.quote(git_dir + "/config")} alias')

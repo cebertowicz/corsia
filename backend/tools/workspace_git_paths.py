@@ -38,6 +38,13 @@ def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
             git_dir / "commondir", common / "hooks")
 
 
+def is_workspace_git_control(workspace: Path | None, path: Path) -> bool:
+    """Return whether ``path`` is a control path, ignoring case as a default macOS volume does."""
+    paths = [str(item).casefold() for item in workspace_git_paths(workspace)]
+    name = str(path).casefold()
+    return name in paths or (bool(paths) and name.startswith(f"{paths[-1]}/"))
+
+
 def workspace_git_rules(paths: tuple[Path, ...]) -> list[str]:
     """Render Seatbelt denies for ``workspace_git_paths`` output."""
     if not paths:

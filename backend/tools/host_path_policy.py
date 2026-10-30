@@ -24,7 +24,7 @@ from tools.host_path_resolution import (
 from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
 from tools.protected_path_rules import ancestor_pins
 from tools.sandbox_git import sandbox_literal
-from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
+from tools.workspace_git_paths import is_workspace_git_control, workspace_git_paths, workspace_git_rules
 
 
 _CONTROL_FILES = (
@@ -121,8 +121,8 @@ class ProtectedHostPathPolicy:
             )
         )
 
-    def hard_floor_denial(self, path: Path) -> str | None:
-        """Return the non-leaseable denial when ``path`` reaches a credential root.
+    def hard_floor_denial(self, path: Path, *, for_write: bool = False) -> str | None:
+        """Return the non-leaseable denial for a credential root or a workspace Git write.
 
         Symlinks and ``..`` are traced component-wise, so a route into a
         credential root is refused as well as the canonical path.
@@ -138,11 +138,13 @@ class ProtectedHostPathPolicy:
                 return _CREDENTIAL_DENIAL
             if resolution_touches(root, path, loop_touches=False):
                 return _CREDENTIAL_DENIAL
+        if for_write and candidate is not None and is_workspace_git_control(self.workspace, candidate):
+            return "Workspace Git settings and hooks are blocked in protected mode." + _NO_LEASE
         return None
 
     def denial(self, path: Path, *, for_write: bool) -> str | None:
         """Return the protected-mode denial for ``path``, if any."""
-        if message := self.hard_floor_denial(path):
+        if message := self.hard_floor_denial(path, for_write=for_write):
             return message
         candidate = canonical(path)
         if any(contains(root, candidate) for root in self.private_roots):
@@ -182,7 +184,7 @@ class ProtectedHostPathPolicy:
                 "CORSIA control-file writes are blocked in protected mode."
                 + _NO_LEASE
             )
-        if self.generated_profile is not None and candidate == self.generated_profile:
+        if self.generated_profile is not None and contains(self.generated_profile, candidate):
             return (
                 "The active Safehouse profile is blocked in protected mode."
                 + _NO_LEASE
@@ -223,7 +225,7 @@ class ProtectedHostPathPolicy:
         # Trace the lexical path first: Python 3.11 raises while resolving a
         # symlink loop, while this boundary deliberately treats an unresolved
         # loop as requiring reviewed host access.
-        if message := self.hard_floor_denial(path):
+        if message := self.hard_floor_denial(path, for_write=for_write):
             # Credential roots (the key store inside the state root) outrank
             # the lease-eligible state-root answer.
             return message
@@ -369,7 +371,7 @@ def path_review_classification(
     forms = tuple(dict.fromkeys(paths))
     policy = current_protected_host_path_policy()
     for form in forms:
-        if message := policy.hard_floor_denial(form):
+        if message := policy.hard_floor_denial(form, for_write=for_write):
             return True, message
     return any(
         ordinary_host_path_denial(form, for_write=for_write) for form in forms
