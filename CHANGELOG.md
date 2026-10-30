@@ -8,11 +8,11 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
-## v0.4.1 — A signed Mac app, a guided first-run setup, one-Allow Google, and steadier local models
+## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
 Released 2026-10-30.
 
-### Packaged Mac App
+### Packaged Mac app
 
 - The Mac app is signed and notarized by Apple, so macOS opens it without an unidentified-developer warning.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
@@ -25,7 +25,7 @@ Released 2026-10-30.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - After updating from an older CORSIA, Codex accounts you added work again without signing in.
 
-### First Run and Setup
+### First run and setup
 
 - Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
 - On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No tested local model handles CORSIA's first-run work reliably on 24 GB.
@@ -50,7 +50,7 @@ Released 2026-10-30.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
 - On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
 
-### Connected Apps, Google and Mail
+### Connected apps, Google and mail
 
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Google and Microsoft setup say what access sign-in grants before asking "Go ahead?", and the approval toggle is called Auto-approve in Settings, as in the chat.
@@ -104,7 +104,7 @@ Released 2026-10-30.
 - Updates show the data upgrade step while your data is being upgraded.
 - When an update fails before CORSIA restarts, your agents' paused work usually picks back up right away instead of staying paused until the next restart.
 
-### Shared Browser
+### Shared browser
 
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
@@ -116,7 +116,7 @@ Released 2026-10-30.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
 
-### Documents and Collaboration
+### Documents and collaboration
 
 - A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
 - Agent replies to your document comments now show as one notice above the message box until you read them.
@@ -134,7 +134,7 @@ Released 2026-10-30.
 - You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
 - Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
 
-### Chat and Interface
+### Chat and interface
 
 - Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
 - Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
@@ -160,7 +160,7 @@ Released 2026-10-30.
 - The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
 - The host-access request card now says what host access is before asking you to approve it.
 
-### Agents and Plans
+### Agents and plans
 
 - In Focus, tasks assigned to you appear in the chat where they were requested and show a receipt when finished.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
@@ -169,7 +169,7 @@ Released 2026-10-30.
 - Plan and decision messages use clearer, consistent wording.
 - Agents can search the web with no search key while CORSIA's own local model is running.
 
-### Source and Linux Installs
+### Source and Linux installs
 
 - On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
 - Source installs use the same local model server release as the app and show the cause if installation fails.
