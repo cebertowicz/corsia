@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A local model is no longer shown as ready after its server exits, until it has loaded again.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - A message you send with chat comments shows them right away, including when you send comments with no text, and the commented message keeps their marks.
+- A model on your own server that reports its context window, such as one served by vLLM, can be used as soon as you add the server.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
@@ -73,6 +74,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
 - On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
+- Open any file a chat's agent was given, straight from the chat.
 - Open files mentioned in chat, including files in your workspace.
 - Plan and decision messages use clearer, consistent wording.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
@@ -86,6 +88,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Select text in chat to add comments to your next message.
 - Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
 - Settings no longer offers an update after it finishes.
+- Setup can continue when a provider added by address has a model that is ready to use.
 - Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.

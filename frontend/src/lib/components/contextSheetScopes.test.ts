@@ -75,6 +75,16 @@ describe('scope grouping', () => {
 		expect(rows.reduce((sum, row) => sum + (row.tokenCount ?? 0), 0)).toBe(60);
 	});
 
+	it('opens a listed skill file while leaving the index inert', () => {
+		const model = contextSheetSnapshotModel(usage([source('skills', 'dynamic', 10, {
+			provider: 'skills', skills: [{ name: 'alpha', scope: 'workspace', scope_id: 'w', path: '/workspace/skills/alpha/SKILL.md', prompt_tokens: 5 }],
+		})]));
+		const skill = model!.sources.find((row) => row.label === 'alpha')!;
+		expect(skill.filePath).toBe('/workspace/skills/alpha/SKILL.md');
+		expect(skill.actionLabel).toBe('Open Document');
+		expect(model!.sources.find((row) => row.label === 'Skills index')?.actionLabel).toBe('');
+	});
+
 	it('keeps 41 skill rows reconciled with a name-only overflow tag', () => {
 		const skills = Array.from({ length: 41 }, (_, index) => ({
 			name: `skill-${index}`,
