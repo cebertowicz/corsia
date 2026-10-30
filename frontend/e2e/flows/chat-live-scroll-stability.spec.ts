@@ -68,20 +68,25 @@ test.afterEach(async ({ request }) => {
 	await setFocusMode(request, true);
 });
 
-for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge'] as const) {
+/** With Focus mode on, the live region mounts inside the current-work block, and only once the person opens it. */
+for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge', 'pinned at the live edge, current work open (Focus mode)'] as const) {
 	test(`@surface:chat-live-scroll the reader's place holds while a turn works (${reading})`, async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop geometry');
 		const title = `live-scroll-${Date.now()}`;
 		const gate = `hold-live-scroll-${Date.now()}`;
-		await setFocusMode(request, false);
+		const focus = reading.includes('Focus mode');
+		await setFocusMode(request, focus);
 		await createSession(request, title);
 		await openThread(page, title);
 		await waitForWsConnected(page);
 		await seedMockResponses(request, [0, 1, 2].map((index) => ({ content: `Reply ${index}. ${LINE.repeat(80)}`, finish_reason: 'stop' })));
 		for (let index = 0; index < 3; index++) {
-			await sendChatMessage(page, `history message ${index}`);
-			await expect(page.locator('.messages .message.assistant').nth(index)).toBeVisible({ timeout: 20_000 });
+			// A Focus-mode history is short (replies are tucked away), so the person's own messages carry the length that makes the list scroll.
+			await sendChatMessage(page, `history message ${index}. ${focus ? LINE.repeat(40) : ''}`);
+			// With Focus mode on, a reply not meant for the person is tucked into a Worked block rather than shown.
+			if (focus) await expect(page.getByRole('button', { name: /^Expand Worked/ })).toHaveCount(index + 1, { timeout: 20_000 });
+			else await expect(page.locator('.messages .message.assistant').nth(index)).toBeVisible({ timeout: 20_000 });
 		}
 		await installPaintedFrames(page);
 		// Every third step also says something, so the run commits streamed replies mid-turn as well as swapping reasoning and tools.
@@ -94,6 +99,10 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge'] 
 		await sendChatMessage(page, 'start the live turn');
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 		await page.waitForTimeout(1500);
+		if (focus) {
+			await page.getByRole('button', { name: /^Expand current work/ }).click();
+			await expect(page.locator('.live-slot')).toBeVisible();
+		}
 		if (reading === 'scrolled up mid-transcript') {
 			await page.locator('.messages').evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight / 2 - el.clientHeight / 2); });
 			await page.waitForTimeout(600);
