@@ -12,6 +12,7 @@ from core.lesson_corrections import correction_facts, source_subjects
 from core.lesson_report import ReportScope, collect_report, detail_request, read_report
 from core.lesson_report_db import report_snapshot
 from core.lesson_report_offers import LessonReportCollectionCancelled
+from core.lesson_report_projects import attach_project_ids
 from core.lesson_report_sources import current_sources, source_inputs
 from core.measurement_scope import completed_week_window, scope_cte, validate_scope
 from infra.db_async import run_bulk, run_off_db
@@ -146,4 +147,5 @@ async def report_for_identity(*, cancellation_event: Event | None = None, **kwar
     collection = await run_bulk(collect_for_identity, cancellation_event=cancellation_event, **kwargs)
     resolved = await run_off_db(current_sources, workspace, collection.inputs)
     collection = await run_bulk(collect_corrections, collection, resolved[0], cancellation_event)
-    return await run_off_db(render_collection, collection, workspace, resolved)
+    result = await run_off_db(render_collection, collection, workspace, resolved)
+    return await run_bulk(attach_project_ids, result, collection.scope.user_id, cancellation_event)
