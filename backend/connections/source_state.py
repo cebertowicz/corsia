@@ -69,6 +69,11 @@ def _prior_state(existing: dict[str, Any] | None) -> str | None:
     return None if state == UNVERIFIED else state
 
 
+def refresh_detail(error: str | None) -> str | None:
+    """A refresh's error as a check's raw detail: the internal cause token is not one a person reads."""
+    return None if error == "account_discovery_failed" else error
+
+
 def user_reason(state: str, detail: str | None) -> str | None:
     """The reason a person reads, from a check's raw detail (which only the log keeps)."""
     if state == NEEDS_AUTH:
@@ -177,7 +182,7 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
         receipt = await refresh_provider(provider, reason="manual", binary=binary)
         state = READY if receipt.get('ok') else (NEEDS_AUTH if receipt.get('error') == 'account_not_configured' else UNVERIFIED)
         try:
-            recorded = await run_in_db(apply_check, provider, state, receipt.get('error'))
+            recorded = await run_in_db(apply_check, provider, state, refresh_detail(receipt.get('error')))
             if recorded is None:
                 raise RuntimeError(f"{provider} source state was not recorded")
         except Exception as exc:

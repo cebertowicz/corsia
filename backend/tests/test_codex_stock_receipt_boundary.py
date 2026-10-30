@@ -149,11 +149,21 @@ async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, 
             declare_codex_tool_step(session, event["id"], persist=False)
 
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
-    # A paid launch admits the Default account of a real thread, whose home is
-    # this isolated environment's Codex home.
+    # A paid launch admits the account of a real thread: a signed-in Default whose
+    # runtime home is this isolated Codex home and whose login lives in its own source home.
     from infra.database import get_db
+    from vendor_account_fixtures import signed_in_default
 
-    monkeypatch.setattr("subagents.codex_env._default_app_server_home", lambda: Path(env["CODEX_HOME"]))
+    account = signed_in_default("codex")
+    (tmp_path / "codex-source").mkdir()
+    staged = get_db()
+    try:
+        staged.execute("UPDATE vendor_accounts SET source_home=?, runtime_home=? WHERE id=?",
+                       (str(tmp_path / "codex-source"), env["CODEX_HOME"], account["id"]))
+        staged.commit()
+    finally:
+        staged.close()
+    signed_in_default("codex", models=("codex/gpt-5.4",))  # re-reads the homes just staged
 
     db = get_db()
     try:

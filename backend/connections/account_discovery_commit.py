@@ -50,6 +50,13 @@ def _store_account_catalog(provider, rows, harness_version, *, db, unlisted_erro
                            unlisted_errors=unlisted_errors)
 
 
+def reproject_availability(provider, *, db):
+    """Re-derive the stored catalog from the accounts still signed in, inside the caller's transaction."""
+    from connections.harness_models import _cached_harness_version
+
+    _store_account_catalog(provider, [], _cached_harness_version(provider, db=db), db=db)
+
+
 def commit_discovery_bundle(provider, staged, rows, *, context, harness_version, db=None):
     """Fence model, usage and recovery effects in one account writer, then publish the cache.
 

@@ -143,7 +143,7 @@ def test_default_and_added_accounts_keep_separate_availability(accounts):
 
 
 @pytest.mark.parametrize('state', ['signed_out', 'removed'])
-def test_added_only_rows_disappear_when_account_leaves(accounts, state):
+def test_added_only_rows_become_unavailable_when_account_leaves(accounts, state):
     from connections.vendor_accounts import get_account, set_account_state
     from llm.model_status import scoped_status_rows
 
@@ -151,7 +151,9 @@ def test_added_only_rows_disappear_when_account_leaves(accounts, state):
     _discover(db, 'codex', account, [_row('added-only')])
     current = get_account(account['id'], db=db)
     set_account_state(account['id'], state, expected_revision=current['revision'], db=db)
-    assert not any(item['id'] == 'codex/added-only' for item in scoped_status_rows())
+    # The row stays listed but unavailable: no signed-in account's ready discovery lists it (D3 item 5).
+    row = next(item for item in scoped_status_rows() if item['id'] == 'codex/added-only')
+    assert (row['available'], row['status']) == (False, 'unavailable')
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
@@ -197,7 +199,8 @@ def test_added_only_admission_recovers_after_signing_in_and_rediscovery(accounts
     assert model_admission('codex/added-only', db=db, thread_id='destination') == 'run'
     current = get_account(account['id'], db=db)
     signed_out = set_account_state(current['id'], 'signed_out', expected_revision=current['revision'], db=db)
-    assert model_admission('codex/added-only', db=db, thread_id='destination') == 'fail'
+    # The catalog row is unavailable, so a send waits for discovery rather than failing (D3 item 5).
+    assert model_admission('codex/added-only', db=db, thread_id='destination') == 'wait'
     signed_in = set_account_state(signed_out['id'], 'signed_in', expected_revision=signed_out['revision'], db=db)
     _discover(db, 'codex', signed_in, [_row('added-only')])
     assert model_admission('codex/added-only', db=db, thread_id='destination') == 'run'

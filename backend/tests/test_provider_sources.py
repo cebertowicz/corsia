@@ -215,7 +215,7 @@ class TestClaudeSignIn:
         self._recheck()
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["prior_state"], claude["reason"]) == (
-            "unverified", "ready", "Check failed: account_discovery_failed",
+            "unverified", "ready", "Check failed",
         )
         assert get_account(signed_in_account['id'])['state'] == 'signed_in'
         assert claude_session.sessions == ['list_models']
@@ -249,7 +249,7 @@ class TestClaudeSignIn:
 
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["reason"]) == (
-            "unverified", "Check failed: account_discovery_failed",
+            "unverified", "Check failed",
         )
 
         claude_session(_listed())
