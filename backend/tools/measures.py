@@ -71,7 +71,8 @@ class MeasureSyncTool(Tool):
                 "end-to-start names, for example on: {introduced_by: pr}. Intake stamps whole minutes from "
                 "the newest matching earlier start, or leaves it absent if none has arrived; later starts do not "
                 "backfill it. KPI operands may declare latest or first "
-                "with one or two id/enum attributes; these are validated but do not filter results yet. "
+                "with one or two id/enum attributes to keep one row per value: latest keeps the newest row, "
+                "then applies where; first applies where, then keeps the earliest row. "
                 "Run it after every change; nothing takes effect until sync succeeds.")
 
     @property
