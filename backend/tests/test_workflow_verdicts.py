@@ -180,14 +180,15 @@ def test_subject_round_trips_a_name_with_an_at_sign() -> None:
     assert split_subject(subject_of("workflow", "team@ops", "ab12cd")) == ("workflow", "team@ops", "ab12cd")
 
 
-@pytest.mark.parametrize(("new", "reason"), [
-    (runs("v2", 1, count=18) + runs("v2", 1, count=2, state="failed"), "failed_run_unpriced"),
-    (runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None), "cost_unknown"),
+@pytest.mark.parametrize("new", [
+    runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None),
+    runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None, state="failed"),
+    runs("v2", 1, count=20, state="failed"),  # no outcome to divide the spend by
 ])
-def test_unknown_cost_makes_cost_per_outcome_unknown_never_zero(new, reason) -> None:
+def test_unknown_cost_makes_cost_per_outcome_unknown_never_zero(new) -> None:
     measure = PlannedMeasure(COST, "spend", "lower", "builtin", 0)
     call = measure_call(measure, new, runs("v1", 1), minimum=20, now=NOW, seed=1)
-    assert (call.call, call.reason, call.values) == ("unknown", reason, (None, None))
+    assert (call.call, call.reason, call.values) == ("unknown", "cost_unknown", (None, None))
 
 
 def test_failed_runs_count_in_the_total_but_never_as_outcomes() -> None:
@@ -415,6 +416,15 @@ def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> Non
     result = verdict(history(_priced("v1", 1, 1.0, started=40, ended=30), _priced("v2", 1, cost)))
     assert (result.word, result.reason) == expected
     assert (result.inputs.get("cheaper") is True) is cheaper
+
+
+def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_version_is_kept() -> None:
+    def arm(version: str, cost: float, **kw) -> list[Run]:
+        return _priced(version, 1, cost, count=18, **kw) + _priced(version, 1, cost, count=2, state="failed", **kw)
+
+    result = verdict(history(arm("v1", 1.0, started=40, ended=30), arm("v2", 0.5)))
+    assert (result.word, result.reason) == ("keep", "no_worse")
+    assert result.inputs["cheaper"] is True
 
 
 def test_rule_3_unclear_spend_with_no_quality_gain_reverts() -> None:

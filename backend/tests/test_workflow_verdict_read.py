@@ -59,12 +59,17 @@ def db(isolated_db):
 
 def node(db, node_id: str, *, workflow: str | None = "sdlc-process", version: str | None = "v1",
          state: str = "accepted", parent: str | None = None, difficulty: str | None = "standard",
-         size: str | None = "M", created: str = "2026-10-01T00:00:00Z", ended: str = "2026-10-05T00:00:00Z") -> None:
+         size: str | None = "M", created: str = "2026-10-01T00:00:00Z", ended: str = "2026-10-05T00:00:00Z",
+         kind: str = "task", revises: str | None = None) -> None:
+    """A node; a ``revises`` node is the sent-back task's revision, created beside it as the rejection does."""
     with raw_plan_seed(db):
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                   "commitment_id,workflow_ref,workflow_version,difficulty,size,requirements_revision,revision,"
-                   "created_at,updated_at) VALUES (?,'plan',?,1,'task','task','done',?,?,?,?,?,?,1,1,?,?)",
-                   (node_id, parent, state, node_id, workflow, version, difficulty, size, created, ended))
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,follow_up_of,order_key,kind,title,acceptance_criteria,"
+                   "state,commitment_id,workflow_ref,workflow_version,difficulty,size,requirements_revision,revision,"
+                   "created_at,updated_at) VALUES (?,'plan',?,?,1,?,'task','done',?,?,?,?,?,?,1,1,?,?)",
+                   (node_id, parent, revises, kind, state, node_id, workflow, version, difficulty, size, created, ended))
+        if revises:
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+                       "VALUES (?,?,'test','revision_created',?)", (f"revise-{node_id}", node_id, created))
         if state in {"accepted", "accepted_with_followup", "failed", "closed"}:
             db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
                        "VALUES (?,?,'test',?,'active',?,?)", (f"end-{node_id}", node_id, state, state, ended))
@@ -230,7 +235,7 @@ def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:
     assert runs_of(read)[0]["run"].kpi_rows == {"escapes": (row,)}
 
 
-def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -> None:
+def test_cost_prices_every_terminal_run_once_and_is_unknown_never_zero_only_when_a_call_cannot_be_priced(db) -> None:
     node(db, "priced")
     usage(db, "u1", "priced")
     node(db, "nested")
@@ -240,17 +245,135 @@ def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -
     node(db, "half")
     usage(db, "u4", "half")
     node(db, "broke", parent="half", workflow=None, state="failed")
+    usage(db, "u4b", "broke")
     node(db, "failed", state="failed")
     usage(db, "u5", "failed")
+    usage(db, "u5-late", "failed")
+    db.execute("UPDATE llm_usage SET created_at='2026-10-06T00:00:00Z' WHERE id='u5-late'")  # after it failed
+    node(db, "gap", state="failed")
+    usage(db, "u6", "gap")
+    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+               "VALUES ('gap-event','gap','test','usage_recording_failed','2026-10-02T00:00:00Z')")
+    node(db, "odd", state="closed")
+    usage(db, "u7", "odd", model="codex/gpt-5.6-terra")
+    db.execute("UPDATE llm_usage SET source='external_harness:codex' WHERE id='u7'")  # no proven price
+    node(db, "empty", state="closed")
     priced = price_snapshot(db, read_snapshot(db, now=NOW))
     runs, _ = runs_of(priced)
     from core.workflow_verdict_read import history_grain
     params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
               "grain": history_grain(datetime(2026, 10, 1).date(), NOW)}
     by_task = {row["task_id"]: row["dollars"] for row in query_model_costs(db, params, IdentityResolver(db))}
-    assert runs["priced"].cost == pytest.approx(by_task["priced"]) and by_task["priced"] > 0
+    one_call = by_task["priced"]
+    assert runs["priced"].cost == pytest.approx(one_call) and one_call > 0
     assert runs["nested"].cost == pytest.approx(by_task["nested"] + by_task["child"])
-    assert runs["half"].cost is None and runs["failed"].cost is None
+    # The failed child's call sits in its accepted ancestor's chain: counted once, in the run that holds it.
+    assert runs["half"].cost == pytest.approx(by_task["half"]) == pytest.approx(2 * one_call)
+    assert runs["failed"].cost == pytest.approx(one_call)  # its own call; the one after it failed is not its cost
+    assert runs["empty"].cost == 0.0
+    assert runs["gap"].cost is None and runs["odd"].cost is None
+    assert db.execute("SELECT COUNT(*) FROM temp.measurement_task_chain").fetchone()[0] == 0
+
+
+def run_costs(db) -> tuple[dict, dict]:
+    """Each run's priced cost, and Measurement's own figure for every accepted task (no seeds)."""
+    from core.workflow_verdict_read import history_grain
+
+    priced = price_snapshot(db, read_snapshot(db, now=NOW))
+    runs = {run.run_id: run for history in priced.workflows for run in history.runs}
+    params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
+              "grain": history_grain(datetime(2026, 10, 1).date(), NOW)}
+    figures = {row["task_id"]: row["dollars"] for row in query_model_costs(db, params, IdentityResolver(db))}
+    return {run_id: run.cost for run_id, run in runs.items()}, figures
+
+
+def step(db, node_id: str, run: str, millions: int, *, state: str = "accepted", **fields) -> None:
+    """A workflow step: a task under its run's phase, with one call of ``millions`` million prompt tokens."""
+    node(db, node_id, workflow=None, parent=run, state=state, **fields)
+    if millions:
+        usage(db, f"call-{node_id}", node_id, prompt=millions * 1_000_000)
+
+
+def test_an_accepted_phase_run_costs_the_sum_of_its_steps_measurement_figures(db) -> None:
+    node(db, "run", kind="phase")
+    step(db, "s1", "run", 1)
+    step(db, "s2", "run", 2)
+    costs, figures = run_costs(db)
+    unit = figures["s1"]
+    assert unit > 0 and figures["s2"] == pytest.approx(2 * unit)
+    assert costs["run"] == pytest.approx(figures["s1"] + figures["s2"]) == pytest.approx(3 * unit)
+
+
+def test_a_failed_phase_run_counts_every_call_in_its_steps_once(db) -> None:
+    node(db, "run", kind="phase", state="failed")
+    step(db, "ok", "run", 1)
+    step(db, "bad", "run", 2, state="failed")
+    step(db, "shut", "run", 4, state="closed")
+    step(db, "sub", "shut", 8, state="active")
+    costs, figures = run_costs(db)
+    assert costs["run"] == pytest.approx(15 * figures["ok"])
+
+
+def test_a_failed_task_under_an_accepted_task_is_counted_once_inside_it(db) -> None:
+    node(db, "run", kind="phase")
+    step(db, "unit", "run", 1)
+    step(db, "top", "run", 1)
+    step(db, "broke", "top", 2, state="failed")
+    costs, figures = run_costs(db)
+    assert figures["top"] == pytest.approx(3 * figures["unit"]) and "broke" not in figures
+    assert costs["run"] == pytest.approx(figures["unit"] + figures["top"])
+
+
+@pytest.mark.parametrize(("revision_state", "units"), [("accepted", 4), ("failed", 4), ("active", None)])
+def test_a_sent_back_step_is_counted_once_and_unknown_while_its_revision_is_open(db, revision_state, units) -> None:
+    node(db, "run", kind="phase", state="failed")
+    step(db, "unit", "run", 1)
+    step(db, "sent", "run", 1, state="closed")
+    step(db, "again", "run", 2, state=revision_state, revises="sent")
+    costs, figures = run_costs(db)
+    assert costs["run"] == (None if units is None else pytest.approx(units * figures["unit"]))
+
+
+def test_a_nested_failed_phase_run_is_priced_in_the_nested_run_only(db) -> None:
+    node(db, "outer", kind="phase")
+    step(db, "o1", "outer", 1)
+    node(db, "inner", kind="phase", workflow="decision-brief", parent="outer", state="failed")
+    step(db, "i1", "inner", 2, state="failed")
+    costs, figures = run_costs(db)
+    assert costs["outer"] == pytest.approx(figures["o1"]) and costs["inner"] == pytest.approx(2 * figures["o1"])
+
+
+@pytest.mark.parametrize("outer_state", ["accepted", "active"])
+def test_a_run_nested_under_an_accepted_step_is_unknown_whether_or_not_the_outer_run_is_settled(db, outer_state) -> None:
+    node(db, "outer", kind="phase", state=outer_state)
+    step(db, "o1", "outer", 1)
+    node(db, "inner", kind="phase", workflow="decision-brief", parent="o1", state="failed")
+    step(db, "i1", "inner", 2, state="failed")
+    costs, _ = run_costs(db)
+    assert costs["inner"] is None  # the accepted step's chain holds the inner run's calls
+
+
+def test_phase_runs_price_late_calls_gaps_unpriceable_calls_and_empty_runs(db) -> None:
+    node(db, "late", kind="phase", state="failed")
+    step(db, "late1", "late", 1, state="failed")
+    usage(db, "after", "late1")
+    db.execute("UPDATE llm_usage SET created_at='2026-10-06T00:00:00Z' WHERE id='after'")  # after it failed
+    node(db, "gap", kind="phase", state="failed")
+    step(db, "gap1", "gap", 1, state="failed")
+    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+               "VALUES ('gap-event','gap1','test','usage_recording_failed','2026-10-02T00:00:00Z')")
+    node(db, "odd", kind="phase", state="closed")
+    step(db, "odd1", "odd", 1, state="closed")
+    db.execute("UPDATE llm_usage SET source='external_harness:codex', model='codex/gpt-5.6-terra' WHERE id='call-odd1'")
+    node(db, "quiet", kind="phase", state="closed")
+    step(db, "quiet1", "quiet", 0, state="closed")
+    node(db, "bare", kind="phase", state="closed")
+    node(db, "ref", kind="phase")
+    step(db, "ref1", "ref", 1)
+    costs, figures = run_costs(db)
+    assert costs["late"] == pytest.approx(figures["ref1"])
+    assert costs["gap"] is None and costs["odd"] is None and costs["bare"] is None
+    assert costs["quiet"] == 0.0
     assert db.execute("SELECT COUNT(*) FROM temp.measurement_task_chain").fetchone()[0] == 0
 
 
