@@ -41,6 +41,7 @@ def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch)
     priced.assert_called_once_with(db, _snapshot())
     db.close.assert_called_once_with()
     write.assert_not_called()
+    assert report.woken == 0
 
 
 def test_run_counts_separate_all_runs_from_outcomes_by_run_and_version() -> None:
@@ -66,6 +67,7 @@ def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) ->
     db = MagicMock()
     evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
     write = MagicMock(return_value=1)
+    wake = MagicMock(return_value=1)
 
     @contextmanager
     def transaction(*_args, **_kwargs):
@@ -79,11 +81,13 @@ def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) ->
     monkeypatch.setattr(workflow_verdicts.evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(workflow_verdicts, "write_transaction", transaction)
     monkeypatch.setattr(workflow_verdicts.evaluator, "write_verdicts", write)
+    monkeypatch.setattr(workflow_verdicts.evaluator, "wake_owners", wake)
 
     report = workflow_verdicts.run_daily()
 
-    assert report.recorded == 1
-    write.assert_called_once_with(db, [evaluation], wake_owners=True)
+    assert report.recorded == report.woken == 1
+    write.assert_called_once_with(db, [evaluation])
+    wake.assert_called_once_with(db)
 
 
 def test_a_workflow_version_with_runs_and_no_events_is_planned_once_and_a_reached_one_drops_out(db, monkeypatch) -> None:

@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from infra.backend_git import git_argv
 from infra.worktree_reaper_probe import (
     GIT_TIMEOUT_SECONDS,
     _is_disposable,
@@ -29,7 +30,7 @@ class SalvageError(RuntimeError):
 def _git_output(worktree: Path, git_env: dict[str, str], args: list[str]) -> bytes:
     try:
         result = subprocess.run(
-            ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", *args],
+            git_argv("--no-optional-locks", *args),
             cwd=worktree, capture_output=True, timeout=GIT_TIMEOUT_SECONDS,
             env={**os.environ, "LC_ALL": "C", "LANG": "C", **git_env},
         )

@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from infra.backend_git import git_argv
+
 
 def is_ignored_untracked_file(path: Path, repo: Path) -> bool:
     """Return Git's exact ignored-and-not-tracked classification for a file."""
@@ -18,11 +20,11 @@ def is_ignored_untracked_file(path: Path, repo: Path) -> bool:
         return False
     try:
         ignored = subprocess.run(
-            ["git", "check-ignore", "--quiet", "--", str(relative)],
+            git_argv("check-ignore", "--quiet", "--", str(relative)),
             cwd=str(repo), capture_output=True, text=True, timeout=5,
         )
         tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", str(relative)],
+            git_argv("ls-files", "--error-unmatch", "--", str(relative)),
             cwd=str(repo), capture_output=True, text=True, timeout=5,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):

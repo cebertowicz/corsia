@@ -32,6 +32,7 @@ class DailyVerdictReport:
     by_reason: dict[str, int] = field(default_factory=dict)
     workflow_runs: dict[str, int] = field(default_factory=dict)
     seconds: float = 0.0
+    woken: int = 0
 
 
 def run_counts(snapshot: Snapshot) -> dict[str, int]:
@@ -69,14 +70,15 @@ def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMI
     evaluations = [*compute(priced), *lessons]
     by_word = Counter(item.verdict.word for item in evaluations)
     reached = sum(count for word, count in by_word.items() if word in REACHED_WORDS)
-    recorded = 0
+    recorded = woken = 0
     if evaluator.VERDICT_WRITES_ENABLED:
         with write_transaction(None, scope="workflow_verdict_daily") as db:
-            recorded = evaluator.write_verdicts(db, evaluations, wake_owners=True)
+            recorded = evaluator.write_verdicts(db, evaluations)
+            woken = evaluator.wake_owners(db)
     report = DailyVerdictReport(len(snapshot.subjects or ()) + len(lessons), len(evaluations), reached, recorded,
                                 dict(by_word), dict(Counter(item.verdict.reason for item in evaluations)),
-                                run_counts(priced), round(time.monotonic() - started, 1))
-    logger.info("workflow_verdict_daily: open={} evaluated={} reached={} recorded={} by_word={} by_reason={} "
+                                run_counts(priced), round(time.monotonic() - started, 1), woken)
+    logger.info("workflow_verdict_daily: open={} evaluated={} reached={} recorded={} woken={} by_word={} by_reason={} "
                 "workflow_runs={} seconds={}", report.open_subjects, report.evaluated, report.reached, report.recorded,
-                report.by_word, report.by_reason, report.workflow_runs, report.seconds)
+                report.woken, report.by_word, report.by_reason, report.workflow_runs, report.seconds)
     return report

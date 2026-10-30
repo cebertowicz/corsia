@@ -133,6 +133,31 @@ async def test_partial_narrative_still_returns_the_truncated_result(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_reply_cut_off_at_its_output_cap_is_truncated_not_complete(monkeypatch):
+    """A fold that hit max_tokens installs with the truncation warning (#1868)."""
+    edit = LLMResponse(
+        content="Earlier narrative.", finish_reason="tool_calls",
+        tool_calls=[ToolCallRequest(id="c1", name=CHECKPOINT_TOOL_NAME, arguments={})],
+    )
+    cut = LLMResponse(content="The checkpoint so f", finish_reason="length")
+
+    _, result = await _run(monkeypatch, [edit, cut])
+
+    assert result.raw_body == "Earlier narrative.\nThe checkpoint so f"
+    assert result.diagnostic == FORK_CONTEXT_TRUNCATED
+    assert len(result.usage["calls"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_reply_cut_off_before_any_narrative_fails_naming_the_output_cap(monkeypatch):
+    with pytest.raises(ProviderForkRejected) as raised:
+        await _run(monkeypatch, [LLMResponse(content=None, finish_reason="length")])
+
+    assert str(raised.value).startswith(f"{FORK_CONTEXT_TRUNCATED}: path=iv_output_cap iteration=0 ")
+    assert "finish_reason=length" in str(raised.value)
+
+
+@pytest.mark.asyncio
 async def test_warm_fork_needs_a_tool_round_trip_of_room_before_it_is_admitted(monkeypatch):
     """A warm fork whose tool-call reply cannot fit is refused before it starts."""
 

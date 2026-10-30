@@ -23,6 +23,7 @@ from api.project_scaffolding import (  # noqa: E402
     remove_linked_repo,
 )
 from auth_fixtures import OWNER_TOKEN  # noqa: E402
+from tests.backend_git_helpers import git_subcommand  # noqa: E402
 from infra.continuation_schema import AUTOMATION_SCHEDULES_SQL  # noqa: E402
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL  # noqa: E402
 
@@ -768,7 +769,7 @@ async def test_update_returns_retryable_error_when_git_status_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -812,7 +813,7 @@ async def test_add_returns_retryable_error_when_git_status_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -857,7 +858,7 @@ async def test_update_returns_conflict_when_git_status_fails(monkeypatch, tmp_pa
     real_run = project_repo_policy.subprocess.run
 
     def _failed_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             return subprocess.CompletedProcess(command, 1, "", "status failed")
         return real_run(command, *args, **kwargs)
 
@@ -889,7 +890,7 @@ async def test_update_returns_retryable_error_when_recheck_git_status_times_out(
 
     def _timeout_recheck(command, *args, **kwargs):
         nonlocal status_calls
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             status_calls += 1
             if status_calls == 2:
                 raise subprocess.TimeoutExpired(command, kwargs["timeout"])
@@ -918,7 +919,7 @@ async def test_add_returns_retryable_error_when_current_branch_times_out(monkeyp
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_current_branch(command, *args, **kwargs):
-        if command[:2] == ["git", "symbolic-ref"]:
+        if git_subcommand(command) == "symbolic-ref":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -951,7 +952,7 @@ async def test_update_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if git_subcommand(command) == "config":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -989,7 +990,7 @@ async def test_add_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if git_subcommand(command) == "config":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -1034,7 +1035,7 @@ async def test_branch_list_returns_retryable_error_when_git_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_branch_list(command, *args, **kwargs):
-        if command[:2] == ["git", "for-each-ref"]:
+        if git_subcommand(command) == "for-each-ref":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
