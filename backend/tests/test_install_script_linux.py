@@ -271,7 +271,7 @@ FRESH_CALLS = [
     "uv python install 3.11",
     "uv python find 3.11",
     f"curl {NODE_URL['aarch64']}",
-    "corsia start stdin=none",
+    "corsia start stdin=terminal-answer",
     "corsia sources --install-summary stdin=none",
 ]
 
@@ -358,7 +358,7 @@ def test_a_second_run_changes_nothing_and_never_asks_for_sudo(env):
 
     assert result.returncode == 0, result.stderr
     assert _calls(env) == [
-        "corsia start stdin=none",
+        "corsia start stdin=terminal-answer",
         "corsia sources --install-summary stdin=none",
     ]
 

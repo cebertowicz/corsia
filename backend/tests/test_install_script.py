@@ -303,6 +303,19 @@ def test_running_install_with_local_flag_runs_the_shared_local_setup(env):
     assert _calls(env) == ["corsia local setup --automatic --start-only stdin=none"]
 
 
+def test_running_install_with_local_flag_without_account_explains_browser_setup(env):
+    result = subprocess.run(
+        ["/bin/bash", str(_script(env)), "--local"],
+        cwd=_script(env).parents[1],
+        env={**env, "STUB_RUNNING": "1"}, input="", text=True,
+        capture_output=True, check=False, timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Finish setup at http://localhost:{DEFAULT_BACKEND_PORT} and choose Local there." in result.stdout
+    assert not any(call.startswith("corsia") for call in _calls(env))
+
+
 def test_installer_leaves_the_assistant_google_tool_to_the_assistant(env):
     _with_brew(env)
 

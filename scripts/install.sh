@@ -10,15 +10,16 @@
 #
 # Readable first, and safe to run again. Every step prints one line before it
 # acts. It finishes the whole install before CORSIA starts: prerequisites, the
-# Python environment and workspace, then starts CORSIA and opens its existing
-# browser setup. Account creation and model selection happen there, so a
-# missing sign-in or local model never prevents opening setup. It saves no API token.
+# Python environment and workspace, then starts CORSIA. On macOS, it opens
+# browser setup for account creation and model selection, so a missing sign-in
+# or local model never prevents opening setup. Linux keeps its terminal workspace,
+# local/server and account questions. It saves no API token.
 #
 # A re-run never pulls: it prints the installed version, starts CORSIA only if
 # it is not running, and points at Settings > Update, which stays the only
 # update path. It never exports CORSIA_WORKSPACE and never touches the
-# launchd service. The CLI owns workspace initialization; browser setup owns
-# the first account and model choices.
+# launchd service. The CLI owns workspace initialization; on macOS, browser
+# setup owns the first account and model choices.
 
 set -euo pipefail
 
@@ -35,7 +36,7 @@ APP_URL="http://localhost:$BACKEND_PORT"
 # service. CORSIA_INSTALL_SERVICE_PATH replaces it for tests only.
 SERVICE_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SERVICE_PATH="${CORSIA_INSTALL_SERVICE_PATH:-$SERVICE_PATH}"
-# Administrator authentication for prerequisites uses the terminal, never
+# Administrator authentication and Linux setup use the terminal, never
 # installer stdin. CORSIA_INSTALL_TTY replaces it for tests only.
 PROMPT_INPUT="${CORSIA_INSTALL_TTY:-/dev/tty}"
 # Test-only command seams. Production keeps the official installer and sudo.
@@ -599,7 +600,8 @@ linux_main() {
     say "CORSIA install"
     require_checkout
     check_platform_linux
-
+    { exec 3< "$PROMPT_INPUT"; } 2> /dev/null \
+        || stop "The installer asks a few questions and needs a terminal. Run it from Terminal."
     case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
@@ -622,9 +624,10 @@ linux_main() {
         say "     To update, use Settings › Update."
         exit 0
     fi
-    start_corsia
+    # The first run asks its questions inside start, from the terminal.
+    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" start <&3 3<&-
     say "     There is no local model on Linux: connect Claude Code, Codex or an API provider in the app."
-    if has_account; then summarize_sources; fi
+    summarize_sources
     open_browser_linux
 }
 
@@ -651,7 +654,13 @@ main() {
     if is_running; then
         say "     CORSIA is running at $APP_URL"
         say "     To update, use Settings › Update."
-        if [ "$LOCAL_SETUP_FORCED" -eq 1 ] && has_account; then setup_local_model; fi
+        if [ "$LOCAL_SETUP_FORCED" -eq 1 ]; then
+            if has_account; then
+                setup_local_model
+            else
+                say "     Finish setup at $APP_URL and choose Local there."
+            fi
+        fi
         exit 0
     fi
     start_corsia
