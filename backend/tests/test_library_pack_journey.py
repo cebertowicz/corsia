@@ -76,7 +76,7 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch, own
         monkeypatch.setattr(items, "_fetch_raw", lambda _url: b"changed")
         failed = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
         assert failed["error"] == "integrity"
-        assert "changed moments ago" in failed["message"] and "try again in a few minutes" in failed["message"]
+        assert "changed moments ago" in failed["message"] and "report it to the conductor" in failed["message"]
         assert not (project_root / ".threads" / owner / "packs" / "demo").exists()
         monkeypatch.setattr(items, "_fetch_raw", fetch)
     result = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)

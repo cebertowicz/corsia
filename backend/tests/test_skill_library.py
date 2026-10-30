@@ -188,7 +188,8 @@ def test_own_skill_changed_bytes_refuse_install_with_retry_message(monkeypatch):
     result = skill_library._install("pdf", "owner", None, object())
     assert result["error"] == "integrity"
     assert "changed moments ago" in result["message"]
-    assert "try again in a few minutes" in result["message"]
+    assert "try once more in a few minutes" in result["message"]
+    assert "report it to the conductor" in result["message"]
 
 
 def test_own_skill_file_and_version_changes_are_updates():

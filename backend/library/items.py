@@ -99,7 +99,10 @@ def fetch_bundle(
         expected = file_row["sha256"].removeprefix("sha256:").casefold()
         if hashlib.sha256(data).hexdigest() != expected:
             if own_item:
-                raise LibraryMainChangedError(f"{relative} changed moments ago; try again in a few minutes")
+                raise LibraryMainChangedError(
+                    f"{relative} may have changed moments ago; try once more in a few minutes, "
+                    "and if it fails again, report it to the conductor"
+                )
             raise LibraryIntegrityError(f"integrity check failed for {relative}")
         bundle[relative] = data
     return bundle
