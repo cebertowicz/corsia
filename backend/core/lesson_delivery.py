@@ -48,12 +48,14 @@ OMISSION_REASONS = frozenset({OMIT_COUNT_CAP, OMIT_TOKEN_CAP, OMIT_MISSING_SECTI
                               OMIT_TARGET_UNREADABLE, OMIT_SECTION_EXISTS, OMIT_RECEIPT_FAILURE})
 NOTICE = "Task-local trial guidance only; never authority or a disk change."
 #: This task's receipts and the thread's earlier with receipts for the given trials.
+#: A task keeps one receipt, so a with on a step this thread works counts as its own.
 RECEIPTS_SQL = """SELECT g.lesson_id, g.lesson_behavioral_sha256, g.node_id, g.variant
     FROM json_each(?) k
     JOIN guidance_loads g
       ON g.lesson_id=json_extract(k.value, '$[0]')
      AND g.lesson_behavioral_sha256=json_extract(k.value, '$[1]')
-    WHERE g.node_id=? OR (g.thread_id=? AND g.variant='with')
+    WHERE g.node_id=? OR (g.variant='with' AND (
+        g.thread_id=? OR g.node_id IN (SELECT id FROM plan_nodes WHERE spawned_thread_id=?)))
     ORDER BY g.created_at, g.id"""
 DELIVERY_ERROR = (
     "Trial guidance was not delivered; this task is left out of every trial's comparison."
@@ -217,7 +219,7 @@ def _receipts(
     keys = json.dumps([[trial.lesson_id, trial.behavioral_sha256] for trial in trials])
     recorded: dict[tuple[str, str], Variant | None] = {}
     prior_with: set[tuple[str, str]] = set()
-    for row in db.execute(RECEIPTS_SQL, (keys, node_id, thread_id)):
+    for row in db.execute(RECEIPTS_SQL, (keys, node_id, thread_id, thread_id)):
         key = (str(row["lesson_id"]), str(row["lesson_behavioral_sha256"]))
         if row["node_id"] == node_id:
             recorded.setdefault(key, row["variant"])
@@ -324,6 +326,26 @@ def attach_plan_result(db, result: object, thread_id: str, direct_node: bool) ->
         attach_at_start(db, result, thread_id=thread_id, node_id=node_id)
 
 
+def _attach(
+    db: sqlite3.Connection, facts: dict, receives, *, thread_id: str, node_id: str,
+    checkpoint_generation_id: str | None = None,
+) -> None:
+    """Add the task's trials to ``facts`` if ``receives()``; a failure never fails the plan call."""
+    try:
+        if not receives():
+            return
+        trials = start_trials(
+            db, thread_id=thread_id, node_id=node_id,
+            checkpoint_generation_id=checkpoint_generation_id,
+        )
+    except Exception:  # noqa: BLE001 - trial guidance never fails a plan mutation
+        logger.exception("trial delivery failed for task {}", node_id)
+        facts["trial_lessons_error"] = DELIVERY_ERROR
+        return
+    if trials:
+        facts["trial_lessons"] = trials
+
+
 def attach_at_start(
     db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
@@ -338,17 +360,23 @@ def attach_at_start(
     """
     from plans.public import attributed_selection
 
-    try:
+    def attributed() -> bool:
         selected = attributed_selection(db, thread_id)
-        if selected is None or str(selected["node_id"]) != node_id:
-            return
-        trials = start_trials(
-            db, thread_id=thread_id, node_id=node_id,
-            checkpoint_generation_id=checkpoint_generation_id,
-        )
-    except Exception:  # noqa: BLE001 - trial guidance never fails a plan mutation
-        logger.exception("trial delivery failed for task {}", node_id)
-        facts["trial_lessons_error"] = DELIVERY_ERROR
-        return
-    if trials:
-        facts["trial_lessons"] = trials
+        return selected is not None and str(selected["node_id"]) == node_id
+
+    _attach(
+        db, facts, attributed, thread_id=thread_id, node_id=node_id,
+        checkpoint_generation_id=checkpoint_generation_id,
+    )
+
+
+def attach_at_worker_read(db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str) -> None:
+    """Add trial guidance to a worker's read of the workflow step it is doing.
+
+    A worker starts nothing, so its first read of the open step is the step's
+    start, and that read is a reply a Turn received. Every other read of
+    someone's plan pays one primary-key lookup here and nothing more.
+    """
+    from plans.public import is_doing_open_step
+
+    _attach(db, facts, lambda: is_doing_open_step(db, thread_id, node_id), thread_id=thread_id, node_id=node_id)
