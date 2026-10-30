@@ -38,7 +38,7 @@ Search issues before filing. Add new evidence to an existing issue instead of op
 
 Open a public pull request to `dev` from your feature branch. Explain the user-visible or technical change, include focused tests, and keep the PR within its stated scope.
 
-If your PR changes what a person sees or does, add one plain-language line under `## Unreleased` in `CHANGELOG.md`, in alphabetical order (never at the top or the end), describing the change as a user would notice it. If it doesn't (tests, refactors, CI, internal docs), write `none` under **Release note** in the pull request description.
+If your PR changes what a person sees or does, add one plain-language line under `## Unreleased` in `CHANGELOG.md`, in its alphabetical place (not simply at the top or the end), describing the change as a user would notice it. If it doesn't (tests, refactors, CI, internal docs), write `none` under **Release note** in the pull request description.
 
 Before pushing, run the local gate:
 

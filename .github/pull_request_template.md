@@ -13,7 +13,7 @@
 
 ## Release note
 
-<!-- A PR that changes what a person sees or does adds one plain line under ## Unreleased in CHANGELOG.md in this PR, in alphabetical order, never at the top or the end. Internal-only PRs write none. -->
+<!-- A PR that changes what a person sees or does adds one plain line under ## Unreleased in CHANGELOG.md in this PR, in its alphabetical place, not simply at the top or the end. Internal-only PRs write none. -->
 
 - Line added under Unreleased (or none):
 

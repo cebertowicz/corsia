@@ -1,11 +1,12 @@
 # Changelog
 
-Shipped behavior, newest first. When a later entry changes an earlier design,
-the later entry describes the current behavior.
+Shipped behavior, releases newest first. When a later entry changes an earlier
+design, the later entry describes the current behavior; under Unreleased, edit
+the earlier line instead of adding another.
 
 ## Unreleased
 
-_Changes merged since the last release. Each PR that changes what you see or do adds a line here, in alphabetical order, never at the top or the end._
+_Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
@@ -120,7 +121,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
 - When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
 - When an agent starts a Google or Microsoft sign-in, it is told once how it ended (you finished it, cancelled it, or it expired) and carries on, instead of waiting for you to tell it you signed in.
-- When an update stops before restarting, CORSIA can resume agents' work once cleanup reaches the running service.
+- When an update fails before CORSIA restarts, your agents' paused work usually picks back up right away instead of staying paused until the next restart.
 - When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
 - When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
 - When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
