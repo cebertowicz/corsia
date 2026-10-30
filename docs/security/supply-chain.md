@@ -38,11 +38,11 @@ Anyone who can push to the branch you track can change what your install runs on
 
 ## Shared skills and setups
 
-The skill library is a separate public repository. It is **off** until you agree to use community improvements in your profile (`backend/tools/skill_library.py`). Once on:
+The skill library is a separate public repository. Agents can't use it until you agree to use community improvements in your profile (`backend/tools/skill_library.py`). CORSIA still downloads the public index at startup and daily with the library off, and no setting stops that (`backend/library/producer.py`). Once on:
 
 - Agents can search it and install a skill into their own conversation without asking you.
 - The library's own items are read from its `main` branch, and each file is checked against the SHA-256 recorded in the library's index, which is read from `main` too. The check catches a file that doesn't match the index, not a change by someone who can push to the library. Items the index lists from other repositories are pinned to a Git commit (`backend/library/items.py`, `backend/library/index.py`).
-- CORSIA checks daily for newer versions but never updates an installed copy on its own.
+- Agents are told of newer versions, but CORSIA never updates an installed copy on its own.
 - Contributions from outside the project aren't open yet, and no review checklist for library items is published.
 
 A skill is instructions, and its bundle can include scripts. An installed skill can tell an agent to do anything that agent can already do.

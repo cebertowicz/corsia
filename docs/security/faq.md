@@ -79,7 +79,7 @@ Yes. Outbound access is not limited. See [Network](network.md#outbound).
 Unknown. No rate is published, and it depends on your local model. You can measure it on your own model with the synthetic set in the repository. See [Untrusted content](untrusted-content.md#what-is-screened).
 
 **21. Can I trust a skill from the library? What does your review actually check?**
-Every file is checked against the hash in the library's index, so you get what the library currently publishes. The library's own items follow its `main` branch, so whoever can push there decides what the next install gets; items from other repositories are pinned to a commit. No review checklist is published, and outside contributions aren't open yet. A skill can tell an agent to do anything that agent can already do. The library is off until you agree to use community improvements. See [Supply chain](supply-chain.md#shared-skills-and-setups).
+Every file is checked against the hash in the library's index, so you get what the library currently publishes. The library's own items follow its `main` branch, so whoever can push there decides what the next install gets; items from other repositories are pinned to a commit. No review checklist is published, and outside contributions aren't open yet. A skill can tell an agent to do anything that agent can already do. Agents can't use the library until you agree to use community improvements. See [Supply chain](supply-chain.md#shared-skills-and-setups).
 
 ## The reviewer
 

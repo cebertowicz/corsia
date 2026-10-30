@@ -13,7 +13,7 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 **Local or server.** `corsia setup local` binds to `127.0.0.1`, so only programs on the same machine can connect. `corsia setup server` binds to all interfaces, so any device that can reach the machine can reach the sign-in page. The installer chooses local. The desktop app always binds to `127.0.0.1`.
 
-**An install with no machine setup file** (`~/.corsia/config.json`) binds to all interfaces. A setup file with no bind choice is rewritten once with the all-interface bind it already had. An inconsistent file fails closed and names the fix. If you run from source and aren't sure, check with the command below and run `corsia setup local`.
+**An install with no machine setup file** (`~/.corsia/config.json`) binds to all interfaces. This takes an install started with `CORSIA_WORKSPACE` set; otherwise `corsia` runs first-time setup and writes the file. `corsia setup local` refuses when the file is missing, and `corsia start` doesn't write one. To get the file, unset `CORSIA_WORKSPACE` and run `~/.corsia/scripts/corsia`; first-time setup asks for the workspace and the setup choice. A setup file with no bind choice is rewritten once with the all-interface bind it already had, and `corsia setup local` changes that. An inconsistent file fails closed and names the fix. If you run from source and aren't sure, check with the command below.
 
 **Routes that take no session or token.** Checked in code at this commit:
 

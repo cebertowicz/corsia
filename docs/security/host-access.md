@@ -27,7 +27,7 @@ flowchart TB
 | Apply | The agent states a purpose (up to 2,000 characters), the exact resources, a plan of up to 20 steps, the effects, and a duration of at most 30 minutes | CORSIA code checks the shape and limits | `backend/infra/host_access_leases.py`, `backend/tools/host_access.py` |
 | Application review | A model reviews the application in a fresh call that sees only the application, not the agent's conversation; a malformed verdict is retried once | Model judgment | `backend/host_access/reviewer.py`, `backend/host_access/review_policy.py` |
 | Approval | You approve or reject it in the app; or, if Auto-approve is on, the reviewer's allow is the approval | CORSIA code requires a signed-in person session; Your setting | `backend/infra/auth.py` (`require_human_user`) |
-| Each command | Every leased shell command, every file-tool call on a path outside the sandbox, and every process control call is reviewed before it runs | Model judgment | `backend/host_access/reviewer.py` |
+| Each command | Every shell call the agent marks `host`, every file-tool call on a path outside the sandbox, and every process control call is reviewed before it runs. A shell call not marked `host` stays in the sandbox and isn't reviewed | Model judgment | `backend/host_access/reviewer.py`, `backend/tools/shell.py` |
 | Run | The command runs with only the hard floor and the sandbox's self-protection in place | Operating system for the floor | `backend/tools/shell_guard.py` |
 | Expiry | The lease ends at its deadline, when you revoke it, or when the reviewer revokes it | CORSIA code | `backend/infra/host_access_leases.py` |
 
@@ -52,7 +52,7 @@ Both reviewers run on fixed instructions in `backend/host_access/review_policy.p
 What follows from that:
 
 - A tricked agent that applies to "read the files in ~/Documents to summarize your tax papers" states a purpose and names its resources. The reviewers are designed to allow that.
-- Once a lease is active, its commands run outside the sandbox. The text-based command refusals (`sudo`, `rm -rf ~` and the rest on [Agent sandbox](agent-sandbox.md)) don't apply; the action reviewer is what stands between a destructive command and your files. `sudo` still asks for your password, which agents don't have, unless your system is set up not to ask.
+- Once a lease is active, a shell call the agent marks `host` runs outside the sandbox. The text-based command refusals (`sudo`, `rm -rf ~` and the rest on [Agent sandbox](agent-sandbox.md)) don't apply to it, apart from the refusal of a literal credential in the command (`backend/tools/host_access_gate.py`); the action reviewer is what stands between a destructive command and your files. `sudo` still asks for your password, which agents don't have, unless your system is set up not to ask.
 - The reviewer is a model. By default it is the requesting agent's own model, in a separate call. You can pick a different model under the same setting, and choose whether to fall back to the agent's own model when yours can't run.
 
 ## What no lease opens
