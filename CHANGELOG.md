@@ -8,10 +8,13 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Open files mentioned in chat, including files in your workspace.
+- When you type into an agent's document, the agent gets your edit as one change once you pause for 30 seconds, instead of a fragment every few seconds of typing.
+- Relative links inside a document's table cells open the linked file instead of saying the document is missing.
 - The reply box on a document comment no longer stays tall after you send a multi-line reply; it goes back to one line.
 - Source updates explain how to fix a branch with no tracking branch or a branch that has diverged from its tracked branch.
 - Source installs use the same local model server release as the app and show the cause if installation fails.
 - The update screen shows how many agents have paused while it waits for them.
+- Update notices wait until setup is finished, when Updates can be opened.
 - The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
 - On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
 - Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
