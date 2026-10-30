@@ -146,6 +146,12 @@ def _create_account(
                 f"'{name}' owns none of the existing data. Create the first "
                 f"account as one of: {', '.join(owners)}. Add others after."
             )
+        if require_first and not owners:
+            from infra.settings import get_setting, save_setting_merge
+
+            defaults = (get_setting("agents", db=conn) or {}).get("defaults", {})
+            if "host_access_auto_approve" not in defaults:
+                save_setting_merge("agents", {"defaults": {"host_access_auto_approve": True}}, db=conn)
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
