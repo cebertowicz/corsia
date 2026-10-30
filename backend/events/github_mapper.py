@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from events import guard
 from events.connectors.github import GITHUB_ROUTED_EVENTS, PrEnd, pr_end_state
 from events.markers import (
     REVIEW_FP_MARKER_PREFIX as _REVIEW_FP_MARKER,
@@ -24,6 +25,11 @@ _PR_END_EVENTS: dict[PrEnd, str] = {
 _PR_STATE_BY_EVENT: dict[str, PrEnd] = {
     event: state for state, event in _PR_END_EVENTS.items()
 }
+_LABEL_EVENTS = frozenset(
+    GITHUB_ROUTED_EVENTS[f"{kind}.{action}"]
+    for kind in ("pr", "issue") for action in ("labeled", "unlabeled")
+)
+LABEL_RULE_ONLY = "label_rule_only"
 
 
 def ends_artifact(internal_event: str) -> bool:
@@ -55,6 +61,35 @@ def pr_terminal_state(
         )
         return None
     return pr_state
+
+
+def label_wakes_nobody(internal_event: str, payload: dict[str, Any]) -> bool:
+    """Whether this label change is heard by event rules alone.
+
+    A label wakes no thread by default. The exception is a person adding the
+    review label, which keeps its owner wake. The self-author check never stops
+    a label from reaching rules, because every agent labels as the agents' account.
+    """
+    if internal_event not in _LABEL_EVENTS:
+        return False
+    review = (internal_event == GITHUB_ROUTED_EVENTS["pr.labeled"]
+              and (payload.get("label") or {}).get("name") == LABEL_REVIEW)
+    return not review or guard.is_bot_or_self_authored(payload)
+
+
+def unruled_reason(internal_event: str, identity: Any, payload: dict[str, Any]) -> str | None:
+    """Why an event no thread takes is parked, not dead-lettered: only rules route it."""
+    if label_wakes_nobody(internal_event, payload):
+        return LABEL_RULE_ONLY
+    if identity is None and internal_event == GITHUB_ROUTED_EVENTS["issue.opened"]:
+        return "issue_opened_unruled"
+    return None
+
+
+def _label_event(kind: str, action: str, payload: dict[str, Any]) -> str | None:
+    """Any named label's change is an event; a change with no label name is not."""
+    label = payload.get("label") or {}
+    return GITHUB_ROUTED_EVENTS[f"{kind}.{action}"] if label.get("name") else None
 
 
 def _is_bot_login(login: str) -> bool:
@@ -89,10 +124,8 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
             return GITHUB_ROUTED_EVENTS["pr.synchronize"]
         if action == "ready_for_review":
             return GITHUB_ROUTED_EVENTS["pr.ready_for_review"]
-        if action == "labeled":
-            # Only the review label is an event; every other label stays unmapped.
-            label = payload.get("label") or {}
-            return GITHUB_ROUTED_EVENTS["pr.labeled"] if label.get("name") == LABEL_REVIEW else None
+        if action in ("labeled", "unlabeled"):
+            return _label_event("pr", action, payload)
         if action == "closed":
             end = pr_end_state(payload)
             if end is None:
@@ -104,6 +137,9 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
 
     if event_type == "issues" and action == "opened":
         return GITHUB_ROUTED_EVENTS["issue.opened"]
+
+    if event_type == "issues" and action in ("labeled", "unlabeled"):
+        return _label_event("issue", action, payload)
 
     if event_type == "issue_comment" and action in ("created", "edited"):
         issue = payload.get("issue", {})
