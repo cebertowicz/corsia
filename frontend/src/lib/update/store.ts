@@ -263,9 +263,8 @@ export async function startUpdate(): Promise<void> {
 	if (!result.ok) {
 		await loadUpdateStatus(true);
 		const latest = get(updateStatus)?.operation;
-		// Only a failure this request recorded is its outcome; an older failed row is history.
-		// The failed row surfaces itself through the poll; nothing more to show here.
-		if (isFailedOperation(latest) && latest.operation_id !== previousOperationId) return;
+		// A new in-flight operation proves it started; a new failed row surfaces itself through the poll.
+		if (latest?.operation_id !== previousOperationId && (isInFlight(latest) || isFailedOperation(latest))) return;
 		const message = result.message ?? "Update didn't start.";
 		updateFailureVerdict.set({ kind: 'refused', message });
 		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdates } });

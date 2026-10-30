@@ -111,6 +111,46 @@ describe('update store', () => {
 		expect(get(settingsNavigation).openRequest).toBe(opened);
 	});
 
+	it('adopts a new in-flight update when the start request loses its connection', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => running('holding') };
+		}));
+
+		await startUpdate();
+
+		expect(get(updateOperation)?.operation_id).toBe('update-1');
+		expect(get(updateInFlight)).toBe(true);
+		expect(get(updateFailureVerdict)).toBeNull();
+		expect(pinned().filter((toast) => toast.type === 'error')).toEqual([]);
+	});
+
+	it('keeps the error toast when a failed start has no new operation', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => ({ ...running('holding'), operation: null }) };
+		}));
+
+		await startUpdate();
+
+		expect(get(updateFailureVerdict)?.kind).toBe('refused');
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Update didn't start" })]);
+	});
+
+	it('does not adopt an operation that was already in flight before the click', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/api/system/restart')) throw new TypeError('Load failed');
+			return { ok: true, json: async () => running('holding') };
+		}));
+		await loadUpdateStatus();
+
+		await startUpdate();
+
+		expect(get(updateOperation)?.operation_id).toBe('update-1');
+		expect(get(updateFailureVerdict)?.kind).toBe('refused');
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Update didn't start" })]);
+	});
+
 	it('refreshes a completed update into the restarted server status', async () => {
 		const stale = { ...completed(), available: true, current_sha: 'old', remote_sha: 'installed', commits_behind: 1 };
 		const current = { ...stale, available: false, current_sha: 'installed', remote_sha: 'installed', commits_behind: 0 };
