@@ -214,10 +214,10 @@
       "sha256": "582fe0631a98012f88d545e7b4d4e82a78d9d13d812d6e32a42ca8d40ec2b3b6"
     },
     {
-      "bytes": 12895,
+      "bytes": 12814,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/look-up-the-person.md",
-      "sha256": "36a9ed9f5b9b4feaae1873ff0d9a2bccfec75bcc061075784d9b19d511b3e4ad"
+      "sha256": "b3dee9bf9cc4ba47f519bda58b35955fbe03364faa56180ccf2fc308a23a604b"
     },
     {
       "bytes": 5753,
