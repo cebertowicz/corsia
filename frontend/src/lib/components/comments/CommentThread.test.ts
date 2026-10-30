@@ -185,13 +185,24 @@ describe('CommentThread', () => {
 	});
 
 	it('keeps a reply being typed on a thread someone else resolves, and says so', () => {
-		const { onResolve } = render(thread({ resolved: true }), false, { replyText: 'half a reply' });
+		const { onResolve } = render(thread({ resolved: true }), false, { replyText: 'half a reply', kept: true });
 		expect(host.querySelector('.ct-res-head')).toBeNull();
 		expect((host.querySelector('.ct-input') as HTMLTextAreaElement).value).toBe('half a reply');
 		expect(host.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
 		expect(host.querySelector('.ct-act.ack')).toBeNull();
 		button('[data-resolved-note] .reopen').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', false);
+	});
+
+	it('keeps a reply started inside a resolved thread in its resolved row, collapsed or not', () => {
+		render(thread({ resolved: true }), false, { replyText: 'started after it was resolved' });
+		expect(host.querySelector('.ct-res-head')).not.toBeNull();
+		expect(host.querySelector('[data-resolved-note]')).toBeNull();
+		button('.ct-res-head').click(); flushSync();
+		expect((host.querySelector('.ct-input') as HTMLTextAreaElement).value).toBe('started after it was resolved');
+		button('.ct-res-head').click(); flushSync();
+		expect(host.querySelector('.ct-res-head')).not.toBeNull();
+		expect(host.querySelector('[data-resolved-note]')).toBeNull();
 	});
 
 	it('collapses a resolved thread with no reply being typed', () => {

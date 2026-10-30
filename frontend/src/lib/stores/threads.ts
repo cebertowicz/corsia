@@ -75,7 +75,6 @@ export interface Message {
 	next_attempt_at?: string | null;
 	/** Artifact cards the server computed for this message when it was read (display rows only). */
 	cards?: import('../api/messageCards').MessageCard[];
-	cards_more?: number;
 	/** Server-computed transcript content after placed chat answers are removed. */
 	chat_visible_content?: string;
 	chat_comments?: ChatComment[];
