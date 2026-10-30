@@ -36,7 +36,7 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         ref = status.get("ref")
         if isinstance(ref, str) and ref and len(ref) <= 160:
             detail["ref"] = ref
-        fix = status.get("message") if cause == "load_refused" else status.get("fix")
+        fix = (status.get("message") or status.get("fix")) if cause == "load_refused" else status.get("fix")
         if isinstance(fix, str) and fix:
             detail["fix"] = fix[:512]
         return detail

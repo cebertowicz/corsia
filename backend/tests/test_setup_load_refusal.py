@@ -25,10 +25,10 @@ async def test_refusal_is_a_referenced_start_failure_and_projected_fix(line, mon
     monkeypatch.setattr("llm.local_model.set_up_model", lambda: MODEL)
     monkeypatch.setattr("llm.local_keep_loaded._model_rows", AsyncMock(return_value=[{"id": MODEL.model}]))
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", AsyncMock(return_value=[]))
-    monkeypatch.setattr(local_setup_flow, "keep_loaded", AsyncMock(return_value={"refused": True, "line": line}))
+    monkeypatch.setattr(local_setup_flow, "keep_loaded", AsyncMock(return_value={"status": "refused", "line": line}))
     assert local_setup._claim_operation("setup", onboarding=True)
 
-    result = await local_setup_flow._run_flight(model=MODEL)
+    result = await local_setup_flow._run_flight(model=MODEL, retry_refused=True)
     status = local_setup.setup_status()
     projected = normalize(status)
 
@@ -38,12 +38,56 @@ async def test_refusal_is_a_referenced_start_failure_and_projected_fix(line, mon
     local_setup_flow.keep_loaded.assert_awaited_once_with("server", MODEL, force_pin=True)
     assert "run `corsia local setup` again" in setup_fix("load_refused", retry=RETRY_IN_TERMINAL)
 
-    local_setup_flow.keep_loaded.return_value = None
+    local_setup_flow.keep_loaded.return_value = {"status": "loaded"}
     started = await local_setup_flow.begin_local_setup(onboarding=True)
     assert started["in_progress"]
     retry = await local_setup.flight_task()
     assert retry["ok"] and local_setup.setup_status()["state"] == "ready"
     assert local_setup_flow.keep_loaded.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,cause", [
+    ({"status": "refused", "line": "Not loaded: needs 12 GB, 8 GB free for a model now"}, "load_refused"),
+    ({"status": "failed", "detail": "private upstream detail"}, "load_failed"),
+])
+async def test_first_download_failure_is_not_ready(outcome, cause, monkeypatch, tmp_path, caplog):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+    monkeypatch.setattr(local_setup, "_notify_models_changed", lambda: None)
+    monkeypatch.setattr(local_setup, "_emit", lambda *_a, **_k: None)
+    monkeypatch.setattr(local_setup, "_download", AsyncMock())
+    monkeypatch.setattr(local_setup, "_notify_terminal_setup_download", AsyncMock())
+    monkeypatch.setattr(local_setup_flow.prepare, "join", AsyncMock())
+    monkeypatch.setattr("llm.local_sources.local_server_for_install", AsyncMock(return_value=("server", 8210, False)))
+    monkeypatch.setattr(local_setup_flow, "apply_optimal_settings", AsyncMock(return_value=SimpleNamespace(status="applied", writer_attempted=True)))
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", AsyncMock(return_value={"ok": True}))
+    monkeypatch.setattr(local_setup_flow, "keep_loaded", AsyncMock(return_value=outcome))
+    assert local_setup._claim_operation("setup", MODEL, onboarding=True)
+
+    result = await local_setup_flow._run_flight(model=MODEL)
+    assert not result["ok"] and local_setup.setup_status()["state"] == "start_failed"
+    status = local_setup.setup_status()
+    assert status["cause"] == cause and status["ref"].startswith("local-")
+    if cause == "load_failed":
+        assert status["fix"] == setup_fix("load_failed") and not status["message"]
+        assert "private upstream detail" in caplog.text and status["ref"] in caplog.text
+        assert "private upstream detail" not in str(normalize(status))
+        monkeypatch.setattr("llm.local_sources.local_server_for_install", AsyncMock(return_value=("server", 8210, True)))
+        monkeypatch.setattr("llm.local_model.set_up_model", lambda: MODEL)
+        monkeypatch.setattr("llm.local_keep_loaded._model_rows", AsyncMock(return_value=[{"id": MODEL.model}]))
+        monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", AsyncMock(return_value=[]))
+        started = await local_setup_flow.begin_local_setup(onboarding=True)
+        assert started["in_progress"]
+        retry = await local_setup.flight_task()
+        assert not retry["ok"] and local_setup.setup_status()["cause"] == "load_failed"
+        monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", AsyncMock(return_value=None))
+        assert (await local_setup_flow.begin_local_setup(onboarding=True))["in_progress"]
+        assert not (await local_setup.flight_task())["ok"]
+        assert local_setup.setup_status()["cause"] == "load_failed"
+        assert "Run `corsia local setup` again" in setup_fix("load_failed", retry=RETRY_IN_TERMINAL)
 
 
 @pytest.mark.asyncio
@@ -57,19 +101,32 @@ async def test_retry_loads_recorded_model_and_loaded_model_is_unchanged(monkeypa
     monkeypatch.setattr("llm.local_keep_loaded._model_rows", AsyncMock(return_value=[{"id": MODEL.model}]))
     loaded = AsyncMock(return_value=[])
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", loaded)
-    keep = AsyncMock(return_value=None)
+    keep = AsyncMock(return_value={"status": "loaded"})
     monkeypatch.setattr(local_setup_flow, "keep_loaded", keep)
     report = lambda _stage, **_kwargs: None
 
-    assert (await local_setup_flow._setup_new_omlx(report, [], MODEL))["ok"]
+    assert (await local_setup_flow._setup_new_omlx(report, [], MODEL, retry_refused=True))["ok"]
     keep.assert_awaited_once_with("server", MODEL, force_pin=True)
     loaded.return_value = [{"identifier": MODEL.model}]
     keep.reset_mock()
-    assert (await local_setup_flow._setup_new_omlx(report, [], MODEL))["existing"]
+    assert (await local_setup_flow._setup_new_omlx(report, [], MODEL, retry_refused=True))["existing"]
     keep.assert_not_awaited()
 
 
-def test_restored_refusal_projects_through_ready_source(monkeypatch, tmp_path):
+def test_cli_no_line_uses_terminal_retry_copy(monkeypatch, capsys):
+    import cli_local
+
+    monkeypatch.setattr(cli_local, "request_json", lambda *_a: {
+        "state": "start_failed", "cause": "load_refused", "message": "", "ref": "local-42",
+    })
+    assert cli_local._follow_server_setup("test", "corsia local setup") == 2
+    output = capsys.readouterr().out
+    assert "run `corsia local setup` again" in output
+    assert "press Retry" not in output and "local-42" in output
+
+
+@pytest.mark.parametrize("cause", ["load_refused", "load_failed"])
+def test_restored_failure_projects_through_ready_source(cause, monkeypatch, tmp_path):
     from dataclasses import replace
     from llm import local_setup_operation, local_sources
 
@@ -77,7 +134,7 @@ def test_restored_refusal_projects_through_ready_source(monkeypatch, tmp_path):
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     line = "Not loaded: needs 12 GB, 8 GB free for a model now"
     operation = replace(local_setup_operation.Operation.for_model(MODEL, "setup", onboarding=True),
-                        result={"ok": False, "cause": "load_refused", "message": line, "ref": "local-42"},
+                        result={"ok": False, "cause": cause, "message": line if cause == "load_refused" else "", "ref": "local-42"},
                         downloaded=True)
     local_setup_operation.write(operation)
     local_setup.restore_terminal_flight(local_setup_operation.read())
@@ -88,7 +145,8 @@ def test_restored_refusal_projects_through_ready_source(monkeypatch, tmp_path):
 
     row = local_sources._omlx_state(({"omlx@server"}, set()))
     assert row["local_state"] == "start_failed"
-    assert row["fix"] == line and row["setup_error_reference"] == "local-42"
+    assert row["fix"] == (line if cause == "load_refused" else setup_fix(cause))
+    assert row["setup_error_reference"] == "local-42"
 
     local_setup._flight.result = {"ok": True}
     assert local_sources._omlx_state(({"omlx@server"}, set()))["local_state"] == "stopped"

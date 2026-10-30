@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
-CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_failed", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
@@ -28,6 +28,9 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"Check your internet connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
+    if cause == "load_failed":
+        action = "Press Retry." if retry == RETRY_IN_APP else retry[0].upper() + retry[1:]
+        return f"CORSIA couldn't load the model. {action} If it fails again, send the report."
     if cause == "load_refused":
         action = "press Retry." if retry == RETRY_IN_APP else retry
         return f"CORSIA couldn't load the model because there isn't enough free memory right now. Close other apps, then {action}"
@@ -66,11 +69,17 @@ class LoadRefused(RuntimeError):
 
     def __init__(self, line: str | None) -> None:
         self.line = line
-        super().__init__(line or setup_fix("load_refused"))
+        super().__init__(line or "")
+
+
+class LoadFailed(RuntimeError):
+    """The model failed to load; detail is logged with the setup reference."""
 
 
 def failure_message(exc: Exception) -> str:
     """A cause the CLI and sources panel can show for any setup failure."""
+    if isinstance(exc, LoadFailed):
+        return ""
     if isinstance(exc, HTTPException):
         return str(exc.detail)
     if isinstance(exc, ValueError):
@@ -87,6 +96,8 @@ def failure_cause(exc: Exception) -> str:
 
     if isinstance(exc, LoadRefused):
         return "load_refused"
+    if isinstance(exc, LoadFailed):
+        return "load_failed"
     if isinstance(exc, OwnOmlxUpgradeRequired):
         return "own_omlx_upgrade_required"
     if isinstance(exc, DiskSpaceError):

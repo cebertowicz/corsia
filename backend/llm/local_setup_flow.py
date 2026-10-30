@@ -13,12 +13,19 @@ from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
 from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
-from llm.local_setup_results import LoadRefused, SETUP_COMMAND, failure_cause, failure_message, local_setup_error
+from llm.local_setup_results import LoadFailed, LoadRefused, SETUP_COMMAND, failure_cause, failure_message, local_setup_error
 from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
 
 
+def _check_load(outcome: dict) -> None:
+    if outcome["status"] == "refused":
+        raise LoadRefused(outcome.get("line"))
+    if outcome["status"] == "failed":
+        raise LoadFailed(outcome.get("detail") or "Model load failed")
+
+
 async def _setup_new_omlx(report: Callable[..., None], events: list[str],
-                         model: LocalModel | None = None) -> dict:
+                         model: LocalModel | None = None, *, retry_refused: bool = False) -> dict:
     from llm.local_sources import local_server_for_install
 
     await prepare.join()
@@ -30,19 +37,20 @@ async def _setup_new_omlx(report: Callable[..., None], events: list[str],
         from llm.local_model import set_up_model
         from llm.providers.omlx_lifecycle import read_loaded
 
-        recorded = await asyncio.to_thread(set_up_model) if model else None
+        recorded = await asyncio.to_thread(set_up_model) if retry_refused else None
+        if retry_refused and model:
+            ls._record_model(model)
+            ls.record_downloaded()
         rows = await _model_rows(server_id) if recorded else None
-        if recorded and rows and any(row.get("id") == recorded.model for row in rows):
+        if retry_refused and (not recorded or recorded != model or rows is None or not any(row.get("id") == recorded.model for row in rows)):
+            raise LoadFailed("The downloaded local model could not be found.")
+        if recorded and rows:
             loaded = await read_loaded({"server_id": server_id})
             if loaded is None:
-                raise RuntimeError("oMLX loaded status unavailable")
+                raise LoadFailed("oMLX loaded status unavailable")
             if not any(row.get("identifier") == recorded.model for row in loaded):
-                ls._record_model(recorded)
-                ls.record_downloaded()
                 report("Loading model", finishing=True)
-                outcome = await keep_loaded(server_id, recorded, force_pin=True)
-                if outcome and outcome.get("refused"):
-                    raise LoadRefused(outcome.get("line"))
+                _check_load(await keep_loaded(server_id, recorded, force_pin=True))
                 return {"ok": True, "server_id": server_id, "model": recorded.model, "progress": events}
         return {"ok": True, "existing": True, "server_id": server_id,
                 "message": "A local model is already connected. Its settings are unchanged.", "progress": events}
@@ -66,15 +74,13 @@ async def _setup_new_omlx(report: Callable[..., None], events: list[str],
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
     await asyncio.to_thread(record_set_up, model)
     report("Loading model", finishing=True)
-    outcome = await keep_loaded(server_id, model, force_pin=True)
-    if outcome and outcome.get("refused"):
-        raise LoadRefused(outcome.get("line"))
+    _check_load(await keep_loaded(server_id, model, force_pin=True))
     ls._emit("completed", model=model.repository)
     return {"ok": True, "server_id": server_id, "model": model.model,
             "download_size": format_size(model.download_size_bytes), "progress": events}
 
 
-async def _run_flight(*, model: LocalModel | None = None,
+async def _run_flight(*, model: LocalModel | None = None, retry_refused: bool = False,
                       on_stage: Callable[[str], None] | None = None) -> dict:
     events: list[str] = []
 
@@ -85,7 +91,8 @@ async def _run_flight(*, model: LocalModel | None = None,
             on_stage(stage)
 
     try:
-        result = await _setup_new_omlx(report, events, model)
+        result = (await _setup_new_omlx(report, events, model, retry_refused=True) if retry_refused
+                  else await _setup_new_omlx(report, events, model))
     except asyncio.CancelledError:
         ls._release_operation_lock()
         raise
@@ -160,11 +167,11 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
     existing = await local_server_for_install(lambda _stage: None, start_if_absent=False)
     if existing is not None:
         server_id, _port, _is_existing = existing
-        refused = operation is not None and operation.downloaded and (operation.result or {}).get("cause") == "load_refused"
+        refused = operation is not None and operation.downloaded and (operation.result or {}).get("cause") in {"load_refused", "load_failed"}
         if not ls._claim_operation("setup", onboarding=onboarding):
             return _in_progress_or_blocked()
         if refused:
-            ls.start_flight(_run_flight(model=operation.model), "Installing")
+            ls.start_flight(_run_flight(model=operation.model, retry_refused=True), "Installing")
             return ls._in_progress_result()
         return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})

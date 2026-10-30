@@ -120,7 +120,19 @@ async def reload_after_restart(server_id: str, model_ids: list[str]) -> None:
 
 async def keep_loaded(
     server_id: str, model: LocalModel, *, force_pin: bool = False, pin_if_fits: bool = True,
-) -> dict | None:
+) -> dict:
+    """Keep the model and return its load outcome for setup."""
+    try:
+        return await _keep_loaded(server_id, model, force_pin=force_pin, pin_if_fits=pin_if_fits)
+    except Exception as exc:
+        if not force_pin:
+            raise
+        return {"status": "failed", "detail": str(exc)}
+
+
+async def _keep_loaded(
+    server_id: str, model: LocalModel, *, force_pin: bool, pin_if_fits: bool,
+) -> dict:
     """Pin a completed download, then load it when it fits now.
 
     Setup uses ``force_pin`` for its one managed model. Settings downloads retain
@@ -147,11 +159,9 @@ async def keep_loaded(
     if row is None:
         log.warning("Not keeping the downloaded local model loaded: oMLX's model list couldn't be read")
         _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNKNOWN  # a reload was not downloaded
-        return
+        return {"status": "failed", "detail": "oMLX model list unavailable"}
     size = row.get("estimated_size")
-    size_bytes: float | None = (
-        float(size) if isinstance(size, (int, float)) and size > 0 else None
-    )
+    size_bytes: float | None = float(size) if isinstance(size, (int, float)) and size > 0 else None
     pinned = force_pin or (
         pin_if_fits
         and size_bytes is not None
@@ -161,9 +171,9 @@ async def keep_loaded(
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
         if not pin.get("ok") or pin.get("settings", {}).get("pinned") is not True:
             log.warning("oMLX did not confirm the downloaded local model as pinned")
-            emit("pin", pin.get("message") or "Pin did not persist")
+            emit("pin", "Pin did not persist" if force_pin else pin.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
-            return
+            return {"status": "failed", "detail": pin.get("message") or "Pin did not persist"}
         emit("pin")
     not_loaded = NOT_LOADED if pinned or row.get("pinned") else NOT_LOADED_UNPINNED
     step = "memory check"
@@ -175,26 +185,28 @@ async def keep_loaded(
             if loaded is None:
                 raise RuntimeError("oMLX loaded status unavailable")
             if any(item["identifier"] == model.model for item in loaded):
-                return
+                return {"status": "loaded"}
             others = [int(item.get("size_bytes") or 0) or None for item in loaded]
             room = model_room_bytes()
             if load_verdict(int(size_bytes) if size_bytes else None, others, room) != "fits_now":
                 _log_no_room(size_bytes, others, room)
                 line = not_loaded_line(int(size_bytes), room) if size_bytes and (pinned or row.get("pinned")) else None
-                return {"refused": True, "line": line}
+                return {"status": "refused", "line": line}
             step = "model load"
             result = await load_model({"server_id": server_id}, model.model)
             if not result.get("ok"):
                 log.warning("Couldn't load the downloaded local model")
-                emit("load.failed", result.get("message") or "Load failed")
+                emit("load.failed", "Load failed" if force_pin else result.get("message") or "Load failed")
                 _FAILED[key] = not_loaded
-                return
+                return {"status": "failed", "detail": result.get("message") or "Load failed"}
             emit("load.completed")
             notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
         await discover_and_notify(server_id)
     except Exception as exc:
-        log.warning("Not loading the downloaded local model after %s failed", step, exc_info=True)
+        log.warning("Not loading the downloaded local model after %s failed", step, exc_info=not force_pin or step == "catalog refresh")
         if step != "catalog refresh":
             emit("load.failed", f"{step} failed: {type(exc).__name__}")
             _FAILED[key] = not_loaded
+            return {"status": "failed", "detail": str(exc)}
+    return {"status": "loaded"}
