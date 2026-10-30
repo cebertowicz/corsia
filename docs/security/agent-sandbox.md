@@ -41,7 +41,7 @@ The project is not a boundary. `backend/tools/filesystem_gate.py` states it in c
 | Piping a download into a shell (`curl … \| sh`), `eval`, process substitution | CORSIA code |
 | Disk formatting and erase (`mkfs`, `diskutil erase…`), fork bombs, literal `rm -rf /` or `rm -rf ~` | CORSIA code |
 | Stopping or restarting CORSIA itself | CORSIA code |
-| A command that contains a literal credential | CORSIA code |
+| A command that passes a literal value where a credential goes (a credential-named variable, flag, header or URL field) | CORSIA code |
 
 The command refusals match text. A command built to avoid the pattern (a script file, a variable) isn't refused by them; the OS sandbox still applies to whatever it does.
 
