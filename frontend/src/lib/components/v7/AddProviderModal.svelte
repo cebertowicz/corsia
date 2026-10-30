@@ -8,7 +8,7 @@
 	interface Props {
 		onClose: () => void;
 		onSelectCloud: (p: ProviderEntry) => void;
-		onAddedEndpoint?: (serverId: string, models: number) => void;
+		onAddedEndpoint?: (serverId: string) => void;
 	}
 
 	const { onClose, onSelectCloud, onAddedEndpoint }: Props = $props();
@@ -76,7 +76,7 @@
 			actionError = r.message ?? 'Failed to reach that endpoint';
 			return;
 		}
-		if (r.server_id) onAddedEndpoint?.(r.server_id, r.models ?? 0);
+		if (r.server_id) onAddedEndpoint?.(r.server_id);
 		await loadHostGroups();
 		onClose();
 	}

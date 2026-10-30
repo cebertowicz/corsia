@@ -2,10 +2,10 @@ import { createServer } from 'node:http';
 import { test, expect } from '../support/test';
 import { TEST_SESSION_TOKEN } from '../support/corsia';
 
-test('@surface:first-run setup counts a listed model only when selectable', async ({ page }) => {
+test('@surface:first-run setup counts a declared model only when selectable', async ({ page }) => {
 	const server = createServer((req, res) => {
 		res.setHeader('Content-Type', 'application/json');
-		res.end(JSON.stringify({ data: [{ id: 'test-model', object: 'model' }] }));
+		res.end(JSON.stringify({ data: [] }));
 	});
 	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 	const address = server.address();
@@ -17,10 +17,12 @@ test('@surface:first-run setup counts a listed model only when selectable', asyn
 		await page.getByRole('button', { name: 'Add provider' }).click();
 		await page.getByRole('button', { name: /Other provider by address/ }).click();
 		await page.getByPlaceholder('https://host.example.com/compatible-mode/v1').fill(`http://127.0.0.1:${address.port}/v1`);
+		await page.getByRole('button', { name: 'More options' }).click();
+		await page.getByPlaceholder('model-one, model-two').fill('test-model');
 		const registration = page.waitForResponse((response) => response.url().includes('/api/settings/network-servers') && response.request().method() === 'POST');
 		await page.getByRole('button', { name: 'Test & add' }).click();
 		const receipt = await (await registration).json();
-		expect(receipt.models).toBe(1);
+		expect(receipt.models).toBe(0);
 		let modelId = '';
 		await expect.poll(async () => {
 			const rows = await page.evaluate(async () => (await (await fetch('/api/models')).json()).models);

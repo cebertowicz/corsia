@@ -25,9 +25,9 @@ export function hasReadySetupModel(models: SetupModel[], tested: TestedProvider[
 	));
 }
 
-/** Registration already tested the model list; only a nonempty list qualifies. */
-export function recordSetupEndpoint(id: string, count: number): void {
-	testedProviders.update((names) => count > 0 ? [...new Set([...names, id])] : names.filter((name) => name !== id));
+/** Record successful registration; catalog readiness decides whether setup can continue. */
+export function recordSetupEndpoint(id: string): void {
+	testedProviders.update((names) => [...new Set([...names, id])]);
 }
 
 export function setupProviderName(source: string): string {

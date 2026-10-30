@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Setup can continue when a provider added by address lists a model that is ready to use.
+- Setup can continue when a provider added by address has a model that is ready to use.
 - When you type into an agent's document, the agent gets your edit as one change once you pause for 30 seconds, instead of a fragment every few seconds of typing.
 - Relative links inside a document's table cells open the linked file instead of saying the document is missing.
 - The reply box on a document comment no longer stays tall after you send a multi-line reply; it goes back to one line.
