@@ -58,6 +58,14 @@ def _duplicate_open_block(connection, node_id: str, payload: Mapping) -> bool:
     return row is not None
 
 
+def _deferred_person_step(connection, node_id: str) -> bool:
+    """Whether the node is a workflow person step built with its card held for its dependencies."""
+    from plans.workflow_fields import creation_payload
+
+    created = creation_payload(connection, node_id)
+    return created.get("workflow_by") == "person" and created.get("person_step") is False
+
+
 def observe_node_event(
     connection,
     *,
@@ -70,7 +78,10 @@ def observe_node_event(
 ) -> None:
     """Write the one card a qualifying outcome permits, in the caller's transaction."""
     kind = _outcome_kind(event, new_state, payload)
-    if event == "node_created" and (payload is None or payload.get("person_step", True)):
+    # A workflow's person step that waits on earlier steps is asked when they finish.
+    if (
+        event == "node_created" and (payload is None or payload.get("person_step", True))
+    ) or (event == "blocked_cleared" and _deferred_person_step(connection, node_id)):
         row = connection.execute(
             "SELECT kind, assignee, state FROM plan_nodes WHERE id=?", (node_id,),
         ).fetchone()

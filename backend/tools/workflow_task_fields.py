@@ -107,7 +107,7 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
         difficulty = step.get("difficulty")
         built: dict[str, Any] = {
             "id": step_id, "title": step.get("title"), "check": step.get("check"),
-            "required": step.get("required") is True,
+            "required": step.get("required") is True, "by": step.get("by", "agent"),
             "after": [value.strip() for value in step.get("after") or () if isinstance(value, str)],
             "difficulty": difficulty.get("default") if isinstance(difficulty, dict) else None,
         }

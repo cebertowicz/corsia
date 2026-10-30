@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import plans.service as service
+from core.size_rating import UNKNOWN as UNKNOWN_SIZE
 
 DIFFICULTIES = frozenset({"routine", "standard", "hard"})
 MAX_WORKFLOW_VALUE = 200
@@ -104,20 +105,36 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
         if difficulty is None:
             raise service.PlanInputError(f"step {step['id']}: {difficulty_rubric()}")
         nested = step.get("workflow")
+        by = step.get("by", "agent")
+        check = step.get("check") or f"Done: {title}"
+        description = step.get("instruction")
+        if by == "person":
+            from plans.boundary_fields import PERSON_STEP_DESCRIPTION_LIMIT
+            description = description or title
+            if step.get("check"):
+                description += f"\n\nCheck: {check}"
+            if len(description) > PERSON_STEP_DESCRIPTION_LIMIT:
+                raise service.PlanInputError(
+                    f"step {step['id']}: a person step's instruction must fit "
+                    f"{PERSON_STEP_DESCRIPTION_LIMIT} characters; shorten its SKILL.md section"
+                )
         node = node_creation.create_node(
             db, phase.plan_id, kind="task" if nested is None else "phase", title=title,
-            acceptance_criteria=step.get("check") or f"Done: {title}", parent_id=phase.id,
-            order_key=None, description=step.get("instruction"),
+            acceptance_criteria=check, parent_id=phase.id,
+            order_key=None, description=description,
             workflow_ref=nested or phase.workflow_ref,
             workflow_version=step.get("version") if nested else phase.workflow_version,
-            workflow_step=step["id"], difficulty=difficulty, size="unknown",
-            checkpoint_exception=False, assignee=None, spawn_kind=None,
+            workflow_step=step["id"], difficulty=difficulty, size=UNKNOWN_SIZE,
+            checkpoint_exception=False, assignee="user" if by == "person" else None, spawn_kind=None,
             watchdog_budget_seconds=None, follow_up_of=None, actor_id=None,
             provenance="plans.workflow_run", node_id=service._id(),
-            intent_node_id=intent_node_id, required_step=step.get("required") is True,
+            intent_node_id=intent_node_id, required_step=step.get("required") is True, workflow_by=by,
+            person_step=not (by == "person" and step.get("after")),
         )
         built[step["id"]] = node
         entry = {"id": node.id, "title": title, "required": step.get("required") is True}
+        if by != "agent":
+            entry["by"] = by
         if nested:
             entry["steps"] = build_run(db, node, step.get("steps") or (), causing_executor=causing_executor)
         listed.append(entry)
@@ -146,15 +163,45 @@ def added(db, node, line, steps, *, causing_executor: str | None):
     return result
 
 
+REVIEWER_ROUTE = (
+    "This step is checked by someone else: hand it to a reviewer "
+    "(delegate_task with plan_node_id) and accept or send back what they return."
+)
+
+
+def _open_step(db, node_id: str):
+    """An unfinished workflow step's node row and creation payload, the one record of its flags."""
+    node = service._node_row(db, node_id)
+    if node["workflow_step"] is None or node["state"] in service._TERMINAL_STATES:
+        return None, {}
+    return node, creation_payload(db, node_id)
+
+
+def creation_payload(db, node_id: str) -> dict[str, Any]:
+    """A node's creation-event payload, where a workflow step's flags are recorded."""
+    row = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created' "
+        "ORDER BY created_at,id LIMIT 1", (node_id,),
+    ).fetchone()
+    return json.loads(row["payload_json"] or "{}") if row is not None else {}
+
+
+def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
+    """Require a harvested worker return before a reviewer step is marked done or accepted."""
+    from plans import delegation_harvest
+
+    if operation not in {"mark_done", "accept", "accept_with_follow_up"}:
+        return
+    node, created = _open_step(db, node_id)
+    if created.get("workflow_by") != "reviewer":
+        return
+    if operation != "mark_done" and delegation_harvest.harvest_review(db, node) is not None:
+        return
+    raise service.PlanError(REVIEWER_ROUTE)
+
+
 def refuse_required_skip(db, node_id: str) -> None:
     """Refuse closing or archiving an unfinished required step of a workflow run."""
-
-    row = db.execute(
-        "SELECT n.state,n.workflow_step,e.payload_json FROM plan_nodes n JOIN plan_node_events e "
-        "ON e.node_id=n.id AND e.event='node_created' WHERE n.id=? ORDER BY e.created_at,e.id LIMIT 1",
-        (node_id,),
-    ).fetchone()
-    if row is None or row["state"] in service._TERMINAL_STATES or not row["payload_json"]:
-        return
-    if json.loads(row["payload_json"]).get("workflow_required") is True:
-        raise service.PlanError(REQUIRED_STEP_SKIP.format(step=row["workflow_step"]))
+    node, created = _open_step(db, node_id)
+    if created.get("workflow_required") is True:
+        raise service.PlanError(REQUIRED_STEP_SKIP.format(step=node["workflow_step"]))
