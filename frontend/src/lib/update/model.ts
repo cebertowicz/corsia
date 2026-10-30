@@ -21,6 +21,8 @@ export type UpdateFailureCode =
 	| 'index_locked'
 	| 'checkout_detached'
 	| 'checkout_dirty'
+	| 'checkout_no_upstream'
+	| 'checkout_diverged'
 	| 'restart_pending';
 
 export interface UpdateOperation {

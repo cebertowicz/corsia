@@ -39,7 +39,7 @@ const MODES: readonly BandMode[] = ['migration', 'plain'];
 const CODES: readonly UpdateFailureCode[] = [
 	'disk_space', 'fetch_failed', 'build_failed', 'launch_failed', 'rolled_back', 'version_unverified', 'wrong_version_running',
 	'drain_cancelled', 'drain_failed', 'update_timed_out', 'prepare_failed', 'index_locked', 'checkout_detached', 'checkout_dirty',
-	'restart_pending',
+	'restart_pending', 'checkout_no_upstream', 'checkout_diverged',
 ];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
