@@ -223,6 +223,9 @@ def try_acquire(
             return None
         if claim is not None and not claim(connection):
             return None
+        detail = {}
+        if previous_version:
+            detail["previous_version"] = previous_version
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
@@ -239,7 +242,7 @@ def try_acquire(
                 trigger,
                 target_version,
                 changes,
-                json.dumps({"previous_version": previous_version}) if previous_version else None,
+                json.dumps(detail) if detail else None,
                 _target_phase,
                 now,
                 now,
@@ -314,6 +317,18 @@ def adopt_for_resume(*, db=None) -> str | None:
         if not transition_operation(operation_id, expected=phase, target="resuming", db=connection):
             return None
         return operation_id
+
+
+def record_update_log(operation_id: str, log_path: str, *, db=None) -> bool:
+    """Attach an already-created log to the exact in-flight update."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        detail = _merged_detail(connection, operation_id, json.dumps({"log_path": log_path}))
+        result = connection.execute(
+            "UPDATE self_restart_requests SET failure_detail=? "
+            "WHERE id=? AND kind='update' AND status='in_flight'",
+            (detail, operation_id),
+        )
+        return result.rowcount == 1
 
 
 def complete_operation(

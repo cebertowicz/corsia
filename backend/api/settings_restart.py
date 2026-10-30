@@ -38,11 +38,11 @@ _PREPARE_EXIT_CODES = {
 }
 
 
-def _update_log_path() -> Path:
+def _update_log_path(operation_id: str | None = None) -> Path:
     """Return an immutable per-attempt log path for one Update request."""
     from infra.config import LOGS_DIR
 
-    return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
+    return LOGS_DIR / f"update-{operation_id or uuid.uuid4().hex}.log"
 
 
 
@@ -75,7 +75,7 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
 
     stdout = clean_update_output(result.stdout)
     stderr = clean_update_output(result.stderr)
-    log_path = _update_log_path()
+    log_path = _update_log_path(restart_env.get("CORSIA_RESTART_OPERATION_ID"))
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
@@ -144,6 +144,7 @@ async def _acquire_settings_restart(
     def _try_acquire() -> str | None:
         version = (target_version or cached_target_version()) if mode == "update" else None
         changes = cached_changes() if mode == "update" else None
+        requested_id = uuid.uuid4().hex if mode == "update" else None
         operation_id = self_restart.try_acquire(
             None,
             user.get("id") if user else None,
@@ -155,6 +156,7 @@ async def _acquire_settings_restart(
             target_version=version if mode == "update" else None,
             previous_version=_packaged_previous_version(mode),
             changes=json.dumps(changes) if changes else None,
+            operation_id=requested_id,
             claim=claim,
         )
         if operation_id is not None:
@@ -262,8 +264,13 @@ async def _launch_settings_restart(
     """Launch the detached lifecycle process or compensate its failed handoff."""
     log_path: Path | None = None
     try:
-        log_path = restart_log_path("restart.log")
-        with log_path.open("w") as log_fh:
+        log_path = _update_log_path(operation_id) if prepared else restart_log_path("restart.log")
+        with log_path.open("a" if prepared else "w") as log_fh:
+            if prepared:
+                from automation import self_restart
+                from infra.db_async import run_in_db
+
+                await run_in_db(self_restart.record_update_log, operation_id, str(log_path))
             process = spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
@@ -281,7 +288,7 @@ async def _launch_settings_restart(
                 operation_id,
                 error="settings restart launch failed",
                 failure_code="launch_failed",
-                failure_detail=json.dumps({"log_path": str(log_path)}) if log_path else None,
+                failure_detail=json.dumps({"log_path": str(log_path) if log_path and log_path.is_file() else None}),
             )
         except Exception:
             release_failed = True

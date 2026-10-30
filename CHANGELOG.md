@@ -114,6 +114,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - The update screen shows how many agents have paused while it waits for them.
 - Update notices wait until setup is finished, when Updates can be opened.
+- Update refusals show their reason and the update's own log in Settings.
 - Update settings show the changes for the update currently on offer.
 - Updates show the data upgrade step while your data is being upgraded.
 - When a plan isn't moving, its note names each wait that is overdue.
