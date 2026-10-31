@@ -481,6 +481,16 @@ async def refresh_provider(
         error = None if ready else (next((result.source_error or result.cause for result in results
                                      if result.source_error or result.cause), None)
                                     if results else 'account_not_configured')
+        causes = [result.cause for result in results if result.cause]
+        if not ready and 'account_refresh_superseded' not in causes and (causes or not results):
+            # The vendor clock records the sweep, never one account: an account's own failure
+            # stays on its discovery and must not back off or reset the others' checks.
+            from infra.time import utc_now_iso
+
+            version = harness_version or await _db_call(_cached_harness_version, provider, db=db)
+            await _db_call(store_failure, provider, causes[0] if causes else 'account_not_configured',
+                           harness_version=version, source=_ADAPTERS[provider][2],
+                           timestamp=utc_now_iso(), db=db)
         return {'provider': provider, 'reason': reason, 'ok': ready, 'error': error}
     context = await _db_call(capture_discovery_context, provider, account_id=account_id,
                              expected_receipt=expected_receipt, db=db)

@@ -220,3 +220,36 @@ def test_superseded_discovery_never_projects_rows(accounts):
         harness_version='1', db=db)
     assert result.cause == 'account_refresh_superseded'
     assert not any(item['id'] == 'codex/stale' for item in scoped_status_rows())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failing', ['first', 'last', 'all'])
+async def test_vendor_refresh_clock_records_the_sweep_not_one_account(accounts, monkeypatch, failing):
+    """One account's failed discovery neither backs off nor clears the vendor's refresh clock."""
+    from connections import account_discovery_refresh, harness_models
+    from connections.account_discovery_commit import record_discovery_failure
+    from connections.vendor_accounts import list_accounts
+
+    order = [account['id'] for account in list_accounts(provider='codex') if account['state'] == 'signed_in']
+    fails = set(order) if failing == 'all' else {order[0] if failing == 'first' else order[-1]}
+
+    async def refresh_once(provider, *, context, db_call, db, **_):
+        if context.account_id in fails:
+            return await db_call(record_discovery_failure, provider, context=context,
+                                 cause='account_discovery_failed', db=db)
+        return await db_call(_commit_ready, provider, context, db=db)
+
+    def _commit_ready(provider, context, *, db=None):
+        from connections.account_discovery_commit import commit_discovery_bundle
+
+        return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+                                       [_row('swept')], context=context, harness_version='1', db=db)
+
+    monkeypatch.setattr(account_discovery_refresh, 'refresh_account_once', refresh_once)
+    result = await harness_models.refresh_provider('codex', reason='explicit', harness_version='1', binary='/bin/test')
+
+    envelope = harness_models.read_discovery_envelope('codex')
+    if failing == 'all':
+        assert (result['ok'], envelope['last_error']) == (False, 'account_discovery_failed')
+    else:
+        assert result['ok'] is True and envelope['last_error'] is None and envelope['refreshed_at']

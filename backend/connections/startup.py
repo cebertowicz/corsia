@@ -34,7 +34,7 @@ async def startup_harness_discovery() -> list[dict]:
     """
     async def catalogs_then_claude() -> list[dict]:
         from connections.models import get_connection
-        from connections.source_state import apply_check, refresh_detail, NEEDS_AUTH, READY, UNVERIFIED
+        from connections.source_state import apply_check, refresh_check
         from infra.db_async import run_in_db
 
         results = await reask_harness_catalogs()
@@ -43,9 +43,7 @@ async def startup_harness_discovery() -> list[dict]:
         if result is None:
             await check_harness_source("claude-code")
         elif row and row["status"] != "not_installed":
-            state = READY if result.get("ok") else (
-                NEEDS_AUTH if result.get("error") == "account_not_configured" else UNVERIFIED)
-            await run_in_db(apply_check, "claude-code", state, refresh_detail(result.get("error")))
+            await run_in_db(apply_check, "claude-code", *refresh_check(result))
         return results
 
     outcomes = await asyncio.gather(

@@ -131,10 +131,5 @@ def record_discovery_failure(provider, *, context, cause, harness_version=None, 
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
         mark_discovery(context.account_id, receipt=context.receipt, status='failed', cause=cause,
                        harness_version=harness_version, db=connection)
-        from connections.harness_models import _ADAPTERS, _cached_harness_version, record_refresh_attempt
-        from infra.time import utc_now_iso
-
-        record_refresh_attempt(provider, harness_version=harness_version or _cached_harness_version(provider, db=connection),
-                               source=_ADAPTERS[provider][2], timestamp=utc_now_iso(), error=cause, db=connection)
         return AccountRefreshResult(provider, context.account_id, cause=cause,
                                     effective_receipt=context.receipt)
