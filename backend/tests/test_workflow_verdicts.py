@@ -430,6 +430,15 @@ def test_rule_3_no_gain_not_cheaper_waits_for_look_3_before_reverting() -> None:
     assert "cheaper" not in final.inputs
 
 
+def test_a_replaced_version_waiting_for_a_later_look_is_changed_again_not_collecting() -> None:
+    old = _priced("v1", 1, 1.0, count=80, started=60, ended=30)
+    for count, look in ((20, 1), (40, 2)):
+        source = history(old, _priced("v2", 1, 1.0, count=count), _priced("v3", 1, 1.0, count=3, started=8, ended=5))
+        result = verdict(source, replaced_by="v3")
+        assert (result.word, result.reason, result.look) == ("changed_early", f"replaced_before_look_{look + 1}", look)
+        assert {key: result.inputs[key] for key in ("k", "next")} == {"k": count, "next": "v3"}
+
+
 def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_version_is_kept() -> None:
     def arm(version: str, cost: float, **kw) -> list[Run]:
         # A failed run carries no corrections: with one each, corrections per outcome (20 over 18) varies with how

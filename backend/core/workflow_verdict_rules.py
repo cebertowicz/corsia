@@ -261,8 +261,9 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
     if replaced_by is not None and all(run.settled(window, now) for run in _side(history, plan.version)):
         reached = decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
-        if reached.word == "collecting" and reached.reason == "below_minimum":
-            return Verdict("changed_early", "replaced_before_look_1", 0, (),
+        # A replaced version gets no more runs, so a look it is still waiting for never comes.
+        if reached.word == "collecting":
+            return Verdict("changed_early", f"replaced_before_look_{reached.look + 1}", reached.look, (),
                            {**inputs, "version": plan.version, "k": len(changed), "next": replaced_by[0]})
         return reached
     return decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
