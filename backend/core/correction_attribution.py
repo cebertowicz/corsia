@@ -113,11 +113,6 @@ _ACTIVE_VERSION_ONLY = f"""{version_key_sql('s.attributes')}=(
 FIRST_ARRIVAL_SQL = _SOURCES_SQL + f"SELECT MIN(source_at) FROM sources s WHERE {_ACTIVE_VERSION_ONLY}"
 """The earliest arrival of a source the active version classified: where corrections began to be measured."""
 
-_TIMED_SQL = _SOURCES_SQL + f"""
-    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread FROM sources s
-    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
-"""
-
 _COVERAGE_SQL = _SOURCES_SQL + f"""
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread,
       EXISTS(SELECT 1 FROM outcome_events t
@@ -210,27 +205,6 @@ def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None =
     return facts if selected is None else [fact for fact in facts if fact.node_id in selected]
 
 
-def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:
-    """The person's corrections arriving in [start, end) as (arrival time, target thread), one per source.
-
-    ``start`` and ``end`` are stored UTC instants (``YYYY-MM-DD HH``), so rows outside the window are
-    dropped by the read and never decoded.
-
-    Messages, chat comments, document comments and decision answers only: a sent-back review is the reviewer's
-    and is counted as a rejection. Only facts of the activated classifier version are read
-    (``active_corrections_version``): a version still backfilling, or never activated, is not
-    served. A source that version classified more than once counts once, by its latest fact.
-    A source whose arrival cannot be resolved has no time and is left out.
-    """
-    rows = db.execute(_TIMED_SQL, {"start": start, "end": end}).fetchall()
-    timed = (row for row in rows if row["source_at"] is not None)
-    return [
-        (str(row["source_at"]), None if row["target_thread"] is None else str(row["target_thread"]))
-        for row in _latest_classifications(timed)
-        if json.loads(row["attributes"]).get("label") == LABEL_CORRECTION
-    ]
-
-
 @dataclass(frozen=True)
 class CorrectionCoverage:
     """One correction's arrival, target thread, whether it was triaged, and whether the thread has run since."""
@@ -242,7 +216,16 @@ class CorrectionCoverage:
 
 
 def person_correction_coverage(db: sqlite3.Connection, start: str, end: str) -> list[CorrectionCoverage]:
-    """The corrections ``person_corrections`` counts, each with its triage and idle state.
+    """The person's corrections arriving in [start, end), one per source, each with its triage and idle state.
+
+    ``start`` and ``end`` are stored UTC instants (``YYYY-MM-DD HH``), so rows outside the window are
+    dropped by the read and never decoded.
+
+    Messages, chat comments, document comments and decision answers only: a sent-back review is the reviewer's
+    and is counted as a rejection. Only facts of the activated classifier version are read
+    (``active_corrections_version``): a version still backfilling, or never activated, is not
+    served. A source that version classified more than once counts once, by its latest fact.
+    A source whose arrival cannot be resolved has no time and is left out.
 
     ``triaged`` is a ``learning_loop.correction_triage`` fact on the same subject, any tier.
     ``later_turn`` is a turn started in the target thread after the correction arrived; an archived
