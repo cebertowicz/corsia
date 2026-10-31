@@ -22,7 +22,7 @@
 .account-manager .account-copy { flex: 1; min-width: 0; }
 .account-manager .account-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 .account-manager .account-meta.signed-out { color: var(--amber-text); }
-.account-manager .account-signin-action { transition-property: none; position: relative; border: 0; background: none; padding: 0; color: var(--accent-text); font: inherit; white-space: nowrap; cursor: pointer; }
+.account-manager .account-signin-action { transition-property: none; position: relative; border: 0; background: none; padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); white-space: nowrap; cursor: pointer; }
 @media (pointer: coarse) {
   .account-manager .account-signin-action::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(var(--touch-target), calc(100% + var(--space-4))); height: max(var(--touch-target), calc(100% + var(--space-4))); transform: translate(-50%, -50%); }
 }
