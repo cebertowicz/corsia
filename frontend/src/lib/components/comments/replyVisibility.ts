@@ -15,14 +15,16 @@ function visibleHeight(element: HTMLElement, viewport: DOMRectReadOnly) {
 }
 
 /**
- * A reply is on screen when fully visible, or when it is taller than the area and its visible part fills it.
- * A filling reply's ratio stops changing, so the last callback can fall up to one threshold step short of full.
+ * A reply is on screen when all of it shows, or all the area when it is taller. The last callback can fall up to one
+ * threshold step short of that: a filling reply's ratio stops changing, and WebKit settles a reply in a rising sheet
+ * just under 1, without crossing the last threshold.
  */
 export function onScreen(entry: IntersectionObserverEntry, element: HTMLElement) {
 	if (entry.intersectionRatio === 1) return true;
 	const area = entry.rootBounds ? visibleHeight(element, entry.rootBounds) : 0;
 	const height = entry.boundingClientRect.height;
-	return area > 0 && height > area && entry.intersectionRect.height >= area - height / STEPS - 1;
+	const full = Math.min(height, area);
+	return full > 0 && entry.intersectionRect.height >= full - height / STEPS - 1;
 }
 
 /** Keeps one viewport observer per rendered unread reply across comment projections. */
