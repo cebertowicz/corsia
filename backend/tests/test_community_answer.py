@@ -134,25 +134,24 @@ def test_a_write_failure_leaves_the_answer_committed(db, monkeypatch, workspace)
     assert json.loads(state)["plan_decision"]["state"] == "answered"
 
 
-def test_a_reworded_option_writes_nothing_and_warns(db, monkeypatch, workspace, caplog):
+def test_a_reworded_option_writes_nothing(db, monkeypatch, workspace):
     options = [{**option, "label": option["label"] + " please"} for option in _community_card()["options"]]
     decision = _raise(db, options=options)
 
     assert _answer(db, monkeypatch, decision, "A").status_code == 200
 
     assert _profile(workspace) == NAME_LINES
-    assert "option label CORSIA does not know" in caplog.text
 
 
-def test_each_setup_label_maps_to_its_pair_by_its_text():
-    from onboarding.community_answer import _ANSWERS
+def test_a_non_community_answer_never_looks_up_the_corsia_agent(db, monkeypatch, workspace):
+    calls = []
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda **_kwargs: calls.append(1))
+    decision = _raise(db, title="Use and share something else?")
 
-    labels = [label for label, _detail in setup_strings.COMMUNITY["options"]]
+    assert _answer(db, monkeypatch, decision, "A").status_code == 200
 
-    assert sorted(labels) == sorted(_ANSWERS)
-    assert _ANSWERS["Use and share"] == (True, True)
-    assert _ANSWERS["Only use"] == (True, False)
-    assert _ANSWERS["Neither"] == (False, False)
+    assert calls == []
+    assert _profile(workspace) == NAME_LINES
 
 
 def test_no_designated_agent_and_a_non_thread_plan_writes_nothing(db, workspace):

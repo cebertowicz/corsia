@@ -306,16 +306,18 @@ def _write_community_answer_after_commit(db, decision: dict, chosen: dict) -> No
 
     try:
         from infra import config
+        from infra.community_answer import community_answer, write_profile_lines
         from infra.corsia_agent import get_corsia_agent
         from infra.write_effects import after_commit
-        from onboarding import community_answer
         from plans.onboarding_reads import decision_owner_id
 
-        answer = community_answer.community_answer(decision, chosen)
-        agent_id = get_corsia_agent(db=db)
-        if answer is None or agent_id is None or decision_owner_id(db, node_id=decision["node_id"]) != agent_id:
+        answer = community_answer(decision, chosen)
+        if answer is None:
             return
-        after_commit(db, lambda: community_answer.write_profile_lines(config.WORKSPACE, answer))
+        agent_id = get_corsia_agent(db=db)
+        if agent_id is None or decision_owner_id(db, node_id=decision["node_id"]) != agent_id:
+            return
+        after_commit(db, lambda: write_profile_lines(config.WORKSPACE, answer))
     except Exception:  # noqa: BLE001 - the profile line is not worth the answer
         logging.getLogger(__name__).warning(
             "community answer not scheduled for the user profile", exc_info=True,

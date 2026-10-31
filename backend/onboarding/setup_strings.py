@@ -96,10 +96,11 @@ COMMUNITY = {
                 "private ever goes into what's shared."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
                  "share leads to GitHub next."),
+    # (label, detail, (use, share)): the pair is the profile answer the option records.
     "options": (
-        ("Use and share", "Agents take improvements other people proved and offer the ones proven here."),
-        ("Only use", "Agents take proven improvements and share nothing."),
-        ("Neither", "Agents keep their improvements here."),
+        ("Use and share", "Agents take improvements other people proved and offer the ones proven here.", (True, True)),
+        ("Only use", "Agents take proven improvements and share nothing.", (True, False)),
+        ("Neither", "Agents keep their improvements here.", (False, False)),
     ),
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
 }

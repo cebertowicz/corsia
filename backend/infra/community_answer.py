@@ -12,34 +12,30 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from onboarding import setup_strings
+from infra import user_profile
 
 log = logging.getLogger(__name__)
 
-# Option label -> (use community improvements, share improvements). Keyed by the label's text, so
-# reordering the options cannot remap consent; a renamed label stops matching and the tests fail.
-_ANSWERS = {
-    "Use and share": (True, True),
-    "Only use": (True, False),
-    "Neither": (False, False),
-}
-
 
 def community_answer(decision: dict, chosen: dict) -> tuple[bool, bool] | None:
-    """The (use, share) answer the chosen option stands for, or None when this is another decision or no listed option."""
+    """The (use, share) answer the chosen option stands for, or None when this is another decision or no listed option.
+
+    Options are matched by label text against ``setup_strings.COMMUNITY``, so reordering them cannot remap consent.
+    """
+    from onboarding import setup_strings
+
     if decision.get("title") != setup_strings.COMMUNITY["title"]:
         return None
     labels = {option["id"]: option["label"] for option in decision.get("options", [])}
-    answer = _ANSWERS.get(labels.get(chosen.get("option_id"), ""))
-    if answer is None and chosen.get("option_id") != "other":
-        log.warning("community decision answered with an option label CORSIA does not know; nothing written")
-    return answer
+    chosen_label = labels.get(chosen.get("option_id"))
+    for label, _detail, answer in setup_strings.COMMUNITY["options"]:
+        if label == chosen_label:
+            return answer
+    return None
 
 
 def write_profile_lines(workspace: Path, answer: tuple[bool, bool]) -> None:
     """Write the two lines; never raises."""
-    from infra import user_profile
-
     try:
         staged = user_profile.stage_community_answer(workspace, use=answer[0], share=answer[1])
         if staged is None:
