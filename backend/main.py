@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+
+# LiteLLM otherwise fetches its cost map during import, before startup completes.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler

@@ -73,6 +73,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda: None)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
+    monkeypatch.setattr("llm.live_cost_map._refresh", _noop)
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
     monkeypatch.setattr(network_discovery, "get_servers", lambda **_filters: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
@@ -196,6 +197,25 @@ async def test_browser_orphan_sweep_failure_does_not_stop_startup(monkeypatch):
     monkeypatch.setattr(browser_orphan, "close_dead_sessions", fail_sweep)
     async with app_lifecycle.lifespan(FastAPI()):
         assert calls == ["sweep"]
+
+
+async def test_lifespan_serves_while_cost_map_fetch_is_pending(monkeypatch):
+    from llm import live_cost_map
+
+    _isolate_lifespan(monkeypatch)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hanging_fetch():
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(live_cost_map, "_refresh", hanging_fetch)
+    async with asyncio.timeout(_HANG_GUARD_SECONDS):
+        async with app_lifecycle.lifespan(FastAPI()):
+            await entered.wait()
+            assert not live_cost_map.refresh_task().done()
+            release.set()
 
 
 async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(monkeypatch):
