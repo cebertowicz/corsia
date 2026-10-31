@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import os
 
-# LiteLLM otherwise fetches its cost map during import, before startup completes.
+# An operator's LITELLM_LOCAL_MODEL_COST_MAP=true keeps the cost map offline. Otherwise
+# LiteLLM's import-time fetch is turned off and the lifespan refreshes it after startup.
+_COST_MAP_OFFLINE = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP", "").lower() == "true"
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
 from fastapi import Depends, FastAPI, Request
@@ -91,6 +93,7 @@ logger = logging.getLogger(__name__)
 
 install_access_log_redaction()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)
+app.state.litellm_cost_map_offline = _COST_MAP_OFFLINE
 
 app.add_middleware(
     CORSMiddleware,

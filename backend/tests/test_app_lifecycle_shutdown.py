@@ -218,6 +218,24 @@ async def test_lifespan_serves_while_cost_map_fetch_is_pending(monkeypatch):
             release.set()
 
 
+async def test_lifespan_skips_cost_map_fetch_when_operator_keeps_it_offline(monkeypatch):
+    from llm import live_cost_map
+
+    _isolate_lifespan(monkeypatch)
+    fetches: list[str] = []
+
+    async def fetch():
+        fetches.append("fetch")
+
+    monkeypatch.setattr(live_cost_map, "_refresh", fetch)
+    app = FastAPI()
+    app.state.litellm_cost_map_offline = True
+    async with app_lifecycle.lifespan(app):
+        assert live_cost_map.refresh_task() is None
+        await live_cost_map.wait_for_refresh()
+    assert fetches == []
+
+
 async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(monkeypatch):
     """The Uvicorn lifespan tunes GIL handoffs before DB startup can use workers."""
     import sys

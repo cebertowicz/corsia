@@ -16,7 +16,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 | Tool servers you add | What the agent passes to the tool | When an agent calls the tool | Remove the app |
 | GitHub, if you connect it | Pull requests, comments, pushes | When an agent uses it | Disconnect it |
 | GitHub, for update checks | An anonymous request: `git fetch` of your branch's upstream for a source install; the release manifest for the desktop app | While the app is open, at most once every five minutes | No setting at this commit |
-| GitHub, for LiteLLM's model price list | An anonymous download of a public JSON file by the LiteLLM library | Each time the server starts | Set `LITELLM_LOCAL_MODEL_COST_MAP=true` in the server's environment |
+| GitHub, for LiteLLM's model price list | An anonymous download of LiteLLM's public price list, made by the server after it starts | Each time the server starts | Set `LITELLM_LOCAL_MODEL_COST_MAP=true` in the server's environment; the server then uses the price list bundled with LiteLLM |
 | GitHub, for the skill library index | An anonymous download of the public index | Daily, and when an agent searches or installs | No setting at this commit |
 | GitHub, for the corrections classifier | A one-time download of the pinned classifier files, checked against hashes in the source | First run, and when a new version is pinned | Don't install the classifier |
 | models.dev | An anonymous download of a public model catalog | When CORSIA discovers models on an OpenAI-compatible endpoint you added | Set `CORSIA_MODEL_CATALOG_URL` to empty |
