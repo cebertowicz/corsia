@@ -172,7 +172,6 @@ def _init_isolated_db_schema():
     with pytest.MonkeyPatch.context() as seed_probe:
         seed_probe.setattr(shutil, "which", lambda name, *_a, **_k: name)
         seed_probe.setattr(connections, "_gh_status", lambda _binary: (True, None))
-        seed_probe.setattr(connections, "_codex_sign_in_state", lambda _binary: "ready")
         init_db()
     # A token authenticates only if it is a row, so the session database needs
     # the accounts the suite signs in as before any authenticated route is
@@ -183,19 +182,10 @@ def _init_isolated_db_schema():
 
 
 @pytest.fixture(autouse=True)
-def _no_host_harness_sign_in_check(monkeypatch):
-    """Startup's sign-in check never runs a host harness CLI in a unit test.
-
-    Its result would depend on whichever codex or claude the host has and is
-    signed in to. Tests of the check itself call ``connections.source_state``
-    directly with their own stubs. GitHub's ``gh auth status``, which the
-    seed and the model-source recheck run, reads signed in unless a test
-    patches it.
+def _no_host_github_sign_in_check(monkeypatch):
+    """GitHub's ``gh auth status``, which the seed and the model-source recheck run,
+    reads signed in unless a test patches it, so no unit test depends on the host's gh.
     """
-    async def _skip(_provider, *, rediscover=False):
-        return None
-
-    monkeypatch.setattr("connections.startup.check_harness_source", _skip)
     monkeypatch.setattr("connections._gh_status", lambda _binary: (True, None))
 
 

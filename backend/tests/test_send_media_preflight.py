@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from shared_send_fixtures import _insert_session
+from vendor_account_fixtures import signed_in_default
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 
 @pytest.mark.asyncio
@@ -33,6 +36,7 @@ async def test_cc_image_uses_shared_projection_without_path_prompt(
             "UPDATE models SET supports_vision=1 WHERE id='claude-code/sonnet'"
         )
         db.commit()
+        signed_in_default("claude-code", db=db)  # the Default lists the model with image input
         thread_row = dict(
             db.execute(
                 "SELECT * FROM threads WHERE id=?",

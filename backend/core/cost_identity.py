@@ -26,6 +26,7 @@ from typing import Any
 
 from connections.claude_unlisted import base_identity
 from connections.source_state import HARNESS_PROVIDERS
+from llm.harness_catalog import project_stored_rows
 from llm.model_status import projected_display_name
 from llm.resolution import catalog_row
 from subagents.child_thread import resolved_external_model_id
@@ -114,10 +115,9 @@ class IdentityResolver:
         if self._labels is None:
             self._labels = {}
             marks = ",".join("?" * len(HARNESS_PROVIDERS))
-            for raw in self._db.execute(
+            for candidate in project_stored_rows(self._db.execute(
                 f"SELECT * FROM models WHERE harness IN ({marks}) ORDER BY id", HARNESS_PROVIDERS,
-            ).fetchall():
-                candidate = dict(raw)
+            ).fetchall(), db=self._db):
                 current = _current_identity(candidate)
                 if current:
                     self._labels.setdefault(

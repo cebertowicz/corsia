@@ -9,6 +9,8 @@ import pytest
 
 from connections import harness_models
 from infra import database
+from llm.harness_catalog import project_stored_rows
+from tests.vendor_account_fixtures import signed_in_default
 
 
 @pytest.fixture(params=["codex", "claude-code"])
@@ -26,11 +28,13 @@ def observed_model(isolated_db, request):
         db.execute(
             "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,"
             "display_name,context_window,metadata_json,created_at,updated_at) "
-            "VALUES ('model',?,?,'selector','test/model','Test model',190000,?,'t','t')",
-            (provider, provider, json.dumps(metadata)),
+            "VALUES ('model',?,?,'selector',?,'Test model',190000,?,'t','t')",
+            (provider, provider, f"{provider}/selector", json.dumps(metadata)),
         )
         db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('outer','original','t')")
         db.commit()
+    # An observation binds to the identity a signed-in account lists for the model now.
+    signed_in_default(provider)
     return isolated_db, provider, metadata
 
 
@@ -45,12 +49,13 @@ def _observe(provider, *, db=None, **overrides):
 
 
 def _stored(path):
+    """The window readers see, the stored metadata and the caller's own write, read fresh."""
     with closing(sqlite3.connect(str(path))) as db:
-        window, metadata = db.execute(
-            "SELECT context_window,metadata_json FROM models WHERE id='model'"
-        ).fetchone()
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM models WHERE id='model'").fetchone()
+        window = project_stored_rows([row], db=db)[0]["context_window"]
         outer = db.execute("SELECT value FROM settings WHERE key='outer'").fetchone()[0]
-    return window, json.loads(metadata), outer
+    return window, json.loads(row["metadata_json"]), outer
 
 
 def test_implicit_observation_cannot_commit_or_discard_foreign_work(observed_model):

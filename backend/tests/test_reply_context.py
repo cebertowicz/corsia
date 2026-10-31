@@ -284,7 +284,10 @@ def test_a_send_without_reply_context_is_stored_exactly_as_before(thread_rows):
     _admit(thread_rows, "plain", None)
     assert KEY not in _stored(thread_rows, "plain")
     _admit(thread_rows, "empty", {KEY: {"in_view": []}})
-    assert _stored(thread_rows, "empty") == _stored(thread_rows, "plain")
+    # A turn on a signed-in account stamps its own login receipt (turn id included); compare without it.
+    stamp = "_corsia_vendor_login"
+    assert ({k: v for k, v in _stored(thread_rows, "empty").items() if k != stamp}
+            == {k: v for k, v in _stored(thread_rows, "plain").items() if k != stamp})
 
 
 @pytest.mark.parametrize("extra,role", [

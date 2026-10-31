@@ -107,17 +107,31 @@ def test_live_handle_cannot_restore_an_unconfined_surface():
 @pytest.mark.asyncio
 async def test_confined_fork_refuses_and_cleans_its_home(isolated_db, tmp_path, monkeypatch):
     from dataclasses import replace
-    from connections.account_runtime import LaunchHomes
+    from connections.account_receipts import capture_receipt
+    from connections.account_runtime import launch_homes
     from core import fork_codex
+    from infra.database import get_db
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.fork_fit import ColdFoldInput
     from core.fork_types import ProviderForkRejected
     from test_checkpoint_provider_adapters import _request, _target
     from test_confined_reads import _seed_thread
+    from vendor_account_fixtures import signed_in_default
 
     _seed_thread(isolated_db, "thread-1", tmp_path)
-    request = replace(_request(None), target=_target("codex"), binary="unused",
-                      working_dir=str(tmp_path), vendor_launch=LaunchHomes(None, False, warm_home=str(tmp_path)))
+    target = _target("codex")
+    def sign_in():
+        account = signed_in_default("codex", models=(target.catalog_id,))
+        db = get_db()
+        try:
+            return account, capture_receipt("codex", account_id=account["id"], db=db), launch_homes(account["id"], db=db)
+        finally:
+            db.close()
+
+    account, receipt, launch = await asyncio.to_thread(sign_in)
+    request = replace(_request(None), target=target, binary="unused", working_dir=str(tmp_path),
+                      vendor_account_id=account["id"], vendor_account_bound=True,
+                      vendor_account_receipt=receipt, vendor_launch=launch)
     monkeypatch.setattr(fork_codex, "admit_fork", lambda value: value)
     monkeypatch.setattr(fork_codex, "_fit_cold_request", lambda value, *a, **k: (value, ColdFoldInput((), 1, None, 0)))
     monkeypatch.setattr(fork_codex, "_fork_tools", lambda *a, **k: (object(), ()))

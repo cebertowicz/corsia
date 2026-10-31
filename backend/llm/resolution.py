@@ -58,12 +58,10 @@ class ExecutionTarget:
 
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
-    if exact:
-        if exact['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import project_stored_row
+    from llm.harness_catalog import account_rows, project_stored_rows
 
-            return project_stored_row(exact, db=db)
-        return dict(exact)
+    if exact:
+        return project_stored_rows([exact], db=db)[0]
     matches = db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (model,)
     ).fetchall()
@@ -78,15 +76,9 @@ def _target_row(model: str, *, db) -> dict | None:
     if len(matches) > 1:
         raise ValueError(f"ambiguous model transport identity: {model}")
     if matches:
-        if matches[0]['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import project_stored_row
-
-            return project_stored_row(matches[0], db=db)
-        return dict(matches[0])
+        return project_stored_rows(matches[:1], db=db)[0]
     if model.startswith(('claude-code/', 'codex/')):
-        from llm.harness_catalog import added_rows
-
-        return added_rows(db=db, provider=model.partition('/')[0]).get(model)
+        return account_rows(db=db, provider=model.partition('/')[0]).get(model)
     return None
 
 
@@ -183,8 +175,6 @@ def resolve_execution_target(
 
         internal_reviewer = bool(metadata.get("internal_reviewer"))
         available = _dispatchable(row, harness)
-        if harness in ('claude-code', 'codex') and row.get('added_available'):
-            available = True
         if harness == "codex" and internal_reviewer:
             # The provider-owned review selector is intentionally hidden from
             # the user catalog but remains callable when Codex is connected.

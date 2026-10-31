@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 
 from connections.account_policy import (
-    PROJECT_POLICY_MISSING, AccountAdmissionError, account_reason, missing_project_reason, thread_scope,
+    NOT_CONFIGURED, PROJECT_POLICY_MISSING, AccountAdmissionError, account_reason, missing_project_reason,
+    thread_scope,
 )
 from connections.vendor_accounts import get_account
 from infra.time import utc_now_iso
@@ -12,7 +13,7 @@ from infra.time import utc_now_iso
 ACCOUNT_HOLD_REASONS = (
     "account_project_denied", "account_removed", "account_signed_out", "account_runtime_pending",
     "account_model_not_discovered", "account_login_unverified", "account_home_mismatch",
-    "codex_auth_projection_changed", "codex_auth_source_missing", PROJECT_POLICY_MISSING,
+    "codex_auth_projection_changed", "codex_auth_source_missing", PROJECT_POLICY_MISSING, NOT_CONFIGURED,
 )
 
 _UNREAD_HOLD = object()
@@ -80,7 +81,7 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
     One read names every candidate with its project and its binding row; the owner
     then answers from those facts, so the walk reads nothing per thread.
     """
-    from connections.account_policy import _scoped_turn_account
+    from connections.account_policy import scoped_turn_account
 
     account = get_account(account_id, db=db)
     provider = account['provider']
@@ -96,7 +97,7 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
     affected = []
     for row in rows:
         binding = None if row['bound'] is None else {'account_id': row['bound'], 'pending_account_id': row['pending']}
-        selected, _ = _scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
+        selected, _ = scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
                                            account_id=None, model=str(row['model']), db=db, binding=binding)
         if selected == account_id:
             affected.append(str(row['id']))

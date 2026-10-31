@@ -11,6 +11,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
+from vendor_account_fixtures import signed_in_default
+
 CC_MODEL = "claude-code/test"
 
 
@@ -27,6 +29,11 @@ def _db() -> sqlite3.Connection:
         "VALUES (?,'claude-code','anthropic',?,?,?,200000,'t0','t0')",
         (CC_MODEL, CC_MODEL, CC_MODEL, CC_MODEL),
     )
+    from connections.models import upsert_connection
+
+    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"}, db=db)
+    db.commit()
+    signed_in_default("claude-code", db=db)  # an input is admitted only on a signed-in account
     return db
 
 

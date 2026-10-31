@@ -35,11 +35,11 @@ _RESTORED_TOKEN_FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens"
 
 
 def default_codex_sessions_root() -> Path:
-    """The managed Codex app-server home's rollout directory.
+    """Where transcripts written before accounts existed live.
 
-    CORSIA's Codex threads run in an isolated ``CODEX_HOME`` (the app-server
-    home under the runtime dir), so their rollouts live there — not in the
-    user's ``~/.codex``.
+    Only a fork of such a thread reads here, to copy its rollout. A Turn is
+    never launched under this root: every Codex Turn runs under its account's
+    own runtime home.
     """
     from subagents.codex_env import _default_app_server_home
 

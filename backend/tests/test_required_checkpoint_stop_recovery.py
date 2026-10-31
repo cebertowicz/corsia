@@ -22,6 +22,8 @@ from core.checkpoint_wait import CheckpointWaitScope
 from core.turn_core import TurnIdentity
 from test_checkpoint_hold_install_resume import _Process, _reach_wait, _seed
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 WINDOW = 32_768
 
 

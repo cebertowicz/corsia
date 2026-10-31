@@ -81,12 +81,11 @@ def _slug(target):
     return json.loads(target.read_text())['models'][0]['slug']
 
 
-async def _refresh(monkeypatch, provider, *, is_default=False, source_home='/synthetic/./source'):
+async def _refresh(monkeypatch, provider, *, source_home='/synthetic/./source'):
     from connections import harness_models
     from connections.account_discovery_types import StagedDiscovery
 
-    context = SimpleNamespace(provider=provider, is_default=is_default, source_home=source_home,
-                              prior_discovery=None)
+    context = SimpleNamespace(provider=provider, source_home=source_home, prior_discovery=None)
     calls, writes = [], []
     async def spawn(*argv, **kwargs):
         calls.append((argv, kwargs))
@@ -173,7 +172,7 @@ def synthetic(accounts, monkeypatch, tmp_path):
         commands={"login": ("login",), "status": ("status",), "logout": ("logout",)},
         missing_cause="synthetic_missing", in_progress_cause="synthetic_signin_in_progress",
         identity_facts=("login", "plan"), comparison_keys=("login",), status_report_keys={},
-        clean_env=lambda: {}, default_warm_home=lambda: str(tmp_path / "warm"),
+        clean_env=lambda: {},
         validate_hint=validate, workspace_default=True, sign_out=sign_out))
     upsert_connection(type="cli", provider="synthetic", status="available", config={})
     return account_profiles.profile_for("synthetic")
@@ -458,11 +457,14 @@ async def test_actual_custom_refresh_version_uses_clean_own_verbatim_source_home
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
-async def test_actual_default_refresh_preserves_original_version_command_without_env_or_stdin(monkeypatch, provider):
-    result, calls, writes = await _refresh(monkeypatch, provider, is_default=True, source_home=None)
+async def test_actual_default_refresh_version_uses_clean_own_source_home(monkeypatch, provider):
+    result, calls, writes = await _refresh(monkeypatch, provider)
     assert result == 'committed'
     assert calls == [(('/synthetic/vendor', '--version'),
-                      {'stdout': asyncio.subprocess.PIPE, 'stderr': asyncio.subprocess.PIPE})]
+                      {'stdout': asyncio.subprocess.PIPE, 'stderr': asyncio.subprocess.PIPE,
+                       'stdin': asyncio.subprocess.DEVNULL,
+                       'env': {'CLEAN': provider,
+                               'CODEX_HOME' if provider == 'codex' else 'CLAUDE_CONFIG_DIR': '/synthetic/./source'}})]
     assert writes[0][0] == 'commit_discovery_bundle'
 
 
@@ -657,6 +659,8 @@ def test_person_account_pin_ignores_the_runtime_epoch_holds_a_busy_choice_and_ke
     from connections.vendor_accounts import add_account, set_account_state
 
     db, legacy, second, third = accounts
+    legacy = set_account_state(legacy['id'], 'signed_in', expected_revision=legacy['revision'], db=db)
+    _ready(db, legacy)
     route = "/api/threads/destination/vendor-account"
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     db.execute("UPDATE threads SET runtime_context_epoch=runtime_context_epoch+5 WHERE id='destination'")
@@ -860,14 +864,14 @@ def test_ready_different_selector_and_stale_login_cannot_publish_catalog(account
 def test_rename_api_preserves_label_text_when_submitting_the_ui_custom_prefill(client_refuses_unsigned_api, accounts):
     """The rename field may submit only `label.custom`, never the person-facing label text."""
     from connections.models import upsert_connection
-    from connections.vendor_accounts import DEFAULT_COMPARISON, default_account
+    from vendor_account_fixtures import seed_default_account
 
     db, _, named, _ = accounts
     db.execute("UPDATE vendor_accounts SET identity_json=? WHERE id=?", (json.dumps({"email": "named@example.test"}), named["id"]))
     upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"}, db=db)
-    unnamed = default_account("claude-code", db=db)
-    db.execute("UPDATE vendor_accounts SET identity_json=? WHERE id=?", (
-        json.dumps({DEFAULT_COMPARISON: {"facts": {"email": "org@example.test", "org_name": "Acme"}}}), unnamed["id"],
+    unnamed = seed_default_account("claude-code", db=db)
+    db.execute("UPDATE vendor_accounts SET state='signed_in',identity_json=? WHERE id=?", (
+        json.dumps({"email": "org@example.test", "org_name": "Acme"}), unnamed["id"],
     ))
     db.commit()
 
@@ -888,11 +892,10 @@ def test_rename_api_preserves_label_text_when_submitting_the_ui_custom_prefill(c
 
 def test_account_labels_use_login_facts_and_the_s8_fallback():
     from connections.account_profiles import account_label
-    from connections.vendor_accounts import DEFAULT_COMPARISON
 
     default = {
-        "id": "default", "provider": "claude-code", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {"email": "default@example.test", "org_name": "Acme"}}},
+        "id": "default", "provider": "claude-code", "name": "Default", "source_home": "/private/default", "is_default": True, "state": "signed_in",
+        "identity": {"email": "default@example.test", "org_name": "Acme"},
         "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(default, rows=[default]) == {
@@ -900,10 +903,10 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
     }
 
     personal_org = {
-        "id": "personal-org", "provider": "claude-code", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {
+        "id": "personal-org", "provider": "claude-code", "name": "Default", "source_home": "/private/default", "is_default": True, "state": "signed_in",
+        "identity": {
             "email": "person@example.test", "org_name": "person@example.test's Organization",
-        }}},
+        },
         "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(personal_org, rows=[personal_org]) == {
@@ -912,7 +915,7 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
     }
 
     renamed = {
-        "id": "work", "provider": "claude-code", "name": "Work", "source_home": "/private/work",
+        "id": "work", "provider": "claude-code", "name": "Work", "source_home": "/private/work", "is_default": False, "state": "signed_in",
         "identity": {"email": "work@example.test", "org_name": "Acme"}, "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(renamed, rows=[renamed]) == {
@@ -920,16 +923,16 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
     }
 
     known_email_without_detail = {
-        "id": "plain", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {"email": "plain@example.test"}}}, "created_at": "2026-10-01T00:00:00Z",
+        "id": "plain", "provider": "codex", "name": "Default", "source_home": "/private/default", "is_default": True, "state": "signed_in",
+        "identity": {"email": "plain@example.test"}, "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(known_email_without_detail, rows=[known_email_without_detail]) == {
         "name": "plain@example.test", "email": "plain@example.test", "text": "plain@example.test", "custom": None, "identified": True,
     }
 
     codex_without_email = {
-        "id": "codex-default", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {"account_fp": "fingerprint", "plan": "Plus"}}},
+        "id": "codex-default", "provider": "codex", "name": "Default", "source_home": "/private/default", "is_default": True, "state": "signed_in",
+        "identity": {"account_fp": "fingerprint", "plan": "Plus"},
         "created_at": "2026-10-02T00:00:00Z",
     }
     assert account_label(codex_without_email, rows=[
@@ -937,8 +940,8 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
     ]) == {"name": "ChatGPT Plus", "email": None, "text": "ChatGPT Plus", "custom": None, "identified": True}
 
     codex_without_email_or_plan = {
-        "id": "codex-unobserved", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {"account_fp": "fingerprint"}}},
+        "id": "codex-unobserved", "provider": "codex", "name": "Default", "source_home": "/private/default", "is_default": True, "state": "signed_in",
+        "identity": {"account_fp": "fingerprint"},
         "created_at": "2026-10-03T00:00:00Z",
     }
     assert account_label(codex_without_email_or_plan, rows=[codex_without_email_or_plan]) == {
@@ -946,7 +949,7 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
     }
 
     custom_without_email = {
-        "id": "codex-custom", "provider": "codex", "name": "Personal", "source_home": "/private/personal",
+        "id": "codex-custom", "provider": "codex", "name": "Personal", "source_home": "/private/personal", "is_default": False, "state": "signed_in",
         "identity": {"plan": "Plus"}, "created_at": "2026-10-02T00:00:00Z",
     }
     assert account_label(custom_without_email, rows=[
@@ -963,11 +966,10 @@ def test_account_labels_use_login_facts_and_the_s8_fallback():
 ])
 def test_account_label_identified_is_false_only_for_the_bare_vendor(provider, name, source_home, identity, identified):
     from connections.account_profiles import account_label
-    from connections.vendor_accounts import DEFAULT_COMPARISON
 
     account = {
         "id": "a", "provider": provider, "name": name, "source_home": source_home,
-        "identity": identity if source_home else {DEFAULT_COMPARISON: {"facts": identity}},
+        "is_default": source_home is None, "state": "signed_in", "identity": identity,
         "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(account, rows=[account])["identified"] is identified
@@ -980,11 +982,10 @@ def test_account_label_identified_is_false_only_for_the_bare_vendor(provider, na
 ])
 def test_renamed_builtin_account_uses_its_user_name(identity, expected):
     from connections.account_profiles import account_label
-    from connections.vendor_accounts import DEFAULT_COMPARISON
 
     builtin = {
-        "id": "builtin", "provider": "claude-code", "name": "Work", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": identity}}, "created_at": "2026-10-01T00:00:00Z",
+        "id": "builtin", "provider": "claude-code", "name": "Work", "source_home": "/private/default",
+        "is_default": True, "state": "signed_in", "identity": identity, "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(builtin, rows=[builtin]) == expected
 
@@ -998,9 +999,9 @@ def test_email_less_default_labels_use_vendor_and_plan_not_creation_order():
         "identity": {"plan": "Plus"}, "created_at": "2026-10-01T00:00:00Z", "is_default": True,
     }
     builtin = {
-        "id": "builtin", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {"default_comparison": {"facts": {"plan": "Plus"}}},
-        "created_at": "2026-10-02T00:00:00Z", "is_default": False,
+        "id": "builtin", "provider": "codex", "name": "Default", "source_home": "/private/default",
+        "identity": {"plan": "Plus"}, "state": "signed_in",
+        "created_at": "2026-10-02T00:00:00Z", "is_default": True,
     }
     removed = {
         "id": "removed", "provider": "codex", "name": "Removed", "source_home": "/private/removed",
@@ -1009,8 +1010,8 @@ def test_email_less_default_labels_use_vendor_and_plan_not_creation_order():
     # Display/default order cannot change an identifier fallback.
     rows = [builtin, first, removed]
     assert account_label(builtin, rows=rows)["text"] == "ChatGPT Plus"
-    first["is_default"], builtin["is_default"] = False, True
-    assert account_label(builtin, rows=rows)["text"] == "ChatGPT Plus"
+    first["is_default"], builtin["is_default"] = True, False
+    assert account_label(builtin, rows=rows)["text"] == "Default"
 
     with pytest.raises(AccountError, match="not present"):
         account_label(builtin, rows=[first, removed])
@@ -1020,8 +1021,8 @@ def test_account_label_does_not_depend_on_creation_timestamp_format():
     from connections.account_profiles import account_label
 
     builtin = {
-        "id": "builtin", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {"default_comparison": {"facts": {"plan": "Plus"}}},
+        "id": "builtin", "provider": "codex", "name": "Default", "source_home": "/private/default",
+        "identity": {"plan": "Plus"}, "is_default": True, "state": "signed_in",
         "created_at": "2026-10-02T00:00:00+00:00",
     }
     added = {
@@ -1039,7 +1040,7 @@ def test_user_named_default_is_not_treated_as_the_builtin_default_account():
 
     named_default = {
         "id": "named-default", "provider": "codex", "name": "Default", "source_home": "/private/named-default",
-        "identity": {"plan": "Plus"}, "created_at": "2026-10-01T00:00:00Z",
+        "is_default": False, "state": "signed_in", "identity": {"plan": "Plus"}, "created_at": "2026-10-01T00:00:00Z",
     }
     assert account_label(named_default, rows=[named_default]) == {
         "name": "Default", "email": None, "text": "Default", "custom": "Default", "identified": True,
@@ -1154,10 +1155,15 @@ async def test_built_in_sign_out_hooks_start_nothing_without_the_vendor_binary(a
 def test_scope_account_resolves_without_a_thread_or_a_write(accounts):
     from connections.account_policy import scope_account
     from connections.provider_policy import set_policy
-    from connections.vendor_accounts import default_account, list_accounts, set_account_state
+    from connections.models import upsert_connection
+    from connections.vendor_accounts import add_account, default_account, list_accounts, set_account_state
 
     db, legacy, second, third = accounts
     legacy, second = default_account("codex"), second["id"]
+    set_account_state(legacy["id"], "signed_in", expected_revision=legacy["revision"], db=db)
+    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"})
+    claude = add_account("claude-code", "Claude")
+    set_account_state(claude["id"], "signed_in", expected_revision=claude["revision"])
     assert scope_account("codex", project_id=None, db=db) == (legacy["id"], None)
     assert scope_account("codex", project_id="destination-project", db=db) == (legacy["id"], None)
     assert scope_account("codex", project_id="missing", db=db) == (None, "project_policy_missing")
@@ -1237,7 +1243,8 @@ def test_sign_out_route_calls_the_profile_hook_after_the_state_commits(client, m
         seen.append((account["provider"], get_account(account["id"])["state"]))
         return {"status": "done", "cause": None}
 
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"})
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config={"binary": "/bin/test", "harness_model_cache": {}})
     for provider in ("codex", "claude-code"):
         monkeypatch.setitem(account_profiles._PROFILES, provider,
                             replace(account_profiles.profile_for(provider), sign_out=recorder))

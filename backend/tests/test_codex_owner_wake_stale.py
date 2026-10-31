@@ -88,6 +88,9 @@ async def test_idle_owner_wake_after_context_change_is_delivered(
             (MODEL,),
         )
         main_db.commit()
+        from vendor_account_fixtures import signed_in_default
+
+        signed_in_default("codex", db=main_db)  # the Default's next discovery lists the new window
         target = resolve_execution_target(MODEL, db=main_db)
     if invalidate == "workdir":
         idle.working_dir = "/somewhere/else"

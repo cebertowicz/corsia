@@ -14,6 +14,8 @@ from llm.api_equivalent import api_equivalent, is_long_context, price_identity
 from llm.list_prices import ALIBABA_BEIJING, ALIBABA_SINGAPORE, LIST_PRICES, listing_for_host
 from model_identity_fixtures import ALIBABA_HOST, seed_external_server
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 CC = "external_harness:claude-code"
 CODEX = "external_harness:codex"
 SONNET = next(price for price in LIST_PRICES if price.model == "claude-sonnet-5-5")

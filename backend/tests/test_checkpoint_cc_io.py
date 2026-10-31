@@ -11,6 +11,9 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from native_checkpoint_fixtures import seed_vendor_checkpoint_thread
 from test_checkpoint_external_adapters import _request, _target
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
+
 
 @pytest.mark.asyncio
 async def test_checkpoint_tool_infrastructure_failure_stops_its_writer_before_error():
@@ -147,6 +150,9 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
             request, asyncio.Event(), on_tool_executor=register, kind=CHECKPOINT_KIND,
         ))
     else:
+        from core.fork_account import admit_fork
+
+        request = admit_fork(request)  # a paid write names its account: invoke_fork does this itself
         operation = asyncio.create_task(communicate_fork(
             process, request, asyncio.Event(), on_tool_executor=register, spawned_at=0.0,
         ))

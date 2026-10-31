@@ -9,6 +9,8 @@ and was accepted as degraded prose.
 
 from __future__ import annotations
 
+from vendor_account_fixtures import seed_catalog
+
 
 def _discovered_model(db, model_id: str, *, temperature, max_tokens) -> None:
     db.execute(
@@ -93,7 +95,7 @@ def _defaults(db, model_id: str) -> tuple:
 
 
 def test_harness_discovery_clears_defaults_stamped_on_existing_rows(isolated_db) -> None:
-    from connections.harness_models import normalize_claude_models, store_success
+    from connections.harness_models import normalize_claude_models
     from infra.database import get_db
 
     db = get_db()
@@ -104,12 +106,18 @@ def test_harness_discovery_clears_defaults_stamped_on_existing_rows(isolated_db)
             harness_version="2.1.218",
             timestamp="2026-09-23T00:00:00+00:00",
         )
-        store_success(
+        seed_catalog(
             "claude-code", rows, harness_version="2.1.218",
             source="claude-stream-json:list_models",
             timestamp="2026-09-23T00:00:00+00:00", db=db,
         )
-        assert _defaults(db, "claude-code/sonnet") == (None, None)
+        # The stored row only registers the model; readers never see its stamped defaults.
+        from llm.capabilities import get_model_max_output_tokens
+        from llm.harness_catalog import harness_row
+
+        row = harness_row("claude-code/sonnet", db=db)
+        assert (row["default_temperature"], row["default_max_tokens"]) == (None, None)
+        assert get_model_max_output_tokens("claude-code/sonnet", fallback=32_768) == 32_768
     finally:
         db.close()
 
@@ -121,7 +129,7 @@ def test_legacy_fallback_sync_clears_defaults_stamped_on_existing_rows(isolated_
     db = get_db()
     try:
         _stale_harness_row(db, "codex/gpt-5-codex", "gpt-5-codex", "legacy_fallback")
-        sync_legacy_fallback("codex", status="not_installed", config={}, db=db)
+        sync_legacy_fallback("codex", config={}, db=db)
         assert _defaults(db, "codex/gpt-5-codex") == (None, None)
     finally:
         db.close()

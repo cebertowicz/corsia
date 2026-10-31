@@ -1,5 +1,5 @@
 """Recover an unchecked account when a second sign-in repeats its identity."""
-from connections.account_lifecycle import change_state
+from connections.account_leftovers import commit_if_leftover
 from connections.account_signin_commit import unchecked_repeat_receipt
 from connections.corsia_agent_account import finish_signin
 from connections.vendor_accounts import get_account
@@ -13,6 +13,6 @@ async def retry_unchecked(operation, account_id, binary, cleanup):
     if receipt is None:
         operation.status, operation.cause = 'failed', 'same_account'
         return
-    await run_in_db(change_state, operation.account_id, 'removed', expected_revision=operation.revision)
+    await run_in_db(commit_if_leftover, operation.account_id)
     await finish_signin(operation, receipt, binary, target_account_id=account_id)
     operation.status, operation.cause = 'failed', 'same_account'

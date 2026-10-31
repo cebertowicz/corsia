@@ -18,6 +18,7 @@ from connections.account_selection import bind_model_account
 from connections.harness_usage import set_allow_overage
 from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, default_account, set_account_state
+from vendor_account_fixtures import signed_in_default
 from llm.model_status import scoped_status_rows
 from vendor_account_fixtures import _accept, _start, accounts, default_receipt, receipt_of, set_legacy_policy  # noqa: F401
 
@@ -121,7 +122,7 @@ def test_claude_bound_to_the_spent_default_reads_the_first_usable_added_account(
     db.commit()
     first, second = (set_account_state(add_account('claude-code', name)['id'], 'signed_in', expected_revision=0)
                      for name in ('First', 'Second'))
-    default = default_account('claude-code', db=db)
+    default = signed_in_default('claude-code', db=db)
     for account in (first, second):
         _discover(db, 'claude-code', account, model)
         harness_usage.record_allowed(provider='claude-code', source='discovery', db=db,

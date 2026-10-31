@@ -18,6 +18,8 @@ import pytest
 
 from tests.github_screen_schema import SCREEN_INSTALL_SCHEMA_SQL
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 

@@ -9,6 +9,8 @@ import httpx
 import pytest
 from infra.default_port import DEFAULT_BACKEND_PORT
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.mark.asyncio
 async def test_cc_rotation_retry_reuses_one_explicit_invocation_id(monkeypatch) -> None:

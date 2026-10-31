@@ -267,8 +267,8 @@ export function usageBreakdown(account: VendorAccount): string[] {
 const NOT_OFFERED = new Set(['account_model_not_discovered', 'discovered_model_unavailable']);
 
 /**
- * A row-level state: limited for this model only, or not offered on the account the next turn
- * runs on. `account` is named only where the person has several (a vendor with one shows none).
+ * A row-level state: limited for this model only, the account the next turn runs on signed out,
+ * or not offered on that account. `account` is named only where the person has several (a vendor with one shows none).
  */
 export function rowNote(model: Model, account?: VendorAccount | null): UsageSegment | null {
 	const turn = modelAvailability(model);
@@ -278,6 +278,7 @@ export function rowNote(model: Model, account?: VendorAccount | null): UsageSegm
 		const back = resetLabel(turn.resets_at, false);
 		return { text: back ? `limited · back ${back}` : 'limited', level: 'red' };
 	}
+	if (turn.status_reason === 'account_signed_out') return { text: 'signed out', level: 'normal' };
 	if (account && turn.status_reason && NOT_OFFERED.has(turn.status_reason)) {
 		return { text: `not offered on ${account.label.name}`, level: 'normal' };
 	}

@@ -26,18 +26,16 @@ _LEGACY_FALLBACKS = {
 }
 
 
-def sync_legacy_fallback(
-    provider: str, *, status: str, config: dict[str, Any] | None, db
-) -> None:
-    """Synchronize the pre-discovery unavailable row inside caller transaction."""
+def sync_legacy_fallback(provider: str, *, config: dict[str, Any] | None, db) -> None:
+    """Keep the unavailable row, inside the caller's transaction, only before any refresh or stored row."""
     fallback = _LEGACY_FALLBACKS.get(provider)
     if fallback is None:
         return
     if not any(row[1] == "harness" for row in db.execute("PRAGMA table_info(models)")):
         return
-    envelope_exists = isinstance(config, dict) and CACHE_KEY in config
-    should_exist = status != "available" and not envelope_exists
-    if not should_exist:
+    if (isinstance(config, dict) and CACHE_KEY in config) or db.execute(
+            "SELECT 1 FROM models WHERE harness = ? AND source NOT IN ('legacy_fallback', 'reference') LIMIT 1",
+            (provider,)).fetchone():
         remove_legacy_fallback(provider, db=db)
         return
     selector = fallback["selector"]

@@ -84,7 +84,9 @@ def _catalog_row(model: str, *, db=None) -> dict | None:
                         "WHERE provider = ? AND provider_model_id = ? AND available = 1",
                         (provider, provider_model_id),
                     ).fetchone()
-        return dict(row) if row else None
+        from llm.harness_catalog import project_stored_rows
+
+        return project_stored_rows([row], db=db)[0] if row else None
     finally:
         if close:
             db.close()

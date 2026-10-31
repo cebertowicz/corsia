@@ -362,14 +362,16 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await expect(modal.getByText(/usage unknown/i)).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`limited-unknown-${surface}.png`), animations: 'disabled', scale: 'css' });
 
-			accounts = vendorAccounts().map((account, index) => index === 0 ? { ...account, state: 'legacy' } : account);
+			// A converted Default: signed out until the person signs it in, with the hint that says why.
+			accounts = vendorAccounts().map((account, index) => index === 0 ? { ...account, name: 'Default', is_default: true, state: 'signed_out', upgrade_reason: 'sign_in_to_keep_using_account' } : account);
 			policy = policyFor('W1');
 			modal = await openWorkspace(surface);
-			await expect(modal.getByText('Managed by provider')).toBeVisible();
+			await expect(modal.getByText('Signed out. Sign in to keep using this account.')).toBeVisible();
+			await expect(modal.locator('[data-link-target]').getByRole('button', { name: 'Sign in' })).toBeVisible();
 			await expect(modal.getByRole('button', { name: 'Roll over when an account hits its limit' })).toBeVisible();
 			await expect(modal.getByRole('button', { name: 'Move Personal Max · sam@example.com up' })).toBeVisible();
 			await expect(modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true })).toBeVisible();
-			await page.screenshot({ path: testInfo.outputPath(`managed-${surface}.png`), animations: 'disabled', scale: 'css' });
+			await page.screenshot({ path: testInfo.outputPath(`signed-out-default-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts();
 			saveAttempt = 0;

@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
-	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupShell, { type SetupJob } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupSourceError from './SetupSourceError.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -11,7 +11,7 @@
 	import SetupWorkFolder, { type FolderNotice } from './SetupWorkFolder.svelte';
 	import SetupConnect from './SetupConnect.svelte';
 	import SetupConnectBack from './SetupConnectBack.svelte';
-	import SetupSubscriptions, { subscriptionQuestion, type SetupPicks } from './SetupSubscriptions.svelte';
+	import SetupSubscriptions, { type SetupPicks } from './SetupSubscriptions.svelte';
 	import AddProviderModal from './v7/AddProviderModal.svelte';
 	import ProviderSettingsModal from './v7/ProviderSettingsModal.svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -30,7 +30,7 @@
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
-	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
+	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart, setupSteps } from '$lib/setupFormSupport';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
@@ -72,7 +72,6 @@
 	const canFinish = $derived(hasReadySetupModel(catalog, tested) || Boolean(endpoint));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
 	const cliPicked = (vendor: string) => !toolsOff.includes(vendor) && (picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude));
-	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
 	const localReady = $derived(catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)));
@@ -84,12 +83,7 @@
 	const folderDecisionPending = $derived(folderNotice !== null);
 	// A new account needs every field; an existing one needs a name, and a password only when one is being changed.
 	const canSubmitAccount = $derived(!folderDecisionPending && (editing ? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password))) : Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password)));
-	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
-		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && $token) ? 'done' : 'todo' },
-		{ label: 'Your subscriptions', icon: 'card', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
-		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
-	]);
+	const steps = $derived(page === 'connect' ? remote.steps : setupSteps(page, Boolean($token)));
 	/** Every failed row's cause and reference, so the saved report says what went wrong where. */
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
@@ -145,8 +139,8 @@
 		if (!canSubmitAccount) return;
 		if (editing) await updateAccount(); else if (!get(token)) await createAccount();
 	}
-	/** The subscriptions screen is asked only while a CLI is still not signed in. */
-	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
+	/** The subscriptions screen is always asked: a CLI already signed in from a terminal still needs its own CORSIA sign-in. */
+	function afterAccount() { page = 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function recordPicks(next: SetupPicks) {
 		picks = next; toolsOff = [];
@@ -167,6 +161,7 @@
 			if (cliPicked(vendor)) connectFlow.pick(vendor);
 			else void connectFlow.stop(vendor);
 		}
+		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal(); // the installer skips the free download once a CORSIA account is signed in; never over a failure its row shows with Retry
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
@@ -355,6 +350,11 @@
 		return () => clearInterval(timer);
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
+	let localAutoStarted = false; // a failed or cancelled sign-in can leave no model when the installer skipped the free download: start it without a click
+	$effect(() => {
+		if (page !== 'models' || localAutoStarted || !eligible || neverLocal || localModelActive || localFailed || !CLI_VENDORS.some((vendor) => connectFlow.attempts[vendor]?.attempt === 'signin_failed')) return;
+		localAutoStarted = true; void startLocal();
+	});
 	onMount(() => {
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
 		const offModels = on('models_updated', () => { if (get(token)) void refreshSources(); });
@@ -370,7 +370,7 @@
 		{:else if page === 'welcome' && canConnect && !$token}<Button variant="chip" onclick={() => downloading ? (confirmConnect = true) : void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'account'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'welcome'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
-		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = 'subscriptions'; }}>Back</Button>
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
@@ -385,7 +385,7 @@
 		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
-	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
+	{:else if page === 'subscriptions'}<SetupSubscriptions {eligible} localActive={localModelActive} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} disableRetry={sourceRetry !== null} />
 		<SetupSourceError error={sourceRetry?.error ?? sourceError} retrying={sourceRetry !== null} retry={retrySources} />

@@ -19,7 +19,7 @@ from connections.account_receipts import capture_receipt
 from connections.account_runtime import LaunchHomes, homes_for, validate_launch
 from connections.vendor_accounts import default_account, get_account
 from infra.database import write_transaction
-from vendor_account_fixtures import accounts, vendors  # noqa: F401
+from vendor_account_fixtures import accounts, signed_in_default, vendors  # noqa: F401
 
 CODEX_MISSING = 'codex_auth_source_missing'
 
@@ -85,11 +85,11 @@ def test_present_claude_home_passes_evaluator_and_launch(vendors):  # noqa: F811
     assert _launch_reason(db, account, receipt, 'claude-code/test') is None
 
 
-def test_builtin_default_is_unaffected_by_the_home_predicate(vendors):  # noqa: F811
+def test_the_default_is_judged_by_the_home_predicate_like_any_account(vendors):  # noqa: F811
     db, _ = vendors
     for provider in ('claude-code', 'codex'):
-        default = default_account(provider, db=db)
-        assert default['source_home'] is None
+        default = signed_in_default(provider, db=db)
+        assert default['source_home'] is not None
         assert missing_home_reason(default) is None
 
 

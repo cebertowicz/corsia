@@ -7,6 +7,8 @@ import pytest
 
 from cc_receipt_stock_runtime import StockClaudeRuntime
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _assert_stored_outcome(runtime):
     from infra.database import get_db

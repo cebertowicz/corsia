@@ -114,31 +114,32 @@ def _required_username() -> str | None:
 
 
 def _ready_ai() -> str | None:
-    """The name of a CLI source that the startup check already found Ready, else None.
+    """The name of a CLI source whose accounts already read Ready, else None.
 
-    Only the stored check result is read, so nothing runs before an account exists. A
+    Only stored account discoveries are read, so nothing runs before an account exists. A
     stale "ready" is harmless: the account step rechecks with a session before it skips.
     """
     from connections.account_profiles import profile_for
-    from connections.models import get_connection
-    from connections.source_state import HARNESS_PROVIDERS, row_state
+    from connections.source_state import HARNESS_PROVIDERS, harness_state
 
     for provider in HARNESS_PROVIDERS:
-        if row_state(get_connection(provider))["state"] == "ready":
+        if harness_state(provider)["state"] == "ready":
             return profile_for(provider).label
     return None
 
 
 def _ai_check_pending() -> bool:
-    """Whether the startup check has not yet recorded a result for Claude Code or Codex.
+    """Whether a signed-in Claude Code or Codex account has no discovery result yet.
 
     Welcome waits briefly on this before it asks which subscription the person has, so a
     tool that is already installed is found first rather than asked about.
     """
-    from connections.models import get_connection
-    from connections.source_state import HARNESS_PROVIDERS, row_state
+    from connections.source_state import HARNESS_PROVIDERS, harness_state
 
-    return any(row_state(get_connection(provider))["checked_at"] is None for provider in HARNESS_PROVIDERS)
+    return any(
+        (view := harness_state(provider))["state"] == "unverified" and view["checked_at"] is None
+        for provider in HARNESS_PROVIDERS
+    )
 
 
 def _setup_status() -> dict:

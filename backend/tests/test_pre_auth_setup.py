@@ -409,29 +409,30 @@ def test_status_has_a_stable_below_minimum_ram_variant(monkeypatch, tmp_path):
         ({"claude-code": "ready", "codex": "ready"}, "Claude Code"),
     ],
 )
-def test_status_names_a_ready_cli_source_from_the_stored_check(monkeypatch, states, expected):
-    from connections import models as connection_models
+def test_status_names_a_ready_cli_source_from_its_accounts(monkeypatch, states, expected):
     from connections import source_state
 
-    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
-    monkeypatch.setattr(source_state, "row_state", lambda row: {"state": states.get(row["provider"], "not_installed")})
+    monkeypatch.setattr(source_state, "harness_state",
+                        lambda provider: {"state": states.get(provider, "not_installed"), "checked_at": None})
     assert setup_api._ready_ai() == expected
 
 
 @pytest.mark.parametrize(
-    ("checked", "expected"),
+    ("views", "expected"),
     [
-        ({}, True),
-        ({"claude-code": "t1"}, True),
-        ({"claude-code": "t1", "codex": "t2"}, False),
+        ({}, False),
+        ({"claude-code": ("unverified", None)}, True),
+        ({"claude-code": ("unverified", "t1"), "codex": ("ready", "t2")}, False),
     ],
 )
-def test_status_says_the_install_check_is_pending_until_both_tools_have_a_result(monkeypatch, checked, expected):
-    from connections import models as connection_models
+def test_status_says_the_check_is_pending_while_a_signed_in_account_is_unchecked(monkeypatch, views, expected):
     from connections import source_state
 
-    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
-    monkeypatch.setattr(source_state, "row_state", lambda row: {"checked_at": checked.get(row["provider"])})
+    def view(provider):
+        state, checked_at = views.get(provider, ("needs_auth", None))
+        return {"state": state, "checked_at": checked_at}
+
+    monkeypatch.setattr(source_state, "harness_state", view)
     assert setup_api._ai_check_pending() is expected
 
 

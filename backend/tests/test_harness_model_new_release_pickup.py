@@ -13,6 +13,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 _VERSION = "1.0.0"
 # Placeholder selectors: the test pins the refresh rule, never a model name.
 _KNOWN = "known-model"
@@ -39,11 +43,13 @@ def _seed_codex(monkeypatch, listed: list[str]) -> list[str]:
     )
     discoveries: list[str] = []
 
-    async def _discover(binary: str) -> dict:
-        discoveries.append(binary)
-        return _codex_payload(*listed)
+    async def _discover(binary: str, context=None):
+        from connections.account_discovery_types import StagedDiscovery
 
-    async def _version(_binary: str) -> str:
+        discoveries.append(binary)
+        return StagedDiscovery(payload=_codex_payload(*listed))
+
+    async def _version(_binary: str, env=None) -> str:
         return _VERSION
 
     # Only Codex: no test may spawn a real harness binary.
@@ -60,10 +66,10 @@ def _seed_codex(monkeypatch, listed: list[str]) -> list[str]:
 
 def _store(model_ids: list[str], at: datetime) -> None:
     from connections.harness_models import (
-        CODEX_SOURCE, normalize_codex_models, store_success,
+        CODEX_SOURCE, normalize_codex_models,
     )
 
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload(*model_ids), harness_version=_VERSION,
@@ -74,16 +80,14 @@ def _store(model_ids: list[str], at: datetime) -> None:
 
 
 def _available_codex() -> set[str]:
+    """The Codex models readers see as available: what the signed-in account lists now."""
     from infra.database import get_db
+    from llm.harness_catalog import project_stored_rows
 
     db = get_db()
     try:
-        return {
-            row["provider_model_id"] for row in db.execute(
-                "SELECT provider_model_id FROM models "
-                "WHERE harness = 'codex' AND available = 1"
-            ).fetchall()
-        }
+        stored = db.execute("SELECT * FROM models WHERE harness = 'codex'").fetchall()
+        return {row["provider_model_id"] for row in project_stored_rows(stored, db=db) if row["available"]}
     finally:
         db.close()
 

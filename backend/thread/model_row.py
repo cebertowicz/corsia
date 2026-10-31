@@ -25,19 +25,18 @@ def _display_model(db: Any, model_id: str | None) -> str:
     identifier = str(model_id or "").strip()
     if not identifier:
         return "the selected model"
+    from llm.harness_catalog import project_stored_rows
+
     try:
-        row = db.execute(
-            "SELECT display_name, alias FROM models WHERE id=? OR litellm_model=? "
-            "LIMIT 1",
+        rows = project_stored_rows(db.execute(
+            "SELECT * FROM models WHERE id=? OR litellm_model=? LIMIT 1",
             (identifier, identifier),
-        ).fetchone()
+        ).fetchall(), db=db)
     except Exception:
         return identifier
-    if row is None:
+    if not rows:
         return identifier
-    name = str(
-        (row["alias"] if "alias" in row.keys() else None) or row["display_name"] or ""
-    ).strip()
+    name = str(rows[0].get("alias") or rows[0]["display_name"] or "").strip()
     return name or identifier
 
 

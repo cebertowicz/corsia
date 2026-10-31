@@ -161,6 +161,9 @@ async def test_available_cache_row_supersedes_obsolete_cc_delist(deleg_db, monke
          '{"resolved_identity":"claude-fable-5"}', "t", "t"),
     )
     deleg_db.commit()
+    from vendor_account_fixtures import signed_in_default
+
+    signed_in_default("claude-code", db=deleg_db)  # the Default's current discovery lists fable
     from tools.delegate_task import DelegateTaskTool
     import connections.models as cm
     import subagents.cc_runtime as rt

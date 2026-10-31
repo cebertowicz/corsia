@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AccountsBlock from './AccountsBlock.svelte';
-import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts } from '$lib/stores/vendorAccounts';
+import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts, signin } from '$lib/stores/vendorAccounts';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { emit } from '$lib/ws/events';
@@ -13,9 +13,12 @@ describe('rendering and actions', () => {
 	};
 
 	const defaultAccount = {
-		id: 'default', provider: 'codex', name: 'Default', is_default: true, state: 'legacy' as const,
+		id: 'default', provider: 'codex', name: 'Default', is_default: true, state: 'signed_in' as const,
 		revision: 1, identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1', custom: null },
 	};
+	// A never-used seeded Default migrates to removed; one with a login or a reference becomes signed_out.
+	const removedDefault = { ...defaultAccount, state: 'removed' as const };
+	const signedOutDefault = { ...defaultAccount, state: 'signed_out' as const, upgrade_reason: 'sign_in_to_keep_using_account' };
 	const workAccount = {
 		id: 'work', provider: 'codex', name: 'Work', is_default: false, state: 'signed_out' as const,
 		revision: 2, identity: { email: 'work@example.test' }, label: { name: 'Work', email: 'work@example.test', text: 'Work · work@example.test', custom: 'Work' },
@@ -46,6 +49,7 @@ describe('rendering and actions', () => {
 	afterEach(() => {
 		token.set(null);
 		vendorAccounts.set([]);
+		signin.set({});
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
 	});
@@ -62,16 +66,28 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('shows the empty account state when the Default is definitely signed out', async () => {
+		it('shows the converted Default as a signed-out row with Sign in', async () => {
 			token.set('test-token');
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
 				? Promise.resolve(response({ providers: [] }))
-				: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }] }))));
+				: Promise.resolve(response({ accounts: [signedOutDefault] }))));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).not.toContain('No Codex accounts signed in');
+			expect(document.body.textContent).toContain('Add account');
+			expect(document.querySelector('#vendor-account-default')?.textContent).toContain('Sign in');
+			unmount(component);
+		});
+
+		it('shows the empty account state when the only Default was removed', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
+				? Promise.resolve(response({ providers: [] }))
+				: Promise.resolve(response({ accounts: [removedDefault] }))));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
 			expect(document.body.textContent).toContain('No Codex accounts signed in');
 			expect(document.body.textContent).toContain('Add account');
-			expect(document.body.textContent).not.toContain('Managed by provider');
 			expect(document.querySelector('#vendor-account-default')).toBeNull();
 			unmount(component);
 		});
@@ -154,7 +170,7 @@ describe('rendering and actions', () => {
 				token.set('test-token');
 				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
 					? Promise.resolve(response({ providers: [entry(['default', 'a'])] }))
-					: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }, signedIn('a', 'Alpha')] }))));
+					: Promise.resolve(response({ accounts: [removedDefault, signedIn('a', 'Alpha')] }))));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 				await vi.waitFor(() => expect(rowIds()).toEqual(['a']));
 				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
@@ -168,7 +184,7 @@ describe('rendering and actions', () => {
 				const policy = { ...entry(['default', 'a']), disabled: ['a'], units: [{ id: 'default', label: 'default', enabled: true }, { id: 'a', label: 'a', enabled: false }] };
 				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).startsWith('/api/provider-policy')
 					? Promise.resolve(response({ providers: [policy] }))
-					: Promise.resolve(response({ accounts: [{ ...defaultAccount, default_signed_out: true }, signedIn('a', 'Alpha')] }))));
+					: Promise.resolve(response({ accounts: [removedDefault, signedIn('a', 'Alpha')] }))));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
 				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
@@ -186,7 +202,7 @@ describe('rendering and actions', () => {
 					}
 					return String(input).startsWith('/api/provider-policy')
 						? Promise.resolve(response({ providers: [entry(units, units)] }))
-						: Promise.resolve(response({ accounts: [signedIn('a', 'Alpha'), { ...defaultAccount, default_signed_out: true }, signedIn('b', 'Bravo')] }));
+						: Promise.resolve(response({ accounts: [signedIn('a', 'Alpha'), removedDefault, signedIn('b', 'Bravo')] }));
 				}));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2']));
@@ -286,9 +302,33 @@ describe('rendering and actions', () => {
 			}
 		});
 
+		it('shows a signed-out account no usage status, and a signed-in account its failed usage read', async () => {
+			const usages = [
+				{ state: 'unknown', usable: false, resets_at: null, windows: [], checking: false, check: { error: 'offline' } },
+				{ state: 'unknown', usable: false, resets_at: null, windows: [], checking: true, check: null },
+				{ state: 'limited', usable: false, reason: 'five_hour_limit', resets_at: null, windows: [], checking: false, check: { error: 'offline' } },
+			] as const;
+			for (const usage of usages) {
+				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [{ ...defaultAccount, state: 'signed_out' as const, usage }] })));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await settle();
+				expect(document.body.textContent).toContain('Signed out');
+				expect(document.querySelectorAll('[aria-label^="Account usage"]')).toHaveLength(0);
+				for (const text of ["Couldn't verify account", 'Checking account…', 'Usage limit reached']) expect(document.body.textContent).not.toContain(text);
+				unmount(component);
+				document.body.innerHTML = '';
+			}
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [{ ...defaultAccount, usage: usages[0] }] })));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).toContain("Couldn't verify account");
+			unmount(component);
+			document.body.innerHTML = '';
+		});
+
 		it('says an account the service records as having no usable model has no models for the tool, and only then', async () => {
 			const signedIn = { ...workAccount, state: 'signed_in' as const };
-			const noModel = 'This ChatGPT account has no models for Codex. Sign in with another account, or turn this account off.';
+			const noModel = 'This ChatGPT account has no models for Codex. Sign in with another account, or remove this one.';
 			for (const [record, shown] of [[{ no_usable_model: true }, true], [{ no_usable_model: false }, false], [{}, false]] as const) {
 				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, { ...signedIn, ...record }] })));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
@@ -338,7 +378,7 @@ describe('rendering and actions', () => {
 			await settle();
 			button('Sign in').click();
 			await settle();
-			expect(document.body.textContent).toContain('Couldn’t finish signing in. If your browser said this account doesn’t include Codex, sign in with another account or turn this account off. Otherwise, sign in again.');
+			expect(document.body.textContent).toContain('Couldn’t finish signing in. If your browser said this account doesn’t include Codex, sign in with another account or remove this one. Otherwise, sign in again.');
 			unmount(component);
 		});
 
@@ -477,7 +517,7 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('does not expose custom sign-out or removal for a provider-managed account', async () => {
+		it('offers Rename, Sign out and Remove on a signed-in Default', async () => {
 			const fetch = vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
 				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409));
@@ -487,8 +527,22 @@ describe('rendering and actions', () => {
 			await openAccountMenu('Plus account 1');
 			const menu = document.querySelector('[role="menu"]')?.textContent;
 			expect(menu).toContain('Rename');
+			expect(menu).toContain('Sign out');
+			expect(menu).toContain('Remove');
+			unmount(component);
+		});
+
+		it('offers Rename and Remove, with Sign in on the row, for a signed-out Default', async () => {
+			const fetch = vi.fn().mockResolvedValueOnce(response({ accounts: [signedOutDefault, workAccount] }));
+			vi.stubGlobal('fetch', fetch);
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.querySelector('#vendor-account-default')?.textContent).toContain('Sign in');
+			await openAccountMenu('Plus account 1');
+			const menu = document.querySelector('[role="menu"]')?.textContent;
+			expect(menu).toContain('Rename');
 			expect(menu).not.toContain('Sign out');
-			expect(menu).not.toContain('Remove');
+			expect(menu).toContain('Remove');
 			unmount(component);
 		});
 
@@ -561,7 +615,7 @@ describe('rendering and actions', () => {
 
 describe('lifecycle', () => {
 	const provider = { name: 'codex', label: 'Codex', type: 'harness' as const, statusDot: 'online' as const, subline: '2 models', raw: { name: 'codex', label: 'Codex', type: 'harness' as const, has_key: false, masked_key: null, api_base: null, docs_url: null, models: [] } };
-	const ambient = { id: 'default', provider: 'codex', name: 'Default', state: 'legacy', is_default: true, revision: 0, identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1' } };
+	const ambient = { id: 'default', provider: 'codex', name: 'Default', state: 'signed_in', is_default: true, revision: 0, identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1' } };
 	const out = { id: 'work', provider: 'codex', name: 'Work', state: 'signed_out', is_default: false, revision: 0, identity: {}, label: { name: 'Work', email: null, text: 'Work' } };
 	const inside = { ...out, state: 'signed_in', revision: 1 };
 	const waiting = { account_id: 'work', route: 'browser', status: 'waiting', cause: null };
@@ -572,7 +626,7 @@ describe('lifecycle', () => {
 	function button(name: string) { const el = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name); if (!el) throw new Error(`Missing ${name}`); return el; }
 	async function settle() { await new Promise((r) => setTimeout(r, 0)); flushSync(); }
 	async function more() { const row = document.querySelector<HTMLElement>('#vendor-account-work')!; row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle(); }
-	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
+	afterEach(() => { vendorAccounts.set([]); signin.set({}); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 	describe('account lifecycle truth', () => {
 		it.each(['reopen', 'Check', 'Cancel', 'start'])('reconciles completed %s before rename at the committed revision', async (path) => {
@@ -652,7 +706,7 @@ describe('lifecycle', () => {
 
 describe('recovery', () => {
 	const provider = { name:'codex',label:'Codex',type:'harness' as const,statusDot:'online' as const,subline:'1 model',raw:{name:'codex',label:'Codex',type:'harness' as const,has_key:false,masked_key:null,api_base:null,docs_url:null,models:[]} };
-	const ambient = { id:'default',provider:'codex',name:'Default',state:'legacy' as const,is_default:true,revision:0,identity:{},label:{name:'Plus account 1',email:null,text:'Plus account 1'} };
+	const ambient = { id:'default',provider:'codex',name:'Default',state: 'signed_in' as const,is_default:true,revision:0,identity:{},label:{name:'Plus account 1',email:null,text:'Plus account 1'} };
 	const work = { id:'work',provider:'codex',name:'Work',state:'signed_out' as const,is_default:false,revision:0,identity:{},label:{name:'Work',email:null,text:'Work'} };
 	const other = { ...work,id:'other',name:'Other',label:{name:'Other',email:null,text:'Other'} };
 	const receipt = (id:string,status:string,extra={}) => ({account_id:id,status,cause:null,route:'browser',...extra});
@@ -666,7 +720,7 @@ describe('recovery', () => {
 	function type(text:string,scope:Element|Document=document){const input=scope.querySelector<HTMLInputElement>('input')!;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));return input;}
 	function deferred(){let resolve!:(r:Response)=>void;const promise=new Promise<Response>(r=>resolve=r);return {promise,resolve};}
 	let clearBoundary = () => {};
-	afterEach(()=>{clearBoundary();vendorAccounts.set([]);vi.unstubAllGlobals();document.body.innerHTML='';});
+	afterEach(()=>{clearBoundary();vendorAccounts.set([]);signin.set({});vi.unstubAllGlobals();document.body.innerHTML='';});
 
 	it('blocks stale revision writes after confirmed completion without fabricating revision',async()=>{
 	 const fetch=vi.fn().mockResolvedValueOnce(res(receipt('work','completed'))).mockResolvedValueOnce(res({detail:'offline'},503));vi.stubGlobal('fetch',fetch);vendorAccounts.set([ambient,work]);
@@ -705,12 +759,12 @@ describe('recovery', () => {
 
 describe('sign-in submit', () => {
 	const provider = { name: 'codex', label: 'Codex', type: 'harness' as const, statusDot: 'online' as const, subline: '1 model', raw: { name: 'codex', label: 'Codex', type: 'harness' as const, has_key: false, masked_key: null, api_base: null, docs_url: null, models: [] } };
-	const ambient = { id: 'default', provider: 'codex', name: 'Default', state: 'legacy', is_default: true, revision: 0, identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1' } };
+	const ambient = { id: 'default', provider: 'codex', name: 'Default', state: 'signed_in', is_default: true, revision: 0, identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1' } };
 	const work = { id: 'work', provider: 'codex', name: 'Work', state: 'signed_out', is_default: false, revision: 0, identity: {}, label: { name: 'Work', email: null, text: 'Work' } };
 	const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 	const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.trim() === name)!;
 	async function settle() { await new Promise(r => setTimeout(r, 0)); flushSync(); }
-	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
+	afterEach(() => { vendorAccounts.set([]); signin.set({}); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 	it('does not label a confirmed completed sign-in as signed out when refresh fails', async () => {
 	 const fetch = vi.fn().mockResolvedValueOnce(response({ accounts: [ambient, work] })).mockResolvedValueOnce(response({ account_id: 'work', status: 'completed', cause: null, route: 'browser' })).mockResolvedValueOnce(response({ detail: 'offline' }, 503));
 	 vi.stubGlobal('fetch', fetch);
@@ -757,7 +811,7 @@ describe('billing in the account row', () => {
 	const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 	const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === name)!;
 	async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); }
-	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
+	afterEach(() => { vendorAccounts.set([]); signin.set({}); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 	it('shows the billing row under the overage switch and saves into the same row, with no Billing history entry', async () => {
 		const saved = row({ billing: { monthly_price_cents: 2000, charge_day: 14 }, billing_revision: 2 });

@@ -26,7 +26,11 @@ from core import fork_runtime
 from cc_runtime_fixtures import cc_target, fake_claude, trust_live_tool_step_ids  # noqa: F401
 from core.turn_core import TurnIdentity
 from test_checkpoint_hold_install_resume import _seed, _start_checkpoint
+from vendor_account_fixtures import point_default_home
 from infra.default_port import DEFAULT_BACKEND_PORT
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"claude-code": (cc_target().catalog_id,)}  # the Default lists the model under test
 
 _THREAD = "held-thread"
 _SERVER = Path(__file__).resolve().parents[1] / "subagents" / "corsia_mcp_server.py"
@@ -248,7 +252,7 @@ async def test_cc_tool_boundary_swap_survives_its_retired_callers_disconnect(
 
     target = replace(cc_target(), context_window=32768)
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda *_a, **_k: target)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    point_default_home("claude-code", tmp_path / "claude")  # the replacement runs in the account's home
     db = get_db()
     _seed(db, target.catalog_id)
     register_cc_session(_THREAD, "old-provider", checkpoint_generation_id="floor", db=db)

@@ -33,6 +33,10 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
     with write_transaction(db, scope='account_discovery_bundle') as connection:
         if not receipt_is_current(receipt, db=connection):
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
+        from connections.harness_model_rows import retain_discovered_context
+
+        account = get_account(context.account_id, db=connection)
+        prior = ((account.get('discovery') or {}).get('discovery') or {}).get('models') or {}
         models = {}
         for row in rows:
             selector = row.get('selector_id')
@@ -41,7 +45,7 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             key = provider + '/' + selector
             if key in models:
                 raise ValueError('duplicate account discovery selector')
-            models[key] = dict(row)
+            models[key] = retain_discovered_context(row, prior.get(key))
         if provider == 'claude-code':
             from connections.claude_discovery import _store_catalog_success
 
@@ -58,6 +62,22 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
         if not mark_discovery(context.account_id, receipt=receipt, status='ready', models=models,
                               harness_version=harness_version, cache_receipt=cache_receipt, db=connection):
             raise RuntimeError('account_refresh_superseded')
+        from connections.harness_legacy_fallback import remove_legacy_fallback
+        from infra.time import utc_now_iso
+        from llm.model_status import versioned_name
+
+        remove_legacy_fallback(provider, db=connection)
+        now = utc_now_iso()
+        # The stored row only registers the model; readers project the rest from signed-in accounts.
+        for key, row in models.items():
+            connection.execute(
+                "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,backend,"
+                "source,enabled,available,metadata_json,default_temperature,default_max_tokens,discovered_at,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,?,'account_discovery',1,0,'{}',NULL,NULL,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET source=excluded.source,enabled=1 WHERE models.source='reference'",
+                (key, provider, provider, key[len(provider) + 1:], key,
+                 versioned_name({'display_name': row.get('display_name') or key[len(provider) + 1:]}, row),
+                 'cc' if provider == 'claude-code' else 'codex', now, now, now))
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 
@@ -68,14 +88,14 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             after_commit(connection, lambda: _publish_cache(context.account_id, stage, cache_receipt, db))
         after_commit(connection, schedule_models_changed)
         return AccountRefreshResult(provider, context.account_id, status='ready',
-            model_count=len(models), effective_receipt=receipt)
+            model_count=len(models), effective_receipt=receipt, harness_version=harness_version)
 
 
-def record_discovery_failure(provider, *, context, cause, harness_version=None, db=None):
+def record_discovery_failure(provider, *, context, cause, harness_version=None, reason=None, db=None):
     with write_transaction(db, scope='account_discovery_failed') as connection:
         if not receipt_is_current(context.receipt, db=connection):
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
         mark_discovery(context.account_id, receipt=context.receipt, status='failed', cause=cause,
-                       harness_version=harness_version, db=connection)
+                       harness_version=harness_version, reason=reason, db=connection)
         return AccountRefreshResult(provider, context.account_id, cause=cause,
                                     effective_receipt=context.receipt)

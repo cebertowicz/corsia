@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from connections import harness_usage
 from connections.account_policy import select_account, turn_account
-from vendor_account_fixtures import _ready, accounts, receipt_of, set_legacy_policy, vendors  # noqa: F401
+from vendor_account_fixtures import _ready, accounts, receipt_of, set_legacy_policy, signed_in_default, vendors  # noqa: F401
 
 LIMIT = dict(reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update")
 USAGE_KEYS = ("usage", "usage_check", "usage_check_error", "status_resets_at", "accounts", "account_id")
@@ -24,6 +24,7 @@ USAGE_KEYS = ("usage", "usage_check", "usage_check_error", "status_resets_at", "
 def _spend_the_default(db, legacy, second):
     """Codex's Default is out of plan; an added account is signed in and usable."""
     db.execute("UPDATE models SET context_window=200000 WHERE id='codex/test'")
+    signed_in_default("codex", db=db, models=("codex/test",))
     _ready(db, second)
     harness_usage.record_allowed(provider="codex", source="discovery", db=db,
                                  receipt=receipt_of("codex", second["id"], db=db))
@@ -249,6 +250,7 @@ async def test_the_catalog_tool_reads_the_account_a_delegated_child_runs_on(acco
 
     db, legacy, second, third = accounts
     db.execute("UPDATE models SET context_window=200000 WHERE id='codex/test'")
+    signed_in_default("codex", db=db, models=("codex/test",))
     for account in (legacy, second, third):
         _ready(db, account)
     set_legacy_policy("actor-project", "codex", allowlist=None, default_account_id=third["id"], db=db)
@@ -280,7 +282,7 @@ def client(accounts):  # noqa: F811
 
 
 def test_vendor_accounts_carry_usage_and_a_label(vendors, client):  # noqa: F811
-    from connections.vendor_accounts import record_default_identity
+    from vendor_account_fixtures import record_default_identity
 
     db, added = vendors
     record_default_identity("claude-code", {"email": "me@example.com", "org_id": "org-1"}, db=db)

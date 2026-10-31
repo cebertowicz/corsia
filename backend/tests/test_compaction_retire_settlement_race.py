@@ -14,6 +14,8 @@ from codex_runtime_fixtures import (
     _reset_runtime,
 )
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 THREAD_ID = "codex-compaction-settle-race"
 ADOPT = "subagents.harness_checkpoint_resume.maintain_external_tool_boundary"
 

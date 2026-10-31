@@ -234,11 +234,13 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.`, error: true };
 		if (sourceIsReady(source)) {
 			const account = readyAccount(source);
-			return { meta: account ? `Ready · ${account}` : 'Ready', ready: true };
+			return { meta: account ? `Signed in as ${account}` : 'Signed in', ready: true };
 		}
 		if (hasNoUsableModel(source)) {
 			return { meta: `This ${copy.account} account has no models for ${copy.cli}. Sign in with another account, or turn ${copy.cli} off.`, error: true, action: signInAction, canTurnOff: true };
 		}
+		// Not checked yet: a signed-in account's first check is still running, so offer nothing until it lands.
+		if (source.state === 'unverified' && !source.checked_at) return { meta: source.reason ?? '', busy: true };
 		if (source.accounts?.some((account) => account.state === 'unchecked')) {
 			return { meta: `Couldn’t check your ${copy.account} models. Sign in again.`, error: true, action: signInAction, canTurnOff: true };
 		}
@@ -246,7 +248,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			const command = source.cli_package_manager === 'homebrew' ? `brew reinstall ${source.source === 'claude-code' ? 'claude-code' : 'codex'}` : `npm install -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
 			return { meta: `CORSIA can’t use this copy of ${copy.cli}. Reinstall it in Terminal with ${command}, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
 		}
-		if (source.state === 'unverified') return { meta: source.reason ?? '', busy: !source.checked_at, action: source.checked_at ? { label: 'Check again', run: () => void deps.refreshSources(true) } : undefined };
+		if (source.state === 'unverified') return { meta: source.reason ?? '', action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
 		return { meta: copy.uses, action: signInAction };
 	}
 	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, pick, sourcesChanged, awaitingSource: (vendor: string) => flow[vendor]?.phase === 'awaiting-source', signIn, stop };

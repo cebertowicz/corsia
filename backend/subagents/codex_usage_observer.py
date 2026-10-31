@@ -107,20 +107,3 @@ async def observe_turn_success(session, started: datetime | None) -> None:
     await _apply(harness_usage.record_allowed, session=session, source='turn_completed',
                  provider='codex', observed_before=started)
     _schedule_sparse_usage_control_read(session)
-
-
-async def observe_account_limits(session) -> None:
-    try:
-        result = await session._request('account/rateLimits/read', None)
-    except Exception:
-        log.warning('Codex account/rateLimits/read failed')
-        await _apply(harness_usage.record_check_failed, session=session,
-                     error='Codex usage read failed', provider='codex')
-        return
-    if isinstance(result, dict) and isinstance(result.get('rateLimits'), dict):
-        snapshot = result['rateLimits']
-        meter = snapshot.get('limitId') or harness_usage.CODEX_DEFAULT_LIMIT
-        by_meter = getattr(session, '_rate_limits_by_meter', None) or {}
-        by_meter[meter] = snapshot
-        session._rate_limits_by_meter, session._rate_limits = by_meter, snapshot
-    await _apply(harness_usage.record_rate_limits_read, session=session, result=result, provider='codex')

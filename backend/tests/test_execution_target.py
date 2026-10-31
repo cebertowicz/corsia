@@ -5,6 +5,8 @@ import sqlite3
 
 import pytest
 
+from vendor_account_fixtures import signed_in_default
+
 
 @pytest.fixture
 def target_db():
@@ -82,9 +84,11 @@ def test_harness_target_preserves_exact_selector_identity_and_context(target_db)
         display_name="Fable 5", supports_vision=True, supports_reasoning=True,
         metadata={
             "resolved_identity": "claude-fable-5",
-            "discovered_capabilities": {},
+            # Reasoning support is what discovery reports: the model's effort levels.
+            "discovered_capabilities": {"effort_levels": ["low", "high"]},
         },
     )
+    signed_in_default("claude-code", db=target_db)
 
     target = resolve_execution_target(
         "claude-code/claude-fable-5[1m]", db=target_db

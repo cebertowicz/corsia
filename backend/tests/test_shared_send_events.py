@@ -14,6 +14,8 @@ from shared_send_fixtures import (
     _thread_row,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.fixture(autouse=True)
 def _native_context_agent(monkeypatch):

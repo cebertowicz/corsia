@@ -105,7 +105,7 @@ class TestCCAttachments:
 
 class TestModelsCatalog:
     @pytest.fixture(autouse=True)
-    def _discovered_harness_catalog(self, monkeypatch):
+    def _discovered_harness_catalog(self, isolated_db, monkeypatch):
         import connections.harness_refresh as harness_refresh
         from llm import catalog as model_catalog
         import llm.model_status as model_status
@@ -135,9 +135,15 @@ class TestModelsCatalog:
             _row("claude-code", "sonnet", "Sonnet", "cc", 1),
             _row("codex", "gpt-5-codex", "GPT-5 Codex", "codex", 0),
         ]
-        monkeypatch.setattr(
-            model_catalog, "get_model_status_catalog_rows", lambda: rows,
-        )
+        import llm.harness_catalog as harness_catalog
+
+        from vendor_account_fixtures import register_harness_rows
+
+        # The catalog registers these models; the signed-in accounts list them as written here.
+        register_harness_rows(rows)
+        monkeypatch.setattr(model_catalog, "get_model_status_catalog_rows", lambda: rows)
+        monkeypatch.setattr(harness_catalog, "account_rows",
+                            lambda **_kw: {row["litellm_model"]: row for row in rows})
         monkeypatch.setattr(
             model_status, "_harness_discovery_envelope", lambda _provider: {},
         )

@@ -104,6 +104,14 @@ describe('first-run line', () => {
 		}
 	});
 
+	it('offers no Sign in while a signed-in account reads Not checked yet', async () => {
+		listed = [{ ...claude('unverified', [account('unchecked')]), reason: 'Not checked yet', checked_at: null }];
+		await render();
+		await vi.waitFor(() => expect(calls).toContain('GET /api/providers/sources'));
+		expect(button('Sign in')).toBeUndefined();
+		expect(text()).not.toContain('Sign in');
+	});
+
 	it('shows no per-source cards or capacity note', async () => {
 		listed = [claude('ready', [account('ready')])];
 		await render();

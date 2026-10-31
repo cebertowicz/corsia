@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults", "admitted_writes")  # a session runs on a signed-in Default; transport tests do not assert admission
+
 from core.media_projection import ValidatedImage, ValidatedMediaProjection
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -46,6 +48,7 @@ class TestBuildCmd:
         from subagents.cc_stream import CCStreamSession
         kw.setdefault("binary", "claude")
         kw.setdefault("session_id", "sess-1")
+        kw.setdefault("claude_dir", "/tmp/cc-stream-test-account")  # every session runs in an account's own root
         return CCStreamSession(**kw)
 
     def test_core_flags(self):
@@ -115,17 +118,17 @@ class TestBuildCmd:
 
         assert env["CLAUDE_CONFIG_DIR"] == str(configured)
 
-    def test_spawn_env_removes_default_config_override(
+    def test_spawn_env_binds_the_explicit_account_root_over_an_inherited_override(
         self,
         monkeypatch,
         tmp_path,
     ):
-        default = str((Path.home() / ".claude").resolve())
+        account_root = str((tmp_path / "account").resolve())
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "inherited"))
 
-        env = self._session(claude_dir=default)._build_env()
+        env = self._session(claude_dir=account_root)._build_env()
 
-        assert "CLAUDE_CONFIG_DIR" not in env
+        assert env["CLAUDE_CONFIG_DIR"] == account_root
 
     def test_seed_file_optional(self):
         with_seed = self._session(seed_file="/tmp/seed.txt").build_cmd()

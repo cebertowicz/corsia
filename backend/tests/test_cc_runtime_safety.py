@@ -123,10 +123,12 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
     from core import fork_cc as checkpoint_fork
     from core.fork_types import ProviderForkRequest
     from native_checkpoint_fixtures import cold_source
+    from vendor_account_fixtures import signed_in_default
     from registry.service import register_cc_session
     import subagents.cc_runtime as rt
 
     _seed_parent(child_db)
+    signed_in_default("claude-code", db=child_db, models=("claude-code/fable",))  # the checkpoint names fable
     register_cc_session(
         "parent",
         "existing-provider-resume",

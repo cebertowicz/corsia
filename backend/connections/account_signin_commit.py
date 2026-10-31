@@ -8,6 +8,7 @@ from connections.vendor_accounts import (
     AccountError,
     comparison_facts,
     duplicate_of,
+    default_on_first_signin,
     get_account,
     list_accounts,
     record_auth_cleanup,
@@ -26,7 +27,7 @@ def unchecked_repeat_receipt(account_id: str):
 
     with write_transaction(None, scope='unchecked_repeat_signin') as connection:
         account = get_account(account_id, db=connection)
-        if account['is_default'] or account['state'] != 'signed_in' or current_ready_discovery(account):
+        if account['state'] != 'signed_in' or current_ready_discovery(account):
             return None
         return account_receipt(account)
 
@@ -44,7 +45,7 @@ def commit_signed_in(account_id: str, revision: int, identity: dict[str, str]):
             raise AccountError("account changed")
         proposed = account | {"identity": identity}
         blockers = [row for row in list_accounts(provider=account["provider"], db=connection)
-                    if row["state"] == "signed_in" or row["source_home"] is None]
+                    if row["state"] == "signed_in"]
         repeat = duplicate_of(proposed, rows=blockers)
         if repeat is not None:
             raise SameAccount(repeat)
@@ -52,7 +53,9 @@ def commit_signed_in(account_id: str, revision: int, identity: dict[str, str]):
         if before is not None and after is not None and before != after:
             harness_usage.clear_account_usage(account["provider"], account_id, db=connection)
         record_evidence(account_id, identity=identity, expected_revision=revision, replace_comparison=True, db=connection)
+        connection.execute("UPDATE vendor_accounts SET identity_json=json_remove(identity_json, '$.upgrade_reason') WHERE id=?", (account_id,))
         record_auth_cleanup(account_id, None, db=connection)
-        change_state(account_id, "signed_in", expected_revision=revision, db=connection)
+        completed = change_state(account_id, "signed_in", expected_revision=revision, db=connection)
+        default_on_first_signin(completed, db=connection)
         completed = get_account(account_id, db=connection)
         return duplicate_of(completed, db=connection), account_receipt(completed)

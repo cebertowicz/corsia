@@ -39,7 +39,9 @@ QUEUED_ROWS_SQL = ("SELECT id,write_outcome,delivery_error FROM messages "
                    "WHERE input_order IS NOT NULL ORDER BY id")
 FROZEN_NOW = "2026-10-06T00:00:00+00:00"
 #: Distinct facts one projection's scope stores, per vendor, in the fixture below.
-EXPECTED_ANSWERS = {"claude-code": 5, "codex": 5}
+# The model row's availability is derived from the vendor's accounts, so the account list and
+# its projection are two of the shared answers.
+EXPECTED_ANSWERS = {"claude-code": 7, "codex": 7}
 
 
 def _thread(db, thread_id, *, project="destination-project", model="codex/test"):
@@ -388,12 +390,14 @@ def test_memoized_readers_run_once_however_many_threads_are_affected(accounts, m
     _project(db, second["id"])
     counted_calls, counted = list(calls), list(reads)
 
-    # Six threads ask the wrapped readers 49 times; the memo answers from five real reads.
-    assert len(counted_calls) == 49, counted_calls
-    assert len(counted) == 5, counted
+    # Six threads ask the wrapped readers 51 times; the memo answers from seven real reads,
+    # two of them the vendor's accounts and the model availability derived from them.
+    assert len(counted_calls) == 51, counted_calls
+    assert len(counted) == 7, counted
     assert len(_family(counted_calls, "effective_policy")) == 18, counted_calls
     assert len(_family(counted_calls, "project_exists")) == 12, counted_calls
-    for fact in ("effective_policy", "project_exists", "get_account", "model_vendor", "account_selection_facts"):
+    for fact in ("effective_policy", "project_exists", "get_account", "model_vendor", "account_selection_facts",
+                 "list_accounts", "account_rows"):
         assert len(_family(counted, fact)) == 1, (fact, counted)
     # A thread's own facts are its own: nothing thread-specific is ever memoized.
     assert not [key for key in counted_calls if "thread" in key[1]]
@@ -434,7 +438,7 @@ def test_the_same_reads_scale_with_the_population_once_the_scope_is_disabled(acc
     _without_scope(monkeypatch)
     _project(db, second["id"])
 
-    assert len(calls) == len(reads) == 49, (calls, reads)
+    assert len(calls) == len(reads) == 61, (calls, reads)
     assert len(_family(reads, "effective_policy")) == 18, reads
     assert len(_family(reads, "project_exists")) == 12, reads
 

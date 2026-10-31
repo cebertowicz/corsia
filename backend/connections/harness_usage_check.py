@@ -1,10 +1,10 @@
 """Usage-only recovery checks for CLI harness accounts.
 
-The model picker triggers these checks only when it opens. Each account is
+The model picker triggers these checks only when it opens. A Claude account is
 checked through its own usage-only control read, with no catalog discovery or
-model turn. Added Claude accounts use their captured source home; Codex retains
-its account-bound app-server path. Each account has one in-memory check at a
-time and no more than one start per five minutes.
+model turn, in its captured source home. A Codex account is read by its own
+account refresh, in its own home and login. Each account has one in-memory check
+at a time and no more than one start per five minutes.
 """
 
 from __future__ import annotations
@@ -116,16 +116,14 @@ async def _check(provider: str, account_id: str) -> None:
         if context is None or context.receipt is None:
             return  # No current login to read for: the next sign-in schedules its own check.
         receipt = context.receipt
-        if not context.is_default and provider != "claude-code":
-            await _check_added(provider, receipt)
+        if provider != "claude-code":
+            await _check_codex(provider, receipt)
             return
         binary = await _binary_for(provider)
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
-        elif provider == "claude-code":
-            await _check_claude(binary, receipt, **({} if context.is_default else {"context": context}))
         else:
-            await _check_codex(binary, receipt)
+            await _check_claude(binary, receipt, context=context)
     except Exception as exc:
         log.warning("%s usage recheck failed for account %s: %s", provider, account_id, exc)
         await _check_failed(provider, receipt, f"{provider} usage read failed: {exc}")
@@ -153,8 +151,8 @@ async def _check_failed(provider: str, receipt, error: str) -> None:
     await run_in_db(harness_usage.record_check_failed, error=error, provider=provider, receipt=receipt)
 
 
-async def _check_added(provider: str, receipt) -> None:
-    """An added account's usage is read by its own refresh, in its own home and login."""
+async def _check_codex(provider: str, receipt) -> None:
+    """A Codex account's usage is read by its own refresh, in its own home and login."""
     from connections import harness_models
 
     result = await harness_models.refresh_provider(provider, reason="usage-recheck", account_id=receipt.account_id,
@@ -166,21 +164,6 @@ async def _check_added(provider: str, receipt) -> None:
         failed, cause = result.status != "ready", result.cause
     if failed and cause != "account_refresh_superseded":
         await _check_failed(provider, receipt, f"{provider} usage read failed: {cause or 'refresh did not finish'}")
-
-
-async def _check_codex(binary: str, receipt) -> None:
-    from subagents.codex_app_server import CodexAppServerSession
-    from subagents.codex_usage_observer import observe_account_limits
-
-    session = CodexAppServerSession(binary=binary, task=None, control_only=True)
-    session.vendor_account_bound = True
-    session.vendor_account_id = receipt.account_id
-    session.vendor_account_receipt = receipt
-    try:
-        await session.start()
-        await observe_account_limits(session)
-    finally:
-        await session.close(timeout=10.0)
 
 
 async def _check_claude(binary: str, receipt, *, context=None) -> None:

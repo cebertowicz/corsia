@@ -17,6 +17,8 @@ import pytest
 from tests.registry_helpers import seed_artifact
 from tests.test_cc_tool_result_echo_binding import _seed_thread
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 PR = {
     "integration": "github",
     "type": "pull-request",

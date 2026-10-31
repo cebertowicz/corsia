@@ -72,6 +72,6 @@ async def link_provider_cli(vendor: str, _user: dict = Depends(require_user)) ->
         from connections.source_state import check_harness_source
         from infra.state.ws import schedule_models_changed
 
-        await check_harness_source(vendor, rediscover=True)
+        await check_harness_source(vendor)
         schedule_models_changed()
     return {"ok": outcome in {"linked", "already_linked"}, "outcome": outcome}

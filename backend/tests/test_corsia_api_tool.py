@@ -20,6 +20,8 @@ from tests.registry_helpers import make_session
 from tools.conductor_api_policy import off_limits, registered_routes, route_class
 from tools.corsia_api import ApiCallError, CorsiaApiTool, _scope, call_application
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 def _actors():
     db = get_db()

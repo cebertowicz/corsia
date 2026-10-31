@@ -17,12 +17,12 @@ def source_auth_exists(path: Path) -> bool:
 def missing_home_reason(account: dict) -> str | None:
     """The source facts shared by readiness and concrete launch admission.
 
-    At most two stats and no vendor or network call. The Default uses ambient login.
+    At most two stats and no vendor or network call. Every account has its own home.
     Codex's file check does not read credentials.
     """
     source = account['source_home']
     if source is None:
-        return None
+        return 'account_home_mismatch'
     if account['provider'] in ('claude-code', 'codex') and not Path(source).is_dir():
         return 'account_home_mismatch'
     if account['provider'] == 'codex' and not source_auth_exists(source_auth_path(source)):

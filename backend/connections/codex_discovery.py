@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from pathlib import Path
 from tempfile import mkdtemp
 import shutil
@@ -20,16 +19,9 @@ from typing import Any
 from connections.harness_process import killed_on_exit
 from infra.db_async import run_in_db
 from subagents.codex_app_server import CodexAppServerSession
-from subagents.codex_env import governed_codex_model_catalog_path
-from subagents.codex_usage_observer import observe_account_limits
 
 log = logging.getLogger(__name__)
 _MODEL_CACHE_FILENAME = "models_cache.json"
-
-
-def codex_app_server_home() -> Path:
-    """Return the persistent isolated home shared by Codex managed sessions."""
-    return governed_codex_model_catalog_path().parent
 
 
 async def discover_codex_debug_models(binary: str, *, env=None) -> dict[str, Any]:
@@ -53,50 +45,27 @@ async def discover_codex_debug_models(binary: str, *, env=None) -> dict[str, Any
     return payload
 
 
-def _promote_fresh_model_cache(fresh: Path, persistent: Path) -> None:
-    """Atomically replace the shared cache only after a verified fresh refresh."""
-    fresh.chmod(0o600)
-    persistent.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.replace(fresh, persistent)
-
-
 def _prepare_discovery_home(context):
     """Prepare the existing fresh home and its captured retirement closure."""
-    custom = context is not None and not context.is_default
-    persistent_home = Path(context.runtime_home) if custom else codex_app_server_home()
-    if custom:
-        from connections.account_projection import projection_gate
+    if context is None or not context.source_home or not context.runtime_home:
+        raise RuntimeError('account_discovery_failed')
+    persistent_home = Path(context.runtime_home)
+    from connections.account_projection import projection_gate
 
-        projection_gate(context.receipt)  # Before mkdir or any fresh temporary allocation.
+    projection_gate(context.receipt)  # Before mkdir or any fresh temporary allocation.
     persistent_home.mkdir(mode=0o700, parents=True, exist_ok=True)
     persistent_cache = persistent_home / _MODEL_CACHE_FILENAME
     fresh_home = Path(mkdtemp(prefix='.corsia-codex-model-discovery-', dir=persistent_home.parent))
 
     def cleanup():
-        if custom:
-            from connections.account_projection import begin_retirement, complete_retirement
+        from connections.account_projection import begin_retirement, complete_retirement
 
-            if not begin_retirement(context.receipt, home=fresh_home, owner_turn_id=None):
-                return  # A successor login owns cleanup of its retained stale receipt.
-            shutil.rmtree(fresh_home)
-            complete_retirement(context.receipt, home=fresh_home, owner_turn_id=None)
-        else:
-            shutil.rmtree(fresh_home)
+        if not begin_retirement(context.receipt, home=fresh_home, owner_turn_id=None):
+            return  # A successor login owns cleanup of its retained stale receipt.
+        shutil.rmtree(fresh_home)
+        complete_retirement(context.receipt, home=fresh_home, owner_turn_id=None)
 
-    return custom, persistent_cache, fresh_home, cleanup
-
-
-def _default_observation():
-    from connections.account_identity import capture_default_observation
-
-    return capture_default_observation("codex")
-
-
-async def _observe_default(observation) -> None:
-    """Identity commits before the limits co-read, so a login change cannot stale the new read."""
-    from connections.account_identity import observe_default_read
-
-    await observe_default_read("codex", observation)
+    return persistent_cache, fresh_home, cleanup
 
 
 async def discover_codex_models(binary: str, *, context=None):
@@ -107,45 +76,35 @@ async def discover_codex_models(binary: str, *, context=None):
     response must write a new cache; only after the control session has stopped
     is that cache atomically promoted for subsequent managed execution.
     """
-    custom, persistent_cache, fresh_home, cleanup = await run_in_db(_prepare_discovery_home, context)
-    observation = None if context is not None else await run_in_db(_default_observation)
+    persistent_cache, fresh_home, cleanup = await run_in_db(_prepare_discovery_home, context)
     transferred = False
     session = None
 
     try:
         fresh_cache = fresh_home / _MODEL_CACHE_FILENAME
-        if custom:
-            from connections.account_projection import ensure_projection
+        from connections.account_projection import ensure_projection
 
-            await run_in_db(lambda: ensure_projection(context.receipt, home=fresh_home, kind='discovery'))
+        await run_in_db(lambda: ensure_projection(context.receipt, home=fresh_home, kind='discovery'))
         session = CodexAppServerSession(
             binary=binary, task=None, codex_home=str(fresh_home), control_only=True,
-            **({'source_codex_home': context.source_home} if custom else {}),
+            source_codex_home=context.source_home,
         )
-        if context is not None:
-            session.vendor_account_id = context.account_id
-            session.vendor_account_bound = True
-            session.vendor_account_custom = custom
-            session.vendor_account_receipt = context.receipt
-            session.vendor_discovery_staged = True
-            session.vendor_staged_rate_updates = []
+        session.vendor_account_id = context.account_id
+        session.vendor_account_bound = True
+        session.vendor_account_receipt = context.receipt
+        session.vendor_discovery_staged = True
+        session.vendor_staged_rate_updates = []
         try:
             await session.start()
             payload = await session.list_models()
             if not fresh_cache.is_file():
                 raise RuntimeError("Codex model/list returned without an online model refresh")
-            if context is None:
-                await _observe_default(observation)
-                await observe_account_limits(session)
-                usage_report = None
-            else:
-                try:
-                    usage_report = await session._request('account/rateLimits/read', None)
-                except Exception:
-                    usage_report = None
             try:
-                debug = await discover_codex_debug_models(binary,
-                    **({'env': await run_in_db(session.build_env)} if context is not None else {}))
+                usage_report = await session._request('account/rateLimits/read', None)
+            except Exception:
+                usage_report = None
+            try:
+                debug = await discover_codex_debug_models(binary, env=await run_in_db(session.build_env))
             except (OSError, RuntimeError, json.JSONDecodeError) as exc:
                 log.warning("Codex context discovery failed: %s", exc)
             else:
@@ -163,15 +122,12 @@ async def discover_codex_models(binary: str, *, context=None):
                 log.warning("Codex discovery cleanup failed: %s", close_error)
             raise
         await session.close(timeout=10.0)
-        if context is not None:
-            from connections.account_discovery_types import StagedDiscovery
-            from connections.model_cache_stage import ModelCacheStage
+        from connections.account_discovery_types import StagedDiscovery
+        from connections.model_cache_stage import ModelCacheStage
 
-            stage = ModelCacheStage.prepare(fresh_cache, persistent_cache)
-            transferred = True
-            return StagedDiscovery(payload, usage_report=usage_report, cache_stage=stage, cleanup_owner=cleanup)
-        _promote_fresh_model_cache(fresh_cache, persistent_cache)
-        return payload
+        stage = ModelCacheStage.prepare(fresh_cache, persistent_cache)
+        transferred = True
+        return StagedDiscovery(payload, usage_report=usage_report, cache_stage=stage, cleanup_owner=cleanup)
     finally:
         if not transferred:
             await run_in_db(cleanup)

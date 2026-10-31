@@ -34,6 +34,7 @@ from infra.thread_inputs import start_idle_turn
 from vendor_account_fixtures import (  # noqa: F401
     _accept,
     _configured,
+    _known_default,
     _move,
     _ready,
     _start,
@@ -45,6 +46,7 @@ from vendor_account_fixtures import (  # noqa: F401
     model_default_id,
     ready,
     receipt_of,
+    seed_default_account,
     vendors,
 )
 
@@ -169,10 +171,15 @@ def claude_accounts(isolated_db, monkeypatch):
 
     monkeypatch.setattr("infra.connection_limit_drive.schedule_plan_limit_stops", Mock())
     upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"})
-    legacy = default_account("claude-code")
+    legacy = seed_default_account("claude-code")
+    legacy = set_account_state(legacy['id'], 'signed_in', expected_revision=legacy['revision'])
     second = add_account("claude-code", "Second")
     third = add_account("claude-code", "Third")
     db = get_db()
+    receipt = capture_receipt('claude-code', account_id=legacy['id'], db=db)
+    assert mark_discovery(legacy['id'], receipt=receipt, status='ready',
+                          models={'claude-code/sonnet': {'available': True}}, db=db)
+    db.commit()
     yield db, legacy, second, third
     db.close()
 
@@ -289,17 +296,22 @@ def test_actual_sql_claim_failure_after_tentative_move_rolls_back_receipt_and_ef
 
 
 def test_default_catalog_models_stay_selectable_after_its_identity_is_observed(accounts):  # noqa: F811
-    from connections.vendor_accounts import record_default_identity
+    from connections.vendor_accounts import record_evidence
     from llm.account_catalog import project_accounts
 
     db, default, _, _ = accounts
+    _known_default(db, default)
+    receipt = capture_receipt('codex', account_id=default['id'], db=db)
+    assert mark_discovery(default['id'], receipt=receipt, status='ready',
+                          models={'codex/test': {'context_window': 999, 'resolved_identity': 'gpt-6.1-sol'}}, db=db)
+    db.commit()
 
     before = project_accounts([_row()], project_id="destination-project", db=db)[0]
     before_selected = next(item for item in before["runs_on"] if item["selected"])
     assert before_selected["status"] == "ready"
     assert before["context_window"] == 999
 
-    assert record_default_identity("codex", {"account_fp": "fp"}, db=db).accepted is True
+    record_evidence(default['id'], identity={"account_fp": "fp"}, db=db)
     db.commit()
 
     after = project_accounts([_row()], project_id="destination-project", db=db)[0]
@@ -308,33 +320,35 @@ def test_default_catalog_models_stay_selectable_after_its_identity_is_observed(a
     assert selected["status_reason"] is None
     assert selected["account_id"] == default["id"]
     assert after["context_window"] == 999
-    assert after["capabilities"] == {"own": True}
+    assert after["resolved_identity"] == "gpt-6.1-sol"
+    assert after["capabilities"] == before["capabilities"]
+    assert after["capabilities"]["context_window_max"] == 999
 
 
-def test_default_claim_uses_catalog_truth_without_a_discovery_record(accounts):  # noqa: F811
-    from connections.account_policy import require_claim
-    from connections.vendor_accounts import record_default_identity
+def test_default_claim_requires_its_own_discovery(accounts):  # noqa: F811
+    from connections.account_policy import AccountAdmissionError, require_claim
 
     db, default, _, _ = accounts
-    record_default_identity("codex", {"account_fp": "fp"}, db=db)
-    db.commit()
-    assert require_claim("codex", thread_id="destination", model="codex/test", db=db) == default["id"]
-
-
-def test_observed_unknown_default_still_refuses_a_claim(accounts):  # noqa: F811
-    from connections.account_policy import AccountAdmissionError, require_claim
-    from connections.vendor_accounts import record_default_identity
-
-    db, _, _, _ = accounts
-    record_default_identity("codex", {}, db=db)
+    _known_default(db, default)
+    db.execute("UPDATE vendor_accounts SET discovery_json=NULL WHERE id=?", (default['id'],))
     db.commit()
     with pytest.raises(AccountAdmissionError) as refused:
         require_claim("codex", thread_id="destination", model="codex/test", db=db)
-    assert refused.value.reason == "account_login_unverified"
+    assert refused.value.reason == "account_model_not_discovered"
+
+
+def test_signed_out_default_refuses_a_claim(accounts):  # noqa: F811
+    from connections.account_policy import AccountAdmissionError, require_claim
+
+    db, default, _, _ = accounts
+    set_account_state(default["id"], "signed_out", expected_revision=default["revision"], db=db)
+    with pytest.raises(AccountAdmissionError) as refused:
+        require_claim("codex", thread_id="destination", model="codex/test", db=db)
+    assert refused.value.reason == "account_signed_out"
 
 
 def test_custom_exhaustion_and_public_overage_never_drive_default_or_other_account(isolated_db, monkeypatch):
-    default = default_account("claude-code")
+    default = seed_default_account("claude-code")
     x, y = add_account("claude-code", "X"), add_account("claude-code", "Y")
     x = set_account_state(x["id"], "signed_in", expected_revision=x["revision"])
     releases, stops, notifications, probes = [], [], [], []
@@ -379,9 +393,14 @@ def test_custom_exhaustion_and_public_overage_never_drive_default_or_other_accou
 
 
 def test_default_keeps_multiscope_effects_after_commit(isolated_db, monkeypatch):
-    default = default_account("claude-code")
+    default = seed_default_account("claude-code")
+    default = set_account_state(default['id'], 'signed_in', expected_revision=default['revision'])
     releases, notifications, plan_effects = [], [], []
     db = get_db()
+    receipt = capture_receipt('claude-code', account_id=default['id'], db=db)
+    assert mark_discovery(default['id'], receipt=receipt, status='ready',
+                          models={'claude-code/sonnet': {'available': True}}, db=db)
+    db.commit()
     def release(subject):
         assert not db.in_transaction
         releases.append((subject.provider, subject.scope_key))
@@ -695,13 +714,14 @@ def test_lifecycle_keeps_binding_model_inputs_and_active_spend(accounts, state, 
     from connections.account_policy import select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _accept_at_fixed_time(db, "first")
     batch = _start_at_fixed_time(db, "running")
     assert batch is not None
     _accept_at_fixed_time(db, "second")
     before = _rows(db)
-    change_state(legacy["id"], state, expected_revision=0, db=db)
+    change_state(legacy["id"], state, expected_revision=get_account(legacy["id"], db=db)["revision"], db=db)
     after = _rows(db)
     assert [(r["id"], r["content"], r["input_order"], r["seq"], r["target_model"], r["delivery_state"])
             for r in after] == [(r["id"], r["content"], r["input_order"], r["seq"], r["target_model"], r["delivery_state"])
@@ -720,6 +740,7 @@ def test_policy_hold_releases_same_binding_in_original_fifo_order(accounts):
     from connections.account_policy import select_account, set_policy
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     set_legacy_policy("destination-project", "codex", allowlist=[second["id"]], default_account_id=second["id"],
                db=db)
@@ -741,6 +762,7 @@ def test_policy_hold_ends_the_shared_prefix_for_claim_and_fail_closed(accounts):
     from connections.account_policy import select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     for identity in ("first", "second", "third"):
         _accept_at_fixed_time(db, identity)
@@ -762,6 +784,7 @@ def test_eligible_unprovable_prefix_still_fails_closed_once_the_hold_lifts(accou
     from connections.account_policy import select_account, set_policy
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _accept_at_fixed_time(db, "first")
     _accept_at_fixed_time(db, "second")
@@ -782,6 +805,7 @@ def test_lifting_the_hold_wakes_the_same_prefix_exactly_once(accounts):
     from connections.account_policy import select_account, set_policy
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _accept_at_fixed_time(db, "first")
     _accept_at_fixed_time(db, "second")
@@ -804,6 +828,7 @@ def test_claim_and_fail_closed_take_the_identical_prefix(accounts, caller):
     from connections.account_policy import select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     for identity in ("first", "second", "third"):
         _accept_at_fixed_time(db, identity)
@@ -822,6 +847,7 @@ def test_dangling_project_holds_instead_of_spending_until_it_resolves(accounts):
     from connections.account_policy import AccountAdmissionError, require_launch, select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _accept_at_fixed_time(db, "first")
     _name_project(db, "destination", "deleted-project")
@@ -847,6 +873,7 @@ def test_dangling_actor_project_refuses_the_paid_write(accounts):
     from connections.account_policy import AccountAdmissionError, require_launch, select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _name_project(db, "actor", "deleted-project")
 
@@ -856,14 +883,15 @@ def test_dangling_actor_project_refuses_the_paid_write(accounts):
 
 
 def test_projectless_thread_admission_is_unchanged(accounts):
-    from connections.account_policy import require_launch, select_account
+    from connections.account_policy import require_claim, select_account
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     _name_project(db, "destination", None)
     assert select_account("destination", "codex", db=db) == legacy["id"]
     _accept_at_fixed_time(db, "first")
 
-    assert require_launch("codex", thread_id="destination", db=db) == legacy["id"]
+    assert require_claim("codex", thread_id="destination", model="codex/test", db=db) == legacy["id"]
     assert [item.message_id for item in _start_at_fixed_time(db, "claimed").items] == ["first"]
     assert db.execute("SELECT COUNT(*) FROM thread_vendor_account_holds").fetchone()[0] == 0
 
@@ -876,6 +904,7 @@ def test_policy_race_refusal_never_fails_or_sequences_input(accounts, after_fenc
     from infra.database import write_transaction
 
     db, legacy, second, third = accounts
+    _known_default(db, legacy)
     select_account("destination", "codex", account_id=legacy["id"], db=db)
     _accept_at_fixed_time(db, "first")
     _accept_at_fixed_time(db, "second")
@@ -1041,6 +1070,7 @@ async def test_a_claude_rate_limit_event_lands_on_the_sessions_own_account(vendo
     assert receipt is not None
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={'claude-code/test': {}}, db=db)
     db.commit()
+    seed_default_account('claude-code', db=db)
     default = default_id('claude-code', db=db)
     session = SimpleNamespace(vendor_account_bound=True, vendor_account_receipt=receipt)
     event = {'rate_limit_info': {'status': 'rejected', 'rateLimitType': 'five_hour', 'resetsAt': 4102444800}}
@@ -1082,11 +1112,11 @@ def test_model_switch_rollover_moves_only_the_destination_provider_binding(accou
     """A cross-harness switch must not derive the source provider from threads.model."""
     from connections.account_selection import bind_model_account
     from connections.models import upsert_connection
-    from connections.vendor_accounts import default_account
-
     db, first, second, _events = _configured(accounts, monkeypatch)
     upsert_connection(type='cli', provider='claude-code', status='available', config={'binary': '/bin/test'})
-    claude = default_account('claude-code')
+    claude = seed_default_account('claude-code', db=db)
+    from connections.vendor_accounts import set_account_state
+    claude = set_account_state(claude['id'], 'signed_in', expected_revision=claude['revision'], db=db)
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES ('claude-code/test','Claude','claude-code/test','claude-code','test','claude-code','t','t')")
     db.execute("UPDATE threads SET model='claude-code/test' WHERE id='destination'")

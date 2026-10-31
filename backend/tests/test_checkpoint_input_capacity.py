@@ -42,7 +42,7 @@ def _accept(db, message_id="input-1"):
 
 @pytest.mark.parametrize("harness", ["native", "claude-code", "codex"])
 @pytest.mark.parametrize("pending", [False, True])
-def test_impossible_profile_cap_refuses_before_fifo_mutation(capacity_db, harness, pending):
+def test_impossible_profile_cap_refuses_before_fifo_mutation(capacity_db, harness, pending, isolated_db):
     db = capacity_db
     destination = "pending" if pending else "source"
     db.execute("UPDATE models SET harness=? WHERE id=?", (harness, destination))
@@ -56,6 +56,14 @@ def test_impossible_profile_cap_refuses_before_fifo_mutation(capacity_db, harnes
             "switch_after_input_order=0 WHERE id='thread-1'"
         )
     db.commit()
+    if harness != "native":
+        # A model with no signed-in account holds its input before its cap is read.
+        from connections.models import upsert_connection
+        from vendor_account_fixtures import signed_in_default
+
+        upsert_connection(type="cli", provider=harness, status="available",
+                          config={"binary": "/bin/synthetic"}, db=db)
+        signed_in_default(harness, db=db, models=("source", "pending"))
     before = db.execute("SELECT next_input_order FROM threads").fetchone()[0]
 
     with pytest.raises(SendRejected) as rejected:

@@ -13,6 +13,8 @@ import pytest
 from infra.database import get_db
 from tests.unavailable_model_support import seed_model
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 CLOUD = "anthropic/x"
 OFF = "project-off"
 

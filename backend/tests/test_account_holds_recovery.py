@@ -33,10 +33,6 @@ from vendor_account_fixtures import (  # noqa: F401
 )
 
 
-SOURCE_CHECK = ('Check the provider source or request its canonical refresh through an available scoped tool'
-                ' with prior authority, or tell the user that this check is needed.')
-
-
 def seed_destination(db, *, same_vendor=False, available=True):
     model = 'codex/alternate' if same_vendor else 'openai/alternate'
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,"
@@ -96,31 +92,28 @@ DENIED_ACTION = ('Restore the permitted project policy through an authorized con
                  'otherwise the user can choose another permitted account if one is available, or switch model.')
 
 
-@pytest.mark.parametrize('cause,default,phrase,action,agent_action', [
-    ('account_signed_out', False, 'it is signed out', 'Sign in to the permitted account through the account controls.', 'The user can sign in to the permitted account through the account controls.'),
-    ('account_signed_out', True, 'it is signed out', "Sign in through the vendor's own CLI, then check the provider source or request its canonical refresh.", "The user can sign in through the vendor's own CLI, then check the provider source or request its canonical refresh."),
-    ('account_removed', False, 'the account was removed', REMOVED_ACTION, 'The user can choose another permitted account if one is available; otherwise switch model.'),
-    ('account_project_denied', False, 'project policy does not permit the account', DENIED_ACTION, DENIED_ACTION),
-    ('project_policy_missing', False, "the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.'),
-    ('account_model_not_discovered', False, 'the selected model has not been discovered for this account', 'Verify the signed-in account through the account controls to discover its models.', 'The user can verify the signed-in account through the account controls to discover its models.'),
-    ('account_model_not_discovered', True, 'the selected model has not been discovered for this account', 'Check the provider source or request its canonical refresh to discover its models.', SOURCE_CHECK),
-    ('account_runtime_pending', False, "this account's runtime is not yet available", 'Inspect the held work and report the missing runtime capability; signing in again will not enable it.', 'Inspect the held work and report the missing runtime capability; signing in again will not enable it.'),
-    ('account_login_unverified', False, "the account's current sign-in could not be verified", 'Verify the signed-in account through the account controls to obtain fresh account evidence.', 'The user can verify the signed-in account through the account controls to obtain fresh account evidence.'),
-    ('account_login_unverified', True, "the account's current sign-in could not be verified", 'Check the provider source or request its canonical refresh to obtain fresh account evidence.', SOURCE_CHECK),
-    ('codex_auth_projection_changed', False, 'the managed authentication link changed', 'Sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.', 'The user can sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.'),
-    ('codex_auth_source_missing', False, 'the authentication source is missing', 'Sign in again through the account controls to restore the source and obtain fresh account evidence.', 'The user can sign in again through the account controls to restore the source and obtain fresh account evidence.'),
+@pytest.mark.parametrize('cause,phrase,action,agent_action', [
+    ('account_signed_out', 'it is signed out', 'Sign in to the permitted account through the account controls.', 'The user can sign in to the permitted account through the account controls.'),
+    ('account_not_configured', 'no account is signed in for this vendor', 'Sign one in under Settings > Providers.', 'The user can sign one in under Settings > Providers.'),
+    ('account_removed', 'the account was removed', REMOVED_ACTION, 'The user can choose another permitted account if one is available; otherwise switch model.'),
+    ('account_project_denied', 'project policy does not permit the account', DENIED_ACTION, DENIED_ACTION),
+    ('project_policy_missing', "the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.'),
+    ('account_model_not_discovered', 'the selected model has not been discovered for this account', 'Verify the signed-in account through the account controls to discover its models.', 'The user can verify the signed-in account through the account controls to discover its models.'),
+    ('account_runtime_pending', "this account's runtime is not yet available", 'Inspect the held work and report the missing runtime capability; signing in again will not enable it.', 'Inspect the held work and report the missing runtime capability; signing in again will not enable it.'),
+    ('account_login_unverified', "the account's current sign-in could not be verified", 'Verify the signed-in account through the account controls to obtain fresh account evidence.', 'The user can verify the signed-in account through the account controls to obtain fresh account evidence.'),
+    ('codex_auth_projection_changed', 'the managed authentication link changed', 'Sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.', 'The user can sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.'),
+    ('codex_auth_source_missing', 'the authentication source is missing', 'Sign in again through the account controls to restore the source and obtain fresh account evidence.', 'The user can sign in again through the account controls to restore the source and obtain fresh account evidence.'),
 ])
-def test_one_map_exact_human_text_and_agent_action_scope(cause, default, phrase, action, agent_action):
+def test_one_map_exact_human_text_and_agent_action_scope(cause, phrase, action, agent_action):
     from prompts.plan_wakes import account_readiness_detail, account_wake_fields
-    readiness = {'ready': False, 'cause': cause, 'is_default': default}
+    readiness = {'ready': False, 'cause': cause}
     human = account_readiness_detail(readiness)
     assert human == f'Its account is not ready: {phrase}. {action}'
     assert cause not in human
     state, fields = account_wake_fields(readiness)
     assert state == 'unready' and fields['cause'] == cause and fields['phrase'] == phrase
     assert fields['action'] == agent_action
-    if default and cause != 'account_signed_out':
-        assert 'verify' not in fields['action']
+    assert 'CLI' not in human and 'provider source' not in human
 
 
 @pytest.mark.parametrize('rollover', [True, False])
@@ -129,8 +122,8 @@ def test_removed_and_turned_off_instructions_are_identical_for_any_other_account
     """Test (f): the exact held-input strings, as the two producing functions return them."""
     from prompts.plan_wakes import account_readiness_detail, account_wake_fields
 
-    removed = {'ready': False, 'cause': 'account_removed', 'is_default': False}
-    denied = {'ready': False, 'cause': 'account_project_denied', 'is_default': False}
+    removed = {'ready': False, 'cause': 'account_removed'}
+    denied = {'ready': False, 'cause': 'account_project_denied'}
 
     assert account_readiness_detail(removed) == (
         'Its account is not ready: the account was removed. Choose another permitted account if one is available; '
@@ -143,8 +136,7 @@ def test_removed_and_turned_off_instructions_are_identical_for_any_other_account
     assert 'cancel' not in account_wake_fields(removed)[1]['action'].lower()
 
 
-@pytest.mark.parametrize('readiness', [None, {'ready': False, 'cause': 'account_signed_out', 'is_default': None},
-                                     {'ready': False, 'cause': 'untrusted-provider-output', 'is_default': False}])
+@pytest.mark.parametrize('readiness', [None, {'ready': False, 'cause': 'untrusted-provider-output'}])
 def test_missing_unknown_facts_conservatively_render_unread(readiness):
     from prompts.plan_wakes import ACCOUNT_READINESS_UNREAD, account_readiness_detail, account_wake_fields
     assert account_readiness_detail(readiness) == ACCOUNT_READINESS_UNREAD
@@ -198,12 +190,8 @@ def test_rewording_an_action_keeps_who_can_take_it(monkeypatch):
 
     monkeypatch.setitem(plan_wakes.ACCOUNT_HOLD_COPY, 'account_removed',
                         ('the account was removed', 'Use the inbox to cancel the held input.', 'user'))
-    monkeypatch.setitem(plan_wakes.ACCOUNT_HOLD_COPY, ('account_login_unverified', True),
-                        ("the account's current sign-in could not be verified", 'Refresh the provider source.', 'source'))
-    _, removed = account_wake_fields({'ready': False, 'cause': 'account_removed', 'is_default': False})
-    _, unverified = account_wake_fields({'ready': False, 'cause': 'account_login_unverified', 'is_default': True})
+    _, removed = account_wake_fields({'ready': False, 'cause': 'account_removed'})
     assert removed['action'] == 'The user can use the inbox to cancel the held input.'
-    assert unverified['action'] == SOURCE_CHECK
 
 
 @pytest.mark.asyncio
@@ -458,6 +446,7 @@ def test_both_real_status_consumers_show_live_pending_separate_from_history(held
     assert 'Verify the signed-in account' in str(read_status(db, plan, 'worker', node.id))
     assert 'Verify the signed-in account' in str(read_status(db, parent_plan, 'parent', step.id))
     assert next(r for r in own['current']['rows'] if r['id'] == node.id)['label'] == 'waiting'
+    db.commit()  # a state change publishes after its own commit, so it must own the transaction
     custom = change_state(custom['id'], 'signed_out', expected_revision=custom['revision'], db=db)
     notice = wakes(db)[-1]
     assert 'it is signed out' in notice['content']
@@ -483,7 +472,7 @@ def test_advisory_current_binding_y_not_retained_marker_x(held_worker):
     db.execute("UPDATE thread_vendor_accounts SET account_id=? WHERE thread_id='worker'", (other['id'],))
     db.commit()
     assert read_account_readiness(['worker'], db=db) == {
-        'worker': {'ready': True, 'cause': None, 'is_default': False}}
+        'worker': {'ready': True, 'cause': None}}
     assert db.execute("SELECT delivery_error FROM messages WHERE id='brief'").fetchone()[0] == 'account_model_not_discovered'
 
 
@@ -519,14 +508,15 @@ def test_loaded_evaluator_matches_actual_require_claim(accounts, state):
     except AccountAdmissionError as exc:
         cause = exc.reason
     assert read_account_readiness(['destination'], db=db) == {
-        'destination': {'ready': cause is None, 'cause': cause, 'is_default': False}}
+        'destination': {'ready': cause is None, 'cause': cause}}
 
 
 
 def test_readiness_deduplicates_missing_targets_without_effects_or_private_reads(accounts):
     from connections import read_account_readiness
 
-    db = accounts[0]
+    db, default, *_ = accounts
+    _known_default(db, default)
     db.executemany("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES (?,'user','codex/test','t','t')",
                    [(f'batch-{index}',) for index in range(901)])
     db.commit()
@@ -547,8 +537,23 @@ def test_readiness_deduplicates_missing_targets_without_effects_or_private_reads
     assert all('SELECT *' not in query and 'usage_json' not in query for query in queries)
     assert all('identity_json' not in query or '$.default_comparison.auth_state' in query for query in queries)
     assert len(result) == 901
-    assert all(row == {'ready': True, 'cause': None, 'is_default': True} for row in result.values())
+    assert all(row == {'ready': True, 'cause': None} for row in result.values())
     assert tuple(db.iterdump()) == before
+
+
+def test_readiness_without_a_configured_account_matches_claim(accounts):
+    from connections import read_account_readiness
+    from connections.account_policy import AccountAdmissionError, require_claim
+
+    db = accounts[0]
+    db.execute("UPDATE vendor_accounts SET state='removed' WHERE connection_id='test-codex'")
+    db.execute("DELETE FROM thread_vendor_accounts WHERE thread_id='destination' AND provider='codex'")
+    db.commit()
+    with pytest.raises(AccountAdmissionError) as exc:
+        require_claim('codex', thread_id='destination', model='codex/test', db=db)
+    assert exc.value.reason == 'account_not_configured'
+    assert read_account_readiness(['destination'], db=db)['destination'] == {
+        'ready': False, 'cause': 'account_not_configured'}
 
 
 def test_null_ambient_allowlist_denial_and_missing_project(accounts):
@@ -562,7 +567,7 @@ def test_null_ambient_allowlist_denial_and_missing_project(accounts):
                "VALUES ('destination-project','codex',0,?,1)", (json.dumps(codex_units),))
     db.commit()
     assert read_account_readiness(['destination'], db=db)['destination'] == {
-        'ready': False, 'cause': 'account_project_denied', 'is_default': None}
+        'ready': False, 'cause': 'account_project_denied'}
     with pytest.raises(AccountAdmissionError) as exc:
         require_claim('codex', thread_id='destination', model='codex/test', db=db)
     assert exc.value.reason == 'account_project_denied'
@@ -574,7 +579,8 @@ def test_null_ambient_allowlist_denial_and_missing_project(accounts):
 
 def test_exact_target_wins_and_ambiguous_native_missing_are_omitted(accounts):
     from connections import read_account_readiness
-    db = accounts[0]
+    db, default, *_ = accounts
+    _known_default(db, default)
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES ('alias','Alias','codex/test','native','alias','native','t','t')")
     db.commit()
@@ -612,7 +618,7 @@ def test_each_consumer_owns_consistent_kind_and_readiness_snapshot(held_worker, 
             nodes = [(service._node_row(db, node.id), service._plan_row(db, plan.id))]
             facts = operator_stopped.nodes(nodes, {node.id: 'worker'}, {node.id: {'selection': {'attempt_id': 'a'}}}, db=observed)
             assert facts['worker']['stalled'] == 'account'
-            assert facts['worker']['account_readiness'] == {'ready': True, 'cause': None, 'is_default': False}
+            assert facts['worker']['account_readiness'] == {'ready': True, 'cause': None}
         else:
             parent_plan = service.ensure_plan('thread', 'parent', db=db)
             db.commit()
@@ -638,8 +644,17 @@ def test_unread_catalog_account_head_notifies_once_with_fixed_fallback(held_work
     prior = tuple(db.execute("SELECT content,input_order,active_turn_id,delivery_state,"
                              "write_outcome,delivery_error FROM messages WHERE id='brief'").fetchone())
     assert prior[2:] == (None, 'queued', 'proved_no_write', 'account_model_not_discovered')
-    # Actual stored catalog loss, not a patched readiness result or admission owner.
+    # Actual stored catalog loss, not a patched readiness result or admission owner: the model is in
+    # neither the stored rows nor any account's discovery (the catalog is projected from the accounts').
     db.execute("DELETE FROM models WHERE id='codex/test'")
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import list_accounts
+
+    for account in list_accounts(provider='codex', db=db):
+        receipt = capture_receipt('codex', account_id=account['id'], db=db)
+        if receipt is not None:
+            assert mark_discovery(account['id'], receipt=receipt, status='ready', models={}, db=db)
     db.commit()
     assert stalled_why(db, 'worker') == 'account'
     assert read_account_readiness(['worker'], db=db) == {}
@@ -827,16 +842,18 @@ def test_missing_concrete_launch_does_not_claim_a_ready_custom_transport(account
     assert refused.value.reason == 'account_runtime_pending'
 
 
-def test_default_observed_unknown_refuses_claim_without_changing_lifecycle(accounts):
+def test_signed_out_default_refuses_claim_without_changing_lifecycle(accounts):
     from connections.account_policy import AccountAdmissionError, require_claim
-    from connections.vendor_accounts import record_default_identity, get_account
+    from connections.vendor_accounts import get_account
+
+    from connections.vendor_accounts import set_account_state
 
     db, default, _, _ = accounts
-    record_default_identity('codex', {}, db=db)
+    set_account_state(default['id'], 'signed_out', expected_revision=default['revision'], db=db)
     with pytest.raises(AccountAdmissionError) as refused:
-        require_claim('codex', thread_id='destination', model='codex/test', db=db)
-    assert refused.value.reason == 'account_login_unverified'
-    assert get_account(default['id'], db=db)['state'] == 'legacy'
+        require_claim('codex', thread_id='destination', model='codex/test', account_id=default['id'], db=db)
+    assert refused.value.reason == 'account_signed_out'
+    assert get_account(default['id'], db=db)['state'] == 'signed_out'
 
 
 def test_current_durable_link_failure_gates_every_claim_before_home_preparation(accounts):
@@ -1041,7 +1058,8 @@ def test_shared_kind_uses_actual_head_and_current_saved_selector(accounts, cause
 
 
 def test_earlier_plain_or_unproved_head_never_selects_later_hold(accounts):
-    db, _, _, _ = accounts
+    db, default, _, _ = accounts
+    _known_default(db, default)
     _accept(db, 'first')
     _accept(db, 'later')
     _held(db, 'later')
