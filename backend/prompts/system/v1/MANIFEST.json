@@ -103,7 +103,7 @@
       "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "384a4d66e6977b41ad725e163981037f87458050fa3b7537500fb672380584d5"
+      "sha256": "0fa95623ebcb91a5404b6cb5e752161d3c03d888cf92dbc3d4da00863e880ff1"
     },
     {
       "bytes": 3492,
@@ -112,10 +112,10 @@
       "sha256": "1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e"
     },
     {
-      "bytes": 4580,
+      "bytes": 4591,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/templates/RESPONSIBILITY.md",
-      "sha256": "1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f"
+      "sha256": "500f9cfe75dc7407e4d43ffe838c449d4ce29541a9be55386becc82d5de69a30"
     },
     {
       "bytes": 3541,
