@@ -197,26 +197,40 @@ def open_workflow_subjects(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LI
     return frozenset(found)
 
 
-def recorded_verdicts(db: sqlite3.Connection, subjects: Iterable[str] | None = None) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
-    """Recorded plan and reached state, optionally for one bounded subject batch."""
-    query = """
-        SELECT subject_key, event_name, attributes FROM outcome_events
-        WHERE event_name IN (:planned, :reached) AND retracted_at IS NULL AND subject_key IS NOT NULL
+def _recorded(db: sqlite3.Connection, index: str, where: str, params: Mapping[str, object]
+              ) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """The one reader of recorded plan and reached events; callers add the subject filter."""
+    query = f"""
+        SELECT subject_key, event_name, attributes FROM outcome_events{index}
+        WHERE event_name IN (:planned, :reached) AND retracted_at IS NULL AND subject_key IS NOT NULL{where}
     """
-    params: dict[str, object] = {"planned": PLANNED_EVENT, "reached": REACHED_EVENT}
-    if subjects is not None:
-        encoded = json_ids(subjects)
-        if encoded == "[]":
-            return {}, frozenset()
-        query += " AND subject_key IN (SELECT value FROM json_each(:subjects))"
-        params["subjects"] = encoded
     plans, reached = {}, set()
-    for row in db.execute(query, params).fetchall():
+    for row in db.execute(query, {"planned": PLANNED_EVENT, "reached": REACHED_EVENT, **params}).fetchall():
         if row["event_name"] == REACHED_EVENT:
             reached.add(row["subject_key"])
         else:
             plans[row["subject_key"]] = FrozenPlan.decoded(json.loads(row["attributes"])["plan"])
     return plans, frozenset(reached)
+
+
+def recorded_verdicts(db: sqlite3.Connection, subjects: Iterable[str] | None = None) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """Recorded plan and reached state, optionally for one bounded subject batch."""
+    if subjects is None:
+        return _recorded(db, "", "", {})
+    encoded = json_ids(subjects)
+    if encoded == "[]":
+        return {}, frozenset()
+    return _recorded(db, "", " AND subject_key IN (SELECT value FROM json_each(:subjects))", {"subjects": encoded})
+
+
+def recorded_lesson_plans(db: sqlite3.Connection, lesson_id: str) -> dict[str, FrozenPlan]:
+    """A lesson's recorded plan per version, for the trial read: one range on the subject index, so it reads only
+    that lesson's planned and reached events (two per version), however large the table."""
+    prefix = subject_of("lesson", lesson_id, "")
+    plans, _reached = _recorded(db, " INDEXED BY idx_outcome_events_subject",
+                                " AND subject_key >= :low AND subject_key < :high",
+                                {"low": prefix, "high": prefix[:-1] + chr(ord(prefix[-1]) + 1)})
+    return {split_subject(subject)[2]: plan for subject, plan in plans.items()}
 
 
 def node_terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) -> str | None:

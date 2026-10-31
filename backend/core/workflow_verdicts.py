@@ -6,12 +6,14 @@ Pure code, no database. ``core.workflow_verdict_read`` builds the runs from real
 from __future__ import annotations
 
 import random
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from math import sqrt
 from typing import Iterable, Mapping, Sequence
 
-POLICY_VERSION = "workflow-verdict-v2"
+POLICY_VERSION = "workflow-verdict-v3"
 DEFAULT_MINIMUM = 20
 GROUP_MINIMUM = 5
 BOOTSTRAP_DRAWS = 2_000
@@ -217,9 +219,23 @@ def _pooled(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence
     return None if total == 0 else (diff / total, base / total, fresh / total)
 
 
+def _tail(alpha: float, runs: int) -> float:
+    """The lower percentile of the expanded percentile bootstrap (Hesterberg 2015): Phi(sqrt(n/(n-1)) * t(alpha/2, n-1)).
+
+    ``runs`` is the smaller side's run count; at 80% the tail is 0.0866 at 20, 0.0934 at 40 and 0.0967 at 80.
+    """
+    from scipy import stats
+
+    n = max(runs, 2)  # one run has no spread to expand
+    return statistics.NormalDist().cdf(sqrt(n / (n - 1)) * float(stats.t.ppf(alpha / 2, n - 1)))
+
+
 def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence[_Sample]],
               groups: Sequence[Group], seed: int, confidence: float) -> tuple[float, float]:
-    """A bootstrap interval at ``confidence``: runs resampled within each side and group, seeded from the subject."""
+    """A bootstrap interval at ``confidence``: runs resampled within each side and group, seeded from the subject.
+
+    The tails are the expanded percentiles for the smaller side's run count, not the plain ``alpha/2``.
+    """
     if not 0 < confidence < 1:
         raise ValueError("confidence must be between zero and one")
     rng, draws = random.Random(seed), []
@@ -230,8 +246,25 @@ def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequen
         if pooled is not None:
             draws.append(pooled[0])
     draws.sort()
-    tail = (1 - confidence) / 2
+    tail = _tail(1 - confidence, min(sum(len(side[g]) for g in groups) for side in (new, old)))
     return draws[int(tail * (len(draws) - 1))], draws[int((1 - tail) * (len(draws) - 1))]
+
+
+def baseline_values(measure: PlannedMeasure, runs: Sequence[Run], now: datetime) -> list[float]:
+    """A measure's per-run values over ``runs``, for the minimum detectable change.
+
+    A run's value is its numerator over its denominator; a run with no denominator (a failed run's outcome count)
+    has none, so the spread approximates the pooled measure, which still counts that run's numerator. Empty when
+    the measure cannot be read from them.
+    """
+    settled = [run for run in runs if run.settled(measure.window_days, now)]
+    if _blocked(measure, settled, []) is not None:
+        return []
+    counter = _counter(measure, settled) if measure.name == CORRECTIONS else None
+    if counter is False:
+        return []
+    samples = (_sample(measure, run, counter or None) for run in settled)  # type: ignore[arg-type]
+    return [sample.num / sample.den for sample in samples if sample is not None and sample.den > 0]
 
 
 def _call_from(better: str, difference: float, interval: tuple[float, float], margin: float) -> str:

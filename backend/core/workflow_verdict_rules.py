@@ -14,6 +14,7 @@ from core.workflow_verdicts import (
     DEFAULT_CONFIDENCE, RAISED_CONFIDENCES, SMALL_HARM, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
+from core.workflow_verdict_looks import LOOK_MULTIPLES, look_confidence, planned_mdc
 from core.workflow_verdict_types import (
     Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, Verdict, WorkflowHistory, subject_of,
 )
@@ -114,8 +115,10 @@ def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     baseline, skipped = choose_baseline(history, version, minimum, window, first_use)
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     confidence, confidence_reason = _validated_confidence(history)
+    arm = [] if baseline is None else baseline_runs(history, baseline, minimum, window, first_use)
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed,
-                      confidence=confidence, confidence_reason=confidence_reason)
+                      confidence=confidence, confidence_reason=confidence_reason,
+                      mdc=planned_mdc(measures, arm, minimum, confidence, first_use, fixed=True))
 
 
 def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verdict | None:
@@ -204,10 +207,10 @@ def decide_arms(plan: FrozenPlan, arms: TwoArms, now: datetime, *, inputs: Mappi
     """Judge generic control and changed arms; callers own how they select or name those arms."""
     control, changed = list(arms.control), list(arms.changed)
 
-    def call(measure: PlannedMeasure, runs: Sequence[Run], against: Sequence[Run] = control, bootstrap: bool = True
-             ) -> MeasureCall:
+    def call(measure: PlannedMeasure, runs: Sequence[Run], against: Sequence[Run] = control, bootstrap: bool = True,
+             look: int = 1) -> MeasureCall:
         return measure_call(measure, runs, against, minimum=plan.minimum, now=now, seed=plan.seed + len(measure.name),
-                            confidence=plan.confidence, bootstrap=bootstrap)
+                            confidence=look_confidence(plan.confidence, look), bootstrap=bootstrap)
 
     overall = [call(measure, changed, bootstrap=False) for measure in plan.measures]
     blocked = _not_enough(overall)
@@ -217,14 +220,14 @@ def decide_arms(plan: FrozenPlan, arms: TwoArms, now: datetime, *, inputs: Mappi
                 if measure.role != "shown" and result.call not in BLOCKED | {"unknown"}]
     context = dict(inputs or {})
 
-    def rule_at(multiple: int, look: int) -> tuple[Verdict | None, bool]:
-        """The rule at a look, and whether the arms reached it."""
-        cut = _cut(plan, deciding, arms, multiple * plan.minimum, now)
+    def rule_at(look: int) -> tuple[Verdict | None, bool]:
+        """The rule at a look, judged at that look's confidence, and whether the arms reached it."""
+        cut = _cut(plan, deciding, arms, LOOK_MULTIPLES[look] * plan.minimum, now)
         if cut is None:
             return None, False
-        return _rule([call(measure, cut[1], cut[0]) for measure in plan.measures], look), True
+        return _rule([call(measure, cut[1], cut[0], look=look) for measure in plan.measures], look), True
 
-    first, reached = rule_at(1, 1)
+    first, reached = rule_at(1)
     if not reached:
         counted = [result for result in overall if result.role != "shown" and result.call not in BLOCKED | {"unknown"}]
         groups = sorted({group for result in counted for group in result.groups})
@@ -233,16 +236,16 @@ def decide_arms(plan: FrozenPlan, arms: TwoArms, now: datetime, *, inputs: Mappi
                         "minimum": plan.minimum, "groups": [list(group) for group in groups]})
     if first is not None:
         return Verdict(first.word, first.reason, 1, first.calls, {**context, **first.inputs})
-    second, reached = rule_at(2, 2)
+    second, reached = rule_at(2)
     if not reached:
-        return Verdict("collecting", "wait_for_look_2", 1, (), {**context, "minimum": 2 * plan.minimum})
+        return Verdict("collecting", "wait_for_look_2", 1, (), {**context, "minimum": LOOK_MULTIPLES[2] * plan.minimum})
     if second is not None:
         return Verdict(second.word, second.reason, 2, second.calls, {**context, **second.inputs})
     if not arms.continue_if_unclear:
         return Verdict("revert", "queued_after_look_2", 2, (), context)
-    final, reached = rule_at(4, 3)
+    final, reached = rule_at(3)
     if not reached:
-        return Verdict("collecting", "wait_for_look_3", 2, (), {**context, "minimum": 4 * plan.minimum})
+        return Verdict("collecting", "wait_for_look_3", 2, (), {**context, "minimum": LOOK_MULTIPLES[3] * plan.minimum})
     assert final is not None
     return Verdict(final.word, final.reason, 3, final.calls, {**context, **final.inputs})
 

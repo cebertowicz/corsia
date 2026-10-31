@@ -11,7 +11,7 @@ from core import lesson_files, workflow_verdict_evaluator as evaluator
 from core import lesson_trial_verdicts as lessons
 from core.lesson_trials import Trial
 from core.workflow_verdict_rules import Definition, FrozenPlan, TwoArms, decide_arms
-from core.workflow_verdicts import Run
+from core.workflow_verdicts import COST, Run
 from infra.outcome_events import record_outcome_event
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -278,7 +278,7 @@ def rate(count: int, per_ten: int) -> list[int]:
 
 
 def plan_of(db, workspace) -> FrozenPlan:
-    return lessons.freeze_plan(trial_at(workspace, db), (), None)
+    return lessons.freeze_plan(trial_at(workspace, db), (), None, (), NOW)
 
 
 def judge(plan: FrozenPlan, without: list[int], with_: list[int]):
@@ -317,6 +317,14 @@ def test_a_restart_margin_is_a_quarter_of_the_restarted_share_not_of_the_share_w
     assert call.call == "worse"
 
 
+def test_a_trials_minimum_detectable_change_is_none_until_its_without_half_has_two_runs(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    empty = lessons.freeze_plan(trial, (), None, (), NOW)
+    assert empty.mdc[lessons.SENT_BACK] == (None, None, None) and empty.mdc[COST] == (None, None, None)
+    started = lessons.freeze_plan(trial, (), None, synthetic("without", rate(20, 3)), NOW)
+    assert all(figure is not None and figure > 0 for figure in started.mdc[lessons.SENT_BACK])
+
+
 def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, workspace) -> None:
     trial = trial_at(workspace, db)
     events = Definition("event", "qg.escape", 1, {"attributes": {"pr": "id"}, "dedupe": ["pr"]},
@@ -328,10 +336,10 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
                 "decides_as": decides_as}
         return Definition("kpi", name, 1, spec, "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
 
-    spend = lessons.freeze_plan(trial, [events, kpi("hours", "spend")], "w")
+    spend = lessons.freeze_plan(trial, [events, kpi("hours", "spend")], "w", (), NOW)
     roles = {measure.name: measure.role for measure in spend.measures}
     assert roles["hours"] == "spend" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "quality"
-    quality = lessons.freeze_plan(trial, [events, kpi("escapes", "quality")], "w")
+    quality = lessons.freeze_plan(trial, [events, kpi("escapes", "quality")], "w", (), NOW)
     roles = {measure.name: measure.role for measure in quality.measures}
     assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "shown"
 
