@@ -103,11 +103,6 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             raise RuntimeError('account_refresh_superseded')
         _store_account_catalog(provider, list(models.values()), harness_version, db=connection,
                                unlisted_errors=staged.unlisted_errors)
-        from connections.harness_models import _ADAPTERS, record_refresh_attempt
-        from infra.time import utc_now_iso
-
-        record_refresh_attempt(provider, harness_version=harness_version, source=_ADAPTERS[provider][2],
-                               timestamp=utc_now_iso(), error=None, db=connection)
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 
@@ -118,7 +113,7 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             after_commit(connection, lambda: _publish_cache(context.account_id, stage, cache_receipt, db))
         after_commit(connection, schedule_models_changed)
         return AccountRefreshResult(provider, context.account_id, status='ready',
-            model_count=len(models), effective_receipt=receipt)
+            model_count=len(models), effective_receipt=receipt, harness_version=harness_version)
 
 
 def record_discovery_failure(provider, *, context, cause, harness_version=None, reason=None, db=None):

@@ -84,15 +84,28 @@ async def refresh_signed_in_accounts(provider, *, reason, harness_version, binar
     ready = any(result.status == 'ready' for result in results)
     causes = [result.cause for result in results if result.cause]
     error = None if ready else (next(iter(causes), None) if results else 'account_not_configured')
-    if not ready and 'account_refresh_superseded' not in causes and (causes or not results):
-        # The vendor clock records the sweep, never one account: an account's own failure
-        # stays on its discovery and must not back off or reset the others' checks.
+    # The vendor clock records the sweep, never one account: an account's own refresh, ready or
+    # failed, stays on its discovery and must not back off or reset the others' checks.
+    if ready or ('account_refresh_superseded' not in causes and (causes or not results)):
         from infra.time import utc_now_iso
 
-        version = harness_version or await harness_models._db_call(
+        read = next((result.harness_version for result in results if result.status == 'ready'), None)
+        version = read or harness_version or await harness_models._db_call(
             harness_models._cached_harness_version, provider, db=db)
-        await harness_models._db_call(
-            harness_models.store_failure, provider, causes[0] if causes else 'account_not_configured',
-            harness_version=version, source=harness_models._ADAPTERS[provider][2],
-            timestamp=utc_now_iso(), db=db)
+        stamp = dict(harness_version=version, source=harness_models._ADAPTERS[provider][2],
+                     timestamp=utc_now_iso(), db=db)
+        if ready:
+            await harness_models._db_call(_store_sweep_success, provider, **stamp)
+        else:
+            await harness_models._db_call(harness_models.store_failure, provider, error, **stamp)
     return {'provider': provider, 'reason': reason, 'ok': ready, 'error': error}
+
+
+def _store_sweep_success(provider, *, harness_version, source, timestamp, db=None):
+    """Stamp a sweep that read at least one account; each account committed its own rows."""
+    from connections.harness_models import record_refresh_attempt
+    from infra.database import write_transaction
+
+    with write_transaction(db, scope='harness_model_catalog') as connection:
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=None, db=connection)

@@ -222,9 +222,10 @@ def seed_catalog(provider: str, rows: list[dict], *, harness_version: str, sourc
                  db=None, unlisted_errors: dict[str, str] | None = None) -> None:
     """Store catalog rows and their refresh envelope with the production writers, for a test about the catalog.
 
-    The writers are the two a committed account discovery calls (``upsert_discovered_rows`` through
-    ``account_discovery_commit._store_account_catalog``, then ``record_refresh_attempt``); this skips only the
-    account discovery evidence that function derives its rows from, for tests that have no account.
+    The writers are the ones a sweep with a ready account calls (``upsert_discovered_rows`` through
+    ``account_discovery_commit._store_account_catalog``, then ``record_refresh_attempt`` through
+    ``account_discovery_refresh._store_sweep_success``); this skips only the account discovery evidence those rows derive from, for tests
+    that have no account.
     """
     from connections.harness_models import record_refresh_attempt, upsert_discovered_rows
     from infra.database import write_transaction

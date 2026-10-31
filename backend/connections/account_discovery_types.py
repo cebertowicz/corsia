@@ -47,6 +47,7 @@ class AccountRefreshResult:
     cause: str | None = None
     model_count: int = 0
     effective_receipt: ReceiptFence | None = field(default=None, repr=False)
+    harness_version: str | None = None
 
 
 def capture_discovery_context(provider: str, *, account_id: str | None = None,

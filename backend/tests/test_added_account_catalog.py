@@ -252,3 +252,72 @@ async def test_vendor_refresh_clock_records_the_sweep_not_one_account(accounts, 
         assert (result['ok'], envelope['last_error']) == (False, 'account_discovery_failed')
     else:
         assert result['ok'] is True and envelope['last_error'] is None and envelope['refreshed_at']
+
+
+_HOUR_AGO_AND_MORE = '2026-01-01T00:00:00+00:00'
+
+
+async def _save_envelope(provider, **envelope):
+    from connections.harness_models import _save_discovery_envelope
+    from infra.database import write_transaction
+    from infra.db_async import run_in_db
+
+    def save():
+        with write_transaction(None, scope='test_discovery_envelope') as connection:
+            _save_discovery_envelope(provider, envelope, db=connection)
+    await run_in_db(save)
+
+
+def _ready_refresh(version, fails=()):
+    async def refresh_once(provider, *, context, db_call, db, **_):
+        from connections.account_discovery_commit import commit_discovery_bundle, record_discovery_failure
+
+        if context.account_id in fails:
+            return await db_call(record_discovery_failure, provider, context=context,
+                                 cause='account_discovery_failed', db=db)
+        return await db_call(commit_discovery_bundle, provider,
+                             SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+                             [_row('swept')], context=context, harness_version=version, db=db)
+    return refresh_once
+
+
+@pytest.mark.asyncio
+async def test_one_accounts_ready_refresh_leaves_the_vendor_clock(accounts, monkeypatch):
+    """A sign-in or usage recheck reads one account: the others still get their hourly sweep."""
+    from connections import account_discovery_refresh, harness_models
+    from connections.vendor_accounts import list_accounts
+
+    await _save_envelope('codex', harness_version='1', source='test', refreshed_at=_HOUR_AGO_AND_MORE,
+                         attempted_at=_HOUR_AGO_AND_MORE, last_error=None)
+    before = harness_models.read_discovery_envelope('codex')
+    due = harness_models.cache_refresh_reason('codex', harness_version='1')
+    assert due is not None
+    account = next(account for account in list_accounts(provider='codex') if account['state'] == 'signed_in')
+    monkeypatch.setattr(account_discovery_refresh, 'refresh_account_once', _ready_refresh('1'))
+
+    result = await harness_models.refresh_provider('codex', reason='account-signin', account_id=account['id'],
+                                                   binary='/bin/test')
+
+    assert result.status == 'ready'
+    assert harness_models.read_discovery_envelope('codex') == before
+    assert harness_models.cache_refresh_reason('codex', harness_version='1') == due
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_with_a_ready_account_stamps_the_version_it_read(accounts, monkeypatch):
+    """The sweep, not the account, clears the vendor's failure; with no probed version it keeps the one read."""
+    from connections import account_discovery_refresh, harness_models
+    from connections.vendor_accounts import list_accounts
+
+    await _save_envelope('codex', harness_version='1', source='test', refreshed_at=_HOUR_AGO_AND_MORE,
+                         attempted_at=_HOUR_AGO_AND_MORE, last_error='account_discovery_failed')
+    signed_in = [account['id'] for account in list_accounts(provider='codex') if account['state'] == 'signed_in']
+    assert len(signed_in) > 1
+    monkeypatch.setattr(account_discovery_refresh, 'refresh_account_once', _ready_refresh('2', fails={signed_in[0]}))
+
+    result = await harness_models.refresh_provider('codex', reason='stale', binary='/bin/test')
+
+    envelope = harness_models.read_discovery_envelope('codex')
+    assert result['ok'] is True and envelope['last_error'] is None
+    assert envelope['refreshed_at'] > _HOUR_AGO_AND_MORE and envelope['harness_version'] == '2'
+    assert harness_models.cache_refresh_reason('codex', harness_version='2') is None

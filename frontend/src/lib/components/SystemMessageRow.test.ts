@@ -219,6 +219,26 @@ describe('SystemMessageRow', () => {
 		await vi.waitFor(() => expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in'));
 	});
 
+	it('expired-login rows that appear together share one account read, and a row that appears later reads again', async () => {
+		const reads = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ accounts: [account('shared', { state: 'signed_in' })] }), { status: 200 }));
+		vi.stubGlobal('fetch', reads);
+		vendorAccounts.set([account('shared', { state: 'signed_in' })]);
+		const message = { id: 'shared-expiry', role: 'system', content: 'shared is signed out of Claude Code.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'shared' } };
+		const settled = async () => { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); };
+		const rows = [0, 1, 2].map(() => mount(SystemMessageRow, { target: host, props: { msg: message } }));
+		flushSync();
+		await vi.waitFor(() => expect(host.textContent).toContain('It’s signed in now.'));
+		await settled();
+		expect(reads).toHaveBeenCalledTimes(1);
+		for (const row of rows) await unmount(row);
+		// Nothing keeps a settled read: the same message shown again reads the account's state now.
+		component = mount(SystemMessageRow, { target: host, props: { msg: message } });
+		flushSync();
+		await vi.waitFor(() => expect(reads).toHaveBeenCalledTimes(2));
+		await settled();
+		expect(reads).toHaveBeenCalledTimes(2);
+	});
+
 	it('writes no link without a usable account id to land on', () => {
 		render({ id: 'no-account', role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error' } });
 		render({ id: 'odd-account', role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error', account_id: 'x y' } });

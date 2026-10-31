@@ -2,8 +2,6 @@
 	let requestedAccounts = false;
 	/** Accounts whose sign-in the rows have already checked once: a long chat sends one check per account, not one per row. */
 	const checkedAccounts = new Set<string>();
-	/** Rows whose account state was read live when they appeared: the page's list can predate the sign-out the row reports. */
-	const liveReadRows = new Map<string, Promise<unknown>>();
 	let accountsRead: Promise<unknown> | null = null;
 	/** Rows that mount together share one read. */
 	function readAccountsOnce(load: () => Promise<unknown>) {
@@ -96,14 +94,12 @@
 			void loadVendorAccounts();
 		}
 	});
-	// An expired-login row decides between live recovery and history on the account's state now, so it reads that once.
+	// An expired-login row decides between live recovery and history on the account's state now, so it reads that
+	// once when it appears: the page's list can predate the sign-out the row reports.
 	$effect(() => {
-		if (!(accountId && expiredLogin && namedAccount && namedAccount.state !== 'signed_out' && !activeSignin)) return;
-		const key = String(msg.id ?? `${accountId}:${content}`);
-		let read = liveReadRows.get(key);
-		if (!read) { read = readAccountsOnce(() => loadVendorAccounts()); liveReadRows.set(key, read); }
+		if (liveRead || !(accountId && expiredLogin && namedAccount && namedAccount.state !== 'signed_out' && !activeSignin)) return;
 		const done = () => { liveRead = true; };
-		void read.then(done, done);
+		void readAccountsOnce(() => loadVendorAccounts()).then(done, done);
 	});
 	const quietRow = $derived(
 		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone,
