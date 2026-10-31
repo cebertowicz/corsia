@@ -97,7 +97,6 @@ async def drain():
 
 
 class FakeControl:
-    mutation = None
     instances: list['FakeControl'] = []
 
     def __init__(self, **kwargs):
@@ -113,8 +112,6 @@ class FakeControl:
 
     async def _request(self, method, params):
         assert (method, params) == ('account/rateLimits/read', None)
-        if self.mutation:
-            self.mutation()
         return {'ordinaryUsageAllowed': True, 'rateLimits': {}}
 
 
@@ -123,12 +120,10 @@ def control(monkeypatch):
     from connections import harness_usage_check as checks
 
     FakeControl.instances = []
-    FakeControl.mutation = None
     monkeypatch.setattr(checks, '_CHECKS', {})
     monkeypatch.setattr(checks, '_binary_for', lambda _p: asyncio.sleep(0, result='/bin/test'))
     monkeypatch.setattr('subagents.codex_app_server.CodexAppServerSession', FakeControl)
     yield FakeControl
-    FakeControl.mutation = None
 
 
 def _seed(provider: str, **config) -> None:
@@ -162,6 +157,28 @@ def _checks_clean(monkeypatch, isolated_db):
 
 def _limited(provider: str) -> None:
     codex_usage.record_limited(reason="limit", resets_at=None, source="test", provider=provider, receipt=default_receipt(provider))
+
+
+def _codex_refresh_reads(monkeypatch, report: dict, *, on_read=None) -> list:
+    """Stub only the vendor reads under a Codex account's own refresh: its adapter reports ``report``."""
+    from connections import harness_models
+    from connections.account_discovery_types import StagedDiscovery
+
+    contexts: list = []
+
+    async def adapter(_binary, *, context):
+        contexts.append(context)
+        if on_read:
+            on_read()
+        return StagedDiscovery({'models': ['test']}, usage_report=report)
+
+    async def version(_binary, **_kwargs):
+        return 'test'
+
+    monkeypatch.setitem(harness_models._ADAPTERS, 'codex', (
+        adapter, lambda _payload, **_kwargs: [{'selector_id': 'test', 'available': True}], 'synthetic'))
+    monkeypatch.setattr(harness_models, 'binary_version', version)
+    return contexts
 
 
 class _Process:
@@ -722,6 +739,7 @@ async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notif
     refused = _row(db)
     assert (refused['delivery_state'], refused['write_outcome'], refused['active_turn_id']) == ('queued', 'proved_no_write', None)
     assert _kind(db) == ('model', 'model')
+    _codex_refresh_reads(monkeypatch, {'ordinaryUsageAllowed': True, 'rateLimits': {}})
     await checks._check('codex', default['id'])
     await drain()
     assert harness_usage.active_limit(provider='codex', account_id=default_id('codex')) is None
@@ -742,7 +760,7 @@ async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notif
 
 
 @pytest.mark.asyncio
-async def test_old_default_recheck_cannot_clear_new_login(accounts, notification_owner, control):
+async def test_old_default_recheck_cannot_clear_new_login(accounts, notification_owner, monkeypatch):
     from connections import harness_usage_check as checks, harness_usage
     from connections.account_receipts import capture_receipt
 
@@ -754,7 +772,7 @@ async def test_old_default_recheck_cannot_clear_new_login(accounts, notification
         _known_default(db, default, login=2)
         harness_usage.record_limited(reason='new-login-limit', resets_at=None, source='test', provider='codex', receipt=default_receipt('codex'))
 
-    control.mutation = staticmethod(new_login)
+    _codex_refresh_reads(monkeypatch, {'ordinaryUsageAllowed': True, 'rateLimits': {}}, on_read=new_login)
     await checks._check('codex', default['id'])
     await drain()
     assert harness_usage.active_limit(provider='codex', account_id=default_id('codex'))['reason'] == 'new-login-limit'
@@ -763,7 +781,7 @@ async def test_old_default_recheck_cannot_clear_new_login(accounts, notification
 
 
 @pytest.mark.asyncio
-async def test_unknown_default_receipt_refuses_and_preserves_custom_usage(accounts, notification_owner, control):
+async def test_unknown_default_receipt_refuses_and_preserves_custom_usage(accounts, notification_owner, monkeypatch):
     from connections import harness_usage_check as checks, harness_usage
     from connections.harness_usage import stored_usage
     from vendor_account_fixtures import _ready
@@ -778,16 +796,17 @@ async def test_unknown_default_receipt_refuses_and_preserves_custom_usage(accoun
     set_account_state(default['id'], 'signed_out', expected_revision=get_account(default['id'], db=db)['revision'], db=db)
     db.commit()
     default_before = stored_usage(provider='codex', account_id=default['id'], db=db)
+    reads = _codex_refresh_reads(monkeypatch, {'ordinaryUsageAllowed': True, 'rateLimits': {}})
     await checks._check('codex', default['id'])
     await drain()
-    assert control.instances == []  # no vendor read starts for an account with no current login
+    assert reads == []  # no vendor read starts for an account with no current login
     assert stored_usage(provider='codex', account_id=default['id'], db=db) == default_before
     assert stored_usage(provider='codex', account_id=custom['id'], db=db) == custom_before
     assert notification_owner == []
 
 
 @pytest.mark.asyncio
-async def test_current_custom_refresh_is_independent_of_default_recheck(accounts, notification_owner, control, monkeypatch):
+async def test_current_custom_refresh_is_independent_of_default_recheck(accounts, notification_owner, monkeypatch):
     from connections import harness_models, harness_usage, harness_usage_check as checks
     from connections.account_discovery_types import StagedDiscovery
     from connections.vendor_accounts import get_account
@@ -801,8 +820,10 @@ async def test_current_custom_refresh_is_independent_of_default_recheck(accounts
     harness_usage.record_limited(reason='limit', resets_at=None, source='test', provider='codex', receipt=default_receipt('codex'))
     custom_before = get_account(custom['id'], db=db)
     other_before = get_account(other['id'], db=db)
+    default_reads = _codex_refresh_reads(monkeypatch, {'ordinaryUsageAllowed': True, 'rateLimits': {}})
     await checks._check('codex', default['id'])
     await drain()
+    assert [context.account_id for context in default_reads] == [default['id']]
     assert get_account(custom['id'], db=db) == custom_before
     assert get_account(other['id'], db=db) == other_before
     default_before = stored_usage(provider='codex', account_id=default['id'], db=db)
@@ -1042,13 +1063,7 @@ async def test_recheck_restores_a_limited_account_and_notifies(monkeypatch, prov
             return _Process(_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 1}}}))
         monkeypatch.setattr(checks.asyncio, "create_subprocess_exec", spawn)
     else:
-        class Session:
-            def __init__(self, **_kwargs): pass
-            async def start(self): pass
-            async def close(self, **_kwargs): pass
-            async def _request(self, _method, _params):
-                return {"ordinaryUsageAllowed": True, "rateLimits": {}}
-        monkeypatch.setattr("subagents.codex_app_server.CodexAppServerSession", Session)
+        _codex_refresh_reads(monkeypatch, {"ordinaryUsageAllowed": True, "rateLimits": {}})
     await checks._check(provider, default_id(provider))
     assert codex_usage.active_limit(provider=provider, account_id=default_id(provider)) is None
     assert notified == [True]
@@ -1070,15 +1085,49 @@ async def test_recheck_keeps_a_limit_and_updates_reset(monkeypatch, provider, _c
             return _Process(_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 100, "resets_at": reset}}}))
         monkeypatch.setattr(checks.asyncio, "create_subprocess_exec", spawn)
     else:
-        class Session:
-            def __init__(self, **_kwargs): pass
-            async def start(self): pass
-            async def close(self, **_kwargs): pass
-            async def _request(self, _method, _params):
-                return {"ordinaryUsageAllowed": False, "rateLimits": {"rateLimitReachedType": "limit", "primary": {"usedPercent": 100, "resetsAt": reset}}}
-        monkeypatch.setattr("subagents.codex_app_server.CodexAppServerSession", Session)
+        _codex_refresh_reads(monkeypatch, {"ordinaryUsageAllowed": False, "rateLimits": {
+            "rateLimitReachedType": "limit", "primary": {"usedPercent": 100, "resetsAt": reset}}})
     await checks._check(provider, default_id(provider))
     assert codex_usage.active_limit(provider=provider, account_id=default_id(provider))["resets_at"] is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("outcome", "recorded"), [
+    (("ready", None), None),
+    (("failed", "account_home_missing"), "codex usage read failed: account_home_missing"),
+    (("failed", None), "codex usage read failed: refresh did not finish"),
+    (("failed", "account_refresh_superseded"), None),
+], ids=("ready", "failed-keeps-cause", "failed-no-cause", "superseded-ignored"))
+async def test_codex_recheck_reads_usage_through_the_accounts_own_refresh(
+        monkeypatch, outcome, recorded, _checks_clean):
+    from connections import harness_models
+    from connections.account_discovery_types import AccountRefreshResult
+
+    _seed("codex")
+    _limited("codex")
+    account_id = default_id("codex")
+    expected = default_receipt("codex")
+    calls = []
+
+    async def refresh(provider, **kwargs):
+        calls.append((provider, kwargs))
+        status, cause = outcome
+        return AccountRefreshResult(provider, account_id, status=status, cause=cause)
+
+    async def no_ambient_session(*_args, **_kwargs):
+        raise AssertionError("a Codex recheck must not open an ambient control session")
+
+    monkeypatch.setattr(harness_models, "refresh_provider", refresh)
+    monkeypatch.setattr(checks, "_binary_for", no_ambient_session)
+    monkeypatch.setattr("subagents.codex_app_server.CodexAppServerSession", no_ambient_session)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+
+    await checks._check("codex", account_id)
+
+    assert [(provider, kwargs.get("account_id"), kwargs.get("expected_receipt"), kwargs.get("reason"))
+            for provider, kwargs in calls] == [("codex", account_id, expected, "usage-recheck")]
+    last_check = (codex_usage.stored_usage(provider="codex", account_id=account_id) or {}).get("last_check") or {}
+    assert last_check.get("error") == recorded
 
 
 @pytest.mark.asyncio
