@@ -74,7 +74,7 @@
 		const result = await (action === 'start' ? startVendorSignin(accountId) : action === 'check' ? checkVendorSignin(accountId) : cancelVendorSignin(accountId));
 		busy = false;
 		if (result.signin) signin.update((current) => rememberVisibleSignin(current, result.signin!, $vendorAccounts));
-		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Could not check sign-in.';
+		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Couldn’t check sign-in. Try again.';
 		else if (result.error) actionError = result.error;
 	}
 	async function refreshModels() {
