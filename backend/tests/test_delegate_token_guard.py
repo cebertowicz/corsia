@@ -200,6 +200,24 @@ def test_without_an_override_a_missing_token_fails_loud(tmp_path):
     assert not (tmp_path / "home" / ".corsia" / "credentials").exists()
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a closed folder")
+def test_without_an_override_a_closed_token_folder_says_so(tmp_path):
+    folder = tmp_path / "home" / ".corsia" / "credentials"
+    folder.mkdir(parents=True, mode=0o700)
+    (folder / "api-token").write_text("folder-token")
+    folder.chmod(0)
+    try:
+        proc = _without_override(tmp_path, "status", "sess-x")
+    finally:
+        folder.chmod(0o700)
+
+    assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}\n{proc.stderr}"
+    assert "permission denied" in proc.stderr
+    assert "its own tools" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert "folder-token" not in proc.stdout + proc.stderr
+
+
 def test_python_cli_direct_invocation_fails_loud(tmp_path):
     token_file = tmp_path / ".api-token"
     proc = subprocess.run(

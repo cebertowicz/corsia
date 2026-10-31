@@ -56,10 +56,9 @@ revokes it.
 - [invariant] Work only in `worktree_create` worktrees of the project
   repository; never in the serving checkout or the base clone.
 - [invariant] Never set or override upstream `qa/*` statuses or labels.
-- [invariant] Reach CORSIA only through the API token in
-  `~/.corsia/credentials/api-token`; never handle a password or paste a token
-  anywhere, and stop on HTTP 401 (`context/CORSIA-API-ACCESS.md`; requires
-  CORSIA at or after `f98af18a`).
+- [invariant] Reach CORSIA only through its scoped tools; never read or copy
+  the CLI API token, handle a password, or paste a token anywhere, and stop on
+  HTTP 401 (`context/CORSIA-API-ACCESS.md`).
 - Root-cause fixes that leave the codebase most maintainable
   (`shared/standards/DEVELOPMENT-DOCTRINE.md`).
 - Run only targeted tests locally; upstream CI owns the full suite.
