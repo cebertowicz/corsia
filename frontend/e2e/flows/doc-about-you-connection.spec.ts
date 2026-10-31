@@ -105,7 +105,6 @@ for (const width of [1440, 393]) {
 				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __conn: Array<{ at: number; s: string }>; __dropAt: number[] };
 				return { timeline: w.__timeline, conn: w.__conn, dropAt: w.__dropAt };
 			});
-			console.log('AS-TIMELINE', JSON.stringify({ name: `drop at ${width}`, totals: HEADINGS.map((_, i) => replacement(i).length), openMs: 0, sentAt: 0, timeline: snap.timeline, frames: [], conn: snap.conn, dropAt: snap.dropAt }));
 			// The drop came while the inserts were typing, and the viewer's status line showed it.
 			expect(snap.dropAt).toHaveLength(1);
 			expect(snap.conn.map((c) => c.s.split(' ')[0])).toEqual(expect.arrayContaining(['Disconnected', 'Reconnecting…']));

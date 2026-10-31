@@ -86,9 +86,24 @@ function startLoad(artifactId: string): Promise<CommentFeedback> {
 	return load;
 }
 
+/**
+ * Per document whose socket dropped, whether it is back. Frames sent meanwhile
+ * never come back, so every load from the drop through the first one to start
+ * after the reconnect looks for the suggestions they missed.
+ */
+const framesLost = new Map<string, boolean>();
+/** The socket dropped while this document was open. */
+export function noteFramesLost(artifactId: string): void {
+	framesLost.set(artifactId, false);
+}
+/** The socket is back: the next load to start is the last that looks. */
+export function noteFramesBack(artifactId: string): void {
+	if (framesLost.has(artifactId)) framesLost.set(artifactId, true);
+}
+
 type UnseenListener = (artifactId: string, rows: DocComment[]) => void;
 const unseenListeners = new Set<UnseenListener>();
-/** Told, before a load shows them, of the open agent suggestions a reload of already-loaded comments finds that this canvas never showed (their change and activity frames were missed). */
+/** Told, before a load shows them, of the open agent suggestions a reload while frames were lost finds that this canvas never showed. */
 export function onUnseenSuggestions(listener: UnseenListener): () => void {
 	unseenListeners.add(listener);
 	return () => unseenListeners.delete(listener);
@@ -99,13 +114,16 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 	// agent) stays 'ready': only a first load, or a retry after an error, reads
 	// as loading and disables the comments control.
 	const reload = get(commentLoads)[artifactId]?.state === 'ready';
+	// Only frames lost to a drop stay missing; on a live socket a suggestion's own frames are still on their way.
+	const lostFrames = framesLost.has(artifactId);
+	if (framesLost.get(artifactId)) framesLost.delete(artifactId);
 	if (!reload) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'loading' } }));
 	}
 	try {
 		const { comments, feedback } = await fetchComments(artifactId);
 		const rows = comments.map(fromServer);
-		if (reload) {
+		if (reload && lostFrames) {
 			const known = new Set([...(get(docComments)[artifactId] ?? []).map((row) => row.id), ...heldIds(artifactId)]);
 			const unseen = rows.filter((row) => !known.has(row.id) && row.authorKind === 'agent' && row.authorThreadId
 				&& row.replacement != null && !row.resolved && !row.decision);

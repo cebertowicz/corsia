@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerComment } from '$lib/api/docs';
 import { recordDocActivity, resetDocPresenceForTests } from './docPresence';
 import { attachDocPresenceSurface, startDocPresence } from './docPresenceRuntime';
-import { commentLoads, docComments, loadComments } from './stores/docComments';
+import { commentLoads, docComments, loadComments, noteFramesBack, noteFramesLost } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
 
 const wire = vi.hoisted(() => ({ rows: [] as unknown[] }));
@@ -43,11 +43,13 @@ function attach(options: { viewing?: boolean; reducedMotion?: boolean } = {}) {
 	return typed;
 }
 
-/** The canvas had loaded its comments (nothing yet), then a reload runs, as after a reconnect. */
+/** The canvas had loaded its comments (nothing yet), then the socket dropped and the reconnect reload runs. */
 async function loadedThenReload(rows: ServerComment[]) {
 	wire.rows = [];
 	await loadComments(ART);
 	wire.rows = rows;
+	noteFramesLost(ART);
+	noteFramesBack(ART);
 	await loadComments(ART);
 	await vi.advanceTimersByTimeAsync(0);
 }
@@ -102,10 +104,39 @@ describe('a reload that finds a suggestion this canvas never showed', () => {
 		expect(shown()).toEqual(['s1']);
 	});
 
+	it('leaves a reload on a live socket to the suggestion\'s own frames', async () => {
+		const typed = attach();
+		wire.rows = [];
+		await loadComments(ART);
+		wire.rows = [suggestion('s1')];
+		await loadComments(ART);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(typed).toEqual([]);
+	});
+
+	it('arrives one a load finds while the socket is down, and stops looking after the first load past the reconnect', async () => {
+		const typed = attach();
+		wire.rows = [];
+		await loadComments(ART);
+		noteFramesLost(ART);
+		wire.rows = [suggestion('s1')];
+		await loadComments(ART);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(typed).toHaveLength(1);
+		noteFramesBack(ART);
+		await loadComments(ART);
+		wire.rows = [suggestion('s1'), suggestion('s2')];
+		await loadComments(ART);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(typed).toHaveLength(1);
+	});
+
 	it('leaves a suggestion already shown alone', async () => {
 		const typed = attach();
 		wire.rows = [suggestion('s1')];
 		await loadComments(ART);
+		noteFramesLost(ART);
+		noteFramesBack(ART);
 		await loadComments(ART);
 		expect(typed).toEqual([]);
 		expect(shown()).toEqual(['s1']);
@@ -129,6 +160,8 @@ describe('a reload that finds a suggestion this canvas never showed', () => {
 		const typed = attach();
 		wire.rows = [suggestion('first')];
 		await loadComments(ART);
+		noteFramesLost(ART);
+		noteFramesBack(ART);
 		wire.rows = [
 			suggestion('first'),
 			suggestion('plain', { replacement: null }),

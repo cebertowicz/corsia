@@ -87,7 +87,6 @@ for (const width of [1440, 393]) {
 				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __conn: Array<{ at: number; s: string }> };
 				return { timeline: w.__timeline, conn: w.__conn };
 			});
-			console.log('AS-TIMELINE', JSON.stringify({ name: `outage at ${width}`, totals: [(HEADING + INSERT).length], openMs: 0, sentAt: 0, timeline: snap.timeline, frames: [], conn: snap.conn, dropAt: [] }));
 			const series = snap.timeline.flatMap(({ s }) => s.split(' ').filter(Boolean).map((part) => Number(part.split('=')[1])));
 			expect(series[0]).toBeLessThan(20);
 			expect(Math.max(...series.slice(1).map((n, i) => n - series[i]))).toBeLessThanOrEqual(40);

@@ -1,7 +1,7 @@
 import { fetchContent, markArtifactVerified } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
+import { ackComment, addReply, loadComments, noteFramesBack, noteFramesLost, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -128,11 +128,18 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 	};
 }
 
-/** Change and activity frames sent while the socket was down never come back: call the returned function with each connection state, and it reloads once the connection returns. */
-export function reloadAfterReconnect(reload: () => void): (connection: string | null) => void {
+/** Change and activity frames sent while the socket was down never come back: call the returned function with each connection state, and it tells the document's comments of the drop and reloads them once the connection returns. */
+export function reloadAfterReconnect(artifactId: () => string | null, reload: () => void): (connection: string | null) => void {
 	let dropped = false;
 	return (connection) => {
-		if (connection === 'disconnected' || connection === 'reconnecting') dropped = true;
-		else if (connection === 'connected' && dropped) { dropped = false; reload(); }
+		const artifact = artifactId();
+		if (connection === 'disconnected' || connection === 'reconnecting') {
+			if (!dropped && artifact) noteFramesLost(artifact);
+			dropped = true;
+		} else if (connection === 'connected' && dropped) {
+			dropped = false;
+			if (artifact) noteFramesBack(artifact);
+			reload();
+		}
 	};
 }

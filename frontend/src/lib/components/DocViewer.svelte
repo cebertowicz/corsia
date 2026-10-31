@@ -106,7 +106,7 @@
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
-	const reloadOnReconnect = reloadAfterReconnect(() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus));
+	const reloadOnReconnect = reloadAfterReconnect(() => loadedArtifactId, () => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus));
 	$effect(() => reloadOnReconnect(liveConnection));
 	let legacyAwaitingSave = $state(false);
 	bindViewerSession(() => liveSession, (state) => {
