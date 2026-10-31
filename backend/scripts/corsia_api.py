@@ -11,13 +11,24 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# The standalone CLIs share the token location with the backend's shell floor.
+_BACKEND = str(Path(__file__).resolve().parents[1])
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+
+from infra.api_token_file import api_token_file, move_legacy_token  # noqa: E402
+
 DEFAULT_PORT = 1956  # held equal to infra.default_port by tests/test_default_port.py
 DEFAULT_BASE = f"http://127.0.0.1:{DEFAULT_PORT}"
 
-TOKEN_FILE = Path(
-    os.environ.get("CORSIA_API_TOKEN_FILE")
-    or Path.home() / ".corsia" / ".api-token"
-)
+# An override is the person's own choice of file and lies outside the shell floor.
+_OVERRIDE = os.environ.get("CORSIA_API_TOKEN_FILE")
+TOKEN_FILE = Path(_OVERRIDE or api_token_file(Path.home()))
+
+
+def settle_token_file() -> None:
+    """Move a token left at an earlier location into the token folder."""
+    move_legacy_token(Path.home(), Path(_OVERRIDE) if _OVERRIDE else None)
 
 
 def resolve_token(explicit: str | None) -> str:
@@ -27,6 +38,7 @@ def resolve_token(explicit: str | None) -> str:
     env = os.environ.get("CORSIA_API_TOKEN")
     if env and env.strip():
         return env.strip()
+    settle_token_file()
     if TOKEN_FILE.exists():
         import stat
         mode = TOKEN_FILE.stat().st_mode

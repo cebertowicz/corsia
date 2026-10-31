@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="corsia context",
         description="Manage workspace, project, and thread CTX bootloader files.",
     )
-    parser.add_argument("--token", help="API token (default: ~/.corsia/.api-token)")
+    parser.add_argument("--token", help="API token (default: ~/.corsia/credentials/api-token)")
     parser.add_argument("--base", help=f"API base URL (default: {_DEFAULT_BASE})")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

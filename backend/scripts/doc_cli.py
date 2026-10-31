@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="corsia doc",
         description="Agent doc-collab — comment / reply / review / resolve / ack / read.")
-    parser.add_argument("--token", help="API token (default: ~/.corsia/.api-token)")
+    parser.add_argument("--token", help="API token (default: ~/.corsia/credentials/api-token)")
     parser.add_argument("--base", help=f"API base URL (default: {_DEFAULT_BASE})")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

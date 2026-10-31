@@ -20,11 +20,12 @@ def run_delegate(
     *args: str,
     token_file: Path | None = None,
     corsia_dir: Path | None = None,
-    extra_env: dict[str, str] | None = None,
+    extra_env: dict[str, str | None] | None = None,
 ) -> subprocess.CompletedProcess:
     tf = token_file if token_file is not None else (tmp_path / ".api-token")
-    env = {
-        "HOME": os.environ["HOME"],
+    (tmp_path / "home").mkdir(exist_ok=True)
+    settings = {
+        "HOME": str(tmp_path / "home"),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
         "CORSIA_DIR": str(corsia_dir or REPO_ROOT),
         "CORSIA_PYTHON": sys.executable,
@@ -33,6 +34,7 @@ def run_delegate(
         "CORSIA_API_BASE": _CLOSED_BASE,
         **(extra_env or {}),
     }
+    env = {name: value for name, value in settings.items() if value is not None}
     return subprocess.run(
         ["bash", str(CORSIA_SCRIPT), "delegate", *args],
         capture_output=True,
@@ -159,6 +161,45 @@ def test_bare_delegate_reaches_argparse_not_the_token_guard(tmp_path):
     assert not token_file.exists()
 
 
+def _without_override(tmp_path, *args: str) -> subprocess.CompletedProcess:
+    return run_delegate(tmp_path, *args, extra_env={"CORSIA_API_TOKEN_FILE": None})
+
+
+def test_without_an_override_the_token_folder_is_read(tmp_path):
+    folder = tmp_path / "home" / ".corsia" / "credentials"
+    folder.mkdir(parents=True, mode=0o700)
+    (folder / "api-token").write_text("folder-token")
+
+    proc = _without_override(tmp_path, "status", "sess-x")
+
+    assert proc.returncode != 2, f"present token wrongly rejected\n{proc.stderr}"
+    assert "folder-token" not in proc.stdout + proc.stderr
+
+
+def test_without_an_override_an_earlier_token_moves_into_the_folder(tmp_path):
+    legacy = tmp_path / "home" / ".corsia" / ".api-token"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("earlier-token")
+
+    proc = _without_override(tmp_path, "status", "sess-x")
+
+    assert proc.returncode != 2, f"earlier token not found after the move\n{proc.stderr}"
+    assert "earlier-token" not in proc.stdout + proc.stderr
+    assert not legacy.exists()
+    moved = tmp_path / "home" / ".corsia" / "credentials" / "api-token"
+    assert moved.read_text() == "earlier-token"
+    assert moved.stat().st_mode & 0o777 == 0o600
+
+
+def test_without_an_override_a_missing_token_fails_loud(tmp_path):
+    proc = _without_override(tmp_path, "status", "sess-x")
+
+    assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}\n{proc.stderr}"
+    assert "No API token found" in proc.stderr
+    assert str(tmp_path / "home" / ".corsia" / "credentials" / "api-token") in proc.stderr
+    assert not (tmp_path / "home" / ".corsia" / "credentials").exists()
+
+
 def test_python_cli_direct_invocation_fails_loud(tmp_path):
     token_file = tmp_path / ".api-token"
     proc = subprocess.run(
@@ -166,7 +207,7 @@ def test_python_cli_direct_invocation_fails_loud(tmp_path):
         capture_output=True,
         text=True,
         env={
-            "HOME": os.environ["HOME"],
+            "HOME": str(tmp_path),
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "CORSIA_API_TOKEN_FILE": str(token_file),
             "CORSIA_API_BASE": _CLOSED_BASE,

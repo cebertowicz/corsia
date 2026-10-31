@@ -21,6 +21,7 @@ from tools.host_path_resolution import (
     denied_paths_in,
     resolution_touches,
 )
+from tools.host_sandbox_floor import hard_floor_rules, stored_credential_roots
 from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
 from tools.protected_path_rules import ancestor_pins
 from tools.sandbox_git import sandbox_literal
@@ -105,9 +106,9 @@ class ProtectedHostPathPolicy:
         """Folders of stored secrets, closed to every agent route, leases included.
 
         The System hard floor covers protected credentials and a lease never
-        opens it. Add a root here only with the project owner's approval.
+        opens it. Add a root to ``stored_credential_roots`` only with the project owner's approval.
         """
-        return (self.state_root / "keys", self.state_root / "browser-profile")
+        return stored_credential_roots(self.state_root, self.home)
 
     @property
     def control_files(self) -> tuple[Path, ...]:
@@ -256,8 +257,7 @@ class ProtectedHostPathPolicy:
 
     def hard_floor_sandbox_rules(self) -> str:
         """Render permanent credential and browser boundaries, including under a lease."""
-        from tools.host_sandbox_floor import hard_floor_rules
-        floor = hard_floor_rules(self.credential_roots, sandbox_literal)
+        floor = hard_floor_rules(self.credential_roots, self.home, sandbox_literal)
         return "\n".join([floor, *workspace_git_rules(workspace_git_paths(self.workspace))])
 
     def sandbox_rules(self) -> str:

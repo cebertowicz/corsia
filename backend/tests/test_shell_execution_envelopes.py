@@ -298,7 +298,8 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     assert keys_deny in leased
     assert browser_profile_deny in leased
     assert f'(subpath "{state_root_text}")' not in leased
-    assert str((Path.home() / ".corsia").resolve(strict=False)) not in leased
+    # The rest of ~/.corsia stays reachable under a lease; only the token folder closes.
+    assert f'(subpath "{(Path.home() / ".corsia").resolve(strict=False)}")' not in leased
     assert (
         str((Path.home() / ".config" / "safehouse").resolve(strict=False)) not in leased
     )
@@ -336,11 +337,16 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     policy = current_protected_host_path_policy()
     workspace = policy.workspace
     # Folders above each credential root stay in place under a lease.
+    from infra.api_token_file import api_token_folder
     from tools.host_sandbox_floor import credential_ancestor_pins
     credential_pins = {
-        f'(deny file-write* (literal "{path}"))' for path in credential_ancestor_pins(policy.credential_roots)
+        f'(deny file-write* (literal "{path}"))'
+        for path in credential_ancestor_pins(policy.credential_roots, policy.home)
     }
     assert f'(deny file-write* (literal "{state_root.resolve()}"))' in credential_pins
+    token_folder = api_token_folder(policy.home).resolve(strict=False)
+    token_folder_deny = f'(deny file-read* file-write* (subpath "{token_folder}"))'
+    assert f'(deny file-write* (literal "{token_folder.parent}"))' in credential_pins
     expected_denied_lines = {
         *workspace_git_rules(workspace_git_paths(workspace)),
         f'(deny file-write* (literal "{profile.resolve(strict=False)}"))',
@@ -353,6 +359,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny mach-priv-task-port)",
         keys_deny,
         browser_profile_deny,
+        token_folder_deny,
         *credential_pins,
         *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }
