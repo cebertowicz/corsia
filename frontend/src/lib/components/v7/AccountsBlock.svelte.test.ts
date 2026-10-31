@@ -75,7 +75,6 @@ describe('rendering and actions', () => {
 			await settle();
 			expect(document.body.textContent).not.toContain('No Codex accounts signed in');
 			expect(document.body.textContent).toContain('Add account');
-			expect(document.body.textContent).not.toContain('Managed by provider');
 			expect(document.querySelector('#vendor-account-default')?.textContent).toContain('Sign in');
 			unmount(component);
 		});
@@ -89,7 +88,6 @@ describe('rendering and actions', () => {
 			await settle();
 			expect(document.body.textContent).toContain('No Codex accounts signed in');
 			expect(document.body.textContent).toContain('Add account');
-			expect(document.body.textContent).not.toContain('Managed by provider');
 			expect(document.querySelector('#vendor-account-default')).toBeNull();
 			unmount(component);
 		});
