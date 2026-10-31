@@ -168,6 +168,11 @@ def _community(strings: dict[str, Any]) -> dict[str, Any]:
     return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings), recommendation="A")
 
 
+def community_card() -> dict[str, Any]:
+    """The community decision as built; it needs no facts."""
+    return _community(text.COMMUNITY)
+
+
 def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]:
     address = agents_email(email)
     return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings),

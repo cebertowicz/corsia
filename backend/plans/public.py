@@ -80,7 +80,9 @@ from plans.onboarding_reads import (
     decision_answer_actor,
     decision_owner_id,
     has_genuine_decision_raised_at_or_after,
+    has_decision_from,
     has_open_titled_node,
+    workflow_step_of,
 )
 
 # Operator projections: the pane, chat list and attention (api/).

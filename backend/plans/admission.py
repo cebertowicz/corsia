@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import asdict, dataclass
 
@@ -90,9 +91,28 @@ def select(
     except sqlite3.IntegrityError:
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
+    from infra.database import TransactionOwnershipError
+    from infra.write_effects import after_commit
+
+    try:
+        after_commit(db, lambda: _became_current(node_id, str(node["plan_id"])))
+    except TransactionOwnershipError:
+        logging.getLogger(__name__).warning(
+            "community card not scheduled: transaction not owned by write_transaction",
+        )
     if touch:
         service.touch_node(db, node_id)
     return attempt, None
+
+
+def _became_current(node_id: str, plan_id: str) -> None:
+    """Tell onboarding a task was just selected, after commit; lazy import avoids a cycle."""
+    try:
+        from onboarding import step_cards
+
+        step_cards.raise_for_current_step(node_id, plan_id)
+    except Exception:  # noqa: BLE001 - see above
+        logging.getLogger(__name__).warning("onboarding step cards failed for %s", node_id, exc_info=True)
 
 
 def release(node_id: str, reason: str, *, db) -> bool:
