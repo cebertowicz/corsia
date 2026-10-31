@@ -142,3 +142,14 @@ def test_a_reworded_option_writes_nothing_and_warns(db, monkeypatch, workspace, 
 
     assert _profile(workspace) == NAME_LINES
     assert "option label CORSIA does not know" in caplog.text
+
+
+def test_each_setup_label_maps_to_its_pair_by_its_text():
+    from onboarding.community_answer import _ANSWERS
+
+    labels = [label for label, _detail in setup_strings.COMMUNITY["options"]]
+
+    assert sorted(labels) == sorted(_ANSWERS)
+    assert _ANSWERS["Use and share"] == (True, True)
+    assert _ANSWERS["Only use"] == (True, False)
+    assert _ANSWERS["Neither"] == (False, False)

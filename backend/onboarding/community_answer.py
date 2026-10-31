@@ -16,11 +16,13 @@ from onboarding import setup_strings
 
 log = logging.getLogger(__name__)
 
-# Option label -> (use community improvements, share improvements).
-_ANSWERS = dict(zip(
-    (label for label, _detail in setup_strings.COMMUNITY["options"]),
-    ((True, True), (True, False), (False, False)),
-))
+# Option label -> (use community improvements, share improvements). Keyed by the label's text, so
+# reordering the options cannot remap consent; a renamed label stops matching and the tests fail.
+_ANSWERS = {
+    "Use and share": (True, True),
+    "Only use": (True, False),
+    "Neither": (False, False),
+}
 
 
 def community_answer(decision: dict, chosen: dict) -> tuple[bool, bool] | None:

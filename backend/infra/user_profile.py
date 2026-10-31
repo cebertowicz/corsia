@@ -6,7 +6,8 @@ Install writes it only when it is missing; an existing file is the person's and
 is never changed there, except that an existing file naming no email gets that
 single line appended. While setup is unfinished, ``stage_profile_update`` also
 rewrites the full name, preferred name and email lines the account screen
-collected, and touches no other line.
+collected, and touches no other line. ``stage_community_answer`` sets the two community lines the person's
+answer to that decision decides, replacing each in place or adding it at the end.
 
 A write is staged beside its target and published by one rename, so the caller
 can put the publish at the end of its own transaction and undo it if that
@@ -258,7 +259,7 @@ def stage_profile_update(workspace: Path, *, full_name: str | None = None, email
 def stage_community_answer(workspace: Path, *, use: bool, share: bool) -> StagedProfile | None:
     """Prepare the two community lines the person's answer sets, leaving every other line as it is.
 
-    Each line is replaced where it is, or added at the end. A missing profile is created holding only
+    Each line is replaced where it is, or added at the end (the share line right after the use line). A missing profile is created holding only
     its heading and these lines; publishing refuses if one appeared meanwhile. Returns ``None`` when
     the file would not change. Raises ``OSError`` when the folder cannot be written.
     """
