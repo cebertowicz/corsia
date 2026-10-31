@@ -177,3 +177,94 @@ def test_the_frontend_label_mirrors_the_backend_sentence():
     root = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/messageDeliveryCopy.ts"
 
     assert CHAT_TOO_LONG_FOR_MEMORY_MESSAGE in root.read_text()
+
+
+def _usage(system: int) -> dict:
+    return {"fit_section_tokens": {"fixed": system}}
+
+
+def _sections(fixed: int, tools: int, current: int) -> tuple[tuple[str, int], ...]:
+    return (("fixed", fixed), ("current_input", current), ("tools", tools), ("provider_wrapper", 0))
+
+
+async def _folds_at_boundary(monkeypatch, *, window, rendered, usage, sections) -> bool:
+    """Run the real Native boundary and report whether it started an optional fold."""
+    from core import checkpoint_native_admission
+
+    started: list[str] = []
+
+    def snapshot(*_args, **_kwargs):
+        return None, None, None
+
+    async def run_in_db(function, *_args):
+        if function is snapshot:
+            return None, None, None
+        return SimpleNamespace(context_window=window, context_window_source="provider")
+
+    async def prepare(checkpoint_id, *_args, **_kwargs):
+        started.append(checkpoint_id)
+
+    monkeypatch.setattr(iteration_context, "provider_boundary_snapshot", snapshot)
+    monkeypatch.setattr(iteration_context, "run_in_db", run_in_db)
+    monkeypatch.setattr(iteration_context, "partial", lambda function, *_a, **_k: function)
+    monkeypatch.setattr(checkpoint_native_admission, "skip_optional_cold_fold", lambda *_a: None)
+    monkeypatch.setattr(checkpoint_native_admission, "prepare_native_checkpoint", prepare)
+    monkeypatch.setattr(iteration_context, "_read_native_checkpoint_context", lambda *_a: object())
+    ledger = SimpleNamespace(
+        target_catalog_id="local/m", effective_window_tokens=window, rendered_input_tokens=rendered,
+        input_identity="i", section_tokens=sections, fits=True,
+    )
+    state = turn_iteration._IterationState(
+        messages=[{"role": "user", "content": "go"}], context_usage=usage, tool_definitions=[],
+        context_identity=None, fit_ledger=ledger, fit_current_input="go",
+        checkpoint_source_messages=[], turn_model="local/m",
+    )
+    cancel = SimpleNamespace(checkpoint_wait_scope=CheckpointWaitScope())
+    await iteration_context.maintain_native_checkpoint(
+        agent=None, state=state, thread_id="t", turn_identity=TurnIdentity("turn", 1),
+        cancel_event=cancel, turn_model="local/m", reasoning_effort=None, project_id=None,
+    )
+    return bool(started)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window,system,tools,current,rendered,folds", [
+    # 32 GB seat: 18,618 fixed split 14,000 system prompt + 4,618 tools, 2,000 current input.
+    # Launch point 20,480; the smallest continuation is 20,618, so no optional fold starts.
+    (28_672, 14_000, 4_618, 2_000, 21_000, False),
+    # System prompt and tools already at the launch point with a small current input.
+    (58_000, 40_000, 10_000, 500, 52_000, False),
+    # A normal window still folds at its launch point (233,472).
+    (262_144, 8_000, 4_000, 500, 237_000, True),
+])
+async def test_the_futile_fold_minimum_counts_the_system_prompt(
+    monkeypatch, window, system, tools, current, rendered, folds,
+):
+    started = await _folds_at_boundary(
+        monkeypatch, window=window, rendered=rendered, usage=_usage(system),
+        sections=_sections(rendered - tools - current, tools, current),
+    )
+
+    assert started is folds
+
+
+@pytest.mark.asyncio
+async def test_the_system_measure_ignores_history_a_tool_phase_refit_absorbed(monkeypatch):
+    from core.destination_preflight import attach_native_provider_fit_ledger
+
+    system = {"role": "system", "content": "s " * 600}
+    history = [{"role": "user" if i % 2 else "assistant", "content": "h " * 400} for i in range(170)]
+    frame = {"role": "user", "content": "go"}
+    ledger = attach_native_provider_fit_ledger(
+        target_catalog_id="local/m", proven_target_window_tokens=58_000,
+        messages=[system, *history, frame], tools=[], input_identity="i", current_input=frame,
+    ).fit_ledger
+    absorbed = dict(ledger.section_tokens)["fixed"]
+    assert absorbed > 43_500  # read as a system measure, this would suppress the fold
+
+    started = await _folds_at_boundary(
+        monkeypatch, window=58_000, rendered=ledger.rendered_input_tokens,
+        usage=_usage(1_200), sections=ledger.section_tokens,
+    )
+
+    assert started is True

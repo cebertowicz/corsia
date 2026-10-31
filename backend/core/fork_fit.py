@@ -55,6 +55,8 @@ class ProviderPayload:
     installed_input_tokens: int | None
     checkpoint_admissible: bool
     recovery_input_tokens: int | None = None
+    # The system prompt and guidance every continuation also carries; never history.
+    system_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +135,7 @@ def evaluate_boundary(payload: ProviderPayload) -> BoundaryDecision:
         under_pressure = at_checkpoint_launch_point(max(current, recovery or 0), payload.context_window)
         # R08: an optional fold cannot relieve pressure when even the smallest
         # continuation it could produce would sit at the launch point itself.
-        futile = at_checkpoint_launch_point(minimum, payload.context_window)
+        futile = at_checkpoint_launch_point(minimum + payload.system_tokens, payload.context_window)
         if under_pressure and payload.checkpoint_admissible and not active and not futile:
             return BoundaryDecision.PROCEED_AND_FOLD
         return BoundaryDecision.PROCEED

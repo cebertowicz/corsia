@@ -161,10 +161,7 @@ async def _refresh_native_window(state, thread_id: str) -> str:
 
 def _minimum_native_input(ledger) -> int:
     sections = dict(ledger.section_tokens)
-    return sum(
-        int(sections.get(name) or 0)
-        for name in ("current_input", "tools", "provider_wrapper")
-    )
+    return sum(int(sections.get(name) or 0) for name in ("current_input", "tools", "provider_wrapper"))
 
 
 async def _render_native_installed(
@@ -303,6 +300,7 @@ async def maintain_native_checkpoint(
         wait_scope=scope,
         eager_checkpoint_id=eager.id if eager is not None else None,
         window_source=window_source,
+        system_input_tokens=int(dict(state.context_usage.get("fit_section_tokens") or {}).get("fixed") or 0),
     ))
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)

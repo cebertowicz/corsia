@@ -56,6 +56,7 @@ class ProviderBoundary:
     recovery_input_tokens: int | None = None
     # Where ``context_window`` came from; ``"memory"`` means the Mac's free memory capped it.
     window_source: str | None = None
+    system_input_tokens: int = 0
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
@@ -182,6 +183,7 @@ def _payload(
         installed_input_tokens=(installed.input_tokens if installed else None),
         checkpoint_admissible=boundary.prepare_checkpoint is not None,
         recovery_input_tokens=boundary.recovery_input_tokens,
+        system_tokens=boundary.system_input_tokens,
     )
 
 
