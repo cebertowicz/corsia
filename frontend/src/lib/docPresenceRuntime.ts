@@ -49,7 +49,7 @@ class ArtifactArrivalCoordinator {
 	private readonly expected = new Map<string, ReturnType<typeof setTimeout>>();
 	/** Comments released because no activity frame came; a late frame must not pull them back out. */
 	private readonly missed = new Set<string>();
-	/** Comments a lane has taken, from enqueue until that arrival's release; a later change frame leaves them alone. */
+	/** Comments a lane has taken, kept after they show: a comment arrives once, so a later change or activity frame leaves it alone. */
 	private readonly staged = new Set<string>();
 
 	constructor(private readonly artifactId: string) {}
@@ -108,7 +108,7 @@ class ArtifactArrivalCoordinator {
 	}
 
 	enqueue(frame: DocActivityFrame): void {
-		// A second frame for a comment a lane already holds (an unseen arrival, then its real frame) must not type it twice.
+		// A second frame for a comment a lane already took (an unseen arrival, then its real frame) must not type it twice.
 		if ((frame.kind === 'comment' || frame.kind === 'suggestion') && frame.comment_id && this.staged.has(frame.comment_id)) return;
 		let queue = this.queues.get(frame.thread_id);
 		if (!queue) {
@@ -141,7 +141,6 @@ class ArtifactArrivalCoordinator {
 
 	private release(arrival: RuntimeArrival): void {
 		if ((arrival.frame.kind !== 'comment' && arrival.frame.kind !== 'suggestion') || !arrival.frame.comment_id) return;
-		this.staged.delete(arrival.frame.comment_id);
 		releaseCommentArrival(this.artifactId, arrival.frame.comment_id);
 	}
 

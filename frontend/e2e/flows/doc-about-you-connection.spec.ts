@@ -1,8 +1,8 @@
 import { test } from '../support/test';
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
+import { expect } from '@playwright/test';
+import { sendChatMessage } from '../support/corsia';
 import { openLiveDocument } from '../support/liveDocument';
-import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
+import { agentCreatesSharedDocument, demoteAgent, openAgentBeside, streamedPieces } from '../support/sharedLiveDocument';
 import { readMockCallCount, seedMockResponses, type MockReply } from '../support/mock';
 
 /**
@@ -13,16 +13,6 @@ import { readMockCallCount, seedMockResponses, type MockReply } from '../support
 const promoted: string[] = [];
 test.afterEach(async ({ request }) => { for (const id of promoted.splice(0)) await demoteAgent(request, id); });
 
-async function openAgent(request: APIRequestContext, viewer: Page, title: string, promote: boolean) {
-	const id = await createSession(request, title);
-	if (promote) promoted.push(id);
-	const page = await viewer.context().newPage();
-	await loginByUrl(page);
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.locator('.thread-item').filter({ hasText: title }).click({ timeout: 10_000 });
-	return { id, title, page };
-}
-
 const HEADINGS = ['## Who you are', "## What you're working toward", '## How you like to work'];
 const BODY = [
 	'\n- Steve, goes by Steve; builds CORSIA, a layer that carries intent and context across your tools.\n- Based in Los Angeles; Pacific time.',
@@ -30,15 +20,6 @@ const BODY = [
 	'\n- Short answers first, the action second.\n- Plan heavily before executing; prove a hypothesis before building on it.',
 ];
 const replacement = (i: number) => HEADINGS[i] + BODY[i];
-
-/** The call's JSON input cut the way a provider streams it: the quote whole, then the replacement in three pieces. */
-function pieces(input: string): string[] {
-	const start = input.indexOf('"replacement":"') + '"replacement":"'.length;
-	const end = input.indexOf('","client_id"');
-	const value = input.slice(start, end);
-	const third = Math.ceil(value.length / 3);
-	return [input.slice(0, start), value.slice(0, third), value.slice(third, third * 2), value.slice(third * 2) + input.slice(end)];
-}
 
 for (const width of [1440, 393]) {
 	test(`@surface:live-document about-you suggestions type through a drop at ${width}`, async ({ browser, request }, testInfo) => {
@@ -78,13 +59,13 @@ for (const width of [1440, 393]) {
 				};
 				requestAnimationFrame(read);
 			});
-			const owner = await openAgent(request, viewer, `AC Owner ${stamp}`, true);
+			const owner = await openAgentBeside(request, viewer, `AC Owner ${stamp}`, promoted);
 			const live = await agentCreatesSharedDocument(request, owner, `about-you-c-${stamp}`, `# About you\n\n${HEADINGS.join('\n\n')}\n`);
 			const authors = [];
-			for (let i = 0; i < 3; i++) authors.push(await openAgent(request, viewer, `AC Author${i} ${stamp}`, false));
+			for (let i = 0; i < 3; i++) authors.push(await openAgentBeside(request, viewer, `AC Author${i} ${stamp}`));
 			const suggestion = (i: number): MockReply => {
 				const args = { artifact_id: live.artifactId, quote: HEADINGS[i], replacement: replacement(i), client_id: `ac-${i}-${stamp}` };
-				return { tool_call_stream: { id: `sg-${i}-${stamp}`, name: 'doc_comment_create', pieces: pieces(JSON.stringify(args)), delay_ms: 350 }, finish_reason: 'tool_calls' };
+				return { tool_call_stream: { id: `sg-${i}-${stamp}`, name: 'doc_comment_create', pieces: streamedPieces(JSON.stringify(args)), delay_ms: 350 }, finish_reason: 'tool_calls' };
 			};
 			await seedMockResponses(request, authors.flatMap((a, i) => [
 				{ tool_calls: [{ id: `read-${i}-${stamp}`, name: 'read_file', arguments: JSON.stringify({ path: live.docPath }) }], finish_reason: 'tool_calls', match_thread: a.id },

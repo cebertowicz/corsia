@@ -1,8 +1,8 @@
 import { test } from '../support/test';
-import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
+import { expect, type Page } from '@playwright/test';
+import { sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { openLiveDocument, routeLiveSocket } from '../support/liveDocument';
-import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
+import { agentCreatesSharedDocument, demoteAgent, openAgentBeside, streamedPieces } from '../support/sharedLiveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 /**
@@ -12,27 +12,8 @@ import { readMockCallCount, seedMockResponses } from '../support/mock';
 const promoted: string[] = [];
 test.afterEach(async ({ request }) => { for (const id of promoted.splice(0)) await demoteAgent(request, id); });
 
-async function openAgent(request: APIRequestContext, browser: Browser, width: number, title: string, promote: boolean) {
-	const id = await createSession(request, title);
-	if (promote) promoted.push(id);
-	const page = await (await browser.newContext({ viewport: { width, height: 960 } })).newPage();
-	await loginByUrl(page);
-	if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.locator('.thread-item').filter({ hasText: title }).click({ timeout: 10_000 });
-	return { id, title, page };
-}
-
 const HEADING = '## Who you are';
 const INSERT = '\n- Steve, goes by Steve; builds CORSIA, a layer that carries intent and context across your tools.\n- Based in Los Angeles; Pacific time.';
-
-/** The call's JSON input cut the way a provider streams it: the quote whole, then the replacement in three pieces. */
-function pieces(input: string): string[] {
-	const start = input.indexOf('"replacement":"') + '"replacement":"'.length;
-	const end = input.indexOf('","client_id"');
-	const value = input.slice(start, end);
-	const third = Math.ceil(value.length / 3);
-	return [input.slice(0, start), value.slice(0, third), value.slice(third, third * 2), value.slice(third * 2) + input.slice(end)];
-}
 
 for (const width of [1440, 393]) {
 	test(`@surface:live-document about-you suggestion landing in an outage types after the reconnect at ${width}`, async ({ browser, request }, testInfo) => {
@@ -40,7 +21,10 @@ for (const width of [1440, 393]) {
 		test.setTimeout(180_000);
 		const stamp = `${Date.now()}`;
 		const viewerContext = await browser.newContext({ viewport: { width, height: 960 } });
+		// The agents' pages stay off the viewer's cut socket.
+		const agentsContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
 		try {
+			const agents = await agentsContext.newPage();
 			const link = await routeLiveSocket(viewerContext);
 			const viewer: Page = await viewerContext.newPage();
 			await viewer.addInitScript(() => {
@@ -55,14 +39,14 @@ for (const width of [1440, 393]) {
 				};
 				requestAnimationFrame(read);
 			});
-			const owner = await openAgent(request, browser, 1440, `AO Owner ${stamp}`, true);
+			const owner = await openAgentBeside(request, agents, `AO Owner ${stamp}`, promoted);
 			const live = await agentCreatesSharedDocument(request, owner, `about-you-o-${stamp}`, `# About you\n\n${HEADING}\n`);
-			const author = await openAgent(request, browser, 1440, `AO Author ${stamp}`, false);
+			const author = await openAgentBeside(request, agents, `AO Author ${stamp}`);
 			const args = { artifact_id: live.artifactId, quote: HEADING, replacement: HEADING + INSERT, client_id: `ao-${stamp}` };
 			await seedMockResponses(request, [
 				{ tool_calls: [{ id: `read-${stamp}`, name: 'read_file', arguments: JSON.stringify({ path: live.docPath }) }], finish_reason: 'tool_calls', match_thread: author.id },
 				{ content: 'Read complete.', finish_reason: 'stop', match_thread: author.id },
-				{ tool_call_stream: { id: `sg-${stamp}`, name: 'doc_comment_create', pieces: pieces(JSON.stringify(args)), delay_ms: 350 }, finish_reason: 'tool_calls', match_thread: author.id },
+				{ tool_call_stream: { id: `sg-${stamp}`, name: 'doc_comment_create', pieces: streamedPieces(JSON.stringify(args)), delay_ms: 350 }, finish_reason: 'tool_calls', match_thread: author.id },
 				{ content: 'Suggested.', finish_reason: 'stop', match_thread: author.id },
 			]);
 			const before = await readMockCallCount(request);
@@ -87,6 +71,7 @@ for (const width of [1440, 393]) {
 			expect(Math.max(...series.slice(1).map((n, i) => n - series[i]))).toBeLessThanOrEqual(40);
 			expect(series[series.length - 1]).toBe((HEADING + INSERT).length);
 		} finally {
+			await agentsContext.close();
 			await viewerContext.close();
 		}
 	});
