@@ -75,7 +75,7 @@ async def test_signed_in_github_account_refuses_without_logout_or_login(monkeypa
     from connections import account_controls
     from connections.vendor_accounts import AccountError
 
-    monkeypatch.setattr(account_controls, 'custom_account', AsyncMock(return_value={
+    monkeypatch.setattr(account_controls, 'account_with_home', AsyncMock(return_value={
         'id': 'gh', 'provider': 'github', 'state': 'signed_in', 'revision': 1, 'source_home': '/synthetic',
     }))
     monkeypatch.setattr(account_controls, 'signin_recheck', AsyncMock(return_value=None))

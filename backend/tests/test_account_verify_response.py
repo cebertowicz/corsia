@@ -14,7 +14,7 @@ async def test_verify_route_reports_refresh_result(monkeypatch, refresh, expecte
     from connections import account_controls
 
     account = {'id': 'a', 'provider': 'github', 'state': 'signed_in', 'source_home': '/fixture', 'revision': 1}
-    monkeypatch.setattr(account_controls, 'custom_account', AsyncMock(return_value=account))
+    monkeypatch.setattr(account_controls, 'account_with_home', AsyncMock(return_value=account))
     monkeypatch.setattr(account_controls, 'account_receipt', lambda _: object())
     monkeypatch.setattr(account_controls, 'readiness_reason', lambda _: None)
     monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/fixture/cli'))

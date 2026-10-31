@@ -17,7 +17,7 @@ import logging
 from typing import Any
 
 from connections import account_cleanup, account_login_wait, account_signin_prompt
-from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
+from connections.account_verify_refresh import account_with_home, refresh_models, signin_recheck
 from connections.account_identity import codex_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for
@@ -186,14 +186,14 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
     """Begin, or return the live, vendor browser sign-in for an added account."""
-    account = await custom_account(account_id)
+    account = await account_with_home(account_id)
     if account["state"] == "signed_in":
         if account["provider"] not in VENDORS:
             raise AccountError("account is already signed in")
         result = await signin_recheck(account_id, account["provider"], verify)
         if result is not None:
             return result
-        account = await custom_account(account_id)
+        account = await account_with_home(account_id)
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:
@@ -239,7 +239,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
 async def check_signin(account_id: str) -> dict[str, Any]:
     """Report one sign-in from its in-process record; a finished one is reported on every check."""
     operation = _SIGNINS.get(account_id)
-    if operation is not None and operation.status == "completed" and (await custom_account(account_id))["state"] != "signed_in":
+    if operation is not None and operation.status == "completed" and (await account_with_home(account_id))["state"] != "signed_in":
         # An expired login signs the account out without a sign-out: the finished sign-in describes the one that expired.
         _SIGNINS.pop(account_id, None)
         operation = None
@@ -325,7 +325,7 @@ async def verify(account_id: str) -> dict[str, Any]:
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
     """
-    account = await custom_account(account_id)
+    account = await account_with_home(account_id)
     provider = account["provider"]
     receipt = account_receipt(account)
     current_c6 = readiness_reason(account) in ("codex_auth_projection_changed", "codex_auth_source_missing")
