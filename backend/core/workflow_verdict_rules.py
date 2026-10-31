@@ -153,7 +153,8 @@ def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
             return Verdict("revert", "cost_worse_no_gain", look, tuple(calls), {"cost_worse": costly})
         cheaper = any(c.call == "better" for c in spend)
         if not cheaper:
-            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
+            # Early looks run at stricter confidence, so "no gain yet" there is weak evidence: wait for the next look.
+            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls)) if look == 3 else None
         if any(c.reason == SMALL_HARM for c in quality):
             return Verdict("revert", "cheaper_small_harm", look, tuple(calls))
         return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})
@@ -260,8 +261,9 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
     if replaced_by is not None and all(run.settled(window, now) for run in _side(history, plan.version)):
         reached = decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
-        if reached.word == "collecting" and reached.reason == "below_minimum":
-            return Verdict("changed_early", "replaced_before_look_1", 0, (),
+        # A replaced version gets no more runs, so a look it is still waiting for never comes.
+        if reached.word == "collecting":
+            return Verdict("changed_early", f"replaced_before_look_{reached.look + 1}", reached.look, (),
                            {**inputs, "version": plan.version, "k": len(changed), "next": replaced_by[0]})
         return reached
     return decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
