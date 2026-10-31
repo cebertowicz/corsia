@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 
@@ -51,3 +52,17 @@ def _make_non_streaming(reply: dict) -> SimpleNamespace:
         total_tokens=reply.get("total_tokens", 150),
     )
     return SimpleNamespace(choices=[choice], usage=usage)
+
+
+async def _stream_tool_calls(reply: dict):
+    """A reply's tool calls: whole in one chunk, or one call whose input streams in pieces (the first carries its id and name)."""
+    if reply.get("tool_calls"):
+        yield _make_chunk(tool_calls=reply["tool_calls"])
+    stream: dict = reply.get("tool_call_stream") or {"pieces": []}
+    for position, piece in enumerate(stream["pieces"]):
+        if position and stream.get("delay_ms"):
+            await asyncio.sleep(stream["delay_ms"] / 1000.0)
+        call = SimpleNamespace(index=0, id=stream["id"] if not position else None,
+                               function=SimpleNamespace(name=stream["name"] if not position else None, arguments=piece))
+        yield SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=[call]), finish_reason=None)], usage=None)
