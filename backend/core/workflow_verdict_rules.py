@@ -153,7 +153,8 @@ def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
             return Verdict("revert", "cost_worse_no_gain", look, tuple(calls), {"cost_worse": costly})
         cheaper = any(c.call == "better" for c in spend)
         if not cheaper:
-            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
+            # Early looks run at stricter confidence, so "no gain yet" there is weak evidence: wait for the next look.
+            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls)) if look == 3 else None
         if any(c.reason == SMALL_HARM for c in quality):
             return Verdict("revert", "cheaper_small_harm", look, tuple(calls))
         return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})

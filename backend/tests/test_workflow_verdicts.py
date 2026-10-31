@@ -293,7 +293,8 @@ def test_changed_again_is_never_stored_so_a_version_back_in_use_is_still_judged(
                  runs("v1", 1, count=3, started=12, ended=10)]
     early = next(e for e in compute(Snapshot(NOW.isoformat(), (history(*during_v1),))) if e.plan.version == "v2")
     assert early.verdict.word == "changed_early" and evaluator.write_verdicts(db, [early]) == 0
-    back = history(*during_v1, runs("v2", 1, count=20, started=9, ended=5))
+    # Clearly worse once back, so look 1 settles it (a no-gain version would wait for look 3).
+    back = history(*during_v1, runs("v2", 2, count=20, started=9, ended=5))
     assert back.successor("v2") is None
     later = next(e for e in compute(Snapshot(NOW.isoformat(), (back,), {early.plan.subject: early.plan}))
                  if e.plan.version == "v2")
@@ -412,14 +413,21 @@ def test_rule_3_cost_worse_with_no_gain_reverts() -> None:
     assert (result.word, result.reason, result.inputs["cost_worse"]) == ("revert", "cost_worse_no_gain", [COST])
 
 
-@pytest.mark.parametrize(("cost", "expected", "cheaper"), [
-    (0.5, ("keep", "no_worse"), True),
-    (1.0, ("revert", "no_gain_not_cheaper"), False),
-])
-def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> None:
-    result = verdict(history(_priced("v1", 1, 1.0, started=40, ended=30), _priced("v2", 1, cost)))
-    assert (result.word, result.reason) == expected
-    assert (result.inputs.get("cheaper") is True) is cheaper
+def test_rule_3_no_worse_and_cheaper_keeps_at_look_1() -> None:
+    result = verdict(history(_priced("v1", 1, 1.0, started=40, ended=30), _priced("v2", 1, 0.5)))
+    assert (result.word, result.reason, result.look) == ("keep", "no_worse", 1)
+    assert result.inputs["cheaper"] is True
+
+
+def test_rule_3_no_gain_not_cheaper_waits_for_look_3_before_reverting() -> None:
+    old = _priced("v1", 1, 1.0, count=80, started=60, ended=30)
+    first = verdict(history(old, _priced("v2", 1, 1.0, count=20)))
+    assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
+    second = verdict(history(old, _priced("v2", 1, 1.0, count=40)))
+    assert (second.word, second.reason, second.look) == ("collecting", "wait_for_look_3", 2)
+    final = verdict(history(old, _priced("v2", 1, 1.0, count=80)))
+    assert (final.word, final.reason, final.look) == ("revert", "no_gain_not_cheaper", 3)
+    assert "cheaper" not in final.inputs
 
 
 def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_version_is_kept() -> None:
@@ -436,11 +444,13 @@ def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_versi
 def test_rule_3_unclear_spend_with_no_quality_gain_reverts() -> None:
     from core.workflow_verdict_rules import _rule
 
-    result = _rule([
+    calls = [
         MeasureCall(CORRECTIONS, "quality", "no_worse", difference=0.0, interval=(-0.01, 0.01), margin=0.02),
         MeasureCall(COST, "spend", "unclear"),
-    ], 1)
+    ]
 
+    assert _rule(calls, 1) is None and _rule(calls, 2) is None
+    result = _rule(calls, 3)
     assert result is not None and (result.word, result.reason) == ("revert", "no_gain_not_cheaper")
 
 
