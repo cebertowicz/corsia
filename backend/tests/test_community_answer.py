@@ -132,3 +132,13 @@ def test_a_write_failure_leaves_the_answer_committed(db, monkeypatch, workspace)
         "SELECT metadata FROM artifact_identities WHERE integration='local' AND type='plan-decision' AND external_id=?",
         (decision["id"],)).fetchone()["metadata"]
     assert json.loads(state)["plan_decision"]["state"] == "answered"
+
+
+def test_a_reworded_option_writes_nothing_and_warns(db, monkeypatch, workspace, caplog):
+    options = [{**option, "label": option["label"] + " please"} for option in _community_card()["options"]]
+    decision = _raise(db, options=options)
+
+    assert _answer(db, monkeypatch, decision, "A").status_code == 200
+
+    assert _profile(workspace) == NAME_LINES
+    assert "option label CORSIA does not know" in caplog.text
