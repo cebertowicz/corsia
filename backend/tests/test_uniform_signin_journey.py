@@ -117,6 +117,95 @@ async def test_upgraded_send_waits_then_runs_on_the_accounts_own_home(
     db.close()
 
 
+async def _recovery_settled(previous):
+    """Wait for the held-input recovery a discovery commit wakes on the app loop."""
+    from infra import unavailable_model_recovery as recovery
+
+    for _ in range(12):
+        await asyncio.sleep(0)
+        if recovery._TASK is not previous:
+            break
+    if recovery._TASK is not None:
+        await asyncio.wait_for(asyncio.shield(recovery._TASK), timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('vendor', ['codex', 'claude-code'])
+async def test_fresh_install_send_before_any_sign_in_runs_after_sign_in(
+        isolated_db, notification_owner, vendor):
+    """A fresh install has no account: a send waits, held ``account_not_configured``, and the
+    first sign-in plus its discovery releases and claims it, as the hold's copy promises."""
+    from connections.account_discovery_commit import commit_discovery_bundle
+    from connections.account_receipts import capture_receipt
+    from connections.account_signin_commit import commit_signed_in
+    from connections.models import upsert_connection
+    from connections.vendor_accounts import add_account
+    from infra import unavailable_model_recovery as recovery
+    from infra.database import get_db
+    from infra.input_admission import accept_thread_input
+    from infra.thread_execution import drive_thread
+    from infra.unavailable_model_recovery import held_head_kind_sql
+
+    selector = {'codex': 'gpt-5-codex', 'claude-code': 'opus'}[vendor]
+    model = f'{vendor}/{selector}'
+    db = get_db()
+    # Before any sign-in the harness shows only its placeholder row, and a chat may still pick it.
+    db.execute('DELETE FROM models WHERE harness=? AND id<>?', (vendor, model))
+    db.execute("UPDATE models SET harness=?,provider=?,provider_model_id=?,source='legacy_fallback' WHERE id=?",
+               (vendor, vendor, selector, model))
+    db.commit()
+    upsert_connection(type='cli', provider=vendor, status='available', config={'binary': '/bin/journey'})
+    assert db.execute('SELECT COUNT(*) FROM vendor_accounts').fetchone()[0] == 0
+    db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES ('fresh','user',?,'t','t')",
+               (model,))
+    db.commit()
+
+    def held_kind():
+        return db.execute(f"SELECT {held_head_kind_sql(':thread')} AS kind", {'thread': 'fresh'}).fetchone()['kind']
+
+    accept_thread_input('fresh', role='user', content='please run', intent='apply_now', message_id='sent', db=db)
+    db.commit()
+    await drive_thread('fresh')
+    row = dict(db.execute('SELECT active_turn_id,delivery_state,delivery_error,write_outcome '
+                          'FROM messages WHERE id=?', ('sent',)).fetchone())
+    assert notification_owner == []
+    assert row['active_turn_id'] is None and row['write_outcome'] == 'proved_no_write'
+    assert row['delivery_error'] == 'account_not_configured' and row['delivery_state'] != 'failed'
+    # Plans and recovery read it as an account hold, so the chat shows it waiting for sign-in.
+    assert held_kind() == 'account'
+    assert db.execute("SELECT COUNT(*) FROM thread_vendor_accounts WHERE thread_id='fresh'").fetchone()[0] == 0
+
+    # Settings > Providers: add the account, sign in, then the login's first discovery commits.
+    account = add_account(vendor, 'Default', db=db)
+    db.commit()
+    if vendor == 'codex':
+        (Path(account['source_home']) / 'auth.json').write_text(json.dumps({
+            'auth_mode': 'chatgpt', 'tokens': {'access_token': '[REDACTED]'}}))
+    identity = {'account_fp': 'fresh'} if vendor == 'codex' else {'email': 'fresh@example.test'}
+    commit_signed_in(account['id'], account['revision'], identity)
+    receipt = capture_receipt(vendor, account_id=account['id'], db=db)
+    previous = recovery._TASK
+    result = commit_discovery_bundle(
+        vendor, SimpleNamespace(usage_report=None, cache_stage=None),
+        [{'selector_id': selector, 'available': True}],
+        context=SimpleNamespace(receipt=receipt, account_id=account['id']), harness_version='1', db=db)
+    assert result.status == 'ready'
+    await _recovery_settled(previous)
+
+    assert len(notification_owner) == 1
+    claimed = notification_owner[0]
+    assert [item.message_id for item in claimed.items] == ['sent']
+    # It runs on the chat's saved model, on the account just signed in, with no switch.
+    assert claimed.target_model == model
+    assert db.execute("SELECT model FROM threads WHERE id='fresh'").fetchone()[0] == model
+    assert db.execute("SELECT account_id FROM thread_vendor_accounts WHERE thread_id='fresh'").fetchone()[0] \
+        == account['id']
+    after = dict(db.execute('SELECT active_turn_id,delivery_error FROM messages WHERE id=?', ('sent',)).fetchone())
+    assert after['active_turn_id'] == claimed.turn_id and after['delivery_error'] is None
+    assert held_kind() is None
+    db.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('vendor', ['codex', 'claude-code'])
 async def test_source_state_follows_the_accounts_through_sign_in_and_removal(isolated_db, vendor):

@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 
 from connections.account_policy import (
-    PROJECT_POLICY_MISSING, AccountAdmissionError, account_reason, missing_project_reason, thread_scope,
+    NOT_CONFIGURED, PROJECT_POLICY_MISSING, AccountAdmissionError, account_reason, missing_project_reason,
+    thread_scope,
 )
 from connections.vendor_accounts import get_account
 from infra.time import utc_now_iso
@@ -12,7 +13,7 @@ from infra.time import utc_now_iso
 ACCOUNT_HOLD_REASONS = (
     "account_project_denied", "account_removed", "account_signed_out", "account_runtime_pending",
     "account_model_not_discovered", "account_login_unverified", "account_home_mismatch",
-    "codex_auth_projection_changed", "codex_auth_source_missing", PROJECT_POLICY_MISSING,
+    "codex_auth_projection_changed", "codex_auth_source_missing", PROJECT_POLICY_MISSING, NOT_CONFIGURED,
 )
 
 _UNREAD_HOLD = object()
