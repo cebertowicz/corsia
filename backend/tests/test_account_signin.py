@@ -941,6 +941,23 @@ async def test_finished_sign_in_is_kept_until_the_next_start_sign_out_or_remove(
 
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
+async def test_finished_sign_in_does_not_answer_a_check_after_the_login_expired(scripted_vendor_clis):
+    from connections import account_controls
+    from connections.vendor_accounts import AccountError, get_account, set_account_state
+
+    codex = scripted_vendor_clis["codex"]
+    await account_controls.start_signin(codex["id"])
+    assert (await _finished(codex["id"]))["status"] == "completed"
+    # The vendor login expires on a turn: the account goes signed out with no sign-out call.
+    account = get_account(codex["id"])
+    set_account_state(codex["id"], "signed_out", expected_revision=account["revision"])
+    with pytest.raises(AccountError, match="no sign-in is in progress"):
+        await account_controls.check_signin(codex["id"])
+    assert account_controls._SIGNINS == {}
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
 @both
 async def test_second_sign_in_for_a_vendor_is_refused_while_one_is_held(scripted_vendor_clis, provider, monkeypatch, tmp_path):
     from connections import account_controls

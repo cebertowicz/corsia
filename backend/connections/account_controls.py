@@ -239,6 +239,10 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
 async def check_signin(account_id: str) -> dict[str, Any]:
     """Report one sign-in from its in-process record; a finished one is reported on every check."""
     operation = _SIGNINS.get(account_id)
+    if operation is not None and operation.status == "completed" and (await custom_account(account_id))["state"] != "signed_in":
+        # An expired login signs the account out without a sign-out: the finished sign-in describes the one that expired.
+        _SIGNINS.pop(account_id, None)
+        operation = None
     if operation is None:
         raise AccountError("no sign-in is in progress for this account")
     return operation.public()
