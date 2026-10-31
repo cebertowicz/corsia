@@ -30,7 +30,7 @@ def community_answer(decision: dict, chosen: dict) -> tuple[bool, bool] | None:
     if decision.get("title") != setup_strings.COMMUNITY["title"]:
         return None
     labels = {option["id"]: option["label"] for option in decision.get("options", [])}
-    answer = _ANSWERS.get(labels.get(chosen.get("option_id")))
+    answer = _ANSWERS.get(labels.get(chosen.get("option_id"), ""))
     if answer is None and chosen.get("option_id") != "other":
         log.warning("community decision answered with an option label CORSIA does not know; nothing written")
     return answer
