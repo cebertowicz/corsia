@@ -83,7 +83,7 @@ def _execute(
             elif action in {"search", "install", "update", "fetch_pack"} and not uses_community_improvements(_workspace()):
                 result = _error(
                     "community_off",
-                    "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. Their answer to the setup decision titled 'Use and share improvements with the CORSIA community?' turns the library on. It is raised unchanged from setup.setup_decisions, during first-run setup only. remove still works on a copy you already hold.",
+                    "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. During first-run setup, that answer comes from the decision titled 'Use and share improvements with the CORSIA community?' in setup.setup_decisions; raise it unchanged there, and nowhere else. remove still works on a copy you already hold.",
                 )
             else:
                 owner_id = _persistent_owner(thread_id, db)
