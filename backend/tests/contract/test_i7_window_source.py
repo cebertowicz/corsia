@@ -39,12 +39,12 @@ DEFAULT_WINDOW = 262_144
 # derives from it. Discovery writers populate it, so they are the source.
 WINDOW_RESOLVER_MODULE = "llm/context_window.py"
 CATALOG_DISCOVERY_WRITERS = {
-    "connections/account_discovery_commit.py",
     "connections/harness_model_rows.py",
     "connections/harness_models.py",
     "llm/catalog_cloud.py",
     "llm/catalog_network_models.py",
     "llm/external_provider.py",
+    "llm/harness_catalog.py",
 }
 
 _STORED_WINDOW_READ = re.compile(
