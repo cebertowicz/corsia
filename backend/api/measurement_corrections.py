@@ -61,7 +61,8 @@ def corrections_by_period(db, grain: Grain) -> dict[str, dict[str, Any]]:
 
 
 def corrections_family(db, grain: Grain, decision_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per outcome period: its outcomes, asks (raised and user holds) and corrections."""
+    """One row per outcome period, and per drawn period with corrections but no outcome row:
+    its outcomes, asks (raised and user holds) and corrections."""
     counts = corrections_by_period(db, grain)
     empty = {"detected": 0, "triaged": 0, "untriaged": 0, "untriaged_idle": 0, "idle_threads": frozenset()}
 
@@ -71,6 +72,6 @@ def corrections_family(db, grain: Grain, decision_rows: list[dict[str, Any]]) ->
 
     rows = [{**row, **fields(row["period"])} for row in decision_rows]
     known = {row["period"] for row in rows}
-    # The period in progress may have corrections before it has an outcome row.
+    # A drawn period, the one in progress included, may have corrections but no outcome row.
     rows.extend({"period": period, **fields(period)} for period in counts if period not in known)
     return rows

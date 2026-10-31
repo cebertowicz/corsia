@@ -97,9 +97,14 @@ def has_live_start(group: str) -> bool:
     return group in _LIVE_SOURCE
 
 
+def live_source(group: str) -> str:
+    """Name the column of `live_starts_query` that holds this metric group's start."""
+    return _LIVE_SOURCE[group]
+
+
 def live_starts_query(groups: Iterable[str]) -> str:
-    """Read each requested metric group's live value-source start."""
-    requested = tuple(dict.fromkeys(groups))
+    """Read each requested group's live start, scanning a source shared by several groups once."""
+    sources = tuple(dict.fromkeys(live_source(group) for group in groups))
     return "SELECT " + ", ".join(
-        f"({source_first_row_sql(_LIVE_SOURCE[group])}) AS {group}" for group in requested
+        f"({source_first_row_sql(source)}) AS {source}" for source in sources
     )
