@@ -299,6 +299,7 @@ Released 2026-10-16.
 
 - MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
 - Connected apps that CORSIA runs on your Mac are sandboxed away from CORSIA's private state and stored keys.
+- Settings › Keys lists the keys your connected apps use, and you can set or replace one there; saving reconnects that app (thanks @dealcoach).
 - Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
 - CORSIA sets up your own private Google project in a browser you can watch; you only sign in and click Allow. Sign-in also asks for Drive, Docs and Sheets now, so you won’t need to sign in again when CORSIA’s tools for them arrive.
 - With Google connected, CORSIA screens new Inbox mail every few minutes and passes it to your agents. It starts from the moment you connect and never replays older mail.
