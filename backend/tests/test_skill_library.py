@@ -239,7 +239,7 @@ def test_community_library_actions_stop_before_loading_the_index(
 
     assert result == {
         "error": "community_off",
-        "message": "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. Their answer to the setup decision titled 'Use and share improvements with the CORSIA community?' (raise it unchanged from setup.setup_decisions) turns the library on. remove still works on a copy you already hold.",
+        "message": "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. Their answer to the setup decision titled 'Use and share improvements with the CORSIA community?' turns the library on. It is raised unchanged from setup.setup_decisions, during first-run setup only. remove still works on a copy you already hold.",
     }
     assert emitted == [(action, "thread", result)]
 
