@@ -104,9 +104,15 @@ class TestRender:
         projection = ".corsia/skills/conductor-bootstrap/references/"
         assert f"`{projection}look-up-the-person.md`" in wake
         assert f"`{projection}about-you-doc.md`" in wake
-        assert "`references/agent-account.md`" in wake
+        assert "skill `github` › `.corsia/skills/github/references/agent-account.md`" in wake
         assert f"`{projection}web-search.md`" in wake
         assert ".corsia/.corsia/" not in wake
+
+    def test_an_unserved_reference_stays_as_written(self):
+        from onboarding import first_run_instructions
+
+        text = "See `references/no-such-file.md` and skill `github` › `references/no-such-file.md`."
+        assert first_run_instructions.anchored(text) == text
 
     @pytest.mark.parametrize("reference", ["FIRST_RUN_REFERENCE", "APP_REFERENCE", "APP_START_REFERENCE"])
     def test_every_skill_reference_an_instruction_names_is_projected(self, reference):
@@ -116,9 +122,10 @@ class TestRender:
         from onboarding import first_run_instructions as wake_text
 
         text = wake_text.anchored(system_resource_source(getattr(wake_text, reference)).read_text())
-        named = set(re.findall(r"\.corsia/(skills/conductor-bootstrap/references/[\w.-]+\.md)", text))
+        named = set(re.findall(r"\.corsia/(skills/[\w-]+/references/[\w.-]+\.md)", text))
         assert named
         assert all(system_resource_source(path).is_file() for path in named)
+        assert not re.findall(r"(?<![\w./-])references/[\w.-]+\.md", text)
 
 
 class TestFirstModelChoice:

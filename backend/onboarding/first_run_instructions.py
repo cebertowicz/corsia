@@ -1,8 +1,8 @@
 """What the first-run wake tells the conductor: its summary and instruction text.
 
 The text comes from skill ``conductor-bootstrap``'s references. Once inlined into a
-message it has no folder of its own, so each reference it names is given the path
-agents read it from, the workspace projection.
+message it has no folder of its own, so each reference it names, its own or another
+skill's, is given the path agents read it from, the workspace projection.
 """
 
 from __future__ import annotations
@@ -15,7 +15,8 @@ SKILL_PROJECTION = ".corsia/" + SKILL_DIR
 FIRST_RUN_REFERENCE = f"{SKILL_DIR}/references/first-run.md"
 APP_REFERENCE = f"{SKILL_DIR}/references/first-run-app.md"
 APP_START_REFERENCE = f"{SKILL_DIR}/references/first-run-start.md"
-_BARE_REFERENCE = re.compile(r"(?<![\w./-])references/[\w.-]+\.md")
+#: A ``references/`` name, after an optional "skill `name` › `" or "skill `name`'s `" owner.
+_REFERENCE = re.compile(r"(skill `([\w-]+)`(?: ›|'s) `)?(?<![\w./-])(references/[\w.-]+\.md)")
 
 INLINE_SUMMARY = (
     "First run of a new install. Your instructions are below: "
@@ -50,18 +51,20 @@ def instructions(path: str = "script") -> str:
 
 
 def anchored(text: str) -> str:
-    """Give this skill's bare ``references/`` names their workspace path.
+    """Give each served ``references/`` name its workspace path.
 
-    Another skill's reference (skill ``github`` › ``references/agent-account.md``)
-    is not in this skill's folder, so it stays as written.
+    A name resolves against the skill the text names before it (skill ``github`` ›
+    ``references/agent-account.md``), else against this skill; one that is not
+    served stays as written.
     """
     from infra.system_package import system_resource_source
 
     def full(match: re.Match[str]) -> str:
-        own = system_resource_source(f"{SKILL_DIR}/{match[0]}").is_file()
-        return f"{SKILL_PROJECTION}/{match[0]}" if own else match[0]
+        path = f"skills/{match[2]}/{match[3]}" if match[2] else f"{SKILL_DIR}/{match[3]}"
+        served = system_resource_source(path).is_file()
+        return (match[1] or "") + (f".corsia/{path}" if served else match[3])
 
-    return _BARE_REFERENCE.sub(full, text)
+    return _REFERENCE.sub(full, text)
 
 
 def first_app_step(facts: dict[str, Any]) -> str:
