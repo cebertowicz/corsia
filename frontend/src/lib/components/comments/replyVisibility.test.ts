@@ -40,7 +40,7 @@ it('counts a tall reply once its visible part fills a shorter scroller, within o
 	root.remove();
 });
 
-it('counts a short reply only when fully visible', () => {
+it('counts a short reply once it shows within one observer step of whole', () => {
 	let callback: IntersectionObserverCallback = () => {};
 	vi.stubGlobal('IntersectionObserver', class { constructor(cb: IntersectionObserverCallback) { callback = cb; } observe() {} disconnect() {} });
 	const root = document.createElement('div');
@@ -51,9 +51,10 @@ it('counts a short reply only when fully visible', () => {
 	const onVisible = vi.fn();
 	const visibility = createReplyVisibility(onVisible, vi.fn(), vi.fn());
 	visibility.sync(root, true, ['r1']);
-	callback([entry(0.95, 95, 100)], {} as IntersectionObserver);
+	callback([entry(0.9, 90, 100)], {} as IntersectionObserver);
 	expect(onVisible).not.toHaveBeenCalled();
-	callback([entry(1, 100, 100)], {} as IntersectionObserver);
+	// WebKit's last callback for a whole 62.5px reply in a phone sheet that just rose (measured at 393px).
+	callback([entry(0.9998270869255066, 62.48919677734375, 62.5)], {} as IntersectionObserver);
 	expect(onVisible).toHaveBeenCalledTimes(1);
 	root.remove();
 });

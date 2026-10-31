@@ -8,6 +8,10 @@ What agents can reach, what stops them, how strong each control is, and where it
 
 Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 
+## How CORSIA works
+
+How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page and defines the terms, then [Architecture](how-it-works/architecture.md).
+
 ## Features and internals
 
 | Page | What it covers |

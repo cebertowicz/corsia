@@ -460,7 +460,7 @@ async def test_app_facts_omit_bound_model_before_the_person_picks_one(monkeypatc
         },
         "agents_found": ["openclaw"], "local_download": {}, "web_search_ready": False,
         "web_search_key": False, "setup_handoff": None, "setup_picks": None, "setup": {"setup_decisions": []},
-        "user_profile": {"name": None, "full_name": None},
+        "user_profile": {"name": None, "full_name": None}, "auto_approve": True,
     }))
 
     facts = await first_run_wake._app_setup_facts("")

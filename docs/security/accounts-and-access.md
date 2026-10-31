@@ -16,7 +16,7 @@ How people and programs sign in to CORSIA, how agents act, and what a project or
 | Password change | Ends every browser session of that account; API tokens stay valid | `backend/infra/accounts.py` |
 | First run | Before the first account exists, setup routes accept any program on the same computer; they close once the account is created | `backend/infra/local_connection.py` |
 
-An unknown token and an expired one get the same answer, "Invalid or expired session". The token can be sent as a `?token=` query parameter or an `Authorization: Bearer` header. The server's access log drops query strings, so tokens don't reach the log.
+Routes take the token in one of three ways. Some accept a `?token=` query parameter or an `Authorization: Bearer` header, and answer an unknown token and an expired one the same way, "Invalid or expired session". Many others, including core thread and file routes, take only the query parameter; `GET /api/threads` is one, and it answers an unknown or expired token with a bare 401. Sign-out and the routes built on `require_user_header_only` (`backend/infra/auth.py`) take only the header. The server's access log drops query strings, so tokens don't reach the log.
 
 **Local storage** is readable by any script running on the CORSIA page. CORSIA serves its own page only; a cross-site scripting flaw in it would expose the session token.
 
@@ -26,7 +26,9 @@ An unknown token and an expired one get the same answer, "Invalid or expired ses
 
 An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Those checks are on the API; a leased command is a [separate case](host-access.md#approval-modes). Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
 
-`corsia token create --write-delegate-file` writes the token to `~/.corsia/.api-token`, readable only by your user. Agent shells can't read `~/.corsia` (checked for this page).
+`corsia token create --write-delegate-file` writes the token to `~/.corsia/credentials/api-token`, readable only by your user. Agent shells can't read `~/.corsia`. A shell running under a host-access lease can reach parts of `~/.corsia`, but never `~/.corsia/credentials`. A token left at `~/.corsia/.api-token` by an earlier version moves into that folder the next time a `corsia` command reads or writes the token.
+
+`CORSIA_API_TOKEN_FILE` points the `corsia` commands at a file you choose instead. That file is outside the closed folder, so a leased shell may be able to read it.
 
 ## How agents act
 

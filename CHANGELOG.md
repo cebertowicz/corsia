@@ -8,9 +8,64 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
+
+## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
+
+Released 2026-10-31.
+
+### Sign-in
+
+- Connecting a Google account works again: it no longer fails with “Google did not provide an account identity”.
+
+### First run and setup
+
+- New installs start with Auto-approve on, and setup and Settings describe it in the same words.
+- The first chat no longer mentions web search when search already works, and asks whether to look you up before it brings up search.
+- The first chat’s files step is shorter, and it mentions local models only on a Mac that can run one.
+- The first chat’s community step says what keeping your own version means.
+- The About you review says that Approve also accepts every suggestion you haven’t rejected.
+- Setup suggests a username from your first name and never fills it back in after you clear it.
+- Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
+- Setup stops saying it failed, in the model picker and in your first chat, once the local model it couldn’t load has loaded.
+
+### Local models
+
+- A long pasted message on a local model no longer makes every later checkpoint fail and stop the chat.
+- Long chats on a local model with a small context window keep going: the checkpoint of earlier conversation now fits the window, and one cut off at its length limit says so.
+- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps. If it still can’t load, setup says there isn’t enough free memory, and Settings says the model couldn’t load.
+- The local model server keeps your server-wide settings when you download a model or run setup again.
+
+### Upgrading
+
+- Take over now waits for an earlier install that runs without a background service, including one set up on its own port, to stop serving before it moves any of its data, and moves nothing if it doesn’t.
+- Start fresh now stops an earlier install that runs without a background service, including one set up on its own port, and points the `corsia` command at CORSIA, as Take over does.
+- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
+
+### Documents
+
+- On iPhone, a comment reply is marked read once you’ve seen it.
 - Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
-- CORSIA's `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
-- Each thread in a document's Comments panel is its own card, with space between cards.
+- Each thread in a document’s Comments panel is its own card, with space between cards.
+
+### Workflows and event rules
+
+- A workflow installed or updated from CORSIA’s community keeps its parts, instead of arriving as plain skill text.
+- When a phase in a plan picks a workflow, CORSIA adds one task for each part of the workflow, in order, each with its own instructions and check.
+- Each of those tasks can name who closes it, and keeps its rules when it is split or sent back.
+- Event rules can react to a label being added to or removed from a pull request or issue.
+
+### Security
+
+- Agents can no longer change your workspace repository’s Git settings, from a shell or a file tool, even with access you approved for them.
+- Cleaning up an agent’s finished copy of a repository no longer runs a program the agent could have named.
+- The credential the `corsia` command uses to sign in to CORSIA now lives in its own folder that no agent can open, and agents can’t move the folders above your saved credentials.
+
+### Command line and documentation
+
+- CORSIA’s `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+- A `corsia` command that can’t sign in to CORSIA says so and what to do, instead of failing with an error trace.
+- New security and how-it-works documentation, with diagrams that read on a phone.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 

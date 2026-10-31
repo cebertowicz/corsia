@@ -201,7 +201,7 @@ cd ~/.corsia
 bash desktop/scripts/build-macos-bundle.sh --skip-dmg
 ```
 
-The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Treat Take over as one-way for now: going back to running the checkout afterwards, opening a newer build over an installed one, and how the app updates after a takeover are not yet tested. If a takeover fails, your source install is restarted as it was.
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and the `corsia` command on your `PATH` is the app's. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was.
 
 </details>
 
@@ -257,7 +257,7 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 
 <br/>Write each instruction once, at the [scope](#scopes) it applies to: **Workspace settings → Create new context file** for everything, **Project settings → Create new context file** for one project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
-**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits, an agent can install a reviewed one from the public [skill library](docs/skill-library.md) and keep it up to date.
+**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits and you've agreed to use community improvements, an agent can install one from the public [skill library](docs/skill-library.md) and keep it up to date.
 
 Every turn shows what the agent loaded, by source and size. A context file in that list opens straight from it, so you can read or change what an agent works from.
 

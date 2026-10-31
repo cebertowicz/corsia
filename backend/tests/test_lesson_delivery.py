@@ -139,7 +139,7 @@ def test_receipt_reads_use_the_lesson_index(db, build):
         migrate_161_to_162(db)
 
     plan = " ".join(
-        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t"))
+        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t", "t"))
     )
     assert "USING INDEX idx_guidance_loads_lesson_node" in plan
 

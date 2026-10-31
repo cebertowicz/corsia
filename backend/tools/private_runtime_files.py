@@ -2,8 +2,10 @@
 
 Sandbox profiles and Claude Code launch files (MCP configs, seed context) must
 never be reachable from an agent shell. The shell sandbox grants the temporary
-directory, so they live in 0700 directories under the state root, which every
-sandbox denies. Files an earlier build left in the temporary directory are swept
+directory, so they live in 0700 directories under the state root. Protected agent
+shells are denied these directories; a reviewed-lease shell is not, because only
+the hard floor (stored keys, the agents' browser profile and control files) holds
+against a lease. Files an earlier build left in the temporary directory are swept
 at startup.
 """
 

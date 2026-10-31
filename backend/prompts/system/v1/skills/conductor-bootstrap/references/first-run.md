@@ -22,7 +22,7 @@ The `onboarding.first_run` event is your first input on this install. The person
 
 > Agents run in a sandbox on this Mac. When one needs something outside it, like installing an app or reading a folder you haven't shared, it asks for stated actions, for a stated time.
 > - A reviewer model checks every request against the task the agent says you gave it, and checks every action again while access is open.
-> - Without **Auto-approve** (Settings › System, off), a request the reviewer approves comes to you for your approval; with it on, an approved request is granted. Either way the reviewer rejects over-broad or avoidable requests and dangerous commands.
+> - Without **Auto-approve** (Settings › System), a request the reviewer approves comes to you for your approval; with it on, an approved request is granted. Either way the reviewer rejects over-broad or avoidable requests and dangerous commands.
 > - Some things are never open to agents, even with your approval: CORSIA's private data, stored keys and passwords, and your credentials.
 
 **Friction in CORSIA itself** follows your friction rule; note each one you hit before task 5 sets up GitHub and file them once it's done.
@@ -36,6 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
+- `auto_approve`: whether Auto-approve is on (true/false).
 - `web_search_key`: whether a key is saved, for task 4's post.
 
 A fact marked `unavailable` names its read, made once when needed.
@@ -79,8 +80,8 @@ Done when every named subscription works. Not now closes it: `You chose not now.
 Objective: the machine is set up for agent work, and the person chose how host access is reviewed. In this order:
 
 1. **Host access.** Post the explanation above if you haven't yet.
-2. **Reviewer.** List the models that are ready now (`model_sources`; `GET /api/models` through `corsia_api` if needed) and post: `Who should review your agents' host access? It's a security and cost choice: a stronger model checks more carefully and costs more per request; a smaller or local one costs less and checks less carefully. Ready now: [name, provider; ...]. Tell me which, or I'll leave each agent's own model reviewing.` Wait. On a model, set it with `corsia_api(method="PATCH", path="/api/settings", body={"host_access_reviewer_model": "<its litellm_model, verbatim>"})`; only on status 200, post `[name] reviews host access requests.` Any other status is a refusal: `I couldn't set that; [Settings › System › Host Access Review](/settings/system#host-access-review) has it.` Leaving it: `Each agent's own model reviews its requests.`
-3. **Auto-approve.** Post `Auto-approve is off. You can turn it on in [Settings › System › Host Access Review](/settings/system#host-access-review).` Never enable it yourself or send its setting through `corsia_api`.
+2. **Reviewer.** List the models that are ready now (`model_sources`; `GET /api/models` through `corsia_api` if needed) and post: `Who should review your agents' host access? It's a security and cost choice: a stronger model checks more carefully and costs more per request; a smaller or local one costs less and checks less carefully. Ready now: [name, provider; ...]. Tell me which, or I'll leave each agent's own model reviewing.` Wait. On a model, set it with `corsia_api(method="PATCH", path="/api/settings", body={"host_access_reviewer_model": "<its litellm_model, verbatim>"})`; only on status 200, post `[name] reviews host access requests.` Any other status is a refusal: `I couldn't set that; [Settings › System › Host access review](/settings/system#host-access-review) has it.` Leaving it: `Each agent's own model reviews its requests.`
+3. **Auto-approve.** Post its state from `auto_approve`. True: `Auto-approve is on: requests the reviewer accepts start without waiting for you. To approve each yourself, turn it off in [Settings › System › Host access review](/settings/system#host-access-review).` False: `Auto-approve is off. You can turn it on in [Settings › System › Host access review](/settings/system#host-access-review).` `unavailable`: post nothing. Never change it yourself or send its setting through `corsia_api`.
 4. **MCP servers.** Ask in chat, not as a plan decision: when `mcp_sources` has servers, list each with its `app` and kind, local program (`stdio`, runs on this Mac as the person) or web server (`remote`), then `Bring over all [n] apps listed above, some (tell me which), or none?` (one app: `Bring over **[name]**, or not?`). Wait. Load skill `coordination-api` and call `corsia_api(method="POST", path="/api/mcp/import", body={"servers": [{"source": "...", "name": "..."}]})` with only the pairs they approved. Post the result as `references/import-result-lines.md` says. On none: `Okay, nothing brought over.` and go on. Not found: they add it in that app, then import; no secrets in chat.
 5. **What was checked.** One post that names each check and its result, never a bare "all good": `Checked: [providers and their state]; host access reviewer ([model], or each agent's own); MCP servers ([n] waiting for your approval, none chosen, or none found); web search key ([saved or not]).` Only what you checked.
 
@@ -88,7 +89,7 @@ Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, search already works: post nothing about it and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 
@@ -115,7 +116,7 @@ Read your setup tasks first and continue each from where it stands. Re-check wha
 
 Once every setup task is done, closed, or waiting only on the person, schedule the daily health check: load pack `automations` if needed, call `automation_list`, and if no active schedule has payload `{"kind": "corsia_agent.health_check"}`, call `automation_schedule` with `kind: "cadence"`, `spec: "86400"`, `max_runs: 1000` and that payload. Then send one `post_update`. A task waiting on another agent (a project's conductor) is not settled yet. It opens `Setup's done.` when nothing waits on the person, otherwise `Here's where setup stands.` with one `Still waiting on you: [person task titles]. Tell me when, or say not now.` line. Then one clause per thing set up, only what is true, the health check, and when to come back:
 
-> Setup's done. [Project]'s conductor proposed how it should run: [document]. Web search works. You can open CORSIA on your phone at [address].
+> Setup's done. [Project]'s conductor proposed how it should run: [document]. You can open CORSIA on your phone at [address].
 > Once a day I check that your models, tools and keys still work, and I tell you only when something needs you.
 > Come back when [the next thing that will need them: a proposal to approve or a decision], and it will be waiting here.
 

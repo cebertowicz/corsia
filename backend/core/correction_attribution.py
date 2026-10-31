@@ -188,9 +188,14 @@ def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
-def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
-    """Latest active person classifications and plan-sourced correction facts."""
-    return _measured_attributed_facts(db) + _plan_attributed_facts(db)
+def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None = None) -> list[AttributedFact]:
+    """Latest active person classifications and plan-sourced correction facts, optionally only those
+    attributed to selected plan nodes."""
+    selected = None if node_ids is None else frozenset(node_ids)
+    if selected is not None and not selected:
+        return []
+    facts = _measured_attributed_facts(db) + _plan_attributed_facts(db)
+    return facts if selected is None else [fact for fact in facts if fact.node_id in selected]
 
 
 def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:

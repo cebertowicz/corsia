@@ -5,6 +5,11 @@ worktree never refreshes its index and resets the idle clock, with hooks
 disabled as ``tools/worktrees.py`` does, and in the C locale so the stderr
 text the removal path matches is Git's untranslated English. Every probe
 fails closed: an error becomes a skip, never a "safe to remove".
+
+This process runs outside the agents' sandbox and agents can write a worktree's
+admin directory, so a Git call that reads a worktree's index or files passes
+``worktree_git_env``: left to itself, Git takes config from wherever the admin
+``commondir`` file points, and that config can name programs to run.
 """
 
 from __future__ import annotations
@@ -16,6 +21,8 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+
+from infra.backend_git import git_argv
 
 GIT_TIMEOUT_SECONDS = 30.0
 LSOF_TIMEOUT_SECONDS = 60.0
@@ -40,19 +47,30 @@ class ReaperGitError(RuntimeError):
     """A Git probe could not produce a trustworthy answer."""
 
 
+def common_git_env(repo: Path) -> dict[str, str]:
+    """Pin the common directory, for commands whose child Git finds the worktree."""
+    return {"GIT_COMMON_DIR": str(repo / ".git")}
+
+
+def worktree_git_env(repo: Path, admin: Path, worktree: Path) -> dict[str, str]:
+    """Pin all of Git's paths for one worktree to values the reaper verified."""
+    return {**common_git_env(repo), "GIT_DIR": str(admin), "GIT_WORK_TREE": str(worktree)}
+
+
 def git(
     cwd: Path, args: list[str], *, timeout: float = GIT_TIMEOUT_SECONDS,
+    git_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one Git command without optional locks, hooks or translated output."""
     try:
         return subprocess.run(
-            ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", *args],
+            git_argv("--no-optional-locks", *args),
             cwd=str(cwd),
             capture_output=True,
             text=True,
             errors="surrogateescape",
             timeout=timeout,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env={**os.environ, "LC_ALL": "C", "LANG": "C", **(git_env or {})},
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         raise ReaperGitError(f"git {' '.join(args[:2])} failed: {exc}") from exc
@@ -183,6 +201,11 @@ def git_lock_files(admin: Path) -> list[str]:
         return [f"<unreadable: {exc.__class__.__name__}>"]
 
 
+def has_worktree_config(admin: Path) -> bool:
+    """Return whether a worktree keeps its own Git config, which the reaper leaves alone."""
+    return os.path.lexists(admin / "config.worktree")
+
+
 def _is_disposable(ignored: str) -> bool:
     parts = [part for part in ignored.rstrip("/").split("/") if part]
     directories = parts if ignored.endswith("/") else parts[:-1]
@@ -212,7 +235,9 @@ def is_tool_output_dir(path: Path) -> bool:
     return (path / "pyvenv.cfg").is_file() or (path / "CACHEDIR.TAG").is_file()
 
 
-def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:
+def status_skip_reason(
+    worktree: Path, git_env: dict[str, str], *, tracked_only: bool = False,
+) -> str | None:
     """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
@@ -221,12 +246,14 @@ def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | N
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
     ]
-    index = git(worktree, ["ls-files", "--stage", "-z"])
+    index = git(worktree, ["ls-files", "--stage", "-z"], git_env=git_env)
     if index.returncode != 0:
         raise ReaperGitError(f"index failed: {git_detail(index)}")
     if any(record.startswith("160000 ") for record in index.stdout.split("\0")):
         return "submodule"
-    result = git(worktree, ["status", "--porcelain=v2", "--ignore-submodules=all", *files])
+    result = git(
+        worktree, ["status", "--porcelain=v2", "--ignore-submodules=all", *files], git_env=git_env,
+    )
     if result.returncode != 0:
         raise ReaperGitError(f"status failed: {git_detail(result)}")
     reasons: set[str] = set()

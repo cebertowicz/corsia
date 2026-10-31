@@ -82,7 +82,7 @@ const APPROVED_WELCOME = {
 	rows: [
 		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
 		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
-		'Asks you first: sending or posting as you, spending money, and opening files outside your work folder.',
+		'Asks you first: sending or posting as you, and spending money.',
 	],
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -174,11 +174,28 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('#setup-email')?.closest('.field')?.querySelector('.hint')?.textContent).toBe('Used only to sign you up for services you choose, such as web search.');
 	});
 
-	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+	it('labels the name field Full name and prefills the username from the first name', async () => {
 		await settle(); button('Continue')?.click(); await settle();
 		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
 		setInput('setup-name', 'Ada Lovelace'); await settle();
-		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+	});
+
+	it('leaves a cleared or edited username alone when the name changes', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		const username = () => (host.querySelector('#setup-username') as HTMLInputElement).value;
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		setInput('setup-username', ''); await settle();
+		expect(username()).toBe('');
+		setInput('setup-name', 'Ada King'); await settle();
+		expect(username()).toBe('');
+		// Clearing the name too makes the suggestion empty; the cleared username still stays cleared.
+		setInput('setup-name', ''); await settle();
+		setInput('setup-name', 'Grace Hopper'); await settle();
+		expect(username()).toBe('');
+		setInput('setup-username', 'countess'); await settle();
+		setInput('setup-name', 'Augusta King'); await settle();
+		expect(username()).toBe('countess');
 	});
 
 	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {

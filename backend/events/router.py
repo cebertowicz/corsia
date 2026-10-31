@@ -23,7 +23,7 @@ from events.connectors.github import (
     github_routing_envelope,
     identity_from_check_pr_metadata,
 )
-from events.github_mapper import pr_terminal_state
+from events.github_mapper import pr_terminal_state, unruled_reason
 from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
     _chip_line, prepare_route_ordered, settle_routed_delivery, summary_facts,
@@ -237,6 +237,8 @@ def _select_route(
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"
         return (str(target.thread), reason), routing_state
+    if unruled := unruled_reason(internal_event, identity, payload):
+        return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason=unruled), routing_state
     if target.reason == "owner_inactive":
         return _dead_letter_result(
             internal_event, payload, "owner_inactive", external_id,
@@ -246,8 +248,6 @@ def _select_route(
             and routing_state.get("triage") is None):
         return _unowned_check_result(
             internal_event, payload, external_id, selected_pr), routing_state
-    if identity is None and internal_event == "webhook.github.issue_opened":  # only rules route it
-        return RouteResult(RouteOutcome.PARKED, reason="issue_opened_unruled"), routing_state
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 

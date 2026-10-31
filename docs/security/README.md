@@ -7,21 +7,21 @@ CORSIA runs agents on your own computer, as your own user account, with real too
 ## The boundaries
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph You[Your user account]
         subgraph WS[Workspace folder]
             P1[Project A]
             P2[Project B]
         end
-        H[Rest of your home folder]
-        F[Hard floor: CORSIA keys, agents' browser profile, sandbox itself]
+        H[Rest of your<br/>home folder]
+        F[Hard floor: CORSIA keys,<br/>agents' browser profile,<br/>sandbox itself]
     end
-    A[Agent shell and file tools] -->|read and write| WS
-    A -->|reviewed lease only| H
+    A[Agent shell and<br/>file tools] -->|read and write| WS
+    A -->|reviewed<br/>lease only| H
     A -.->|never| F
-    A -->|not limited| N[Internet and local network]
-    S[CORSIA server] --> M[Model providers you connect]
-    S --> C[Email, calendar, tool servers you connect]
+    A -->|not limited| N[Internet and<br/>local network]
+    S[CORSIA server] --> M[Model providers<br/>you connect]
+    S --> C[Email, calendar,<br/>tool servers you connect]
 ```
 
 - **Workspace:** the folder CORSIA works in (by default `~/corsia`). It holds every project, shared files, context and each conversation's working files.

@@ -6,16 +6,19 @@ import asyncio
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from history.types import HistoryBoundary
 from subagents.provider_context_limits import is_provider_context_limit
 
 from core.fork_native_tools import (
+    MeasuredInput,
+    assistant_message,
     await_or_cancel as _await_or_cancel,
     input_fits_off_loop as _input_fits,
     input_room,
+    measured_input,
     run_tool_calls as _run_tool_calls,
 )
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
@@ -31,6 +34,23 @@ from core.fork_types import (
     FORK_TOOL_ROUND_TRIP_TOKENS,
     ColdInputCallback,
 )
+
+# A small window gives a Native fork a fifth of itself for output: cold fit
+# reserves the allowance twice (reply, then its round trip), and a fixed 16,384
+# left a 41,681-token local seat under 7k of input, so it never folded. A fifth
+# still covers the largest local checkpoint call measured (7,336 tokens).
+SMALL_WINDOW_OUTPUT_DIVISOR = 5
+
+
+def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
+    """Bound the fork's output allowance by its writer's window."""
+    window = request.target.context_window
+    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
+        return request
+    allowance = min(request.max_output_tokens, window // SMALL_WINDOW_OUTPUT_DIVISOR)
+    if allowance == request.max_output_tokens:
+        return request
+    return replace(request, max_output_tokens=allowance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +202,7 @@ async def warm_input_fits(
     It keeps one tool round trip of room: the fork's tool-call reply joins its
     input before the call that writes the narrative.
     """
+    request = _window_output(request)
     messages, tools, _first_included_seq = await _messages_and_tools(request, None, kind)
     return await _input_fits(request, messages, tools, FORK_TOOL_ROUND_TRIP_TOKENS)
 
@@ -211,6 +232,7 @@ async def _complete(request, messages, tools, model, provider, cancel_event):
 
 async def _truncated_result(
     bodies, usage_calls, path, iteration, request, messages, tools, response,
+    measured=None,
 ) -> ProviderForkResult:
     """A partial body keeps the exact truncation marker; an empty one fails, named.
 
@@ -222,7 +244,7 @@ async def _truncated_result(
         return ProviderForkResult(
             "\n".join(bodies), {"calls": usage_calls}, FORK_CONTEXT_TRUNCATED,
         )
-    room = await asyncio.to_thread(input_room, request, messages, tools)
+    room = await asyncio.to_thread(input_room, request, messages, tools, 0, measured)
     raise ProviderForkRejected(
         f"{FORK_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
@@ -247,6 +269,42 @@ def _provider_failure(response, kind: ForkKind) -> None:
     kind.provider_failure("native", detail)
 
 
+async def _measured_after(
+    request: ProviderForkRequest,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    response: Any,
+    usage: dict[str, Any],
+) -> MeasuredInput | None:
+    """Count the next call's input from the provider's reading of this one."""
+    return await asyncio.to_thread(
+        measured_input, request, [*messages, assistant_message(response)], tools, usage,
+    )
+
+
+def _reply_body(response: Any) -> str | None:
+    """Return the reply's narrative, falling back to its reasoning."""
+    for body in (response.content, response.reasoning_content):
+        if isinstance(body, str) and body.strip():
+            return body
+    return None
+
+
+async def _final_reply(
+    response, bodies, usage_calls, iteration, request, messages, tools, measured, *, kind,
+) -> ProviderForkResult:
+    """End the fold on a reply without tool calls; one cut off at its output cap is truncated."""
+    body = _reply_body(response)
+    if response.finish_reason == "length":
+        return await _truncated_result(
+            [*bodies, body] if body is not None else bodies, usage_calls, "iv_output_cap",
+            iteration, request, messages, tools, response, measured,
+        )
+    if body is None:
+        raise ProviderForkRejected(f"Native {kind.name} produced no body")
+    return ProviderForkResult(body, {"calls": usage_calls})
+
+
 async def invoke_fork(
     request: ProviderForkRequest,
     cancel_event: asyncio.Event,
@@ -257,6 +315,7 @@ async def invoke_fork(
     """Run one disposable fork through the Native tool loop."""
     if request.target.harness != "native":
         raise TypeError("Native adapter requires a Native target")
+    request = _window_output(request)
     agent = await _get_agent()
     messages, tools, first_included_seq = await _messages_and_tools(request, agent, kind)
     if request.warm_source is None and on_cold_input is not None:
@@ -268,6 +327,7 @@ async def invoke_fork(
     usage_calls: list[dict[str, Any]] = []
     response: Any = None
     partial_bodies: list[str] = []
+    measured = None
 
     from infra import state
 
@@ -280,12 +340,12 @@ async def invoke_fork(
             if cancel_event.is_set():
                 raise asyncio.CancelledError
             first_reserve = FORK_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
-            if not await _input_fits(request, messages, tools, first_reserve):
+            if not await _input_fits(request, messages, tools, first_reserve, measured):
                 if _iteration == 0:
                     raise _initial_input_refusal(request, kind)
                 return await _truncated_result(
                     partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
-                    request, messages, tools, response,
+                    request, messages, tools, response, measured,
                 )
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
@@ -302,26 +362,23 @@ async def invoke_fork(
             if response.has_tool_calls:
                 if isinstance(response.content, str) and response.content.strip():
                     partial_bodies.append(response.content)
+                measured = await _measured_after(request, messages, tools, response, usage_calls[-1])
                 fits = await _run_tool_calls(
                     agent, response, messages, cancel_event, request, tools,
-                    kind=kind,
+                    kind=kind, measured=measured,
                 )
                 if not fits:
                     if cancel_event.is_set():
                         raise asyncio.CancelledError
                     return await _truncated_result(
                         partial_bodies, usage_calls, "iii_tool_results_over_bound",
-                        _iteration, request, messages, tools, response,
+                        _iteration, request, messages, tools, response, measured,
                     )
                 continue
-            body = response.content
-            if not (isinstance(body, str) and body.strip()):
-                body = response.reasoning_content
-            if isinstance(body, str) and body.strip():
-                return ProviderForkResult(body, {"calls": usage_calls})
-            break
-        else:
-            raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
+            return await _final_reply(
+                response, partial_bodies, usage_calls, _iteration, request, messages, tools,
+                measured, kind=kind,
+            )
+        raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
     finally:
         state._current_thread_id.reset(thread_token)
-    raise ProviderForkRejected(f"Native {kind.name} produced no body")

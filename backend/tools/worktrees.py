@@ -10,6 +10,7 @@ import re
 import subprocess
 from typing import Any
 
+from infra.backend_git import git_argv
 from infra.product_events import emit_product_event
 from infra.project_repo_policy import RepoPolicy, list_registered_repo_policies
 from tools.base import Tool
@@ -34,7 +35,7 @@ def _git(
     """Run one direct Git command with repository hooks disabled."""
     try:
         result = subprocess.run(
-            ["git", "-c", "core.hooksPath=/dev/null", *args],
+            git_argv(*args),
             cwd=str(repo),
             capture_output=True,
             text=True,

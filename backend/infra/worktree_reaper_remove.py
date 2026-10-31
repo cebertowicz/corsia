@@ -17,7 +17,7 @@ import time
 
 from loguru import logger
 
-from infra.worktree_reaper_probe import git, git_detail, list_worktrees
+from infra.worktree_reaper_probe import common_git_env, git, git_detail, list_worktrees
 from infra.worktree_reaper_salvage import SalvageError
 
 QUARANTINE_DIR = "corsia-reaping"
@@ -135,7 +135,12 @@ def remove_worktree(
                     name, git_detail(restored),
                 )
             raise
-    removed = git(repo, ["worktree", "remove", *(["--force"] if force else []), str(target)])
+    # Without --force Git spawns its own status in the worktree; the child
+    # inherits this pin but finds its GIT_DIR through the worktree.
+    removed = git(
+        repo, ["worktree", "remove", *(["--force"] if force else []), str(target)],
+        git_env=common_git_env(repo),
+    )
     if removed.returncode == 0:
         return "removed"
     detail = git_detail(removed)

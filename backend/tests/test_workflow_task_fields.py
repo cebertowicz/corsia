@@ -242,6 +242,28 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
     assert split["size"] == "S" and follow_up["size"] == "S"
 
 
+def test_a_standalone_workflow_task_sent_back_stays_one_run(db):
+    from core.workflow_verdict_read import _nodes, run_roots
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    source = _mutate(db, plan.id, "add", {
+        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+        "workflow_ref": "sample", "workflow_step": "build", "difficulty": "standard", "size": "L",
+    }, workflow_version="abc")["node"]
+    node = source["id"]
+
+    def revision() -> int:
+        return service._node_row(db, node)["revision"]
+
+    _mutate(db, plan.id, "start", {"node_id": node, "expected_revision": revision()})
+    _mutate(db, plan.id, "request_review", {"node_id": node, "expected_revision": revision(), "evidence": "Built"})
+    result = _mutate(db, plan.id, "reject", {"node_id": node, "expected_revision": revision(), "feedback": "Rebuild"})
+
+    revised = service._node_row(db, result["revision"]["node_id"])
+    assert (revised["workflow_ref"], revised["workflow_step"]) == ("sample", "build")
+    assert [root["id"] for root in run_roots(_nodes(db))] == [node]
+
+
 def test_effective_workflows_read_the_corsia_block(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

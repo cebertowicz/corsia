@@ -53,6 +53,71 @@ async def test_person_step_and_reviewer_refusals(isolated_db, tmp_path, monkeypa
     assert "hand it to a reviewer" in result
 
 
+@pytest.mark.asyncio
+async def test_a_sent_back_step_stays_the_same_step_under_the_same_rules(isolated_db, tmp_path, monkeypatch):
+    steps = (
+        "    - {id: review, by: reviewer, required: true, check: Review passes, difficulty: {default: routine}}\n"
+        "    - {id: ship, required: true, check: Shipped, after: [review], difficulty: {default: routine}}\n"
+    )
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    reply = await run.start("ship")
+    review, ship = (step["id"] for step in reply["steps"])
+    await run.update("start", {"node_id": review, "expected_revision": run.revision(review)})
+    await run.update("request_review", {"node_id": review, "expected_revision": run.revision(review), "evidence": "owner says done"})
+    result = await run.update("reject", {"node_id": review, "expected_revision": run.revision(review), "feedback": "needs a real check"})
+
+    round_two = result["revision"]["node_id"]
+    source, revised = (run.rows("SELECT * FROM plan_nodes WHERE id=?", node)[0] for node in (review, round_two))
+    assert {field: revised[field] for field in ("workflow_ref", "workflow_version", "workflow_step", "difficulty")} == {
+        field: source[field] for field in ("workflow_ref", "workflow_version", "workflow_step", "difficulty")
+    }
+    assert run.rows("SELECT depends_on_node_id FROM plan_node_dependencies WHERE node_id=?", ship) == [
+        {"depends_on_node_id": round_two},
+    ]
+    args = {"node_id": round_two, "expected_revision": run.revision(round_two)}
+    assert "can't be skipped" in await run.update("close_node", {**args, "reason": "skip"})
+    assert "hand it to a reviewer" in await run.update("mark_done", {**args, "evidence": "done", "verification_result": "passed"})
+
+
+@pytest.mark.asyncio
+async def test_a_split_part_of_a_step_is_under_the_same_rules(isolated_db, tmp_path, monkeypatch):
+    steps = "    - {id: review, by: reviewer, required: true, check: Review passes, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    review = (await run.start("ship"))["steps"][0]["id"]
+    result = await run.update("split", {
+        "node_id": review, "expected_revision": run.revision(review),
+        "title": "Review the appendix", "acceptance_criteria": "Appendix reviewed", "size": "S",
+    })
+
+    part = result["node"]["id"]
+    assert run.rows("SELECT workflow_step FROM plan_nodes WHERE id=?", part) == [{"workflow_step": "review"}]
+    args = {"node_id": part, "expected_revision": run.revision(part)}
+    assert "can't be skipped" in await run.update("close_node", {**args, "reason": "skip"})
+    assert "hand it to a reviewer" in await run.update("mark_done", {**args, "evidence": "done", "verification_result": "passed"})
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_steps_follow_up_counts_as_that_step_without_its_rules(isolated_db, tmp_path, monkeypatch):
+    steps = "    - {id: draft, required: true, check: Draft exists, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    draft = (await run.start("ship"))["steps"][0]["id"]
+    await run.update("start", {"node_id": draft, "expected_revision": run.revision(draft)})
+    await run.update("request_review", {"node_id": draft, "expected_revision": run.revision(draft), "evidence": "drafted"})
+    result = await run.update("accept_with_follow_up", {
+        "node_id": draft, "expected_revision": run.revision(draft), "verification_result": "passed",
+        "title": "Re-check the draft", "acceptance_criteria": "Draft re-checked", "size": "XS",
+    })
+
+    follow_up = result["follow_up"]["id"]
+    fields = ("workflow_ref", "workflow_version", "workflow_step", "difficulty")
+    source, after = (run.rows("SELECT * FROM plan_nodes WHERE id=?", node)[0] for node in (draft, follow_up))
+    assert {field: after[field] for field in fields} == {field: source[field] for field in fields}
+    assert after["workflow_step"] == "draft"
+    created = run.rows("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'", follow_up)
+    assert json.loads(created[0]["payload_json"]).get("workflow_required") is not True
+    closed = await run.update("close_node", {"node_id": follow_up, "expected_revision": run.revision(follow_up), "reason": "not needed"})
+    assert not isinstance(closed, str)
+
 
 @pytest.mark.asyncio
 async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, monkeypatch):

@@ -22,6 +22,10 @@ from api.measurement_token_sql import ROLLUP_TOKEN_SUM_SQL, CACHED_TOKEN_SQL
 from core.measurement_scope import Grain
 from api.usage_rollup import usage_params, usage_source
 
+#: Attempt release reasons that mean a task restarted: the one definition behind both the first-try
+#: share and the lesson verdict's "finished without a restart".
+RESTART_RELEASE_REASONS = ("failed", "requirements_changed")
+RESTART_REASONS_SQL = ", ".join(f"'{reason}'" for reason in RESTART_RELEASE_REASONS)
 
 
 def range_filter(column: str) -> str:
@@ -80,7 +84,7 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
           SELECT node_id FROM plan_node_events WHERE event='review_rejected' GROUP BY node_id
         ), released_bad AS (
           SELECT node_id FROM plan_node_attempts
-          WHERE release_reason IN ('failed','requirements_changed') GROUP BY node_id
+          WHERE release_reason IN ({RESTART_REASONS_SQL}) GROUP BY node_id
         ), reworked AS (
           SELECT node_id FROM rejected
           UNION SELECT node_id FROM released_bad

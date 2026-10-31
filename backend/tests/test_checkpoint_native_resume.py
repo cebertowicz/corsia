@@ -166,7 +166,7 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
 
     built = object()
 
-    async def run_in_db(function, *args):
+    async def run_off_db(function, *args):
         assert function is checkpoint_native_admission.build_native_cold_checkpoint_admission
         assert args[0] == "checkpoint-1"
         return built
@@ -174,7 +174,7 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
     monkeypatch.setattr(
         checkpoint_native_admission, "capture_native_checkpoint_source", capture,
     )
-    monkeypatch.setattr(checkpoint_native_admission, "run_in_db", run_in_db)
+    monkeypatch.setattr(checkpoint_native_admission, "run_off_db", run_off_db)
 
     result = await checkpoint_native_admission.prepare_native_checkpoint(
         "checkpoint-1",

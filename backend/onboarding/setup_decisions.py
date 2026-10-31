@@ -84,7 +84,7 @@ def _decision(task_title: str, strings: dict[str, str], *, options: list[dict[st
 
 def _lettered(strings: dict[str, Any]) -> list[dict[str, str]]:
     return [_option(chr(ord("A") + index), label, detail)
-            for index, (label, detail) in enumerate(strings["options"])]
+            for index, (label, detail, *_answer) in enumerate(strings["options"])]
 
 
 

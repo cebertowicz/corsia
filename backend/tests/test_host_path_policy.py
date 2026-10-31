@@ -254,11 +254,55 @@ def test_the_api_token_remains_hard_floor_denied(tmp_path) -> None:
     authority host-access review exists to gate.
     """
     policy = _token_policy(tmp_path)
-    token = policy.home / ".corsia" / ".api-token"
+    folder = policy.home / ".corsia" / "credentials"
+    token = folder / "api-token"
 
-    assert policy.denial(token, for_write=False)
-    assert policy.ordinary_denial(token, for_write=False)
-    assert str(token) not in policy.sandbox_rules()
+    assert folder in policy.credential_roots
+    for for_write in (False, True):
+        for path in (token, folder / "api-token.tmp-1", folder):
+            message = policy.ordinary_denial(path, for_write=for_write)
+            assert message and "No host-access lease can open it." in message, path
+    assert f'(deny file-read* file-write* (subpath "{folder}"))' in policy.hard_floor_sandbox_rules()
+
+
+def test_the_leased_floor_pins_every_folder_above_each_credential(tmp_path) -> None:
+    policy = _token_policy(tmp_path)
+    rules = policy.hard_floor_sandbox_rules()
+
+    for folder in (policy.state_root, policy.state_root.parent, policy.home / ".corsia", policy.home):
+        assert f'(deny file-write* (literal "{folder}"))' in rules
+    assert '(literal "/")' not in rules
+
+
+def test_a_linked_corsia_folder_is_pinned_as_written_and_as_resolved(tmp_path) -> None:
+    from tools.host_path_policy import ProtectedHostPathPolicy
+
+    home, target = tmp_path / "home", tmp_path / "elsewhere" / "corsia"
+    home.mkdir()
+    (target / "credentials").mkdir(parents=True)
+    (home / ".corsia").symlink_to(target)
+    policy = ProtectedHostPathPolicy(home=home, state_root=tmp_path / "state")
+    rules = policy.hard_floor_sandbox_rules()
+
+    assert target / "credentials" in policy.credential_roots
+    assert f'(deny file-read* file-write* (subpath "{target / "credentials"}"))' in rules
+    for folder in (home / ".corsia", home, target, target.parent):
+        assert f'(deny file-write* (literal "{folder}"))' in rules, folder
+    assert policy.ordinary_denial(home / ".corsia" / "credentials" / "api-token", for_write=False)
+
+
+def test_the_floor_token_location_does_not_follow_the_environment(tmp_path, monkeypatch) -> None:
+    """The floor's token folder is fixed under the home folder; an override is the person's own file."""
+    from tools.host_path_policy import current_protected_host_path_policy
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    before = current_protected_host_path_policy().credential_roots
+    monkeypatch.setenv("CORSIA_API_TOKEN_FILE", str(tmp_path / "chosen" / "token"))
+    after = current_protected_host_path_policy()
+
+    assert after.credential_roots == before
+    assert (tmp_path / "home" / ".corsia" / "credentials").resolve() in after.credential_roots
+    assert not any("chosen" in str(root) for root in after.credential_roots)
 
 
 def test_hard_floor_denials_say_that_no_lease_will_open_them(tmp_path) -> None:
@@ -475,7 +519,8 @@ def test_private_roots_stay_protected_mode_only_while_credentials_are_hard_floor
     assert "keys" not in policy.hard_floor_sandbox_rules().replace(
         str(tmp_path / "state" / "keys"), ""
     )
-    assert str(corsia_file.parent) not in policy.hard_floor_sandbox_rules()
+    # Only the token folder inside ~/.corsia is closed under a lease.
+    assert f'(subpath "{corsia_file.parent}")' not in policy.hard_floor_sandbox_rules()
 
 
 def test_rename_of_an_ancestor_is_pinned_for_every_protected_path_in_a_granted_root(

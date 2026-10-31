@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 
 from core.project_context import resolve_project_paths
+from infra.backend_git import git_argv
 from infra.config import WORKSPACE
 from infra.database import get_db
 from infra.git_state_cache import cached_current_branch, cached_layout_error
@@ -216,11 +217,6 @@ def branch_pin_support_error(repo_path: Path) -> str | None:
             "directory; linked worktrees and submodules share Git metadata "
             "outside the registered checkout"
         )
-    if (git_dir / "commondir").exists():
-        return (
-            "branch pinning requires repository-local Git metadata; this checkout "
-            "uses a shared common Git directory"
-        )
     if (git_dir / "reftable").exists():
         return (
             "Git ref storage `reftable` is not supported by branch pinning; "
@@ -326,7 +322,7 @@ def _run_git(
     """Run one bounded Git command; a timeout raises the retryable RepoGitTimeout."""
     try:
         return subprocess.run(
-            ["git", *argv], cwd=str(repo), capture_output=True, text=True, timeout=timeout,
+            git_argv(*argv), cwd=str(repo), capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         raise RepoGitTimeout(f"{operation} timed out: {exc}") from exc
@@ -446,10 +442,8 @@ def repo_checkout_state(repo_path: Path) -> RepoCheckoutState:
 
 
 def _run_branch_mutation(repo: Path, args: list[str], *, operation: str) -> None:
-    """Run a direct-argv Git mutation with all repository hooks disabled."""
-    result = _run_git(
-        repo, ["-c", "core.hooksPath=/dev/null", *args], operation=operation, timeout=30,
-    )
+    """Run a direct-argv Git mutation (the shared options disable repository hooks)."""
+    result = _run_git(repo, args, operation=operation, timeout=30)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:240]
         raise ValueError(f"{operation} failed: {detail or 'git failed'}")
