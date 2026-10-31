@@ -34,6 +34,9 @@ def test_codex_compaction_threshold_does_not_inherit_profile_cap(isolated_db, ca
         db.execute("UPDATE models SET context_window=950000 WHERE id=?", (model,))
         db.execute("INSERT OR REPLACE INTO model_profiles(model_id,context_window) VALUES (?,?)", (model, cap))
         db.commit()
+        from vendor_account_fixtures import signed_in_default
+
+        signed_in_default("codex", db=db)  # the signed-in account lists the 950k window
     target = resolve_execution_target(model)
     assert target.context_window == cap
     assert _compaction_overrides(

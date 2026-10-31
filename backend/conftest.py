@@ -173,12 +173,6 @@ def _init_isolated_db_schema():
         seed_probe.setattr(shutil, "which", lambda name, *_a, **_k: name)
         seed_probe.setattr(connections, "_gh_status", lambda _binary: (True, None))
         init_db()
-    # The seed no longer reads a vendor login: Codex starts ``unverified`` until its account-scoped
-    # source check runs, which no test does here. The per-test databases seed it available.
-    from infra.database import write_transaction
-
-    with write_transaction(None, scope="conftest_codex_available") as db:
-        db.execute("UPDATE connections SET status='available' WHERE provider='codex'")
     # A token authenticates only if it is a row, so the session database needs
     # the accounts the suite signs in as before any authenticated route is
     # called. ``tests/auth_fixtures.py`` owns which those are.

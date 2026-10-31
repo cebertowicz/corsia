@@ -89,7 +89,7 @@ async def test_upgraded_send_waits_then_runs_on_the_accounts_own_home(
     receipt = capture_receipt(vendor, account_id='ambient', db=db)
     previous = recovery._TASK
     result = commit_discovery_bundle(
-        vendor, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+        vendor, SimpleNamespace(usage_report=None, cache_stage=None),
         [{'selector_id': 'journey', 'available': True}],
         context=SimpleNamespace(receipt=receipt, account_id='ambient'), harness_version='1', db=db)
     assert result.status == 'ready'
@@ -148,7 +148,7 @@ async def test_source_state_follows_the_accounts_through_sign_in_and_removal(iso
 
     receipt = capture_receipt(vendor, account_id='ambient', db=db)
     result = commit_discovery_bundle(
-        vendor, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+        vendor, SimpleNamespace(usage_report=None, cache_stage=None),
         [{'selector_id': 'journey', 'available': True}],
         context=SimpleNamespace(receipt=receipt, account_id='ambient'), harness_version='1', db=db)
     assert result.status == 'ready'

@@ -146,13 +146,13 @@ async def _publish_process_exit(
     broadcast: Broadcast,
     db,
 ) -> None:
-    added_account = not live.tool_boundary_marker_id and await claude_turn_signed_out(
+    account = not live.tool_boundary_marker_id and await claude_turn_signed_out(
         identity.turn_id, detail, db=db, include_account=True,
     )
     marker_id = live.tool_boundary_marker_id or surface_exit_error(
         child_thread_id, code, detail, broadcast, db, None,
         insert_message_fn=insert_message, logger=log,
-        added_account=added_account,
+        account=account,
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,

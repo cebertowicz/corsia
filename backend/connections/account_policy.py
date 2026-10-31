@@ -233,14 +233,10 @@ def admit_account(provider, identity, projects, *, execution, model=None, db):
     The one admission rule shared by every account writer: ``execution`` adds the launch checks.
     """
     if identity is None:
-        # No account is selectable; an explicit disabled policy is a denial, not ambient absence.
-        policies = _policies(provider, projects, db=db)
-        if any(policy["disabled"] for policy in policies):
+        # No account is selectable; an explicit disabled policy is a denial, not a missing account.
+        if any(policy["disabled"] for policy in _policies(provider, projects, db=db)):
             raise AccountAdmissionError("account_project_denied")
-        reason = account_fact_reason(None, provider=provider, execution=execution, model=model, policies=policies)
-        if reason:
-            raise AccountAdmissionError(reason)
-        return None
+        raise AccountAdmissionError(NOT_CONFIGURED)
     account = get_account(identity, db=db)
     reason = account_reason(account, provider=provider, project_ids=projects,
                             execution=execution, model=model, db=db)

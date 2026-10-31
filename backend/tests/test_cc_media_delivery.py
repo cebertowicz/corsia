@@ -262,6 +262,7 @@ async def test_cc_queued_image_is_idempotent_and_revalidated_on_restart(
     try:
         db.execute("UPDATE models SET supports_vision=1 WHERE id=?", (model_id,))
         db.commit()
+        signed_in_default("claude-code", db=db)  # the Default lists the model with image input
         thread_row = dict(db.execute(
             "SELECT * FROM threads WHERE id=?",
             (thread_id,),

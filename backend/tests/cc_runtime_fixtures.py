@@ -247,17 +247,9 @@ def child_db(tmp_path, monkeypatch, _cc_runtime_cleanup):
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
     _seed_test_model_catalog(conn)
-    from connections.account_evidence import mark_discovery
-    from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import set_account_state
-    from vendor_account_fixtures import seed_default_account
+    from vendor_account_fixtures import signed_in_default
 
-    account = seed_default_account('claude-code', db=conn)
-    account = set_account_state(account['id'], 'signed_in', expected_revision=0, db=conn)
-    receipt = capture_receipt('claude-code', account_id=account['id'], db=conn)
-    models = {row['id']: {} for row in conn.execute("SELECT id FROM models WHERE harness='claude-code'")}
-    assert mark_discovery(account['id'], receipt=receipt, status='ready', models=models, db=conn)
-    conn.commit()
+    signed_in_default('claude-code', db=conn)  # the Default lists every catalog Claude Code model
     wrapper = _TestNoOpClose(conn)
 
     from infra import config, database

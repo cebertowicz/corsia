@@ -94,6 +94,7 @@ DENIED_ACTION = ('Restore the permitted project policy through an authorized con
 
 @pytest.mark.parametrize('cause,phrase,action,agent_action', [
     ('account_signed_out', 'it is signed out', 'Sign in to the permitted account through the account controls.', 'The user can sign in to the permitted account through the account controls.'),
+    ('account_not_configured', 'no account is signed in for this vendor', 'Sign one in under Settings > Providers.', 'The user can sign one in under Settings > Providers.'),
     ('account_removed', 'the account was removed', REMOVED_ACTION, 'The user can choose another permitted account if one is available; otherwise switch model.'),
     ('account_project_denied', 'project policy does not permit the account', DENIED_ACTION, DENIED_ACTION),
     ('project_policy_missing', "the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.'),

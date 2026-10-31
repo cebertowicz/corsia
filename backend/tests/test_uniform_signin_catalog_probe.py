@@ -2,6 +2,7 @@
 import pytest
 
 from vendor_account_fixtures import seed_catalog, accounts  # noqa: F401
+from llm.harness_catalog import harness_row
 from test_added_account_catalog import _discover, _row
 
 
@@ -10,10 +11,10 @@ def test_second_account_only_selector_is_stored_and_survives_other_refresh(accou
     db.execute("UPDATE vendor_accounts SET state='removed', is_default=0 WHERE id=?", (default['id'],))
     db.commit()
     assert _discover(db, 'codex', second, [_row('second-only')]).status == 'ready'
-    before = db.execute("SELECT available FROM models WHERE id='codex/second-only'").fetchone()
+    before = harness_row('codex/second-only', db=db)
     assert before is not None and before['available'] == 1
     assert _discover(db, 'codex', first, [_row('first-only')]).status == 'ready'
-    assert db.execute("SELECT available FROM models WHERE id='codex/second-only'").fetchone()['available'] == 1
+    assert harness_row('codex/second-only', db=db)['available'] == 1
 
 
 @pytest.mark.parametrize('small_last', [True, False])
@@ -28,9 +29,9 @@ def test_shared_selector_uses_smallest_window_regardless_of_refresh_order(accoun
         order.reverse()
     for account, row in order:
         assert _discover(db, 'codex', account, [row]).status == 'ready'
-    assert db.execute("SELECT context_window FROM models WHERE id='codex/shared'").fetchone()[0] == 100000
+    assert harness_row('codex/shared', db=db)['context_window'] == 100000
     assert _discover(db, 'codex', first, [_row('other')]).status == 'ready'
-    assert db.execute("SELECT context_window FROM models WHERE id='codex/shared'").fetchone()[0] == 200000
+    assert harness_row('codex/shared', db=db)['context_window'] == 200000
 
 
 def test_other_account_refresh_preserves_existing_available_selector(accounts):
@@ -41,7 +42,7 @@ def test_other_account_refresh_preserves_existing_available_selector(accounts):
     db.commit()
     assert _discover(db, 'codex', second, [_row('second-only')]).status == 'ready'
     assert _discover(db, 'codex', first, [_row('first-only')]).status == 'ready'
-    assert db.execute("SELECT available FROM models WHERE id='codex/second-only'").fetchone()['available'] == 1
+    assert harness_row('codex/second-only', db=db)['available'] == 1
 
 
 def test_account_refresh_preserves_hide_and_saved_window(accounts):

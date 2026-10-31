@@ -84,7 +84,8 @@ def test_harness_target_preserves_exact_selector_identity_and_context(target_db)
         display_name="Fable 5", supports_vision=True, supports_reasoning=True,
         metadata={
             "resolved_identity": "claude-fable-5",
-            "discovered_capabilities": {},
+            # Reasoning support is what discovery reports: the model's effort levels.
+            "discovered_capabilities": {"effort_levels": ["low", "high"]},
         },
     )
     signed_in_default("claude-code", db=target_db)

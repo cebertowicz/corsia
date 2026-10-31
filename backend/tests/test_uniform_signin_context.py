@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from vendor_account_fixtures import accounts  # noqa: F401
+from llm.harness_catalog import harness_row
 from test_added_account_catalog import _discover, _row
 
 
@@ -40,7 +41,7 @@ async def test_claude_skipped_probes_preserve_smaller_account_window(accounts, m
             assert _discover(db, 'claude-code', large, [large_row]).status == 'ready'
         record = get_account(small['id'], db=db)['discovery']['discovery']['models']['claude-code/sonnet']
         assert record['context_window'] == 100000
-        assert db.execute("SELECT context_window FROM models WHERE id='claude-code/sonnet'").fetchone()[0] == 100000
+        assert harness_row('claude-code/sonnet', db=db)['context_window'] == 100000
     assert calls == ['sonnet']
 
 
@@ -52,4 +53,4 @@ def test_changed_resolved_identity_drops_old_account_window(accounts):
     assert _discover(db, 'codex', account, [_row('changed') | {'resolved_identity': 'new', 'context_window': None}]).status == 'ready'
     record = get_account(account['id'], db=db)['discovery']['discovery']['models']['codex/changed']
     assert record.get('context_window') is None
-    assert db.execute("SELECT context_window FROM models WHERE id='codex/changed'").fetchone()[0] is None
+    assert harness_row('codex/changed', db=db)['context_window'] is None

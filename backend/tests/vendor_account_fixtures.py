@@ -99,11 +99,25 @@ def signed_in_default(provider: str, *, db=None, models: tuple[str, ...] = ()) -
         if account['state'] != 'signed_in':
             account = set_account_state(account['id'], 'signed_in', expected_revision=account['revision'], db=connection)
         receipt = capture_receipt(provider, account_id=account['id'], db=connection)
-        # An account's discovery is keyed by the model's litellm id, which is the catalog id except for a
-        # row built to mislead; list both so a test row of either kind runs.
-        discovered = {key: {} for row in connection.execute(
-            'SELECT id, litellm_model FROM models WHERE harness=?', (provider,)) for key in (row['id'], row['litellm_model'])}
-        discovered.update({model: {} for model in models})
+        # The catalog reads every harness model from discovery, so the Default lists each stored test
+        # row as that row describes it. Discovery is keyed by the model's litellm id, which is the
+        # catalog id except for a row built to mislead; list both so a test row of either kind runs.
+        discovered = {}
+        for row in map(dict, connection.execute('SELECT * FROM models WHERE harness=?', (provider,))):
+            # A test's own narrow models table may lack columns; a missing column is the schema default.
+            meta = json.loads(row.get('metadata_json') or '{}')
+            capabilities = dict(meta.get('discovered_capabilities') or {})
+            if row.get('supports_vision'):
+                capabilities.setdefault('input_modalities', ['text', 'image'])
+            evidence = {'available': bool(row.get('available', 1)), 'context_window': row.get('context_window'),
+                        'display_name': row['display_name'], 'description': row.get('description') or '',
+                        'resolved_identity': meta.get('resolved_identity'), 'capabilities': capabilities,
+                        'is_default': bool(meta.get('is_default'))}
+            if meta.get('alias_of'):
+                evidence['alias_of'] = meta['alias_of'].partition('/')[2]
+            discovered.update({row['id']: evidence, row['litellm_model']: evidence})
+        for model in models:  # a model with no stored row is listed available
+            discovered.setdefault(model, {'available': True})
         assert mark_discovery(account['id'], receipt=receipt, status='ready', models=discovered, db=connection)
         connection.commit()
         return get_account(account['id'], db=connection)
@@ -219,22 +233,53 @@ def default_subject(provider: str, scope: str, *, db=None) -> LimitSubject:
 
 
 def seed_catalog(provider: str, rows: list[dict], *, harness_version: str, source: str, timestamp: str,
-                 db=None, unlisted_errors: dict[str, str] | None = None) -> None:
-    """Store catalog rows and their refresh envelope with the production writers, for a test about the catalog.
+                 db=None) -> None:
+    """Store normalized rows as the signed-in Default's ready discovery, for a test about the catalog.
 
-    The writers are the ones a sweep with a ready account calls (``upsert_discovered_rows`` through
-    ``account_discovery_commit._store_account_catalog``, then ``record_refresh_attempt`` through
-    ``account_discovery_refresh._store_sweep_success``); this skips only the account discovery evidence those rows derive from, for tests
-    that have no account.
+    As a sweep's commit leaves it: the rows are that account's whole discovery and the catalog's
+    registered models, and the refresh envelope is stamped. This skips only the harness call.
     """
-    from connections.harness_models import record_refresh_attempt, upsert_discovered_rows
-    from infra.database import write_transaction
+    from connections.harness_legacy_fallback import remove_legacy_fallback
+    from connections.harness_models import record_refresh_attempt
+    from connections.vendor_accounts import get_account
 
-    with write_transaction(db, scope='harness_model_catalog') as connection:
-        upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
-                               timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
+    account = signed_in_default(provider, db=db)
+
+    def write(connection):
+        remove_legacy_fallback(provider, db=connection)
+        models = {f"{provider}/{row['selector_id']}": {**row, 'harness_version': harness_version} for row in rows}
+        for key, row in models.items():
+            connection.execute(
+                "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,"
+                "backend,source,enabled,available,metadata_json,default_temperature,default_max_tokens,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,?,'account_discovery',1,0,'{}',NULL,NULL,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET source=excluded.source,enabled=1 WHERE models.source='reference'",
+                (key, provider, provider, row['selector_id'], key, row.get('display_name') or row['selector_id'],
+                 'cc' if provider == 'claude-code' else 'codex', timestamp, timestamp))
+        receipt = capture_receipt(provider, account_id=account['id'], db=connection)
+        assert mark_discovery(account['id'], receipt=receipt, status='ready', models=models,
+                              harness_version=harness_version, db=connection)
         record_refresh_attempt(provider, harness_version=harness_version, source=source,
                                timestamp=timestamp, error=None, db=connection)
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    _read(write, db)
+
+
+def register_harness_rows(rows: list[dict], *, db=None) -> None:
+    """Register test harness rows in the catalog by id, as a discovery commit leaves each model it lists."""
+    def write(connection):
+        for row in rows:
+            connection.execute(
+                "INSERT OR IGNORE INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,"
+                "source,enabled,available,metadata_json,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,'account_discovery',1,0,'{}','t','t')",
+                (row['id'], row['harness'], row['provider'], row['provider_model_id'], row['litellm_model'],
+                 row['display_name']))
+        connection.commit()
+
+    _read(write, db)
 
 
 def seed_usage(account_id: str, *, facts: dict, db=None) -> None:
@@ -290,7 +335,7 @@ def _ready(db, account, model='codex/test'):
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     assert receipt is not None
     assert mark_discovery(account['id'], receipt=receipt, status='ready',
-                          models={model: {'resolved_identity': 'synthetic'}}, db=db)
+                          models={model: {'available': True, 'resolved_identity': 'synthetic'}}, db=db)
     db.commit()
     return receipt
 
@@ -306,7 +351,8 @@ def _known_default(db, account, login=1):
     (Path(current['source_home']) / 'auth.json').touch()
     invalidate_discovery(current, login_seq=login, auth_state='known', db=db)
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
-    assert mark_discovery(account['id'], receipt=receipt, status='ready', models={'codex/test': {}}, db=db)
+    assert mark_discovery(account['id'], receipt=receipt, status='ready',
+                          models={'codex/test': {'available': True}}, db=db)
     db.commit()
 
 

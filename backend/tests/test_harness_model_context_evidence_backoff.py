@@ -90,13 +90,13 @@ def _age_last_attempt(minutes: int, *, refresh: bool = False) -> None:
 
 
 def _window(model_id: str) -> int | None:
+    """The window readers see: what the signed-in account lists now."""
     from infra.database import get_db
+    from llm.harness_catalog import harness_row
 
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT context_window FROM models WHERE id=?", (model_id,)
-        ).fetchone()
+        row = harness_row(model_id, db=db)
     finally:
         db.close()
     return None if row is None else row["context_window"]

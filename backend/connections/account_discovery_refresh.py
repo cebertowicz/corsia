@@ -34,14 +34,15 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
         try:
             version = harness_version or await version_read(binary, env=env)
         except Exception as error:
-            # The CLI's own words are a person's only clue to why it is broken: their first line
-            # is kept as the failure's reason, and the whole text goes to the log.
+            # A person reads only that the check failed or timed out; the error names the binary's
+            # path and the CLI's stderr, so it goes to the log alone.
             from connections.source_state import UNVERIFIED, user_reason
 
             log.warning('%s version check failed: %s', provider, error)
+            timed_out = 'timed out' if 'timed out' in str(error) else None
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', harness_version=harness_version,
-                                 reason=user_reason(UNVERIFIED, str(error)), db=db)
+                                 reason=user_reason(UNVERIFIED, timed_out), db=db)
         try:
             staged = await discover(binary, context=context)
             if not isinstance(staged, StagedDiscovery):
@@ -55,13 +56,13 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
                     'resolved_identity': row.get('resolved_identity') or '',
                     'display_name': row.get('display_name') or key.partition('/')[2]}
                     for key, row in prior.items()]
-                staged.unlisted_errors = await add_accepted_unlisted(staged.payload, previous,
+                await add_accepted_unlisted(staged.payload, previous,
                     lambda selector: _discover_claude_context(binary, selector, context=context))
             rows = normalize(staged.payload, harness_version=version,
                              timestamp=datetime.now(timezone.utc).isoformat())
         except Exception:
             # An adapter's raw diagnostics are never stored on account evidence: only a failed
-            # version check (above) keeps a reason, the first line of the CLI's error.
+            # version check (above) keeps a reason, in the person's terms.
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', harness_version=harness_version, db=db)
         # Transaction/restoration/terminal cleanup failures must remain loud, not a failed adapter report.

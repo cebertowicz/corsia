@@ -31,7 +31,6 @@ class StagedDiscovery:
     usage_report: object = None
     cache_stage: object | None = None
     cleanup_owner: Callable[[], None] | None = None
-    unlisted_errors: dict[str, str] = field(default_factory=dict)
 
     def close(self):
         if self.cleanup_owner is not None:

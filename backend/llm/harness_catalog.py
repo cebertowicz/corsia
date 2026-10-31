@@ -1,23 +1,37 @@
-"""Read-only harness catalog rows from current account discovery."""
+"""Read-only harness catalog rows from current account discovery.
+
+A stored Claude Code or Codex row is an identity registry. Availability and every
+discovered field come from what signed-in accounts list now.
+"""
 from __future__ import annotations
 
 import json
 
 from connections import fact_memo
 
+# Stored metadata a refresh used to write; the live projection owns these now.
+_DISCOVERED = ('resolved_identity', 'discovered_capabilities', 'is_default', 'alias_of', 'availability_reason',
+               'discovery_order', 'harness_version', 'context_observation', 'reference_only')
+_LIVE_COLUMNS = ('available', 'context_window', 'supports_vision', 'supports_reasoning', 'display_name',
+                 'description', 'last_error')
+
 
 @fact_memo.memoized_reader
-def added_rows(*, db, provider: str | None = None) -> dict[str, dict]:
-    """Project added-only models from current signed-in account evidence."""
+def account_rows(*, db, provider: str | None = None) -> dict[str, dict]:
+    """Project models from current signed-in account evidence."""
     from connections.vendor_accounts import list_accounts
 
     accounts = [account for vendor in ((provider,) if provider else ('claude-code', 'codex'))
                 for account in list_accounts(provider=vendor, db=db)]
-    return added_rows_from_accounts(accounts)
+    return account_rows_from_accounts(accounts)
 
 
-def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
-    """Project discovery from account rows a caller already read."""
+def account_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
+    """Project discovery from account rows a caller already read.
+
+    A model any account lists available is available, with the smallest window those
+    accounts report; its order is where an account first listed it.
+    """
     from connections.account_evidence import current_ready_discovery
     from llm.context_window import discovered_window
 
@@ -34,18 +48,28 @@ def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
                 continue
             previous = rows.get(model)
             available = evidence.get('available') is True
+            window = discovered_window(evidence)
             if previous is not None and (previous['available'] or not available):
+                if available and window and previous['context_window']:
+                    previous['context_window'] = min(previous['context_window'], window)
                 continue
             capabilities = evidence.get('capabilities') or {}
             metadata = {'resolved_identity': evidence.get('resolved_identity'),
-                        'discovered_capabilities': capabilities, 'is_default': False,
-                        'availability_reason': evidence.get('availability_reason')}
+                        'discovered_capabilities': capabilities, 'is_default': bool(evidence.get('is_default')),
+                        'harness_version': evidence.get('harness_version'),
+                        'discovery_order': list(rows).index(model) if previous else len(rows)}
+            if not available:
+                metadata['availability_reason'] = evidence.get('availability_reason') or 'discovered_model_unavailable'
+            if evidence.get('alias_of'):
+                metadata['alias_of'] = f"{vendor}/{evidence['alias_of']}"
+            if isinstance(evidence.get('context_observation'), dict):
+                metadata['context_observation'] = evidence['context_observation']
             rows[model] = {
                 'id': model, 'litellm_model': model, 'provider': vendor, 'harness': vendor,
                 'provider_model_id': model[len(vendor) + 1:], 'backend': 'cc' if vendor == 'claude-code' else 'codex',
                 'display_name': evidence.get('display_name') or model[len(vendor) + 1:],
                 'description': evidence.get('description') or '', 'source': 'account_discovery',
-                'enabled': 1, 'available': available, 'context_window': discovered_window(evidence),
+                'enabled': 1, 'available': available, 'context_window': window,
                 'supports_vision': 'image' in (capabilities.get('input_modalities') or []),
                 'supports_tools': 1, 'supports_reasoning': bool(capabilities.get('effort_levels') or capabilities.get('reasoning_efforts')),
                 'metadata_json': json.dumps(metadata), 'last_error': None,
@@ -54,17 +78,23 @@ def added_rows_from_accounts(accounts: list[dict]) -> dict[str, dict]:
 
 
 def catalog_rows(stored: list[dict]) -> list[dict]:
-    """Append each signed-in account's listed models that have no stored catalog row."""
+    """Project stored rows and append listed models with no stored row, harness rows in discovery order."""
     from infra.database import get_db
 
     db = get_db()
     try:
         existing = {row[0] for row in db.execute(
             "SELECT id FROM models WHERE harness IN ('claude-code','codex')")}
-        projected = added_rows(db=db)
-        return [*stored, *(row for model, row in projected.items() if model not in existing)]
+        projected = account_rows(db=db)
+        rows = [*project_stored_rows(stored, db=db),
+                *(row for model, row in projected.items() if model not in existing)]
     finally:
         db.close()
+    rank = {'claude-code': 1, 'codex': 2}
+    return [row for row in rows if row['harness'] not in rank] + sorted(
+        (row for row in rows if row['harness'] in rank),
+        key=lambda row: (rank[row['harness']], json.loads(row['metadata_json'] or '{}').get(
+            'discovery_order', 2147483647), row['display_name'], row['id']))
 
 
 def harness_base_from_row(row: dict, *, db) -> dict:
@@ -79,13 +109,39 @@ def harness_base_from_row(row: dict, *, db) -> dict:
     return {'litellm_model': row['litellm_model'], 'status': status, 'status_reason': reason}
 
 
-def project_stored_row(row, *, db) -> dict:
-    """Add other accounts' availability to an unavailable stored row without rereading it."""
-    result = dict(row)
-    if not result['available']:
-        added = added_rows(db=db).get(result['litellm_model'])
-        result['added_available'] = bool(added and added['available'])
-    return result
+def project_stored_rows(rows, *, db) -> list[dict]:
+    """Overlay each stored Claude Code or Codex row with what signed-in accounts list now.
+
+    The stored row keeps what a person set (enabled, alias, overrides) and a runtime
+    window observed for the resolved identity accounts list now. A model no account
+    lists keeps its registered name and is unavailable. Other rows pass through.
+    """
+    from llm.model_status import versioned_name
+
+    rows = [dict(row) for row in rows]
+    vendors = {row.get('harness') for row in rows} & {'claude-code', 'codex'}
+    live = account_rows(db=db, provider=next(iter(vendors)) if len(vendors) == 1 else None) if vendors else {}
+    for row in rows:
+        if row.get('harness') in ('claude-code', 'codex'):
+            stored = json.loads(row.get('metadata_json') or '{}')
+            meta = {key: value for key, value in stored.items() if key not in _DISCOVERED}
+            current = live.get(row['litellm_model'])
+            # A harness has no catalog inference defaults; an older row's schema-stamped ones never apply.
+            row.update(default_temperature=None, default_max_tokens=None)
+            if current is None:
+                row.update(available=0, context_window=None, supports_vision=0, supports_reasoning=0,
+                           display_name=versioned_name(row, stored), last_error=None)
+                meta['availability_reason'] = 'not_returned_by_discovery'
+            else:
+                row.update({key: current[key] for key in _LIVE_COLUMNS})
+                meta.update(json.loads(current['metadata_json']))
+                observed = stored.get('context_observation')
+                if (isinstance(observed, dict) and observed.get('resolved_identity')
+                        and observed['resolved_identity'] == meta['resolved_identity']):
+                    row['context_window'] = observed['effective_tokens']
+                    meta['context_observation'] = observed
+            row['metadata_json'] = json.dumps(meta)
+    return rows
 
 
 @fact_memo.memoized_reader
@@ -100,5 +156,5 @@ def harness_row(model: str, *, db) -> dict | None:
         "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)
     ).fetchone()
     if row is not None:
-        return project_stored_row(row, db=db)
-    return added_rows(db=db).get(model)
+        return project_stored_rows([row], db=db)[0]
+    return account_rows(db=db).get(model)

@@ -324,7 +324,7 @@ async def test_a_held_head_moves_when_its_destination_finishes_discovery(account
     harness_usage.record_allowed(provider=provider, source="rate_limit_update", receipt=receipt, db=db)
 
     admitted = await _held_then_destination_usable(db, monkeypatch, v, lambda: commit_discovery_bundle(
-        provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}), [{"selector_id": "test", "available": True}],
+        provider, SimpleNamespace(usage_report=None, cache_stage=None), [{"selector_id": "test", "available": True}],
         context=SimpleNamespace(receipt=receipt, account_id=v.second["id"]), harness_version="test", db=db))
 
     batch = admitted.await_args.args[0]

@@ -37,11 +37,12 @@ def _seed_reviewer_catalog(conn: sqlite3.Connection) -> None:
             json.dumps({"resolved_identity": selector, "internal_reviewer": False}),
             "t", "t",
         ))
+    # The review selector is hidden from the picker but the account offers it, as Codex does.
     for selector, internal in (("gpt-5-codex", False), ("codex-auto-review", True)):
         rows.append((
             f"codex/{selector}", "codex", "codex", selector,
             f"codex/{selector}", selector, "codex", "test",
-            0 if internal else 1, 0 if internal else 1, 200_000,
+            0 if internal else 1, 1, 200_000,
             json.dumps({"resolved_identity": selector, "internal_reviewer": internal}),
             "t", "t",
         ))

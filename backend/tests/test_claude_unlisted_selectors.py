@@ -57,10 +57,11 @@ NEW_LIST = [
 
 
 def _rows(db) -> dict[str, dict]:
-    return {
-        row["provider_model_id"]: dict(row)
-        for row in db.execute("SELECT * FROM models WHERE harness = 'claude-code'")
-    }
+    """Each Claude Code row as readers see it: what the signed-in account lists now."""
+    from llm.harness_catalog import project_stored_rows
+
+    stored = db.execute("SELECT * FROM models WHERE harness = 'claude-code'").fetchall()
+    return {row["provider_model_id"]: row for row in project_stored_rows(stored, db=db)}
 
 
 async def _refresh(db, monkeypatch, listing, accepted: dict[str, str]):
@@ -131,7 +132,7 @@ async def test_accepted_unlisted_selector_keeps_running_as_an_alias(
 
 
 @pytest.mark.asyncio
-async def test_a_selector_not_kept_says_why(connections_db, monkeypatch):
+async def test_a_selector_not_kept_says_why(connections_db, monkeypatch, caplog):
     await _refresh(connections_db, monkeypatch, OLD_LIST, {})
     await _refresh(
         connections_db, monkeypatch, NEW_LIST,
@@ -140,12 +141,12 @@ async def test_a_selector_not_kept_says_why(connections_db, monkeypatch):
 
     rows = _rows(connections_db)
     remapped, rejected = rows["opus[1m]"], rows["fable[1m]"]
-    assert remapped["available"] == 0
-    assert json.loads(remapped["metadata_json"])[
-        "availability_reason"] == "not_returned_by_discovery"
-    assert "now maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in remapped["last_error"]
-    assert rejected["available"] == 0
-    assert "RuntimeError: Claude Code rejected selector fable[1m]" in rejected["last_error"]
+    for row in (remapped, rejected):
+        assert row["available"] == 0
+        assert json.loads(row["metadata_json"])["availability_reason"] == "not_returned_by_discovery"
+    # No reader shows a retired row's probe error; the discovery log keeps it.
+    assert "now maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in caplog.text
+    assert "RuntimeError: Claude Code rejected selector fable[1m]" in caplog.text
 
 
 @pytest.mark.asyncio

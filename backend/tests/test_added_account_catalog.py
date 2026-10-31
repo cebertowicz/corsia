@@ -17,7 +17,7 @@ def _discover(db, provider, account, rows):
     from connections.account_receipts import capture_receipt
 
     receipt = capture_receipt(provider, account_id=account['id'], db=db)
-    return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}), rows,
+    return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None), rows,
         context=SimpleNamespace(receipt=receipt, account_id=account['id']), harness_version='1', db=db)
 
 
@@ -51,9 +51,9 @@ def test_fresh_added_account_lists_models_and_sources_ready(accounts, client, pr
     assert next(line for line in source['accounts'] if line['account_id'] == account['id'])['state'] == 'ready'
 
 
-def test_added_rows_read_once_per_fact_scope(accounts, monkeypatch):
+def test_account_rows_read_once_per_fact_scope(accounts, monkeypatch):
     from connections import fact_memo, vendor_accounts
-    from llm.harness_catalog import added_rows
+    from llm.harness_catalog import account_rows
 
     db = accounts[0]
     original = vendor_accounts.list_accounts
@@ -65,10 +65,10 @@ def test_added_rows_read_once_per_fact_scope(accounts, monkeypatch):
 
     monkeypatch.setattr(vendor_accounts, 'list_accounts', counted)
     with fact_memo.fact_reads():
-        first = added_rows(db=db)
-        assert added_rows(db=db) is first
+        first = account_rows(db=db)
+        assert account_rows(db=db) is first
     assert calls == ['claude-code', 'codex']
-    added_rows(db=db)
+    account_rows(db=db)
     assert calls == ['claude-code', 'codex', 'claude-code', 'codex']
 
 
@@ -128,11 +128,13 @@ def test_existing_ready_discovery_is_projected_without_rediscovery(accounts):
 def test_default_and_added_accounts_keep_separate_availability(accounts):
     db, default, account, _ = accounts
     # The Default lists the model unavailable through its own refresh, like any account.
+    from llm.harness_catalog import harness_row
+
     _discover(db, 'codex', default, [_row('default-unavailable', False)])
-    assert db.execute("SELECT available FROM models WHERE id='codex/default-unavailable'").fetchone()[0] == 0
+    assert harness_row('codex/default-unavailable', db=db)['available'] == 0
     _discover(db, 'codex', account, [_row('added-only'), _row('default-unavailable')])
     # The row is shared: the added account lists it available, so it is (design D3 item 5, Writer and Availability).
-    assert db.execute("SELECT available FROM models WHERE id='codex/default-unavailable'").fetchone()[0] == 1
+    assert harness_row('codex/default-unavailable', db=db)['available'] == 1
     extra = {entry['account_id']: entry for entry in _projected('codex', 'added-only')['runs_on']}
     assert (extra[default['id']]['status'], extra[default['id']]['status_reason']) == ('unavailable', 'account_model_not_discovered')
     assert extra[account['id']]['status'] == 'ready'
@@ -214,7 +216,7 @@ def test_superseded_discovery_never_projects_rows(accounts):
     db, _, account, _ = accounts
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     set_account_state(account['id'], 'signed_out', expected_revision=account['revision'])
-    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+    result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
         [_row('stale')], context=SimpleNamespace(receipt=receipt, account_id=account['id']),
         harness_version='1', db=db)
     assert result.cause == 'account_refresh_superseded'
@@ -241,7 +243,7 @@ async def test_vendor_refresh_clock_records_the_sweep_not_one_account(accounts, 
     def _commit_ready(provider, context, *, db=None):
         from connections.account_discovery_commit import commit_discovery_bundle
 
-        return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+        return commit_discovery_bundle(provider, SimpleNamespace(usage_report=None, cache_stage=None),
                                        [_row('swept')], context=context, harness_version='1', db=db)
 
     monkeypatch.setattr(account_discovery_refresh, 'refresh_account_once', refresh_once)
@@ -276,7 +278,7 @@ def _ready_refresh(version, fails=()):
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', db=db)
         return await db_call(commit_discovery_bundle, provider,
-                             SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+                             SimpleNamespace(usage_report=None, cache_stage=None),
                              [_row('swept')], context=context, harness_version=version, db=db)
     return refresh_once
 
@@ -300,7 +302,10 @@ async def test_one_accounts_ready_refresh_leaves_the_vendor_clock(accounts, monk
 
     assert result.status == 'ready'
     assert harness_models.read_discovery_envelope('codex') == before
-    assert harness_models.cache_refresh_reason('codex', harness_version='1') == due
+    # The vendor clock is still over an hour old. The reason now reads 'stale', not the
+    # missing window: what the accounts list now has every window.
+    assert due == 'missing_context_evidence'
+    assert harness_models.cache_refresh_reason('codex', harness_version='1') == 'stale'
 
 
 @pytest.mark.asyncio

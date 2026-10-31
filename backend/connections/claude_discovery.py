@@ -164,7 +164,7 @@ def _store_catalog_success(report: object, *, account_id: str, receipt, db=None)
             with write_transaction(db, scope='claude_account_catalog_usage') as usage_db:
                 claude_usage.apply_usage_response(report, receipt=receipt, db=usage_db)
         except Exception as exc:
-            log.error("Claude Code usage observation failed: %s", type(exc).__name__)
+            log.error("Claude Code usage observation failed: %s: %s", type(exc).__name__, exc)
 
 
 async def _discover_claude_context(binary: str, selector: str, *, context=None) -> dict[str, Any]:

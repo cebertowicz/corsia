@@ -64,7 +64,7 @@ class FirstRunBind:
 
 def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> tuple[list[dict], bool]:
     """Picker rows and whether any stored catalog models exist for this vendor."""
-    from llm.harness_catalog import added_rows, added_rows_from_accounts, harness_base_from_row
+    from llm.harness_catalog import account_rows, account_rows_from_accounts, harness_base_from_row
     from llm.model_status import harness_base_row
 
     catalog = db.execute(
@@ -72,8 +72,8 @@ def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> tu
     ).fetchall()
     models = [row['litellm_model'] for row in catalog if row['enabled']]
     stored = {row['id'] for row in catalog}
-    projected = (added_rows(db=db, provider=provider) if accounts is None else
-                 added_rows_from_accounts([account for account in accounts if account['provider'] == provider]))
+    projected = (account_rows(db=db, provider=provider) if accounts is None else
+                 account_rows_from_accounts([account for account in accounts if account['provider'] == provider]))
     result = [row for row in (harness_base_row(model, db=db) for model in models) if row is not None]
     result.extend(harness_base_from_row(row, db=db) for model, row in projected.items() if model not in stored)
     return result, bool(catalog)

@@ -18,45 +18,6 @@ def _publish_cache(account_id, stage, cache_receipt, db):
             stage.promote()
 
 
-def _store_account_catalog(provider, rows, harness_version, *, db, unlisted_errors=None):
-    """Project current account rows using the shared, current discovery of every account."""
-    from connections.account_evidence import current_ready_discovery
-    from connections.harness_models import upsert_discovered_rows
-    from connections.vendor_accounts import list_accounts
-    from infra.time import utc_now_iso
-
-    discoveries = [current_ready_discovery(account) for account in list_accounts(provider=provider, db=db)]
-    by_model = {}
-    for discovery in discoveries:
-        if discovery is None:
-            continue
-        for model, evidence in discovery.get('models', {}).items():
-            if isinstance(evidence, dict):
-                by_model.setdefault(model, []).append(evidence)
-    current = {provider + '/' + row['selector_id']: row for row in rows}
-    combined = []
-    for model, evidence in by_model.items():
-        if not model.startswith(provider + '/'):
-            continue
-        entry = dict(current.get(model) or evidence[0])
-        entry['selector_id'] = model[len(provider) + 1:]
-        windows = [item.get('context_window') for item in evidence
-                   if isinstance(item.get('context_window'), int) and item['context_window'] > 0]
-        entry['context_window'] = min(windows) if windows else None
-        entry['available'] = any(item.get('available') is True for item in evidence)
-        combined.append(entry)
-    upsert_discovered_rows(provider, combined, harness_version=harness_version,
-                           source='account_discovery', timestamp=utc_now_iso(), db=db,
-                           unlisted_errors=unlisted_errors)
-
-
-def reproject_availability(provider, *, db):
-    """Re-derive the stored catalog from the accounts still signed in, inside the caller's transaction."""
-    from connections.harness_models import _cached_harness_version
-
-    _store_account_catalog(provider, [], _cached_harness_version(provider, db=db), db=db)
-
-
 def commit_discovery_bundle(provider, staged, rows, *, context, harness_version, db=None):
     """Fence model, usage and recovery effects in one account writer, then publish the cache.
 
@@ -101,8 +62,22 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
         if not mark_discovery(context.account_id, receipt=receipt, status='ready', models=models,
                               harness_version=harness_version, cache_receipt=cache_receipt, db=connection):
             raise RuntimeError('account_refresh_superseded')
-        _store_account_catalog(provider, list(models.values()), harness_version, db=connection,
-                               unlisted_errors=staged.unlisted_errors)
+        from connections.harness_legacy_fallback import remove_legacy_fallback
+        from infra.time import utc_now_iso
+        from llm.model_status import versioned_name
+
+        remove_legacy_fallback(provider, db=connection)
+        now = utc_now_iso()
+        # The stored row only registers the model; readers project the rest from signed-in accounts.
+        for key, row in models.items():
+            connection.execute(
+                "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,backend,"
+                "source,enabled,available,metadata_json,default_temperature,default_max_tokens,discovered_at,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,?,'account_discovery',1,0,'{}',NULL,NULL,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET source=excluded.source,enabled=1 WHERE models.source='reference'",
+                (key, provider, provider, key[len(provider) + 1:], key,
+                 versioned_name({'display_name': row.get('display_name') or key[len(provider) + 1:]}, row),
+                 'cc' if provider == 'claude-code' else 'codex', now, now, now))
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 

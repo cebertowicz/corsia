@@ -80,16 +80,14 @@ def _store(model_ids: list[str], at: datetime) -> None:
 
 
 def _available_codex() -> set[str]:
+    """The Codex models readers see as available: what the signed-in account lists now."""
     from infra.database import get_db
+    from llm.harness_catalog import project_stored_rows
 
     db = get_db()
     try:
-        return {
-            row["provider_model_id"] for row in db.execute(
-                "SELECT provider_model_id FROM models "
-                "WHERE harness = 'codex' AND available = 1"
-            ).fetchall()
-        }
+        stored = db.execute("SELECT * FROM models WHERE harness = 'codex'").fetchall()
+        return {row["provider_model_id"] for row in project_stored_rows(stored, db=db) if row["available"]}
     finally:
         db.close()
 

@@ -339,8 +339,10 @@ class TestClaudeSignIn:
         assert connection_available("claude-code") is True
 
     @pytest.mark.parametrize(("failure", "reason"), [
-        ("claude --version failed: bad install", "Check failed: claude --version failed: bad install"),
-        ("claude --version timed out", "Check timed out"),
+        # The binary's path and the CLI's stderr stay in the log.
+        ("/Users/someone/.local/bin/claude --version failed: bad install", "Check failed"),
+        ("[Errno 2] No such file or directory: '/Users/someone/.local/bin/claude'", "Check failed"),
+        ("/Users/someone/.local/bin/claude --version timed out", "Check timed out"),
     ])
     def test_not_checked_yet_ends_in_the_version_reads_failure(
         self, isolated_db, client, claude_session, monkeypatch, failure, reason,

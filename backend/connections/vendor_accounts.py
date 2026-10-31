@@ -310,11 +310,6 @@ def set_account_state(account_id: str, state: str, *, expected_revision: int, db
                 record = discovery_record(account)
                 invalidate_discovery(account, login_seq=record["login_seq"],
                     auth_state=record["auth_state"], db=connection)
-        if account["provider"] in VENDORS and account["state"] == "signed_in" and state != "signed_in":
-            # A model is available only while a signed-in account's ready discovery lists it.
-            from connections.account_discovery_commit import reproject_availability
-
-            reproject_availability(account["provider"], db=connection)
         return get_account(account_id, db=connection)
 
 

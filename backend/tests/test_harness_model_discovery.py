@@ -378,6 +378,7 @@ def test_runtime_context_observation_updates_only_exact_cc_identity(connections_
         "source": "claude-stream-json:result",
         "version": "2.1.206",
         "observed_at": "2026-07-11T01:00:00+00:00",
+        "resolved_identity": "claude-fable-5",
         "raw_tokens": 934000,
         "max_tokens": 934000,
         "effective_tokens": 934000,
@@ -474,11 +475,14 @@ def test_refresh_drops_context_evidence_when_selector_resolves_new_identity(
 
 
 def _model_rows(db, provider: str) -> dict[str, dict]:
+    """The catalog rows as readers see them: projected from the accounts that list them."""
+    from llm.harness_catalog import project_stored_rows
+
     return {
-        row["provider_model_id"]: dict(row)
-        for row in db.execute(
+        row["provider_model_id"]: row
+        for row in project_stored_rows(db.execute(
             "SELECT * FROM models WHERE harness = ? ORDER BY id", (provider,)
-        ).fetchall()
+        ).fetchall(), db=db)
     }
 
 

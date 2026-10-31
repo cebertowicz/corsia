@@ -129,7 +129,7 @@ def _commit(db, account, models):
 
     receipt = capture_receipt("codex", account_id=account["id"], db=db)
     result = commit_discovery_bundle(
-        "codex", SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+        "codex", SimpleNamespace(usage_report=None, cache_stage=None),
         [{"selector_id": name.split("/", 1)[1], "available": True} for name in models],
         context=SimpleNamespace(receipt=receipt, account_id=account["id"]), harness_version="1", db=db)
     return result

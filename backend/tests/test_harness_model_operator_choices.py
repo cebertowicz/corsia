@@ -30,16 +30,14 @@ def _discover(provider: str, *rows: dict, at: str = "2026-09-25T00:00:00+00:00")
 
 
 def _catalog(provider: str) -> dict[str, dict]:
+    """Each stored row as readers see it: the operator's choices over what discovery lists now."""
     from infra.database import get_db
+    from llm.harness_catalog import project_stored_rows
 
     db = get_db()
     try:
-        return {
-            row["provider_model_id"]: dict(row)
-            for row in db.execute(
-                "SELECT * FROM models WHERE harness = ?", (provider,),
-            ).fetchall()
-        }
+        stored = db.execute("SELECT * FROM models WHERE harness = ?", (provider,)).fetchall()
+        return {row["provider_model_id"]: row for row in project_stored_rows(stored, db=db)}
     finally:
         db.close()
 

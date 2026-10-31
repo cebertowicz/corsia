@@ -111,7 +111,13 @@ def test_harness_discovery_clears_defaults_stamped_on_existing_rows(isolated_db)
             source="claude-stream-json:list_models",
             timestamp="2026-09-23T00:00:00+00:00", db=db,
         )
-        assert _defaults(db, "claude-code/sonnet") == (None, None)
+        # The stored row only registers the model; readers never see its stamped defaults.
+        from llm.capabilities import get_model_max_output_tokens
+        from llm.harness_catalog import harness_row
+
+        row = harness_row("claude-code/sonnet", db=db)
+        assert (row["default_temperature"], row["default_max_tokens"]) == (None, None)
+        assert get_model_max_output_tokens("claude-code/sonnet", fallback=32_768) == 32_768
     finally:
         db.close()
 

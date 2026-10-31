@@ -94,6 +94,9 @@ def test_alias_selects_its_canonical_catalog_id(deleg_db, monkeypatch):
          '{"alias_of":"claude-code/sonnet"}', "t", "t"),
     )
     deleg_db.commit()
+    from vendor_account_fixtures import signed_in_default
+
+    signed_in_default("claude-code", db=deleg_db)  # the Default lists the alias
     monkeypatch.setattr(status, "get_model_status_rows", lambda: [
         _row("claude-code/sonnet", "ready"),
     ])

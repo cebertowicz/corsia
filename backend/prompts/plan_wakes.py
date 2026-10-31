@@ -313,6 +313,7 @@ ACCOUNT_PENDING_DETAIL = 'Its account is ready; the input is waiting for its cla
 AccountActor = Literal['user', 'agent']
 ACCOUNT_HOLD_COPY: dict[str, tuple[str, str, AccountActor]] = {
     'account_signed_out': ('it is signed out', 'Sign in to the permitted account through the account controls.', 'user'),
+    'account_not_configured': ('no account is signed in for this vendor', 'Sign one in under Settings > Providers.', 'user'),
     'account_removed': ('the account was removed', 'Choose another permitted account if one is available; otherwise switch model.', 'user'),
     'account_project_denied': ('project policy does not permit the account', 'Restore the permitted project policy through an authorized control, or ask the user to restore it; otherwise the user can choose another permitted account if one is available, or switch model.', 'agent'),
     'project_policy_missing': ("the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'agent'),
