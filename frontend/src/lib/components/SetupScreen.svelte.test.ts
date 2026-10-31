@@ -535,6 +535,25 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toContain('Codex');
 	});
 
+	it('keeps the saved subscription answer in a resumed setup: the declined tool stays hidden and Back shows the answer', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/api/setup/progress' && (init?.method ?? 'GET') === 'GET') return json({ setup_completed: false, picks: { claude: true, chatgpt: false }, status: { local_eligible: false, work_folder: '~/CORSIA' } });
+			return base(input, init);
+		}));
+		await unmount(component);
+		token.set('setup-token');
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync(); await settle(); await settle();
+		expect(rowNames()).toContain('Claude Code');
+		expect(rowNames()).not.toContain('Codex');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(button('Claude')?.getAttribute('aria-description')).toBe('Your earlier answer');
+		expect(button('ChatGPT')?.hasAttribute('aria-description')).toBe(false);
+	});
+
 	it('asks the subscription question even when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
