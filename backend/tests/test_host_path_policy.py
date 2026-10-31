@@ -261,6 +261,15 @@ def test_the_api_token_remains_hard_floor_denied(tmp_path) -> None:
     assert str(token) not in policy.sandbox_rules()
 
 
+def test_the_leased_floor_pins_every_folder_above_each_credential(tmp_path) -> None:
+    policy = _token_policy(tmp_path)
+    rules = policy.hard_floor_sandbox_rules()
+
+    for folder in (policy.state_root, policy.state_root.parent):
+        assert f'(deny file-write* (literal "{folder}"))' in rules
+    assert '(literal "/")' not in rules
+
+
 def test_hard_floor_denials_say_that_no_lease_will_open_them(tmp_path) -> None:
     """An agent must not request a lease that cannot possibly help."""
     from tools.host_path_policy import ProtectedHostPathPolicy

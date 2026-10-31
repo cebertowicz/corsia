@@ -333,7 +333,14 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     }
     from tools.host_path_policy import current_protected_host_path_policy
     from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
-    workspace = current_protected_host_path_policy().workspace
+    policy = current_protected_host_path_policy()
+    workspace = policy.workspace
+    # Folders above each credential root stay in place under a lease.
+    from tools.host_sandbox_floor import credential_ancestor_pins
+    credential_pins = {
+        f'(deny file-write* (literal "{path}"))' for path in credential_ancestor_pins(policy.credential_roots)
+    }
+    assert f'(deny file-write* (literal "{state_root.resolve()}"))' in credential_pins
     expected_denied_lines = {
         *workspace_git_rules(workspace_git_paths(workspace)),
         f'(deny file-write* (literal "{profile.resolve(strict=False)}"))',
@@ -346,6 +353,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny mach-priv-task-port)",
         keys_deny,
         browser_profile_deny,
+        *credential_pins,
         *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }
     assert denied_lines == expected_denied_lines
