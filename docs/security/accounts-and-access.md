@@ -26,7 +26,9 @@ Routes take the token in one of three ways. Some accept a `?token=` query parame
 
 An API token can do almost everything a signed-in person can. A few actions accept only a browser session from the person: approving a connected app or changing its reach, managing paired devices, host-access approval settings, and turning Local only on or off. Those checks are on the API; a leased command is a [separate case](host-access.md#approval-modes). Anyone holding an API token can still read that account's conversations, start and message agents, and through them use its connected apps.
 
-`corsia token create --write-delegate-file` writes the token to `~/.corsia/.api-token`, readable only by your user. Agent shells can't read `~/.corsia` (checked for this page).
+`corsia token create --write-delegate-file` writes the token to `~/.corsia/credentials/api-token`, readable only by your user. Agent shells can't read `~/.corsia`, and that folder stays closed even to a shell running under a host-access lease. A token from an earlier version, at `~/.corsia/.api-token`, moves there the next time a `corsia` command reads or writes it.
+
+`CORSIA_API_TOKEN_FILE` points the `corsia` commands at a file you choose instead. That file is outside the closed folder, so a leased shell may be able to read it.
 
 ## How agents act
 
