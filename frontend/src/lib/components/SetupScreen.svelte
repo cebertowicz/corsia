@@ -319,7 +319,7 @@
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as Status; setFolderState(status);
+		status = (progress.status ?? {}) as Status; setFolderState(status); picks = progress.picks ?? null; // the saved answer keeps a declined tool's row hidden
 		page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
 		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
