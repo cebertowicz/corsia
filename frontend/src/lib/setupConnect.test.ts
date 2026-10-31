@@ -79,7 +79,7 @@ describe('unchecked setup accounts', () => {
 		const account = { account_id: 'account', label: 'Claude', label_verified: true, identified: true, resets_at: null, corsia_agent_binding: false };
 		const source = { source: 'claude-code', name: 'Claude Code', state: 'ready' as const, accounts: [{ ...account, state: 'unchecked' as const }, { ...account, account_id: 'ready', state: 'ready' as const }] };
 		const flow = createSetupConnect({ token: () => null, sources: () => [source], refreshSources: async () => undefined });
-		expect(flow.row(source)).toMatchObject({ meta: 'Ready · Claude', ready: true });
+		expect(flow.row(source)).toMatchObject({ meta: 'Signed in as Claude', ready: true });
 	});
 });
 

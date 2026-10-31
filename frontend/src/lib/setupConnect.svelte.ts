@@ -234,7 +234,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.`, error: true };
 		if (sourceIsReady(source)) {
 			const account = readyAccount(source);
-			return { meta: account ? `Ready · ${account}` : 'Ready', ready: true };
+			return { meta: account ? `Signed in as ${account}` : 'Signed in', ready: true };
 		}
 		if (hasNoUsableModel(source)) {
 			return { meta: `This ${copy.account} account has no models for ${copy.cli}. Sign in with another account, or turn ${copy.cli} off.`, error: true, action: signInAction, canTurnOff: true };
