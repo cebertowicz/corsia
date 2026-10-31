@@ -153,3 +153,16 @@ def test_each_setup_label_maps_to_its_pair_by_its_text():
     assert _ANSWERS["Use and share"] == (True, True)
     assert _ANSWERS["Only use"] == (True, False)
     assert _ANSWERS["Neither"] == (False, False)
+
+
+def test_no_designated_agent_and_a_non_thread_plan_writes_nothing(db, workspace):
+    from plans import decisions
+
+    decision = raise_decision(db, "child", "child", **_community_card())
+    db.execute("UPDATE plans SET owner_kind = 'workspace_scope' WHERE id = ?", (decision["plan_id"],))
+    db.commit()
+    assert db.execute("SELECT value FROM settings WHERE key = ?", (SETTINGS_KEY,)).fetchone() is None
+
+    decisions._write_community_answer_after_commit(db, decision, {"option_id": "A", "text": None})
+
+    assert _profile(workspace) == NAME_LINES

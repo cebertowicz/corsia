@@ -312,7 +312,8 @@ def _write_community_answer_after_commit(db, decision: dict, chosen: dict) -> No
         from plans.onboarding_reads import decision_owner_id
 
         answer = community_answer.community_answer(decision, chosen)
-        if answer is None or decision_owner_id(db, node_id=decision["node_id"]) != get_corsia_agent(db=db):
+        agent_id = get_corsia_agent(db=db)
+        if answer is None or agent_id is None or decision_owner_id(db, node_id=decision["node_id"]) != agent_id:
             return
         after_commit(db, lambda: community_answer.write_profile_lines(config.WORKSPACE, answer))
     except Exception:  # noqa: BLE001 - the profile line is not worth the answer
