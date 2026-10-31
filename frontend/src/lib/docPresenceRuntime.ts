@@ -32,6 +32,8 @@ export interface DocPresenceSurface {
 	 */
 	select?: (frame: DocActivityFrame, prepared: PreparedPresenceArrival) => Promise<SelectOutcome> | null;
 	reducedMotion?: () => boolean;
+	/** False while this surface's live text is away (opening or reconnecting), when nothing can type in it; true when it has none. */
+	textCurrent?: () => boolean;
 }
 
 interface RuntimeArrival {
@@ -60,8 +62,8 @@ class ArtifactArrivalCoordinator {
 	private readonly missed = new Set<string>();
 	/** Comments a lane has taken, kept after they show: a comment arrives once, so a later change or activity frame leaves it alone. */
 	private readonly staged = new Set<string>();
-	/** Back on the socket after a drop, no load has yet found what it missed: its reconnect reload is running, or failed. */
-	private lostFrames: 'reloading' | 'failed' | null = null;
+	/** Back on the socket after a drop, no load has yet found what it missed: its reconnect reload waits for the text, is running, or failed. */
+	private lostFrames: 'due' | 'reloading' | 'failed' | null = null;
 
 	constructor(private readonly artifactId: string) {}
 
@@ -80,6 +82,13 @@ class ArtifactArrivalCoordinator {
 	/** The socket is back: an open document reloads its comments, and looks for suggestions the drop missed until a load succeeds. */
 	reloadAfterDrop(): void {
 		if (!this.surfaces.size) return;
+		this.lostFrames = 'due';
+		this.reloadWhenTextCurrent();
+	}
+
+	/** The reconnect reload waits until the viewed document's live text is back, so the suggestions it finds can type. */
+	private reloadWhenTextCurrent(): void {
+		if (this.lostFrames !== 'due' || !(this.activeSurface()?.textCurrent?.() ?? true)) return;
 		const drop = reconnects;
 		this.lostFrames = 'reloading';
 		loadComments(this.artifactId).then(
@@ -162,6 +171,7 @@ class ArtifactArrivalCoordinator {
 	async wake(): Promise<void> {
 		// Nobody is viewing this document: nothing stages its comments, so they show normally.
 		if (!this.activeSurface()) this.releaseAll();
+		this.reloadWhenTextCurrent();
 		await Promise.all([...this.queues.values()].map((queue) => queue.wake()));
 	}
 

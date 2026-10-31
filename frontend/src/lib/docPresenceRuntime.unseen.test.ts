@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerComment } from '$lib/api/docs';
 import { recordDocActivity, resetDocPresenceForTests } from './docPresence';
-import { attachDocPresenceSurface, startDocPresence } from './docPresenceRuntime';
+import { attachDocPresenceSurface, notifyDocPresenceViewingChanged, startDocPresence } from './docPresenceRuntime';
 import { connectionState } from './stores/connection';
 import { commentLoads, docComments, loadComments } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
@@ -35,11 +35,12 @@ const shown = () => (get(docComments)[ART] ?? []).map((row) => row.id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 /** A surface whose editor types a suggestion's insert for TYPING_MS; `typed` records each insert it was asked to type. */
-function attach(options: { viewing?: boolean; reducedMotion?: boolean } = {}) {
+function attach(options: { viewing?: boolean; reducedMotion?: boolean; textCurrent?: () => boolean } = {}) {
 	const typed: Array<string | null | undefined> = [];
 	cleanups.push(attachDocPresenceSurface(ART, 'surface', {
 		isViewing: () => options.viewing ?? true,
 		reducedMotion: () => options.reducedMotion ?? false,
+		textCurrent: options.textCurrent,
 		prepare: async (frame) => ({ chars: 10, payload: await prepareCommentArrival(ART, frame.comment_id) }),
 		select: (_frame, prepared) => {
 			typed.push((prepared.payload as Awaited<ReturnType<typeof prepareCommentArrival>>).comment?.replacement);
@@ -95,6 +96,21 @@ describe('a suggestion whose frames a socket drop lost', () => {
 		expect(shown()).toEqual([]);
 		await vi.advanceTimersByTimeAsync(TYPING_MS + 100);
 		expect(shown()).toEqual(['s1']);
+	});
+
+	it('waits for the live text to come back before the reconnect reload, so it types', async () => {
+		let current = true;
+		const typed = attach({ textCurrent: () => current });
+		await loadedThenDrop();
+		current = false;
+		await reconnect([suggestion('s1')]);
+		expect(typed).toEqual([]);
+		expect(shown()).toEqual([]);
+		current = true;
+		notifyDocPresenceViewingChanged(ART);
+		await settle();
+		await settle();
+		expect(typed).toEqual(['a longer replacement']);
 	});
 
 	it('arrives when a load finds it while the socket is still down', async () => {
