@@ -1,22 +1,20 @@
 """A prompt the Mac cannot prefill goes back to the boundary once, then ends handled.
 
 Covers the Turn half of the local-overflow recovery: the loop's one retry after a
-provider size refusal, the futile optional fold, and the memory-window copy.
+provider size refusal, and the futile optional fold with its system-prompt floor.
 """
 
 from __future__ import annotations
 
 import asyncio
-import pathlib
 from types import SimpleNamespace
 
 import pytest
 
 from core import turn_iteration
 from core import turn_iteration_context as iteration_context
-from core.checkpoint_resume import CheckpointWaitScope, ProviderBoundary, maintain_before_provider_call
-from core.checkpoint_types import CHAT_TOO_LONG_FOR_MEMORY_MESSAGE, CheckpointUnavailable
-from core.fork_fit import ColdFoldInputTooLarge, ProviderPayload, evaluate_boundary
+from core.checkpoint_resume import CheckpointWaitScope
+from core.fork_fit import ProviderPayload, evaluate_boundary
 from core.turn_core import TurnIdentity
 from core.turn_provider_error import TurnProviderError
 from llm.router import LLMResponse
@@ -142,56 +140,6 @@ def test_a_normal_window_still_folds_at_the_launch_point():
     assert evaluate_boundary(big).value == "proceed_and_fold"
 
 
-def _boundary(**values) -> ProviderBoundary:
-    async def render(record):  # pragma: no cover - never reached
-        raise AssertionError(record)
-
-    base = dict(
-        thread_id="t", turn=TurnIdentity("turn", 1), context_window=28_672,
-        canonical_input_tokens=30_000, provider_input_tokens=None, minimum_input_tokens=2_000,
-        adopted_checkpoint_id=None, active_checkpoint=None, installed_checkpoint=None,
-        prepare_checkpoint=None, render_installed=render, wait_scope=CheckpointWaitScope(),
-    )
-    return ProviderBoundary(**{**base, **values})
-
-
-async def _refused(**values) -> CheckpointUnavailable:
-    with pytest.raises(CheckpointUnavailable) as raised:
-        await maintain_before_provider_call(_boundary(**values))
-    return raised.value
-
-
-async def _too_large(_checkpoint_id, _required):
-    raise ColdFoldInputTooLarge("minimum meaningful cold fork input does not fit")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("values", [
-    {},  # no checkpoint is admissible
-    {"minimum_input_tokens": 40_000, "prepare_checkpoint": _too_large},  # the floor exceeds the window
-    {"prepare_checkpoint": _too_large},  # the fold's generation cannot fit
-])
-async def test_memory_window_that_nothing_fits_tells_the_person_what_to_do(values):
-    error = await _refused(window_source="memory", **values)
-
-    assert str(error) == CHAT_TOO_LONG_FOR_MEMORY_MESSAGE
-    assert error.context_window == 28_672  # the settlement's stable-window comparison
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["provider", "user", None])
-async def test_other_window_sources_keep_the_mechanism_text(source):
-    error = await _refused(window_source=source, minimum_input_tokens=40_000)
-
-    assert str(error) == "the minimum provider continuation exceeds the context window"
-
-
-def test_the_frontend_label_mirrors_the_backend_sentence():
-    root = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/messageDeliveryCopy.ts"
-
-    assert CHAT_TOO_LONG_FOR_MEMORY_MESSAGE in root.read_text()
-
-
 def _usage(system: int) -> dict:
     return {"fit_section_tokens": {"fixed": system}}
 
@@ -212,7 +160,7 @@ async def _folds_at_boundary(monkeypatch, *, window, rendered, usage, sections) 
     async def run_in_db(function, *_args):
         if function is snapshot:
             return None, None, None
-        return SimpleNamespace(context_window=window, context_window_source="provider")
+        return SimpleNamespace(context_window=window)
 
     async def prepare(checkpoint_id, *_args, **_kwargs):
         started.append(checkpoint_id)

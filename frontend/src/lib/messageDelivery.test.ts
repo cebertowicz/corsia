@@ -330,18 +330,6 @@ describe('isImminentDelivery', () => {
 		});
 	});
 
-	it('shortens the chat-too-long refusal to its label and keeps the title short too', () => {
-		expect(deliveryPresentation({
-			delivery_state: 'failed',
-			delivery_error: 'This chat is now too long for the local model to run on this Mac. Start a new chat to keep going.',
-		})).toEqual({
-			label: 'Not delivered: chat too long for this Mac',
-			title: 'chat too long for this Mac',
-			pending: true,
-			failed: true,
-		});
-	});
-
 	it('never renders a raw machine code to the user', () => {
 		// Being shown `provider_write_outcome_unknown` and asked what to do is
 		// asking the user a question they hold no evidence to answer.
