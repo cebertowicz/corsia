@@ -284,7 +284,7 @@ def seed_mock_catalog() -> None:
                 ) in harness_rows
             ),
         )
-    connect_fixture_harnesses(db, fixture_binaries, {h: [r[0] for r in harness_rows if r[1] == h] for h in fixture_binaries}, now)
+    connect_fixture_harnesses(db, fixture_binaries, harness_rows, now)
     db.commit()
     db.close()
 
