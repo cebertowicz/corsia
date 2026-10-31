@@ -255,8 +255,7 @@ function _networkSubline(s: NetworkServer): string {
 	const port = s.port ? `port ${s.port}` : '';
 	if (s.status !== 'online') return ['off', port].filter(Boolean).join(' · ');
 	const usedGb = Math.round((s.memory_used_mb ?? 0) / 1024);
-	const used = usedGb > 0 ? `${usedGb} GB used` : '';
-	return [port, used].filter(Boolean).join(' · ');
+	return [port, usedGb > 0 ? `${usedGb} GB used` : ''].filter(Boolean).join(' · ');
 }
 
 function _cloudSubline(p: ProviderEntry): string {

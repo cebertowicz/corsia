@@ -118,7 +118,7 @@ def memory_fit_window(row: Mapping[str, Any]) -> int | None:
     """Tokens that fit in memory now for this catalog row, else None."""
     key = split_omlx_selector(row.get("litellm_model"))
     obs = _live_observation(*key) if key else None
-    if obs is None:
+    if key is None or obs is None:
         return None
     used_now = _server_used_mb(key[0])
     delta = (used_now - obs.used0_mb) * _MIB if used_now and obs.used0_mb else 0
