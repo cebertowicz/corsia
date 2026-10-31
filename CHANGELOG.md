@@ -8,6 +8,8 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
+
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
 
 Released 2026-10-31.

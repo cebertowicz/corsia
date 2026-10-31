@@ -622,8 +622,12 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
         "Who you are", "What you're working toward", "How you like to work"]
     assert "no text under a heading" in doc
     assert "Skip this whole reference when they answered none of the questions" in doc
-    # Every line is a suggestion on the heading, never text written into the doc.
-    assert "`doc_comment_create` with `quote` the heading line exactly and `replacement`" in doc
+    # Every fact is its own insert-after suggestion on its heading, never text written into the doc.
+    form = doc.split("## 2.", 1)[1].split("What each heading gets", 1)[0]
+    assert "one `doc_comment_create` per fact, with `quote` the heading line exactly, `replacement` a newline followed by that one fact, and `insert_after` true" in form
+    assert "no replacement contains a heading" in form
+    assert "Every fact quotes its heading, never an earlier fact, because a suggested fact isn't in the doc until it is accepted." in form
+    assert "Facts under one heading land in the order you create them." in form
     assert "never as text you wrote into the doc" in doc
     # Each heading gets only its own material.
     assert "**Who you are:** the lookup's kept lines and their answer to question 1." in doc
@@ -638,8 +642,8 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert ("If `delegate_task` refuses the model, keep that task as your own: write that heading yourself, "
             "then `mark_done` the task.") in doc
     # A returned helper's task waits for review (accept); a failed or empty one stays active (mark_done).
-    assert "puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestion is in" in doc
-    assert "write that heading's suggestion yourself, then settle its task: `accept` it if it is awaiting your review, else `mark_done`" in doc
+    assert "puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestions are in" in doc
+    assert "write that heading's suggestions yourself, then settle its task: `accept` it if it is awaiting your review, else `mark_done`" in doc
     assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
@@ -650,10 +654,12 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "including agents on a cloud model" not in doc
     # The saved line says agents keep adding to it and where to edit it.
     assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
-    assert "The replacement starts with that heading line unchanged." in doc
+    # A helper's brief carries the same per-fact form and quotes only its own heading.
+    assert "the suggestion form above, one call per fact and no heading in any replacement, and that it quotes its own heading only" in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
-    assert "any suggestion that can no longer apply to it, and put back any heading a suggestion changed or dropped. Never wait on a helper" in doc
+    assert "any suggestion that can no longer apply to it, as when the person edited its heading. Never wait on a helper" in doc
+    assert "put back any heading" not in doc and "unchanged" not in form
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc
@@ -661,7 +667,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
-    assert len(doc.split()) < 1010  # raised from 960 for the profile explanation and where to edit it
+    assert len(doc.split()) < 1060
 
 
 def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():
