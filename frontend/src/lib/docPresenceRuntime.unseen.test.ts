@@ -3,16 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerComment } from '$lib/api/docs';
 import { recordDocActivity, resetDocPresenceForTests } from './docPresence';
 import { attachDocPresenceSurface, startDocPresence } from './docPresenceRuntime';
+import { reloadAfterReconnect } from './docViewerOperations';
 import { commentLoads, docComments, loadComments, noteFramesBack, noteFramesLost } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
 
-const wire = vi.hoisted(() => ({ rows: [] as unknown[] }));
+const wire = vi.hoisted(() => ({ rows: [] as unknown[], fail: false }));
 vi.mock('$lib/api/docs', async (original) => ({
 	...await original<typeof import('$lib/api/docs')>(),
-	fetchComments: async () => ({
-		comments: wire.rows,
-		feedback: { open_count: 0, owner_label: null, undelivered_batches: [] },
-	}),
+	fetchComments: async () => {
+		if (wire.fail) throw new Error('offline');
+		return { comments: wire.rows, feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } };
+	},
 }));
 
 const ART = 'art';
@@ -56,6 +57,7 @@ async function loadedThenReload(rows: ServerComment[]) {
 
 beforeEach(() => {
 	vi.useFakeTimers();
+	wire.fail = false;
 	resetDocPresenceForTests();
 	docComments.set({});
 	commentLoads.set({});
@@ -129,6 +131,44 @@ describe('a reload that finds a suggestion this canvas never showed', () => {
 		await loadComments(ART);
 		await vi.advanceTimersByTimeAsync(0);
 		expect(typed).toHaveLength(1);
+	});
+
+	it('keeps looking after a reconnect load that fails', async () => {
+		const typed = attach();
+		wire.rows = [];
+		await loadComments(ART);
+		noteFramesLost(ART);
+		noteFramesBack(ART);
+		wire.fail = true;
+		await expect(loadComments(ART)).rejects.toThrow('offline');
+		wire.fail = false;
+		wire.rows = [suggestion('s1')];
+		await loadComments(ART);
+		wire.rows = [suggestion('s1'), suggestion('s2')];
+		await loadComments(ART);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(typed).toEqual(['a longer replacement']);
+	});
+
+	it.each([
+		['another document opens', (tracker: ReturnType<typeof reloadAfterReconnect>, open: (id: string) => void) => { open('other'); tracker.track('disconnected'); tracker.track('connected'); }],
+		['the viewer closes', (tracker: ReturnType<typeof reloadAfterReconnect>) => tracker.close()],
+	])('stops looking on a live socket when %s during a drop', async (_case, leave) => {
+		const typed = attach();
+		wire.rows = [];
+		await loadComments(ART);
+		let open = ART;
+		const tracker = reloadAfterReconnect(() => open, () => undefined);
+		tracker.track('disconnected');
+		leave(tracker, (id) => { open = id; });
+		wire.rows = [suggestion('s1')];
+		await loadComments(ART);
+		wire.rows = [suggestion('s1'), suggestion('s2')];
+		await loadComments(ART);
+		await loadComments('other');
+		await vi.advanceTimersByTimeAsync(TYPING_MS * 3);
+		expect(typed).toHaveLength(1);
+		expect(shown().sort()).toEqual(['s1', 's2']);
 	});
 
 	it('leaves a suggestion already shown alone', async () => {

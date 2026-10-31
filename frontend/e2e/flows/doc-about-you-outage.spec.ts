@@ -44,15 +44,13 @@ for (const width of [1440, 393]) {
 			const link = await routeLiveSocket(viewerContext);
 			const viewer: Page = await viewerContext.newPage();
 			await viewer.addInitScript(() => {
-				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __conn: Array<{ at: number; s: string }>; __started: number };
-				w.__timeline = []; w.__conn = []; w.__started = Date.now();
-				let last = '', lastLine = '';
+				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __started: number };
+				w.__timeline = []; w.__started = Date.now();
+				let last = '';
 				const read = () => {
 					const s = [...document.querySelectorAll('.cm-content .cm-suggestion-insert')]
 						.map((el) => `C:${(el.getAttribute('data-suggestion-id') ?? '').slice(0, 4)}=${el.getAttribute('data-insert')?.length ?? 0}`).join(' ');
 					if (s !== last) { w.__timeline.push({ at: Date.now() - w.__started, s }); last = s; }
-					const line = [...document.querySelectorAll('.live-line')].map((el) => el.textContent?.trim().slice(0, 24)).join('|') || 'ok';
-					if (line !== lastLine) { w.__conn.push({ at: Date.now() - w.__started, s: line }); lastLine = line; }
 					requestAnimationFrame(read);
 				};
 				requestAnimationFrame(read);
@@ -83,11 +81,8 @@ for (const width of [1440, 393]) {
 			link.restore();
 			await expect(viewer.locator('.cm-content .cm-suggestion-insert')).toHaveCount(1, { timeout: 40_000 });
 			await viewer.waitForTimeout(8_000);
-			const snap = await viewer.evaluate(() => {
-				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __conn: Array<{ at: number; s: string }> };
-				return { timeline: w.__timeline, conn: w.__conn };
-			});
-			const series = snap.timeline.flatMap(({ s }) => s.split(' ').filter(Boolean).map((part) => Number(part.split('=')[1])));
+			const timeline = await viewer.evaluate(() => (window as unknown as { __timeline: Array<{ at: number; s: string }> }).__timeline);
+			const series = timeline.flatMap(({ s }) => s.split(' ').filter(Boolean).map((part) => Number(part.split('=')[1])));
 			expect(series[0]).toBeLessThan(20);
 			expect(Math.max(...series.slice(1).map((n, i) => n - series[i]))).toBeLessThanOrEqual(40);
 			expect(series[series.length - 1]).toBe((HEADING + INSERT).length);

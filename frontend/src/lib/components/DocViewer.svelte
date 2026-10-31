@@ -107,7 +107,7 @@
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
 	const reloadOnReconnect = reloadAfterReconnect(() => loadedArtifactId, () => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus));
-	$effect(() => reloadOnReconnect(liveConnection));
+	$effect(() => reloadOnReconnect.track(liveConnection));
 	let legacyAwaitingSave = $state(false);
 	bindViewerSession(() => liveSession, (state) => {
 		if (!state) { liveConnection = null; return; }
@@ -277,7 +277,7 @@
 		canEdit: () => docState === 'ready' && !readonly && !confirming && !openRefusal,
 		canFlush: () => !readonly && !confirming });
 
-	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
+	onDestroy(() => { reloadOnReconnect.close(); teardownDocumentViewer(target, flushNow, releaseDocEditor); });
 
 	function onKey(event: KeyboardEvent): void {
 		handleDocumentKey(event, {

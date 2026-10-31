@@ -88,17 +88,18 @@ function startLoad(artifactId: string): Promise<CommentFeedback> {
 
 /**
  * Per document whose socket dropped, whether it is back. Frames sent meanwhile
- * never come back, so every load from the drop through the first one to start
- * after the reconnect looks for the suggestions they missed.
+ * never come back, so every load from the drop through the first one after the
+ * reconnect to succeed looks for the suggestions they missed. Each note is a new
+ * object, so a load clears only the note it started under.
  */
-const framesLost = new Map<string, boolean>();
+const framesLost = new Map<string, { back: boolean }>();
 /** The socket dropped while this document was open. */
 export function noteFramesLost(artifactId: string): void {
-	framesLost.set(artifactId, false);
+	framesLost.set(artifactId, { back: false });
 }
-/** The socket is back: the next load to start is the last that looks. */
+/** The socket is back, or the document closed: the next load to succeed is the last that looks. */
 export function noteFramesBack(artifactId: string): void {
-	if (framesLost.has(artifactId)) framesLost.set(artifactId, true);
+	if (framesLost.has(artifactId)) framesLost.set(artifactId, { back: true });
 }
 
 type UnseenListener = (artifactId: string, rows: DocComment[]) => void;
@@ -115,16 +116,18 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 	// as loading and disables the comments control.
 	const reload = get(commentLoads)[artifactId]?.state === 'ready';
 	// Only frames lost to a drop stay missing; on a live socket a suggestion's own frames are still on their way.
-	const lostFrames = framesLost.has(artifactId);
-	if (framesLost.get(artifactId)) framesLost.delete(artifactId);
+	const lost = framesLost.get(artifactId);
 	if (!reload) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'loading' } }));
 	}
 	try {
 		const { comments, feedback } = await fetchComments(artifactId);
 		const rows = comments.map(fromServer);
-		if (reload && lostFrames) {
-			const known = new Set([...(get(docComments)[artifactId] ?? []).map((row) => row.id), ...heldIds(artifactId)]);
+		if (lost?.back && framesLost.get(artifactId) === lost) framesLost.delete(artifactId);
+		// What this canvas already showed stays through a failed load, so a retry after one still finds what is new.
+		const shown = get(docComments)[artifactId];
+		if (shown && lost) {
+			const known = new Set([...shown.map((row) => row.id), ...heldIds(artifactId)]);
 			const unseen = rows.filter((row) => !known.has(row.id) && row.authorKind === 'agent' && row.authorThreadId
 				&& row.replacement != null && !row.resolved && !row.decision);
 			if (unseen.length) unseenListeners.forEach((listener) => listener(artifactId, unseen));

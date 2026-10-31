@@ -105,9 +105,13 @@ for (const width of [1440, 393]) {
 				const w = window as unknown as { __timeline: Array<{ at: number; s: string }>; __conn: Array<{ at: number; s: string }>; __dropAt: number[] };
 				return { timeline: w.__timeline, conn: w.__conn, dropAt: w.__dropAt };
 			});
-			// The drop came while the inserts were typing, and the viewer's status line showed it.
+			// The drop came while the inserts were typing, and the viewer's status line showed it and then cleared.
+			// 'Reconnecting…' lasts only until the reopen answers, often under one frame, so it is not asserted.
 			expect(snap.dropAt).toHaveLength(1);
-			expect(snap.conn.map((c) => c.s.split(' ')[0])).toEqual(expect.arrayContaining(['Disconnected', 'Reconnecting…']));
+			const lines = snap.conn.map((c) => c.s.split(' ')[0]);
+			expect(lines).toContain('Disconnected');
+			expect(lines.slice(lines.indexOf('Disconnected'))).toContain('ok');
+			expect(lines[lines.length - 1]).toBe('ok');
 			// Per insert: first drawn near 0, never a jump while in view, and it ends at its full length.
 			const lengths = new Map<string, number[]>();
 			for (const { s } of snap.timeline) {

@@ -128,18 +128,31 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 	};
 }
 
-/** Change and activity frames sent while the socket was down never come back: call the returned function with each connection state, and it tells the document's comments of the drop and reloads them once the connection returns. */
-export function reloadAfterReconnect(artifactId: () => string | null, reload: () => void): (connection: string | null) => void {
+/** Change and activity frames sent while the socket was down never come back: call `track` with each connection state, and `close` when the viewer closes. It tells the open document's comments of the drop, and once the connection returns reloads them. */
+export function reloadAfterReconnect(artifactId: () => string | null, reload: () => void): { track: (connection: string | null) => void; close: () => void } {
 	let dropped = false;
-	return (connection) => {
-		const artifact = artifactId();
-		if (connection === 'disconnected' || connection === 'reconnecting') {
-			if (!dropped && artifact) noteFramesLost(artifact);
-			dropped = true;
-		} else if (connection === 'connected' && dropped) {
-			dropped = false;
-			if (artifact) noteFramesBack(artifact);
-			reload();
-		}
+	// The document told of the drop; told it is back even if another document opened meanwhile.
+	let lost: string | null = null;
+	const back = () => {
+		if (lost) noteFramesBack(lost);
+		lost = null;
+	};
+	return {
+		track(connection) {
+			const artifact = artifactId();
+			if (connection === 'disconnected' || connection === 'reconnecting') {
+				dropped = true;
+				if (artifact !== lost) {
+					back();
+					if (artifact) noteFramesLost(artifact);
+					lost = artifact;
+				}
+			} else if (connection === 'connected' && dropped) {
+				dropped = false;
+				back();
+				reload();
+			}
+		},
+		close: back,
 	};
 }
