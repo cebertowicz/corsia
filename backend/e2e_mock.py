@@ -14,6 +14,8 @@ from loguru import logger
 
 import e2e_mock_calls as mock_calls
 import e2e_pressure_fixture as pressure_fixture
+from types import SimpleNamespace
+
 from e2e_mock_responses import _make_chunk, _make_non_streaming
 
 _mock_replies: list[dict] = []
@@ -154,6 +156,17 @@ async def _streaming_iter(reply: dict):
 
     if reply.get("tool_calls"):
         yield _make_chunk(tool_calls=reply["tool_calls"])
+
+    stream = reply.get("tool_call_stream")
+    if stream:
+        # A tool call whose input arrives in pieces, the first carrying its id and name, as a provider streams it.
+        for position, piece in enumerate(stream["pieces"]):
+            if position and stream.get("delay_ms"):
+                await asyncio.sleep(stream["delay_ms"] / 1000.0)
+            call = SimpleNamespace(index=0, id=stream["id"] if not position else None,
+                                   function=SimpleNamespace(name=stream["name"] if not position else None, arguments=piece))
+            yield SimpleNamespace(choices=[SimpleNamespace(
+                delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=[call]), finish_reason=None)], usage=None)
 
     yield _make_chunk(finish_reason=reply.get("finish_reason", "stop"))
 
