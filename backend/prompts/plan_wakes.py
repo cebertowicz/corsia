@@ -311,17 +311,14 @@ ACCOUNT_PENDING_DETAIL = 'Its account is ready; the input is waiting for its cla
 # Who can take each action: the user through a control ('user'), a provider
 # source check ('source'), or the agent as written ('agent').
 AccountActor = Literal['user', 'source', 'agent']
-ACCOUNT_HOLD_COPY: dict[str | tuple[str, bool], tuple[str, str, AccountActor]] = {
-    ('account_signed_out', False): ('it is signed out', 'Sign in to the permitted account through the account controls.', 'user'),
-    ('account_signed_out', True): ('it is signed out', "Sign in through the vendor's own CLI, then check the provider source or request its canonical refresh.", 'user'),
+ACCOUNT_HOLD_COPY: dict[str, tuple[str, str, AccountActor]] = {
+    'account_signed_out': ('it is signed out', 'Sign in to the permitted account through the account controls.', 'user'),
     'account_removed': ('the account was removed', 'Choose another permitted account if one is available; otherwise switch model.', 'user'),
     'account_project_denied': ('project policy does not permit the account', 'Restore the permitted project policy through an authorized control, or ask the user to restore it; otherwise the user can choose another permitted account if one is available, or switch model.', 'agent'),
     'project_policy_missing': ("the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'agent'),
-    ('account_model_not_discovered', False): ('the selected model has not been discovered for this account', 'Verify the signed-in account through the account controls to discover its models.', 'user'),
-    ('account_model_not_discovered', True): ('the selected model has not been discovered for this account', 'Check the provider source or request its canonical refresh to discover its models.', 'source'),
+    'account_model_not_discovered': ('the selected model has not been discovered for this account', 'Verify the signed-in account through the account controls to discover its models.', 'user'),
     'account_runtime_pending': ("this account's runtime is not yet available", 'Inspect the held work and report the missing runtime capability; signing in again will not enable it.', 'agent'),
-    ('account_login_unverified', False): ("the account's current sign-in could not be verified", 'Verify the signed-in account through the account controls to obtain fresh account evidence.', 'user'),
-    ('account_login_unverified', True): ("the account's current sign-in could not be verified", 'Check the provider source or request its canonical refresh to obtain fresh account evidence.', 'source'),
+    'account_login_unverified': ("the account's current sign-in could not be verified", 'Verify the signed-in account through the account controls to obtain fresh account evidence.', 'user'),
     'codex_auth_projection_changed': ('the managed authentication link changed', 'Sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.', 'user'),
     'codex_auth_source_missing': ('the authentication source is missing', 'Sign in again through the account controls to restore the source and obtain fresh account evidence.', 'user'),
 }
@@ -371,9 +368,7 @@ def account_wake_chip(event_type, state) -> str:
 def _account_copy(readiness):
     if not readiness:
         return None
-    cause, default = readiness['cause'], readiness['is_default']
-    return ACCOUNT_HOLD_COPY.get((cause, default)) if default is not None and (
-        cause, default) in ACCOUNT_HOLD_COPY else ACCOUNT_HOLD_COPY.get(cause)
+    return ACCOUNT_HOLD_COPY.get(readiness['cause'])
 
 
 def account_readiness_detail(readiness) -> str:

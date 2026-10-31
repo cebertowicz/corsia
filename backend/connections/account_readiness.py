@@ -10,7 +10,6 @@ from typing import TypedDict
 class AccountReadiness(TypedDict):
     ready: bool
     cause: str | None
-    is_default: bool | None
 
 
 def _targets(ids, *, db):
@@ -48,7 +47,7 @@ def _accounts(choices, *, db):
         return {}
     marks = ','.join('?' for _ in ids)
     rows = db.execute(
-        f"SELECT a.id,a.state,a.revision,a.is_default,a.source_home,a.discovery_json,c.provider "
+        f"SELECT a.id,a.state,a.revision,a.source_home,a.discovery_json,c.provider "
         f"FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id WHERE a.id IN ({marks})", ids).fetchall()
     return {r['id']: {**dict(r), 'discovery': json.loads(r['discovery_json']) if r['discovery_json'] else None}
             for r in rows}
@@ -82,8 +81,7 @@ def _batch(ids, *, db) -> dict[str, AccountReadiness]:
         cause = choice_reason or (account_reason(
             account, provider=target['harness'], project_ids=[project_id] if project_id is not None else [],
             execution=True, model=str(target['model'] or '').strip(), db=db) if account is not None else None)
-        result[thread] = {'ready': cause is None, 'cause': cause,
-                          'is_default': None if cause == 'account_project_denied' else bool(account['is_default']) if account else None}
+        result[thread] = {'ready': cause is None, 'cause': cause}
     return result
 
 

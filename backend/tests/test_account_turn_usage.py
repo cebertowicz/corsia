@@ -704,7 +704,7 @@ def test_compact_fact_boundary_keeps_kind_and_readiness_in_same_snapshot(held_wo
             db.commit()
             fact = wait_causes.delegation_facts([(service._node_row(db, step.id), service._plan_row(db, parent.id))], db=observed)[step.id]
         assert fact['stalled'] == 'account'
-        assert fact['account_readiness'] == {'ready': True, 'cause': None, 'is_default': False}
+        assert fact['account_readiness'] == {'ready': True, 'cause': None}
         assert observed.fired and not db.in_transaction
         assert read_account_readiness(['worker'], db=db)['worker']['cause'] == 'account_signed_out'
     finally:
