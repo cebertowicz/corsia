@@ -255,6 +255,7 @@ def answer(decision_id: str, *, option_id=None, option_ids=None, other_text=None
         _note_answered_after_commit(
             db, decision["node_id"], decision_fields.answer_label(decision, chosen),
         )
+        _write_community_answer_after_commit(db, decision, chosen)
         return result
 
     params = {"option_id": option_id, "other_text": other_text}
@@ -297,6 +298,27 @@ def _answer_evidence(decision: dict, chosen: dict) -> str:
     if chosen["text"]:
         evidence += f" · Note: {json.dumps(chosen['text'], ensure_ascii=False)}"
     return evidence
+
+
+def _write_community_answer_after_commit(db, decision: dict, chosen: dict) -> None:
+    """Record the community decision's answer in the profile once it commits; never breaks the answer."""
+    import logging
+
+    try:
+        from infra import config
+        from infra.corsia_agent import get_corsia_agent
+        from infra.write_effects import after_commit
+        from onboarding import community_answer
+        from plans.onboarding_reads import decision_owner_id
+
+        answer = community_answer.community_answer(decision, chosen)
+        if answer is None or decision_owner_id(db, node_id=decision["node_id"]) != get_corsia_agent(db=db):
+            return
+        after_commit(db, lambda: community_answer.write_profile_lines(config.WORKSPACE, answer))
+    except Exception:  # noqa: BLE001 - the profile line is not worth the answer
+        logging.getLogger(__name__).warning(
+            "community answer not scheduled for the user profile", exc_info=True,
+        )
 
 
 def _note_answered_after_commit(db, node_id: str, option_id: str) -> None:
