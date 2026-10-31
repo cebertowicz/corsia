@@ -34,7 +34,7 @@ def test_scoped_delegation_keeps_the_api_label_after_an_earlier_removal(monkeypa
     ])
 
     assert _account_label("default") == "ChatGPT Plus"
-    assert calls == [{"provider": "codex", "include_removed": True}]
+    assert calls == [{"provider": "codex", "include_removed": True, "db": None}]
 
 
 def test_scoped_refusal_names_the_canonical_label_and_account_id(deleg_db, monkeypatch):
