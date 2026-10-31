@@ -33,7 +33,13 @@ assert get_model_cost_map_source_info()['is_env_forced']
 # Only the operator's own setting keeps CORSIA's post-startup refresh offline.
 assert main.app.state.litellm_cost_map_offline is {offline}
 """
+    relaunch = (
+        "import os, subprocess, sys\n" + code
+        # A relaunch from this backend's environment, as the in-app restart does.
+        + "subprocess.run([sys.executable, '-c', CODE], env=dict(os.environ), check=True)\n"
+    )
     result = subprocess.run(
-        [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=30
+        [sys.executable, "-c", f"CODE = {code!r}\n" + relaunch],
+        env=env, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr

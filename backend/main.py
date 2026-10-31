@@ -7,8 +7,17 @@ import os
 
 # An operator's LITELLM_LOCAL_MODEL_COST_MAP=true keeps the cost map offline. Otherwise
 # LiteLLM's import-time fetch is turned off and the lifespan refreshes it after startup.
-_COST_MAP_OFFLINE = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP", "").lower() == "true"
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+# CORSIA's own value lasts only for the import, so a process this backend starts (its
+# in-app restart included) inherits the operator's setting, never CORSIA's.
+_OPERATOR_COST_MAP = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP")
+_COST_MAP_OFFLINE = (_OPERATOR_COST_MAP or "").lower() == "true"
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+import litellm  # noqa: E402,F401  (reads the setting once, here)
+
+if _OPERATOR_COST_MAP is None:
+    del os.environ["LITELLM_LOCAL_MODEL_COST_MAP"]
+else:
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = _OPERATOR_COST_MAP
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
