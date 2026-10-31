@@ -78,7 +78,7 @@ The server posts `references/first-run-opening.md` as your first message, with `
    >
    > A chat on a cloud model sends what you say to that provider. Apps you connect, like your email, follow their own privacy terms; CORSIA can't control what they do with what they receive.
 
-   Auto-approve follows `auto_approve`. When it is false, replace the two Auto-approve lines with `**Auto-approve is off.** A reviewer model checks each request for access outside your work folder, and every command that uses it, and you approve each request yourself. To let most requests start without asking you, turn on Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.` and write `leave` for `turn` in the next paragraph's "turn Auto-approve off". When it is `unavailable`, leave out those lines and that sentence.
+   Auto-approve follows `auto_approve`. When it is false, replace the two Auto-approve lines with `**Auto-approve is off.** A reviewer model checks each request for access outside your work folder, and every command that uses it, and you approve each request yourself. To let most requests start without asking you, turn on Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.` and write `leave` for `turn` in the next paragraph's "turn Auto-approve off". When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.
 
    Only when `local_eligible` is true, add this to the same post:
 
