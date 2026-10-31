@@ -39,3 +39,21 @@ async def test_process_exit_signs_out_added_login_before_its_one_completion(clau
     default_reconcile.assert_not_called()
     assert get_connection('claude-code', db=db) == before
     assert sum(frame.get('type') == 'turn_complete' for frame in frames) == 1
+
+
+def test_signed_out_converted_default_is_named_by_its_label_not_default(claude):
+    """A converted Default has no custom name: the line says who it was, as the account rows do."""
+    from subagents.cc_runtime_errors import surface_exit_error
+    from connections.vendor_accounts import get_account
+
+    db = claude.db
+    db.execute("UPDATE vendor_accounts SET state='signed_out', identity_json=? WHERE id=?",
+               (json.dumps({'upgrade_reason': 'sign_in_to_keep_using_account',
+                            'hint': {'email': 'old@example.test'}}), claude.first))
+    db.commit()
+    surface_exit_error('claude-destination', 1, EXPIRED, lambda *_: None, db, SimpleNamespace(turn_id='claude-turn'),
+                       insert_message_fn=__import__('infra.queries', fromlist=['insert_message']).insert_message,
+                       logger=__import__('logging').getLogger(__name__),
+                       added_account=get_account(claude.first, db=db))
+    row = db.execute("SELECT content FROM messages WHERE thread_id='claude-destination' AND id!='claude-input'").fetchone()
+    assert row['content'] == 'old@example.test is signed out of Claude Code. Sign it in again under Settings › Providers.'

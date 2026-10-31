@@ -80,7 +80,7 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
     One read names every candidate with its project and its binding row; the owner
     then answers from those facts, so the walk reads nothing per thread.
     """
-    from connections.account_policy import _scoped_turn_account
+    from connections.account_policy import scoped_turn_account
 
     account = get_account(account_id, db=db)
     provider = account['provider']
@@ -96,7 +96,7 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
     affected = []
     for row in rows:
         binding = None if row['bound'] is None else {'account_id': row['bound'], 'pending_account_id': row['pending']}
-        selected, _ = _scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
+        selected, _ = scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
                                            account_id=None, model=str(row['model']), db=db, binding=binding)
         if selected == account_id:
             affected.append(str(row['id']))

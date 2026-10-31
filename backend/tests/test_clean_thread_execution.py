@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 HUMAN_FOOTER = (
     '[To reply, call post_update(text="<your reply>")]\n'
     "If no reply is needed, do not send one."

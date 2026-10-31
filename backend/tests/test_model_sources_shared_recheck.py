@@ -190,7 +190,6 @@ def test_startup_still_stores_a_failed_github_probe_as_needs_auth(api, monkeypat
 
     probed = []
     _gh(monkeypatch, lambda binary: probed.append(binary))
-    monkeypatch.setattr(connections, "_codex_sign_in_state", lambda _binary: "ready")
     connections.seed_builtin_connections()
 
     assert probed == ["/opt/test/github"]

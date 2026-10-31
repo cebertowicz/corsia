@@ -132,6 +132,10 @@ def deleg_db(tmp_path, monkeypatch):
         "VALUES ('sender-self','u-test','claude-code/opus','Sender Thread','t','t')"
     )
     conn.commit()
+    from vendor_account_fixtures import seed_signed_in_defaults
+
+    seed_signed_in_defaults(conn)  # no ambient login: each harness has a signed-in Default
+    conn.commit()
     from core import agent as agent_mod
     from infra import settings as settings_mod
     import llm.model_status as model_status

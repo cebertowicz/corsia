@@ -309,20 +309,11 @@ def test_write_scope_with_custom_config_root_allows_only_the_run_state_folder():
     assert scope.global_file.as_posix() == "/x/acct/.claude.json"
 
 
-def test_write_scope_without_config_root_variable_uses_the_default_root():
-    from reviewer.reviewer_exact_source import (
-        claude_config_state_scope, render_write_profile,
-    )
+def test_write_scope_without_config_root_refuses_ambient_home():
+    from reviewer.reviewer_exact_source import ExactSourceError, claude_config_state_scope
 
-    scope = claude_config_state_scope({"HOME": "/srv/home"}, _RUN_DIR)
-
-    assert render_write_profile(["/x/work"], scope) == (
-        _BASE_RULES.format(work="/x/work")
-        + f'(allow file-write* (regex #"^/srv/home/\\.claude/projects/{_RUN_FOLDER}(/.*)?$"))'
-        + _temp_rule()
-        + _cwd_tracking_file_rule()
-    )
-    assert scope.global_file.as_posix() == "/srv/home/.claude.json"
+    with pytest.raises(ExactSourceError):
+        claude_config_state_scope({"HOME": "/srv/home"}, _RUN_DIR)
 
 
 def test_write_profile_contains_no_counted_regex_interval():
@@ -345,11 +336,9 @@ def test_write_scope_opens_the_global_config_file_only_on_request():
     )
 
     custom = claude_config_state_scope({"CLAUDE_CONFIG_DIR": "/x/acct"}, _RUN_DIR)
-    default = claude_config_state_scope({"HOME": "/srv/home"}, _RUN_DIR)
 
     for scope, file_rule in (
         (custom, r'^/x/acct/\.claude\.json(\.[^/]*)?$'),
-        (default, r'^/srv/home/\.claude\.json(\.[^/]*)?$'),
     ):
         assert file_rule not in render_write_profile(["/x/work"], scope)
         opened = dataclasses.replace(scope, allow_global_file=True)

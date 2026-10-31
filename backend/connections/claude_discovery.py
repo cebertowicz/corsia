@@ -5,10 +5,7 @@ persisted session, no tools. One process lists the models and reads the
 account's plan usage (``get_usage``); one more per selector reads its context
 window. ``connections.harness_models`` stores what these return.
 
-That one process is also the Claude Code sign-in check: whether it could list
-the models is recorded as the source state (#1910). A session that fails does
-not by itself mean signed out: only ``claude auth status`` exiting 1 does, so a
-usage-limit or transport message can never take the source away.
+The control session uses the selected account's home.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, NoReturn
+from typing import Any
 
 from connections import claude_usage, source_state
 from connections.claude_context_probe import read_context_usage
@@ -27,13 +24,6 @@ from subagents.cc_env import clean_claude_env
 from subagents.managed_launch import claude_project_discovery_args
 
 log = logging.getLogger(__name__)
-
-AUTH_STATUS_TIMEOUT_SECONDS = 10
-
-
-class ClaudeCatalogCheckFailed(RuntimeError):
-    """The catalog failed after its sign-in observation was successfully recorded."""
-
 
 def claude_control_command(binary: str) -> list[str]:
     """The no-turn Claude CLI command used for catalog and usage controls.
@@ -61,11 +51,12 @@ async def run_claude_control(
     taken effect: nothing promises the CLI answers in send order, and a usage
     read ahead of ``set_model`` would describe the previously selected model.
     """
-    env = clean_claude_env()
-    if context is not None:
-        from subagents.cc_env import apply_claude_config_dir
+    if context is None:
+        raise RuntimeError('account_discovery_failed')
+    from subagents.cc_env import apply_claude_config_dir
 
-        apply_claude_config_dir(env, context.source_home)
+    env = clean_claude_env()
+    apply_claude_config_dir(env, context.source_home)
     # Serialize before spawning so an invalid frame cannot leave a child process behind.
     payload = "".join(json.dumps(frame) + "\n" for frame in frames).encode()
     process = await asyncio.create_subprocess_exec(
@@ -94,6 +85,8 @@ async def discover_claude_models(binary: str, *, context=None):
     The same process also reads the account's plan usage and records it, so
     every catalog refresh re-checks whether the signed-in account can send.
     """
+    if context is None:
+        raise RuntimeError('account_discovery_failed')
     frames = [
         {"type": "control_request", "request_id": "corsia-model-list",
          "request": {"subtype": "list_models"}},
@@ -102,42 +95,19 @@ async def discover_claude_models(binary: str, *, context=None):
         {"type": "control_request", "request_id": "corsia-model-list-end",
          "request": {"subtype": "end_session", "reason": "discovery_complete"}},
     ]
-    # The Default's identity is fenced before the read its co-read belongs to.
-    observation = None if context is not None else await run_in_db(_default_observation)
     try:
-        stdout = await run_claude_control(binary, frames, operation="list_models",
-                                         **({'context': context} if context is not None else {}))
-    except (RuntimeError, OSError) as exc:
-        if context is not None:
-            raise RuntimeError('account_discovery_failed') from None
-        await _record_failed_sign_in(binary, str(exc))
+        stdout = await run_claude_control(binary, frames, operation="list_models", context=context)
+    except (RuntimeError, OSError):
+        raise RuntimeError('account_discovery_failed') from None
     responses = _control_responses(stdout)
     response = responses.get("corsia-model-list")
-    if response is None:
-        if context is not None:
-            raise RuntimeError('account_discovery_failed')
-        await _record_failed_sign_in(binary, "Claude Code returned no reply")
-    if response.get("subtype") != "success":
-        if context is not None:
-            raise RuntimeError('account_discovery_failed')
-        detail = str(response.get("error") or response)
-        await _record_failed_sign_in(binary, detail)
-    # Invalidate the old account before applying this co-read, in one transaction.
-    if context is None:
-        usage = responses.get("corsia-usage")
-        # A signed-out CLI still lists its static models, so a listed catalog
-        # proves nothing about the login: ask the CLI before calling it ready.
-        if (await auth_status(binary))[0] == source_state.NEEDS_AUTH:
-            await _record_failed_sign_in(binary, str((usage or {}).get("error") or "Claude Code is not signed in"))
-        await _record_catalog_success(usage, observation)
+    if response is None or response.get("subtype") != "success":
+        raise RuntimeError('account_discovery_failed')
     payload = response.get("response") or {}
-    if context is None:
-        known_contexts = await run_in_db(_known_claude_context_identities)
-    else:
-        from llm.context_window import known_discovery_context_identities
+    from llm.context_window import known_discovery_context_identities
 
-        prior = (context.prior_discovery or {}).get('discovery', {}).get('models', {})
-        known_contexts = known_discovery_context_identities(prior)
+    prior = (context.prior_discovery or {}).get('discovery', {}).get('models', {})
+    known_contexts = known_discovery_context_identities(prior)
     probes = []
     probe_rows = []
     for raw in payload.get("models") or []:
@@ -148,8 +118,7 @@ async def discover_claude_models(binary: str, *, context=None):
         if known_contexts.get(selector) == resolved:
             continue
         probe_rows.append(raw)
-        probes.append(_discover_claude_context(binary, selector,
-                                              **({'context': context} if context is not None else {})))
+        probes.append(_discover_claude_context(binary, selector, context=context))
     if probes:
         results = await asyncio.gather(*probes, return_exceptions=True)
         for raw, result in zip(probe_rows, results, strict=True):
@@ -160,65 +129,11 @@ async def discover_claude_models(binary: str, *, context=None):
                 )
                 continue
             raw["contextUsage"] = result
-    if context is not None:
-        from connections.account_discovery_types import StagedDiscovery
+    from connections.account_discovery_types import StagedDiscovery
 
-        usage = responses.get('corsia-usage') or {}
-        report = usage.get('response') if usage.get('subtype') == 'success' else None
-        return StagedDiscovery(payload, usage_report=report)
-    return payload
-
-
-async def auth_status(binary: str) -> tuple[str, str]:
-    """The source state and login status from ``claude auth status``; it writes nothing.
-
-    The state is needs_auth only when the command exits 1; anything else is
-    unverified. A failed session says something went wrong, not that the user
-    is signed out, so ask the CLI's own answer once, bounded. The JSON login
-    flag is read without retaining the account details the output can contain.
-    """
-    from connections.account_identity import claude_login_status
-
-    try:
-        process = await asyncio.create_subprocess_exec(
-            binary, "auth", "status", stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            env=clean_claude_env(),
-        )
-        async with killed_on_exit(process):
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=AUTH_STATUS_TIMEOUT_SECONDS)
-        code = process.returncode
-        try:
-            report = json.loads(stdout)
-        except ValueError:
-            report = None
-    except (OSError, asyncio.TimeoutError) as exc:
-        log.warning("claude auth status did not answer: %s", type(exc).__name__)
-        return source_state.UNVERIFIED, "unknown"
-    state = source_state.NEEDS_AUTH if code == 1 else source_state.UNVERIFIED
-    return state, claude_login_status(report, code)
-
-
-async def _record_failed_sign_in(binary: str, detail: str) -> NoReturn:
-    """Fail discovery with an explicit receipt only after the source write succeeded.
-
-    A successful catalog records the Default's visibility with its own fenced
-    identity read, so only this failed path records the status read here.
-    """
-    from connections.account_identity import capture_default_observation, observe_discovered_identity
-    from connections.auth_failure import auth_failure_kind
-
-    observation = await run_in_db(capture_default_observation, "claude-code")
-    state, login = await auth_status(binary)
-    await run_in_db(observe_discovered_identity, "claude-code", {"_login_status": login}, token=observation)
-    # A stale credential file can make ``claude auth status`` exit successfully
-    # after the CLI has already reported that its refresh is impossible. This
-    # exact provider error overrides only that stale success, never a generic
-    # HTTP 401.
-    if state != source_state.NEEDS_AUTH and auth_failure_kind("claude-code", detail) is not None:
-        state = source_state.NEEDS_AUTH
-    await _record_sign_in(state, detail)
-    raise ClaudeCatalogCheckFailed(detail)
+    usage = responses.get('corsia-usage') or {}
+    report = usage.get('response') if usage.get('subtype') == 'success' else None
+    return StagedDiscovery(payload, usage_report=report)
 
 
 async def reconcile_turn_auth_failure(detail: str) -> None:
@@ -259,7 +174,7 @@ def _known_claude_context_identities() -> dict[str, str]:
     Context-window evidence is identity-bound: a selector can keep its prior
     window only while ``resolvedModel`` has not changed. Re-probing an
     unchanged identity creates a fresh CLI control process without improving
-    catalog truth, so leave its existing observation to ``store_success``.
+    catalog truth, so leave its existing observation to the account discovery commit.
     """
     from infra.database import get_db
 
@@ -298,87 +213,23 @@ def _control_responses(stdout: bytes) -> dict[str, dict[str, Any]]:
     return found
 
 
-def _default_observation():
-    from connections.account_identity import capture_default_observation
-
-    return capture_default_observation("claude-code")
-
-
-async def _record_catalog_success(response: dict[str, Any] | None, observation=None) -> None:
-    """Commit sign-in and its co-read together; an unreadable meter stays unknown."""
-    if response is not None and response.get("subtype") == "success":
-        report = response.get("response")
-    else:
-        detail = (response or {}).get("error") or "no reply"
-        log.warning("Claude Code get_usage failed: %s", detail)
-        report = None
-    from connections.account_identity import read_default_facts
-
-    identity = await read_default_facts("claude-code") if observation is not None else {}
-    await run_in_db(_store_default_catalog_success, report, identity, observation)
-
-
-def _store_default_catalog_success(report: object, identity: dict | None = None,
-                                   observation=None, *, db=None) -> None:
-    """The ambient sign-in's co-read belongs to the Default account's current login.
-
-    The read's identity commits first, so its usage is captured against the
-    login it read; a read a newer observation superseded commits nothing.
-    """
-    from connections.account_identity import observe_discovered_identity
-    from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import resolve_account_id
-    from infra.database import write_transaction
-
-    with write_transaction(db, scope="claude_default_catalog") as db:
-        account_id = resolve_account_id("claude-code", db=db)
-        if account_id is None:
-            return
-        if not observe_discovered_identity("claude-code", identity or {}, token=observation, db=db):
-            return
-        _store_catalog_success(report, account_id=account_id,
-                               receipt=capture_receipt("claude-code", account_id=account_id, db=db), db=db)
-
-
 def _store_catalog_success(report: object, *, account_id: str, receipt, db=None) -> None:
-    """Expose only the new login's capacity after its sign-in commits.
-
-    A read whose login was superseded changes nothing. A Default whose login is
-    unknown still records its source check; its usage writes are refused (logged).
-    """
+    """Apply a usage co-read only to the login that produced it."""
     from connections import harness_usage
     from connections.account_receipts import receipt_is_current
-    from connections.models import get_connection
-    from connections.vendor_accounts import get_account
     from infra.database import write_transaction
 
     with write_transaction(db, scope="claude_catalog_sign_in") as db:
-        if receipt is not None and not receipt_is_current(receipt, db=db):
+        if receipt is None or not receipt_is_current(receipt, db=db):
             return
-        if not get_account(account_id, db=db)['is_default']:
-            if receipt is None:
-                return
-            harness_usage.mark_readings_stale(provider='claude-code', account_id=account_id, db=db)
+        harness_usage.mark_readings_stale(provider='claude-code', account_id=account_id, db=db)
+        try:
+            # A failed usage write must not undo a successful discovery or
+            # expose the old login's allowance as a verified meter.
             with write_transaction(db, scope='claude_account_catalog_usage') as usage_db:
                 claude_usage.apply_usage_response(report, receipt=receipt, db=usage_db)
-            return
-        previous = get_connection("claude-code", db=db)
-        row = source_state.apply_check("claude-code", source_state.READY, db=db,
-                                       schedule_usage_check=False)
-        if row is None:
-            raise RuntimeError("Claude Code source state was not recorded")
-        if previous is not None and previous["status"] != "available":
-            # Sign-in invalidates the old limits, but proves no new capacity.
-            harness_usage.record_usage(provider="claude-code", verdict={
-                "state": "unknown", "source": "sign_in",
-            }, check_error="New account usage has not been verified", receipt=receipt, db=db)
-        try:
-            # A failed usage write must not undo a successful source check or
-            # expose the old account's sign-in allowance as a verified meter.
-            with write_transaction(db, scope="claude_catalog_usage") as usage_db:
-                claude_usage.apply_usage_response(report, receipt=receipt, db=usage_db)
         except Exception as exc:
-            log.error("Claude Code usage observation failed: %s", exc)
+            log.error("Claude Code usage observation failed: %s", type(exc).__name__)
 
 
 async def _discover_claude_context(binary: str, selector: str, *, context=None) -> dict[str, Any]:

@@ -17,8 +17,8 @@ import logging
 from typing import Any
 
 from connections import account_cleanup, account_login_wait, account_signin_prompt
-from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
-from connections.account_identity import codex_identity, refresh_default_identity
+from connections.account_verify_refresh import account_with_home, refresh_models, signin_recheck
+from connections.account_identity import codex_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for
 from connections.account_receipts import account_receipt
@@ -160,8 +160,6 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
             await account_cleanup.cleanup(await run_in_db(get_account, operation.account_id))
             operation.status, operation.cause = "failed", refused
             return
-        if operation.provider in VENDORS:
-            await refresh_default_identity(operation.provider)
         try:
             operation.duplicate_of, receipt = await run_in_db(
                 commit_signed_in, operation.account_id, operation.revision, identity)
@@ -188,14 +186,14 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
     """Begin, or return the live, vendor browser sign-in for an added account."""
-    account = await custom_account(account_id)
+    account = await account_with_home(account_id)
     if account["state"] == "signed_in":
         if account["provider"] not in VENDORS:
             raise AccountError("account is already signed in")
-        result = await signin_recheck(account_id, account["provider"], lambda selected: verify(selected, report_refresh=True))
+        result = await signin_recheck(account_id, account["provider"], verify)
         if result is not None:
             return result
-        account = await custom_account(account_id)
+        account = await account_with_home(account_id)
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:
@@ -241,6 +239,10 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
 async def check_signin(account_id: str) -> dict[str, Any]:
     """Report one sign-in from its in-process record; a finished one is reported on every check."""
     operation = _SIGNINS.get(account_id)
+    if operation is not None and operation.status == "completed" and (await account_with_home(account_id))["state"] != "signed_in":
+        # An expired login signs the account out without a sign-out: the finished sign-in describes the one that expired.
+        _SIGNINS.pop(account_id, None)
+        operation = None
     if operation is None:
         raise AccountError("no sign-in is in progress for this account")
     return operation.public()
@@ -318,28 +320,25 @@ async def stop_all_signins() -> None:
             raise result
 
 
-async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, Any]:
+async def verify(account_id: str) -> dict[str, Any]:
     """Re-read vendor sign-in; only a definite signed-out answer flips a signed-in account.
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
     """
-    account = await custom_account(account_id)
+    account = await account_with_home(account_id)
     provider = account["provider"]
     receipt = account_receipt(account)
     current_c6 = readiness_reason(account) in ("codex_auth_projection_changed", "codex_auth_source_missing")
     binary = await _binary(provider)
     signed_in, _, cause = ((None, {}, profile_for(provider).missing_cause) if binary is None
                            else await _vendor_status(provider, account["source_home"], binary))
-    if provider in VENDORS:
-        await refresh_default_identity(provider)
     if account["state"] == "signed_in" and signed_in is False:
         account = await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
     refresh_ok, refresh_cause, refresh_ref = None, None, None
     if account["state"] == "signed_in" and signed_in is True:
         refresh_ok, refresh_cause, refresh_ref = await refresh_models(account, receipt, binary, current_c6)
     result = {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
-    if report_refresh:
-        result.update(model_refresh_ok=refresh_ok, model_refresh_cause=refresh_cause, model_refresh_ref=refresh_ref)
+    result.update(model_refresh_ok=refresh_ok, model_refresh_cause=refresh_cause, model_refresh_ref=refresh_ref)
     return result
 
 

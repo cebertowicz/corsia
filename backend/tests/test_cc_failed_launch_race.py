@@ -16,6 +16,7 @@ async def test_launch_exit_before_first_event_ends_turn(child_db, monkeypatch):
     from subagents.cc_runtime_state import _LIVE, _Live
     from subagents.cc_stream import CCStreamSession
     from subagents import vendor_write_admission
+    from vendor_account_fixtures import default_home
 
     thread_id = "cc-failed-launch"
     _LIVE.reset()
@@ -30,7 +31,8 @@ async def test_launch_exit_before_first_event_ends_turn(child_db, monkeypatch):
         await handle_process_exit(thread_id, live, code, stderr, lambda _, frame: frames.append(frame),
                                   finalize_callback=finalize)
 
-    session = CCStreamSession(binary=sys.executable, session_id="failed", on_exit=on_exit)
+    session = CCStreamSession(binary=sys.executable, session_id="failed", on_exit=on_exit,
+                              claude_dir=default_home("claude-code"))  # a launch runs in its account's home
     live.session = session
     _LIVE.put(thread_id, live)
     monkeypatch.setattr(vendor_write_admission, "prepare_session_launch", lambda *_args: None)

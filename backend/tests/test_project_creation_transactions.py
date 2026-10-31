@@ -13,6 +13,8 @@ import sqlite3
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 @pytest.fixture
 def project_environment(isolated_db, tmp_path, monkeypatch):

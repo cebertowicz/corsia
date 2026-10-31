@@ -10,6 +10,7 @@ import asyncio
 import json
 
 import pytest
+from types import SimpleNamespace
 
 from connections import claude_discovery
 
@@ -119,6 +120,11 @@ class _StubCli:
         self.returncode = -9
 
 
+def _account(tmp_path):
+    """A probe runs inside an account's home: there is no ambient one."""
+    return SimpleNamespace(source_home=str(tmp_path / "account-home"))
+
+
 def _install(monkeypatch, cli: _StubCli) -> None:
     async def _spawn(*_cmd, **_kwargs):
         return cli
@@ -127,29 +133,29 @@ def _install(monkeypatch, cli: _StubCli) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_window_read_is_the_selected_models_not_the_previous_one(monkeypatch):
+async def test_the_window_read_is_the_selected_models_not_the_previous_one(monkeypatch, tmp_path):
     cli = _StubCli()
     _install(monkeypatch, cli)
 
-    usage = await claude_discovery._discover_claude_context("/bin/claude", "fable[1m]")
+    usage = await claude_discovery._discover_claude_context("/bin/claude", "fable[1m]", context=_account(tmp_path))
 
     assert usage["rawMaxTokens"] == WINDOWS["fable[1m]"]
     assert cli.frames == ["set_model", "get_context_usage", "end_session"]
 
 
 @pytest.mark.asyncio
-async def test_a_refused_selector_names_the_reason_and_asks_for_no_usage(monkeypatch):
+async def test_a_refused_selector_names_the_reason_and_asks_for_no_usage(monkeypatch, tmp_path):
     cli = _StubCli(set_model="reject")
     _install(monkeypatch, cli)
 
     with pytest.raises(RuntimeError, match="rejected selector fable.*model not available for this account"):
-        await claude_discovery._discover_claude_context("/bin/claude", "fable[1m]")
+        await claude_discovery._discover_claude_context("/bin/claude", "fable[1m]", context=_account(tmp_path))
 
     assert "get_context_usage" not in cli.frames
 
 
 @pytest.mark.asyncio
-async def test_a_cli_that_exits_without_answering_ends_the_probe_with_what_it_said(monkeypatch):
+async def test_a_cli_that_exits_without_answering_ends_the_probe_with_what_it_said(monkeypatch, tmp_path):
     cli = _StubCli(set_model="silent")
     _install(monkeypatch, cli)
 
@@ -160,5 +166,5 @@ async def test_a_cli_that_exits_without_answering_ends_the_probe_with_what_it_sa
 
     exit_task = asyncio.ensure_future(_exit_after_set_model())
     with pytest.raises(RuntimeError, match="no context evidence for fable.*control responses seen: none"):
-        await asyncio.wait_for(claude_discovery._discover_claude_context("/bin/claude", "fable[1m]"), 5)
+        await asyncio.wait_for(claude_discovery._discover_claude_context("/bin/claude", "fable[1m]", context=_account(tmp_path)), 5)
     await exit_task

@@ -168,9 +168,8 @@ def test_startup_connector_probes_run_outside_writes(catalog, monkeypatch):
 
     monkeypatch.setattr(shutil, "which", probe)
     monkeypatch.setattr(connections, "_gh_status", lambda _binary: (bool(probe("gh-auth")), None))
-    monkeypatch.setattr(connections, "_codex_sign_in_state", lambda binary: "ready" if probe("codex-auth") else "needs_auth")
     assert connections.seed_builtin_connections() == 3
-    assert observed == ["claude", "gh", "gh-auth", "codex", "codex-auth"]
+    assert observed == ["claude", "gh", "gh-auth", "codex"]
     assert _read(catalog, "SELECT provider,status FROM connections ORDER BY provider") == [
         ("claude-code", "available"), ("codex", "available"), ("github", "available"),
     ]

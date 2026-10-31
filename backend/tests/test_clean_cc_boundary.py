@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, call
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 class _Registry:
     def __init__(self, live) -> None:

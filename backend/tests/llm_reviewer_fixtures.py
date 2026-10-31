@@ -60,29 +60,7 @@ def _seed_reviewer_catalog(conn: sqlite3.Connection) -> None:
             ("reviewer-codex", "cli", "codex", "available", "t", "t"),
         ],
     )
-    # The reviewer runs on an account like any other consumer: each configured
-    # harness connection has its Default row.
-    from connections.vendor_accounts import ensure_default_account
-
-    for connection_id in ("reviewer-cc", "reviewer-codex"):
-        ensure_default_account(connection_id, db=conn)
     conn.commit()
-
-
-def _seed_default_codex_login() -> None:
-    """A synthetic file-backed login in the Default Codex home the reviewer launch projects."""
-    from subagents.codex_env import _default_app_server_home
-
-    home = _default_app_server_home()
-    home.mkdir(parents=True, exist_ok=True)
-    # A launch earlier in the session projects auth.json as a symlink to its
-    # own source login. Replace it rather than write through it: that source
-    # may belong to another test, or be gone with that test's tmp_path.
-    auth = home / "auth.json"
-    auth.unlink(missing_ok=True)
-    auth.write_text(
-        json.dumps({"auth_mode": "chatgpt", "tokens": {"access": "synthetic"}})
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +72,23 @@ def _reviewer_catalog(isolated_db):
         _seed_reviewer_catalog(conn)
     finally:
         conn.close()
-    _seed_default_codex_login()
+
+
+@pytest.fixture
+def reviewer_accounts(_reviewer_catalog):
+    """A signed-in Default per harness whose discovery lists every seeded reviewer model.
+
+    Opt-in: a test that builds its own accounts, or proves a missing one, does not take it.
+    """
+    from infra.database import get_db
+    from vendor_account_fixtures import seed_signed_in_defaults
+
+    db = get_db()
+    try:
+        seed_signed_in_defaults(db)
+        db.commit()
+    finally:
+        db.close()
 
 
 @pytest.fixture(autouse=True)
@@ -127,6 +121,10 @@ def _isolated_db(tmp_path, monkeypatch):
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
     _seed_reviewer_catalog(conn)
+    # The workflow's reviewer runs on a signed-in Default listing every seeded model.
+    from vendor_account_fixtures import seed_signed_in_defaults
+
+    seed_signed_in_defaults(conn)
     conn.commit()
     conn.close()
 

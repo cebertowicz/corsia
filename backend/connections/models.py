@@ -58,9 +58,6 @@ def upsert_connection(*, type, provider: str, status, config: dict | None = None
     if provider in VENDORS and config is not None:
         config = {key: value for key, value in config.items() if key != "usage"}
     with write_transaction(db, scope="upsert_connection") as _db:
-        previous = _db.execute(
-            "SELECT status FROM connections WHERE provider=?", (provider,),
-        ).fetchone()
         _db.execute(
             """INSERT INTO connections
                (id, type, provider, config, status, scope, created_at, updated_at)
@@ -78,21 +75,10 @@ def upsert_connection(*, type, provider: str, status, config: dict | None = None
         )
         if provider in VENDORS:
             from connections.harness_legacy_fallback import sync_legacy_fallback
-            from connections.vendor_accounts import ensure_default_account
 
-            transport = _db.execute("SELECT id FROM connections WHERE provider=?", (provider,)).fetchone()
-            ensure_default_account(str(transport["id"]), db=_db)
             sync_legacy_fallback(
                 provider, status=status_value, config=config, db=_db,
             )
-            if (
-                status_value == ConnectionStatus.AVAILABLE.value
-                and previous is not None
-                and previous["status"] != ConnectionStatus.AVAILABLE.value
-            ):
-                from infra.connection_limit_release import release_after_sign_in
-
-                release_after_sign_in(provider, db=_db)
         row = _db.execute("SELECT * FROM connections WHERE provider = ?", (provider,)).fetchone()
         return _row_to_dict(row)
 
@@ -131,9 +117,6 @@ def set_connection_status(
     now = datetime.now(timezone.utc).isoformat()
     status_value = _v(status)
     with write_transaction(db, scope="set_connection_status") as _db:
-        previous = _db.execute(
-            "SELECT status FROM connections WHERE provider=?", (provider,),
-        ).fetchone()
         _db.execute(
             "UPDATE connections SET status = ?, updated_at = ? WHERE provider = ?",
             (status_value, now, provider),
@@ -148,14 +131,6 @@ def set_connection_status(
             sync_legacy_fallback(
                 provider, status=status_value, config=config, db=_db,
             )
-            if (
-                status_value == ConnectionStatus.AVAILABLE.value
-                and previous is not None
-                and previous["status"] != ConnectionStatus.AVAILABLE.value
-            ):
-                from infra.connection_limit_release import release_after_sign_in
-
-                release_after_sign_in(provider, db=_db, schedule_usage_check=schedule_usage_check)
         row = _db.execute("SELECT * FROM connections WHERE provider = ?", (provider,)).fetchone()
         return _row_to_dict(row) if row else None
 
@@ -175,7 +150,7 @@ def connection_available(provider: str, db=None) -> bool:
 
 
 def provider_may_run(provider: str, db=None) -> bool:
-    """Whether a provider has a connection or a signed-in added account to try.
+    """Whether a provider has an available connection or a signed-in account to try.
 
     Per-account discovery and policy are checked at turn admission.
     """
@@ -185,7 +160,7 @@ def provider_may_run(provider: str, db=None) -> bool:
             "SELECT 1 FROM connections c WHERE c.provider=? AND "
             "(c.status='available' OR (c.status IN ('needs_auth','unverified') AND EXISTS "
             "(SELECT 1 FROM vendor_accounts a WHERE a.connection_id=c.id "
-            "AND a.is_default=0 AND a.state='signed_in'))) LIMIT 1", (provider,)
+            "AND a.state='signed_in'))) LIMIT 1", (provider,)
         ).fetchone()
         return row is not None
     finally:

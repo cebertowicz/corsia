@@ -184,3 +184,55 @@ def normalize_codex_models(
                 )
         models.append(row)
     return models
+
+
+def retain_discovered_context(row: dict, previous: dict | None) -> dict:
+    """Keep exact-identity context evidence when this refresh could not re-observe it."""
+    result = dict(row)
+    if (result.get('context_window') is None and previous
+            and result.get('resolved_identity')
+            and result.get('resolved_identity') == previous.get('resolved_identity')):
+        result['context_window'] = previous.get('context_window')
+        if isinstance(previous.get('context_observation'), dict):
+            result['context_observation'] = previous['context_observation']
+    return result
+
+
+def discovered_row_metadata(
+    provider: str, selector: str, order: int, row: dict, old: dict | None,
+    meta: dict, harness_version: str,
+) -> tuple[dict, dict]:
+    """Return the row's stored metadata and the row with exact-identity context retained.
+
+    ``meta`` is the prior row's metadata (``{}`` for a new one); it is edited in place.
+    """
+    prior_meta = dict(meta)
+    resolved_identity = str(row.get("resolved_identity") or "")
+    if not (old and resolved_identity and str(meta.get("resolved_identity") or "") == resolved_identity):
+        meta.pop("context_observation", None)
+    meta.pop("reference_only", None)
+    meta.pop("availability_reason", None)
+    alias_of = row.get("alias_of")
+    # An accepted-but-unlisted selector keeps running for whatever is
+    # pinned to it; the picker offers only the listed name it aliases.
+    if alias_of:
+        meta["alias_of"] = f"{provider}/{alias_of}"
+    else:
+        meta.pop("alias_of", None)
+    meta.update({
+        "resolved_identity": row.get("resolved_identity"),
+        "discovered_capabilities": row.get("capabilities") or {},
+        "is_default": bool(row.get("is_default")),
+        "harness_version": harness_version,
+        "discovery_order": order,
+    })
+    row = retain_discovered_context(row, {
+        "resolved_identity": prior_meta.get("resolved_identity"),
+        "context_window": old.get("context_window"),
+        "context_observation": prior_meta.get("context_observation"),
+    } if old else None)
+    if isinstance(row.get("context_observation"), dict):
+        meta["context_observation"] = row["context_observation"]
+    if row.get("available") is not True:
+        meta["availability_reason"] = row.get("availability_reason") or "discovered_model_unavailable"
+    return meta, row

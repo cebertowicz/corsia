@@ -94,6 +94,13 @@ async def _preadmitted_input(thread_id: str, text: str, kwargs: dict) -> dict:
     return kwargs
 
 
+def _own_home(home) -> None:
+    """The directory a test launches in is the signed-in Default's home: an account's launch uses no other."""
+    from tests.vendor_account_fixtures import point_default_home
+
+    point_default_home("claude-code", home)
+
+
 async def feed_main_with_persisted_input(
     thread_id: str,
     text: str,
@@ -106,6 +113,8 @@ async def feed_main_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)
@@ -123,6 +132,8 @@ async def feed_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)
@@ -141,6 +152,8 @@ async def ensure_live_with_persisted_input(
     from unittest.mock import patch
 
     home = kwargs.get("claude_dir")
+    if home:
+        _own_home(home)
     scope = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}) if home else nullcontext()
     with scope:
         prepared = await _preadmitted_input(thread_id, text, kwargs)
@@ -234,6 +247,16 @@ def child_db(tmp_path, monkeypatch, _cc_runtime_cleanup):
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
     _seed_test_model_catalog(conn)
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import seed_default_account
+
+    account = seed_default_account('claude-code', db=conn)
+    account = set_account_state(account['id'], 'signed_in', expected_revision=0, db=conn)
+    receipt = capture_receipt('claude-code', account_id=account['id'], db=conn)
+    models = {row['id']: {} for row in conn.execute("SELECT id FROM models WHERE harness='claude-code'")}
+    assert mark_discovery(account['id'], receipt=receipt, status='ready', models=models, db=conn)
     conn.commit()
     wrapper = _TestNoOpClose(conn)
 

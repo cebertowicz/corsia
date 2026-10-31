@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 
 from connections.claude_discovery import (
-    ClaudeCatalogCheckFailed, _discover_claude_context, discover_claude_models,
+    _discover_claude_context, discover_claude_models,
 )
 from connections.claude_unlisted import add_accepted_unlisted
 from connections.codex_discovery import discover_codex_models
@@ -24,6 +24,7 @@ from connections.harness_model_rows import (
     CLAUDE_SOURCE,
     CODEX_SOURCE,
     normalize_claude_models,
+    discovered_row_metadata,
     normalize_codex_models,
 )
 from connections.harness_model_rows import VERSION as _VERSION, _positive_int
@@ -214,11 +215,34 @@ def _retire_unlisted(
         )
 
 
-def store_success(
+def _reject_collisions(connection, provider: str, current: dict) -> None:
+    """Refuse a selector whose model id or provider key already names another row."""
+    for selector in current:
+        model_id = f"{provider}/{selector}"
+        by_id = connection.execute(
+            "SELECT id,harness,provider,provider_model_id FROM models WHERE id = ?",
+            (model_id,),
+        ).fetchone()
+        by_key = connection.execute(
+            "SELECT id,harness,provider,provider_model_id FROM models "
+            "WHERE provider = ? AND provider_model_id = ?",
+            (provider, selector),
+        ).fetchone()
+        for existing in (by_id, by_key):
+            if existing and (
+                existing["id"] != model_id
+                or existing["harness"] != provider
+                or existing["provider"] != provider
+                or existing["provider_model_id"] != selector
+            ):
+                raise ValueError(f"harness model collision: {model_id}")
+
+
+def upsert_discovered_rows(
     provider: str, rows: list[dict[str, Any]], *, harness_version: str,
     source: str, timestamp: str, db=None, unlisted_errors: dict[str, str] | None = None,
 ) -> None:
-    """Atomically persist discovery rows and the connection refresh envelope.
+    """Atomically persist discovery rows.
 
     ``unlisted_errors`` names why each previously known, now unlisted selector
     was not kept; it becomes that row's ``last_error``.
@@ -238,25 +262,7 @@ def store_success(
         remove_legacy_fallback(provider, db=connection)
         prior_rows = _catalog_rows(provider, db=connection)
         prior = {str(row["provider_model_id"]): row for row in prior_rows}
-        for selector in current:
-            model_id = f"{provider}/{selector}"
-            by_id = connection.execute(
-                "SELECT id,harness,provider,provider_model_id FROM models WHERE id = ?",
-                (model_id,),
-            ).fetchone()
-            by_key = connection.execute(
-                "SELECT id,harness,provider,provider_model_id FROM models "
-                "WHERE provider = ? AND provider_model_id = ?",
-                (provider, selector),
-            ).fetchone()
-            for existing in (by_id, by_key):
-                if existing and (
-                    existing["id"] != model_id
-                    or existing["harness"] != provider
-                    or existing["provider"] != provider
-                    or existing["provider_model_id"] != selector
-                ):
-                    raise ValueError(f"harness model collision: {model_id}")
+        _reject_collisions(connection, provider, current)
 
         _retire_unlisted(connection, prior, current, timestamp, unlisted_errors or {})
 
@@ -264,45 +270,10 @@ def store_success(
         for selector, (order, row) in current.items():
             model_id = f"{provider}/{selector}"
             old = prior.get(selector)
-            meta = _metadata(old) if old else {}
-            resolved_identity = str(row.get("resolved_identity") or "")
-            same_resolved_identity = bool(
-                old
-                and resolved_identity
-                and str(meta.get("resolved_identity") or "")
-                == resolved_identity
-            )
-            if not same_resolved_identity:
-                meta.pop("context_observation", None)
-            meta.pop("reference_only", None)
-            meta.pop("availability_reason", None)
-            alias_of = row.get("alias_of")
-            # An accepted-but-unlisted selector keeps running for whatever is
-            # pinned to it; the picker offers only the listed name it aliases.
-            if alias_of:
-                meta["alias_of"] = f"{provider}/{alias_of}"
-            else:
-                meta.pop("alias_of", None)
-            meta.update({
-                "resolved_identity": row.get("resolved_identity"),
-                "discovered_capabilities": row.get("capabilities") or {},
-                "is_default": bool(row.get("is_default")),
-                "harness_version": harness_version,
-                "discovery_order": order,
-            })
-            observation = row.get("context_observation")
-            if isinstance(observation, dict):
-                meta["context_observation"] = observation
+            meta, row = discovered_row_metadata(
+                provider, selector, order, row, old, _metadata(old) if old else {}, harness_version)
             context_window = row.get("context_window")
-            if context_window is None and old is not None and same_resolved_identity:
-                # A failed per-model probe does not erase a prior exact
-                # discovery/runtime observation.
-                context_window = old.get("context_window")
             available = row.get("available") is True
-            if not available:
-                meta["availability_reason"] = (
-                    row.get("availability_reason") or "discovered_model_unavailable"
-                )
             capabilities = row.get("capabilities") or {}
             supports_vision = "image" in (capabilities.get("input_modalities") or [])
             supports_reasoning = bool(
@@ -338,15 +309,22 @@ def store_success(
                     None, timestamp, timestamp, timestamp, timestamp,
                 ),
             )
-        previous = read_discovery_envelope(provider, db=connection) or {}
-        _save_discovery_envelope(provider, {
-            **previous,
-            "harness_version": harness_version,
-            "source": source,
-            "refreshed_at": timestamp,
-            "attempted_at": timestamp,
-            "last_error": None,
-        }, db=connection)
+
+
+def record_refresh_attempt(
+    provider: str, *, harness_version: str, source: str, timestamp: str,
+    error: str | None, db,
+) -> None:
+    """Stamp the connection's refresh envelope: the one clock behind stale and backoff checks."""
+    previous = read_discovery_envelope(provider, db=db) or {}
+    _save_discovery_envelope(provider, {
+        **previous,
+        "harness_version": harness_version,
+        "source": source,
+        **({"refreshed_at": timestamp} if error is None else {}),
+        "attempted_at": timestamp,
+        "last_error": error,
+    }, db=db)
 
 
 def store_failure(
@@ -356,14 +334,8 @@ def store_failure(
     """Record failed refresh without replacing last-known model rows."""
     with write_transaction(db, scope="harness_model_catalog") as connection:
         remove_legacy_fallback(provider, db=connection)
-        previous = read_discovery_envelope(provider, db=connection) or {}
-        _save_discovery_envelope(provider, {
-            **previous,
-            "harness_version": harness_version,
-            "source": source,
-            "attempted_at": timestamp,
-            "last_error": error,
-        }, db=connection)
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=error, db=connection)
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -444,7 +416,7 @@ def _provider_binary(provider: str, *, db=None) -> tuple[str | None, str | None]
     connection = get_connection(provider, db=db)
     if not connection:
         return None, "connection_not_found"
-    if connection.get("status") != "available":
+    if connection.get("status") == "not_installed":
         return None, "connection_unavailable"
     binary = str((connection.get("config") or {}).get("binary") or provider)
     return binary, None
@@ -457,79 +429,49 @@ def _cached_harness_version(provider: str, *, db=None) -> str:
 
 async def _refresh_provider_once(
     provider: str, *, reason: RefreshReason, harness_version: str | None = None, db=None,
-    binary: str | None = None, context=None,
+    binary: str | None = None, context,
 ) -> dict[str, Any]:
     # A caller that names the binary asks even a row that is not available (a sign-in check).
     binary, unavailable = (binary, None) if binary else await _db_call(
         _provider_binary, provider, db=db)
     if unavailable:
-        return {"provider": provider, "ok": False, "reason": reason, "error": unavailable}
-    assert binary is not None
-    if context is not None:
-        from connections.account_discovery_refresh import refresh_account_once
+        from connections.account_discovery_types import AccountRefreshResult
 
-        return await refresh_account_once(provider, context=context, binary=binary,
-            harness_version=harness_version, adapter=_ADAPTERS[provider], db_call=_db_call,
-            version_read=binary_version, db=db)
-    discover, normalize, source = _ADAPTERS[provider]
-    timestamp = datetime.now(timezone.utc).isoformat()
-    version = harness_version
-    try:
-        version = version or await binary_version(binary)
-        payload = await discover(binary)
-        unlisted_errors: dict[str, str] = {}
-        if provider == "claude-code":
-            prior = await _db_call(_prior_selectors, provider, db=db)
-            unlisted_errors = await add_accepted_unlisted(
-                payload, prior,
-                lambda selector: _discover_claude_context(binary, selector),
-            )
-        rows = normalize(payload, harness_version=version, timestamp=timestamp)
-        await _db_call(
-            store_success,
-            provider, rows, harness_version=version, source=source,
-            timestamp=timestamp, db=db, unlisted_errors=unlisted_errors,
-        )
-        return {"provider": provider, "ok": True, "reason": reason,
-                "model_count": len(rows), "harness_version": version}
-    except Exception as exc:
-        version = version or await _db_call(
-            _cached_harness_version, provider, db=db,
-        )
-        error = str(exc)
-        await _db_call(
-            store_failure,
-            provider, error, harness_version=version, source=source,
-            timestamp=timestamp, db=db,
-        )
-        return {"provider": provider, "ok": False, "reason": reason,
-                "error": error, "harness_version": version,
-                "source_check_recorded": isinstance(exc, ClaudeCatalogCheckFailed)}
+        return AccountRefreshResult(provider, context.account_id, cause=unavailable)
+    assert binary is not None
+    from connections.account_discovery_refresh import refresh_account_once
+
+    return await refresh_account_once(provider, context=context, binary=binary,
+        harness_version=harness_version, adapter=_ADAPTERS[provider], db_call=_db_call,
+        version_read=binary_version, db=db)
 
 
 async def refresh_provider(
     provider: str, *, reason: RefreshReason, harness_version: str | None = None, db=None,
     binary: str | None = None, account_id: str | None = None, expected_receipt=None,
 ) -> dict[str, Any]:
-    """Single-flight by account generation; unscoped Default retains its provider key."""
-    context = None
-    key = provider
-    if account_id is not None:
-        from connections.account_discovery_types import capture_discovery_context, AccountRefreshResult
+    """Refresh one account's catalog, single-flight by account generation.
 
-        context = await _db_call(capture_discovery_context, provider, account_id=account_id,
-                                expected_receipt=expected_receipt, db=db)
-        if context is None:
-            return AccountRefreshResult(provider, account_id, cause='account_refresh_superseded')
-        if context.is_default:
-            context = None  # Default's pre/post observation is handled by its canonical path.
-        else:
-            key = context.key
+    Without ``account_id`` it refreshes every signed-in account of the provider and
+    returns the summary ``{provider, reason, ok, error}``; with one it returns that
+    account's ``AccountRefreshResult``.
+    """
+    from connections.account_discovery_types import capture_discovery_context, AccountRefreshResult
+
+    if account_id is None:
+        from connections.account_discovery_refresh import refresh_signed_in_accounts
+
+        return await refresh_signed_in_accounts(provider, reason=reason, harness_version=harness_version,
+                                                binary=binary, db=db)
+    context = await _db_call(capture_discovery_context, provider, account_id=account_id,
+                             expected_receipt=expected_receipt, db=db)
+    if context is None:
+        return AccountRefreshResult(provider, account_id, cause='account_refresh_superseded')
+    key = context.key
     task = _REFRESH_TASKS.get(key)
     if task is None or task.done():
         task = asyncio.create_task(_refresh_provider_once(
-            provider, reason=reason, harness_version=harness_version, db=db, binary=binary,
-            **({'context': context} if context is not None else {}),
+            provider, reason=reason, harness_version=harness_version, db=db, binary=binary, context=context,
         ))
         _REFRESH_TASKS[key] = task
 
@@ -538,10 +480,7 @@ async def refresh_provider(
                 _REFRESH_TASKS.pop(key, None)
 
         task.add_done_callback(_clear)
-    result = await asyncio.shield(task)
-    if context is not None:
-        return result
-    return {**result, "reason": reason}
+    return await asyncio.shield(task)
 
 
 def start_background_check(provider: str, check) -> None:

@@ -19,6 +19,9 @@ from core.fork_types import (
 from core.checkpoint_types import CheckpointRequest
 from llm.resolution import ExecutionTarget
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"claude-code": ("openai/test-checkpoint",), "codex": ("openai/test-checkpoint",)}
+
 
 def _target() -> ExecutionTarget:
     return ExecutionTarget(

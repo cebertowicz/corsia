@@ -1,73 +1,14 @@
 import { get, writable } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
-import type { ModelUsage } from './modelUsage';
+import type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
+export type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 
 const BASE = '';
 const auth = () => get(token) || '';
 
-export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
-export type SigninStatus = 'waiting' | 'completed' | 'already_signed_in' | 'model_refresh_failed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
-
-export interface VendorAccountLabel {
-	name: string;
-	email: string | null;
-	text: string;
-	custom: string | null;
-}
-
-/** An account's recorded subscription price; the account's billing is null when none is recorded. */
-export interface AccountBilling {
-	monthly_price_cents: number;
-	charge_day: number;
-}
-
-export interface VendorAccountUsage extends ModelUsage {
-	/** A background account-usage recheck is still running. */
-	checking: boolean;
-	/** The most recent usage check, including any failure the account row should show. */
-	check: { outcome?: string; at?: string; error?: string | null } | null;
-}
-
-export interface VendorAccount {
-	id: string;
-	provider: string;
-	name: string;
-	is_default: boolean;
-	state: VendorAccountState;
-	revision: number;
-	identity: Record<string, string>;
-	label: VendorAccountLabel;
-	duplicate_of?: string | null;
-	/** This account's 'Spend past usage limit' switch; null where no plan limit applies. */
-	allow_overage?: boolean | null;
-	/** Signed in, but none of the vendor's models can run on this account. */
-	no_usable_model?: boolean;
-	/** The Default CLI has definitely reported that it is signed out. */
-	default_signed_out?: boolean;
-	/** Account-owned plan usage, rendered once in its Settings account row. */
-	usage?: VendorAccountUsage;
-	/** The recorded monthly price and charge day; null when no price is recorded. */
-	billing?: AccountBilling | null;
-	/** Fences billing writes; sent back unchanged. */
-	billing_revision?: number;
-	/** A receipt confirmed state, but account details/revision require an explicit reload. */
-	details_stale?: boolean;
-}
-
-export interface SigninResult {
-	account_id: string;
-	route: 'browser' | null;
-	status: SigninStatus;
-	cause: string | null;
-	duplicate_of?: string | null;
-	held_by?: string | null;
-	/** Support reference for a failure the person may report. */
-	ref?: string | null;
-}
-
 export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
-	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !account.default_signed_out && !removed.some((row) => row.id === account.id)), ...removed];
+	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !removed.some((row) => row.id === account.id)), ...removed];
 }
 
 export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
@@ -84,6 +25,8 @@ export function reloadErrorText(error: string, ref?: string): string {
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
+/** One live sign-in state per account, shared by Settings and every held chat. */
+export const signin = writable<Record<string, SigninResult>>({});
 // Confirmations invalidate in-flight inventories, including equal-revision receipts.
 // Among unchanged confirmations, the latest successful request wins; failures do not.
 let confirmationSequence = 0;
@@ -247,6 +190,31 @@ export async function checkVendorSignin(accountId: string): Promise<{ ok: boolea
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, json('POST'), 'Could not check sign-in.');
 	if (!result.ok) return result.error === 'no sign-in is in progress for this account' ? { ok: false, absent: true } : result;
 	return reconcileSignin(result.data);
+}
+
+export async function refreshVendorModels(accountId: string): Promise<{ ok: boolean; signedOut?: boolean; superseded?: boolean; error?: string; ref?: string }> {
+	const result = await request<{ state: VendorAccountState; vendor_signed_in: boolean | null; model_refresh_ok: boolean | null; model_refresh_cause: string | null; model_refresh_ref: string | null }>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/verify`, json('POST'), 'Couldn’t refresh models. Try again.');
+	if (!result.ok) return result;
+	if (result.data.state === 'signed_out') {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === accountId ? { ...account, state: 'signed_out', details_stale: true } : account));
+		const refreshed = await loadVendorAccounts();
+		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts. Try again.', refreshed.ref) };
+	}
+	if (result.data.vendor_signed_in === true && result.data.model_refresh_ok === true) return { ok: true };
+	// A newer login replaced the one this refresh read: nothing failed, and the reload shows the account as it now is.
+	if (result.data.model_refresh_cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, superseded: true };
+	}
+	return { ok: false, error: 'The model list couldn’t be refreshed.', ref: result.data.model_refresh_ref ?? undefined };
+}
+
+/** Reload an account's model list and record the outcome as its one sign-in line, for Settings and chat alike. */
+export async function refreshAndRecordModels(accountId: string): ReturnType<typeof refreshVendorModels> {
+	const result = await refreshVendorModels(accountId);
+	if (result.signedOut || result.superseded) signin.update(({ [accountId]: _, ...rest }) => rest);
+	else signin.update((current) => ({ ...current, [accountId]: { account_id: accountId, route: null, status: result.ok ? 'already_signed_in' : 'model_refresh_failed', cause: null, ref: result.ref } }));
+	return result;
 }
 
 export async function cancelVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {

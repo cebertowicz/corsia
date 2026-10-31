@@ -21,6 +21,8 @@ from codex_runtime_fixtures import (
     _reset_runtime,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 THREAD = "codex-writer-owned"
 
 

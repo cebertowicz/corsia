@@ -17,6 +17,7 @@ from plans import admission, service
 from plans.boundary import PlanActor, mutate
 from tests.test_clean_turn_terminal import _db, _running_turn, _session
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 THREAD = "thread-1"
 
 

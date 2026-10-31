@@ -26,6 +26,8 @@ from tests.child_parent_notice_helpers import delegated
 
 
 KEY = "_corsia_vendor_login"
+# What a harness's discovery leaves on its connection: an available harness has its catalog rows and this.
+DISCOVERED: dict[str, dict] = {"harness_model_cache": {}}
 
 
 THREAD, MODEL = "claude-destination", "claude-code/test"
@@ -56,6 +58,105 @@ def _read(fn, db):
     finally:
         if db is None:
             connection.close()
+
+
+def seed_default_account(provider: str, *, db=None) -> dict:
+    """The provider's home-backed Default, made if the test has none, for tests that do not exercise sign-in."""
+    from connections.vendor_accounts import add_account, get_account
+
+    def write(connection):
+        existing = resolve_account_id(provider, db=connection)
+        if existing is not None:
+            return get_account(existing, db=connection)
+        account = add_account(provider, 'Default', db=connection)
+        connection.execute('UPDATE vendor_accounts SET is_default=1 WHERE id=?', (account['id'],))
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    return _read(write, db)
+
+
+def signed_in_default(provider: str, *, db=None, models: tuple[str, ...] = ()) -> dict:
+    """The provider's Default account, signed in with ready discovery; made if the test has none.
+
+    There is no ambient login to stand in for it: a test that runs a harness turn names
+    its account. Idempotent, so a helper may call it for a Default another helper made.
+    """
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import get_account, set_account_state
+
+    def write(connection):
+        identity = resolve_account_id(provider, db=connection)
+        if identity is None:
+            account = seed_default_account(provider, db=connection)
+        else:
+            account = get_account(identity, db=connection)
+        if provider == 'codex':
+            (Path(account['source_home']) / 'auth.json').write_text(json.dumps({
+                'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'},
+            }))
+        if account['state'] != 'signed_in':
+            account = set_account_state(account['id'], 'signed_in', expected_revision=account['revision'], db=connection)
+        receipt = capture_receipt(provider, account_id=account['id'], db=connection)
+        # An account's discovery is keyed by the model's litellm id, which is the catalog id except for a
+        # row built to mislead; list both so a test row of either kind runs.
+        discovered = {key: {} for row in connection.execute(
+            'SELECT id, litellm_model FROM models WHERE harness=?', (provider,)) for key in (row['id'], row['litellm_model'])}
+        discovered.update({model: {} for model in models})
+        assert mark_discovery(account['id'], receipt=receipt, status='ready', models=discovered, db=connection)
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    return _read(write, db)
+
+
+def point_default_home(provider: str, home, *, db=None) -> dict:
+    """The signed-in Default, with its home at a directory the test prepared.
+
+    For a test that stages session files or credentials in its own directory: that directory is
+    the account's home, as it would be for a person who signed in there.
+    """
+    from connections.vendor_accounts import get_account
+
+    account = signed_in_default(provider, db=db)
+
+    Path(home).mkdir(parents=True, exist_ok=True)
+
+    def write(connection):
+        connection.execute('UPDATE vendor_accounts SET source_home=? WHERE id=?', (str(home), account['id']))
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    return _read(write, db)
+
+
+def record_default_identity(provider: str, facts: dict, *, db=None) -> dict:
+    """The signed-in Default, with these identity facts read from its own home."""
+    from connections.vendor_accounts import get_account, record_evidence
+
+    account = signed_in_default(provider, db=db)
+
+    def write(connection):
+        record_evidence(account['id'], identity=facts, db=connection)
+        connection.commit()
+        return get_account(account['id'], db=connection)
+
+    return _read(write, db)
+
+
+def seed_signed_in_defaults(db, models: dict[str, tuple[str, ...]] | None = None) -> None:
+    for provider in ('claude-code', 'codex'):
+        signed_in_default(provider, db=db, models=tuple((models or {}).get(provider, ())))
+
+
+
+def default_home(provider: str, *, db=None) -> str:
+    """The home a session of the signed-in Default runs in: its Claude root or Codex runtime home."""
+    from connections.account_runtime import homes_for
+
+    homes = homes_for(signed_in_default(provider, db=db))
+    return homes.claude_dir or homes.codex_runtime
 
 
 def default_id(provider: str, *, db=None) -> str:
@@ -117,6 +218,24 @@ def default_subject(provider: str, scope: str, *, db=None) -> LimitSubject:
     return LimitSubject(provider, scope, receipt.account_id, receipt)
 
 
+def seed_catalog(provider: str, rows: list[dict], *, harness_version: str, source: str, timestamp: str,
+                 db=None, unlisted_errors: dict[str, str] | None = None) -> None:
+    """Store catalog rows and their refresh envelope with the production writers, for a test about the catalog.
+
+    The writers are the two a committed account discovery calls (``upsert_discovered_rows`` through
+    ``account_discovery_commit._store_account_catalog``, then ``record_refresh_attempt``); this skips only the
+    account discovery evidence that function derives its rows from, for tests that have no account.
+    """
+    from connections.harness_models import record_refresh_attempt, upsert_discovered_rows
+    from infra.database import write_transaction
+
+    with write_transaction(db, scope='harness_model_catalog') as connection:
+        upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
+                               timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=None, db=connection)
+
+
 def seed_usage(account_id: str, *, facts: dict, db=None) -> None:
     """Store usage on an account with no current login, as an earlier login left it.
 
@@ -176,12 +295,15 @@ def _ready(db, account, model='codex/test'):
 
 
 def _known_default(db, account, login=1):
-    db.execute("UPDATE vendor_accounts SET identity_json=? WHERE id=?", (
-        json.dumps({"default_comparison": {"facts": {"account_fp": "synthetic"},
-                    "auth_state": "known", "observation_seq": login, "login_seq": login}}), account["id"]))
+    from connections.account_evidence import invalidate_discovery, mark_discovery
     from connections.account_receipts import capture_receipt
-    from connections.account_evidence import mark_discovery
+    from connections.vendor_accounts import get_account
 
+    db.execute("UPDATE vendor_accounts SET state='signed_in', identity_json=? WHERE id=?",
+               (json.dumps({'account_fp': 'synthetic'}), account['id']))
+    current = get_account(account['id'], db=db)
+    (Path(current['source_home']) / 'auth.json').touch()
+    invalidate_discovery(current, login_seq=login, auth_state='known', db=db)
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={'codex/test': {}}, db=db)
     db.commit()
@@ -266,11 +388,11 @@ def _move(db):
 @pytest.fixture
 def accounts(isolated_db):
     from connections.models import upsert_connection
-    from connections.vendor_accounts import add_account, default_account, set_account_state
+    from connections.vendor_accounts import add_account, set_account_state
     from infra.database import get_db
 
-    upsert_connection(type="cli", provider="codex", status="available", config={"binary": "/bin/test"})
-    legacy = default_account("codex")
+    upsert_connection(type="cli", provider="codex", status="available",
+                      config=DISCOVERED | {"binary": "/bin/test"})
     second = add_account("codex", "Second")
     second = set_account_state(second["id"], "signed_in", expected_revision=0)
     third = add_account("codex", "Third")
@@ -289,7 +411,8 @@ def accounts(isolated_db):
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES ('codex/test','Test','codex/test','codex','test','codex','t','t')")
     db.commit()
-    yield db, legacy, second, third
+    default = signed_in_default('codex')  # no ambient login: the Default is an account like the others
+    yield db, default, second, third
     db.close()
 
 
@@ -298,8 +421,10 @@ def vendors(accounts):
     from connections.models import upsert_connection
     from connections.vendor_accounts import add_account, set_account_state
 
-    db, legacy, codex, third = accounts
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/synthetic"})
+    db, default, codex, third = accounts
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config=DISCOVERED | {"binary": "/bin/synthetic"})
+    signed_in_default("claude-code")
     claude = add_account("claude-code", "Claude Second")
     claude = set_account_state(claude["id"], "signed_in", expected_revision=0)
     return db, {"codex": codex, "claude-code": claude}
@@ -368,12 +493,14 @@ def claude(accounts):
     from connections.vendor_accounts import add_account, set_account_state
 
     db = accounts[0]
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/synthetic"})
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config=DISCOVERED | {"binary": "/bin/synthetic"})
     db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
                "VALUES (?,'user',?,'destination-project','t','t')", (THREAD, MODEL))
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES (?,'Test',?,'claude-code','test','claude-code','t','t')", (MODEL, MODEL))
     db.commit()
+    signed_in_default("claude-code", db=db)
     first = select_account(THREAD, "claude-code", db=db)
     other = add_account("claude-code", "Other")
     other = set_account_state(other["id"], "signed_in", expected_revision=0)

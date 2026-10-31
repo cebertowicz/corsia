@@ -89,7 +89,10 @@ def surface_exit_error(
         reconcile_expired_login(stderr, logger)
     text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
     if added_account and added_account["state"] == "signed_out":
-        text = f'{added_account["name"]} is signed out of Claude Code. Sign it in again under Settings › Providers.'
+        from connections.account_profiles import account_label
+
+        label = account_label(added_account, db=db)["text"]
+        text = f'{label} is signed out of Claude Code. Sign it in again under Settings › Providers.'
     try:
         meta = {
             "cc": True,

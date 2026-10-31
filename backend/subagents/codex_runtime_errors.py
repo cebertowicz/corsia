@@ -37,6 +37,7 @@ def cache_error_marker(exc, thread_id, identity, bcast, db, insert_message_fn, l
         return None
 
     async def marker():
+        from connections.account_profiles import account_label
         from connections.vendor_accounts import get_account
         from infra.db_async import run_in_db_unless_owned
         from connections.account_runtime import thread_launch_homes
@@ -47,7 +48,7 @@ def cache_error_marker(exc, thread_id, identity, bcast, db, insert_message_fn, l
             try:
                 homes = thread_launch_homes(thread_id, "codex", turn_id=identity.turn_id, db=connection)
                 account = get_account(homes.account_id, db=connection) if homes.account_id else None
-                name = account["name"] if account else "this account"
+                name = account_label(account, db=connection)["text"] if account else "this account"
                 text = (f"Couldn’t start Codex on {name}: its model list is out of date. "
                         f"Use Sign in again on {name} under Settings › Providers.")
                 meta = {"codex": True, "type": "cc_error", "event_type": "harness.error",

@@ -7,6 +7,8 @@ import sqlite3
 
 import pytest
 
+from vendor_account_fixtures import signed_in_default
+
 
 @pytest.fixture
 def connections_db(tmp_path, monkeypatch):
@@ -29,6 +31,8 @@ def connections_db(tmp_path, monkeypatch):
         type=ConnectionType.CLI, provider="claude-code",
         status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/claude"}, db=db,
     )
+    signed_in_default("claude-code", db=db)  # discovery runs for an account: there is no ambient login
+    db.commit()
     yield db
     db.close()
 
@@ -65,24 +69,26 @@ async def _refresh(db, monkeypatch, listing, accepted: dict[str, str]):
 
     probed: list[str] = []
 
-    async def _discover(_binary):
-        return {"models": [dict(raw) for raw in listing]}
+    async def _discover(_binary, context=None):
+        from connections.account_discovery_types import StagedDiscovery
 
-    async def _probe(_binary, selector):
+        return StagedDiscovery(payload={"models": [dict(raw) for raw in listing]})
+
+    async def _probe(_binary, selector, context=None):
         probed.append(selector)
         if selector not in accepted:
             raise RuntimeError(f"Claude Code rejected selector {selector}")
         return {"model": accepted[selector], "maxTokens": 1_000_000,
                 "rawMaxTokens": 1_000_000}
 
-    async def _version(_binary):
+    async def _version(_binary, env=None):
         return "2.1.283"
 
     monkeypatch.setitem(
         harness_models._ADAPTERS, "claude-code",
         (_discover, harness_models.normalize_claude_models, harness_models.CLAUDE_SOURCE),
     )
-    monkeypatch.setattr(harness_models, "_discover_claude_context", _probe)
+    monkeypatch.setattr("connections.claude_discovery._discover_claude_context", _probe)
     monkeypatch.setattr(harness_models, "binary_version", _version)
     result = await harness_models.refresh_provider(
         "claude-code", reason="version_changed", db=db,

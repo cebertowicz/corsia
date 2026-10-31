@@ -15,6 +15,9 @@ from core.checkpoint_types import CheckpointProviderForkRequest
 from llm.resolution import ExecutionTarget
 from native_checkpoint_fixtures import cold_source, seed_vendor_checkpoint_thread
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
+
 
 def _target(harness: str, *, context_window: int = 262_144) -> ExecutionTarget:
     return ExecutionTarget(

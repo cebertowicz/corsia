@@ -146,6 +146,21 @@ def _check_row_targets(db: sqlite3.Connection, manifest: dict) -> None:
     manifest["short"] = short
 
 
+def _seed_default_accounts(db: sqlite3.Connection) -> None:
+    """One signed-in Default per harness connection, as a person who signed in has.
+
+    ``init_db`` no longer seeds an ambient Default, so the fixture makes the accounts its
+    plan, usage and thread rows reference.
+    """
+    for connection_id, provider in db.execute(
+            "SELECT id, provider FROM connections WHERE provider IN ('claude-code','codex')").fetchall():
+        db.execute(
+            "INSERT OR IGNORE INTO vendor_accounts (id,connection_id,name,source_home,runtime_home,is_default,"
+            "state,created_at,updated_at) VALUES (?,?,?,?,?,1,'signed_in','2026-01-01T00:00:00','2026-01-01T00:00:00')",
+            (f"{provider}-default", connection_id, "Default",
+             f"/fixture/{provider}/default/source", f"/fixture/{provider}/default/runtime"))
+
+
 def build_into(db: sqlite3.Connection) -> dict:
     """Fill an initialised database; returns the build manifest."""
     rng = random.Random(spec.SEED)
@@ -163,6 +178,7 @@ def build_into(db: sqlite3.Connection) -> dict:
                                       "rows": core.seed_messages(db, rng, message_counts)}
     manifest["tables"]["llm_usage"] = {"target": spec.target_rows("llm_usage"),
                                        "rows": core.seed_usage(db, rng, usage_counts)}
+    _seed_default_accounts(db)
     pools.add("vendor_account", [r[0] for r in db.execute("SELECT id FROM vendor_accounts")])
     plans.seed_plans(db, rng, pools)
     manifest["tables"]["plan_nodes"] = {"target": spec.target_rows("plan_nodes"),

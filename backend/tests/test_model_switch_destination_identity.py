@@ -19,6 +19,8 @@ from loguru import logger
 
 from shared_send_fixtures import _insert_native_model, _insert_session
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 THREAD = "switch-identity"
 USER = "u-test"
 DESTINATION = "claude-code/opus"
@@ -59,8 +61,10 @@ def switch(isolated_db, monkeypatch):
 
     listing = {"payload": _listing()}
 
-    async def list_models(_binary):
-        return copy.deepcopy(listing["payload"])
+    async def list_models(_binary, context=None):
+        from connections.account_discovery_types import StagedDiscovery
+
+        return StagedDiscovery(payload=copy.deepcopy(listing["payload"]))
 
     monkeypatch.setattr(harness_refresh, "_harness_version", AsyncMock(return_value=HARNESS_VERSION))
     monkeypatch.setitem(

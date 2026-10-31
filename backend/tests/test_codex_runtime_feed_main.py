@@ -25,6 +25,9 @@ from subagents import (
     codex_spawn_preflight,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"codex": ("codex/gpt-5-codex",)}
+
 
 def _successor_turn_id() -> str:
     return str(uuid4())

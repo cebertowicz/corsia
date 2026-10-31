@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
+from vendor_account_fixtures import seed_catalog
 from PIL import Image
 
 from core.media_projection import ValidatedImage, ValidatedMediaProjection
@@ -64,7 +66,7 @@ def test_cc_discovery_enables_images_only_for_proven_cli_grammar() -> None:
 
 
 def test_proven_cc_discovery_persists_vision_target(isolated_db) -> None:
-    from connections.harness_models import normalize_claude_models, store_success
+    from connections.harness_models import normalize_claude_models
     from infra.database import get_db
     from llm.resolution import resolve_execution_target
 
@@ -81,7 +83,7 @@ def test_proven_cc_discovery_persists_vision_target(isolated_db) -> None:
     )
     db = get_db()
     try:
-        store_success(
+        seed_catalog(
             "claude-code",
             rows,
             harness_version="2.1.218",
@@ -229,6 +231,7 @@ async def test_cc_runtime_cold_and_live_paths_forward_fresh_projection(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("signed_in_defaults")  # the queued input needs a signed-in Default: no ambient login
 @pytest.mark.parametrize("mutate_before_restart", [False, True])
 async def test_cc_queued_image_is_idempotent_and_revalidated_on_restart(
     isolated_db,

@@ -21,6 +21,13 @@ from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from subagents.harness_checkpoint_context import ExternalCheckpointContext
 
+DISCOVERED_MODELS = {
+    "claude-code": ("claude-code/awaited-advance",),
+    "codex": ("codex/awaited-advance",),
+}
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")
+
 
 def _target(harness: str) -> ExecutionTarget:
     return ExecutionTarget(

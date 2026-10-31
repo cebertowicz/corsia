@@ -20,12 +20,12 @@ def _row(model_id: str, status: str, **overrides) -> dict:
 
 def test_scoped_delegation_keeps_the_api_label_after_an_earlier_removal(monkeypatch):
     import connections.vendor_accounts as accounts
-    from connections.vendor_accounts import DEFAULT_COMPARISON
     from llm.delegation_model import _account_label
 
     account = {
-        "id": "default", "provider": "codex", "name": "Default", "source_home": None,
-        "identity": {DEFAULT_COMPARISON: {"facts": {"plan": "Plus"}}},
+        "id": "default", "provider": "codex", "name": "Default", "source_home": "/home/default",
+        "state": "signed_in", "is_default": True,
+        "identity": {"plan": "Plus"},
     }
     calls = []
     monkeypatch.setattr(accounts, "get_account", lambda _id: account)
@@ -34,7 +34,7 @@ def test_scoped_delegation_keeps_the_api_label_after_an_earlier_removal(monkeypa
     ])
 
     assert _account_label("default") == "ChatGPT Plus"
-    assert calls == [{"provider": "codex", "include_removed": True}]
+    assert calls == [{"provider": "codex", "include_removed": True, "db": None}]
 
 
 def test_scoped_refusal_names_the_canonical_label_and_account_id(deleg_db, monkeypatch):

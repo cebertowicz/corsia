@@ -18,7 +18,7 @@ DEFAULT_ACCOUNT_NAME = "Default"
 # The only causes a cleanup receipt may carry: fixed names from code, never provider text.
 AUTH_CLEANUP_CAUSES = frozenset({
     None, "claude_executable_missing", "codex_executable_missing", "github_executable_missing", "vendor_logout_failed",
-    "vendor_logout_unavailable", "sign_out_result_invalid", "sign_out_hook_failed", "signin_stop_failed", "default_home_untouched"})
+    "vendor_logout_unavailable", "sign_out_result_invalid", "sign_out_hook_failed", "signin_stop_failed", "no_home"})
 
 
 class AccountError(ValueError):
@@ -100,7 +100,7 @@ def get_account(account_id: str, *, db=None) -> dict[str, Any]:
 def resolve_account_id(provider: str, account_id: str | None = None, *, db) -> str | None:
     """Resolve one explicit or workspace default identity, never a substitute."""
     require_account_provider(provider)
-    clause = "a.id=?" if account_id is not None else "a.is_default=1"
+    clause = "a.id=?" if account_id is not None else "a.is_default=1 AND a.state!='removed'"
     params = (provider, account_id) if account_id is not None else (provider,)
     row = db.execute("SELECT a.id" + JOIN + " WHERE c.provider=? AND " + clause, params).fetchone()
     if row is None and account_id is not None:
@@ -120,18 +120,6 @@ def default_account(provider: str, *, db=None) -> dict[str, Any]:
             connection.close()
 
 
-def ensure_default_account(connection_id: str, *, db) -> None:
-    """Adopt a newly configured harness transport in its owner's transaction."""
-    row = db.execute("SELECT provider,created_at FROM connections WHERE id=?", (connection_id,)).fetchone()
-    if row is None or row["provider"] not in VENDORS:
-        return
-    if resolve_account_id(str(row["provider"]), db=db) is not None:
-        return
-    db.execute("""INSERT INTO vendor_accounts(id,connection_id,name,is_default,state,created_at,updated_at)
-        VALUES (?,?,?,1,'legacy',?,?)""",
-               (uuid.uuid4().hex, connection_id, DEFAULT_ACCOUNT_NAME, row["created_at"], utc_now_iso()))
-
-
 @fact_memo.memoized_reader
 def list_accounts(*, provider: str | None = None, include_removed: bool = False, db=None) -> list[dict[str, Any]]:
     connection = db or get_db()
@@ -143,23 +131,18 @@ def list_accounts(*, provider: str | None = None, include_removed: bool = False,
             connection.close()
 
 
-DEFAULT_COMPARISON = "default_comparison"
-
-
 def comparison_facts(account: dict) -> tuple[str, ...] | None:
     """The complete comparison key for this vendor, or no claim."""
     from connections.account_profiles import profile_for
 
     identity = account["identity"]
-    if account["source_home"] is None:
-        identity = (identity.get(DEFAULT_COMPARISON) or {}).get("facts", {})
     keys = profile_for(account["provider"]).comparison_keys
     values = tuple(identity.get(key) for key in keys)
     return values if values and all(isinstance(value, str) and value for value in values) else None
 
 
 def same_account(left: dict, right: dict) -> bool:
-    """Compare one vendor's complete stored facts, including the Default read snapshot."""
+    """Compare one vendor's complete stored facts."""
     facts = comparison_facts(left)
     return left["provider"] == right["provider"] and facts is not None and facts == comparison_facts(right)
 
@@ -174,17 +157,6 @@ def duplicate_of(account: dict, *, rows: list[dict] | None = None, db=None) -> s
         if other["id"] != account["id"] and other["state"] != "removed" and same_account(account, other):
             return str(other["id"])
     return None
-
-
-def record_default_identity(provider: str, identity: dict, *, token=None,
-                            schedule_usage_check: bool = True, db=None):
-    """Publish a fenced observation without changing the Default lifecycle revision."""
-    from connections.account_observation import begin_default_observation, commit_default_observation
-
-    with write_transaction(db, scope="vendor_default_identity") as connection:
-        token = token or begin_default_observation(provider, db=connection)
-        return commit_default_observation(provider, identity, token=token,
-            schedule_usage_check=schedule_usage_check, db=connection)
 
 
 def _name(name: str) -> str:
@@ -204,6 +176,18 @@ def _hint(profile, identity_hint: dict | None) -> dict | None:
     return hint
 
 
+def allocate_account_homes(provider: str, identity: str):
+    """Allocate the private homes of a new account; ``add_account`` is the only caller."""
+    from connections.account_profiles import profile_for
+
+    root = profile_for(provider).home_root() / identity
+    source, runtime = root / 'source', root / 'runtime'
+    for directory in (root.parent, root, source, runtime):
+        directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+        directory.chmod(0o700)
+    return root, source, runtime
+
+
 def add_account(provider: str, name: str, *, identity_hint: dict | None = None, db=None) -> dict[str, Any]:
     """Create a signed-out identity with two generated private distinct homes.
 
@@ -216,8 +200,6 @@ def add_account(provider: str, name: str, *, identity_hint: dict | None = None, 
     name = _name(name)
     hint = _hint(profile, identity_hint)
     identity = uuid.uuid4().hex
-    root = profile.home_root() / identity
-    source, runtime = root / "source", root / "runtime"
     with write_transaction(db, scope="add_vendor_account") as connection:
         transport = connection.execute("SELECT id FROM connections WHERE provider=?", (provider,)).fetchone()
         if transport is None:
@@ -227,9 +209,7 @@ def add_account(provider: str, name: str, *, identity_hint: dict | None = None, 
                 "SELECT 1 FROM vendor_accounts WHERE connection_id=? AND state!='removed'",
                 (transport["id"],)).fetchone() is not None:
             raise AccountError(f"{profile.label} already exists")
-        for directory in (root.parent, root, source, runtime):
-            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-            directory.chmod(0o700)
+        root, source, runtime = allocate_account_homes(provider, identity)
         now = utc_now_iso()
         try:
             connection.execute("""INSERT INTO vendor_accounts
@@ -264,6 +244,21 @@ def rename_account(account_id: str, name: str, *, expected_revision: int, db=Non
         return get_account(account_id, db=connection)
 
 
+def _write_default(account: dict, *, db) -> None:
+    """Set one workspace Default, clearing any prior marker including tombstones."""
+    now = utc_now_iso()
+    db.execute("UPDATE vendor_accounts SET is_default=0,revision=revision+1,updated_at=? "
+               "WHERE connection_id=? AND is_default=1 AND id!=?", (now, account['connection_id'], account['id']))
+    db.execute("UPDATE vendor_accounts SET is_default=1,revision=revision+1,updated_at=? WHERE id=?",
+               (now, account['id']))
+
+
+def default_on_first_signin(account: dict, *, db) -> None:
+    """Make a first signed-in vendor account Default if no live Default exists."""
+    if account['provider'] in VENDORS and resolve_account_id(account['provider'], db=db) is None:
+        _write_default(account, db=db)
+
+
 def set_default_account(account_id: str, *, expected_revision: int, db=None) -> dict[str, Any]:
     """Make this account its provider's workspace default, where the provider allows choosing one."""
     from connections.account_profiles import profile_for
@@ -272,13 +267,7 @@ def set_default_account(account_id: str, *, expected_revision: int, db=None) -> 
         account = _current(account_id, expected_revision, connection)
         if not profile_for(account["provider"]).workspace_default:
             raise AccountError("this provider's workspace default cannot be changed")
-        now = utc_now_iso()
-        # Clear first: the unique index allows one default per connection.
-        connection.execute("UPDATE vendor_accounts SET is_default=0,revision=revision+1,updated_at=? "
-                           "WHERE connection_id=? AND is_default=1 AND id!=?",
-                           (now, account["connection_id"], account_id))
-        connection.execute("UPDATE vendor_accounts SET is_default=1,revision=revision+1,updated_at=? WHERE id=?",
-                           (now, account_id))
+        _write_default(account, db=connection)
         return get_account(account_id, db=connection)
 
 
@@ -321,6 +310,13 @@ def set_account_state(account_id: str, state: str, *, expected_revision: int, db
                 record = discovery_record(account)
                 invalidate_discovery(account, login_seq=record["login_seq"],
                     auth_state=record["auth_state"], db=connection)
+        if account["provider"] in VENDORS and account["state"] == "signed_in" and state != "signed_in":
+            # A model is available only while a signed-in account's ready discovery lists it.
+            from connections.account_discovery_commit import reproject_availability
+            from connections.source_state import record_last_account_left
+
+            reproject_availability(account["provider"], db=connection)
+            record_last_account_left(account["provider"], db=connection)
         return get_account(account_id, db=connection)
 
 
@@ -349,7 +345,7 @@ def record_evidence(account_id: str, *, identity: dict, expected_revision: int |
             for key in facts:
                 stored.pop(key, None)
         stored.update({key: value for key, value in identity.items()
-                       if key in facts and key not in ("auth_cleanup", DEFAULT_COMPARISON)
+                       if key in facts and key != "auth_cleanup"
                        and isinstance(value, str) and value})
         connection.execute("UPDATE vendor_accounts SET identity_json=?,updated_at=? WHERE id=?",
                            (json.dumps(stored, sort_keys=True), utc_now_iso(), account_id))

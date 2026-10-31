@@ -58,7 +58,7 @@ def world(accounts, monkeypatch):  # noqa: F811
 
 
 def _row(**fields):
-    return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], **fields}
+    return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], "capabilities": {}, **fields}
 
 
 @pytest.mark.parametrize(("thread_local_only", "cloud_off", "expected"), [

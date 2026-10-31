@@ -9,6 +9,9 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('claude-code/reviewer',), 'codex': ('codex/reviewer',)}
+
 
 def _target(harness: str = "native"):
     from llm.resolution import ExecutionTarget
@@ -101,10 +104,10 @@ def test_session_limit_is_unavailable_before_rate_limit_retry() -> None:
     )
 
 
-def test_claude_structured_env_removes_default_config_override() -> None:
+def test_claude_structured_env_binds_the_explicit_account_root_over_an_inherited_override(tmp_path) -> None:
     from llm import isolated_structured
 
-    default = str((Path.home() / ".claude").resolve())
+    account_root = str((tmp_path / "account-home").resolve())
     request = isolated_structured.IsolatedStructuredRequest(
         system_prompt="policy",
         user_prompt="payload",
@@ -118,10 +121,11 @@ def test_claude_structured_env_removes_default_config_override() -> None:
             "CLAUDE_CONFIG_DIR": "/inherited/custom-claude-root",
             "PATH": "/bin",
         },
-        claude_dir=default,
+        claude_dir=account_root,
     )
 
-    assert "CLAUDE_CONFIG_DIR" not in env
+    # There is no ambient Default root to leave unset: every launch names its account's home.
+    assert env["CLAUDE_CONFIG_DIR"] == account_root
 
 
 def _patch_native(monkeypatch, module, response: object) -> None:
@@ -602,11 +606,14 @@ async def test_claude_host_review_disables_retries_and_terminal_title(
         "type": "object",
     }
     assert argv[-2:] == ("--max-turns", "2")
+    from vendor_account_fixtures import default_home
+
     assert kwargs["env"] == {
         "PATH": "/bin",
         "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS": "1",
         "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
         "CLAUDE_CODE_MAX_RETRIES": "0",
+        "CLAUDE_CONFIG_DIR": str(Path(default_home("claude-code")).resolve()),
     }
 
 

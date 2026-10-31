@@ -9,15 +9,8 @@ AVAILABLE, so dispatch keeps working, and reports ``unverified`` with
 ``prior_state="ready"``. Any other row becomes UNVERIFIED, which is not
 available. Nothing here polls.
 
-When a sign-out is noticed:
-
-* Claude Code: whenever its catalog session runs (``claude_discovery``), which
-  is at startup, on the recheck route, and on each catalog refresh the request
-  paths start (a stale catalog, a new CLI version, a selector never seen). A
-  failed session reads needs_auth only when ``claude auth status`` exits 1.
-* Codex: only at startup and on the recheck route. ``codex login status`` runs
-  at three sites: ``seed_builtin_connections`` and ``check_harness_source``
-  (both at startup) and ``check_harness_source`` on the recheck route.
+Checks refresh the selected account's catalog through its account-owned home.
+An unconfigured account reports that sign-in is needed.
 """
 
 from __future__ import annotations
@@ -74,6 +67,18 @@ def _prior_state(existing: dict[str, Any] | None) -> str | None:
     # No recorded check yet (a row from before checks were kept): its status stands.
     state = _STATE_OF.get(existing.get("status"))
     return None if state == UNVERIFIED else state
+
+
+def refresh_check(result: dict) -> tuple[str, str | None]:
+    """The source state and raw detail one vendor refresh result proves.
+
+    The internal ``account_discovery_failed`` cause is not one a person reads.
+    """
+    if result.get("ok"):
+        return READY, None
+    error = result.get("error")
+    state = NEEDS_AUTH if error == "account_not_configured" else UNVERIFIED
+    return state, None if error == "account_discovery_failed" else error
 
 
 def user_reason(state: str, detail: str | None) -> str | None:
@@ -139,6 +144,23 @@ def apply_check(
     return row
 
 
+def record_last_account_left(provider: str, *, db) -> None:
+    """Record that sign-in is needed once no signed-in account of the vendor remains.
+
+    The writer the account lifecycle calls inside its own transaction, the counterpart
+    of the READY an account's committed discovery records. A vendor that is not
+    installed keeps that state.
+    """
+    from connections.vendor_accounts import list_accounts
+
+    if any(account["state"] == "signed_in" for account in list_accounts(provider=provider, db=db)):
+        return
+    row = get_connection(provider, db=db)
+    if row is None or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
+        return
+    apply_check(provider, NEEDS_AUTH, "account_not_configured", db=db, schedule_usage_check=False)
+
+
 def _ensure_row(provider: str, cfg: dict, binary: str | None) -> None:
     """Create or refresh the row so the check has a place to land."""
     existing = get_connection(provider)
@@ -158,12 +180,10 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
     the recheck route (``rediscover``) looks for a binary again, so an install
     or a moved binary is picked up when the user asks.
 
-    Codex runs ``codex login status``. Claude Code's answer is its catalog
-    session's own: an available row is checked by the catalog refresh that runs
-    beside this at startup, so only a row that is not available (or a recheck)
-    runs that refresh here, and its receipt is the only result.
+    An available Claude Code row is checked by the catalog refresh beside this
+    at startup. Other checks use the selected account's refresh result.
     """
-    from connections import _codex_sign_in_state, resolve_builtin_binary
+    from connections import resolve_builtin_binary
     from connections.harness_models import refresh_provider
 
     try:
@@ -182,15 +202,9 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
         return
     if binary is None:
         await run_in_db(apply_check, provider, NOT_INSTALLED)
-    elif provider == "codex":
-        from connections.account_identity import capture_default_observation, observe_discovered_identity
-
-        observation = await run_in_db(capture_default_observation, provider)
-        state = await asyncio.to_thread(_codex_sign_in_state, binary)
-        await run_in_db(observe_discovered_identity, provider,
-                        {"_login_status": "signed_out"} if state == NEEDS_AUTH else {}, token=observation)
-        await run_in_db(apply_check, provider, state)  # its output is not kept
     else:
         receipt = await refresh_provider(provider, reason="manual", binary=binary)
-        if not receipt.get("ok") and not receipt.get("source_check_recorded"):
-            await run_in_db(apply_check, provider, UNVERIFIED, receipt.get("error"))
+        try:
+            await run_in_db(apply_check, provider, *refresh_check(receipt))
+        except Exception as exc:
+            await run_in_db(apply_check, provider, UNVERIFIED, str(exc))

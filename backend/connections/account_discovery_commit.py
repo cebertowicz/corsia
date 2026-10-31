@@ -18,6 +18,45 @@ def _publish_cache(account_id, stage, cache_receipt, db):
             stage.promote()
 
 
+def _store_account_catalog(provider, rows, harness_version, *, db, unlisted_errors=None):
+    """Project current account rows using the shared, current discovery of every account."""
+    from connections.account_evidence import current_ready_discovery
+    from connections.harness_models import upsert_discovered_rows
+    from connections.vendor_accounts import list_accounts
+    from infra.time import utc_now_iso
+
+    discoveries = [current_ready_discovery(account) for account in list_accounts(provider=provider, db=db)]
+    by_model = {}
+    for discovery in discoveries:
+        if discovery is None:
+            continue
+        for model, evidence in discovery.get('models', {}).items():
+            if isinstance(evidence, dict):
+                by_model.setdefault(model, []).append(evidence)
+    current = {provider + '/' + row['selector_id']: row for row in rows}
+    combined = []
+    for model, evidence in by_model.items():
+        if not model.startswith(provider + '/'):
+            continue
+        entry = dict(current.get(model) or evidence[0])
+        entry['selector_id'] = model[len(provider) + 1:]
+        windows = [item.get('context_window') for item in evidence
+                   if isinstance(item.get('context_window'), int) and item['context_window'] > 0]
+        entry['context_window'] = min(windows) if windows else None
+        entry['available'] = any(item.get('available') is True for item in evidence)
+        combined.append(entry)
+    upsert_discovered_rows(provider, combined, harness_version=harness_version,
+                           source='account_discovery', timestamp=utc_now_iso(), db=db,
+                           unlisted_errors=unlisted_errors)
+
+
+def reproject_availability(provider, *, db):
+    """Re-derive the stored catalog from the accounts still signed in, inside the caller's transaction."""
+    from connections.harness_models import _cached_harness_version
+
+    _store_account_catalog(provider, [], _cached_harness_version(provider, db=db), db=db)
+
+
 def commit_discovery_bundle(provider, staged, rows, *, context, harness_version, db=None):
     """Fence model, usage and recovery effects in one account writer, then publish the cache.
 
@@ -33,6 +72,10 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
     with write_transaction(db, scope='account_discovery_bundle') as connection:
         if not receipt_is_current(receipt, db=connection):
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
+        from connections.harness_model_rows import retain_discovered_context
+
+        account = get_account(context.account_id, db=connection)
+        prior = ((account.get('discovery') or {}).get('discovery') or {}).get('models') or {}
         models = {}
         for row in rows:
             selector = row.get('selector_id')
@@ -41,7 +84,7 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             key = provider + '/' + selector
             if key in models:
                 raise ValueError('duplicate account discovery selector')
-            models[key] = dict(row)
+            models[key] = retain_discovered_context(row, prior.get(key))
         if provider == 'claude-code':
             from connections.claude_discovery import _store_catalog_success
 
@@ -58,6 +101,17 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
         if not mark_discovery(context.account_id, receipt=receipt, status='ready', models=models,
                               harness_version=harness_version, cache_receipt=cache_receipt, db=connection):
             raise RuntimeError('account_refresh_superseded')
+        _store_account_catalog(provider, list(models.values()), harness_version, db=connection,
+                               unlisted_errors=staged.unlisted_errors)
+        from connections.harness_models import _ADAPTERS, record_refresh_attempt
+        from infra.time import utc_now_iso
+
+        record_refresh_attempt(provider, harness_version=harness_version, source=_ADAPTERS[provider][2],
+                               timestamp=utc_now_iso(), error=None, db=connection)
+        # The vendor's source is ready once any account's discovery commits ready.
+        from connections.source_state import READY, apply_check
+
+        apply_check(provider, READY, db=connection, schedule_usage_check=False)
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 

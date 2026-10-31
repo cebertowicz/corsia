@@ -79,8 +79,7 @@ def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> tu
     return result, bool(catalog)
 
 
-def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None,
-                  source_state: str | None = None) -> tuple[str, str | None]:
+def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None) -> tuple[str, str | None]:
     """One account's first-run state, and when a limited one is back.
 
     Ready means at least one of its vendor's models passes the same per-account
@@ -88,20 +87,13 @@ def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | No
     project policy, this account's discovered models, then its usage). With none
     ready, a limit on any model reads limited; models never read for this login
     read unchecked; otherwise this plan offers no model CORSIA can run. ``rows``
-    are the vendor's catalog rows when the caller already read them. The ambient
-    Default has no managed account lifecycle, so its source's definitive
-    needs-auth state is its signed-out state.
+    are the vendor's catalog rows when the caller already read them.
     """
     from connections.account_evidence import readiness_reason
-    from connections.models import get_connection
-    from connections.source_state import NEEDS_AUTH, row_state
     from llm.account_catalog import account_model_status
     from llm.model_status import USAGE_LIMITED
 
-    if account["state"] == "signed_out" or (
-            account["source_home"] is None
-            and (source_state if source_state is not None else
-                 row_state(get_connection(account["provider"], db=db))["state"]) == NEEDS_AUTH):
+    if account["state"] == "signed_out":
         return SIGNED_OUT, None
     decisions = [account_model_status(account, row, project_ids=project_ids, db=db)
                  for row in (_vendor_rows(account["provider"], db=db)[0] if rows is None else rows)]
@@ -310,19 +302,19 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
 
 
 def _scoped_states(provider: str, project, *, rows: list[dict], has_catalog: bool, db,
-                   accounts: list[dict] | None = None, source_state: str | None = None) -> list[tuple[dict, str, str | None]]:
+                   accounts: list[dict] | None = None) -> list[tuple[dict, str, str | None]]:
     """Each permitted, non-removed account's first-run state, preserving disabled-model suppression."""
     from connections.account_policy import permitted_accounts
 
     if not rows and has_catalog:
         return []  # The vendor's stored models were deliberately disabled.
-    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows, source_state=source_state))
+    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows))
             for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
-            if account["state"] != "removed" and (rows or not account["is_default"])]
+            if account["state"] != "removed"]
 
 
 @fact_memo.fact_reads()
-def source_account_view(provider: str, *, source_state: str | None = None) -> tuple[list[dict], dict | None]:
+def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
     Lines: membership is the picker's: the accounts the CORSIA agent's scope
@@ -350,7 +342,7 @@ def source_account_view(provider: str, *, source_state: str | None = None) -> tu
         rows, has_catalog = _vendor_rows(provider, db=db, accounts=labels)  # reuse the account rows already read
         lines = []
         for account, state, resets_at in _scoped_states(provider, project, rows=rows, has_catalog=has_catalog,
-                                                       db=db, accounts=labels, source_state=source_state):
+                                                       db=db, accounts=labels):
             label = account_label(account, rows=labels)
             lines.append({"account_id": account["id"], "label": label["text"],
                           "label_verified": not (label["email"] is None and label["custom"]),

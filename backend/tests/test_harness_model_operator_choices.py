@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog
+
 
 def _row(selector: str, name: str, *, available: bool = True) -> dict:
     return {
@@ -20,9 +22,8 @@ def _row(selector: str, name: str, *, available: bool = True) -> dict:
 
 
 def _discover(provider: str, *rows: dict, at: str = "2026-09-25T00:00:00+00:00") -> None:
-    from connections.harness_models import store_success
 
-    store_success(
+    seed_catalog(
         provider, list(rows), harness_version="2.1.300",
         source="test", timestamp=at,
     )

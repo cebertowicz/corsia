@@ -15,6 +15,8 @@ from infra.thread_input_types import ClaimedBatch, HeldAdmission
 from infra.thread_inputs import start_idle_turn
 from vendor_account_fixtures import default_receipt
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _future() -> str:
     return (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()

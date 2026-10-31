@@ -12,6 +12,7 @@ from cc_receipt_stock_fixtures import ClaudePeer
 from cc_runtime_fixtures import cc_target
 from contract.matrix_environment import guarded_command, isolated_environment
 from test_checkpoint_hold_install_resume import _seed, _start_checkpoint
+from vendor_account_fixtures import point_default_home
 
 
 class StockClaudeRuntime:
@@ -115,6 +116,8 @@ class StockClaudeRuntime:
         self.session._on_exit = self.exited
         db = get_db()
         try:
+            # The stock CLI runs in the signed-in Default's own home, the isolated config root.
+            point_default_home("claude-code", self.env["CLAUDE_CONFIG_DIR"], db=db)
             _seed(db, self.target.catalog_id)
             register_cc_session("held-thread", self.session.session_id, checkpoint_generation_id="floor", db=db)
             db.commit()

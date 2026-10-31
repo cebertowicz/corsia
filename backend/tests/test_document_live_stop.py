@@ -15,6 +15,8 @@ from tests.test_cc_tool_result_echo_binding import _seed_thread
 from tests.test_document_live_lane import open_lane, cut_at
 from tests.test_stop_receipts import _clear_live_turn_state as _clear_live_turn_state
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 class LaneProbe(ProbeTool):
     def __init__(self, lane, cancel_event):

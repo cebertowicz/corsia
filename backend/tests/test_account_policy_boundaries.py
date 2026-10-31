@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from vendor_account_fixtures import set_legacy_policy
 
-from vendor_account_fixtures import accounts, claude, ready, THREAD  # noqa: F401
+from vendor_account_fixtures import accounts, claude, ready, signed_in_default, THREAD  # noqa: F401
 
 
 @pytest.fixture
@@ -63,8 +63,11 @@ class _ThreadOnly(_Untouched):
 @pytest.fixture
 def removed(accounts):
     """Bind each vendor thread, freeze a Turn on its account, then delete the model rows."""
+    from connections.account_evidence import mark_discovery
     from connections.account_policy import select_account
+    from connections.account_receipts import capture_receipt
     from connections.models import upsert_connection
+    from connections.vendor_accounts import list_accounts
     from infra.vendor_turn_binding import turn_account_id
     from llm.resolution import resolve_execution_target
 
@@ -75,6 +78,7 @@ def removed(accounts):
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
                "VALUES ('claude-code/test','Test','claude-code/test','claude-code','test','claude-code','t','t')")
     db.commit()
+    signed_in_default("claude-code", db=db, models=(MODELS["claude-code"],))
     bound = {}
     for provider in PROVIDERS:
         thread, model = THREADS[provider], MODELS[provider]
@@ -91,6 +95,12 @@ def removed(accounts):
     db.execute("INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,vendor_account_id) "
                "VALUES ('added-turn','actor',0,'codex/test','running','t','test',?)", (second["id"],))
     db.execute("DELETE FROM models WHERE id IN ('codex/test','claude-code/test')")
+    # An account's discovery lists its models as catalog rows too, so the row is gone only once no account lists it.
+    for provider in PROVIDERS:
+        for account in list_accounts(provider=provider, db=db):
+            if account['state'] == 'signed_in':
+                receipt = capture_receipt(provider, account_id=account['id'], db=db)
+                assert mark_discovery(account['id'], receipt=receipt, status='ready', models={}, db=db)
     db.commit()
     return SimpleNamespace(db=db, bound=bound, added=second["id"])
 
@@ -104,7 +114,40 @@ def _missing(model):
     return f"Model '{model}' not found in catalog"
 
 
-def _session(provider, thread, turn_id, writes):
+def _launched(session, provider, turn_id):
+    """The session as its launch froze it on the Turn's account, which every account, the Default included, has.
+
+    The Turn was claimed while the catalog row existed, so the claim is not repeated here.
+    """
+    from connections.account_evidence import mark_discovery
+    from connections.account_projection import ensure_projection
+    from connections.account_receipts import capture_receipt
+    from connections.account_runtime import homes_for
+    from connections.vendor_accounts import get_account
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        account = get_account(db.execute("SELECT vendor_account_id FROM active_turns WHERE id=?", (turn_id,)).fetchone()[0], db=db)
+        # The model left the catalog table after the claim; the account's own discovery still lists it.
+        receipt = capture_receipt(provider, account_id=account["id"], db=db)
+        mark_discovery(account["id"], receipt=receipt, status="ready", models={MODELS[provider]: {}}, db=db)
+        db.commit()
+        homes = homes_for(account)
+    finally:
+        db.close()
+    if provider == "claude-code":
+        session.claude_dir = homes.claude_dir
+    else:
+        session.codex_home, session.source_codex_home = homes.codex_runtime, homes.codex_source
+        ensure_projection(receipt, home=homes.codex_runtime, kind="live", owner_turn_id=turn_id)
+    session.vendor_account_id, session.vendor_account_receipt = account["id"], receipt
+    session.vendor_account_bound = True
+    session.vendor_catalog_model = MODELS[provider]
+    return session
+
+
+def _session(provider, thread, turn_id, writes, *, launched=False):
     from infra.thread_input_types import TurnIdentity
     from subagents.cc_stream import CCStreamSession
     from subagents.codex_app_server import CodexAppServerSession
@@ -112,7 +155,7 @@ def _session(provider, thread, turn_id, writes):
     if provider == "claude-code":
         session = CCStreamSession(binary="/bin/synthetic", session_id="test", corsia_thread_id=thread)
         session._proc = SimpleNamespace(stdin=SimpleNamespace(write=writes.append, drain=AsyncMock()), returncode=None)
-        return session
+        return _launched(session, provider, turn_id) if launched else session
     session = CodexAppServerSession(binary="/bin/synthetic", task=None, corsia_thread_id=thread,
                                     corsia_turn_identity=TurnIdentity(turn_id, 1))
 
@@ -122,7 +165,7 @@ def _session(provider, thread, turn_id, writes):
             pending.set_result({"accepted": True})
 
     session._proc = SimpleNamespace(stdin=SimpleNamespace(write=write, drain=AsyncMock()), returncode=None)
-    return session
+    return _launched(session, provider, turn_id) if launched else session
 
 
 async def _steer(provider, session, observed, accepted):
@@ -213,7 +256,9 @@ def test_custom_account_never_executes_using_default_evidence(accounts):
         require_launch("codex", thread_id="destination", account_id=second["id"], db=db)
     assert error.value.reason == "account_runtime_pending"
     assert db.execute("SELECT account_id FROM thread_vendor_accounts WHERE thread_id='destination'").fetchone()[0] == second["id"]
-    assert require_launch("codex", account_id=legacy["id"], db=db) == legacy["id"]
+    with pytest.raises(AccountAdmissionError) as default:
+        require_launch("codex", account_id=legacy["id"], db=db)
+    assert default.value.reason == "account_runtime_pending"  # the Default has no launch exemption either
 
 
 def test_workspace_rollover_moves_a_limited_projectless_thread_to_the_next_enabled_account(accounts):
@@ -402,7 +447,7 @@ def test_affected_account_threads_filter_provider_subjects_through_canonical_che
         return (legacy["id"] if thread_id == "destination" else second["id"], None)
 
     # turn_account is this selector once a caller has read the thread's project (and binding)
-    monkeypatch.setattr(account_policy, "_scoped_turn_account", canonical)
+    monkeypatch.setattr(account_policy, "scoped_turn_account", canonical)
 
     assert affected_thread_ids(legacy["id"], db=db) == ["destination"]
     assert checked == [("codex", "destination", "codex/test", legacy["id"]),
@@ -767,7 +812,7 @@ async def test_steer_stays_admitted_on_the_turns_frozen_account(removed, provide
     frozen = db.execute("SELECT vendor_account_id FROM active_turns WHERE id=?", (provider + "-turn",)).fetchone()[0]
     assert frozen == removed.bound[provider]
     writes, observed, accepted = [], [], []
-    session = _session(provider, thread, provider + "-turn", writes)
+    session = _session(provider, thread, provider + "-turn", writes, launched=True)
     await _steer(provider, session, observed, accepted)
     assert len(writes) == 1 and observed == accepted == [True]
     assert (session.vendor_account_id, session.vendor_account_bound) == (frozen, True)
@@ -795,11 +840,13 @@ async def test_feed_refuses_when_the_threads_account_moved_during_the_turn(claud
     from connections.account_policy import AccountAdmissionError, select_account
     from connections.account_selection import rebind_idle_account
     from subagents.cc_stream import CCStreamSession
+    from subagents.vendor_write_admission import prepare_session_launch
 
     db = claude.db
     writes, observed, accepted = [], [], []
     session = CCStreamSession(binary="/bin/synthetic", session_id="test", corsia_thread_id=THREAD)
     session._proc = SimpleNamespace(stdin=SimpleNamespace(write=writes.append, drain=AsyncMock()), returncode=None)
+    prepare_session_launch(session, "claude-code")  # the launch freezes the account, the Default's included
     await _feed(session, observed, accepted)
     assert len(writes) == 1 and observed == accepted == [True]
     assert (session.vendor_account_id, session.vendor_account_bound) == (claude.first, True)
@@ -856,11 +903,13 @@ def test_frozen_unknown_writer_denied_by_any_nonempty_policy(accounts, restricte
 
 
 def test_unrestricted_frozen_unknown_remains_unknown_and_native_ignores_vendor_policy(accounts):
-    from connections.account_policy import require_launch, set_policy
+    from connections.account_policy import AccountAdmissionError, require_launch, set_policy
     from connections.account_selection import bind_model_account
 
     db, legacy, second, third = accounts
-    assert require_launch("codex", thread_id="destination", account_id=None, frozen=True, db=db) is None
+    with pytest.raises(AccountAdmissionError) as unknown:
+        require_launch("codex", thread_id="destination", account_id=None, frozen=True, db=db)
+    assert unknown.value.reason == "account_not_configured"  # no ambient login to stand in for an unknown account
     set_legacy_policy("destination-project", "codex", allowlist=[second["id"]], default_account_id=second["id"], db=db)
     assert bind_model_account("destination", "local/native", db=db) is None
     assert db.execute("SELECT COUNT(*) FROM thread_vendor_accounts").fetchone()[0] == 0
@@ -882,7 +931,7 @@ def test_model_less_thread_binds_no_account_and_reads_no_catalog(model):
     assert error.value.reason == "account_requires_vendor_model"
 
 
-def test_detached_reviewer_session_writes_on_its_own_account_after_the_thread_moved(accounts):
+def test_detached_reviewer_session_writes_on_its_own_account_after_the_thread_moved(accounts, tmp_path):
     """A lease review runs on the project-policy account while the requester's thread has moved.
 
     The reviewer is a non-thread consumer: its session carries the requester's
@@ -890,7 +939,7 @@ def test_detached_reviewer_session_writes_on_its_own_account_after_the_thread_mo
     at the paid write gate refuses every application from a moved thread, so a
     session already admitted through the operation owner must keep its account.
     """
-    from connections.account_operation import admit_operation, bind_operation_session
+    from connections.account_operation import admit_operation, bind_operation_session, prepare_operation_home
     from connections.account_policy import select_account
     from reviewer.reviewer_account import ReviewerOperation
     from subagents.vendor_write_admission import require_session_write
@@ -898,7 +947,8 @@ def test_detached_reviewer_session_writes_on_its_own_account_after_the_thread_mo
     db, reviewer, moved, _third = accounts
     select_account("destination", "codex", account_id=moved["id"], db=db)
     request = ReviewerOperation(target=None, vendor_account_id=reviewer["id"], thread_id="destination")
-    admitted = admit_operation("codex", "codex/test", request)
+    admitted = prepare_operation_home(admit_operation("codex", "codex/test", request), tmp_path / "detached", kind="detached",
+                                    model="codex/test")
     session = bind_operation_session(admitted, SimpleNamespace(corsia_thread_id="destination"),
                                      kind="detached", model="codex/test")
     assert require_session_write(session, "codex") == reviewer["id"]

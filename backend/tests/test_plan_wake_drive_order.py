@@ -20,6 +20,8 @@ import infra.thread_execution as thread_execution
 from tests.child_parent_notice_helpers import delegated, wakes
 from tests.test_plan_wake_drive import lineage  # noqa: F401  (fixture)
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 @pytest.fixture
 def order(lineage, monkeypatch):
