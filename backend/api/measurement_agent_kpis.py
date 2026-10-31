@@ -87,7 +87,8 @@ def read_own(user_id: str, thread_id: str, grain) -> dict[str, Any]:
         row = db.execute("SELECT project_id FROM threads WHERE id=? AND user_id=?", (thread_id, user_id)).fetchone()
         if not row:
             raise HTTPException(404, "thread not found")
-        return _read_scoped(db, user_id, MeasurementScope(project=row[0], agent=thread_id), row[0], grain)
+        # A thread outside any project reads at All work, as the agent route does; the agent narrows it.
+        return _read_scoped(db, user_id, MeasurementScope(project=row[0] or "all", agent=thread_id), row[0], grain)
     finally:
         db.close()
 

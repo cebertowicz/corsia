@@ -66,7 +66,7 @@ def _kpi_summary(result: dict[str, Any]) -> list[dict[str, Any]]:
             for item in result["kpis"]]
 
 
-async def _own_kpis(user_id: str, project: str | None, thread_id: str) -> list[dict[str, Any]] | str:
+async def _own_kpis(user_id: str, thread_id: str) -> list[dict[str, Any]] | str:
     from fastapi import HTTPException
 
     from api.measurement_agent_kpis import read_own
@@ -141,7 +141,7 @@ class MeasureStatusTool(Tool):
             return status(get_db(), thread_id)
         result = await run_in_db(read)
         if kwargs.get("kpis"):
-            kpis = await _own_kpis(actor_row["user_id"], actor_row.get("project_id"), thread_id)
+            kpis = await _own_kpis(actor_row["user_id"], thread_id)
             if isinstance(kpis, str):
                 return kpis
             result["kpis"] = kpis
