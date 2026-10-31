@@ -2,6 +2,13 @@
 	let requestedAccounts = false;
 	/** Accounts whose sign-in the rows have already checked once: a long chat sends one check per account, not one per row. */
 	const checkedAccounts = new Set<string>();
+	/** Rows whose account state was read live when they appeared: the page's list can predate the sign-out the row reports. */
+	const liveReadRows = new Set<string>();
+	let accountsRead: Promise<unknown> | null = null;
+	/** Rows that mount together share one read. */
+	function readAccountsOnce(load: () => Promise<unknown>) {
+		accountsRead ??= load().finally(() => { accountsRead = null; });
+	}
 </script>
 
 <script lang="ts">
@@ -81,6 +88,14 @@
 		if (accountId && $vendorAccounts.length === 0 && !requestedAccounts) {
 			requestedAccounts = true;
 			void loadVendorAccounts();
+		}
+	});
+	// An expired-login row decides between live recovery and history on the account's state now, so it reads that once.
+	$effect(() => {
+		const key = String(msg.id ?? `${accountId}:${content}`);
+		if (accountId && expiredLogin && namedAccount && namedAccount.state !== 'signed_out' && !activeSignin && !liveReadRows.has(key)) {
+			liveReadRows.add(key);
+			readAccountsOnce(() => loadVendorAccounts());
 		}
 	});
 	const quietRow = $derived(

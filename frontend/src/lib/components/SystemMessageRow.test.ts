@@ -121,6 +121,7 @@ describe('SystemMessageRow', () => {
 	});
 
 	it('reads a past signed-out row as history once the account is signed in again', () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [{ ...account('back'), state: 'signed_in' }] }), { status: 200 })));
 		vendorAccounts.set([account('back', { state: 'signed_in' })]);
 		render({ role: 'system', content: 'back is signed out of Claude Code. Sign it in again under Settings › Providers.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'back' } });
 		expect(host.textContent).toContain('back is signed out of Claude Code.');
@@ -153,6 +154,15 @@ describe('SystemMessageRow', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(fetchChecks.mock.calls.filter(([url]) => String(url).includes('/signin/check'))).toHaveLength(1);
 		for (const row of rows) await unmount(row);
+	});
+
+	it('reads the account again when an expired-login row appears, so a sign-out the page has not heard of shows recovery', async () => {
+		const reads = vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [{ ...account('fresh'), state: 'signed_out' }] }), { status: 200 }));
+		vi.stubGlobal('fetch', reads);
+		vendorAccounts.set([account('fresh', { state: 'signed_in' })]);
+		render({ id: 'fresh-expiry', role: 'system', content: 'fresh is signed out of Claude Code.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'fresh' } });
+		expect(host.querySelector('.account-recovery')).toBeNull();
+		await vi.waitFor(() => expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in'));
 	});
 
 	it('writes no link without a usable account id to land on', () => {
