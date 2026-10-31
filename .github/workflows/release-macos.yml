@@ -27,7 +27,7 @@ on:
 # built dev commit's copy of this file, since a scheduled run uses main's copy, which
 # equals the stable tag just cut.
 env:
-  NEXT_RELEASE_VERSION: '0.4.2'
+  NEXT_RELEASE_VERSION: '0.4.3'
   DEV_UPDATER_ENDPOINT: https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json
 
 jobs:

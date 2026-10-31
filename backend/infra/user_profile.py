@@ -6,7 +6,8 @@ Install writes it only when it is missing; an existing file is the person's and
 is never changed there, except that an existing file naming no email gets that
 single line appended. While setup is unfinished, ``stage_profile_update`` also
 rewrites the full name, preferred name and email lines the account screen
-collected, and touches no other line.
+collected, and touches no other line. ``stage_community_answer`` sets the two community lines the person's
+answer to that decision decides, replacing each in place or adding it at the end.
 
 A write is staged beside its target and published by one rename, so the caller
 can put the publish at the end of its own transaction and undo it if that
@@ -34,6 +35,7 @@ _EMAIL_LABEL = "- **Email:**"
 _NAME_LABEL = "- **Preferred name:**"
 _FULL_NAME_LABEL = "- **Full name:**"
 USE_COMMUNITY_LABEL = "- **Use community improvements:**"
+SHARE_COMMUNITY_LABEL = "- **Share improvements with the community:**"
 
 
 def mac_full_name() -> str:
@@ -252,3 +254,28 @@ def stage_profile_update(workspace: Path, *, full_name: str | None = None, email
     if text == previous:
         return None
     return _stage_text(path, text, previous, stat.S_IMODE(path.stat().st_mode))
+
+
+def stage_community_answer(workspace: Path, *, use: bool, share: bool) -> StagedProfile | None:
+    """Prepare the two community lines the person's answer sets, leaving every other line as it is.
+
+    Each line is replaced where it is, or added at the end (the share line right after the use line). A missing profile is created holding only
+    its heading and these lines; publishing refuses if one appeared meanwhile. Returns ``None`` when
+    the file would not change. Raises ``OSError`` when the folder cannot be written.
+    """
+    path = Path(workspace) / PROFILE_RELATIVE_PATH
+    previous: str | None = None
+    mode: int | None = None
+    lines = ["# User profile", ""]
+    if path.exists():
+        previous = path.read_text(encoding="utf-8")
+        lines = previous.splitlines()
+        mode = stat.S_IMODE(path.stat().st_mode)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    lines = _with_line(lines, USE_COMMUNITY_LABEL, "Yes" if use else "No")
+    lines = _with_line(lines, SHARE_COMMUNITY_LABEL, "Yes" if share else "No", after=USE_COMMUNITY_LABEL)
+    text = "\n".join(lines) + "\n"
+    if text == previous:
+        return None
+    return _stage_text(path, text, previous, mode)
