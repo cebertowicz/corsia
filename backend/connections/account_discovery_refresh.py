@@ -62,3 +62,31 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
     finally:
         if staged is not None:
             await run_in_db(staged.close)
+
+
+async def refresh_signed_in_accounts(provider, *, reason, harness_version, binary, db):
+    """Refresh every signed-in account of ``provider``; return ``{provider, reason, ok, error}``."""
+    import connections.harness_models as harness_models
+    from connections.vendor_accounts import list_accounts
+
+    accounts = await harness_models._db_call(list_accounts, provider=provider, db=db)
+    results = [await harness_models.refresh_provider(
+        provider, reason=reason, harness_version=harness_version, db=db, binary=binary,
+        account_id=account['id']) for account in accounts if account['state'] == 'signed_in']
+    ready = any(result.status == 'ready' for result in results)
+    error = None if ready else (next((result.source_error or result.cause for result in results
+                                 if result.source_error or result.cause), None)
+                                if results else 'account_not_configured')
+    causes = [result.cause for result in results if result.cause]
+    if not ready and 'account_refresh_superseded' not in causes and (causes or not results):
+        # The vendor clock records the sweep, never one account: an account's own failure
+        # stays on its discovery and must not back off or reset the others' checks.
+        from infra.time import utc_now_iso
+
+        version = harness_version or await harness_models._db_call(
+            harness_models._cached_harness_version, provider, db=db)
+        await harness_models._db_call(
+            harness_models.store_failure, provider, causes[0] if causes else 'account_not_configured',
+            harness_version=version, source=harness_models._ADAPTERS[provider][2],
+            timestamp=utc_now_iso(), db=db)
+    return {'provider': provider, 'reason': reason, 'ok': ready, 'error': error}
