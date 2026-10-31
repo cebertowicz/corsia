@@ -22,7 +22,7 @@
 	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
-	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadAfterReconnect, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
@@ -106,6 +106,8 @@
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
+	const reloadOnReconnect = reloadAfterReconnect(() => loadedArtifactId, () => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus));
+	$effect(() => reloadOnReconnect.track(liveConnection));
 	let legacyAwaitingSave = $state(false);
 	bindViewerSession(() => liveSession, (state) => {
 		if (!state) { liveConnection = null; return; }
@@ -275,7 +277,7 @@
 		canEdit: () => docState === 'ready' && !readonly && !confirming && !openRefusal,
 		canFlush: () => !readonly && !confirming });
 
-	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
+	onDestroy(() => { reloadOnReconnect.close(); teardownDocumentViewer(target, flushNow, releaseDocEditor); });
 
 	function onKey(event: KeyboardEvent): void {
 		handleDocumentKey(event, {

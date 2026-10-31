@@ -14,7 +14,7 @@ from loguru import logger
 
 import e2e_mock_calls as mock_calls
 import e2e_pressure_fixture as pressure_fixture
-from e2e_mock_responses import _make_chunk, _make_non_streaming
+from e2e_mock_responses import _make_chunk, _make_non_streaming, _stream_tool_calls
 
 _mock_replies: list[dict] = []
 _mock_gates: dict[str, asyncio.Event] = {}
@@ -152,8 +152,8 @@ async def _streaming_iter(reply: dict):
         if mid > 0:
             yield _make_chunk(content=content[mid:])
 
-    if reply.get("tool_calls"):
-        yield _make_chunk(tool_calls=reply["tool_calls"])
+    async for chunk in _stream_tool_calls(reply):
+        yield chunk
 
     yield _make_chunk(finish_reason=reply.get("finish_reason", "stop"))
 
