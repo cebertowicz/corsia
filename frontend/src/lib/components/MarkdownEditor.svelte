@@ -297,6 +297,8 @@
 		const previous = binding;
 		binding = text ? liveDocumentBinding(text) : undefined;
 		activeText = text;
+		// A different live text (a reset or replacement) cannot be trusted to still hold what was typing.
+		if (previous) settleTypedReveals(view);
 		const next = text?.toString() ?? value;
 		syncing = true;
 		try {
@@ -330,8 +332,8 @@
 	});
 
 	$effect(() => {
+		// A drop or reconnect decides whether a new arrival types, not whether the ones already typing finish.
 		typingOk = typingAllowed;
-		if (!typingAllowed && view) settleTypedReveals(view);
 	});
 
 	let lastPainted = '';
