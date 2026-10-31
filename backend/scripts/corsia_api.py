@@ -38,18 +38,31 @@ def resolve_token(explicit: str | None) -> str:
     env = os.environ.get("CORSIA_API_TOKEN")
     if env and env.strip():
         return env.strip()
-    settle_token_file()
-    if TOKEN_FILE.exists():
-        import stat
+    # Read the file directly rather than asking whether it exists: a closed
+    # folder must say so, and Path.exists either raises or answers False there
+    # depending on the Python version.
+    try:
+        settle_token_file()
         mode = TOKEN_FILE.stat().st_mode
+        tok = TOKEN_FILE.read_text().strip()
+    except (FileNotFoundError, NotADirectoryError):
+        tok = ""
+    except PermissionError as exc:
+        sys.stderr.write(
+            f"Can't read the API token: permission denied ({exc.filename or TOKEN_FILE}).\n"
+            "  Agent shells can't reach the token folder, even under a host-access lease.\n"
+            "  Agents reach CORSIA through its own tools instead.\n"
+        )
+        sys.exit(2)
+    else:
+        import stat
         if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
             sys.stderr.write(
                 f"WARNING: {TOKEN_FILE} is group/world-readable "
                 f"(mode {oct(mode & 0o777)}). Run: chmod 600 {TOKEN_FILE}\n"
             )
-        tok = TOKEN_FILE.read_text().strip()
-        if tok:
-            return tok
+    if tok:
+        return tok
     sys.stderr.write(
         f"No API token found.\n"
         f"  The credential file {TOKEN_FILE} is missing or empty.\n"
