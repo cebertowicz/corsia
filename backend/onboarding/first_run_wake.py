@@ -15,12 +15,18 @@ from dataclasses import replace
 from typing import Any
 
 from infra.settings import get_host_access_auto_approve
+from onboarding.first_run_instructions import (
+    APP_INLINE_SUMMARY,
+    APP_REFERENCE,
+    INLINE_SUMMARY,
+    anchored,
+    app_reference_served,
+    first_app_step,
+    instructions,
+)
 
 log = logging.getLogger(__name__)
 
-FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
-APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
-APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
 #: Fact reads share this budget; cancelled reads finish cleanup before the pick returns.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
@@ -51,38 +57,6 @@ UNAVAILABLE_READS = {
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred and full name read from the workspace profile",
 }
-
-INLINE_SUMMARY = (
-    "First run of a new install. Your instructions are below: skill "
-    "conductor-bootstrap's references/first-run.md. The Setup facts section "
-    "holds what its Preparation reads; do not load the skill or call those "
-    "tools for them. A fact marked unavailable names the one read that gets it."
-)
-APP_INLINE_SUMMARY = (
-    "First run of a new install. Your instructions are below: skill "
-    "conductor-bootstrap's references/first-run-start.md. The server has already "
-    "posted your opening and seeded your plan. Start the first applicable step."
-)
-
-
-def app_reference_served() -> bool:
-    """Whether the app-path instruction reference is present in this System package."""
-    from infra.system_package import system_resource_source
-    from onboarding.first_run_opening import OPENING_REFERENCE
-
-    return all(system_resource_source(path).is_file() for path in (APP_REFERENCE, APP_START_REFERENCE, OPENING_REFERENCE))
-
-
-def instructions(path: str = "script") -> str:
-    """The script instructions, or the app's compact first-turn instructions."""
-    from infra.system_package import system_resource_source
-
-    if path == "script":
-        return system_resource_source(FIRST_RUN_REFERENCE).read_text(encoding="utf-8").strip()
-    if path == "app":
-        return system_resource_source(APP_START_REFERENCE).read_text(encoding="utf-8").strip()
-    raise ValueError("first_run_path must be 'app' or 'script'")
-
 
 def _model_sources() -> dict[str, Any]:
     """What ``model_sources`` returns without a recheck."""
@@ -328,38 +302,10 @@ def render(facts: dict[str, Any], instruction_text: str, summary: str = INLINE_S
     from infra.onboarding_events import FIRST_RUN_EVENT
 
     body = "\n\n".join((
-        instruction_text,
+        anchored(instruction_text),
         "## Setup facts\n\n" + json.dumps(facts, sort_keys=True, ensure_ascii=False, default=str),
     ))
     return format_event_input(FIRST_RUN_EVENT, summary, None, notice=body)
-
-
-def first_app_step(facts: dict[str, Any]) -> str:
-    """Inline only the first applicable numbered section; keep later steps on demand."""
-    import re
-
-    from infra.system_package import system_resource_source
-    from onboarding.app_first_run import applicable_steps
-
-    steps = applicable_steps(facts)
-    number = steps[0]["step_number"] if steps else 9
-    reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
-    if number == 9:
-        return reference[reference.index("## Hand over to your agents"):].strip()
-    match = re.search(rf"(?ms)^{number}\. \*\*.*?(?=^\d+\. \*\*|^Silently,|\Z)", reference)
-    if match is None:
-        raise ValueError(f"The first-run app reference has no step {number}")
-    section = match.group().strip()
-    if number == 3:
-        # The first question needs no helper/connection instructions until answered.
-        section = section.split("   - **Quick**", 1)[0].strip()
-    elif number == 4:
-        web = system_resource_source("skills/conductor-bootstrap/references/web-search.md").read_text(encoding="utf-8")
-        section += "\n\n" + web.split("## 1. Explain, then ask", 1)[1].split("## 2.", 1)[0].strip()
-    elif number == 5:
-        lookup = system_resource_source("skills/conductor-bootstrap/references/look-up-the-person.md").read_text(encoding="utf-8")
-        section += "\n\n" + lookup.split("## Before anything: ask when search was already set up", 1)[1].split("## A.", 1)[0].strip()
-    return "## Your first step\n\n" + section
 
 
 async def render_for(model: str, path: str = "script", *, thread_id: str | None = None) -> str:
