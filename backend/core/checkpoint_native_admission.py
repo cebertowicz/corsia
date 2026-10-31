@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from infra.db_async import run_in_db
+from infra.db_async import run_off_db
 
 
 #: The ``turn_complete`` terminal payload key that carries the receipt to the
@@ -173,14 +173,15 @@ async def prepare_native_checkpoint(
             provider_request=replace(
                 admission.provider_request,
                 same_model_cold=partial(
-                    run_in_db,
+                    run_off_db,
                     build_native_cold_checkpoint_admission,
                     checkpoint_id, thread_id, context, turn_identity,
                     reasoning_effort, trigger,
                 ),
             ),
         )
-    return await run_in_db(
+    # A local writer's cold count asks its own server; that wait holds no DB worker.
+    return await run_off_db(
         build_native_cold_checkpoint_admission,
         checkpoint_id, thread_id, context, turn_identity, reasoning_effort, trigger,
     )
