@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
-	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupShell, { type SetupJob } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupSourceError from './SetupSourceError.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -30,7 +30,7 @@
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
-	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
+	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart, setupSteps } from '$lib/setupFormSupport';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
@@ -83,12 +83,7 @@
 	const folderDecisionPending = $derived(folderNotice !== null);
 	// A new account needs every field; an existing one needs a name, and a password only when one is being changed.
 	const canSubmitAccount = $derived(!folderDecisionPending && (editing ? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password))) : Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password)));
-	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
-		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && $token) ? 'done' : 'todo' },
-		{ label: 'Your subscriptions', icon: 'card', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
-		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
-	]);
+	const steps = $derived(page === 'connect' ? remote.steps : setupSteps(page, Boolean($token)));
 	/** Every failed row's cause and reference, so the saved report says what went wrong where. */
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
@@ -166,8 +161,7 @@
 			if (cliPicked(vendor)) connectFlow.pick(vendor);
 			else void connectFlow.stop(vendor);
 		}
-		// The installer skipped the free download on a signed-in CLI, so answering Neither starts it now, but never over a failure its row is showing with Retry.
-		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal();
+		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal(); // the installer skips the free download on a signed-in CLI; never over a failure its row shows with Retry
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
@@ -356,11 +350,9 @@
 		return () => clearInterval(timer);
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
-	// A failed or cancelled sign-in can leave no model when the installer skipped the free download, so it starts without a click.
-	let localAutoStarted = false;
+	let localAutoStarted = false; // a failed or cancelled sign-in can leave no model when the installer skipped the free download: start it without a click
 	$effect(() => {
-		const signinEnded = CLI_VENDORS.some((vendor) => connectFlow.attempts[vendor]?.attempt === 'signin_failed');
-		if (page !== 'models' || !signinEnded || localAutoStarted || !eligible || neverLocal || localModelActive || localFailed) return;
+		if (page !== 'models' || localAutoStarted || !eligible || neverLocal || localModelActive || localFailed || !CLI_VENDORS.some((vendor) => connectFlow.attempts[vendor]?.attempt === 'signin_failed')) return;
 		localAutoStarted = true; void startLocal();
 	});
 	onMount(() => {

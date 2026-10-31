@@ -28,10 +28,8 @@
 		renameVendorAccount,
 		signOutVendorAccount,
 		startVendorSignin,
-		refreshAndRecordModels,
-		vendorAccounts, signin, visibleVendorAccounts, rememberVisibleSignin, reloadErrorText,
-		type SigninResult,
-		type VendorAccount,
+		refreshAndRecordModels, vendorAccounts, signin, visibleVendorAccounts, rememberVisibleSignin, reloadErrorText,
+		type SigninResult, type VendorAccount,
 	} from '$lib/stores/vendorAccounts';
 
 	interface Props { provider: HostProvider; }
@@ -251,8 +249,7 @@
 		if (showHistorical) await openHistoricalAccounts();
 	}
 
-	// Account links still navigate to the row or its available Sign in action.
-
+	// Account links land on the row, or its Sign in action when it has one.
 	$effect(() => {
 		const anchor = $settingsNavigation.anchor;
 		const id = anchor?.startsWith('account-') ? anchor.slice('account-'.length) : null;

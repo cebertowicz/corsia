@@ -176,7 +176,7 @@
 	.message-content.account-recovery, .account-recovery button { transition-property: none; }
 	.recovery-actions { display: inline-flex; flex-wrap: wrap; gap: var(--space-5); }
 	.account-recovery button { position: relative; border: 0; background: transparent; color: var(--accent-text); font: inherit; white-space: nowrap; cursor: pointer; }
-	@media (max-width: 768px) {
+	@media (pointer: coarse) {
 		/* Keep expanded touch targets inside the transcript row's clipping bounds. */
 		.message-content.account-recovery { padding-block: var(--space-3); }
 		.account-recovery button::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(var(--touch-target), calc(100% + var(--space-4))); height: max(var(--touch-target), calc(100% + var(--space-4))); transform: translate(-50%, -50%); }
