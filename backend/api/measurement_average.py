@@ -12,8 +12,10 @@ from typing import Any
 from api.measurement_windows import window_figure
 from core.measurement_scope import Grain, Window
 
-# Series whose pooled span figure is a total, not a rate: the chart draws it as a per-period mean.
-TOTALS = frozenset({"outcomes", "fresh_tokens", "limit_hits", "time_on_platform_h"})
+# Series whose pooled span figure is a total, not a rate: the chart draws it as a per-period mean. A distinct
+# count (idle threads) pools as the distinct count over the span, so a thread idle in several periods adds once.
+TOTALS = frozenset({"outcomes", "fresh_tokens", "limit_hits", "time_on_platform_h", "corrections_detected",
+                    "idle_untriaged_threads"})
 
 
 def span_ending(grain: Grain, period: str) -> Window | None:

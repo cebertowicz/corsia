@@ -95,7 +95,8 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
          breaks: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """Apply registry-owned thresholds and presentation flags to one aggregate row.
 
-    ``partial`` marks the period still in progress, served for ``fresh_tokens`` and, on Days, for ``outcomes``.
+    ``partial`` marks the period still in progress, served for ``fresh_tokens``, the correction coverage series
+    and, on Days, for ``outcomes``.
     """
     definition = REGISTRY[metric]
     source = source or {}
@@ -194,8 +195,9 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     every part of its response is bucketed by one request calendar. An identical read in flight is
     joined (``api.measurement_join``).
     """
-    # The period still in progress: every series is served by completed periods, and only the token
-    # total (and, on Days, the outcome count) also shows this one, flagged partial, so a first period is not an empty page.
+    # The period still in progress: every series is served by completed periods, and only the token total, the
+    # correction coverage series (and, on Days, the outcome count) also show this one, flagged partial, so a first
+    # period is not an empty page.
     current_period = page_grain.current
 
     selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks = await run_bulk(

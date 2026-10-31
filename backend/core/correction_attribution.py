@@ -113,15 +113,19 @@ _ACTIVE_VERSION_ONLY = f"""{version_key_sql('s.attributes')}=(
 FIRST_ARRIVAL_SQL = _SOURCES_SQL + f"SELECT MIN(source_at) FROM sources s WHERE {_ACTIVE_VERSION_ONLY}"
 """The earliest arrival of a source the active version classified: where corrections began to be measured."""
 
-_COVERAGE_SQL = _SOURCES_SQL + f"""
+_COVERAGE_SQL = _SOURCES_SQL + f""", windowed AS (
+      SELECT * FROM sources s
+      WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
+    ), last_turns AS (
+      SELECT t.thread_id,MAX({_ts('t.started_at')}) AS started FROM active_turns t
+      WHERE t.thread_id IN (SELECT target_thread FROM windowed) GROUP BY t.thread_id
+    )
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread,
       EXISTS(SELECT 1 FROM outcome_events t
         WHERE t.event_name='{TRIAGE_EVENT}' AND t.subject_key=s.subject_key) AS triaged,
-      EXISTS(SELECT 1 FROM active_turns t
-        WHERE t.thread_id=s.target_thread
-          AND {_ts('t.started_at')} > {_ts('s.source_at')}) AS later_turn
-    FROM sources s
-    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
+      (s.source_kind='{SOURCE_KIND_MESSAGE}' AND s.active_turn_id IS NOT NULL)
+        OR COALESCE(l.started > {_ts('s.source_at')}, 0) AS later_turn
+    FROM windowed s LEFT JOIN last_turns l ON l.thread_id=s.target_thread
 """
 
 
@@ -207,7 +211,7 @@ def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None =
 
 @dataclass(frozen=True)
 class CorrectionCoverage:
-    """One correction's arrival, target thread, whether it was triaged, and whether the thread has run since."""
+    """One correction's arrival, target thread, whether it was triaged, and whether a turn has had it since."""
 
     arrived: str
     thread: str | None
@@ -228,8 +232,10 @@ def person_correction_coverage(db: sqlite3.Connection, start: str, end: str) -> 
     A source whose arrival cannot be resolved has no time and is left out.
 
     ``triaged`` is a ``learning_loop.correction_triage`` fact on the same subject, any tier.
-    ``later_turn`` is a turn started in the target thread after the correction arrived; an archived
+    ``later_turn`` is a turn that has had the correction: one that took the message in (a steer into a
+    running turn included), or any turn started in the target thread after it arrived. An archived
     thread that never ran again, or a deleted one (its turn rows go with it), has none and reads as idle.
+    The last turn start is read once per target thread, not once per correction.
     """
     rows = db.execute(_COVERAGE_SQL, {"start": start, "end": end}).fetchall()
     timed = (row for row in rows if row["source_at"] is not None)

@@ -29,16 +29,19 @@ def coverage_value(metric: str, source: dict[str, Any]) -> tuple[float | int | N
         return int(source.get(name, 0) or 0)
 
     if metric == "corrections_detected": return get("detected"), get("detected")
-    if metric == "idle_untriaged_threads": return get("idle_threads"), get("idle_threads")
+    if metric == "idle_untriaged_threads":
+        threads = len(source.get("idle_threads") or ())
+        return threads, threads
     numerator, n = (get("triaged"), get("detected")) if metric == "corrections_triaged_pct" else (get("untriaged_idle"), get("untriaged"))
     return (numerator / n if n else None), n
 
 
-def corrections_by_period(db, grain: Grain) -> dict[str, Counter[str]]:
+def corrections_by_period(db, grain: Grain) -> dict[str, dict[str, Any]]:
     """Per drawn period (and the one in progress), the corrections whose target thread is in the scope.
 
     ``detected`` counts them all; ``triaged`` and ``untriaged`` split them; ``untriaged_idle`` are the
-    untriaged whose thread has started no turn since, and ``idle_threads`` is how many threads those sit on.
+    untriaged no turn has had since, and ``idle_threads`` is the set of threads those sit on, so a
+    window or average pooling several periods counts a thread idle in more than one of them once.
     """
     in_scope = {str(row[0]) for row in db.execute(f"SELECT id FROM {PREPARED_SCOPE}")}
     drawn = {*grain.periods, grain.current}
@@ -54,19 +57,20 @@ def corrections_by_period(db, grain: Grain) -> dict[str, Counter[str]]:
         if not item.triaged and not item.later_turn:
             row["untriaged_idle"] += 1
             idle.setdefault(period, set()).add(str(item.thread))
-    for period, threads in idle.items():
-        counts[period]["idle_threads"] = len(threads)
-    return counts
+    return {period: {**count, "idle_threads": frozenset(idle.get(period, ()))} for period, count in counts.items()}
 
 
 def corrections_family(db, grain: Grain, decision_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per outcome period: its outcomes, asks (raised and user holds) and corrections."""
     counts = corrections_by_period(db, grain)
-    fields = ("detected", "triaged", "untriaged", "untriaged_idle", "idle_threads")
-    rows = [{**row, "corrections": counts.get(row["period"], Counter())["detected"],
-             **{name: counts.get(row["period"], Counter())[name] for name in fields}} for row in decision_rows]
+    empty = {"detected": 0, "triaged": 0, "untriaged": 0, "untriaged_idle": 0, "idle_threads": frozenset()}
+
+    def fields(period: str) -> dict[str, Any]:
+        count = {**empty, **counts.get(period, {})}
+        return {"corrections": count["detected"], **count}
+
+    rows = [{**row, **fields(row["period"])} for row in decision_rows]
     known = {row["period"] for row in rows}
     # The period in progress may have corrections before it has an outcome row.
-    rows.extend({"period": period, "corrections": count["detected"], **{name: count[name] for name in fields}}
-                for period, count in counts.items() if period not in known)
+    rows.extend({"period": period, **fields(period)} for period in counts if period not in known)
     return rows

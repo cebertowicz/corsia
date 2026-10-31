@@ -8,7 +8,7 @@ import pytest
 
 from core.correction_attribution import person_correction_coverage
 from core.correction_learning import TRIAGE_EVENT
-from tests.test_measurement_api import WEEK, _seed_thread
+from tests.test_measurement_api import USER, WEEK, _freeze_clock, _seed_thread
 from tests.test_measurement_corrections_series import _activate, _fact, _rows, _seed
 
 IDS = "corrections_detected,corrections_triaged_pct,corrections_untriaged_idle_pct,idle_untriaged_threads"
@@ -190,6 +190,50 @@ def test_a_deleted_thread_reads_as_idle_because_its_turn_rows_go_with_it(isolate
         delete_thread_turns(db, "gone")
         assert [(c.thread, c.triaged, c.later_turn) for c in person_correction_coverage(db, *window)] == [
             ("gone", False, False)]
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_windows_and_averages_count_a_thread_idle_in_several_periods_once(isolated_db, monkeypatch):
+    from api.measurement import measurement_series
+
+    db = _db()
+    try:
+        _seed(db)
+        _seed_thread(db, "idle")
+        _fact(db, "first", at="2026-09-01T12:00:00Z")
+        _triage(db, "first", at="2026-09-01T13:00:00Z")  # coverage is measured from the week of Aug 31
+        for week in ("2026-09-08", "2026-09-15", "2026-09-22", "2026-09-29"):
+            _fact(db, f"idle-{week}", thread="idle", at=f"{week}T12:00:00Z")  # one idle correction each week
+        db.commit()
+    finally:
+        db.close()
+
+    _freeze_clock(monkeypatch)
+    result = await measurement_series("corrections_detected,idle_untriaged_threads", project="all", agent="none",
+                                      grain="weeks", timezone_name="UTC", user=USER)
+    rows = {(row["series"], row["period"]): row for row in result["rows"]}
+    assert [rows[("idle_untriaged_threads", week)]["value"] for week in ("2026-09-07", "2026-09-14", WEEK, "2026-09-28")] == [1, 1, 1, 1]
+    # The four weeks hold one idle thread, not four; the average is that span figure over the four weeks.
+    assert result["windows"]["idle_untriaged_threads"]["latest"]["value"] == 1
+    assert rows[("idle_untriaged_threads", "2026-09-28")]["average"] == pytest.approx(1 / 4)
+    # Detected corrections add up across the span, and the average is the per-week mean, not the span total.
+    assert result["windows"]["corrections_detected"]["latest"]["value"] == 4
+    assert rows[("corrections_detected", "2026-09-28")]["average"] == pytest.approx(1)
+
+
+def test_a_correction_steered_into_a_running_turn_is_not_idle(isolated_db):
+    db = _db()
+    try:
+        _seed(db)
+        _fact(db, "steer", at="2026-09-22T12:00:00Z")
+        _fact(db, "waiting", at="2026-09-22T12:30:00Z")
+        _turn(db, "root", "2026-09-22T11:00:00Z")  # started before both, and none starts after
+        db.execute("UPDATE messages SET active_turn_id=? WHERE id='steer'", ("turn-root-2026-09-22T11:00:00Z",))
+        found = person_correction_coverage(db, "2026-09-21 00", "2026-09-28 00")
+        assert sorted((c.arrived, c.later_turn) for c in found) == [
+            ("2026-09-22T12:00:00Z", True), ("2026-09-22T12:30:00Z", False)]
     finally:
         db.close()
 
