@@ -9,6 +9,7 @@ import {
 	type DocSpan,
 } from '$lib/docPresence';
 import { holdCommentArrival, holdCommentCall, releaseCommentArrival, releaseCommentArrivals } from '$lib/stores/docCommentArrivals';
+import { onUnseenSuggestions, type DocComment } from '$lib/stores/docComments';
 import { on } from '$lib/ws/events';
 import type { SelectOutcome } from '$lib/cm/typed-reveal-arrival';
 
@@ -72,6 +73,18 @@ class ArtifactArrivalCoordinator {
 			this.missed.add(commentId);
 			releaseCommentArrival(this.artifactId, commentId);
 		}, MISSING_FRAME_WAIT_MS));
+	}
+
+	/** A reload found suggestions this canvas never saw (their frames were missed): arrive them as their activity frame would have. */
+	arriveUnseen(rows: DocComment[]): void {
+		if (!this.activeSurface() || this.reducedMotion()) return;
+		for (const row of rows) {
+			recordDocActivity({
+				type: 'doc_activity', artifact_id: this.artifactId, thread_id: row.authorThreadId, agent: row.author, kind: 'suggestion',
+				span: row.from !== undefined && row.to !== undefined ? { from: row.from, to: row.to } : null,
+				comment_id: row.id, revision: null, at: row.createdAt, call_id: null,
+			});
+		}
 	}
 
 	/** Release every hold on this document and stop waiting for activity frames. */
@@ -182,6 +195,7 @@ let startCount = 0;
 let stopWebsocket: (() => void) | null = null;
 let stopActivity: (() => void) | null = null;
 let stopCommentChanges: (() => void) | null = null;
+let stopUnseen: (() => void) | null = null;
 let expiryTimer: ReturnType<typeof setInterval> | null = null;
 
 function coordinator(artifactId: string): ArtifactArrivalCoordinator {
@@ -214,6 +228,7 @@ export function startDocPresence(): () => void {
 		stopActivity = onRecordedDocActivity(queueRecordedFrame);
 		stopWebsocket = on('doc_activity', recordDocActivity);
 		stopCommentChanges = on('doc_comment_changed', holdNamedComment);
+		stopUnseen = onUnseenSuggestions((artifactId, rows) => coordinators.get(artifactId)?.arriveUnseen(rows));
 		expiryTimer = setInterval(() => prunePresence(), 30_000);
 	}
 	let stopped = false;
@@ -225,6 +240,8 @@ export function startDocPresence(): () => void {
 		stopWebsocket?.();
 		stopActivity?.();
 		stopCommentChanges?.();
+		stopUnseen?.();
+		stopUnseen = null;
 		stopWebsocket = null;
 		stopActivity = null;
 		stopCommentChanges = null;

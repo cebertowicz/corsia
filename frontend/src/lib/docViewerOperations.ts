@@ -127,3 +127,12 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
 	};
 }
+
+/** Change and activity frames sent while the socket was down never come back: call the returned function with each connection state, and it reloads once the connection returns. */
+export function reloadAfterReconnect(reload: () => void): (connection: string | null) => void {
+	let dropped = false;
+	return (connection) => {
+		if (connection === 'disconnected' || connection === 'reconnecting') dropped = true;
+		else if (connection === 'connected' && dropped) { dropped = false; reload(); }
+	};
+}
