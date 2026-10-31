@@ -75,7 +75,7 @@ export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: 
 	const read = ++readSequence;
 	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', includeRemoved ? { include_removed: 'true' } : {});
 	if (!result.ok) return result;
-	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Couldn’t read accounts.' };
+	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	if (confirmationAtStart !== confirmationSequence || read < acceptedRead) {
 		return { ok: false, superseded: true, error: 'Account details changed while loading. Reload again.' };
 	}
@@ -88,12 +88,12 @@ export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: 
 export async function fetchRemovedVendorAccounts(): Promise<{ ok: true; accounts: VendorAccount[] } | { ok: false; error: string }> {
 	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', { include_removed: 'true' });
 	if (!result.ok) return result;
-	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Couldn’t read accounts.' };
+	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	return { ok: true, accounts: result.data.accounts.filter((account) => account.state === 'removed') };
 }
 
 export async function addVendorAccount(provider: string, name: string): Promise<{ ok: boolean; account?: VendorAccount; error?: string }> {
-	const result = await request<VendorAccount>('/api/vendor-accounts', json('POST', { provider, name }), 'Couldn’t add account.');
+	const result = await request<VendorAccount>('/api/vendor-accounts', json('POST', { provider, name }), 'Could not add account.');
 	if (!result.ok) return result;
 	confirmAccounts((accounts) => [...accounts, result.data]);
 	return { ok: true, account: result.data };
@@ -109,7 +109,7 @@ export async function renameVendorAccount(account: VendorAccount, name: string):
 	if (staleAccount(account)) return { ok: false, error: RELOAD_ACCOUNT };
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}`, json('PATCH', {
 		name, expected_revision: account.revision,
-	}), 'Couldn’t rename account.');
+	}), 'Could not rename account.');
 	if (!result.ok) {
 		if (result.status === 409) replace({ ...account, details_stale: true });
 		return result;
@@ -130,7 +130,7 @@ export async function setVendorAccountBilling(account: VendorAccount, input: {
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}/billing`, json('PUT', {
 		...input,
 		expected_billing_revision: account.billing_revision ?? 0,
-	}), 'Couldn’t save billing.');
+	}), 'Could not save billing.');
 	if (!result.ok) return result;
 	replace(result.data);
 	return { ok: true };
@@ -143,7 +143,7 @@ export async function recordVendorAccountOverage(account: VendorAccount, input: 
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}/overage`, json('POST', {
 		...input,
 		expected_billing_revision: account.billing_revision ?? 0,
-	}), 'Couldn’t save overage.');
+	}), 'Could not save overage.');
 	if (!result.ok) return result;
 	replace(result.data);
 	return { ok: true };
@@ -161,7 +161,7 @@ export async function setVendorAccountOverage(account: VendorAccount, allow: boo
 
 export async function startVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
 	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
-	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Couldn’t start sign-in.');
+	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
 	if (wasSignedIn && result.data.status === 'waiting') {
 		const refreshed = await loadVendorAccounts();
@@ -187,18 +187,18 @@ async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; sig
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {
-	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, json('POST'), 'Couldn’t check sign-in.');
+	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, json('POST'), 'Could not check sign-in.');
 	if (!result.ok) return result.error === 'no sign-in is in progress for this account' ? { ok: false, absent: true } : result;
 	return reconcileSignin(result.data);
 }
 
 export async function refreshVendorModels(accountId: string): Promise<{ ok: boolean; signedOut?: boolean; superseded?: boolean; error?: string; ref?: string }> {
-	const result = await request<{ state: VendorAccountState; vendor_signed_in: boolean | null; model_refresh_ok: boolean | null; model_refresh_cause: string | null; model_refresh_ref: string | null }>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/verify`, json('POST'), 'Couldn’t refresh models.');
+	const result = await request<{ state: VendorAccountState; vendor_signed_in: boolean | null; model_refresh_ok: boolean | null; model_refresh_cause: string | null; model_refresh_ref: string | null }>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/verify`, json('POST'), 'Couldn’t refresh models. Try again.');
 	if (!result.ok) return result;
 	if (result.data.state === 'signed_out') {
 		confirmAccounts((accounts) => accounts.map((account) => account.id === accountId ? { ...account, state: 'signed_out', details_stale: true } : account));
 		const refreshed = await loadVendorAccounts();
-		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
+		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts. Try again.', refreshed.ref) };
 	}
 	if (result.data.vendor_signed_in === true && result.data.model_refresh_ok === true) return { ok: true };
 	// A newer login replaced the one this refresh read: nothing failed, and the reload shows the account as it now is.
@@ -218,7 +218,7 @@ export async function refreshAndRecordModels(accountId: string): ReturnType<type
 }
 
 export async function cancelVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
-	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('DELETE'), 'Couldn’t cancel sign-in.');
+	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('DELETE'), 'Could not cancel sign-in.');
 	if (!result.ok) return result;
 	return reconcileSignin(result.data);
 }
@@ -233,7 +233,7 @@ export async function signOutVendorAccount(account: VendorAccount): Promise<{ ok
 	if (staleAccount(account)) return { ok: false, error: RELOAD_ACCOUNT };
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}/signout`, json('POST', {
 		expected_revision: account.revision,
-	}), 'Couldn’t sign out.');
+	}), 'Could not sign out.');
 	if (!result.ok) return result;
 	return applyThenRefresh(result.data, 'The account was signed out.');
 }
@@ -242,7 +242,7 @@ export async function removeVendorAccount(account: VendorAccount): Promise<{ ok:
 	if (staleAccount(account)) return { ok: false, error: RELOAD_ACCOUNT };
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}`, json('DELETE', {
 		expected_revision: account.revision,
-	}), 'Couldn’t remove account.');
+	}), 'Could not remove account.');
 	if (!result.ok) return result;
 	return applyThenRefresh(result.data, 'The account was removed.');
 }
