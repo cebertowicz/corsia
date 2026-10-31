@@ -1,11 +1,11 @@
 ---
 name: experiment-design
-description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance), and when recording, counting or tracking something your work does, being woken or acting when something happens, or defining or interpreting a KPI. Run it in stages that each must earn the next, with a confirmation bar matched to consequence. Not for regression tests or source inspection.
+description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance), and when recording, counting or tracking something your work does, being woken or acting when something happens, an alert or chart for a number, or defining or interpreting a KPI. Run it in stages that each must earn the next, with a confirmation bar matched to consequence. Not for regression tests or source inspection.
 ---
 
 # Experiment design
 
-Counting, tracking, being woken by or timing something your work does, not testing a change? Go straight to `references/instrument-measures.md`. The rest of this file is for experiments and comparisons.
+Counting, tracking, being woken by or timing something your work does, or an alert or chart for a number, not testing a change? Go straight to `references/instrument-measures.md`. The rest of this file is for experiments and comparisons.
 
 An experiment exists to inform one decision at the lowest cost that can inform it. Spending past that point is waste, not rigor.
 

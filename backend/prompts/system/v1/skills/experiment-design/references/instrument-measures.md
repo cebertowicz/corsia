@@ -51,7 +51,7 @@ Nothing feeds a calendar, chat or any other service. If the happening lives ther
        num: {event: backup.checked, attr: result, values: [failed]}
        min_n: 7
    ```
-   An example, not a pre-existing event: use your own names, and a `min_n` that fits the question. `use: record` stores only; `route` only routes; `both` does each. A routed event cannot declare a `login` attribute.
+   An example, not a pre-existing event: use your own names, and a `min_n` that fits the question. `use: record` stores only; `route` only routes; `both` does each. A routed event cannot declare a `login` attribute. `formula` is `count`, `ratio`, `share`, `percentile` or `rate_per_run` (workflows only); there is no mean, so for an average use the median (`percentile`, `p: 50`).
 3. `measure_sync` with `path` relative to the workspace root. Fix what it refuses and sync again. Nothing takes effect until it succeeds.
 4. Record each occurrence: `event_rules` `emit` with the full declared name (`backup.checked`) and `facts`, or print `{"event": {"type": "backup.checked", "facts": {...}}}` from a script registered with `automation_schedule` (`kind: script`, interval at least 300 seconds); a `record` event is a script's `{"measure": {"event.name": "...", "attributes": {...}}}`. A run's lines are capped at 200.
 5. `measure_status` (add `kpis: true` for each KPI's current and last-week value). Each refusal says whether the row or only the attribute was dropped, and the fix. Recording starts when you first record; earlier occurrences are not counted.
