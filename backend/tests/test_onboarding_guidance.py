@@ -640,7 +640,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # One review ask, worded for the review bar with or without the accept-all button.
     ask = "Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve."
     # The first post says what approving does: the answers become the profile every agent and chat loads, and what a cloud model receives.
-    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " It accepts the rest for you.`") == 1
+    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " Approve also accepts every suggestion you haven't rejected.`") == 1
     assert doc.count(ask) == 2  # the post and the ask's reason
     assert "including agents on a cloud model" not in doc
     # The saved line says agents keep adding to it and where to edit it.
