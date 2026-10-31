@@ -36,6 +36,8 @@
 
 	const { account, variant = 'settings', compact = false, order = null, marker = null, children, marked = false, choosable = true, pending = false, onselect }: Props = $props();
 	const label = $derived(account.label);
+	/** A signed-out account has one status, "Signed out", which its row shows; a usage read on it would say a second thing. */
+	const signedOut = $derived(account.state === 'signed_out');
 	const hasEmail = $derived(!!label.email && label.email !== label.name);
 	const usageLimit = $derived(account.usage?.state === 'limited' ? formatUsageLimit(account.usage) : null);
 	const checking = $derived(!!account.usage?.checking);
@@ -76,7 +78,9 @@
 	<div class="account-usage-row" class:compact class:ordered={order !== null}>
 		{#if order !== null}<span class="order" aria-label={`Rollover order ${order}`}>{order}</span>{/if}
 		<strong><span class="name">{label.name}</span>{#if marker}<span class="separator" aria-hidden="true">{' · '}</span><span class="marker">{marker}</span>{/if}{#if hasEmail}<span class="separator" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}</strong>
-		{#if usageLimit}
+		{#if signedOut}
+			<!-- The row's own "Signed out" is its only status. -->
+		{:else if usageLimit}
 			<!-- A limited account cannot run a turn: red, as the picker shows it. -->
 			<p class="usage" aria-label="Account usage"><span class="red">{usageLimit}</span></p>
 		{:else if segments.length}
@@ -87,8 +91,8 @@
 				{/each}
 			</p>
 		{/if}
-		{#if checking}<p class="usage" aria-label="Account usage check">Checking account…</p>{/if}
-		{#if checkError}<p class="usage" aria-label="Account usage check">{checkError}</p>{/if}
+		{#if checking && !signedOut}<p class="usage" aria-label="Account usage check">Checking account…</p>{/if}
+		{#if checkError && !signedOut}<p class="usage" aria-label="Account usage check">{checkError}</p>{/if}
 		{#if children}<span class="controls">{@render children()}</span>{/if}
 	</div>
 {/if}

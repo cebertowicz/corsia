@@ -3,11 +3,12 @@
 	/** Accounts whose sign-in the rows have already checked once: a long chat sends one check per account, not one per row. */
 	const checkedAccounts = new Set<string>();
 	/** Rows whose account state was read live when they appeared: the page's list can predate the sign-out the row reports. */
-	const liveReadRows = new Set<string>();
+	const liveReadRows = new Map<string, Promise<unknown>>();
 	let accountsRead: Promise<unknown> | null = null;
 	/** Rows that mount together share one read. */
 	function readAccountsOnce(load: () => Promise<unknown>) {
 		accountsRead ??= load().finally(() => { accountsRead = null; });
+		return accountsRead;
 	}
 </script>
 
@@ -22,6 +23,7 @@
 	 */
 	import { loadVendorAccounts, vendorAccounts, signin, rememberVisibleSignin, startVendorSignin, checkVendorSignin, cancelVendorSignin, refreshAndRecordModels } from '$lib/stores/vendorAccounts';
 	import { signinMessage } from './v7/accountSigninMessage';
+	import { isHeldSignedOutNotice } from './heldAccountNotice';
 	import { VENDORS } from '$lib/conductorSources';
 	import SubagentChip from './SubagentChip.svelte';
 	import EventChip from './EventChip.svelte';
@@ -57,6 +59,10 @@
 	const activeSignin = $derived(accountId ? $signin[accountId] : undefined);
 	/** A row offers live recovery only while the account is in that state now; otherwise it reads as history. */
 	const accountRecovery = $derived(linkableAccount && (staleModels || (expiredLogin && (namedAccount?.state === 'signed_out' || !!activeSignin))));
+	/** An expired-login row whose account is signed in again, with no sign-in under way, reads as history from the account's state (live, after Check, and after a reload). A held message's row is not history: it goes when its message sends. */
+	const expiredHistory = $derived(expiredLogin && namedAccount?.state === 'signed_in' && (activeSignin?.status === 'completed' || (!activeSignin && liveRead)) && !isHeldSignedOutNotice(msg));
+	/** The page's list can predate a sign-out, so a row with no sign-in under way says "signed in now" only after it has read the account itself. */
+	let liveRead = $state(false);
 	let busy = $state(false);
 	let refreshing = $state(false);
 	let actionError = $state('');
@@ -92,11 +98,12 @@
 	});
 	// An expired-login row decides between live recovery and history on the account's state now, so it reads that once.
 	$effect(() => {
+		if (!(accountId && expiredLogin && namedAccount && namedAccount.state !== 'signed_out' && !activeSignin)) return;
 		const key = String(msg.id ?? `${accountId}:${content}`);
-		if (accountId && expiredLogin && namedAccount && namedAccount.state !== 'signed_out' && !activeSignin && !liveReadRows.has(key)) {
-			liveReadRows.add(key);
-			readAccountsOnce(() => loadVendorAccounts());
-		}
+		let read = liveReadRows.get(key);
+		if (!read) { read = readAccountsOnce(() => loadVendorAccounts()); liveReadRows.set(key, read); }
+		const done = () => { liveRead = true; };
+		void read.then(done, done);
 	});
 	const quietRow = $derived(
 		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone,
@@ -130,12 +137,14 @@
 				class:model-switch={msg.metadata?.type === 'model_switch'}
 				class:system-interrupt={msg.metadata?.type === 'system_interrupt'}
 				class:sandbox-denial={msg.metadata?.type === 'sandbox_denial'}
-				class:harness-error={!accountRecovery && (msg.metadata?.event_type === 'harness.error' || msg.metadata?.type === 'harness_error')}
-				class:account-recovery={accountRecovery}
-				class:recovery-working={accountRecovery && (activeSignin?.status === 'waiting' || activeSignin?.status === 'already_signed_in')}
+				class:harness-error={!accountRecovery && !expiredHistory && (msg.metadata?.event_type === 'harness.error' || msg.metadata?.type === 'harness_error')}
+				class:account-recovery={accountRecovery || expiredHistory}
+				class:recovery-working={expiredHistory || (accountRecovery && (activeSignin?.status === 'waiting' || activeSignin?.status === 'already_signed_in'))}
 				class:recovery-failure={accountRecovery && !!activeSignin && ['failed', 'unavailable', 'model_refresh_failed'].includes(activeSignin.status)}
 			>
-				{#if accountRecovery && namedAccount}
+				{#if expiredHistory && namedAccount}
+					<span>{namedAccount.label.text} was signed out, so this message got no answer. It’s signed in now.</span>
+				{:else if accountRecovery && namedAccount}
 					{#if !(activeSignin?.status === 'completed' && namedAccount.state === 'signed_in')}
 						{#if activeSignin}
 							<span>{chatStatus(staleModels && activeSignin.status === 'model_refresh_failed' ? `Couldn’t refresh the model list.${activeSignin.ref ? ` Reference: ${activeSignin.ref}` : ''}` : signinMessage(activeSignin, nameOf, $signin, VENDORS[namedAccount.provider]?.cli ?? null))}</span>

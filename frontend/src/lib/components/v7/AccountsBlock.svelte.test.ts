@@ -304,6 +304,30 @@ describe('rendering and actions', () => {
 			}
 		});
 
+		it('shows a signed-out account no usage status, and a signed-in account its failed usage read', async () => {
+			const usages = [
+				{ state: 'unknown', usable: false, resets_at: null, windows: [], checking: false, check: { error: 'offline' } },
+				{ state: 'unknown', usable: false, resets_at: null, windows: [], checking: true, check: null },
+				{ state: 'limited', usable: false, reason: 'five_hour_limit', resets_at: null, windows: [], checking: false, check: { error: 'offline' } },
+			] as const;
+			for (const usage of usages) {
+				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [{ ...defaultAccount, state: 'signed_out' as const, usage }] })));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await settle();
+				expect(document.body.textContent).toContain('Signed out');
+				expect(document.querySelectorAll('[aria-label^="Account usage"]')).toHaveLength(0);
+				for (const text of ["Couldn't verify account", 'Checking account…', 'Usage limit reached']) expect(document.body.textContent).not.toContain(text);
+				unmount(component);
+				document.body.innerHTML = '';
+			}
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [{ ...defaultAccount, usage: usages[0] }] })));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).toContain("Couldn't verify account");
+			unmount(component);
+			document.body.innerHTML = '';
+		});
+
 		it('says an account the service records as having no usable model has no models for the tool, and only then', async () => {
 			const signedIn = { ...workAccount, state: 'signed_in' as const };
 			const noModel = 'This ChatGPT account has no models for Codex. Sign in with another account, or remove this one.';

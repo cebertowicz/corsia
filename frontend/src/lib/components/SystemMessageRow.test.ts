@@ -120,14 +120,68 @@ describe('SystemMessageRow', () => {
 		await unmount(first); await unmount(second);
 	});
 
-	it('reads a past signed-out row as history once the account is signed in again', () => {
-		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [{ ...account('back'), state: 'signed_in' }] }), { status: 200 })));
+	const expiryRow = (id: string, extra: Record<string, unknown> = {}) => ({ id: `expiry-${id}`, role: 'system', content: `${id} is signed out of Claude Code. Sign it in again under Settings › Providers.`, metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: id }, ...extra });
+	const accountsResponse = (id: string, state: VendorAccount['state']) => vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [account(id, { state })] }), { status: 200 }));
+	const HISTORY = (id: string) => `${id} was signed out, so this message got no answer. It’s signed in now.`;
+
+	it('reads a past signed-out row as one history line, with no control, once the account is signed in again', async () => {
+		vi.stubGlobal('fetch', accountsResponse('back', 'signed_in'));
 		vendorAccounts.set([account('back', { state: 'signed_in' })]);
-		render({ role: 'system', content: 'back is signed out of Claude Code. Sign it in again under Settings › Providers.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'back' } });
-		expect(host.textContent).toContain('back is signed out of Claude Code.');
-		expect(host.querySelector('.account-recovery')).toBeNull();
+		render(expiryRow('back'));
+		await vi.waitFor(() => expect(host.textContent?.trim()).toBe(HISTORY('back')));
+		expect(host.querySelector('.recovery-working')).not.toBeNull();
 		expect(host.querySelector('button')).toBeNull();
-		expect(host.querySelector('a')?.textContent).toBe('Settings › Providers');
+		expect(host.querySelector('a')).toBeNull();
+	});
+
+	it('shows the history line live: signed out, then signed in after Check', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 })));
+		vendorAccounts.set([account('live')]);
+		render(expiryRow('live'));
+		expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in');
+		signin.set({ live: { account_id: 'live', route: 'browser', status: 'completed', cause: null } });
+		vendorAccounts.set([account('live', { state: 'signed_in' })]);
+		flushSync();
+		expect(host.textContent?.trim()).toBe(HISTORY('live'));
+		expect(host.querySelector('button')).toBeNull();
+	});
+
+	it('shows the same line when the row is mounted fresh with the account signed in, as after a reload or a remount', async () => {
+		vi.stubGlobal('fetch', accountsResponse('reload', 'signed_in'));
+		vendorAccounts.set([account('reload', { state: 'signed_in' })]);
+		render(expiryRow('reload'));
+		await vi.waitFor(() => expect(host.textContent?.trim()).toBe(HISTORY('reload')));
+		unmount(component!); component = null; host.textContent = '';
+		signin.set({});
+		render(expiryRow('reload'));
+		await vi.waitFor(() => expect(host.textContent?.trim()).toBe(HISTORY('reload')));
+	});
+
+	it('does not say the account is signed in before the row has read it, when the page list is stale', async () => {
+		vi.stubGlobal('fetch', accountsResponse('stale', 'signed_out'));
+		vendorAccounts.set([account('stale', { state: 'signed_in' })]);
+		render(expiryRow('stale'));
+		expect(host.textContent).not.toContain('signed in now');
+		await vi.waitFor(() => expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in'));
+		expect(host.textContent).not.toContain('signed in now');
+	});
+
+	it('shows no history line on the held message’s notice once the account is signed in', async () => {
+		vi.stubGlobal('fetch', accountsResponse('held', 'signed_in'));
+		vendorAccounts.set([account('held', { state: 'signed_in' })]);
+		signin.set({ held: { account_id: 'held', route: 'browser', status: 'completed', cause: null } });
+		render(expiryRow('held', { id: 'held-signin-m1' }));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(host.textContent?.trim()).toBe('');
+	});
+
+	it('keeps the stored text for an account that was removed or is not in the list', () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [] }), { status: 200 })));
+		vendorAccounts.set([account('gone', { state: 'removed' })]);
+		render(expiryRow('gone'));
+		expect(host.textContent).toContain('gone is signed out of Claude Code.');
+		expect(host.textContent).not.toContain('signed in now');
 	});
 
 	it('offers sign-in on the structured expired-login cause, not on the wording', () => {
@@ -161,7 +215,7 @@ describe('SystemMessageRow', () => {
 		vi.stubGlobal('fetch', reads);
 		vendorAccounts.set([account('fresh', { state: 'signed_in' })]);
 		render({ id: 'fresh-expiry', role: 'system', content: 'fresh is signed out of Claude Code.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'fresh' } });
-		expect(host.querySelector('.account-recovery')).toBeNull();
+		expect(host.querySelector('.account-recovery button')).toBeNull();
 		await vi.waitFor(() => expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in'));
 	});
 
