@@ -1,5 +1,7 @@
 <script module lang="ts">
 	let requestedAccounts = false;
+	/** Accounts whose sign-in the rows have already checked once: a long chat sends one check per account, not one per row. */
+	const checkedAccounts = new Set<string>();
 </script>
 
 <script lang="ts">
@@ -43,12 +45,14 @@
 	const content = $derived(String(msg.content ?? ''));
 	const linkAt = $derived(linkableAccount ? content.indexOf(PROVIDERS_LINK_TEXT) : -1);
 	const staleModels = $derived(msg.metadata?.cause === 'account_model_cache_changed');
-	const accountRecovery = $derived(linkableAccount && (staleModels || signInExpired || (linkAt >= 0 && content.includes('signed out'))));
+	/** A turn that ended on the exact expired-login error carries `cause_kind` (`llm/error_cause.py`), and its row names the account. */
+	const expiredLogin = $derived(signInExpired || msg.metadata?.cause_kind === 'sign_in_expired');
 	const activeSignin = $derived(accountId ? $signin[accountId] : undefined);
+	/** A row offers live recovery only while the account is in that state now; otherwise it reads as history. */
+	const accountRecovery = $derived(linkableAccount && (staleModels || (expiredLogin && (namedAccount?.state === 'signed_out' || !!activeSignin))));
 	let busy = $state(false);
 	let refreshing = $state(false);
 	let actionError = $state('');
-	let checkedId: string | null = null;
 	function nameOf(id: string | null | undefined) { return $vendorAccounts.find((a) => a.id === id)?.label.text ?? null; }
 	function chatStatus(text: string) { return /[.!?]$/.test(text) ? text : `${text}.`; }
 	async function accountAction(action: 'start' | 'check' | 'cancel') {
@@ -57,7 +61,7 @@
 		const result = await (action === 'start' ? startVendorSignin(accountId) : action === 'check' ? checkVendorSignin(accountId) : cancelVendorSignin(accountId));
 		busy = false;
 		if (result.signin) signin.update((current) => rememberVisibleSignin(current, result.signin!, $vendorAccounts));
-		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Could not check sign-in.';
+		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Couldn’t check sign-in.';
 		else if (result.error) actionError = result.error;
 	}
 	async function refreshModels() {
@@ -68,8 +72,8 @@
 		if (result.signedOut && result.error) actionError = result.error;
 	}
 	$effect(() => {
-		if (accountRecovery && accountId && checkedId !== accountId) {
-			checkedId = accountId;
+		if (accountRecovery && accountId && !checkedAccounts.has(accountId)) {
+			checkedAccounts.add(accountId);
 			if (!$signin[accountId]) void accountAction('check');
 		}
 	});

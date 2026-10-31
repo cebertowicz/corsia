@@ -71,7 +71,7 @@ describe('SystemMessageRow', () => {
 	it('keeps Sign in available when another account holds sign-in', () => {
 		vendorAccounts.set([account('personal'), account('work')]);
 		signin.set({ personal: { account_id: 'personal', route: 'browser', status: 'refused', cause: null, held_by: 'work' } });
-		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } });
+		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'personal' } });
 		expect(host.textContent).toContain('work is already signing in');
 		expect(host.querySelector('button')?.textContent).toBe('Sign in');
 	});
@@ -86,7 +86,7 @@ describe('SystemMessageRow', () => {
 	] as const)('punctuates %s status and uses the appropriate treatment', (status, cause, copy, failure) => {
 		vendorAccounts.set([account('personal'), account('work')]);
 		signin.set({ personal: { account_id: 'personal', route: 'browser', status, cause, held_by: 'work', duplicate_of: 'work' } });
-		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } });
+		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'personal' } });
 		const line = host.querySelector('.account-recovery')!;
 		expect(line.textContent).toContain(copy);
 		expect(line.classList.contains('recovery-failure')).toBe(failure);
@@ -109,7 +109,7 @@ describe('SystemMessageRow', () => {
 				: new Response(JSON.stringify({ account_id: 'personal', route: 'browser', status: 'waiting', cause: null }), { status: 200 }),
 		)));
 		vendorAccounts.set([account('personal')]);
-		const message = { role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } };
+		const message = { role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'personal' } };
 		const first = mount(SystemMessageRow, { target: host, props: { msg: message } });
 		const second = mount(SystemMessageRow, { target: host, props: { msg: message } });
 		flushSync();
@@ -118,6 +118,41 @@ describe('SystemMessageRow', () => {
 		await vi.waitFor(() => expect(host.querySelectorAll('.recovery-working')).toHaveLength(2));
 		expect(host.querySelectorAll('.account-recovery button')).toHaveLength(4);
 		await unmount(first); await unmount(second);
+	});
+
+	it('reads a past signed-out row as history once the account is signed in again', () => {
+		vendorAccounts.set([account('back', { state: 'signed_in' })]);
+		render({ role: 'system', content: 'back is signed out of Claude Code. Sign it in again under Settings › Providers.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'back' } });
+		expect(host.textContent).toContain('back is signed out of Claude Code.');
+		expect(host.querySelector('.account-recovery')).toBeNull();
+		expect(host.querySelector('button')).toBeNull();
+		expect(host.querySelector('a')?.textContent).toBe('Settings › Providers');
+	});
+
+	it('offers sign-in on the structured expired-login cause, not on the wording', () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 })));
+		vendorAccounts.set([account('structured')]);
+		render({ role: 'system', content: 'Reworded error text with no link.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'structured' } });
+		expect(host.querySelector('.account-recovery button')?.textContent).toBe('Sign in');
+	});
+
+	it('does not offer sign-in for a signed-out wording with no structured cause', () => {
+		vendorAccounts.set([account('wording')]);
+		render({ role: 'system', content: 'wording is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'wording' } });
+		expect(host.querySelector('.account-recovery')).toBeNull();
+	});
+
+	it('sends one sign-in check per account however many rows name it', async () => {
+		const fetchChecks = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 }));
+		vi.stubGlobal('fetch', fetchChecks);
+		vendorAccounts.set([account('once')]);
+		const message = { role: 'system', content: 'once is signed out of Claude Code.', metadata: { type: 'cc_error', cause: 'process_exited', cause_kind: 'sign_in_expired', account_id: 'once' } };
+		const rows = [0, 1, 2].map(() => mount(SystemMessageRow, { target: host, props: { msg: message } }));
+		flushSync();
+		await vi.waitFor(() => expect(fetchChecks).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(fetchChecks.mock.calls.filter(([url]) => String(url).includes('/signin/check'))).toHaveLength(1);
+		for (const row of rows) await unmount(row);
 	});
 
 	it('writes no link without a usable account id to land on', () => {
