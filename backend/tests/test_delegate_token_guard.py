@@ -24,7 +24,7 @@ def run_delegate(
 ) -> subprocess.CompletedProcess:
     tf = token_file if token_file is not None else (tmp_path / ".api-token")
     (tmp_path / "home").mkdir(exist_ok=True)
-    env = {
+    settings = {
         "HOME": str(tmp_path / "home"),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
         "CORSIA_DIR": str(corsia_dir or REPO_ROOT),
@@ -34,7 +34,7 @@ def run_delegate(
         "CORSIA_API_BASE": _CLOSED_BASE,
         **(extra_env or {}),
     }
-    env = {name: value for name, value in env.items() if value is not None}
+    env = {name: value for name, value in settings.items() if value is not None}
     return subprocess.run(
         ["bash", str(CORSIA_SCRIPT), "delegate", *args],
         capture_output=True,
