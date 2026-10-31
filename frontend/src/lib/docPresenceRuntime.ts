@@ -1,46 +1,18 @@
 import {
-	ArrivalQueue,
 	onRecordedDocActivity,
 	prunePresence,
 	recordDocActivity,
-	setPresenceHighlight,
 	takePendingArrivals,
+	type ArrivalQueue,
 	type DocActivityFrame,
-	type DocSpan,
 } from '$lib/docPresence';
+import { createArrivalLane, type DocPresenceSurface, type RuntimeArrival } from '$lib/docPresenceLane';
 import { holdCommentArrival, holdCommentCall, releaseCommentArrival, releaseCommentArrivals } from '$lib/stores/docCommentArrivals';
 import { loadComments, onCommentsReloaded, type DocComment } from '$lib/stores/docComments';
 import { connectionState, type ConnectionState } from '$lib/stores/connection';
 import { on } from '$lib/ws/events';
-import type { SelectOutcome } from '$lib/cm/typed-reveal-arrival';
 
-export interface PreparedPresenceArrival {
-	chars: number;
-	/** Display time before the reveal when no editor runs the select (sweep plus hold); defaults to a delay scaled by `chars`. */
-	delayMs?: number;
-	payload?: unknown;
-	highlightSpan?: DocSpan | null;
-}
-
-export interface DocPresenceSurface {
-	isViewing: () => boolean;
-	prepare: (frame: DocActivityFrame) => Promise<PreparedPresenceArrival>;
-	reveal: (frame: DocActivityFrame, payload: unknown) => void | Promise<void>;
-	/**
-	 * Run the arrival's select step in this surface's editor and report how it ended, or null when no
-	 * editor can run one. When it runs it is the arrival's only highlight and clock.
-	 */
-	select?: (frame: DocActivityFrame, prepared: PreparedPresenceArrival) => Promise<SelectOutcome> | null;
-	reducedMotion?: () => boolean;
-	/** False while this surface's live text is away (opening or reconnecting), when nothing can type in it; true when it has none. */
-	textCurrent?: () => boolean;
-}
-
-interface RuntimeArrival {
-	frame: DocActivityFrame;
-	prepared?: PreparedPresenceArrival;
-	failed?: boolean;
-}
+export type { DocPresenceSurface, PreparedPresenceArrival } from '$lib/docPresenceLane';
 
 /** How long a comment named by a change frame is held while its activity frame is awaited. */
 const MISSING_FRAME_WAIT_MS = 5_000;
@@ -183,55 +155,12 @@ class ArtifactArrivalCoordinator {
 		return this.activeSurface()?.reducedMotion?.() ?? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 	}
 
-	private release(arrival: RuntimeArrival): void {
-		if ((arrival.frame.kind !== 'comment' && arrival.frame.kind !== 'suggestion') || !arrival.frame.comment_id) return;
-		releaseCommentArrival(this.artifactId, arrival.frame.comment_id);
-	}
-
 	private createQueue(threadId: string): ArrivalQueue<RuntimeArrival> {
-		return new ArrivalQueue<RuntimeArrival>({
-			isViewing: () => this.activeSurface() !== null,
+		return createArrivalLane({
+			artifactId: this.artifactId,
+			activeSurface: () => this.activeSurface(),
 			reducedMotion: () => this.reducedMotion(),
-			paused: (waiting) => waiting.forEach((arrival) => this.release(arrival)),
-			prepare: async (arrival) => {
-				const surface = this.activeSurface();
-				if (!surface) return { value: arrival, chars: 0 };
-				try {
-					arrival.prepared = await surface.prepare(arrival.frame);
-					return { value: arrival, chars: arrival.prepared.chars, delayMs: arrival.prepared.delayMs };
-				} catch (error) {
-					arrival.failed = true;
-					console.error('document arrival preparation failed', error);
-					return { value: arrival, chars: 0 };
-				}
-			},
-			select: (arrival) => {
-				if (arrival.failed || !arrival.prepared) return null;
-				return this.activeSurface()?.select?.(arrival.frame, arrival.prepared) ?? null;
-			},
-			highlight: (arrival, selecting) => {
-				if (arrival.failed) return;
-				// The editor draws a select it runs itself; the presence mark would be a second highlight.
-				if (selecting) { setPresenceHighlight(this.artifactId, threadId, null, true); return; }
-				const span = arrival.prepared && 'highlightSpan' in arrival.prepared
-					? arrival.prepared.highlightSpan ?? null
-					: arrival.frame.span;
-				setPresenceHighlight(this.artifactId, threadId, span, true, arrival.frame.kind);
-			},
-			reveal: async (arrival) => {
-				try {
-					if (arrival.failed) return;
-					const surface = this.activeSurface();
-					if (surface) await surface.reveal(arrival.frame, arrival.prepared?.payload);
-				} finally {
-					this.release(arrival);
-				}
-			},
-			clear: (arrival) => {
-				setPresenceHighlight(this.artifactId, threadId, null, false);
-				this.release(arrival);
-			},
-		});
+		}, threadId);
 	}
 }
 
