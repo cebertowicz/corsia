@@ -97,6 +97,12 @@ def refused(tmp_path: Path, text: str) -> str:
     return str(caught.value)
 
 
+def test_a_kpi_formula_the_evaluator_lacks_is_refused(tmp_path: Path) -> None:
+    text = small("mean:\n  title: Mean\n  unit: count\n  better: higher\n  formula: mean\n  num: {event: qa.done}\n  min_n: 1")
+    message = refused(tmp_path, text)
+    assert 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile' in message
+
+
 def deciding(extra: str = "", *, name: str = "rate") -> str:
     return (
         f"{name}:\n  title: Rate\n  unit: percent\n  better: higher\n  formula: share\n"

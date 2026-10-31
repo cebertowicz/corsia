@@ -58,7 +58,8 @@ def facts(db: sqlite3.Connection, owner: str, project: str | None, declarations:
     """Load owner/worker facts and platform facts in the project's repository scope."""
     user_id = db.execute("SELECT user_id FROM threads WHERE id=?", (owner,)).fetchone()[0]
     params = MeasurementScope(project="all", agent=owner).params(user_id)
-    workers = {r[0] for r in db.execute(scope_cte() + "SELECT id FROM scope_threads", params)}
+    # The scope closure roots only at an active agent; the owner's own events count for a plain thread too.
+    workers = {r[0] for r in db.execute(scope_cte() + "SELECT id FROM scope_threads", params)} | {owner}
     declared = {d["name"]: d for d in declarations if d["kind"] == "event"}
     user_threads = {r[0] for r in db.execute("SELECT id FROM threads WHERE user_id=?", (user_id,))}
     rows = db.execute("""SELECT event_name,ts,subject_key,project_id,agent_thread_id,attributes,provenance,corroborated_by

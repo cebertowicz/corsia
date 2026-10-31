@@ -92,9 +92,20 @@ async def test_an_agent_outside_any_project_reads_its_kpis(owner) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_thread_that_is_not_an_active_agent_gets_the_usual_error(owner) -> None:
+async def test_a_thread_that_is_not_a_promoted_agent_reads_its_own_synced_kpis(owner) -> None:
     db = get_db()
     _seed_thread(db, "plain", project_id="p")
     db.commit()
     db.close()
-    assert await MeasureStatusTool().execute(_thread_id="plain", kpis=True) == "Error: agent not found"
+    db = get_db()
+    for kind, name, spec in (("event", "demo.done", {"attributes": {}}),
+                             ("kpi", "items", {"title": "Items", "formula": "count", "num": {"event": "demo.done"}, "min_n": 1})):
+        db.execute("INSERT INTO measure_definitions(owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at) "
+                   "VALUES ('plain',?,?,1,?,?, 'hash','2026-01-01')", (kind, name, json.dumps(spec), str(owner / "plain.yaml")))
+    fact(db, "demo.done", 14, {}, agent="plain")
+    db.commit()
+    db.close()
+    shown = json.loads(await MeasureStatusTool().execute(_thread_id="plain", kpis=True))
+    assert sorted(row["name"] for row in shown["kpis"]) == ["items"]
+    assert shown["kpis"][0]["last_complete"]["value"] == 1
+

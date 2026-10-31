@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.measurement_partial import grain_instant
-from api.measurement_scope import resolve_grain, validate_scope
+from api.measurement_scope import MeasurementScope, resolve_grain, validate_scope
 from core.agent_kpi_formula import evaluate, prepare
 from core.agent_kpi_operands import Event, timestamp
 from core.agent_kpi_read import definitions, event_names, facts
@@ -74,62 +74,78 @@ def _read(user_id: str, project: str, agent: str, grain) -> dict[str, Any]:
         scope = validate_scope(db, user_id, project, agent)
         if scope.agent is None:
             raise HTTPException(400, "agent is required")
-        row = db.execute("SELECT project_id FROM threads WHERE id=?", (agent,)).fetchone()
-        actual_project = row[0]
-        declarations = definitions(db, agent)
-        kpis = [item for item in declarations if item["kind"] == "kpi"]
-        names = set().union(*(event_names(item["spec"]) for item in kpis))
-        events = facts(db, agent, actual_project, declarations, names, _repositories(db, actual_project))
-        boundaries = [grain_instant(start) for start in grain.starts] + [grain_instant(grain.current_end)]
-        now = datetime.now(timezone.utc)
-        workflow_names: dict[str, set[str]] = {}
-        for item in kpis:
-            if item['workflow'] and (needed := _builtins(item['spec'])):
-                workflow_names.setdefault(item['workflow'], set()).update(needed)
-        ledger = attributed_facts(db) if any('corrections' in wanted for wanted in workflow_names.values()) else []
-        scoped = scoped_runs(db, user_id, scope) if workflow_names else None
-        prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, wanted, ledger, scoped)
-                    for workflow, wanted in workflow_names.items()}
-        windows = list(zip(boundaries, boundaries[1:]))
-        # Each workflow's builtins are read once per period, however many KPIs use them.
-        builtin_reads = {workflow: [{name: read_builtin(db, builtin=name, workflow=workflow, user_id=user_id, scope=scope,
-                                                        start=start.isoformat(), end=end.isoformat(),
-                                                        prepared=prepared[workflow])
-                                     for name in wanted} for start, end in windows]
-                         for workflow, wanted in workflow_names.items()}
-        results = []
-        for item in kpis:
-            spec = item["spec"]
-            selected = prepare(spec, events)
-            file_events = {entry["name"] for entry in declarations
-                           if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
-            builtin_names = _builtins(spec)
-            version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
-            if builtin_names and item['workflow']:
-                version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')
-                                 for row in prepared[item['workflow']].nodes]
-            versions = _versions(version_rows)
-            periods = []
-            for index, period in enumerate((*grain.periods, grain.current)):
-                start, end = windows[index]
-                builtin_results = {name: builtin_reads[item['workflow']][index][name] for name in builtin_names}
-                value = evaluate(spec, events, start, end,
-                                 builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
-                                 selected=selected)
-                value["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
-                by_version = []
-                for version in versions:
-                    part = evaluate(spec, events, start, end, version["version"],
-                                    builtins={name: _builtin_value(result, version['version'])
-                                              for name, result in builtin_results.items()}, selected=selected)
-                    part["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
-                    by_version.append({"version": version["version"], **part})
-                periods.append({"period": period, **value, "versions": by_version})
-            results.append({"name": item["name"], "definition_version": item["version"], "spec": spec,
-                            "workflow": item["workflow"], "versions": versions, "periods": periods})
-        return {"scope": scope.response(), "kpis": results}
+        actual_project = db.execute("SELECT project_id FROM threads WHERE id=?", (agent,)).fetchone()[0]
+        return _read_scoped(db, user_id, scope, actual_project, grain)
     finally:
         db.close()
+
+
+def read_own(user_id: str, thread_id: str, grain) -> dict[str, Any]:
+    """The calling thread's own KPIs, promoted agent or not; the caller's identity is the authorization."""
+    db = get_db()
+    try:
+        row = db.execute("SELECT project_id FROM threads WHERE id=? AND user_id=?", (thread_id, user_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "thread not found")
+        return _read_scoped(db, user_id, MeasurementScope(project=row[0], agent=thread_id), row[0], grain)
+    finally:
+        db.close()
+
+
+def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str, grain) -> dict[str, Any]:
+    agent = scope.agent
+    declarations = definitions(db, agent)
+    kpis = [item for item in declarations if item["kind"] == "kpi"]
+    names = set().union(*(event_names(item["spec"]) for item in kpis))
+    events = facts(db, agent, actual_project, declarations, names, _repositories(db, actual_project))
+    boundaries = [grain_instant(start) for start in grain.starts] + [grain_instant(grain.current_end)]
+    now = datetime.now(timezone.utc)
+    workflow_names: dict[str, set[str]] = {}
+    for item in kpis:
+        if item['workflow'] and (needed := _builtins(item['spec'])):
+            workflow_names.setdefault(item['workflow'], set()).update(needed)
+    ledger = attributed_facts(db) if any('corrections' in wanted for wanted in workflow_names.values()) else []
+    scoped = scoped_runs(db, user_id, scope) if workflow_names else None
+    prepared = {workflow: prepare_builtin(db, workflow, user_id, scope, wanted, ledger, scoped)
+                for workflow, wanted in workflow_names.items()}
+    windows = list(zip(boundaries, boundaries[1:]))
+    # Each workflow's builtins are read once per period, however many KPIs use them.
+    builtin_reads = {workflow: [{name: read_builtin(db, builtin=name, workflow=workflow, user_id=user_id, scope=scope,
+                                                    start=start.isoformat(), end=end.isoformat(),
+                                                    prepared=prepared[workflow])
+                                 for name in wanted} for start, end in windows]
+                     for workflow, wanted in workflow_names.items()}
+    results = []
+    for item in kpis:
+        spec = item["spec"]
+        selected = prepare(spec, events)
+        file_events = {entry["name"] for entry in declarations
+                       if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
+        builtin_names = _builtins(spec)
+        version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
+        if builtin_names and item['workflow']:
+            version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')
+                             for row in prepared[item['workflow']].nodes]
+        versions = _versions(version_rows)
+        periods = []
+        for index, period in enumerate((*grain.periods, grain.current)):
+            start, end = windows[index]
+            builtin_results = {name: builtin_reads[item['workflow']][index][name] for name in builtin_names}
+            value = evaluate(spec, events, start, end,
+                             builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
+                             selected=selected)
+            value["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
+            by_version = []
+            for version in versions:
+                part = evaluate(spec, events, start, end, version["version"],
+                                builtins={name: _builtin_value(result, version['version'])
+                                          for name, result in builtin_results.items()}, selected=selected)
+                part["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
+                by_version.append({"version": version["version"], **part})
+            periods.append({"period": period, **value, "versions": by_version})
+        results.append({"name": item["name"], "definition_version": item["version"], "spec": spec,
+                        "workflow": item["workflow"], "versions": versions, "periods": periods})
+    return {"scope": scope.response(), "kpis": results}
 
 
 @router.get("/agent-kpis")

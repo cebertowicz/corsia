@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 from core.agent_kpi_operands import Event, attribute, distinct, select
 
+FORMULAS = ("count", "ratio", "rate_per_run", "share", "percentile")
 _LABEL_ORDER = {"Reported by another agent": 0, "Self-reported": 1, "Imported": 2,
                 "Corroborated": 3, "Observed": 4}
 
