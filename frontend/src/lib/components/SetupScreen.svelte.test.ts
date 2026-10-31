@@ -174,11 +174,24 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('#setup-email')?.closest('.field')?.querySelector('.hint')?.textContent).toBe('Used only to sign you up for services you choose, such as web search.');
 	});
 
-	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+	it('labels the name field Full name and prefills the username from the first name', async () => {
 		await settle(); button('Continue')?.click(); await settle();
 		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
 		setInput('setup-name', 'Ada Lovelace'); await settle();
-		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+	});
+
+	it('leaves a cleared or edited username alone when the name changes', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		const username = () => (host.querySelector('#setup-username') as HTMLInputElement).value;
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		setInput('setup-username', ''); await settle();
+		expect(username()).toBe('');
+		setInput('setup-name', 'Ada King'); await settle();
+		expect(username()).toBe('');
+		setInput('setup-username', 'countess'); await settle();
+		setInput('setup-name', 'Augusta King'); await settle();
+		expect(username()).toBe('countess');
 	});
 
 	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {

@@ -11,10 +11,12 @@
 	let { name = $bindable(), username = $bindable(), password = $bindable(), confirmation = $bindable(),
 		email = $bindable(), usernameError, confirmationError, requiredUsername, editing = false, accountError, onSubmit,
 		onValidateConfirmation }: Props = $props();
+	// The username follows the first name until the person edits it; a cleared field stays cleared.
 	let suggested = $state('');
 	$effect(() => {
-		const next = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
-		if (!requiredUsername && !editing && (!username || username === suggested)) username = next;
+		const first = name.trim().split(/\s+/)[0] ?? '';
+		const next = first.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
+		if (!requiredUsername && !editing && username === suggested) username = next;
 		suggested = next;
 	});
 </script>
