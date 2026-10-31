@@ -61,8 +61,8 @@ class _IterationState:
     active_boundary_input: NativeSafeBoundaryInput | None = None
     boundary_write_started: bool = False
     restart_resume_registered: bool = False
-    # (window, response) of the one overflow this Turn sends back to the boundary.
-    overflowed: tuple[int | None, Any] | None = None
+    # The one overflow response this Turn sends back to the boundary.
+    overflowed: Any = None
     overflow_retry_pending: bool = False
 
 

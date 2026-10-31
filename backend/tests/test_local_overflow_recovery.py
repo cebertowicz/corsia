@@ -14,7 +14,7 @@ import pytest
 from core import turn_iteration
 from core import turn_iteration_context as iteration_context
 from core.checkpoint_resume import CheckpointWaitScope
-from core.fork_fit import ProviderPayload, evaluate_boundary
+from core.fork_fit import BoundaryDecision, ProviderPayload, evaluate_boundary
 from core.turn_core import TurnIdentity
 from core.turn_provider_error import TurnProviderError
 from llm.router import LLMResponse
@@ -23,12 +23,18 @@ OVERFLOW = LLMResponse(
     "prefill memory guard rejected", finish_reason="error", error_kind="provider_context_overflow",
 )
 ANSWER = LLMResponse("done")
+CHECKPOINTED = object()
 
 
-async def _run(monkeypatch, responses, *, windows, max_iterations=6):
-    """Run the loop with scripted provider responses and one window per boundary."""
+async def _run(monkeypatch, responses, *, windows, max_iterations=6, checkpoints=True, adopted=None):
+    """Run the loop with scripted provider responses and one window per boundary.
+
+    ``checkpoints`` is whether the retry boundary adopts a checkpoint; ``adopted``
+    collects what the loop adopted.
+    """
     frames: list[str] = []
     boundaries: list[int] = []
+    adopted = [] if adopted is None else adopted
     calls = iter(responses)
     ledger = SimpleNamespace(effective_window_tokens=windows[0])
     state = turn_iteration._IterationState(
@@ -42,6 +48,7 @@ async def _run(monkeypatch, responses, *, windows, max_iterations=6):
         window = next(window_at_boundary)
         boundaries.append(window)
         state.fit_ledger = SimpleNamespace(effective_window_tokens=window)
+        return CHECKPOINTED if state.overflow_retry_pending and checkpoints else None
 
     async def call_provider(*_args, **_kwargs):
         return next(calls), False
@@ -50,6 +57,7 @@ async def _run(monkeypatch, responses, *, windows, max_iterations=6):
         frames.append(kind)
 
     monkeypatch.setattr(iteration_context, "maintain_native_checkpoint", maintain)
+    monkeypatch.setattr(iteration_context, "adopt_native_context", lambda _state, prepared: adopted.append(prepared))
     monkeypatch.setattr(turn_iteration, "_call_provider", call_provider)
     agent = SimpleNamespace(max_iterations=max_iterations, _strip_think=lambda text: text)
     outcome = None
@@ -64,12 +72,14 @@ async def _run(monkeypatch, responses, *, windows, max_iterations=6):
 
 @pytest.mark.asyncio
 async def test_overflow_once_checkpoints_at_the_smaller_window_then_completes(monkeypatch):
+    adopted: list[object] = []
     frames, boundaries, error, state = await _run(
-        monkeypatch, [OVERFLOW, ANSWER], windows=[40_000, 28_672],
+        monkeypatch, [OVERFLOW, ANSWER], windows=[40_000, 28_672], adopted=adopted,
     )
 
     assert error is None
     assert boundaries == [40_000, 28_672]
+    assert adopted == [CHECKPOINTED]  # the retry carries a checkpoint, not the refused payload
     assert "error" not in frames and frames[-1] == "turn_complete"
     assert state.iteration == 2
 
@@ -87,9 +97,9 @@ async def test_overflow_twice_in_one_turn_ends_as_before(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_window_that_did_not_shrink_ends_handled_without_a_second_call(monkeypatch):
+async def test_a_retry_boundary_that_adopts_no_checkpoint_ends_handled_without_a_second_call(monkeypatch):
     frames, boundaries, error, state = await _run(
-        monkeypatch, [OVERFLOW, ANSWER], windows=[28_672, 28_672],
+        monkeypatch, [OVERFLOW, ANSWER], windows=[40_000, 28_672], checkpoints=False,
     )
 
     assert isinstance(error, TurnProviderError)
@@ -304,3 +314,62 @@ async def test_the_fixed_prompt_and_tools_reach_the_warm_and_cold_fork_requests(
 
     assert warm.provider_request.carried_tokens == 18_618
     assert cold.provider_request.carried_tokens == 18_618
+
+
+async def _boundary_call(monkeypatch, *, retry, installed_id, adopted_id="ck-1"):
+    """Run the real Native boundary and capture what it asks of the checkpoint layer."""
+    from core import checkpoint_resume
+    from core.checkpoint_resume import ProviderContinuation
+
+    seen: dict = {}
+    installed = SimpleNamespace(id=installed_id)
+
+    async def run_in_db(function, *_args):
+        if function is iteration_context.provider_boundary_snapshot:
+            return None, installed, None
+        return SimpleNamespace(context_window=28_672)
+
+    async def maintain(boundary, *, must_adopt=False):
+        seen.update(must_adopt=must_adopt, installed=boundary.installed_checkpoint)
+        return ProviderContinuation(BoundaryDecision.PROCEED, boundary.turn)
+
+    monkeypatch.setattr(iteration_context, "run_in_db", run_in_db)
+    monkeypatch.setattr(checkpoint_resume, "maintain_before_provider_call", maintain)
+    ledger = SimpleNamespace(
+        target_catalog_id="local/m", effective_window_tokens=28_672, rendered_input_tokens=21_000,
+        input_identity="i", section_tokens=_sections(14_000, 4_618, 2_000), fits=True,
+    )
+    state = turn_iteration._IterationState(
+        messages=[{"role": "user", "content": "go"}],
+        context_usage={"checkpoint_generation_id": adopted_id, **_usage(14_000, 4_618)},
+        tool_definitions=[], context_identity=None, fit_ledger=ledger, fit_current_input="go",
+        checkpoint_source_messages=[], turn_model="local/m",
+    )
+    state.overflow_retry_pending = retry
+    cancel = SimpleNamespace(checkpoint_wait_scope=CheckpointWaitScope())
+    await iteration_context.maintain_native_checkpoint(
+        agent=None, state=state, thread_id="t", turn_identity=TurnIdentity("turn", 1),
+        cancel_event=cancel, turn_model="local/m", reasoning_effort=None, project_id=None,
+    )
+    return seen, installed
+
+
+@pytest.mark.asyncio
+async def test_the_overflow_retry_boundary_must_adopt_a_checkpoint_newer_than_the_refused_one(monkeypatch):
+    seen, _installed = await _boundary_call(monkeypatch, retry=True, installed_id="ck-1")
+
+    assert seen == {"must_adopt": True, "installed": None}
+
+
+@pytest.mark.asyncio
+async def test_the_overflow_retry_may_adopt_a_checkpoint_installed_since_the_refusal(monkeypatch):
+    seen, installed = await _boundary_call(monkeypatch, retry=True, installed_id="ck-2")
+
+    assert seen == {"must_adopt": True, "installed": installed}
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_boundary_does_not_force_a_checkpoint(monkeypatch):
+    seen, installed = await _boundary_call(monkeypatch, retry=False, installed_id="ck-1")
+
+    assert seen == {"must_adopt": False, "installed": installed}

@@ -35,10 +35,9 @@ async def check_provider_error(state, response, turn_model, thread_id, provider_
                    thread_id, turn, getattr(response, "error_kind", None), response.content)
     overflow = getattr(response, "error_kind", None) == "provider_context_overflow"
     if overflow and state.overflowed is None and retry_available:
-        # The refused call recorded its usage and emitted no step, so the boundary
-        # re-resolves the window and checkpoints before the one retry.
-        window = state.fit_ledger.effective_window_tokens if state.fit_ledger is not None else None
-        state.overflowed = (window, response)
+        # The refused call emitted no step; the boundary re-resolves the window and
+        # must checkpoint before the one retry.
+        state.overflowed = response
         state.overflow_retry_pending = True
         return True
     await end_on_provider_error(state, response, turn_model, provider_on_step, overflow)
@@ -64,12 +63,13 @@ async def end_on_provider_error(state, response, turn_model, provider_on_step, o
 
 
 async def end_if_overflow_unchanged(state, prepared, turn_model, provider_on_step) -> None:
-    """End the Turn, handled, when the one retry would resend what the provider refused."""
+    """End the Turn, handled, when the one retry would resend what the provider refused.
+
+    The retry boundary must adopt a checkpoint (``maintain_native_checkpoint``), so
+    no prepared continuation means the next call would carry the refused payload.
+    """
     if not state.overflow_retry_pending:
         return
     state.overflow_retry_pending = False
-    window, response = state.overflowed
-    ledger = state.fit_ledger
-    smaller = ledger is not None and window is not None and ledger.effective_window_tokens < window
-    if prepared is None and not smaller:
-        await end_on_provider_error(state, response, turn_model, provider_on_step, True)
+    if prepared is None:
+        await end_on_provider_error(state, state.overflowed, turn_model, provider_on_step, True)

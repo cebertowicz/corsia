@@ -269,7 +269,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
     selection = SimpleNamespace(tail=SimpleNamespace(messages=()))
 
     async def maintain(boundary, **options):
-        assert options == {}
+        assert options == {"must_adopt": False}
         adopted = boundary.adopted_checkpoint_id
         assert boundary.installed_checkpoint.id == current["id"]
         observed.append(adopted)
@@ -330,6 +330,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
         active_boundary_input=None,
         last_measured_call_usage=None,
         last_measured_rendered_input_tokens=None,
+        overflow_retry_pending=False,
     )
     cancel = SimpleNamespace(checkpoint_wait_scope=CheckpointWaitScope())
 
