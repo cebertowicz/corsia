@@ -5,6 +5,17 @@ from connections.account_holds import refresh_account_holds
 from connections.account_receipts import ReceiptFence, account_receipt
 from connections.vendor_accounts import get_account, set_account_state
 from infra.database import write_transaction
+from infra.write_effects import after_commit
+
+
+def _publish_models_changed(connection) -> None:
+    """Tell open pages their catalog is stale: the account's state decides every row's ``runs_on``.
+
+    A hold that begins (sign-out, removal, expired login) leaves no released input to announce it.
+    """
+    from infra.state.ws import schedule_models_changed
+
+    after_commit(connection, schedule_models_changed)
 
 
 def change_state(account_id: str, state: str, *, expected_revision: int, db=None) -> dict:
@@ -12,6 +23,8 @@ def change_state(account_id: str, state: str, *, expected_revision: int, db=None
     with write_transaction(db, scope="vendor_account_hold_lifecycle") as connection:
         account = set_account_state(account_id, state, expected_revision=expected_revision, db=connection)
         refresh_account_holds(account_id, db=connection)
+        if state != "signed_in":  # a sign-in announces itself once its own refresh and bind finish
+            _publish_models_changed(connection)
         return account
 
 
@@ -29,4 +42,5 @@ def sign_out_expired(receipt: ReceiptFence, *, db=None) -> dict:
         account = set_account_state(receipt.account_id, "signed_out", expected_revision=account["revision"],
                                     db=connection)
         refresh_account_holds(receipt.account_id, db=connection)
+        _publish_models_changed(connection)
         return account

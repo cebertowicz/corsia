@@ -458,6 +458,7 @@ def test_both_real_status_consumers_show_live_pending_separate_from_history(held
     assert 'Verify the signed-in account' in str(read_status(db, plan, 'worker', node.id))
     assert 'Verify the signed-in account' in str(read_status(db, parent_plan, 'parent', step.id))
     assert next(r for r in own['current']['rows'] if r['id'] == node.id)['label'] == 'waiting'
+    db.commit()  # a state change publishes after its own commit, so it must own the transaction
     custom = change_state(custom['id'], 'signed_out', expected_revision=custom['revision'], db=db)
     notice = wakes(db)[-1]
     assert 'it is signed out' in notice['content']
