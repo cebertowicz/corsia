@@ -117,10 +117,13 @@ def _seed(db, model):
     )
     db.execute("UPDATE threads SET next_message_seq=11 WHERE id='held-thread'")
     # The resumed launch freezes the current Turn's login: stamp its input like a real claim.
+    # A native Turn carries no account, so it has no login to stamp.
     db.execute("UPDATE messages SET active_turn_id='turn-current' WHERE id='u8'")
+    from connections.vendor_accounts import VENDORS
     from infra.vendor_login import stamp_initial_claim
 
-    assert stamp_initial_claim(db, "turn-current", "u8") is not None
+    stamped = stamp_initial_claim(db, "turn-current", "u8") is not None
+    assert stamped == (model.split("/", 1)[0] in VENDORS)
     db.commit()
 
 

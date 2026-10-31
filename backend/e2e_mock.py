@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 import e2e_mock_calls as mock_calls
+from e2e_mock_harnesses import connect_fixture_harnesses
 import e2e_pressure_fixture as pressure_fixture
 from e2e_mock_responses import _make_chunk, _make_non_streaming
 
@@ -283,18 +284,7 @@ def seed_mock_catalog() -> None:
                 ) in harness_rows
             ),
         )
-    for harness, binary in fixture_binaries.items():
-        if binary is None:
-            continue
-        config = {"binary": binary}
-        if harness == "codex":
-            config["app_server"] = True
-        db.execute(
-            """INSERT OR REPLACE INTO connections
-               (id,type,provider,config,status,scope,created_at,updated_at)
-               VALUES (?, 'cli', ?, ?, 'available', 'global', ?, ?)""",
-            (f"mock-{harness}", harness, json.dumps(config), now, now),
-        )
+    connect_fixture_harnesses(db, fixture_binaries, {h: [r[0] for r in harness_rows if r[1] == h] for h in fixture_binaries}, now)
     db.commit()
     db.close()
 
