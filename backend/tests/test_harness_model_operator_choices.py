@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from vendor_account_fixtures import seed_catalog
+from vendor_account_fixtures import seed_catalog, signed_in_default
 
 
 def _row(selector: str, name: str, *, available: bool = True) -> dict:
@@ -52,6 +52,7 @@ def claude_code(isolated_db):
         type=ConnectionType.CLI, provider="claude-code",
         status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/claude"},
     )
+    signed_in_default("claude-code")
 
 
 def test_a_hidden_and_renamed_model_stays_that_way_across_discovery(claude_code):

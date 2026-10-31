@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vendor_account_fixtures import seed_catalog
+from vendor_account_fixtures import seed_catalog, signed_in_default
 from PIL import Image
 
 from core.media_projection import ValidatedImage, ValidatedMediaProjection
@@ -120,10 +120,10 @@ def _target():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("is_subagent", [False, True])
 async def test_cc_dispatch_forwards_same_projection(
+    isolated_db,
     monkeypatch,
     is_subagent: bool,
 ) -> None:
-    from connections import models
     from infra import effort, send_dispatch, state
     from infra.send_dispatch import DispatchContext, _accept_cc
 
@@ -131,7 +131,7 @@ async def test_cc_dispatch_forwards_same_projection(
     accepted = TurnIdentity("cc-turn", 1)
     adapter = AsyncMock(return_value=("cc-runtime", accepted))
     monkeypatch.setattr(effort, "resolve_effort", lambda *_args: None)
-    monkeypatch.setattr(models, "connection_available", lambda _name: True)
+    signed_in_default("claude-code")
     monkeypatch.setattr(state, "owner_broadcast", lambda _owner: None)
     monkeypatch.setattr(
         send_dispatch,

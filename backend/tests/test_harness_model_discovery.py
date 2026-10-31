@@ -609,7 +609,8 @@ def test_legacy_fallback_is_a_catalog_row_only_until_first_discovery_attempt(
         status=ConnectionStatus.AVAILABLE, config={"binary": "codex"},
         db=connections_db,
     )
-    assert _model_rows(connections_db, "codex") == {}
+    # Installing records no discovery attempt, so the placeholder stays.
+    assert list(_model_rows(connections_db, "codex")) == ["gpt-5-codex"]
 
     upsert_connection(
         type=ConnectionType.CLI, provider="codex",

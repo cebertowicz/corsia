@@ -19,7 +19,9 @@ def _insert_history_with_checkpoint_floor() -> None:
     from infra.checkpoints import capture, create_running, install
     from infra.database import get_db
     from registry.service import register_codex_thread
+    from vendor_account_fixtures import signed_in_default
 
+    signed_in_default("codex")
     db = get_db()
     try:
         db.execute(
