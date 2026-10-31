@@ -22,7 +22,7 @@
   "limits": {
     "backend/api/project_repos.py": 784,
     "backend/api/project_scaffolding.py": 447,
-    "backend/connections/harness_models.py": 557,
+    "backend/connections/harness_models.py": 550,
     "backend/core/step_handler.py": 424,
     "backend/core/thread_lifecycle.py": 498,
     "backend/host_access/processes.py": 1404,
