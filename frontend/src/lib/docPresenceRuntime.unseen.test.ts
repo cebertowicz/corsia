@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerComment } from '$lib/api/docs';
-import { resetDocPresenceForTests } from './docPresence';
+import { recordDocActivity, resetDocPresenceForTests } from './docPresence';
 import { attachDocPresenceSurface, startDocPresence } from './docPresenceRuntime';
 import { commentLoads, docComments, loadComments } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
@@ -86,6 +86,18 @@ describe('a reload that finds a suggestion this canvas never showed', () => {
 		expect(typed).toHaveLength(1);
 		await vi.advanceTimersByTimeAsync(TYPING_MS);
 		await loadComments(ART);
+		expect(typed).toHaveLength(1);
+		expect(shown()).toEqual(['s1']);
+	});
+
+	it('types it once when its real activity frame arrives after the unseen arrival', async () => {
+		const typed = attach();
+		await loadedThenReload([suggestion('s1')]);
+		recordDocActivity({
+			type: 'doc_activity', artifact_id: ART, thread_id: 'agent-a', agent: 'agent-a', kind: 'suggestion',
+			span: { from: 1, to: 4 }, comment_id: 's1', revision: null, at: '2026-10-08T20:00:00Z', call_id: null,
+		});
+		await vi.advanceTimersByTimeAsync(TYPING_MS * 3);
 		expect(typed).toHaveLength(1);
 		expect(shown()).toEqual(['s1']);
 	});

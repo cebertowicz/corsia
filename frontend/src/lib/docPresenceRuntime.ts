@@ -108,6 +108,8 @@ class ArtifactArrivalCoordinator {
 	}
 
 	enqueue(frame: DocActivityFrame): void {
+		// A second frame for a comment a lane already holds (an unseen arrival, then its real frame) must not type it twice.
+		if ((frame.kind === 'comment' || frame.kind === 'suggestion') && frame.comment_id && this.staged.has(frame.comment_id)) return;
 		let queue = this.queues.get(frame.thread_id);
 		if (!queue) {
 			queue = this.createQueue(frame.thread_id);
