@@ -115,3 +115,51 @@ async def test_upgraded_send_waits_then_runs_on_the_accounts_own_home(
     else:
         assert homes.claude_dir == account['source_home']
     db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('vendor', ['codex', 'claude-code'])
+async def test_source_state_follows_the_accounts_through_sign_in_and_removal(isolated_db, vendor):
+    """First-run setup and Settings read the vendor source state: it follows the account, not a restart."""
+    from connections.account_discovery_commit import commit_discovery_bundle
+    from connections.account_receipts import capture_receipt
+    from connections.account_signin_commit import commit_signed_in
+    from connections.models import get_connection
+    from connections.source_state import NEEDS_AUTH, READY, row_state
+    from connections.vendor_accounts import get_account, set_account_state
+    from infra.database import get_db
+    from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
+    from llm.local_setup_gates import subscription_available
+
+    db = get_db()
+    _pre_upgrade_install(db, vendor, 'needs_auth')
+    migrate_166_to_167(db)
+    db.commit()
+    account = get_account('ambient', db=db)
+    # The upgrade leaves the vendor needing sign-in, and no subscription for setup to count.
+    assert await subscription_available() is None
+
+    if vendor == 'codex':
+        (Path(account['source_home']) / 'auth.json').write_text(json.dumps({
+            'auth_mode': 'chatgpt', 'tokens': {'access_token': 'journey'}}))
+    identity = {'account_fp': 'journey'} if vendor == 'codex' else {'email': 'journey@example.test'}
+    commit_signed_in('ambient', account['revision'], identity)
+    # A login with no discovery proves nothing yet.
+    assert row_state(get_connection(vendor, db=db))['state'] != READY
+
+    receipt = capture_receipt(vendor, account_id='ambient', db=db)
+    result = commit_discovery_bundle(
+        vendor, SimpleNamespace(usage_report=None, cache_stage=None, unlisted_errors={}),
+        [{'selector_id': 'journey', 'available': True}],
+        context=SimpleNamespace(receipt=receipt, account_id='ambient'), harness_version='1', db=db)
+    assert result.status == 'ready'
+    assert row_state(get_connection(vendor, db=db))['state'] == READY
+    source = await subscription_available()
+    assert source is not None and source.provider == vendor
+
+    current = get_account('ambient', db=db)
+    set_account_state('ambient', 'removed', expected_revision=current['revision'], db=db)
+    db.commit()
+    assert row_state(get_connection(vendor, db=db))['state'] == NEEDS_AUTH
+    assert await subscription_available() is None
+    db.close()

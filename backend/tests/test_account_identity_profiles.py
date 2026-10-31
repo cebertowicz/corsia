@@ -1243,7 +1243,8 @@ def test_sign_out_route_calls_the_profile_hook_after_the_state_commits(client, m
         seen.append((account["provider"], get_account(account["id"])["state"]))
         return {"status": "done", "cause": None}
 
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"})
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config={"binary": "/bin/test", "harness_model_cache": {}})
     for provider in ("codex", "claude-code"):
         monkeypatch.setitem(account_profiles._PROFILES, provider,
                             replace(account_profiles.profile_for(provider), sign_out=recorder))

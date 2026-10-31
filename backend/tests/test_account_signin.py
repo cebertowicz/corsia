@@ -175,9 +175,9 @@ def scripted_vendor_clis(isolated_db, tmp_path, monkeypatch):
     log.touch()
     monkeypatch.setenv("VENDOR_LOG", str(log))
     upsert_connection(type="cli", provider="codex", status="available",
-                      config={"binary": _script(tmp_path / "codex", _CODEX)})
+                      config={"binary": _script(tmp_path / "codex", _CODEX), "harness_model_cache": {}})
     upsert_connection(type="cli", provider="claude-code", status="available",
-                      config={"binary": _script(tmp_path / "claude", _CLAUDE)})
+                      config={"binary": _script(tmp_path / "claude", _CLAUDE), "harness_model_cache": {}})
     default_codex, default_claude = tmp_path / "default-codex", tmp_path / "default-claude"
     default_codex.mkdir()
     default_claude.mkdir()
@@ -1450,7 +1450,7 @@ def test_routes_run_sign_in_to_sign_out_and_never_return_the_cleanup_as_identity
     monkeypatch.setenv("TEST_CLAUDE_DEFAULT", str(default_claude))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "default-codex"))
     upsert_connection(type="cli", provider="claude-code", status="available",
-                      config={"binary": _script(tmp_path / "claude", _CLAUDE)})
+                      config={"binary": _script(tmp_path / "claude", _CLAUDE), "harness_model_cache": {}})
     account_controls._SIGNINS.clear()
     app = FastAPI()
     app.include_router(router)

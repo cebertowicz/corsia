@@ -137,6 +137,23 @@ def apply_check(
     return row
 
 
+def record_last_account_left(provider: str, *, db) -> None:
+    """Record that sign-in is needed once no signed-in account of the vendor remains.
+
+    The writer the account lifecycle calls inside its own transaction, the counterpart
+    of the READY an account's committed discovery records. A vendor that is not
+    installed keeps that state.
+    """
+    from connections.vendor_accounts import list_accounts
+
+    if any(account["state"] == "signed_in" for account in list_accounts(provider=provider, db=db)):
+        return
+    row = get_connection(provider, db=db)
+    if row is None or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
+        return
+    apply_check(provider, NEEDS_AUTH, "account_not_configured", db=db, schedule_usage_check=False)
+
+
 def _ensure_row(provider: str, cfg: dict, binary: str | None) -> None:
     """Create or refresh the row so the check has a place to land."""
     existing = get_connection(provider)

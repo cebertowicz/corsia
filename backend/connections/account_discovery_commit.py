@@ -108,6 +108,10 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
 
         record_refresh_attempt(provider, harness_version=harness_version, source=_ADAPTERS[provider][2],
                                timestamp=utc_now_iso(), error=None, db=connection)
+        # The vendor's source is ready once any account's discovery commits ready.
+        from connections.source_state import READY, apply_check
+
+        apply_check(provider, READY, db=connection, schedule_usage_check=False)
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 

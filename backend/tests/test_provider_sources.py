@@ -351,7 +351,8 @@ class TestClaudeSignIn:
         real = source_state.apply_check
 
         def flaky(provider, state, reason=None, *, db=None, schedule_usage_check=True):
-            if state == source_state.READY:
+            # The check's own write; the discovery commit's READY has no usage check and is in its transaction.
+            if state == source_state.READY and schedule_usage_check:
                 raise OSError("database is locked")
             return real(provider, state, reason, db=db, schedule_usage_check=schedule_usage_check)
 
@@ -359,7 +360,7 @@ class TestClaudeSignIn:
         self._recheck()
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified"
-        assert claude["prior_state"] == "needs_auth"
+        assert claude["prior_state"] == "ready"
         assert claude["reason"] == "Check failed: database is locked"
 
     def test_a_state_write_that_finds_no_row_is_reported_unverified(

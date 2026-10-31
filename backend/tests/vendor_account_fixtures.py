@@ -26,6 +26,8 @@ from tests.child_parent_notice_helpers import delegated
 
 
 KEY = "_corsia_vendor_login"
+# What a harness's discovery leaves on its connection: an available harness has its catalog rows and this.
+DISCOVERED = {"harness_model_cache": {}}
 
 
 THREAD, MODEL = "claude-destination", "claude-code/test"
@@ -371,7 +373,8 @@ def accounts(isolated_db):
     from connections.vendor_accounts import add_account, set_account_state
     from infra.database import get_db
 
-    upsert_connection(type="cli", provider="codex", status="available", config={"binary": "/bin/test"})
+    upsert_connection(type="cli", provider="codex", status="available",
+                      config=DISCOVERED | {"binary": "/bin/test"})
     second = add_account("codex", "Second")
     second = set_account_state(second["id"], "signed_in", expected_revision=0)
     third = add_account("codex", "Third")
@@ -401,7 +404,8 @@ def vendors(accounts):
     from connections.vendor_accounts import add_account, set_account_state
 
     db, default, codex, third = accounts
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/synthetic"})
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config=DISCOVERED | {"binary": "/bin/synthetic"})
     signed_in_default("claude-code")
     claude = add_account("claude-code", "Claude Second")
     claude = set_account_state(claude["id"], "signed_in", expected_revision=0)
@@ -471,7 +475,8 @@ def claude(accounts):
     from connections.vendor_accounts import add_account, set_account_state
 
     db = accounts[0]
-    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/synthetic"})
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config=DISCOVERED | {"binary": "/bin/synthetic"})
     db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
                "VALUES (?,'user',?,'destination-project','t','t')", (THREAD, MODEL))
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "

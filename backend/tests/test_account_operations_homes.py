@@ -58,7 +58,8 @@ MEASURED = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
 
 
 def _seed(provider, db):
-    upsert_connection(type="cli", provider=provider, status="available", config={}, db=db)
+    upsert_connection(type="cli", provider=provider, status="available",
+                      config={"harness_model_cache": {}}, db=db)
     model = provider + "/account-test"
     db.execute("""INSERT INTO models
         (id,harness,provider,provider_model_id,litellm_model,display_name,created_at,updated_at)
