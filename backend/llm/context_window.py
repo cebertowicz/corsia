@@ -240,7 +240,7 @@ def resolve_window_facts(row: Mapping[str, Any], *, db=None) -> WindowFacts:
     override = _saved_override(
         harness, model_id, lambda: _profile_context_window(model_id, db=db)
     )
-    return _facts_with_override(data, harness, override)
+    return _with_memory_fit(data, _facts_with_override(data, harness, override))
 
 
 def resolve_unsaved_window_facts(row: Mapping[str, Any]) -> WindowFacts:
@@ -307,8 +307,23 @@ def resolve_window_facts_for_rows(
         harness = str(data.get("harness") or "native")
         model_id = str(data.get("id") or "")
         override = _saved_override(harness, model_id, read_for(model_id))
-        facts.append(_facts_with_override(data, harness, override))
+        facts.append(_with_memory_fit(data, _facts_with_override(data, harness, override)))
     return facts
+
+
+def _with_memory_fit(data: Mapping[str, Any], facts: WindowFacts) -> WindowFacts:
+    """Cap a local oMLX row's window by what fits in memory right now.
+
+    The one place the physical limit enters; ``discovered`` stays the model's own.
+    """
+    if facts.effective is None:
+        return facts
+    from llm.memory_fit import memory_fit_window
+
+    fit = memory_fit_window(data)
+    if fit is None or fit >= facts.effective:
+        return facts
+    return facts._replace(effective=fit, source="memory")
 
 
 def _names_extended_window(data: Mapping[str, Any]) -> bool:

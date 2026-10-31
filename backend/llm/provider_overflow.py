@@ -79,6 +79,27 @@ async def refit_after_overflow_rediscovery(
     return required <= window
 
 
+def _learn_memory_fit(
+    error: Exception, model: str, messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None, omlx_server_id: str | None,
+) -> None:
+    """Record what an oMLX prefill-guard refusal teaches about this prompt's size.
+
+    The wire model is ``openai/<model_id>``; the managed server travels beside it.
+    """
+    from core.token_estimation import _estimate_messages_tokens, _text_tokens
+    from llm.memory_fit import record_refusal
+
+    if not omlx_server_id:
+        return
+    tokens = _estimate_messages_tokens(list(messages), model=model)
+    if tools:
+        tokens += _text_tokens(json.dumps(tools, sort_keys=True, default=str), model) + 4
+    record_refusal(
+        omlx_server_id, model.removeprefix("openai/"), str(error), prompt_tokens=tokens,
+    )
+
+
 async def overflow_disposition(
     error: Exception,
     model: str,
@@ -87,6 +108,7 @@ async def overflow_disposition(
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int | None = None,
     already_retried: bool = False,
+    omlx_server_id: str | None = None,
 ) -> OverflowDisposition:
     """Decide the dispatch loop's response to one provider error.
 
@@ -97,6 +119,7 @@ async def overflow_disposition(
     """
     if not is_context_overflow_error(error):
         return OverflowDisposition.NOT_OVERFLOW
+    _learn_memory_fit(error, model, messages, tools, omlx_server_id)
     if not already_retried and await refit_after_overflow_rediscovery(
         model, messages=messages, tools=tools, max_tokens=max_tokens,
     ):
