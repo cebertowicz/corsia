@@ -27,7 +27,7 @@ from tests.child_parent_notice_helpers import delegated
 
 KEY = "_corsia_vendor_login"
 # What a harness's discovery leaves on its connection: an available harness has its catalog rows and this.
-DISCOVERED = {"harness_model_cache": {}}
+DISCOVERED: dict[str, dict] = {"harness_model_cache": {}}
 
 
 THREAD, MODEL = "claude-destination", "claude-code/test"
