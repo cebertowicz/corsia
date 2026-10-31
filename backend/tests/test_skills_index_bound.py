@@ -126,7 +126,7 @@ def test_non_system_descriptions_are_bounded_but_system_descriptions_are_not(mon
 
     content = index.prompt_content or ""
     assert f"- system: {long_description}" in content
-    assert f"- workspace: {'x' * 500} (" in content
+    assert content.endswith(f"- workspace: {'x' * 500}")
     assert f"- workspace: {long_description}" not in content
 
 
@@ -204,3 +204,31 @@ def test_trial_token_estimate_uses_its_delivered_line(monkeypatch):
     skill = inventory["metadata"]["skills"][0]
 
     assert skill["prompt_tokens"] == line_tokens(_trial_record(trial)["index_line"])
+
+
+def _odd_row(scope: str, scope_id: str) -> SkillRow:
+    row = _row("odd", scope, scope_id)
+    return SkillRow(**{**row.__dict__, "path": Path("/elsewhere/renamed/SKILL.md")})
+
+
+def test_rows_sharing_a_root_state_it_once_and_an_odd_path_keeps_its_own(monkeypatch):
+    rows = [_row("first", "workspace", "workspace"), _row("second", "workspace", "workspace"), _odd_row("system", "v1")]
+    lines = (_index(monkeypatch, rows).prompt_content or "").splitlines()
+
+    header = "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md):"
+    assert lines.count(header) == 1
+    assert "- first: Use this skill." in lines
+    assert "- second: Use this skill." in lines
+    assert "- odd: Use this skill. (/elsewhere/renamed/SKILL.md)" in lines
+    assert not any("/first/SKILL.md" in line for line in lines)
+
+
+def test_overflow_names_share_a_root_header_and_an_odd_path_keeps_its_own(monkeypatch):
+    rows = [_row(f"extra-{number:02}", "project", "project") for number in range(40)]
+    rows += [_row("first", "workspace", "workspace"), _row("second", "workspace", "workspace"), _odd_row("workspace", "workspace")]
+    overflow = (_index(monkeypatch, rows).prompt_content or "").splitlines()[-1]
+
+    assert overflow.startswith("Also installed, listed by name only")
+    assert "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md): " in overflow
+    assert "odd (/elsewhere/renamed/SKILL.md)" in overflow
+    assert "/first/SKILL.md" not in overflow
