@@ -350,7 +350,7 @@
 		return () => clearInterval(timer);
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
-	let localAutoStarted = false; // a failed or cancelled sign-in can leave no model when the installer skipped the free download: start it without a click
+	let localAutoStarted = false; // a failed Claude Code or Codex sign-in can leave no model when the installer skipped the free download: start it without a click
 	$effect(() => {
 		if (page !== 'models' || localAutoStarted || !eligible || neverLocal || localModelActive || localFailed || !CLI_VENDORS.some((vendor) => connectFlow.attempts[vendor]?.attempt === 'signin_failed')) return;
 		localAutoStarted = true; void startLocal();

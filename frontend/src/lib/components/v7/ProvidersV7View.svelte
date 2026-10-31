@@ -3,6 +3,7 @@
 	import { get } from 'svelte/store';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
+		agentCliGroup,
 		harnessInventoryError,
 		hostGroups,
 		hostGroupsLoading,
@@ -164,7 +165,7 @@
 	const groups = $derived.by<HostGroup[]>(() => {
 		// A vendor with no models yet (not signed in, or still setting up) is a row of Agent CLIs too.
 		const base = cliRows.length && !baseGroups.some((group) => group.key === 'agent-clis')
-			? [...baseGroups, { key: 'agent-clis', name: 'Agent CLIs', subname: 'Run by the CLI on this computer', netKind: 'localhost' as const, providers: [] }]
+			? [...baseGroups, agentCliGroup()]
 			: baseGroups;
 		if (!localSetupRow) return base;
 		const local = base.find((group) => group.key === 'this-mac');
