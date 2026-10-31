@@ -189,6 +189,10 @@ describe('SetupScreen', () => {
 		expect(username()).toBe('');
 		setInput('setup-name', 'Ada King'); await settle();
 		expect(username()).toBe('');
+		// Clearing the name too makes the suggestion empty; the cleared username still stays cleared.
+		setInput('setup-name', ''); await settle();
+		setInput('setup-name', 'Grace Hopper'); await settle();
+		expect(username()).toBe('');
 		setInput('setup-username', 'countess'); await settle();
 		setInput('setup-name', 'Augusta King'); await settle();
 		expect(username()).toBe('countess');
