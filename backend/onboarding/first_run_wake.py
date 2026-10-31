@@ -14,6 +14,8 @@ import logging
 from dataclasses import replace
 from typing import Any
 
+from infra.settings import get_host_access_auto_approve
+
 log = logging.getLogger(__name__)
 
 FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
@@ -23,7 +25,7 @@ APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
+    "local_eligible", "auto_approve", "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
     "setup", "user_profile",
 })
 APP_PLAN_FACT_KEYS = APP_FACT_KEYS | {"connected_app_count", "email_calendar_ready"}
@@ -39,6 +41,8 @@ UNAVAILABLE_READS = {
     "sources_missing": "tool model_sources, once, without recheck",
     "agents_found": "none; skip the import step unless its consent decision is available",
     "local_download": "corsia_api GET /api/providers/local/setup",
+    "auto_approve": "none; corsia_api hides host-access fields, so say nothing about its state",
+    "local_eligible": "none; say nothing about local models",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
     "setup_picks": "setup progress picks saved on the subscriptions screen",
@@ -148,6 +152,10 @@ def _app_local_download() -> dict[str, Any]:
     return current()
 
 
+def _app_local_eligible(snapshot: dict[str, Any]) -> bool:
+    return any(item.get("source") == "omlx" and (item.get("eligible") is True or item.get("state") == "ready") for item in snapshot["sources"])
+
+
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
     return any(snapshot[key].get("state") == "ready" for key in ("github_agent", "github"))
 
@@ -234,6 +242,7 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
         "setup": lambda: setup_decisions.setup_plan(self_check_passed=True, probe_web_search=False),
         "host_access_reviewer": lambda: run_in_db(host_access_reviewer_status),
         "web_search_key": lambda: run_in_db(_web_search_key),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     return {"first_run_path": path, **facts}
 
@@ -253,12 +262,15 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "setup_picks": lambda: run_in_db(_app_setup_picks),
         "setup": lambda: _app_setup(model),
         "user_profile": lambda: run_off_db(_app_user_profile),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     snapshot = reads.pop("model_sources")
     harness_ready: list[str] | dict[str, str]
     github_ready: bool | dict[str, str]
+    local_eligible: bool | dict[str, str] = _unavailable("local_eligible")
     if isinstance(snapshot, dict) and "unavailable" not in snapshot:
         harness_ready = _app_harness_ready(snapshot)
+        local_eligible = _app_local_eligible(snapshot)
         sources_missing: dict[str, str] = _app_sources_missing(snapshot)
         github_ready = _app_github_ready(snapshot)
     else:
@@ -286,6 +298,8 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "sources_missing": sources_missing,
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
+        "local_eligible": local_eligible,
+        "auto_approve": reads["auto_approve"],
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
         "web_search_ready": reads["web_search_ready"],
@@ -363,16 +377,16 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
         if facts is None:
             facts = await read_app_facts(model)
         else:
-            facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
-            # Consent names the person-selected provider, which was unknown in setup.
-            from onboarding import setup_decisions
+            # The snapshot predates the person's choices: re-read the Auto-approve switch they can change.
+            facts = {**facts, "bound_model": await run_in_db(_bound_model, model),
+                     **await _read_facts({"auto_approve": lambda: run_in_db(get_host_access_auto_approve)})}
+            from onboarding import setup_decisions  # consent names the provider picked after setup
             harness_ready = facts.get("harness_ready", [])
             ready = {"claude-code" if source == "claude_code" else source
                      for source in harness_ready} if isinstance(harness_ready, list) else set()
             setup = facts.get("setup")
             cached_decisions = setup.get("setup_decisions") if isinstance(setup, dict) else None
-            # An unavailable marker stays as it is: it sends the agent to the live read, and a
-            # partial list beside it would pass for the complete one.
+            # An unavailable marker stays as it is: a partial list beside it would pass for the complete one.
             if isinstance(cached_decisions, list):
                 card = await run_in_db(setup_decisions.import_card, model, ready)
                 decisions = [item for item in cached_decisions if item.get("title") != IMPORT_DECISION_TITLE]

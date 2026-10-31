@@ -262,6 +262,55 @@ def test_the_cli_and_the_setup_route_write_the_same_profile(client, workspace, m
     )
 
 
+@pytest.mark.parametrize("route", ["setup", "cli"])
+def test_fresh_first_account_stores_auto_approve(client, workspace, monkeypatch, route):
+    from infra.settings import get_host_access_auto_approve, get_setting
+
+    if route == "setup":
+        assert _post(client, REQUEST).status_code == 200
+    else:
+        assert _cli_first_account(monkeypatch, name="pat", answers=["Pat Example", "pat@example.test"]) == 0
+    assert get_setting("agents")["defaults"]["host_access_auto_approve"] is True
+    assert get_host_access_auto_approve() is True
+
+
+def test_existing_install_without_a_stored_value_stays_off(client, workspace):
+    from infra.settings import get_host_access_auto_approve, get_setting
+
+    accounts.create_user("existing", PASSWORD, first_run_wake=False)
+    assert get_host_access_auto_approve() is False
+    assert _post(client, REQUEST).status_code == 409
+    assert get_host_access_auto_approve() is False
+    assert "host_access_auto_approve" not in (get_setting("agents") or {}).get("defaults", {})
+
+
+def test_first_account_claiming_existing_data_leaves_auto_approve_off(client, workspace):
+    from infra.settings import get_host_access_auto_approve, get_setting
+
+    _own_data("pat")
+    assert _post(client, REQUEST).status_code == 200
+    assert get_host_access_auto_approve() is False
+    assert "host_access_auto_approve" not in (get_setting("agents") or {}).get("defaults", {})
+
+
+@pytest.mark.parametrize("value", [False, True, None])
+def test_first_account_preserves_a_stored_auto_approve_value(client, workspace, value):
+    from infra.settings import get_setting, save_setting_merge
+
+    save_setting_merge("agents", {"defaults": {"host_access_auto_approve": value}})
+    assert _post(client, REQUEST).status_code == 200
+    assert get_setting("agents")["defaults"]["host_access_auto_approve"] is value
+
+
+def test_failed_first_account_commit_does_not_store_auto_approve(client, workspace, monkeypatch):
+    from infra.settings import get_host_access_auto_approve, get_setting
+
+    monkeypatch.setattr(accounts, "write_transaction", _failing_commit(accounts.write_transaction))
+    assert _post(client, REQUEST).status_code == 500
+    assert get_host_access_auto_approve() is False
+    assert "host_access_auto_approve" not in (get_setting("agents") or {}).get("defaults", {})
+
+
 def test_cli_first_account_queues_the_script_path(workspace, monkeypatch):
     import json
 

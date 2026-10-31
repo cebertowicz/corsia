@@ -82,7 +82,7 @@ const APPROVED_WELCOME = {
 	rows: [
 		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
 		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
-		'Asks you first: sending or posting as you, spending money, and opening files outside your work folder.',
+		'Asks you first: sending or posting as you, and spending money.',
 	],
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();

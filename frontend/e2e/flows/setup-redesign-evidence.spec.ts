@@ -261,7 +261,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
 	if (fixture.screen === 'protected') {
-		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
+		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking. Outside it, access needs approval.')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();

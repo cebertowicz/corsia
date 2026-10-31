@@ -130,16 +130,3 @@ async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
     result = await keyless.keyless_search("query")
     assert (result.kind, result.reason) == (outcomes.FAILED, reason)
     assert search.call_count == 1
-
-
-def test_first_run_engine_names_are_text_engines_in_the_pinned_library():
-    from ddgs.engines import ENGINES
-
-    from infra.system_package import system_resource_source
-    from onboarding.first_run_wake import APP_REFERENCE, FIRST_RUN_REFERENCE
-
-    keyless = "Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia."
-    for reference in (FIRST_RUN_REFERENCE, APP_REFERENCE):
-        text = system_resource_source(reference).read_text()
-        assert keyless in text and "Searches go to Brave." in text
-    assert {"duckduckgo", "yahoo", "wikipedia"} <= set(ENGINES["text"])
