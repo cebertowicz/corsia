@@ -27,7 +27,7 @@ OVERFLOW = LLMResponse(
 ANSWER = LLMResponse("done")
 
 
-async def _run(monkeypatch, responses, *, windows):
+async def _run(monkeypatch, responses, *, windows, max_iterations=6):
     """Run the loop with scripted provider responses and one window per boundary."""
     frames: list[str] = []
     boundaries: list[int] = []
@@ -53,7 +53,7 @@ async def _run(monkeypatch, responses, *, windows):
 
     monkeypatch.setattr(iteration_context, "maintain_native_checkpoint", maintain)
     monkeypatch.setattr(turn_iteration, "_call_provider", call_provider)
-    agent = SimpleNamespace(max_iterations=6, _strip_think=lambda text: text)
+    agent = SimpleNamespace(max_iterations=max_iterations, _strip_think=lambda text: text)
     outcome = None
     try:
         await turn_iteration._run_loop(
@@ -97,6 +97,19 @@ async def test_a_window_that_did_not_shrink_ends_handled_without_a_second_call(m
     assert isinstance(error, TurnProviderError)
     assert frames == ["error"]
     assert state.iteration == 1  # the retry never reached the provider
+
+
+@pytest.mark.asyncio
+async def test_an_overflow_on_the_last_iteration_ends_as_an_error_not_a_finished_turn(monkeypatch):
+    frames, boundaries, error, state = await _run(
+        monkeypatch, [OVERFLOW, ANSWER], windows=[40_000, 28_672], max_iterations=1,
+    )
+
+    assert isinstance(error, TurnProviderError)
+    assert "Retry the send" in str(error)
+    assert frames == ["error"]  # no turn_complete, no maximum-iterations text
+    assert boundaries == [40_000]  # no retry boundary was granted
+    assert state.iteration == 1 and not state.overflow_retry_pending
 
 
 @pytest.mark.asyncio

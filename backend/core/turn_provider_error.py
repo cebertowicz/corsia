@@ -23,15 +23,18 @@ def terminal_payload(state, **fields) -> dict:
     return fields
 
 
-async def check_provider_error(state, response, turn_model, thread_id, provider_on_step) -> bool:
-    """End the Turn on a provider error; True when a first overflow goes back to the boundary."""
+async def check_provider_error(state, response, turn_model, thread_id, provider_on_step, retry_available: bool) -> bool:
+    """End the Turn on a provider error; True when a first overflow goes back to the boundary.
+
+    ``retry_available`` is whether an iteration remains for the retry: without one the refusal ends the Turn here.
+    """
     if response.finish_reason != "error":
         return False
     turn = getattr(runtime_state._current_turn_identity.get(None), "turn_id", None)
     logger.warning("run_turn_with_steps: LLM returned error for session {} turn {} kind={}: {}",
                    thread_id, turn, getattr(response, "error_kind", None), response.content)
     overflow = getattr(response, "error_kind", None) == "provider_context_overflow"
-    if overflow and state.overflowed is None:
+    if overflow and state.overflowed is None and retry_available:
         # The refused call recorded its usage and emitted no step, so the boundary
         # re-resolves the window and checkpoints before the one retry.
         window = state.fit_ledger.effective_window_tokens if state.fit_ledger is not None else None

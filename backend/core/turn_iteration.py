@@ -284,7 +284,8 @@ async def _run_loop(
             if result is None:
                 break
             response, tools_already_streamed = result
-            if await check_provider_error(state, response, turn_model, thread_id, provider_on_step):
+            if await check_provider_error(
+                    state, response, turn_model, thread_id, provider_on_step, state.iteration < agent.max_iterations):
                 continue
             await turns_steps.emit_reasoning(response, provider_on_step,
                 was_streamed=provider_params.get("uses_streaming", False))
