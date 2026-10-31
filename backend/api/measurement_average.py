@@ -2,7 +2,8 @@
 
 It is the series' own figure over the trailing span (7 days, or 4 weeks), the one the comparison
 windows serve, so it weighs each period by its own denominator. It sits on the chart's own axis, a
-per-period figure: a rate is pooled over the span, a count is the span's total over k. A span that
+per-period figure: a rate is pooled over the span, a count is the span's total over k, and a distinct
+count is the mean of its periods' own values. A span that
 reaches before the instrument existed or before the first drawn period, or that includes the period still in progress, has no average.
 """
 from __future__ import annotations
@@ -12,10 +13,11 @@ from typing import Any
 from api.measurement_windows import window_figure
 from core.measurement_scope import Grain, Window
 
-# Series whose pooled span figure is a total, not a rate: the chart draws it as a per-period mean. A distinct
-# count (idle threads) pools as the distinct count over the span, so a thread idle in several periods adds once.
-TOTALS = frozenset({"outcomes", "fresh_tokens", "limit_hits", "time_on_platform_h", "corrections_detected",
-                    "idle_untriaged_threads"})
+# Series whose pooled span figure is a total, not a rate: the chart draws it as a per-period mean.
+TOTALS = frozenset({"outcomes", "fresh_tokens", "limit_hits", "time_on_platform_h", "corrections_detected"})
+# Distinct counts: over a span a thread idle in several periods counts once, which is no per-period figure,
+# so the chart's average is the mean of the span's period values.
+DISTINCT_COUNTS = frozenset({"idle_untriaged_threads"})
 
 
 def span_ending(grain: Grain, period: str) -> Window | None:
@@ -41,6 +43,10 @@ def series_average(metric: str, grain: Grain, period: str, eligible: set[str], s
     span = span_ending(grain, period)
     if span is None or any(key not in eligible for key in span.periods):
         return None
+    if metric in DISTINCT_COUNTS:
+        values = [window_figure(metric, Window(key, key, (key,)), sources, periods=eligible, **window_kwargs)["value"]
+                  for key in span.periods]
+        return None if None in values else sum(values) / len(values)
     value = window_figure(metric, span, sources, periods=eligible, **window_kwargs)["value"]
     if value is None:
         return None

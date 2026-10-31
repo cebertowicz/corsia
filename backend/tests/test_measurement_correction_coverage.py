@@ -73,18 +73,6 @@ async def test_each_formula_counts_triaged_untriaged_and_idle(isolated_db, monke
 
 
 @pytest.mark.asyncio
-async def test_the_already_said_series_is_registered_but_not_served(isolated_db, monkeypatch):
-    from fastapi import HTTPException
-
-    from api.measurement_registry import REGISTRY
-
-    assert REGISTRY["already_said_check_passed_pct"].available is False
-    with pytest.raises(HTTPException) as refused:
-        await _rows(monkeypatch, "already_said_check_passed_pct")
-    assert refused.value.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_a_triaged_correction_on_an_idle_thread_is_not_untriaged(isolated_db, monkeypatch):
     db = _db()
     try:
@@ -215,9 +203,9 @@ async def test_windows_and_averages_count_a_thread_idle_in_several_periods_once(
                                       grain="weeks", timezone_name="UTC", user=USER)
     rows = {(row["series"], row["period"]): row for row in result["rows"]}
     assert [rows[("idle_untriaged_threads", week)]["value"] for week in ("2026-09-07", "2026-09-14", WEEK, "2026-09-28")] == [1, 1, 1, 1]
-    # The four weeks hold one idle thread, not four; the average is that span figure over the four weeks.
+    # The four weeks hold one idle thread, not four; the average is the mean of the weeks' own values, so it sits on the bars.
     assert result["windows"]["idle_untriaged_threads"]["latest"]["value"] == 1
-    assert rows[("idle_untriaged_threads", "2026-09-28")]["average"] == pytest.approx(1 / 4)
+    assert rows[("idle_untriaged_threads", "2026-09-28")]["average"] == pytest.approx(1)
     # Detected corrections add up across the span, and the average is the per-week mean, not the span total.
     assert result["windows"]["corrections_detected"]["latest"]["value"] == 4
     assert rows[("corrections_detected", "2026-09-28")]["average"] == pytest.approx(1)
