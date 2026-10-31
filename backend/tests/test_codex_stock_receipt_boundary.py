@@ -156,14 +156,18 @@ async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, 
 
     account = signed_in_default("codex")
     (tmp_path / "codex-source").mkdir()
-    staged = get_db()
-    try:
-        staged.execute("UPDATE vendor_accounts SET source_home=?, runtime_home=? WHERE id=?",
-                       (str(tmp_path / "codex-source"), env["CODEX_HOME"], account["id"]))
-        staged.commit()
-    finally:
-        staged.close()
-    signed_in_default("codex", models=("codex/gpt-5.4",))  # re-reads the homes just staged
+
+    def stage_runtime_home(runtime_home):
+        staged = get_db()
+        try:
+            staged.execute("UPDATE vendor_accounts SET source_home=?, runtime_home=? WHERE id=?",
+                           (str(tmp_path / "codex-source"), runtime_home, account["id"]))
+            staged.commit()
+        finally:
+            staged.close()
+        signed_in_default("codex", models=("codex/gpt-5.4",))  # re-reads the homes just staged
+
+    stage_runtime_home(env["CODEX_HOME"])
 
     db = get_db()
     try:
@@ -207,6 +211,8 @@ async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, 
                     )
                     env["CODEX_HOME"] = str(fork_home)
                     session_options["codex_home"] = str(fork_home)
+                    # The fork launches unbound, so admission requires the account's own runtime home.
+                    stage_runtime_home(str(fork_home))
                 session = StockSession(**session_options, codex_thread_id=provider_id)
                 await start_with_ci_budget(session)
             events.clear()
