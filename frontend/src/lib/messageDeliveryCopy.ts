@@ -9,7 +9,16 @@ import { isMachineCode } from './plainError';
  * shown `provider_write_outcome_unknown` and asked what to do about it is
  * asking the user a question they hold no evidence to answer.
  */
+/**
+ * The refusal sentence the backend writes when a chat outgrows a memory-capped local
+ * window. Mirrors `core.checkpoint_types.CHAT_TOO_LONG_FOR_MEMORY_MESSAGE`; the
+ * transcript carries the full sentence, so the label shortens it.
+ */
+export const CHAT_TOO_LONG_FOR_MEMORY_SENTENCE =
+	'This chat is now too long for the local model to run on this Mac. Start a new chat to keep going.';
+
 const BLOCKED_COPY: Readonly<Record<string, string>> = Object.freeze({
+	[CHAT_TOO_LONG_FOR_MEMORY_SENTENCE]: 'chat too long for this Mac',
 	missing_context_evidence: 'CORSIA could not rebuild this thread’s context',
 	cancelled_by_user: 'you cancelled it',
 	provider_unavailable: 'the provider was unreachable',

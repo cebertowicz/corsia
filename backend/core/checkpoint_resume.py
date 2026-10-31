@@ -14,6 +14,7 @@ from core.fork_fit import (
 from core.checkpoint_wait import CheckpointWaitScope, await_checkpoint_or_stop
 from core.checkpoint_warm_request import CheckpointAdmission
 from core.checkpoint_types import (
+    CHAT_TOO_LONG_FOR_MEMORY_MESSAGE,
     CheckpointContinuationError,
     CheckpointRecord,
     CheckpointUnavailable,
@@ -53,12 +54,20 @@ class ProviderBoundary:
     wait_scope: CheckpointWaitScope
     eager_checkpoint_id: str | None = None
     recovery_input_tokens: int | None = None
+    # Where ``context_window`` came from; ``"memory"`` means the Mac's free memory capped it.
+    window_source: str | None = None
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
-        limited_connection: str | None = None,
+        limited_connection: str | None = None, nothing_fits: bool = False,
     ) -> CheckpointUnavailable:
-        """Carry the observed facts to the existing input settlement owner."""
+        """Carry the observed facts to the existing input settlement owner.
+
+        ``nothing_fits`` marks a refusal because no continuation fits the window; on a
+        memory-capped window the person is told what to do instead of the mechanism.
+        """
+        if nothing_fits and self.window_source == "memory":
+            detail = CHAT_TOO_LONG_FOR_MEMORY_MESSAGE
         return CheckpointUnavailable(
             detail, context_window=self.context_window,
             installed_checkpoint_id=(
@@ -98,7 +107,8 @@ async def _start_checkpoint(
     if boundary.prepare_checkpoint is None:
         if required:
             raise boundary.unavailable(
-                "the next provider call does not fit and no checkpoint is admissible"
+                "the next provider call does not fit and no checkpoint is admissible",
+                nothing_fits=True,
             )
         return None
     from core.checkpoint_runtime import (
@@ -132,7 +142,9 @@ async def _start_checkpoint(
         return None
     except (ColdFoldInputTooLarge, ForkNotAdmitted) as error:
         if required:
-            raise boundary.unavailable(str(error)) from error
+            raise boundary.unavailable(
+                str(error), nothing_fits=isinstance(error, ColdFoldInputTooLarge),
+            ) from error
         logger.warning("Optional checkpoint unavailable for {}: {}", boundary.thread_id, error)
         return None
 
@@ -199,7 +211,8 @@ async def _await_installed(
     if installed.input_tokens > boundary.context_window:
         if not allow_newer_fold:
             raise boundary.unavailable(
-                "checkpoint plus tail does not fit the selected provider"
+                "checkpoint plus tail does not fit the selected provider",
+                nothing_fits=True,
             )
         started = await _start_checkpoint(boundary, required=True)
         assert started is not None
@@ -278,7 +291,8 @@ async def maintain_before_provider_call(
         )
     if decision is BoundaryDecision.FAIL_VISIBLE:
         raise boundary.unavailable(
-            "the minimum provider continuation exceeds the context window"
+            "the minimum provider continuation exceeds the context window",
+            nothing_fits=True,
         )
     if active is not None:
         return await _await_installed(boundary, active)

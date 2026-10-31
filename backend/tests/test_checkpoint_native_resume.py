@@ -316,7 +316,8 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
         return function(*args)
 
     monkeypatch.setattr("llm.resolution.resolve_locality_permitted",
-                        lambda _model, **_k: SimpleNamespace(context_window=100_000))
+                        lambda _model, **_k: SimpleNamespace(
+                            context_window=100_000, context_window_source="provider"))
     monkeypatch.setattr(turn_iteration_context, "run_in_db", checkpoint_snapshot)
     state = SimpleNamespace(
         messages=[{"role": "user", "content": "continue"}],

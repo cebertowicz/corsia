@@ -59,6 +59,14 @@ CLOUD_OFF_CHECKPOINT_MESSAGE = (
 )
 
 
+#: What a person is told when no continuation fits a window the Mac's free memory capped.
+#: ``frontend/src/lib/messageDeliveryCopy.ts`` mirrors it.
+CHAT_TOO_LONG_FOR_MEMORY_MESSAGE = (
+    "This chat is now too long for the local model to run on this Mac. "
+    "Start a new chat to keep going."
+)
+
+
 class OptionalCheckpointSkipped(Exception):
     """A preparer declined an optional fold by design; not an admission failure."""
 

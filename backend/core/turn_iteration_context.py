@@ -136,8 +136,8 @@ def remaining_native_input(state) -> int:
     return max(0, state.fit_ledger.effective_window_tokens - occupied)
 
 
-async def _refresh_native_window(state, thread_id: str) -> None:
-    """Rebind the same payload to a freshly resolved cap at its next call boundary.
+async def _refresh_native_window(state, thread_id: str) -> str:
+    """Rebind the same payload to a freshly resolved cap at its next call boundary; return its source.
 
     The resolution is the thread's, so a model its locality policy now forbids stops the
     whole Turn here, before the call: later input then holds at admission on that cause.
@@ -156,6 +156,7 @@ async def _refresh_native_window(state, thread_id: str) -> None:
             model=target.expected_reported_model or target.transport_model,
         )
         state.context_usage["model_context_window"] = target.context_window
+    return target.context_window_source
 
 
 def _minimum_native_input(ledger) -> int:
@@ -250,7 +251,7 @@ async def maintain_native_checkpoint(
     """Apply the shared checkpoint boundary before one Native provider call."""
     if turn_identity is None or state.fit_ledger is None:
         return None
-    await _refresh_native_window(state, thread_id)
+    window_source = await _refresh_native_window(state, thread_id)
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderBoundary,
@@ -301,6 +302,7 @@ async def maintain_native_checkpoint(
         render_installed=render,
         wait_scope=scope,
         eager_checkpoint_id=eager.id if eager is not None else None,
+        window_source=window_source,
     ))
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)

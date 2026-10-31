@@ -131,7 +131,10 @@ def evaluate_boundary(payload: ProviderPayload) -> BoundaryDecision:
     if current <= payload.context_window:
         active = payload.checkpoint_status in {"running", "captured"}
         under_pressure = at_checkpoint_launch_point(max(current, recovery or 0), payload.context_window)
-        if under_pressure and payload.checkpoint_admissible and not active:
+        # R08: an optional fold cannot relieve pressure when even the smallest
+        # continuation it could produce would sit at the launch point itself.
+        futile = at_checkpoint_launch_point(minimum, payload.context_window)
+        if under_pressure and payload.checkpoint_admissible and not active and not futile:
             return BoundaryDecision.PROCEED_AND_FOLD
         return BoundaryDecision.PROCEED
     if installed is not None and installed <= payload.context_window:

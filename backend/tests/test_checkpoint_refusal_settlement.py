@@ -178,3 +178,21 @@ def test_turn_terminal_refusal_uses_the_same_classification(isolated_db):
         assert _state(db, "turn-input")[0] == "failed"
     finally:
         db.close()
+
+
+def test_a_stable_memory_window_refusal_fails_with_the_chat_too_long_copy(refused_input):
+    """The window the Turn refused on is still the window: nothing is released or re-queued."""
+    from core.checkpoint_types import CHAT_TOO_LONG_FOR_MEMORY_MESSAGE
+
+    db = refused_input
+    settle_batch_write(
+        "held-attempt", outcome="proved_no_write", db=db,
+        error=CheckpointUnavailable(
+            CHAT_TOO_LONG_FOR_MEMORY_MESSAGE, context_window=100_000, installed_checkpoint_id=None,
+        ),
+    )
+
+    state, outcome, error, seq = _state(db)
+
+    assert (state, outcome, error) == ("failed", "proved_no_write", CHAT_TOO_LONG_FOR_MEMORY_MESSAGE)
+    assert seq is not None
