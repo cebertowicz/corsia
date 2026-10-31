@@ -14,7 +14,7 @@ Released 2026-10-31.
 
 ### Sign-in
 
-- Connecting a Google account works again: new connects no longer fail with “Google did not provide an account identity”.
+- Connecting a Google account works again: it no longer fails with “Google did not provide an account identity”.
 
 ### First run and setup
 
@@ -64,12 +64,6 @@ Released 2026-10-31.
 - CORSIA’s `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
 - A `corsia` command that can’t sign in to CORSIA says so and what to do, instead of failing with an error trace.
 - New security and how-it-works documentation, with diagrams that read on a phone.
-
-### Known issues
-
-- During an update restart, the count of paused agents can show 0 while agents are still finishing a call to a local model.
-- On a local model server that can’t measure text length itself, the first message after a restart is sized by a cautious estimate, so a checkpoint may come earlier than it needs to.
-- On an install that turns Auto-approve off, the first chat’s files step and the Welcome list still read as if it’s on.
 
 ## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
 
