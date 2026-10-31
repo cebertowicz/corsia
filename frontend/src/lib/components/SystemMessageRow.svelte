@@ -59,10 +59,10 @@
 	const activeSignin = $derived(accountId ? $signin[accountId] : undefined);
 	/** A row offers live recovery only while the account is in that state now; otherwise it reads as history. */
 	const accountRecovery = $derived(linkableAccount && (staleModels || (expiredLogin && (namedAccount?.state === 'signed_out' || !!activeSignin))));
-	/** An expired-login row whose account is signed in again, with no sign-in under way, reads as history from the account's state (live, after Check, and after a reload). A held message's row is not history: it goes when its message sends. */
-	const expiredHistory = $derived(expiredLogin && namedAccount?.state === 'signed_in' && (activeSignin?.status === 'completed' || (!activeSignin && liveRead)) && !isHeldSignedOutNotice(msg));
 	/** The page's list can predate a sign-out, so a row with no sign-in under way says "signed in now" only after it has read the account itself. */
 	let liveRead = $state(false);
+	/** An expired-login row whose account is signed in again, with no sign-in under way, reads as history from the account's state (live, after Check, and after a reload). A held message's row is not history: it goes when its message sends. */
+	const expiredHistory = $derived(expiredLogin && namedAccount?.state === 'signed_in' && (activeSignin?.status === 'completed' || (!activeSignin && liveRead)) && !isHeldSignedOutNotice(msg));
 	let busy = $state(false);
 	let refreshing = $state(false);
 	let actionError = $state('');
@@ -74,7 +74,7 @@
 		const result = await (action === 'start' ? startVendorSignin(accountId) : action === 'check' ? checkVendorSignin(accountId) : cancelVendorSignin(accountId));
 		busy = false;
 		if (result.signin) signin.update((current) => rememberVisibleSignin(current, result.signin!, $vendorAccounts));
-		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Couldn’t check sign-in.';
+		if (!result.ok && !('absent' in result && result.absent)) actionError = result.error ?? 'Could not check sign-in.';
 		else if (result.error) actionError = result.error;
 	}
 	async function refreshModels() {
