@@ -295,8 +295,8 @@ def _operand_events(spec: dict[str, Any]) -> list[str]:
 def _check_kpi(name: str, spec: dict[str, Any], context: _Context) -> None:
     """The ``can_decide`` sync test (§4.2): each check is a field check, with its §5 refusal."""
     path = ("kpis", name)
-    if "formula" in spec and spec["formula"] not in FORMULAS:
-        raise fail(context.lines, path + ("formula",), f'kpi {name} formula "{spec["formula"]}" is not one of {", ".join(FORMULAS)}. Use one of them.')
+    if spec.get("formula") not in FORMULAS:
+        raise fail(context.lines, path + ("formula",), f'kpi {name} formula "{spec.get("formula")}" is not one of {", ".join(FORMULAS)}. Use one of them.')
     deciding, decides_as = spec.get("can_decide", False), spec.get("decides_as")
     if not isinstance(deciding, bool):
         raise fail(context.lines, path + ("can_decide",), f"kpi {name} can_decide must be true or false.")

@@ -49,7 +49,7 @@ def _versions(rows) -> list[dict[str, Any]]:
 
 def _builtins(spec: dict[str, Any]) -> set[str]:
     needed = {op['builtin'] for op in (spec['num'], spec.get('den', {})) if 'builtin' in op}
-    if spec['formula'] == 'rate_per_run':
+    if spec.get('formula') == 'rate_per_run':
         needed.add('runs')
     return needed
 

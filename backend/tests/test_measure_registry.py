@@ -103,6 +103,11 @@ def test_a_kpi_formula_the_evaluator_lacks_is_refused(tmp_path: Path) -> None:
     assert 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile' in message
 
 
+def test_a_kpi_without_a_formula_is_refused(tmp_path: Path) -> None:
+    text = small("nameless:\n  title: Nameless\n  unit: count\n  better: higher\n  num: {event: qa.done}\n  min_n: 1")
+    assert 'formula "None" is not one of count, ratio, rate_per_run, share, percentile' in refused(tmp_path, text)
+
+
 def deciding(extra: str = "", *, name: str = "rate") -> str:
     return (
         f"{name}:\n  title: Rate\n  unit: percent\n  better: higher\n  formula: share\n"
