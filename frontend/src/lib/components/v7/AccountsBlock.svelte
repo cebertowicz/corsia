@@ -28,7 +28,8 @@
 		renameVendorAccount,
 		signOutVendorAccount,
 		startVendorSignin,
-		vendorAccounts, visibleVendorAccounts, rememberVisibleSignin, reloadErrorText,
+		refreshAndRecordModels,
+		vendorAccounts, signin, visibleVendorAccounts, rememberVisibleSignin, reloadErrorText,
 		type SigninResult,
 		type VendorAccount,
 	} from '$lib/stores/vendorAccounts';
@@ -41,6 +42,7 @@
 	let adding = $state(false);
 	let addName = $state('');
 	let pending = $state<Record<string, boolean>>({});
+	let refreshing = $state<Record<string, boolean>>({});
 	const addBusy = $derived(!!pending.add);
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
@@ -53,14 +55,12 @@
 	const policyProvider = $derived(policyState.policy?.providers.find((entry) => entry.provider_key === provider.name));
 	const rolloverTarget = $derived(`rollover:${provider.name}`);
 	const overridingProjects = $derived(policyState.policy?.overriding_projects ?? []);
-	let signin = $state<Record<string, SigninResult>>({});
-
 	// The historical view owns its removed accounts, so a later plain reload of the shared list cannot strand it.
 	let historicalAccounts = $state<VendorAccount[] | null>(null);
 	const showHistorical = $derived(historicalAccounts !== null);
 	const removedAccounts = $derived((historicalAccounts ?? []).filter((account) => account.provider === provider.name));
 	const accounts = $derived(visibleVendorAccounts($vendorAccounts, provider.name, removedAccounts));
-	const showRows = $derived(accounts.length > 0 || Object.keys(signin).length > 0);
+	const showRows = $derived(accounts.length > 0);
 	const visibleUnitCount = $derived((policyProvider?.units ?? []).filter((unit) => accounts.some((account) => account.id === unit.id && account.state !== 'removed')).length);
 	const rolloverActive = $derived(!!policyProvider?.rollover && visibleUnitCount >= 2);
 	// The saved rollover order is the order of `units`: numbered rows follow it, and accounts with no unit (removed ones) follow, unnumbered.
@@ -124,13 +124,12 @@
 	}
 
 	function rememberSignin(result: SigninResult) {
-		signin = rememberVisibleSignin(signin, result, $vendorAccounts);
-		if (signin[result.account_id] && result.status === 'refused') void focusHolder(result);
+		signin.update((current) => rememberVisibleSignin(current, result, $vendorAccounts));
+		if ($signin[result.account_id] && result.status === 'refused') void focusHolder(result);
 	}
 
 	function clearSignin(accountId: string) {
-		const { [accountId]: _, ...rest } = signin;
-		signin = rest;
+		signin.update(({ [accountId]: _, ...rest }) => rest);
 	}
 
 	async function openHistoricalAccounts() {
@@ -165,6 +164,16 @@
 		if (result.signin.status === 'superseded' && result.signin.cause === 'account_refresh_superseded') clearSignin(accountId);
 		else rememberSignin(result.signin);
 		if (result.error) refreshError = result.error;
+	}
+
+	async function refreshModels(accountId: string) {
+		if (!beginAction(accountId)) return;
+		actionError = '';
+		refreshing = { ...refreshing, [accountId]: true };
+		const result = await refreshAndRecordModels(accountId);
+		refreshing = { ...refreshing, [accountId]: false };
+		endAction(accountId);
+		if (result.signedOut && result.error) actionError = result.error;
 	}
 
 	async function checkSignin(accountId: string) {
@@ -242,11 +251,7 @@
 		if (showHistorical) await openHistoricalAccounts();
 	}
 
-	// A settings link to one account (`#account-<id>`) lands on what the person does next: a signed-out row's
-	// Sign in, else a signed-in row's menu with Sign in again focused. The marker clears when focus leaves it.
-	let linkedRowId = $state<string | null>(null);
-	let linkedMenuId = $state<string | null>(null);
-	function clearLinkedFocus(): void { linkedRowId = null; }
+	// Account links still navigate to the row or its available Sign in action.
 
 	$effect(() => {
 		const anchor = $settingsNavigation.anchor;
@@ -254,17 +259,13 @@
 		const account = id ? rows.find((entry) => entry.account.id === id)?.account : undefined;
 		if (!anchor || !account) return;
 		clearSettingsAnchor(anchor);
-		clearLinkedFocus();
-		requestAnimationFrame(() => void landOnAccount(account, (id) => linkedRowId = id, (row) => {
-			linkedMenuId = account.id; accountMenu.openFor(account, row);
-		}));
+		requestAnimationFrame(() => void landOnAccount(account));
 	});
 
 	function selectAccountMenu(id: string) {
 		const account = accountMenu.open?.item;
 		if (!account) return;
 		if (id === 'rename') beginRename(account);
-		else if (id === 'sign-in-again') { accountMenu.close(); void startSignin(account.id); }
 		else if (id === 'sign-out') void signOut(account);
 		else if (id === 'remove') { accountMenu.close(); removeTarget = account; }
 	}
@@ -287,7 +288,7 @@
 		{/if}
 		{#each rows as { account, unit, position } (account.id)}
 			{@const unitTarget = `unit:${provider.name}:${account.id}`}
-			{@const signIn = signin[account.id]}
+			{@const signIn = $signin[account.id]}
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<section class="account" class:ordered={rolloverActive} id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
@@ -311,7 +312,7 @@
 							<AccountUsageRow {account} compact marker={account.is_default ? 'Workspace account' : null} order={rolloverActive && unit ? position + 1 : null}>
 								<!-- The row's right-hand controls slot, first in it; a signed-in row shows its usage figures there. -->
 								{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
-									<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
+									<span class="link-target" data-link-target><button class="account-signin-action" disabled={!!pending[account.id]} onclick={() => void startSignin(account.id)}>Sign in</button></span>
 								{/if}
 								{#if unit && (visibleUnitCount >= 2 || !unit.enabled)}
 									<ProviderAccountPolicyControls
@@ -328,7 +329,7 @@
 									/>
 								{/if}
 							</AccountUsageRow>
-							{#if accountStateLabel(account)}<div class="account-meta"><span>{accountStateLabel(account)}</span></div>{/if}
+							{#if accountStateLabel(account)}<div class="account-meta" class:signed-out={account.state === 'signed_out'}><span>{accountStateLabel(account)}</span></div>{/if}
 						</div>
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>
@@ -341,14 +342,16 @@
 				{/if}
 				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
-						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli ?? null)}</span>
+						<span>{signinMessage(signIn, accountName, $signin, VENDORS[account.provider]?.cli ?? null)}</span>
 						{#if signIn.status === 'waiting'}
 							<div class="signin-actions">
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>
 								<Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => cancelSignin(account.id)}>Cancel</Button>
 							</div>
+						{:else if signIn.status === 'model_refresh_failed'}
+							<span class="link-target" data-link-target><Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => void refreshModels(account.id)}>{refreshing[account.id] ? 'Refreshing…' : 'Refresh models'}</Button></span>
 						{:else if (signIn.status === 'failed' && signIn.account_id === account.id) || signIn.status === 'cancelled' || signIn.status === 'unavailable' || signIn.status === 'superseded'}
-							<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in again</Button></span>
+							<span class="link-target" data-link-target><Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => void startSignin(account.id)}>Sign in again</Button></span>
 						{/if}
 					</div>
 				{/if}
@@ -384,7 +387,7 @@
 </div>
 
 {#if accountMenu.open}
-	<Menu ariaLabel={`Actions for ${displayName(accountMenu.open.item)}`} items={menuItems} x={accountMenu.open.x} y={accountMenu.open.y} focusId={linkedMenuId === accountMenu.open.item.id ? 'sign-in-again' : null} onSelect={selectAccountMenu} onClose={() => { linkedMenuId = null; accountMenu.close(); }} />
+	<Menu ariaLabel={`Actions for ${displayName(accountMenu.open.item)}`} items={menuItems} x={accountMenu.open.x} y={accountMenu.open.y} onSelect={selectAccountMenu} onClose={() => accountMenu.close()} />
 {/if}
 
 <ConfirmDialog

@@ -460,23 +460,17 @@ describe('SetupScreen', () => {
 		await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
 		await passFolder();
 		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
-		expect(host.textContent).toContain('No subscription? The free model downloading to this computer works too, or add an API key.');
+		expect(host.textContent).toContain('No subscription? Choose Neither and the free model downloads to this computer, or add an API key.');
 		expect(host.textContent).not.toContain('Add an API key on the next screen.');
 	});
 
-	it('explains the ChatGPT question when Claude Code is signed in, and the Claude question when Codex is', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+	it.each([['Claude Code', 'claude-code'], ['Codex', 'codex']])('asks the same four-answer question when %s is signed in', async (_name, signedIn) => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: signedIn === 'claude-code' ? 'ready' : 'not_installed' }, { source: 'codex', name: 'Codex', state: signedIn === 'codex' ? 'ready' : 'not_installed' }];
 		await passFolder();
 		expect(host.querySelector('.lede')?.textContent).toBe('CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.');
-		expect(host.textContent).toContain('A ChatGPT subscription uses Codex (a Claude subscription uses Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
-	});
-
-	it('explains the Claude question when Codex is signed in', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'ready' }];
-		await passFolder();
-		expect(host.textContent).toContain('A Claude subscription uses Claude Code (a ChatGPT subscription uses Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
+		expect(host.textContent).toContain('Which do you pay for?');
+		expect([...host.querySelectorAll('.choices button')].map((choice) => choice.textContent?.trim())).toEqual(['Claude', 'ChatGPT', 'Both', 'Neither']);
+		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
 	});
 
 	it('says what the work folder is for beside its row on the account form', async () => {
@@ -484,12 +478,11 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Your projects and files live here.');
 	});
 
-	it('asks only about the other subscription when one tool is signed in', async () => {
+	it('asks the four-answer question when one tool is signed in, and Claude alone leaves Claude Code on the models screen', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
-		expect(host.textContent).toContain('Claude Code is signed in.');
-		expect(host.textContent).toContain('Do you also pay for ChatGPT?');
-		button('No')?.click(); await settle();
+		expect(host.textContent).toContain('Which do you pay for?');
+		button('Claude')?.click(); await settle();
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 	});
 
@@ -525,10 +518,10 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toContain('Codex');
 	});
 
-	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
+	it('asks the subscription question even when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
-		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your account');
 		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');

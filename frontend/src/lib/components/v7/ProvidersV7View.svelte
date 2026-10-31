@@ -191,7 +191,7 @@
 	// (the first account without a price, else the first account), then focuses the row.
 	$effect(() => {
 		if ($settingsNavigation.anchor !== 'account-billing') return;
-		const live = $vendorAccounts.filter((account) => account.state !== 'removed' && !account.default_signed_out);
+		const live = $vendorAccounts.filter((account) => account.state !== 'removed');
 		const target = live.find((account) => !account.billing) ?? live[0];
 		const provider = target && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === target.provider);
 		if (!target || !provider) return;

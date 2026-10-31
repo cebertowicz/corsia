@@ -44,7 +44,7 @@ describe('ProvidersV7View card request', () => {
 		providerCardRequest.set('codex');
 		// The switch belongs to an account, so the card shows it once the account list is known.
 		vendorAccounts.set([{
-			id: 'codex-default', provider: 'codex', name: 'Default', is_default: true, state: 'legacy', revision: 0,
+			id: 'codex-default', provider: 'codex', name: 'Default', is_default: true, state: 'signed_in', revision: 0,
 			identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1', custom: null }, allow_overage: false,
 		}]);
 

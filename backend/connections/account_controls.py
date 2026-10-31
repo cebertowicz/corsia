@@ -190,7 +190,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
     if account["state"] == "signed_in":
         if account["provider"] not in VENDORS:
             raise AccountError("account is already signed in")
-        result = await signin_recheck(account_id, account["provider"], lambda selected: verify(selected, report_refresh=True))
+        result = await signin_recheck(account_id, account["provider"], verify)
         if result is not None:
             return result
         account = await custom_account(account_id)
@@ -316,7 +316,7 @@ async def stop_all_signins() -> None:
             raise result
 
 
-async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, Any]:
+async def verify(account_id: str) -> dict[str, Any]:
     """Re-read vendor sign-in; only a definite signed-out answer flips a signed-in account.
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
@@ -334,8 +334,7 @@ async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, 
     if account["state"] == "signed_in" and signed_in is True:
         refresh_ok, refresh_cause, refresh_ref = await refresh_models(account, receipt, binary, current_c6)
     result = {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
-    if report_refresh:
-        result.update(model_refresh_ok=refresh_ok, model_refresh_cause=refresh_cause, model_refresh_ref=refresh_ref)
+    result.update(model_refresh_ok=refresh_ok, model_refresh_cause=refresh_cause, model_refresh_ref=refresh_ref)
     return result
 
 

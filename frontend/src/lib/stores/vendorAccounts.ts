@@ -6,7 +6,7 @@ import type { ModelUsage } from './modelUsage';
 const BASE = '';
 const auth = () => get(token) || '';
 
-export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
+export type VendorAccountState = 'signed_in' | 'signed_out' | 'removed';
 export type SigninStatus = 'waiting' | 'completed' | 'already_signed_in' | 'model_refresh_failed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
 
 export interface VendorAccountLabel {
@@ -43,8 +43,8 @@ export interface VendorAccount {
 	allow_overage?: boolean | null;
 	/** Signed in, but none of the vendor's models can run on this account. */
 	no_usable_model?: boolean;
-	/** The Default CLI has definitely reported that it is signed out. */
-	default_signed_out?: boolean;
+	/** Set on the converted old Default until its first sign-in in CORSIA: its signed-out row says why. */
+	upgrade_reason?: string | null;
 	/** Account-owned plan usage, rendered once in its Settings account row. */
 	usage?: VendorAccountUsage;
 	/** The recorded monthly price and charge day; null when no price is recorded. */
@@ -67,7 +67,7 @@ export interface SigninResult {
 }
 
 export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
-	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !account.default_signed_out && !removed.some((row) => row.id === account.id)), ...removed];
+	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !removed.some((row) => row.id === account.id)), ...removed];
 }
 
 export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
@@ -84,6 +84,8 @@ export function reloadErrorText(error: string, ref?: string): string {
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
+/** One live sign-in state per account, shared by Settings and every held chat. */
+export const signin = writable<Record<string, SigninResult>>({});
 // Confirmations invalidate in-flight inventories, including equal-revision receipts.
 // Among unchanged confirmations, the latest successful request wins; failures do not.
 let confirmationSequence = 0;
@@ -247,6 +249,31 @@ export async function checkVendorSignin(accountId: string): Promise<{ ok: boolea
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, json('POST'), 'Could not check sign-in.');
 	if (!result.ok) return result.error === 'no sign-in is in progress for this account' ? { ok: false, absent: true } : result;
 	return reconcileSignin(result.data);
+}
+
+export async function refreshVendorModels(accountId: string): Promise<{ ok: boolean; signedOut?: boolean; superseded?: boolean; error?: string; ref?: string }> {
+	const result = await request<{ state: VendorAccountState; vendor_signed_in: boolean | null; model_refresh_ok: boolean | null; model_refresh_cause: string | null; model_refresh_ref: string | null }>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/verify`, json('POST'), 'Could not refresh models.');
+	if (!result.ok) return result;
+	if (result.data.state === 'signed_out') {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === accountId ? { ...account, state: 'signed_out', details_stale: true } : account));
+		const refreshed = await loadVendorAccounts();
+		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+	}
+	if (result.data.vendor_signed_in === true && result.data.model_refresh_ok === true) return { ok: true };
+	// A newer login replaced the one this refresh read: nothing failed, and the reload shows the account as it now is.
+	if (result.data.model_refresh_cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, superseded: true };
+	}
+	return { ok: false, error: 'The model list couldn’t be refreshed.', ref: result.data.model_refresh_ref ?? undefined };
+}
+
+/** Reload an account's model list and record the outcome as its one sign-in line, for Settings and chat alike. */
+export async function refreshAndRecordModels(accountId: string): ReturnType<typeof refreshVendorModels> {
+	const result = await refreshVendorModels(accountId);
+	if (result.signedOut || result.superseded) signin.update(({ [accountId]: _, ...rest }) => rest);
+	else signin.update((current) => ({ ...current, [accountId]: { account_id: accountId, route: null, status: result.ok ? 'already_signed_in' : 'model_refresh_failed', cause: null, ref: result.ref } }));
+	return result;
 }
 
 export async function cancelVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {

@@ -72,7 +72,7 @@ export const CREATE_ACCOUNT_REFUSED = 'Couldn’t start the chat on that account
 export const CREATE_FAILED = 'Couldn’t create the chat. Try again.';
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
 
-const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again.';
 const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
 const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
 
@@ -93,7 +93,7 @@ export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_
 	codex_auth_projection_changed: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
 	account_model_not_discovered: {
 		label: WAITING_FOR_ACCOUNT,
-		title: `CORSIA couldn’t find this model on this chat’s account. ${SWITCH_MODELS}, or sign in again in Settings › Providers.`,
+		title: `CORSIA couldn’t find this model on this chat’s account. ${SWITCH_MODELS}, or sign in again.`,
 	},
 	account_removed: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account isn’t set up in CORSIA. ${SWITCH_MODELS}.` },
 	// The denying policy may be the workspace's or the project's and the hold

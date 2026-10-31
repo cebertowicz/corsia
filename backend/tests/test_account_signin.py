@@ -423,7 +423,8 @@ async def test_verify_started_on_old_login_cannot_discover_the_replacement(accou
     before = replacement['discovery']
     assert old != account_receipt(replacement)
     release.set()
-    assert await task == {'account_id': row['id'], 'vendor_signed_in': True, 'cause': None, 'state': 'signed_in'}
+    assert await task == {'account_id': row['id'], 'vendor_signed_in': True, 'cause': None, 'state': 'signed_in',
+                          'model_refresh_ok': None, 'model_refresh_cause': 'account_refresh_superseded', 'model_refresh_ref': None}
     assert get_account(row['id'], db=db)['discovery'] == before
 
 
@@ -457,7 +458,8 @@ async def test_verify_never_starts_discovery_for_noneligible_auth(accounts, monk
             await account_controls.verify(row['id'])
     else:
         result = await account_controls.verify(row['id'])
-        assert set(result) == {'account_id', 'vendor_signed_in', 'cause', 'state'}
+        assert set(result) == {'account_id', 'vendor_signed_in', 'cause', 'state',
+                               'model_refresh_ok', 'model_refresh_cause', 'model_refresh_ref'}
 
 
 def test_fake_claude_reports_carry_the_recorded_real_key_sets():
@@ -1360,11 +1362,13 @@ async def test_verify_flips_only_on_a_definite_signed_out_answer_and_never_signs
     Path(account["source_home"], "signed").touch()
     # A signed-out account stays signed out even though the vendor says signed in.
     assert await account_controls.verify(account["id"]) == {
-        "account_id": account["id"], "vendor_signed_in": True, "cause": None, "state": "signed_out"}
+        "account_id": account["id"], "vendor_signed_in": True, "cause": None, "state": "signed_out",
+        "model_refresh_ok": None, "model_refresh_cause": None, "model_refresh_ref": None}
     set_account_state(account["id"], "signed_in", expected_revision=0)
     monkeypatch.setenv("STATUS_EXIT", "2")
     assert await account_controls.verify(account["id"]) == {
-        "account_id": account["id"], "vendor_signed_in": None, "cause": "vendor_status_failed", "state": "signed_in"}
+        "account_id": account["id"], "vendor_signed_in": None, "cause": "vendor_status_failed", "state": "signed_in",
+        "model_refresh_ok": None, "model_refresh_cause": None, "model_refresh_ref": None}
     monkeypatch.delenv("STATUS_EXIT")
     Path(account["source_home"], "signed").unlink()
     assert (await account_controls.verify(account["id"]))["state"] == "signed_out"

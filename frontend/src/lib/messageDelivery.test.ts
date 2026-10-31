@@ -90,7 +90,7 @@ describe('deliveryPresentation', () => {
 	const heldOn = (delivery_error: string | null) => deliveryPresentation({
 		delivery_state: 'queued', write_outcome: 'proved_no_write', active_turn_id: null, delivery_error, metadata: {},
 	});
-	const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+	const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again.';
 	const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
 	it.each([
 		['account_signed_out', `This chat’s account is signed out. ${SIGN_IN_AGAIN}`],
@@ -98,7 +98,7 @@ describe('deliveryPresentation', () => {
 		['account_home_mismatch', SIGN_IN_MISSING],
 		['codex_auth_source_missing', SIGN_IN_MISSING],
 		['codex_auth_projection_changed', SIGN_IN_MISSING],
-		['account_model_not_discovered', 'CORSIA couldn’t find this model on this chat’s account. Your message is saved and will send as soon as you switch models, or sign in again in Settings › Providers.'],
+		['account_model_not_discovered', 'CORSIA couldn’t find this model on this chat’s account. Your message is saved and will send as soon as you switch models, or sign in again.'],
 		['account_removed', 'This chat’s account isn’t set up in CORSIA. Your message is saved and will send as soon as you switch models.'],
 		['account_project_denied', 'Your provider settings don’t allow this chat’s account. Your message is saved and will send as soon as you switch models.'],
 		['project_policy_missing', 'This project doesn’t allow this chat’s account. Your message is saved and will send as soon as you switch models.'],

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 import SystemMessageRow from './SystemMessageRow.svelte';
-import { vendorAccounts, type VendorAccount } from '$lib/stores/vendorAccounts';
+import { signin, vendorAccounts, type VendorAccount } from '$lib/stores/vendorAccounts';
 
 const account = (id: string, extra: Partial<VendorAccount> = {}): VendorAccount => ({
 	id, provider: 'claude-code', name: id, is_default: false, state: 'signed_out', revision: 1, identity: {},
@@ -19,6 +19,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vendorAccounts.set([]);
+	signin.set({});
 	vi.unstubAllGlobals();
 	if (component) unmount(component);
 	component = null;
@@ -58,36 +59,65 @@ describe('SystemMessageRow', () => {
 		expect(details?.textContent).toContain('Failed to authenticate: OAuth session expired and could not be refreshed.');
 	});
 
-	it('shows a lost-login error as written and links Settings › Providers to the account named', () => {
-		const text = 'FOMRRT1 is signed out of Claude Code. Sign it in again under Settings › Providers.';
+	it('offers sign-in in the expired account’s chat line', () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 })));
 		vendorAccounts.set([account('fomrrt1')]);
-		render({ id: 'lost-login', role: 'system', content: text, metadata: { type: 'result', cause: 'sign_in_expired', cc: true, account_id: 'fomrrt1' } });
-
-		expect(host.textContent?.trim()).toBe(text);
-		expect(host.querySelector('details')).toBeNull();
-		const link = host.querySelector<HTMLAnchorElement>('a')!;
-		expect(link.textContent).toBe('Settings › Providers');
-		expect(link.getAttribute('href')).toBe('/settings/providers#account-fomrrt1');
-		expect(link.closest('.md-content')).not.toBeNull();
-	});
-
-	it('links the same way in any error that names an account', () => {
-		const text = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers.';
-		vendorAccounts.set([account('fomrrt1', { state: 'signed_in' })]);
-		render({ id: 'stale-models', role: 'system', content: text, metadata: { type: 'harness_error', account_id: 'fomrrt1' } });
-
-		expect(host.textContent?.trim()).toBe(text);
-		expect(host.querySelector('a')?.getAttribute('href')).toBe('/settings/providers#account-fomrrt1');
-	});
-
-	it('keeps the text for the Default and legacy accounts, which have no row to press', () => {
-		vendorAccounts.set([account('personal', { is_default: true, state: 'signed_in' }), account('older', { state: 'legacy' }), account('gone', { state: 'removed' })]);
-		for (const id of ['personal', 'older', 'gone']) {
-			render({ id: `plain-${id}`, role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error', account_id: id } });
-		}
-
+		render({ id: 'lost-login', role: 'system', content: 'OAuth session expired', metadata: { type: 'result', cause: 'sign_in_expired', cc: true, account_id: 'fomrrt1' } });
+		expect(host.textContent).toContain('fomrrt1 is signed out of Claude Code.');
+		expect(host.querySelector('button')?.textContent).toBe('Sign in');
 		expect(host.querySelector('a')).toBeNull();
-		expect(host.textContent).toContain('Sign it in again under Settings › Providers.');
+	});
+
+	it('keeps Sign in available when another account holds sign-in', () => {
+		vendorAccounts.set([account('personal'), account('work')]);
+		signin.set({ personal: { account_id: 'personal', route: 'browser', status: 'refused', cause: null, held_by: 'work' } });
+		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } });
+		expect(host.textContent).toContain('work is already signing in');
+		expect(host.querySelector('button')?.textContent).toBe('Sign in');
+	});
+
+	it.each([
+		['waiting', null, 'Waiting for sign-in in your browser.', false],
+		['cancelled', null, 'Sign-in cancelled.', false],
+		['refused', null, 'work is already signing in.', false],
+		['failed', 'vendor_login_failed', 'Sign-in didn’t complete.', true],
+		['failed', 'same_account', 'Already signed in as work.', true],
+		['unavailable', null, 'Sign-in is unavailable.', true],
+	] as const)('punctuates %s status and uses the appropriate treatment', (status, cause, copy, failure) => {
+		vendorAccounts.set([account('personal'), account('work')]);
+		signin.set({ personal: { account_id: 'personal', route: 'browser', status, cause, held_by: 'work', duplicate_of: 'work' } });
+		render({ role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } });
+		const line = host.querySelector('.account-recovery')!;
+		expect(line.textContent).toContain(copy);
+		expect(line.classList.contains('recovery-failure')).toBe(failure);
+		if (status === 'waiting') expect(line.querySelector('.recovery-actions')?.querySelectorAll('button')).toHaveLength(2);
+	});
+
+	it('offers model refresh in the stale-model chat line', () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 })));
+		vendorAccounts.set([account('fomrrt1', { provider: 'codex', state: 'signed_in' })]);
+		render({ id: 'stale-models', role: 'system', content: 'model list out of date', metadata: { type: 'harness_error', cause: 'account_model_cache_changed', account_id: 'fomrrt1' } });
+		expect(host.textContent).toContain('model list is out of date');
+		expect(host.querySelector('button')?.textContent).toBe('Refresh models');
+		expect(host.querySelector('a')).toBeNull();
+	});
+
+	it('shares a sign-in started in one chat with another chat for the same account', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve(
+			url.includes('/signin/check')
+				? new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 })
+				: new Response(JSON.stringify({ account_id: 'personal', route: 'browser', status: 'waiting', cause: null }), { status: 200 }),
+		)));
+		vendorAccounts.set([account('personal')]);
+		const message = { role: 'system', content: 'Personal is signed out. Settings › Providers', metadata: { type: 'harness_error', account_id: 'personal' } };
+		const first = mount(SystemMessageRow, { target: host, props: { msg: message } });
+		const second = mount(SystemMessageRow, { target: host, props: { msg: message } });
+		flushSync();
+		await vi.waitFor(() => expect((host.querySelector('button') as HTMLButtonElement).disabled).toBe(false));
+		(host.querySelector('button') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.recovery-working')).toHaveLength(2));
+		expect(host.querySelectorAll('.account-recovery button')).toHaveLength(4);
+		await unmount(first); await unmount(second);
 	});
 
 	it('writes no link without a usable account id to land on', () => {
