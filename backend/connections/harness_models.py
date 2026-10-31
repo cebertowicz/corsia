@@ -237,6 +237,10 @@ def cache_refresh_reason(
     return None
 
 
+class VersionTimeout(RuntimeError):
+    """A harness ``--version`` read that did not finish in time."""
+
+
 async def binary_version(binary: str, *, env=None) -> str:
     """Read a harness version without starting a model turn."""
     process = await asyncio.create_subprocess_exec(
@@ -247,7 +251,7 @@ async def binary_version(binary: str, *, env=None) -> str:
         async with killed_on_exit(process):
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
     except asyncio.TimeoutError:
-        raise RuntimeError(f"{binary} --version timed out") from None
+        raise VersionTimeout(f"{binary} --version timed out") from None
     match = _VERSION.search(stdout.decode("utf-8", "replace"))
     if process.returncode or not match:
         detail = stderr.decode("utf-8", "replace").strip() or "invalid output"

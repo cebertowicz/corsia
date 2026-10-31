@@ -28,7 +28,8 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
     try:
         try:
             env = _version_environment(context)
-        except Exception:
+        except Exception as error:
+            log.warning('%s account environment failed: %s', provider, error, exc_info=True)
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', harness_version=harness_version, db=db)
         try:
@@ -36,10 +37,11 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
         except Exception as error:
             # A person reads only that the check failed or timed out; the error names the binary's
             # path and the CLI's stderr, so it goes to the log alone.
+            from connections.harness_models import VersionTimeout
             from connections.source_state import UNVERIFIED, user_reason
 
             log.warning('%s version check failed: %s', provider, error)
-            timed_out = 'timed out' if 'timed out' in str(error) else None
+            timed_out = 'timed out' if isinstance(error, VersionTimeout) else None
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', harness_version=harness_version,
                                  reason=user_reason(UNVERIFIED, timed_out), db=db)

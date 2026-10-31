@@ -350,7 +350,7 @@ class TestClaudeSignIn:
         import connections.harness_models as harness_models
 
         async def no_version(_binary, *, env=None):
-            raise RuntimeError(failure)
+            raise (harness_models.VersionTimeout if failure.endswith("timed out") else RuntimeError)(failure)
 
         _put("claude-code", "available")
         assert _sources(client)["claude-code"]["reason"] == "Not checked yet"
