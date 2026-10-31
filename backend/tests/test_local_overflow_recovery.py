@@ -252,7 +252,8 @@ def _fork_request(window: int, system: int):
     (36_000, 18_600, 4_200),  # launch 27,000, half of 8,400
     (262_144, 18_600, 16_384),  # a large window is unchanged
     (48_000, 0, 9_600),  # no measurement: the existing allowance
-    (20_000, 18_600, 0),  # the fixed prompt is past the launch point
+    (20_000, 18_600, 4_000),  # no half-room to take: window // 5, unchanged
+    (48_000, 35_999, 9_600),  # launch - system is exactly 1: unchanged
 ])
 def test_the_fork_output_allowance_is_half_the_room_above_the_fixed_prompt(window, system, allowance):
     from core.fork_native import _window_output
