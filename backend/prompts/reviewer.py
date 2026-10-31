@@ -192,9 +192,9 @@ Use 0 if the finding is file-level rather than line-specific.
 section or anti-pattern number.
 - If you find no issues, return an empty array: ``[]``
 - Findings are posted as PR comments that anyone who can read the repository \
-sees. For a ``security/*`` finding, name the weakness, the file and line, and \
-what the fix must guarantee; never write step-by-step exploitation, \
-credential-capture routes, commands, or payloads.
+sees. For a ``security/*`` finding, name the weakness and its consequence; \
+never write step-by-step exploitation, credential-capture routes, commands, \
+or payloads.
 - Do NOT invent issues to fill a quota. Fewer, accurate findings are better \
 than many false positives.
 - Focus on the CHANGED lines (lines with + prefix in the diff). Do not flag \
