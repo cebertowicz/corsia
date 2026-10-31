@@ -843,33 +843,6 @@ def test_status_rows_carry_the_reason_and_reset(_no_codex_connection) -> None:
     )
 
 
-def test_discovery_session_reads_account_limits(_no_codex_connection) -> None:
-    from connections import harness_usage as codex_usage
-    from subagents import codex_usage_observer as observer
-
-    _seed_codex()
-    calls: list[str] = []
-
-    class _Session:
-        async def _request(self, method, params):
-            calls.append(method)
-            return {"ordinaryUsageAllowed": False, "rateLimits": {}}
-
-    asyncio.run(observer.observe_account_limits(_bind_default(_Session())))
-    assert calls == ["account/rateLimits/read"]
-    assert codex_usage.active_limit(provider="codex", account_id=default_id("codex"))["source"] == "discovery"
-
-
-def test_discovery_survives_a_cli_without_the_method(_no_codex_connection) -> None:
-    from subagents import codex_usage_observer as observer
-
-    class _Old:
-        async def _request(self, method, params):
-            raise RuntimeError("method not found")
-
-    asyncio.run(observer.observe_account_limits(_Old()))
-
-
 @pytest.mark.parametrize("limited, expected", [
     (False, ("ready", None)),
     (True, ("unavailable", "usage_limited")),

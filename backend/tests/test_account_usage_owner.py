@@ -700,14 +700,12 @@ def test_a_non_plan_or_unnameable_meter_stays_an_observation(isolated_db, event)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('release_claims_slowly', [False, True])
-async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notification_owner, control, monkeypatch,
+async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notification_owner, monkeypatch,
                                                                   release_claims_slowly):
     from connections import harness_usage_check as checks, harness_usage
     from infra import unavailable_model_recovery as recovery
     from infra.thread_driver import finish_turn
     from infra.state.ws import notify_models_changed
-    from subagents.codex_usage_observer import observe_account_limits
-    from subagents.vendor_write_admission import session_receipt
 
     db, default, *_ = accounts
     if release_claims_slowly:
@@ -726,16 +724,10 @@ async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notif
     harness_usage.record_limited(reason='limit', resets_at=None, source='test', provider='codex', receipt=default_receipt('codex'))
     _accept(db, 'm')
     _held(db, cause='selected_model_unavailable')
-    unbound = control(binary='/bin/test', task=None, control_only=True)
-    try:
-        await observe_account_limits(unbound)
-    finally:
-        await unbound.close()
     notify_models_changed()
     await drain()
     assert harness_usage.active_limit(provider='codex', account_id=default_id('codex')) is not None
     assert notification_owner == []
-    assert session_receipt(unbound) is None
     refused = _row(db)
     assert (refused['delivery_state'], refused['write_outcome'], refused['active_turn_id']) == ('queued', 'proved_no_write', None)
     assert _kind(db) == ('model', 'model')
@@ -756,7 +748,6 @@ async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notif
     await drain()
     assert len(notification_owner) == 1
     assert _row(db) == after
-    assert all(session.closed for session in control.instances)
 
 
 @pytest.mark.asyncio

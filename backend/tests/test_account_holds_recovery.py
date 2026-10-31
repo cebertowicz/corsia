@@ -33,10 +33,6 @@ from vendor_account_fixtures import (  # noqa: F401
 )
 
 
-SOURCE_CHECK = ('Check the provider source or request its canonical refresh through an available scoped tool'
-                ' with prior authority, or tell the user that this check is needed.')
-
-
 def seed_destination(db, *, same_vendor=False, available=True):
     model = 'codex/alternate' if same_vendor else 'openai/alternate'
     db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,"
@@ -193,12 +189,8 @@ def test_rewording_an_action_keeps_who_can_take_it(monkeypatch):
 
     monkeypatch.setitem(plan_wakes.ACCOUNT_HOLD_COPY, 'account_removed',
                         ('the account was removed', 'Use the inbox to cancel the held input.', 'user'))
-    monkeypatch.setitem(plan_wakes.ACCOUNT_HOLD_COPY, 'account_login_unverified',
-                        ("the account's current sign-in could not be verified", 'Refresh the provider source.', 'source'))
     _, removed = account_wake_fields({'ready': False, 'cause': 'account_removed'})
-    _, unverified = account_wake_fields({'ready': False, 'cause': 'account_login_unverified'})
     assert removed['action'] == 'The user can use the inbox to cancel the held input.'
-    assert unverified['action'] == SOURCE_CHECK
 
 
 @pytest.mark.asyncio

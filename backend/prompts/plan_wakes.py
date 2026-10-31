@@ -308,9 +308,9 @@ ACCOUNT_HELD_CHIP = 'Delegated worker is waiting for its account'
 ACCOUNT_PENDING_RESUME_CHIP = 'Delegated worker is waiting to resume'
 ACCOUNT_READINESS_UNREAD = 'Its account readiness could not be read. Inspect the held work before taking action.'
 ACCOUNT_PENDING_DETAIL = 'Its account is ready; the input is waiting for its claim to resume.'
-# Who can take each action: the user through a control ('user'), a provider
-# source check ('source'), or the agent as written ('agent').
-AccountActor = Literal['user', 'source', 'agent']
+# Who can take each action: the user through a control ('user'), or the agent
+# as written ('agent').
+AccountActor = Literal['user', 'agent']
 ACCOUNT_HOLD_COPY: dict[str, tuple[str, str, AccountActor]] = {
     'account_signed_out': ('it is signed out', 'Sign in to the permitted account through the account controls.', 'user'),
     'account_removed': ('the account was removed', 'Choose another permitted account if one is available; otherwise switch model.', 'user'),
@@ -322,8 +322,6 @@ ACCOUNT_HOLD_COPY: dict[str, tuple[str, str, AccountActor]] = {
     'codex_auth_projection_changed': ('the managed authentication link changed', 'Sign in again through the account controls so the old managed link can be cleaned up and fresh account evidence obtained.', 'user'),
     'codex_auth_source_missing': ('the authentication source is missing', 'Sign in again through the account controls to restore the source and obtain fresh account evidence.', 'user'),
 }
-ACCOUNT_SOURCE_CHECK_ACTION = ('Check the provider source or request its canonical refresh through an available scoped tool'
-                               ' with prior authority, or tell the user that this check is needed.')
 ACCOUNT_HELD_WAKE_TEMPLATE = (
     '[CORSIA plan] The child delegated for {title} has input held for its account on'
     ' {model}: {phrase} ({cause}). Its plan and history are intact. Read delegate_status'
@@ -331,7 +329,7 @@ ACCOUNT_HELD_WAKE_TEMPLATE = (
     ' The user can cancel the held input in the inbox. Tell the user exactly what is needed,'
     " or return that need as review evidence from your own assigned plan task to your parent if you have no user route;"
     ' continue your other authorized work, and retain this same queued brief.'
-    ' Do not resend it or re-delegate it. Policy or source-check actions require an available'
+    ' Do not resend it or re-delegate it. Policy actions require an available'
     ' scoped tool and prior authority; otherwise ask the user to act. If changing this same'
     " own child's model is already authorized, delegate_set_model to an exact permitted ready"
     ' and usage-usable selector is supported only when its current account and policy are usable.'
@@ -390,6 +388,4 @@ def account_wake_fields(readiness):
     phrase, action, actor = copy
     if actor == 'user':
         action = 'The user can ' + action[0].lower() + action[1:]
-    elif actor == 'source':
-        action = ACCOUNT_SOURCE_CHECK_ACTION
     return 'unready', {'phrase': phrase, 'cause': readiness['cause'], 'action': action}
