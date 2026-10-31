@@ -163,3 +163,24 @@ async def test_source_state_follows_the_accounts_through_sign_in_and_removal(iso
     assert row_state(get_connection(vendor, db=db))['state'] == NEEDS_AUTH
     assert await subscription_available() is None
     db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('vendor', ['codex', 'claude-code'])
+async def test_stale_ready_row_with_only_a_signed_out_account_counts_for_no_subscription(isolated_db, vendor):
+    """An upgrade can leave the source reading ready until its first check: setup must not skip the local model on it."""
+    from connections.source_state import READY, apply_check
+    from infra.database import get_db
+    from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
+    from llm.local_setup_gates import limited_subscription_message, subscription_available
+
+    db = get_db()
+    _pre_upgrade_install(db, vendor, 'available')
+    apply_check(vendor, READY, db=db)
+    db.commit()
+    migrate_166_to_167(db)
+    db.commit()
+    assert db.execute("SELECT state FROM vendor_accounts WHERE id='ambient'").fetchone()[0] == 'signed_out'
+    assert await subscription_available() is None
+    assert await limited_subscription_message() is None
+    db.close()

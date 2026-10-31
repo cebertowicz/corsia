@@ -42,16 +42,26 @@ def local_memory_ok(ram_bytes: int | None = None) -> bool:
     return memory_allows_local(host_ram_bytes() if ram_bytes is None else ram_bytes)
 
 
-def _default_limit(provider: str) -> dict | None:
-    """Read the known active limit for one source's Default account."""
+def _signed_in_accounts(provider: str) -> list[tuple[dict, dict | None]]:
+    """Each signed-in CORSIA account of a vendor whose source is usable, with its active plan limit.
+
+    A vendor's source counts only through its accounts: one that last checked ready (or could
+    not tell but was ready before), and that has an account signed in now. A connection row
+    that still reads ready after its account signed out counts for nothing.
+    """
     from connections.harness_usage import active_limit
-    from connections.vendor_accounts import resolve_account_id
+    from connections.models import get_connection
+    from connections.source_state import READY, UNVERIFIED, row_state
+    from connections.vendor_accounts import list_accounts
     from infra.database import get_db
 
     db = get_db()
     try:
-        account_id = resolve_account_id(provider, db=db)
-        return active_limit(provider=provider, account_id=account_id, db=db) if account_id else None
+        state = row_state(get_connection(provider, db=db))
+        if not (state["state"] == READY or (state["state"] == UNVERIFIED and state["prior_state"] == READY)):
+            return []
+        return [(account, active_limit(provider=provider, account_id=account["id"], db=db))
+                for account in list_accounts(provider=provider, db=db) if account["state"] == "signed_in"]
     finally:
         db.close()
 
@@ -66,20 +76,16 @@ def _local_reset_time(reset: str) -> str:
 
 
 async def limited_subscription_message() -> str | None:
-    """Explain the first signed-in source with a known active plan limit.
+    """Explain the first source with a signed-in account at a known active plan limit.
 
     A missing or stale usage observation does not establish a limit, so it
     deliberately returns ``None`` in that case.
     """
-    from connections.models import get_connection
-    from connections.source_state import READY, row_state
     from infra.db_async import run_in_db
 
     for provider in ("claude-code", "codex"):
-        state = row_state(await run_in_db(get_connection, provider))
-        if READY not in (state["state"], state["prior_state"]):
-            continue
-        limit = await run_in_db(_default_limit, provider)
+        limit = next((limit for _, limit in await run_in_db(_signed_in_accounts, provider)
+                      if limit is not None), None)
         if limit is None:
             continue
         source = "Claude Code" if provider == "claude-code" else "Codex"
@@ -91,23 +97,15 @@ async def limited_subscription_message() -> str | None:
     return None
 
 
-def _verified_default_label(provider: str) -> str | None:
-    """Return the verified Default account label, never a plan or custom name."""
+def _verified_label(account: dict) -> str | None:
+    """Return the account's label when it names a verified email, never a plan or custom name."""
     from connections.account_profiles import account_label
-    from connections.vendor_accounts import get_account, resolve_account_id
-    from infra.database import get_db
 
-    db = get_db()
     try:
-        account_id = resolve_account_id(provider, db=db)
-        if account_id is None:
-            return None
-        label = account_label(get_account(account_id, db=db))
+        label = account_label(account)
     except Exception:
-        log.warning("Could not read the verified %s account label", provider, exc_info=True)
+        log.warning("Could not read the verified %s account label", account["provider"], exc_info=True)
         return None
-    finally:
-        db.close()
     text = label.get("text")
     email = label.get("email")
     return text if isinstance(text, str) and isinstance(email, str) and email else None
@@ -116,20 +114,15 @@ def _verified_default_label(provider: str) -> str | None:
 async def subscription_available() -> SubscriptionSource | None:
     """The first subscription source that works now, with a verified label when one exists.
 
-    A source counts only when its last check found it ready (or could not tell
-    but it was ready before: still usable by the source-state contract) and no
-    plan limit is active. A ``needs_auth`` result never carries a prior ready,
-    and a source that was never checked does not count: a CLI that is merely
-    installed is not a working provider.
+    A source counts only through a CORSIA account of that vendor that is signed in now
+    with no active plan limit, on a source whose last check found it ready (or could not
+    tell but it was ready before). A CLI that is merely installed or signed in from a
+    terminal is not a working provider.
     """
-    from connections.models import get_connection
-    from connections.source_state import READY, UNVERIFIED, row_state
     from infra.db_async import run_in_db
 
     for provider in ("claude-code", "codex"):
-        state = row_state(await run_in_db(get_connection, provider))
-        usable = state["state"] == READY or (
-            state["state"] == UNVERIFIED and state["prior_state"] == READY)
-        if usable and await run_in_db(_default_limit, provider) is None:
-            return SubscriptionSource(provider, await run_in_db(_verified_default_label, provider))
+        for account, limit in await run_in_db(_signed_in_accounts, provider):
+            if limit is None:
+                return SubscriptionSource(provider, await run_in_db(_verified_label, account))
     return None
