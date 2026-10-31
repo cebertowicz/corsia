@@ -6,15 +6,14 @@ KV+SDPA cost K of this prompt of P tokens, so it teaches how many tokens fit:
 ``P * (L - C_now) / K``. That is a physical runtime fact of one server and one
 loaded model, so it lives in process memory only, keyed by (server, model),
 and is dropped when the server's observation generation changes or the model
-is no longer loaded. ``context_window`` caps the row's window with it.
+is no longer loaded. ``context_window.resolve_live_window_facts`` caps the
+runtime window with it; settings and catalog surfaces keep the configured one.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any, Mapping, NamedTuple
-
-from loguru import logger
 
 _GIB = 2 ** 30
 _MIB = 2 ** 20
@@ -26,7 +25,9 @@ WINDOW_STEP = 1024
 _CURRENT_AND_KV = re.compile(
     r"current\s+([\d.]+)\s*GB\s*\+\s*KV\+SDPA\s+([\d.]+)\s*GB", re.IGNORECASE
 )
-_LIMIT = re.compile(r"prefill limit is\s+([\d.]+)\s*GB", re.IGNORECASE)
+# The scheduler's guard says "the prefill limit is L"; the memory monitor's says
+# "<binding> ceiling is L". Both carry the same current and KV+SDPA terms.
+_LIMIT = re.compile(r"(?:prefill limit|ceiling) is\s+([\d.]+)\s*GB", re.IGNORECASE)
 
 
 class _Observation(NamedTuple):
@@ -74,12 +75,7 @@ def _server_used_mb(server_id: str) -> int | None:
     """The server's oMLX model memory in MiB, as the status sweep last stored it."""
     from llm.network_discovery import get_server
 
-    try:
-        server = get_server(server_id)
-    except Exception as exc:
-        logger.warning("memory reading for {} unavailable: {}", server_id, exc)
-        return None
-    used = (server or {}).get("memory_used_mb")
+    used = (get_server(server_id) or {}).get("memory_used_mb")
     return int(used) if isinstance(used, int) and used > 0 else None
 
 
@@ -104,12 +100,16 @@ def _live_observation(server_id: str, model_id: str) -> _Observation | None:
     from llm.network_discovery import get_loaded_model_ids
     from llm.server_observation import observation_generation
 
-    obs = _OBSERVATIONS.get((server_id, model_id))
+    key = (server_id, model_id)
+    obs = _OBSERVATIONS.get(key)
     if obs is None:
         return None
     if (observation_generation(server_id) != obs.generation
             or model_id not in get_loaded_model_ids(server_id)):
-        del _OBSERVATIONS[(server_id, model_id)]
+        # Resolvers run on several threads: drop only the entry this read saw,
+        # never one a newer refusal has recorded since.
+        if _OBSERVATIONS.get(key) is obs:
+            _OBSERVATIONS.pop(key, None)
         return None
     return obs
 

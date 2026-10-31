@@ -310,8 +310,7 @@ async def _sweep_managed(client: httpx.AsyncClient, server: dict) -> None:
             loaded={m for m in loaded if isinstance(m, str) and m},
             generation=generation,
             latency_ms=fastest_latency,
-            # oMLX reports its model memory and the cap it enforces, in bytes.
-            memory_total_mb=int(latest_data.get("model_memory_max") or 0) // (1024 ** 2),
+            # oMLX reports the memory its loaded models use, in bytes.
             memory_used_mb=int(latest_data.get("model_memory_used") or 0) // (1024 ** 2),
             gpu_info=latest_data.get("device"),
             machine_id=latest_data.get("machine_id"),

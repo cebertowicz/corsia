@@ -214,6 +214,8 @@ class WindowFacts(NamedTuple):
     tell a user whether the limit they see is the model's or CORSIA's.
     ``source`` names which one produced ``effective`` — ``saved``, the CORSIA
     ``default``, or the ``provider`` — so no surface recomputes that rule.
+    Only ``resolve_live_window_facts`` adds ``memory``: a local seat's live
+    memory fit capping the runtime window. No settings surface carries it.
     """
 
     effective: int | None
@@ -240,7 +242,26 @@ def resolve_window_facts(row: Mapping[str, Any], *, db=None) -> WindowFacts:
     override = _saved_override(
         harness, model_id, lambda: _profile_context_window(model_id, db=db)
     )
-    return _with_memory_fit(data, _facts_with_override(data, harness, override))
+    return _facts_with_override(data, harness, override)
+
+
+def resolve_live_window_facts(row: Mapping[str, Any], *, db=None) -> WindowFacts:
+    """The facts a running turn counts against: the configured window, capped for a
+    local oMLX row by what fits in memory right now.
+
+    The one place the physical limit enters; ``discovered`` stays the model's own.
+    It moves with live memory, so it serves dispatch, admission and checkpoint
+    sizing, never a settings or catalog surface.
+    """
+    from llm.memory_fit import memory_fit_window
+
+    facts = resolve_window_facts(row, db=db)
+    if facts.effective is None:
+        return facts
+    fit = memory_fit_window(row)
+    if fit is None or fit >= facts.effective:
+        return facts
+    return facts._replace(effective=fit, source="memory")
 
 
 def resolve_unsaved_window_facts(row: Mapping[str, Any]) -> WindowFacts:
@@ -307,23 +328,8 @@ def resolve_window_facts_for_rows(
         harness = str(data.get("harness") or "native")
         model_id = str(data.get("id") or "")
         override = _saved_override(harness, model_id, read_for(model_id))
-        facts.append(_with_memory_fit(data, _facts_with_override(data, harness, override)))
+        facts.append(_facts_with_override(data, harness, override))
     return facts
-
-
-def _with_memory_fit(data: Mapping[str, Any], facts: WindowFacts) -> WindowFacts:
-    """Cap a local oMLX row's window by what fits in memory right now.
-
-    The one place the physical limit enters; ``discovered`` stays the model's own.
-    """
-    if facts.effective is None:
-        return facts
-    from llm.memory_fit import memory_fit_window
-
-    fit = memory_fit_window(data)
-    if fit is None or fit >= facts.effective:
-        return facts
-    return facts._replace(effective=fit, source="memory")
 
 
 def _names_extended_window(data: Mapping[str, Any]) -> bool:
@@ -356,7 +362,7 @@ def _facts_with_override(
 
 
 def resolve_window_for_row(row: Mapping[str, Any], *, db=None) -> int | None:
-    """Resolve the live window CORSIA counts against for one catalog row."""
+    """Resolve the configured window CORSIA counts against for one catalog row."""
     return resolve_window_facts(row, db=db).effective
 
 
@@ -368,7 +374,7 @@ def get_context_window_or_none(model: str, *, db=None) -> int | None:
     except Exception as exc:
         logger.warning("model catalog lookup failed for {}: {}", model, exc)
     if row is not None:
-        return resolve_window_for_row(row, db=db)
+        return resolve_live_window_facts(row, db=db).effective
     # No catalog row: an optional override keyed by the raw id may still pin it.
     return _optional_profile_context_window(model, db=db)
 

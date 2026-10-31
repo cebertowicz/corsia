@@ -6,7 +6,7 @@ import httpx
 
 
 def test_managed_sweep_stores_the_model_memory_oMLX_reports(isolated_db):
-    """oMLX 0.7.1rc1 sends ``model_memory_used``/``model_memory_max`` in bytes."""
+    """oMLX 0.7.1rc1 sends ``model_memory_used`` in bytes."""
     from llm import network_discovery as nd
 
     server_id = nd.upsert_server("omlx", "m", "m", "127.0.0.1", 5200, "offline", kind="managed")
@@ -24,4 +24,3 @@ def test_managed_sweep_stores_the_model_memory_oMLX_reports(isolated_db):
     asyncio.run(run())
     server = nd.get_server(server_id)
     assert server["memory_used_mb"] == 19683470507 // 2 ** 20
-    assert server["memory_total_mb"] == 24219694464 // 2 ** 20

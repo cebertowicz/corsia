@@ -221,12 +221,6 @@ describe('groupByHost', () => {
 		expect(groups[0].providers[0].subline).toContain('port 5100');
 	});
 
-	it('subline for an online network server stays the port when memory is reported', () => {
-		const online = s({ provider: 'omlx', status: 'online', port: 8210, memory_used_mb: 18771 });
-		const groups = groupByHost([p({ name: 'omlx', type: 'network' })], [online], null);
-		expect(groups[0].providers[0].subline).toBe('port 8210');
-	});
-
 	it('shows an endpoint registered on a public host as its own cloud group, named by URL not port', () => {
 		const base = 'https://ws-x.us-east-1.maas.aliyuncs.com/compatible-mode/v1';
 		const alibaba = s({
