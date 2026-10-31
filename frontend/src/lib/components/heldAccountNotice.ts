@@ -26,6 +26,6 @@ export function heldSignedOutInput(messages: TranscriptMessage[], threadId: stri
 export function heldSignedOutNotice(msg: TranscriptMessage, accounts: ThreadVendorAccount[]): TranscriptMessage | null {
 	const account = accounts.find((row) => row.hold_reason === SIGNED_OUT_HOLD);
 	if (!account) return null;
-	return { id: `${NOTICE_ID_PREFIX}${msg.id}`, thread_id: msg.thread_id, role: 'system', content: `${account.name} is signed out of ${VENDORS[account.provider]?.cli ?? 'this tool'}. Sign it in again under Settings › Providers.`,
+	return { id: `${NOTICE_ID_PREFIX}${msg.id}`, thread_id: msg.thread_id, role: 'system', content: `${account.label.text} is signed out of ${VENDORS[account.provider]?.cli ?? 'this tool'}. Sign it in again under Settings › Providers.`,
 		metadata: { cc: true, type: 'cc_error', cause_kind: 'sign_in_expired', account_id: account.id } };
 }

@@ -28,3 +28,21 @@ async def test_cache_failure_uses_turn_bound_account_and_own_cause(accounts):
     assert metadata['reference']
     assert metadata['account_id'] == account['id']
     assert metadata['cause'] == 'account_model_cache_changed'
+
+
+@pytest.mark.asyncio
+async def test_cache_failure_names_a_converted_default_by_its_label(accounts):
+    from infra.queries import insert_message
+    from subagents.codex_runtime_errors import CodexModelCacheChanged, cache_error_marker
+
+    db, default, _, _ = accounts
+    db.execute("UPDATE vendor_accounts SET state='signed_out', identity_json=? WHERE id=?",
+               (json.dumps({'upgrade_reason': 'sign_in_to_keep_using_account',
+                            'hint': {'email': 'old@example.test'}}), default['id']))
+    db.execute("INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,vendor_account_id) "
+               "VALUES ('codex-turn','destination',0,'codex/test','running','t','test',?)", (default['id'],))
+    db.commit()
+    marker = cache_error_marker(CodexModelCacheChanged(), 'destination', SimpleNamespace(turn_id='codex-turn'),
+                                lambda *_: None, db, insert_message, logging.getLogger(__name__))
+    row = db.execute('SELECT content FROM messages WHERE id=?', (await marker(),)).fetchone()
+    assert 'Default' not in row['content'] and 'old@example.test' in row['content']

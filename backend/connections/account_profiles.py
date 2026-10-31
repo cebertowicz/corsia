@@ -188,12 +188,12 @@ async def sign_out_account(account: dict) -> dict:
         account, Path(account["source_home"]), Path(account["runtime_home"]))
 
 
-def account_label(account: dict, *, rows: list[dict] | None = None) -> dict:
+def account_label(account: dict, *, rows: list[dict] | None = None, db=None) -> dict:
     """Return the person-facing label from this account's own evidence."""
     from connections.vendor_accounts import DEFAULT_ACCOUNT_NAME, list_accounts
 
     if rows is None:
-        rows = list_accounts(provider=account["provider"], include_removed=True)
+        rows = list_accounts(provider=account["provider"], include_removed=True, db=db)
     provider_rows = [row for row in rows if row["provider"] == account["provider"]]
     if not any(row["id"] == account["id"] for row in provider_rows):
         raise AccountError("account is not present in its supplied label rows")
