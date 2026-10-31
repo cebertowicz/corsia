@@ -256,10 +256,10 @@
       "sha256": "881ad673645b6becdf297e0f681e07b8697f141e6ea675f45511f67688d0c347"
     },
     {
-      "bytes": 3875,
+      "bytes": 3954,
       "kind": "skill",
       "path": "skills/context-stewardship/references/cross-agent-read.md",
-      "sha256": "66ade7b360e3231cde297373b47d7d840d7e2fbbc0e3b7ec7bf85e4370763863"
+      "sha256": "d549a33e89f04a5a7b5c888874d71910e01316bbd518973778b719b02f1f5c3d"
     },
     {
       "bytes": 10314,
