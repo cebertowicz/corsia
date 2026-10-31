@@ -268,6 +268,7 @@ async def test_renderer_seam_attaches_exactly_one_ledger(
         return function(*args, **kwargs)
 
     monkeypatch.setattr("infra.db_async.run_in_db", immediate)
+    monkeypatch.setattr("infra.db_async.run_off_db", immediate)
     if provider == "native":
         prepared_native = SimpleNamespace(
             messages=[{"role": "system", "content": "fixed"}, "FIFO_HEAD"],

@@ -1,8 +1,10 @@
 """One owner for counting cold fork input, by the writer's tokenizer.
 
-The cold admission, its send-time capacity check, and every harness fork must
-agree on what "input tokens" means, or an admitted fold overflows or a possible
-fold is refused. Counting serialized bytes (the prior bound) overcounts real
+The cold admission and every harness fork must agree on what "input tokens"
+means, or an admitted fold overflows or a possible fold is refused. The
+send-time capacity check passes a bare model id and so keeps the byte bound for
+local writers: it may refuse a cap the fork would fit, never admit one it
+cannot. Counting serialized bytes (the prior bound) overcounts real
 prompts by roughly 2x for Claude and 4x for the Codex surface, which refuses
 folds that would have fit.
 

@@ -231,9 +231,10 @@ async def prepare_target_checkpoint(
     checkpoint_id: str,
 ) -> CheckpointAdmission:
     """Prepare the one selected-destination cold request and fixed local fit."""
-    from infra.db_async import run_in_db
+    from infra.db_async import run_off_db
 
-    return await run_in_db(_target_cold_admission, request, checkpoint_id)
+    # A local writer's cold count asks its own server; that wait holds no DB worker.
+    return await run_off_db(_target_cold_admission, request, checkpoint_id)
 
 
 def relevant_checkpoint(request: SwitchRequest) -> CheckpointSummary | None:

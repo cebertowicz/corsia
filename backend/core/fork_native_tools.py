@@ -68,10 +68,10 @@ class MeasuredInput(NamedTuple):
 def measured_input(request, messages, tools, usage) -> MeasuredInput | None:
     """Anchor the next call on what the provider measured for the last one.
 
-    ``messages`` already ends with that reply. A cold count is a UTF-8 byte
-    bound for a writer with no bundled tokenizer, several times its real
-    tokens, so re-counting the reply's reasoning overflowed a small window the
-    provider itself had room for.
+    ``messages`` already ends with that reply. A cold count can be a UTF-8
+    byte bound (a writer with no bundled tokenizer whose server cannot
+    tokenize), several times its real tokens, so re-counting the reply's
+    reasoning overflowed a small window the provider itself had room for.
     """
     from core.checkpoint_native_admission import effective_input_tokens
     from core.token_estimation import measure_request
