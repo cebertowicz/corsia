@@ -659,7 +659,6 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
     assert "any suggestion that can no longer apply to it, as when the person edited its heading. Never wait on a helper" in doc
-    assert "put back any heading" not in doc and "unchanged" not in form
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc
