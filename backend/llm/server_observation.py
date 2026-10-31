@@ -64,7 +64,8 @@ _PENDING: set[asyncio.Task] = set()
 _UNLISTED: dict[str, str | None] = {}
 
 
-# Observation generation per server: an exit or going offline starts a new one. A
+# Observation generation per server: a process exit, or any source finding the server
+# unreachable (even one already offline), starts a new one. A
 # probe or load captures it before awaiting and publishes only if it is unchanged,
 # so a result begun before the server died never revives what it held.
 _GENERATION: dict[str, int] = {}
