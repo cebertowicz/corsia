@@ -254,8 +254,8 @@ function _networkSubline(s: NetworkServer): string {
 	}
 	const port = s.port ? `port ${s.port}` : '';
 	if (s.status !== 'online') return ['off', port].filter(Boolean).join(' · ');
-	const usedGb = Math.round((s.memory_used_mb ?? 0) / 1024);
-	return [port, usedGb > 0 ? `${usedGb} GB used` : ''].filter(Boolean).join(' · ');
+	// Memory in use is shown once, by the host section; not repeated per server.
+	return port;
 }
 
 function _cloudSubline(p: ProviderEntry): string {
