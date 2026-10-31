@@ -20,28 +20,27 @@ def account_sessions_root(thread_id: str, db) -> tuple[Path, object | None] | st
 
     Taken from the frozen login of the thread's latest Codex Turn, never from
     the thread's current account binding. An unstamped Turn with no account
-    keeps the managed default root; an account must prove a current receipt and
-    resolves its own runtime home, with no fallback.
+    keeps the managed default root, where only pre-account transcripts live; a
+    Turn with an account must prove a current receipt and resolves its own
+    runtime home, with no fallback.
     """
     from connections.account_receipts import receipt_is_current
     from connections.account_runtime import launch_homes
-    from connections.vendor_accounts import AccountError, get_account
+    from connections.vendor_accounts import AccountError
     from infra.vendor_login import thread_login
     from llm.codex_rollout_files import default_codex_sessions_root
 
     receipt = thread_login(thread_id, "codex", db=db)
     if receipt is None:
-        turn = db.execute(
-            "SELECT t.vendor_account_id FROM active_turns t "
+        account_turn = db.execute(
+            "SELECT 1 FROM active_turns t "
             "JOIN vendor_accounts a ON a.id=t.vendor_account_id "
             "JOIN connections c ON c.id=a.connection_id "
             "WHERE t.thread_id=? AND c.provider='codex' "
             "ORDER BY t.turn_order DESC LIMIT 1",
             (thread_id,),
         ).fetchone()
-        if turn is not None and get_account(
-            str(turn["vendor_account_id"]), db=db,
-        )["source_home"] is not None:
+        if account_turn is not None:
             return "account_provenance_ambiguous"
         return default_codex_sessions_root(), None
     try:

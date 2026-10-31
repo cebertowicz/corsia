@@ -177,7 +177,7 @@ def _hint(profile, identity_hint: dict | None) -> dict | None:
 
 
 def allocate_account_homes(provider: str, identity: str):
-    """Allocate the same private homes for a new or upgraded account."""
+    """Allocate the private homes of a new account; ``add_account`` is the only caller."""
     from connections.account_profiles import profile_for
 
     root = profile_for(provider).home_root() / identity
