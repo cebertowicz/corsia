@@ -57,7 +57,7 @@ revokes it.
   repository; never in the serving checkout or the base clone.
 - [invariant] Never set or override upstream `qa/*` statuses or labels.
 - [invariant] Reach CORSIA only through the API token in
-  `~/.corsia/.api-token`; never handle a password or paste a token
+  `~/.corsia/credentials/api-token`; never handle a password or paste a token
   anywhere, and stop on HTTP 401 (`context/CORSIA-API-ACCESS.md`; requires
   CORSIA at or after `f98af18a`).
 - Root-cause fixes that leave the codebase most maintainable

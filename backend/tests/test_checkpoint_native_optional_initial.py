@@ -112,7 +112,7 @@ def folds(monkeypatch):
     holder = {"context": context}
     monkeypatch.setattr(turn_iteration_context, "provider_boundary_snapshot", boundary_snapshot)
     monkeypatch.setattr(turn_iteration_context, "run_in_db", iteration_db)
-    monkeypatch.setattr(checkpoint_native_admission, "run_in_db", admission_db)
+    monkeypatch.setattr(checkpoint_native_admission, "run_off_db", admission_db)
     monkeypatch.setattr(
         "core.fork_native.capture_live_warm_source",
         lambda *_args, **_kwargs: object(),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 import plans.service as service
 from core.size_rating import UNKNOWN as UNKNOWN_SIZE
@@ -199,6 +199,19 @@ def same_step_fields(db, source) -> dict[str, Any]:
         "required_step": created.get("workflow_required") is True,
         "workflow_by": created.get("workflow_by", "agent"),
     }
+
+
+#: What a follow-up keeps of its source's step: nothing, the step it counts as, or that step under its rules.
+FollowUpStep = Literal["none", "identity", "rules"]
+
+
+def follow_up_step_fields(db, source, step: FollowUpStep) -> dict[str, Any]:
+    """A follow-up's creation fields: an accepted step's follow-up counts as that step, a revision is it."""
+    if step == "rules":
+        return same_step_fields(db, source)
+    if step == "identity":
+        return {field: source[field] for field in NOT_A_STEP}
+    return NOT_A_STEP
 
 
 def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:

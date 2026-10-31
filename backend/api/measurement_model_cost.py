@@ -34,7 +34,11 @@ def _bound(params: dict[str, Any], task_ids: Collection[str] | None) -> dict[str
 
 
 # The accepted tasks and the nodes of their chains: ``task_id, period, settled_at, node_id``.
-_CHAIN_ROWS = "(SELECT o.id AS task_id,o.period,o.settled_at,c.node_id FROM outcome_rows o JOIN chain c ON c.task_id=o.id)"
+_ACCEPTED_ROWS = "SELECT o.id AS task_id,o.period,o.settled_at,c.node_id FROM outcome_rows o JOIN chain c ON c.task_id=o.id"
+# The seeds' (``chain_ctes(seeded=True)``): no period, usage read to the seed's own terminal time.
+_SEED_ROWS = "SELECT s.task_id,NULL,s.settled_at,c.node_id FROM seeds s JOIN seed_chain c ON c.task_id=s.task_id"
+_CHAIN_ROWS = f"({_ACCEPTED_ROWS})"
+_SEEDED_CHAIN_ROWS = f"({_ACCEPTED_ROWS} UNION ALL {_SEED_ROWS})"
 
 
 def _cost_sql(chain_rows: str) -> str:
@@ -45,9 +49,10 @@ def _cost_sql(chain_rows: str) -> str:
     )
 
 
-def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | None = None) -> str:
+def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | None = None, *, seeded: bool = False) -> str:
     """Walk the chains of the prepared periods' accepted tasks (or only ``task_ids``) once into a temporary table
-    the readers below can share.
+    the readers below can share. With ``seeded`` (needs ``task_ids``) the terminal ``task_ids`` that no accepted
+    chain reaches and no revision replaced are walked too, each read to its own terminal time (``chain_ctes``).
 
     Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces its
     rows, so the caller empties it when done.
@@ -55,7 +60,7 @@ def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | No
     The table is created once per connection, before any write (see ``create_tables``), and refilled, never dropped:
     creating or dropping a table changes the connection's schema, which expires every statement it has prepared, so
     each would be planned again on its next run, whichever job sends it."""
-    prefix, source, bound = _chain_source(params, task_ids, None)
+    prefix, source, bound = _chain_source(params, task_ids, None, seeded)
     db.execute(CHAIN_DDL)
     db.execute(f"DELETE FROM {CHAIN_TABLE}")
     db.execute(f"INSERT INTO {CHAIN_TABLE} {prefix} SELECT task_id,period,settled_at,node_id FROM {source}", bound)
@@ -67,12 +72,14 @@ def clear_chain(db) -> None:
     db.execute(f"DELETE FROM {CHAIN_TABLE}")
 
 
-def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None) -> tuple[str, str, dict[str, Any]]:
+def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None,
+                  seeded: bool = False) -> tuple[str, str, dict[str, Any]]:
     """The CTE prefix, the chain rows to select from and the binds: the walk itself, unless a table already holds it."""
     if chain_rows is not None:
         return "", chain_rows, {}
-    prefix = scope_cte() + outcome_ctes(query_params(params)["grain"], limited_to_range=False) + chain_ctes(only_tasks=task_ids is not None)
-    return prefix, _CHAIN_ROWS, _bound(params, task_ids)
+    prefix = (scope_cte() + outcome_ctes(query_params(params)["grain"], limited_to_range=False)
+              + chain_ctes(only_tasks=task_ids is not None, seeded=seeded))
+    return prefix, _SEEDED_CHAIN_ROWS if seeded else _CHAIN_ROWS, _bound(params, task_ids)
 
 
 def query_model_costs(
@@ -82,7 +89,8 @@ def query_model_costs(
     """Return each accepted task's classified usage per identity, for the periods the page grain prepared.
 
     ``task_ids`` narrows the read to those tasks' chains; their figures are unchanged. ``chain_rows`` is the table
-    :func:`materialize_chain` filled for them, so a caller that also reads the gaps walks the chains once."""
+    :func:`materialize_chain` filled for them (seeds included, if it was seeded: their rows carry no period and
+    their own ``task_id``), so a caller that also reads the gaps walks the chains once."""
     prefix, source, bound = _chain_source(params, task_ids, chain_rows)
     rows = []
     for row in (dict(item) for item in db.execute(prefix + _cost_sql(source), bound).fetchall()):

@@ -11,7 +11,7 @@ from core import lesson_files, workflow_verdict_evaluator as evaluator
 from core import lesson_trial_verdicts as lessons
 from core.lesson_trials import Trial
 from core.workflow_verdict_rules import Definition, FrozenPlan, TwoArms, decide_arms
-from core.workflow_verdicts import Run
+from core.workflow_verdicts import COST, Run
 from infra.outcome_events import record_outcome_event
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -211,7 +211,7 @@ def test_an_open_task_is_a_run_without_facts_and_a_restart_is_a_failed_or_change
                        (f"a{ordinal}", node, ordinal, reason))
     arms = lessons.read_arms(db, trial)
     by_id = {run.run_id: run for run in arms.with_runs}
-    assert [by_id[name].kpi_rows[lessons.WITHOUT_RESTART][0].value for name in ("w-0", "w-1")] == [0.0, 1.0]
+    assert [by_id[name].kpi_rows[lessons.RESTARTED][0].value for name in ("w-0", "w-1")] == [1.0, 0.0]
     assert by_id["open-0"].kpi_rows == {} and by_id["open-0"].terminal_at is None
 
 
@@ -278,7 +278,7 @@ def rate(count: int, per_ten: int) -> list[int]:
 
 
 def plan_of(db, workspace) -> FrozenPlan:
-    return lessons.freeze_plan(trial_at(workspace, db), (), None)
+    return lessons.freeze_plan(trial_at(workspace, db), (), None, (), NOW)
 
 
 def judge(plan: FrozenPlan, without: list[int], with_: list[int]):
@@ -302,6 +302,29 @@ def test_look_three_is_the_last_and_a_tie_reverts(db, workspace) -> None:
     assert judge(plan, rate(80, 3), rate(80, 3)[:79]).word == "collecting"  # one task short of 80 per half
 
 
+def test_a_restart_margin_is_a_quarter_of_the_restarted_share_not_of_the_share_without_one(db, workspace) -> None:
+    def restarts(version: str, flags: list[int]) -> tuple[Run, ...]:
+        end = "2026-10-01T00:00:00+00:00"
+        return tuple(Run(f"{version}{index}", version, ("s", "none", "none"), end, end, "accepted",
+                         kpi_rows=lessons._kpi_rows(False, bool(flag), end)) for index, flag in enumerate(flags))
+
+    plan = plan_of(db, workspace)
+    # 90% finished without a restart falls to 80%: within a quarter of 0.9, but four times a quarter of 0.1.
+    verdict = decide_arms(plan, TwoArms(restarts("without", rate(80, 1)), restarts("with", rate(80, 2)),
+                                        matched=True), NOW)
+    call = next(call for call in verdict.calls if call.name == lessons.RESTARTED)
+    assert call.margin == pytest.approx(0.025)
+    assert call.call == "worse"
+
+
+def test_a_trials_minimum_detectable_change_is_none_until_its_without_half_has_two_runs(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    empty = lessons.freeze_plan(trial, (), None, (), NOW)
+    assert empty.mdc[lessons.SENT_BACK] == (None, None, None) and empty.mdc[COST] == (None, None, None)
+    started = lessons.freeze_plan(trial, (), None, synthetic("without", rate(20, 3)), NOW)
+    assert all(figure is not None and figure > 0 for figure in started.mdc[lessons.SENT_BACK])
+
+
 def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, workspace) -> None:
     trial = trial_at(workspace, db)
     events = Definition("event", "qg.escape", 1, {"attributes": {"pr": "id"}, "dedupe": ["pr"]},
@@ -313,12 +336,12 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
                 "decides_as": decides_as}
         return Definition("kpi", name, 1, spec, "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
 
-    spend = lessons.freeze_plan(trial, [events, kpi("hours", "spend")], "w")
+    spend = lessons.freeze_plan(trial, [events, kpi("hours", "spend")], "w", (), NOW)
     roles = {measure.name: measure.role for measure in spend.measures}
-    assert roles["hours"] == "spend" and roles[lessons.SENT_BACK] == roles[lessons.WITHOUT_RESTART] == "quality"
-    quality = lessons.freeze_plan(trial, [events, kpi("escapes", "quality")], "w")
+    assert roles["hours"] == "spend" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "quality"
+    quality = lessons.freeze_plan(trial, [events, kpi("escapes", "quality")], "w", (), NOW)
     roles = {measure.name: measure.role for measure in quality.measures}
-    assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.WITHOUT_RESTART] == "shown"
+    assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "shown"
 
 
 # --- the owner -------------------------------------------------------------------------------------------------
@@ -388,14 +411,23 @@ def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner_when_swit
     trial = seed_finished_trial(db, workspace)
     db.commit()
     wakes = []
+
+    def wake(*args, message_id, db):
+        # Accepted the way the real wake is: its message row exists afterwards, so the next run doesn't retry it.
+        wakes.append(args)
+        db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,'system','',?)",
+                   (message_id, args[0], NOW.isoformat()))
+
     monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
-    monkeypatch.setattr(delivery, "enqueue_event_wake", lambda *args, **kwargs: wakes.append(args))
+    monkeypatch.setattr(delivery, "enqueue_event_wake", wake)
     assert workflow_verdicts.run_daily(now=NOW).recorded == 1
     assert workflow_verdicts.run_daily(now=NOW).recorded == 0
     rows = db.execute("SELECT event_name,subject_key FROM outcome_events ORDER BY event_name").fetchall()
     assert [(row["event_name"], row["subject_key"]) for row in rows] == [
         (evaluator.PLANNED_EVENT, trial.subject), (evaluator.REACHED_EVENT, trial.subject)]
-    assert len(wakes) == 1 and wakes[0][0] == "root" and wakes[0][2].startswith("Lesson verdict reached")
+    lesson, _, version = trial.subject.partition(":")[2].partition("@")
+    assert len(wakes) == 1 and wakes[0][0] == "root" and wakes[0][2] == (
+        f"Lesson {lesson} ({version[:7]}) verdict reached: keep the change.")
 
 
 def test_an_unavailable_owner_keeps_the_verdict_and_skips_the_wake(db, workspace, monkeypatch) -> None:

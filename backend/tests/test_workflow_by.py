@@ -97,6 +97,29 @@ async def test_a_split_part_of_a_step_is_under_the_same_rules(isolated_db, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_an_accepted_steps_follow_up_counts_as_that_step_without_its_rules(isolated_db, tmp_path, monkeypatch):
+    steps = "    - {id: draft, required: true, check: Draft exists, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    draft = (await run.start("ship"))["steps"][0]["id"]
+    await run.update("start", {"node_id": draft, "expected_revision": run.revision(draft)})
+    await run.update("request_review", {"node_id": draft, "expected_revision": run.revision(draft), "evidence": "drafted"})
+    result = await run.update("accept_with_follow_up", {
+        "node_id": draft, "expected_revision": run.revision(draft), "verification_result": "passed",
+        "title": "Re-check the draft", "acceptance_criteria": "Draft re-checked", "size": "XS",
+    })
+
+    follow_up = result["follow_up"]["id"]
+    fields = ("workflow_ref", "workflow_version", "workflow_step", "difficulty")
+    source, after = (run.rows("SELECT * FROM plan_nodes WHERE id=?", node)[0] for node in (draft, follow_up))
+    assert {field: after[field] for field in fields} == {field: source[field] for field in fields}
+    assert after["workflow_step"] == "draft"
+    created = run.rows("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'", follow_up)
+    assert json.loads(created[0]["payload_json"]).get("workflow_required") is not True
+    closed = await run.update("close_node", {"node_id": follow_up, "expected_revision": run.revision(follow_up), "reason": "not needed"})
+    assert not isinstance(closed, str)
+
+
+@pytest.mark.asyncio
 async def test_person_title_fallback_and_reviewer_fail(isolated_db, tmp_path, monkeypatch):
     steps = (
         "    - {id: review, by: reviewer, difficulty: {default: routine}}\n"

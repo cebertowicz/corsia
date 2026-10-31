@@ -22,6 +22,8 @@ import re
 import shutil
 import subprocess
 
+from infra.backend_git import git_argv
+
 GIT_TIMEOUT_SECONDS = 30.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
@@ -62,7 +64,7 @@ def git(
     """Run one Git command without optional locks, hooks or translated output."""
     try:
         return subprocess.run(
-            ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", *args],
+            git_argv("--no-optional-locks", *args),
             cwd=str(cwd),
             capture_output=True,
             text=True,

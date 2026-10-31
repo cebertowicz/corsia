@@ -8,16 +8,22 @@ import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from math import sqrt
+from statistics import NormalDist
 
+from loguru import logger
 import pytest
 
 import core.workflow_verdict_evaluator as evaluator
+import core.workflow_verdicts as verdicts
+from core.workflow_verdict_looks import OBRIEN_FLEMING, look_confidence, minimum_detectable_change
 from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
     decide_arms, freeze_plan,
 )
+from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MINUTES, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
@@ -162,14 +168,31 @@ def test_kpi_n_counts_deciding_denominator_rows_with_allowed_labels() -> None:
     assert (call.call, call.n_new) == ("no_worse", 20)
 
 
-@pytest.mark.parametrize(("new", "reason"), [
-    (runs("v2", 1, count=18) + runs("v2", 1, count=2, state="failed"), "failed_run_unpriced"),
-    (runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None), "cost_unknown"),
+@pytest.mark.parametrize(("better", "new_num", "reason"), [
+    ("lower", 1.05, "small_harm"), ("lower", 0.95, None),
+    ("higher", 0.95, "small_harm"), ("higher", 1.05, None),
 ])
-def test_unknown_cost_makes_cost_per_outcome_unknown_never_zero(new, reason) -> None:
+def test_small_harm_follows_the_measure_direction(better, new_num, reason) -> None:
+    measure = PlannedMeasure("escapes", "quality", better, "kpi", 0, 1, margin_gap=0.1)
+    old = runs("v1", 0, kpi=[("num", "observed", 1.0), ("den", "observed", 1.0)])
+    new = runs("v2", 0, kpi=[("num", "observed", new_num), ("den", "observed", 1.0)])
+    call = measure_call(measure, new, old, minimum=20, now=NOW, seed=1)
+    assert (call.call, call.reason) == ("no_worse", reason)
+
+
+def test_subject_round_trips_a_name_with_an_at_sign() -> None:
+    assert split_subject(subject_of("workflow", "team@ops", "ab12cd")) == ("workflow", "team@ops", "ab12cd")
+
+
+@pytest.mark.parametrize("new", [
+    runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None),
+    runs("v2", 1, count=19) + runs("v2", 1, count=1, cost=None, state="failed"),
+    runs("v2", 1, count=20, state="failed"),  # no outcome to divide the spend by
+])
+def test_unknown_cost_makes_cost_per_outcome_unknown_never_zero(new) -> None:
     measure = PlannedMeasure(COST, "spend", "lower", "builtin", 0)
     call = measure_call(measure, new, runs("v1", 1), minimum=20, now=NOW, seed=1)
-    assert (call.call, call.reason, call.values) == ("unknown", reason, (None, None))
+    assert (call.call, call.reason, call.values) == ("unknown", "cost_unknown", (None, None))
 
 
 def test_failed_runs_count_in_the_total_but_never_as_outcomes() -> None:
@@ -399,6 +422,17 @@ def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> Non
     assert (result.inputs.get("cheaper") is True) is cheaper
 
 
+def test_a_failed_run_in_each_arm_prices_in_and_a_clearly_cheaper_no_worse_version_is_kept() -> None:
+    def arm(version: str, cost: float, **kw) -> list[Run]:
+        # A failed run carries no corrections: with one each, corrections per outcome (20 over 18) varies with how
+        # many failed runs a resample draws, and look 1's 99.31% reads it as unclear rather than no worse.
+        return _priced(version, 1, cost, count=18, **kw) + _priced(version, 0, cost, count=2, state="failed", **kw)
+
+    result = verdict(history(arm("v1", 1.0, started=40, ended=30), arm("v2", 0.5)))
+    assert (result.word, result.reason) == ("keep", "no_worse")
+    assert result.inputs["cheaper"] is True
+
+
 def test_rule_3_unclear_spend_with_no_quality_gain_reverts() -> None:
     from core.workflow_verdict_rules import _rule
 
@@ -442,12 +476,18 @@ def test_an_unclear_result_keeps_the_current_version_even_when_the_changed_arm_i
     assert result is not None and (result.word, result.reason) == ("revert", "unclear_after_look_3")
 
 
-def test_cheaper_arm_is_not_kept_when_quality_is_not_measured_near_zero() -> None:
+def test_cheaper_arm_is_not_kept_when_its_interval_sits_wholly_on_the_harm_side() -> None:
     source = history(_priced("v1", 5, 1.0, started=40, ended=30), _priced("v2", 6, 0.5))
 
     result = verdict(source)
 
-    assert (result.word, result.reason) == ("revert", "cheaper_not_near_zero")
+    assert (result.word, result.reason) == ("revert", "cheaper_small_harm")
+
+
+def test_cheaper_arm_with_a_real_improvement_below_the_margin_is_kept() -> None:
+    result = verdict(history(_priced("v1", 8, 1.0, started=40, ended=30), _priced("v2", 7, 0.5)))
+
+    assert (result.word, result.reason) == ("keep", "no_worse")
 
 
 def test_frozen_plan_carries_raised_confidence_and_reason() -> None:
@@ -459,7 +499,7 @@ def test_frozen_plan_carries_raised_confidence_and_reason() -> None:
 
     assert FrozenPlan.decoded(frozen.encoded()).confidence == pytest.approx(0.95)
     assert FrozenPlan.decoded(frozen.encoded()).confidence_reason == "security"
-    assert FrozenPlan.decoded(frozen.encoded()).policy_version == "workflow-verdict-v2"
+    assert FrozenPlan.decoded(frozen.encoded()).policy_version == "workflow-verdict-v3"
 
 
 @pytest.mark.parametrize(("confidence", "reason"), [
@@ -515,23 +555,171 @@ def test_reached_verdict_does_not_flip_on_new_data(monkeypatch) -> None:
     assert [e.subject for e in compute(snapshot)] == ["workflow:sdlc-process@v1"]
 
 
+def _wake_db(*owners: tuple[str, str, str | None]) -> sqlite3.Connection:
+    """Outcome events plus the thread and message columns a wake reads; each owner is (id, state, archived_reason)."""
+    db = sqlite3.connect(":memory:")
+    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL + "CREATE TABLE threads (id TEXT PRIMARY KEY, lifecycle_state TEXT, "
+                     "archived_reason TEXT); CREATE TABLE messages (id TEXT PRIMARY KEY);")
+    db.executemany("INSERT INTO threads VALUES (?,?,?)", owners)
+    return db
+
+
+def _accepting(wakes: list):
+    """A wake that is accepted the way the real one is: its message row exists afterwards."""
+    def wake(thread_id, event, summary, details, *, message_id, db):
+        wakes.append((thread_id, event, summary, details, message_id))
+        db.execute("INSERT INTO messages (id) VALUES (?)", (message_id,))
+    return wake
+
+
 def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
     from events import delivery
 
     monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
-    wakes = []
-    monkeypatch.setattr(delivery, "enqueue_event_wake", lambda *args, **kwargs: wakes.append((args, kwargs)))
-    db = sqlite3.connect(":memory:")
-    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    wakes: list = []
+    monkeypatch.setattr(delivery, "enqueue_event_wake", _accepting(wakes))
+    db = _wake_db(("owner", "active", None))
     source = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
     frozen = plan_for(source)
     reached = Evaluation(frozen.subject, "owner", frozen, decide(source, frozen, NOW), True)
 
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 1
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 0
-    assert wakes == [(("owner", "measurement.verdict.reached", "Workflow verdict reached: revert.",
-                      {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"}),
-                     {"message_id": f"verdict:wake:{frozen.subject}", "db": db})]
+    assert evaluator.write_verdicts(db, [reached]) == 1
+    assert evaluator.wake_owners(db) == 1
+    assert evaluator.write_verdicts(db, [reached]) == 0
+    assert evaluator.wake_owners(db) == 0
+    logged: list[str] = []
+    sink = logger.add(logged.append, level="WARNING", format="{message}")
+    orphan = history(runs("v1", 1, started=40, ended=30), runs("v3", 2))
+    unowned = plan_for(orphan, "v3")
+    assert evaluator.write_verdicts(db, [Evaluation(unowned.subject, None, unowned, decide(orphan, unowned, NOW), True)]) == 1
+    assert evaluator.wake_owners(db) == 0
+    logger.remove(sink)
+    assert [line.strip() for line in logged] == [f"verdict_wake: no owner to wake for {unowned.subject}"]
+    assert wakes == [("owner", "measurement.verdict.reached",
+                      f"Workflow sdlc-process ({frozen.version}) verdict reached: revert the change.",
+                      {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"},
+                      f"verdict:wake:{frozen.subject}")]
+
+
+def test_a_refused_wake_keeps_every_verdict_and_reaches_the_owner_once_fixed(monkeypatch) -> None:
+    from events import delivery
+    from infra.send_types import SendRejected
+
+    wakes: list = []
+    accept = _accepting(wakes)
+    capped = {"capped"}
+
+    def refuse(thread_id, *args, **kwargs):
+        if thread_id in capped:
+            raise SendRejected(409, "model's cap can't fit a checkpoint")
+        accept(thread_id, *args, **kwargs)
+
+    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
+    monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
+    db = _wake_db(("capped", "active", None), ("owner", "active", None), ("purged", "purged", None),
+                  ("archived", "archived", "user"))
+    batch = []
+    for owner, version in (("capped", "v2"), ("owner", "v3"), ("purged", "v4"), ("archived", "v5")):
+        source = history(runs("v1", 1, started=40, ended=30), runs(version, 2))
+        plan = plan_for(source, version)
+        batch.append(Evaluation(plan.subject, owner, plan, decide(source, plan, NOW), True))
+    logged: list[str] = []
+    sink = logger.add(logged.append, level="WARNING", format="{message}")
+    assert evaluator.write_verdicts(db, batch) == 4
+    assert evaluator.wake_owners(db) == 1
+    capped.clear()  # the person raises the cap; the next night's run reaches that owner
+    assert evaluator.wake_owners(db) == 1
+    assert evaluator.wake_owners(db) == 0
+    logger.remove(sink)
+    assert [line.strip() for line in logged] == [
+        f"verdict_wake: owner capped refused for {batch[0].subject}: model's cap can't fit a checkpoint"]
+    assert [wake[0] for wake in wakes] == ["owner", "capped"]
+
+
+def test_each_look_is_judged_at_its_obrien_fleming_confidence() -> None:
+    assert [round(look_confidence(0.8, look), 4) for look in (1, 2, 3)] == [0.9931, 0.9438, 0.8231]
+    assert [round(look_confidence(0.9, look), 4) for look in (1, 2, 3)] == [0.9992, 0.9824, 0.9068]
+    assert [round(look_confidence(0.95, look), 4) for look in (1, 2, 3)] == [0.9999, 0.9948, 0.9520]
+    assert set(OBRIEN_FLEMING) == {verdicts.DEFAULT_CONFIDENCE, *verdicts.RAISED_CONFIDENCES}
+    with pytest.raises(ValueError, match="O'Brien-Fleming"):
+        look_confidence(0.85, 1)
+
+
+@pytest.mark.parametrize("confidence", sorted(OBRIEN_FLEMING))
+def test_obrien_fleming_constants_hold_the_trials_level_over_the_three_looks(confidence) -> None:
+    """Re-derive the method recorded beside the constants: the chance that any look excludes zero on a version
+    that changed nothing is one minus the confidence (|B(t)| < c at t = 1/4, 1/2, 1, Brownian motion)."""
+    import numpy as np
+    from scipy.stats import multivariate_normal
+
+    times = np.array([0.25, 0.5, 1.0])
+    edge = np.full(3, OBRIEN_FLEMING[confidence])
+    quiet = multivariate_normal(np.zeros(3), np.minimum.outer(times, times), abseps=1e-9, releps=1e-9,
+                                maxpts=3_000_000).cdf(edge, lower_limit=-edge)
+    assert 1 - quiet == pytest.approx(1 - confidence, abs=2e-3)
+
+
+def test_the_bootstrap_tail_expands_with_the_smaller_sides_run_count() -> None:
+    assert [round(verdicts._tail(0.2, count), 4) for count in (20, 40, 80)] == [0.0866, 0.0934, 0.0967]
+    assert verdicts._tail(0.2, 1) == verdicts._tail(0.2, 2)
+
+
+def test_interval_takes_its_tails_from_the_smaller_side(monkeypatch) -> None:
+    seen: list[tuple[float, int]] = []
+
+    def tail(alpha: float, n: int) -> float:
+        seen.append((alpha, n))
+        return alpha / 2
+
+    monkeypatch.setattr(verdicts, "_tail", tail)
+    sample = verdicts._Sample(1.0, 1.0, 1)
+    verdicts._interval({GROUP: [sample] * 30}, {GROUP: [sample] * 20}, [GROUP], 1, 0.8)
+    assert seen == [(pytest.approx(0.2), 20)]
+
+
+def test_minimum_detectable_change_is_hand_computed_per_look_and_none_under_two_baseline_runs() -> None:
+    old = runs("v1", [0, 2], count=20, started=60, ended=30)  # per-run values 0 and 2: spread sqrt(20/19)
+    spread = sqrt(20 / 19)
+    z_power = NormalDist().inv_cdf(0.8)
+    frozen = freeze_plan(history(old, runs("v2", 1, count=20)), "v2")
+    # z(1 - a/2) at a look is c / sqrt(information fraction): 2.7008, 1.9098, 1.3504 for c = 1.3504. The baseline
+    # arm is frozen at its 20 runs, so every look compares 20, 40 and 80 new runs against those 20.
+    expected = [(2.7008 + z_power) * spread * sqrt(1 / 20 + 1 / 20), (1.9098 + z_power) * spread * sqrt(1 / 40 + 1 / 20),
+                (1.3504 + z_power) * spread * sqrt(1 / 80 + 1 / 20)]
+    assert frozen.mdc[CORRECTIONS] == pytest.approx(expected, rel=1e-3)
+    assert MINUTES not in frozen.mdc  # shown, never deciding
+    assert FrozenPlan.decoded(frozen.encoded()).mdc == frozen.mdc
+    assert minimum_detectable_change(0.8, 1, None, 20) is None
+    sparse = runs("v1", 1, count=1, started=60, ended=30) + runs("v1", 1, count=19, state="failed", started=60, ended=30)
+    one_run = freeze_plan(history(sparse, runs("v2", 1, count=20)), "v2")
+    assert one_run.baseline == "v1" and one_run.mdc[CORRECTIONS] == (None, None, None)
+
+
+def test_no_baseline_freezes_none_never_zero_and_no_rule_reads_the_figure() -> None:
+    new_only = freeze_plan(history(runs("v2", 1, count=20)), "v2")
+    assert new_only.baseline is None and set(new_only.mdc[CORRECTIONS]) == {None}
+    source = history(runs("v1", 1, count=80, started=60, ended=30), runs("v2", [0, 0, 3, 3, 4], count=40))
+    frozen = plan_for(source)
+    bare = replace(frozen, mdc={name: (0.0, 0.0, 0.0) for name in frozen.mdc})
+    assert decide(source, replace(frozen, mdc={}), NOW) == decide(source, bare, NOW)
+
+
+def test_a_clear_difference_at_80_percent_waits_for_the_stricter_first_look() -> None:
+    """Judged at 80% at every look this version is reverted at look 1 (n=20); at look 1's 99.31% it is not clear,
+    so it waits, and look 2's 94.38% still finds the same harm."""
+    old = runs("v1", 1, count=80, started=60, ended=30)
+    first = verdict(history(old, runs("v2", [0, 0, 3, 3, 4], count=20)))
+    assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
+    second = verdict(history(old, runs("v2", [0, 0, 3, 3, 4], count=40)))
+    assert (second.word, second.reason, second.look) == ("revert", "quality_worse", 2)
+
+
+def test_calibration_script_simulates_versions_that_changed_nothing_without_a_database(capsys) -> None:
+    script = calibration_script()
+    assert script.main(["--null-trials", "2", "--seed", "7"]) == 0
+    assert capsys.readouterr().out.startswith("null trials 2: false calls ")
+    assert script.main(["--null-trials", "2", "--fixed-baseline"]) == 0
+    assert script.null_trial((7, 80, False)) == script.null_trial((7, 80, False))  # seeded, so splittable
 
 
 def test_writes_stay_off_by_default() -> None:

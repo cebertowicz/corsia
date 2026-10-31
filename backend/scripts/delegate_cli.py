@@ -17,12 +17,14 @@ Subcommands:
 Auth (no env tokens): the API token is read from, in order —
     1. ``--token`` (explicit override).
     2. ``$CORSIA_API_TOKEN`` (operator/CI override).
-    3. ``~/.corsia/.api-token`` — a perms-scoped (chmod 600) credential file
-       containing just the token. The default agent path, provisioned once by
-       the operator. When the file is absent/empty and no override is given,
+    3. ``~/.corsia/credentials/api-token`` — a perms-scoped (chmod 600)
+       credential file containing just the token, in a folder closed to every
+       agent shell, leases included. The default agent path, provisioned once
+       by the operator. When the file is absent/empty and no override is given,
        the resolver fails loud with a guided error (it never silently falls
        back to raw curl, and never materializes a token itself). Override the
-       path with ``$CORSIA_API_TOKEN_FILE`` (the wrapper and tests use this).
+       path with ``$CORSIA_API_TOKEN_FILE`` (tests use this); a file named
+       there is the operator's choice and lies outside that closed folder.
 
 Base URL: ``--base`` / ``$CORSIA_API_BASE`` / the backend's default loopback URL (see ``infra.default_port``).
 
@@ -287,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="corsia delegate",
         description="Coordinator delegation — create threads, send turns, read status.",
     )
-    parser.add_argument("--token", help="API token (default: ~/.corsia/.api-token)")
+    parser.add_argument("--token", help="API token (default: ~/.corsia/credentials/api-token)")
     parser.add_argument("--base", help=f"API base URL (default: {_DEFAULT_BASE})")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

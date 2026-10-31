@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from claude_controls import confined_claude_controls
+from infra.backend_git import git_argv
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _READER = Path(__file__).with_name("reviewer_read.py")
@@ -215,7 +216,7 @@ def codex_exact_source_controls(review_dir: str, git_dir: str) -> list[str]:
 
 def _run_git(args: list[str], *, cwd: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        git_argv(*args),
         cwd=cwd,
         capture_output=True,
         text=True,
