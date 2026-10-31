@@ -859,6 +859,8 @@ async def test_published_callback_and_refresh(google, conductor, monkeypatch, ca
     state = json.loads(base64.b64decode(query["state"][0]))
     assert state == {"uri": oauth.redirect_uri(), "manual": False, "csrf": state["csrf"]}
     assert query["scope"][0].split() == list(oauth.PUBLISHED_SCOPES)
+    # The relay passes no ID token; Google's tokeninfo returns the account subject only for an openid token.
+    assert "openid" in query["scope"][0].split()
     params = {"state": state["csrf"], "access_token": ACCESS, "refresh_token": REFRESH,
               "scope": " ".join(oauth.PUBLISHED_SCOPES)}
     async with _http() as http:
