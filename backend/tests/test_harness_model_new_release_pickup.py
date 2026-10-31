@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog
+
 pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 _VERSION = "1.0.0"
@@ -64,10 +66,10 @@ def _seed_codex(monkeypatch, listed: list[str]) -> list[str]:
 
 def _store(model_ids: list[str], at: datetime) -> None:
     from connections.harness_models import (
-        CODEX_SOURCE, normalize_codex_models, store_success,
+        CODEX_SOURCE, normalize_codex_models,
     )
 
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload(*model_ids), harness_version=_VERSION,

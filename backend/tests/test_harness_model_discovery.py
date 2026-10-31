@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog
+
 
 class _BytesReader:
     """Minimal async byte reader matching the control-I/O owner's stream use."""
@@ -347,8 +349,8 @@ def test_runtime_context_observation_updates_only_exact_cc_identity(connections_
     _seed_connection(connections_db, "claude-code")
     row = _claude_payload()["models"][1]
     row["contextUsage"] = {"rawMaxTokens": 967000, "maxTokens": 967000}
-    from connections.harness_models import normalize_claude_models, store_success
-    store_success(
+    from connections.harness_models import normalize_claude_models
+    seed_catalog(
         "claude-code",
         normalize_claude_models(
             {"models": [row]}, harness_version="2.1.206",
@@ -389,7 +391,6 @@ def test_codex_runtime_effective_window_is_not_scaled_twice(
     from connections.harness_models import (
         normalize_codex_models,
         record_runtime_context_observation,
-        store_success,
     )
 
     _seed_connection(connections_db, "codex")
@@ -399,7 +400,7 @@ def test_codex_runtime_effective_window_is_not_scaled_twice(
         "max_context_window": 1000000,
         "effective_context_window_percent": 95,
     }
-    store_success(
+    seed_catalog(
         "codex", normalize_codex_models(
             payload, harness_version="0.144.0",
             timestamp="2026-07-11T00:00:00+00:00",
@@ -430,7 +431,6 @@ def test_refresh_drops_context_evidence_when_selector_resolves_new_identity(
     from connections.harness_models import (
         normalize_codex_models,
         record_runtime_context_observation,
-        store_success,
     )
 
     _seed_connection(connections_db, "codex")
@@ -441,7 +441,7 @@ def test_refresh_drops_context_evidence_when_selector_resolves_new_identity(
         "max_context_window": 1000000,
         "effective_context_window_percent": 95,
     }
-    store_success(
+    seed_catalog(
         "codex", normalize_codex_models(
             first, harness_version="0.144.0",
             timestamp="2026-07-11T00:00:00+00:00",
@@ -457,7 +457,7 @@ def test_refresh_drops_context_evidence_when_selector_resolves_new_identity(
 
     second = _codex_payload("mutable")
     second["data"][0]["model"] = "model-b"
-    store_success(
+    seed_catalog(
         "codex", normalize_codex_models(
             second, harness_version="0.144.0",
             timestamp="2026-07-11T02:00:00+00:00",
@@ -486,11 +486,10 @@ def test_successful_refresh_marks_missing_catalog_rows_unavailable(connections_d
     from connections.harness_models import (
         normalize_codex_models,
         read_discovery_envelope,
-        store_success,
     )
 
     _seed_connection(connections_db, "codex")
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload("gpt-5.6-sol", "gpt-5.6-terra"),
@@ -502,7 +501,7 @@ def test_successful_refresh_marks_missing_catalog_rows_unavailable(connections_d
         timestamp="2026-07-11T00:00:00+00:00",
         db=connections_db,
     )
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),
@@ -531,7 +530,6 @@ def test_failed_refresh_retains_last_known_rows_and_records_error(connections_db
         normalize_codex_models,
         read_discovery_envelope,
         store_failure,
-        store_success,
     )
 
     _seed_connection(connections_db, "codex")
@@ -540,7 +538,7 @@ def test_failed_refresh_retains_last_known_rows_and_records_error(connections_db
         harness_version="0.144.0",
         timestamp="2026-07-11T00:00:00+00:00",
     )
-    store_success(
+    seed_catalog(
         "codex",
         rows,
         harness_version="0.144.0",
@@ -649,14 +647,13 @@ def test_refresh_reason_is_event_driven_for_missing_stale_version_and_failure(
         cache_refresh_reason,
         normalize_codex_models,
         store_failure,
-        store_success,
     )
 
     _seed_connection(connections_db, "codex")
     now = datetime(2026, 7, 11, 3, tzinfo=timezone.utc)
     assert cache_refresh_reason("codex", now=now, db=connections_db) == "missing"
 
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),
@@ -696,10 +693,10 @@ def test_refresh_reason_is_event_driven_for_missing_stale_version_and_failure(
 
 
 def test_rows_and_discovery_envelope_commit_to_their_canonical_owners(connections_db):
-    from connections.harness_models import normalize_codex_models, store_success
+    from connections.harness_models import normalize_codex_models
 
     _seed_connection(connections_db, "codex", {"binary": "codex", "app_server": True})
-    store_success(
+    seed_catalog(
         "codex",
         normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),
@@ -1201,7 +1198,7 @@ async def test_refresh_provider_failure_keeps_cached_rows(connections_db, monkey
     import connections.harness_models as harness_models
 
     _seed_connection(connections_db, "codex", {"binary": "/bin/codex"})
-    harness_models.store_success(
+    seed_catalog(
         "codex",
         harness_models.normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),
@@ -1246,7 +1243,7 @@ async def test_selection_refresh_is_unknown_only_and_never_rewrites(connections_
     import connections.harness_refresh as harness_refresh
 
     _seed_connection(connections_db, "codex", {"binary": "/bin/codex"})
-    harness_models.store_success(
+    seed_catalog(
         "codex",
         harness_models.normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),
@@ -1294,7 +1291,7 @@ async def test_saved_unknown_selectors_batch_one_version_probe_and_refresh_per_p
 
     _seed_connection(connections_db, "codex", {"binary": "/bin/codex"})
     now = datetime.now(timezone.utc).isoformat()
-    harness_models.store_success(
+    seed_catalog(
         "codex",
         harness_models.normalize_codex_models(
             _codex_payload_with_context("gpt-5.6-sol"),

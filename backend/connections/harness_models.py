@@ -311,18 +311,6 @@ def upsert_discovered_rows(
             )
 
 
-def store_success(
-    provider: str, rows: list[dict[str, Any]], *, harness_version: str,
-    source: str, timestamp: str, db=None, unlisted_errors: dict[str, str] | None = None,
-) -> None:
-    """Persist model rows and their connection refresh envelope together."""
-    with write_transaction(db, scope="harness_model_catalog") as connection:
-        upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
-                               timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
-        record_refresh_attempt(provider, harness_version=harness_version, source=source,
-                               timestamp=timestamp, error=None, db=connection)
-
-
 def record_refresh_attempt(
     provider: str, *, harness_version: str, source: str, timestamp: str,
     error: str | None, db,

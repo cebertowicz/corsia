@@ -218,6 +218,24 @@ def default_subject(provider: str, scope: str, *, db=None) -> LimitSubject:
     return LimitSubject(provider, scope, receipt.account_id, receipt)
 
 
+def seed_catalog(provider: str, rows: list[dict], *, harness_version: str, source: str, timestamp: str,
+                 db=None, unlisted_errors: dict[str, str] | None = None) -> None:
+    """Store catalog rows and their refresh envelope with the production writers, for a test about the catalog.
+
+    The writers are the two a committed account discovery calls (``upsert_discovered_rows`` through
+    ``account_discovery_commit._store_account_catalog``, then ``record_refresh_attempt``); this skips only the
+    account discovery evidence that function derives its rows from, for tests that have no account.
+    """
+    from connections.harness_models import record_refresh_attempt, upsert_discovered_rows
+    from infra.database import write_transaction
+
+    with write_transaction(db, scope='harness_model_catalog') as connection:
+        upsert_discovered_rows(provider, rows, harness_version=harness_version, source=source,
+                               timestamp=timestamp, db=connection, unlisted_errors=unlisted_errors)
+        record_refresh_attempt(provider, harness_version=harness_version, source=source,
+                               timestamp=timestamp, error=None, db=connection)
+
+
 def seed_usage(account_id: str, *, facts: dict, db=None) -> None:
     """Store usage on an account with no current login, as an earlier login left it.
 

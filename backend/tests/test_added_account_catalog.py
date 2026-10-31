@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vendor_account_fixtures import accounts, signed_in_default  # noqa: F401
+from vendor_account_fixtures import seed_catalog, accounts, signed_in_default  # noqa: F401
 from test_provider_sources import client  # noqa: F401
 
 
@@ -74,7 +74,6 @@ def test_added_rows_read_once_per_fact_scope(accounts, monkeypatch):
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
 def test_fresh_schema_without_added_accounts_reports_unavailable(isolated_db, provider):
-    from connections.harness_models import store_success
     from connections.models import upsert_connection
     from infra.database import get_db
     from llm.model_status import scoped_status_rows
@@ -83,7 +82,7 @@ def test_fresh_schema_without_added_accounts_reports_unavailable(isolated_db, pr
     upsert_connection(type='cli', provider=provider, status='available', config={'binary': '/bin/test'})
     db = get_db()
     try:
-        store_success(provider, [_row('fresh-default')], harness_version='1', source='test', timestamp='t', db=db)
+        seed_catalog(provider, [_row('fresh-default')], harness_version='1', source='test', timestamp='t', db=db)
         db.execute("UPDATE connections SET status='needs_auth' WHERE provider=?", (provider,))
         db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE is_default=1")
         db.commit()

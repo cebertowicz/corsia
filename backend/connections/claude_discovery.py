@@ -174,7 +174,7 @@ def _known_claude_context_identities() -> dict[str, str]:
     Context-window evidence is identity-bound: a selector can keep its prior
     window only while ``resolvedModel`` has not changed. Re-probing an
     unchanged identity creates a fresh CLI control process without improving
-    catalog truth, so leave its existing observation to ``store_success``.
+    catalog truth, so leave its existing observation to the account discovery commit.
     """
     from infra.database import get_db
 

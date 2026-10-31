@@ -1,7 +1,7 @@
 """Baseline probes for account-scoped model catalog reconciliation."""
 import pytest
 
-from vendor_account_fixtures import accounts  # noqa: F401
+from vendor_account_fixtures import seed_catalog, accounts  # noqa: F401
 from test_added_account_catalog import _discover, _row
 
 
@@ -34,11 +34,10 @@ def test_shared_selector_uses_smallest_window_regardless_of_refresh_order(accoun
 
 
 def test_other_account_refresh_preserves_existing_available_selector(accounts):
-    from connections.harness_models import store_success
 
     db, default, first, second = accounts
     db.execute("UPDATE vendor_accounts SET state='removed', is_default=0 WHERE id=?", (default['id'],))
-    store_success('codex', [_row('second-only')], harness_version='1', source='test', timestamp='t', db=db)
+    seed_catalog('codex', [_row('second-only')], harness_version='1', source='test', timestamp='t', db=db)
     db.commit()
     assert _discover(db, 'codex', second, [_row('second-only')]).status == 'ready'
     assert _discover(db, 'codex', first, [_row('first-only')]).status == 'ready'
@@ -46,13 +45,12 @@ def test_other_account_refresh_preserves_existing_available_selector(accounts):
 
 
 def test_account_refresh_preserves_hide_and_saved_window(accounts):
-    from connections.harness_models import store_success
     from llm.context_window import get_context_window_or_none
     from llm.model_status import scoped_status_rows
 
     db, default, account, _ = accounts
     db.execute("UPDATE vendor_accounts SET state='removed', is_default=0 WHERE id=?", (default['id'],))
-    store_success('codex', [_row('hidden')], harness_version='1', source='test', timestamp='t', db=db)
+    seed_catalog('codex', [_row('hidden')], harness_version='1', source='test', timestamp='t', db=db)
     db.execute("UPDATE models SET enabled=0 WHERE id='codex/hidden'")
     db.execute("INSERT INTO model_profiles(model_id,context_window) VALUES ('codex/hidden',120000)")
     db.commit()

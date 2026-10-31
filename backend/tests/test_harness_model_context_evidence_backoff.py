@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog
+
 pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 
@@ -102,9 +104,9 @@ def _window(model_id: str) -> int | None:
 
 def _store_discovery(payload: dict, at: datetime) -> None:
     """Persist one successful Claude Code discovery at ``at``."""
-    from connections.harness_models import normalize_claude_models, store_success
+    from connections.harness_models import normalize_claude_models
 
-    store_success(
+    seed_catalog(
         "claude-code",
         normalize_claude_models(payload, harness_version="2.1.268", timestamp=at.isoformat()),
         harness_version="2.1.268",
