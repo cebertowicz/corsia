@@ -49,12 +49,13 @@ def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
         return request
     allowance = min(request.max_output_tokens, window // SMALL_WINDOW_OUTPUT_DIVISOR)
-    if request.system_tokens > 0:
-        # Half the room between the parent's fixed prompt and the launch point;
-        # the other half is left for turns before the chat folds again. No room
-        # to halve leaves the allowance as it was; a zero allowance cannot run.
+    if request.carried_tokens > 0:
+        # Half the room between what the parent carries (fixed prompt and tool
+        # definitions) and the launch point; the other half is left for turns
+        # before the chat folds again. No room to halve leaves the allowance as
+        # it was; a zero allowance cannot run.
         launch = window - soft_pressure_remaining(window)
-        half_room = (launch - request.system_tokens) // 2
+        half_room = (launch - request.carried_tokens) // 2
         if half_room > 0:
             allowance = min(allowance, half_room)
     if allowance == request.max_output_tokens:

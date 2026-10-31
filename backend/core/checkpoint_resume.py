@@ -53,7 +53,7 @@ class ProviderBoundary:
     wait_scope: CheckpointWaitScope
     eager_checkpoint_id: str | None = None
     recovery_input_tokens: int | None = None
-    system_input_tokens: int = 0
+    fixed_input_tokens: int = 0
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
@@ -171,7 +171,7 @@ def _payload(
         installed_input_tokens=(installed.input_tokens if installed else None),
         checkpoint_admissible=boundary.prepare_checkpoint is not None,
         recovery_input_tokens=boundary.recovery_input_tokens,
-        system_tokens=boundary.system_input_tokens,
+        fixed_tokens=boundary.fixed_input_tokens,
     )
 
 

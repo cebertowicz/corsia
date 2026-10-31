@@ -29,9 +29,19 @@ class NativeIdleReceipt:
     final_message_id: str | None = None
 
 
-def system_input_tokens(state) -> int:
+def _fit_sections(state) -> dict:
+    return dict(state.context_usage.get("fit_section_tokens") or {})
+
+
+def fixed_input_tokens(state) -> int:
     """The Turn's measured fixed prompt, as the initial render recorded it."""
-    return int(dict(state.context_usage.get("fit_section_tokens") or {}).get("fixed") or 0)
+    return int(_fit_sections(state).get("fixed") or 0)
+
+
+def carried_input_tokens(state) -> int:
+    """The fixed prompt plus tool definitions: what every continuation carries."""
+    sections = _fit_sections(state)
+    return int(sections.get("fixed") or 0) + int(sections.get("tools") or 0)
 
 
 def effective_input_tokens(usage: dict | None) -> int | None:
@@ -121,7 +131,7 @@ async def capture_native_checkpoint_source(
 
 def build_native_cold_checkpoint_admission(
     checkpoint_id, thread_id, context, turn_identity, reasoning_effort,
-    trigger="pressure", system_tokens=0,
+    trigger="pressure", carried_tokens=0,
 ):
     """Build the existing Native cold request from one frozen DB context."""
     from dataclasses import replace
@@ -147,7 +157,7 @@ def build_native_cold_checkpoint_admission(
             db=db,
         )
         return replace(admission, provider_request=replace(
-            admission.provider_request, system_tokens=system_tokens,
+            admission.provider_request, carried_tokens=carried_tokens,
         ))
     finally:
         db.close()
@@ -175,7 +185,7 @@ async def prepare_native_checkpoint(
             working_dir=context.working_dir, reasoning_effort=reasoning_effort,
             binary=None, warm_source=source,
         )
-        system_tokens = system_input_tokens(state)
+        carried_tokens = carried_input_tokens(state)
         # Warmth proved by a past receipt can still exceed the window on the
         # next call; carry this boundary's own cold admission so the fork can
         # correct its path rather than ending the turn.
@@ -183,12 +193,12 @@ async def prepare_native_checkpoint(
             admission,
             provider_request=replace(
                 admission.provider_request,
-                system_tokens=system_tokens,
+                carried_tokens=carried_tokens,
                 same_model_cold=partial(
                     run_off_db,
                     build_native_cold_checkpoint_admission,
                     checkpoint_id, thread_id, context, turn_identity,
-                    reasoning_effort, trigger, system_tokens,
+                    reasoning_effort, trigger, carried_tokens,
                 ),
             ),
         )
@@ -196,5 +206,5 @@ async def prepare_native_checkpoint(
     return await run_off_db(
         build_native_cold_checkpoint_admission,
         checkpoint_id, thread_id, context, turn_identity, reasoning_effort, trigger,
-        system_input_tokens(state),
+        carried_input_tokens(state),
     )

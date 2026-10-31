@@ -49,8 +49,9 @@ class ProviderForkRequest:
     warm_source: object | None = None
     mcp_config: str | None = None
     max_output_tokens: int = FORK_OUTPUT_TOKENS
-    #: The parent's measured fixed prompt (0 = unmeasured); sizes a Native fork's output.
-    system_tokens: int = 0
+    #: The parent's measured fixed prompt plus tool definitions (0 = unmeasured);
+    #: sizes a Native fork's output.
+    carried_tokens: int = 0
     tool_registry: object | None = None
     dynamic_tool_specs: tuple[dict[str, Any], ...] = ()
     developer_instructions: str | None = None

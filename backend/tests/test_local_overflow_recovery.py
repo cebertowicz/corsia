@@ -140,8 +140,8 @@ def test_a_normal_window_still_folds_at_the_launch_point():
     assert evaluate_boundary(big).value == "proceed_and_fold"
 
 
-def _usage(system: int) -> dict:
-    return {"fit_section_tokens": {"fixed": system}}
+def _usage(system: int, tools: int = 0) -> dict:
+    return {"fit_section_tokens": {"fixed": system, "tools": tools}}
 
 
 def _sections(fixed: int, tools: int, current: int) -> tuple[tuple[str, int], ...]:
@@ -231,7 +231,7 @@ async def test_the_system_measure_ignores_history_a_tool_phase_refit_absorbed(mo
     assert started is True
 
 
-def _fork_request(window: int, system: int):
+def _fork_request(window: int, carried: int):
     from core.fork_types import ProviderForkRequest
     from llm.resolution import ExecutionTarget
 
@@ -243,11 +243,11 @@ def _fork_request(window: int, system: int):
     )
     return ProviderForkRequest(
         fork_id="f", thread_id="t", target=target, instruction="write",
-        reasoning_effort=None, working_dir="/w", system_tokens=system,
+        reasoning_effort=None, working_dir="/w", carried_tokens=carried,
     )
 
 
-@pytest.mark.parametrize("window,system,allowance", [
+@pytest.mark.parametrize("window,carried,allowance", [
     (48_000, 18_600, 8_700),  # was 9,600: launch 36,000, half of 17,400
     (36_000, 18_600, 4_200),  # launch 27,000, half of 8,400
     (262_144, 18_600, 16_384),  # a large window is unchanged
@@ -255,26 +255,26 @@ def _fork_request(window: int, system: int):
     (20_000, 18_600, 4_000),  # no half-room to take: window // 5, unchanged
     (48_000, 35_999, 9_600),  # launch - system is exactly 1: unchanged
 ])
-def test_the_fork_output_allowance_is_half_the_room_above_the_fixed_prompt(window, system, allowance):
+def test_the_fork_output_allowance_is_half_the_room_above_the_carried_prompt(window, carried, allowance):
     from core.fork_native import _window_output
 
-    assert _window_output(_fork_request(window, system)).max_output_tokens == allowance
+    assert _window_output(_fork_request(window, carried)).max_output_tokens == allowance
 
 
 def test_a_full_checkpoint_body_leaves_the_chat_below_its_launch_point():
     from core.fork_native import _window_output
     from core.fork_pressure import soft_pressure_remaining
 
-    window, system, current = 48_000, 18_600, 1_000
-    body = _window_output(_fork_request(window, system)).max_output_tokens
+    window, carried, current = 48_000, 18_600, 1_000
+    body = _window_output(_fork_request(window, carried)).max_output_tokens
     launch = window - soft_pressure_remaining(window)
 
-    assert system + body + current < launch
-    assert launch - (system + body + current) >= 7_000  # room left for turns
+    assert carried + body + current < launch
+    assert launch - (carried + body + current) >= 7_000  # room left for turns
 
 
 @pytest.mark.asyncio
-async def test_the_measured_fixed_prompt_reaches_the_warm_and_cold_fork_requests(monkeypatch):
+async def test_the_fixed_prompt_and_tools_reach_the_warm_and_cold_fork_requests(monkeypatch):
     from core import checkpoint_cold_admission, checkpoint_native_admission as admission
     from core.checkpoint_warm_request import CheckpointAdmission
     from history.types import HistoryBoundary
@@ -285,7 +285,8 @@ async def test_the_measured_fixed_prompt_reaches_the_warm_and_cold_fork_requests
         target=request.target, boundary=HistoryBoundary("t", 1, 1, "m1"),
         previous_generation_id=None, previous=None, projection=None, working_dir="/w",
     )
-    state = SimpleNamespace(context_usage=_usage(18_600))
+    # The 32 GB seat: 14,000 fixed prompt + 4,618 tool definitions.
+    state = SimpleNamespace(context_usage=_usage(14_000, 4_618))
 
     async def source(*_args):
         return object()
@@ -301,5 +302,5 @@ async def test_the_measured_fixed_prompt_reaches_the_warm_and_cold_fork_requests
     )
     cold = await warm.provider_request.same_model_cold()
 
-    assert warm.provider_request.system_tokens == 18_600
-    assert cold.provider_request.system_tokens == 18_600
+    assert warm.provider_request.carried_tokens == 18_618
+    assert cold.provider_request.carried_tokens == 18_618
