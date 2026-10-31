@@ -42,7 +42,8 @@ def _skills_index_content(
     lines = [
         "Available skills. Before answering, compare the user request to the skill descriptions below. "
         "If the user names a skill or the request matches a skill description, you MUST load that skill's "
-        "SKILL.md before responding. Load the listed SKILL.md path with your file-read "
+        "SKILL.md before responding. Its path is on its line, or else in its group's header with <name> "
+        "replaced by the skill's name. Load it with your file-read "
         f"tool: `{MCP_CORSIA_PREFIX}read_file` on Claude Code, `read_file` on other harnesses; "
         "when only the generic CORSIA tool is available, call it with name=read_file.",
     ]
