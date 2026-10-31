@@ -17,10 +17,11 @@ describe('held signed-out input', () => {
 	});
 
 	it('gives the same line and cause an expired login writes, naming the held account', () => {
-		const accounts = [{ id: 'free', name: 'Free', hold_reason: null }, { id: 'studio', name: 'Studio', hold_reason: 'account_signed_out' }] as unknown as ThreadVendorAccount[];
+		const accounts = [{ id: 'free', provider: 'claude-code', name: 'Free', hold_reason: null }, { id: 'studio', provider: 'claude-code', name: 'Studio', hold_reason: 'account_signed_out' }] as unknown as ThreadVendorAccount[];
 		const notice = heldSignedOutNotice(held('first'), accounts)!;
 		expect(notice.role).toBe('system');
-		expect(notice.content).toBe('Studio is signed out. Sign it in again under Settings › Providers.');
+		// backend/subagents/cc_runtime_errors.py writes this line for an expired Claude Code login.
+		expect(notice.content).toBe('Studio is signed out of Claude Code. Sign it in again under Settings › Providers.');
 		expect(notice.metadata).toMatchObject({ cause_kind: 'sign_in_expired', account_id: 'studio' });
 	});
 

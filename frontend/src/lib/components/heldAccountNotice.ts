@@ -1,3 +1,4 @@
+import { HARNESSES } from '$lib/stores/harnessMembership';
 import type { ThreadVendorAccount } from '$lib/stores/threadVendorAccounts';
 import type { TranscriptMessage } from './messageListModel';
 
@@ -18,6 +19,7 @@ export function heldSignedOutInput(messages: TranscriptMessage[], threadId: stri
 export function heldSignedOutNotice(msg: TranscriptMessage, accounts: ThreadVendorAccount[]): TranscriptMessage | null {
 	const account = accounts.find((row) => row.hold_reason === SIGNED_OUT_HOLD);
 	if (!account) return null;
-	return { id: `held-signin-${msg.id}`, thread_id: msg.thread_id, role: 'system', content: `${account.name} is signed out. Sign it in again under Settings › Providers.`,
+	const harness = HARNESSES.find((row) => row.name === account.provider)?.label ?? account.provider;
+	return { id: `held-signin-${msg.id}`, thread_id: msg.thread_id, role: 'system', content: `${account.name} is signed out of ${harness}. Sign it in again under Settings › Providers.`,
 		metadata: { cc: true, type: 'cc_error', cause_kind: 'sign_in_expired', account_id: account.id } };
 }
