@@ -408,6 +408,33 @@ class App:
         return staged
 
 
+@pytest.mark.parametrize("args", [(), ("help",), ("--help",), ("-h",)])
+def test_packaged_cli_help_lists_app_commands(app, args):
+    entry = app.bundle / "Contents" / "Resources" / "bin" / "corsia"
+    entry.parent.mkdir(parents=True)
+    shutil.copy(REPO / "desktop" / "scripts" / "corsia", entry)
+    result = app.run(*args, script=entry)
+    assert result.returncode == 0, result.stderr
+    for verb in ("start", "open", "stop", "restart", "status", "logs", "service",
+                 "init", "setup", "bind-host", "remote-address", "event", "artifact", "mcp"):
+        assert verb in result.stdout
+    for refused in ("redeploy", "install", "uninstall"):
+        assert refused not in result.stdout
+    assert not app.launchd_calls()
+
+
+def test_packaged_cli_unknown_command_fails_with_usage(app):
+    entry = app.bundle / "Contents" / "Resources" / "bin" / "corsia"
+    entry.parent.mkdir(parents=True)
+    shutil.copy(REPO / "desktop" / "scripts" / "corsia", entry)
+    result = app.run("stauts", script=entry)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Unknown command 'stauts'" in result.stderr
+    assert "Usage: corsia <command>" in result.stderr
+    assert not app.launchd_calls()
+
+
 @pytest.fixture
 def app(tmp_path):
     # Orphaned at once, so launchd (PID 1) reaps one that bootout stops, as it
@@ -439,6 +466,22 @@ def _snapshot(root: Path) -> list[tuple[str, int, int, int]]:
         for path in [root, *root.rglob("*")]
         for info in [path.lstat()]
     )
+
+
+def test_app_mode_user_receives_configured_workspace_and_state(app):
+    import json
+
+    workspace = app.root / "workspace"
+    state = app.root / "custom-state"
+    service_file = app.home / "Library" / "Application Support" / "CORSIA" / "service.json"
+    service_file.write_text(json.dumps({"workspace": str(workspace), "state_dir": str(state), "port": PORT}))
+    cli = app.bundle / "Contents" / "Resources" / "backend" / "cli.py"
+    cli.write_text('import os\nprint(os.environ["CORSIA_WORKSPACE"])\nprint(os.environ["CORSIA_STATE_DIR"])\n')
+
+    result = app.run("user")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [str(workspace), str(state)]
 
 
 def test_app_mode_keeps_bundled_tools_ahead_of_service_defaults(app):
@@ -624,6 +667,14 @@ def test_registration_belongs_to_the_app_binary(app):
         assert "--service register|unregister" in result.stdout
     assert app.launchd_calls() == []
     assert not (app.home / "Library" / "LaunchAgents").exists()
+
+
+def test_direct_app_script_refuses_source_redeploy(app):
+    result = app.run("redeploy")
+
+    assert result.returncode != 0
+    assert "source checkout" in result.stdout
+    assert app.launchd_calls() == []
 
 
 def test_prepare_discard_and_ensure_use_the_app_binary_and_its_staged_copy(app):

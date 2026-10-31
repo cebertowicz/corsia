@@ -46,6 +46,10 @@ workspace/
 .pip-audit-cache/
 # Service env file — contains API keys, must not be committed
 .env
+# The CLI API token: its folder under ~/.corsia (a serving checkout's root), and
+# the file an earlier wrapper kept at the checkout root
+/credentials/
+.api-token
 .pip-audit-cache/
 # First-run bootstrap — per-machine workspace path
 config.json

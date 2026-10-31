@@ -73,7 +73,7 @@ def _row(
 
 def _rows(monkeypatch, admitted: list[SkillRow], capped: list[SkillRow] | None = None) -> None:
     monkeypatch.setattr(
-        "core.skills_registry.trial_delivery_rows", lambda **_kwargs: (admitted, capped or []),
+        "core.skills_registry.trial_delivery_rows", lambda **_kwargs: ([*admitted, *(capped or [])], []),
     )
 
 
@@ -89,7 +89,7 @@ def _in_context(monkeypatch, tmp_path: Path, text: str = "# Rules\n", *, deliver
     )
 
 
-def test_trial_cap_is_independent_of_index_limit_and_uses_scope_order(monkeypatch, tmp_path):
+def test_trial_rows_are_independent_of_index_limit_and_use_scope_order(monkeypatch, tmp_path):
     from types import SimpleNamespace
     from core import skills_registry
 
@@ -99,9 +99,9 @@ def test_trial_cap_is_independent_of_index_limit_and_uses_scope_order(monkeypatc
     monkeypatch.setattr(skills_registry, "resolve_effective_skills", lambda **_: resolved)
     monkeypatch.setattr(skills_registry, "partition", lambda *_args, **_kwargs: SimpleNamespace(per_task=rows))
     monkeypatch.setattr(skills_registry, "_NON_SYSTEM_FULL_SKILL_LIMIT", 1)
-    admitted, omitted = skills_registry.trial_delivery_rows(thread_id="child", project_id=None, workspace=tmp_path, db=None)
-    assert len(admitted) == 40 and len(omitted) == 2
-    assert admitted[0].name == "priority" and [row.name for row in omitted] == ["trial-39", "trial-40"]
+    ordered, included = skills_registry.trial_delivery_rows(thread_id="child", project_id=None, workspace=tmp_path, db=None)
+    assert len(ordered) == 42 and included is rows
+    assert ordered[0].name == "priority" and [row.name for row in ordered[-2:]] == ["trial-39", "trial-40"]
 
 
 def test_read_file_description_does_not_duplicate_trial_marker_protocol():
@@ -139,7 +139,7 @@ def test_receipt_reads_use_the_lesson_index(db, build):
         migrate_161_to_162(db)
 
     plan = " ".join(
-        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t"))
+        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t", "t"))
     )
     assert "USING INDEX idx_guidance_loads_lesson_node" in plan
 

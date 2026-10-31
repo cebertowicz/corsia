@@ -355,7 +355,7 @@
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}>{@render content()}</AdaptiveDrawer>
-	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

@@ -14,10 +14,10 @@ from urllib.request import urlopen
 
 import semver
 
-from library.items import COMMIT, REPOSITORY, LibraryItemError, validate_relative_path
+from library.items import COMMIT, LIBRARY_REPOSITORY, REPOSITORY, LibraryItemError, validate_relative_path
 from library.pack_validation import validate_blueprint_path
 
-INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
+INDEX_URL = f"https://raw.githubusercontent.com/{LIBRARY_REPOSITORY}/main/index.json"
 _CACHE_NAME = "index.json"
 _SHA256 = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
 
@@ -115,7 +115,12 @@ def _write_cache(payload: tuple[dict[str, Any], ...], fetched_at: float, generat
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         with staged.open("w", encoding="utf-8") as handle:
-            json.dump({"fetched_at": fetched_at, "generations": generations, "index": {"skills": payload}}, handle)
+            rows = [
+                {**item, "source": "library"}
+                if item["source"]["repository"] == LIBRARY_REPOSITORY and item["source"]["commit"] == "main"
+                else item for item in payload
+            ]
+            json.dump({"fetched_at": fetched_at, "generations": generations, "index": {"skills": rows}}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(staged, target)
@@ -176,7 +181,8 @@ def _validate_item(row: Any) -> dict[str, Any]:
     if row["withdrawn"] and not row["withdrawn_reason"]:
         raise LibraryIndexValidationError("withdrawn library items must include withdrawn_reason")
 
-    source = row["source"]
+    own_item = row["source"] == "library"
+    source = _own_source(row.get("url"), kind) if own_item else row["source"]
     if not isinstance(source, dict):
         raise LibraryIndexValidationError("library index item source must be an object")
     for field in ("repository", "path", "commit"):
@@ -184,7 +190,7 @@ def _validate_item(row: Any) -> dict[str, Any]:
             raise LibraryIndexValidationError(f"library index source {field} must be a non-empty string")
     if not REPOSITORY.fullmatch(source["repository"]):
         raise LibraryIndexValidationError("library index source repository must be an owner/name pair")
-    if not COMMIT.fullmatch(source["commit"]):
+    if not own_item and not COMMIT.fullmatch(source["commit"]):
         raise LibraryIndexValidationError("library index source commit must be a full 40-character SHA")
     _validate_relative_path(source["path"])
 
@@ -216,7 +222,17 @@ def _validate_item(row: Any) -> dict[str, Any]:
         raise LibraryIndexValidationError("library blueprint must include manifest.yaml and CHANGELOG.md")
     if len(paths) != len({path.casefold() for path in paths}):
         raise LibraryIndexValidationError("library index file paths must be unique, ignoring case")
-    return dict(row)
+    return {**row, "source": source}
+
+
+def _own_source(url: Any, kind: str) -> dict[str, str]:
+    """The library's own rows name only their folder; their files are read from main."""
+    pattern = r"skills/[^/]+/SKILL\.md" if kind == "skill" else r"packs/[^/]+/"
+    if not isinstance(url, str) or not re.fullmatch(pattern, url) or url.split("/")[1] in {".", ".."}:
+        raise LibraryIndexValidationError("library-owned item url must identify its item folder")
+    base_path = url.removesuffix("/SKILL.md") if kind == "skill" else url.removesuffix("/")
+    _validate_relative_path(base_path)
+    return {"repository": LIBRARY_REPOSITORY, "path": base_path, "commit": "main"}
 
 
 def _validate_relative_path(path: str) -> None:

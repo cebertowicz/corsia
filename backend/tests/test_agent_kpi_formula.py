@@ -22,6 +22,18 @@ def test_latest_and_first_use_source_time_not_arrival_order():
     assert select({"event": "label", "first": ["key"]}, rows)[0].attrs["v"] == "old"
 
 
+def test_latest_counts_a_relabelled_item_only_under_its_current_value():
+    rows = [event("label", 2, key="a", cause="unknown"), event("label", 5, key="a", cause="missed-test"),
+            event("label", 3, key="b", cause="unknown")]
+    assert [row.attrs["key"] for row in select({"event": "label", "where": {"cause": "unknown"}, "latest": ["key"]}, rows)] == ["b"]
+    assert [row.attrs["key"] for row in select({"event": "label", "where": {"cause": "missed-test"}, "latest": ["key"]}, rows)] == ["a"]
+
+
+def test_first_reads_the_earliest_row_that_qualifies():
+    rows = [event("comment", 2, key="a", reviewer="no"), event("comment", 5, key="a", reviewer="yes", v="review")]
+    assert select({"event": "comment", "where": {"reviewer": "yes"}, "first": ["key"]}, rows)[0].attrs["v"] == "review"
+
+
 @pytest.mark.parametrize("attrs,present", [({}, False), ({"id": None}, False), ({"id": ""}, False), ({"id": "a"}, True)])
 def test_presence(attrs, present):
     row = event("a", 1, **attrs)

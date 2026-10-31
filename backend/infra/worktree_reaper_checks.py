@@ -23,7 +23,9 @@ from infra.worktree_reaper_probe import (
     is_ancestor,
     list_worktrees,
     open_pr_branches,
+    has_worktree_config,
     status_skip_reason,
+    worktree_git_env,
 )
 from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
 
@@ -101,9 +103,10 @@ class CheckContext:
         return None
 
 
-def _status_reason(path: Path, merged: bool) -> str | None:
+def _status_reason(ctx: CheckContext, candidate: Candidate, merged: bool) -> str | None:
+    git_env = worktree_git_env(ctx.repo, candidate.admin, candidate.path)
     try:
-        return status_skip_reason(path, tracked_only=merged)
+        return status_skip_reason(candidate.path, git_env, tracked_only=merged)
     except ReaperGitError:
         return "status_error"
 
@@ -126,7 +129,7 @@ def _status_verdict(
     ctx: CheckContext, entry: WorktreeEntry | None, path: Path, status: str | None,
     idle: float, threshold: float,
 ) -> str | RemovalVerdict | None:
-    if status is None or status == "status_error":
+    if status is None or status in ("status_error", "submodule"):
         return status
     if ctx.now - idle < threshold:
         return status
@@ -157,12 +160,14 @@ def candidate_verdict(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
+    if has_worktree_config(candidate.admin):
+        return "worktree_config"
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
         return "recent"
     verdict = _status_verdict(
-        ctx, candidate.entry, candidate.path, _status_reason(candidate.path, merged),
+        ctx, candidate.entry, candidate.path, _status_reason(ctx, candidate, merged),
         candidate.idle_since, threshold_seconds,
     )
     if isinstance(verdict, str):
@@ -202,6 +207,8 @@ def recheck_before_removal(
         return reason
     if git_lock_files(candidate.admin):
         return "git_lock"
+    if has_worktree_config(candidate.admin):
+        return "worktree_config"
     idle = idle_since(candidate.path, candidate.admin)
     if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
         return "recent"
@@ -213,7 +220,7 @@ def recheck_before_removal(
         except ReaperGitError:
             return "status_error"
     verdict = _status_verdict(
-        ctx, entry, candidate.path, _status_reason(candidate.path, merged), idle,
+        ctx, entry, candidate.path, _status_reason(ctx, candidate, merged), idle,
         threshold_seconds,
     )
     if isinstance(verdict, str):

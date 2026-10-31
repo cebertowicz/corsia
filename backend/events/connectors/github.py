@@ -53,10 +53,13 @@ GITHUB_ROUTED_EVENTS = {
     "pr.synchronize": "webhook.github.pr_synchronize",
     "pr.ready_for_review": "webhook.github.pr_ready_for_review",
     "pr.labeled": "webhook.github.pr_labeled",
+    "pr.unlabeled": "webhook.github.pr_unlabeled",
     "pr.merged": "webhook.github.pr_merged",
     "pr.closed": "webhook.github.pr_closed",
     "check.completed": "webhook.github.check_suite_completed",
     "issue.opened": "webhook.github.issue_opened",
+    "issue.labeled": "webhook.github.issue_labeled",
+    "issue.unlabeled": "webhook.github.issue_unlabeled",
     "issue_comment.created": "webhook.github.issue_comment",
     "pr_comment.created": "webhook.github.pr_comment",
     "issue_comment.edited": "webhook.github.issue_comment_edited",
@@ -289,7 +292,8 @@ MANIFEST = register(ConnectorManifest(
             routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
         "pr.unlabeled": EventTypeDecl(
             "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
-            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
+            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event=GITHUB_ROUTED_EVENTS["pr.unlabeled"]),
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
                                  routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},

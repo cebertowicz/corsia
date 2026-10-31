@@ -7,7 +7,7 @@ import time
 from functools import partial
 from typing import Any
 
-from core.lesson_delivery import attach_plan_result
+from core.lesson_delivery import attach_at_worker_read, attach_plan_result
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
@@ -107,7 +107,10 @@ def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
             restriction = read_restriction(db, reader, other)
             if restriction is not None:
                 return restriction.payload()
-            return public.addressed_to(page, other, db=db)
+            addressed = public.addressed_to(page, other, db=db)
+            if read.get("node_id"):
+                attach_at_worker_read(db, addressed, thread_id=thread_id, node_id=read["node_id"])
+            return addressed
         return page
     finally:
         db.close()
@@ -203,10 +206,11 @@ def _mutation_operation(
     try:
         import tools.workflow_task_fields as workflow_task_fields
         actor = _thread_actor(thread_id, actor_row, turn_identity, call_ids)
-        workflow_version = None
+        workflow_version, workflow_steps = None, ()
         if operation in {"add", "insert"}:
             workflow_task_fields.validate_creation_reference(params, workflows)
             workflow_version = workflow_task_fields.creation_version(params, workflows)
+            workflow_steps = workflow_task_fields.creation_run(params, workflows)
         result = mutate(
             plan_id,
             operation,
@@ -216,13 +220,10 @@ def _mutation_operation(
             mutation_id=mutation_id,
             db=db,
             workflow_version=workflow_version,
+            workflow_steps=workflow_steps,
         )
         if operation in {"add", "insert"}:
             workflow_task_fields.append_add_notice(result.result, db, workflows)
-        elif operation in {"accept", "accept_with_follow_up", "fail", "close_node"}:
-            workflow_task_fields.append_close_notice(
-                result.result, node_id=params["node_id"], db=db, workflows=workflows,
-            )
         attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
         node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
         return result

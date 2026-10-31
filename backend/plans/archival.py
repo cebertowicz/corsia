@@ -92,6 +92,9 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
         _require_no_children(connection, node_id)
+        from plans.workflow_fields import refuse_required_skip
+
+        refuse_required_skip(connection, node_id)
         # Order is load-bearing: when the child is still working, that is the
         # actionable message. The delegation refusal is reserved for the case
         # where the child is genuinely finished and only the verdict is missing.

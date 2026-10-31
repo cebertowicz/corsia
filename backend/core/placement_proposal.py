@@ -220,8 +220,10 @@ def backlog_target(
 def _github_repo(path: Path) -> str | None:
     import subprocess
 
+    from infra.backend_git import git_argv
+
     result = subprocess.run(
-        ["git", "-C", str(path), "remote", "get-url", "origin"],
+        git_argv("-C", str(path), "remote", "get-url", "origin"),
         capture_output=True, text=True, timeout=10, check=False,
     )
     match = _REMOTE.search(result.stdout.strip())

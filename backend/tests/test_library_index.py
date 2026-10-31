@@ -26,6 +26,37 @@ def _index_payload(*, withdrawn: bool = False) -> dict:
     }
 
 
+def test_own_and_pinned_rows_validate_and_cache_offline(monkeypatch, tmp_path):
+    _seams(monkeypatch, tmp_path)
+    payload = _index_payload()
+    own = deepcopy(payload["skills"][0])
+    own.update(name="own", source="library", url="skills/own/SKILL.md")
+    payload["skills"].append(own)
+    monkeypatch.setattr(index, "_fetch_index", lambda: payload)
+    result = index.load_index()
+    assert result.items[1]["source"] == {
+        "repository": "cebertowicz/corsia-library", "path": "skills/own", "commit": "main",
+    }
+    monkeypatch.setattr(index, "_fetch_index", lambda: (_ for _ in ()).throw(OSError("offline")))
+    assert index.load_index().items == result.items
+
+
+@pytest.mark.parametrize("source", ["other", {"repository": "example/other", "path": "skills/sample", "commit": "main"}])
+def test_unrecognized_source_and_unpinned_external_source_are_rejected(source):
+    payload = _index_payload()
+    payload["skills"][0]["source"] = source
+    with pytest.raises(index.LibraryIndexValidationError):
+        index._validate_index(payload)
+
+
+@pytest.mark.parametrize("url", ["skills/../SKILL.md", "skills/./SKILL.md", "skills/x/../../SKILL.md", "packs/x/"])
+def test_own_skill_rejects_unsafe_or_wrong_urls(url):
+    payload = _index_payload()
+    payload["skills"][0].update(source="library", url=url)
+    with pytest.raises(index.LibraryIndexValidationError):
+        index._validate_index(payload)
+
+
 def _seams(monkeypatch, tmp_path, *, now: float = 1_000.0) -> list[float]:
     clock = [now]
     monkeypatch.setattr(index, "_state_root", lambda: tmp_path / "state")

@@ -200,3 +200,96 @@ def test_a_recording_failure_anywhere_in_the_chain_marks_the_task(db):
     assert query_recording_gaps(db, PARAMS) == set()
     db.execute(failed, ("before", "work", BEFORE))
     assert query_recording_gaps(db, PARAMS) == {"task"}
+
+
+def _fail(db, node: str, at: str = SETTLED) -> None:
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                   "VALUES (?,?,'test','failed','active','failed',?)", (f"fail-{node}", node, at))
+
+
+def _seeded(db, task_ids: set[str]) -> dict[str, float]:
+    """Each chain's dollars for ``task_ids``, accepted and seeded, walked once as the verdict reads them."""
+    from api.measurement_model_cost import clear_chain, materialize_chain
+
+    chain = materialize_chain(db, PARAMS, task_ids, seeded=True)
+    try:
+        rows = query_model_costs(db, PARAMS, IdentityResolver(db), task_ids=task_ids, chain_rows=chain)
+    finally:
+        clear_chain(db)
+    dollars: Counter = Counter()
+    for row in rows:
+        dollars[row["task_id"]] += row["dollars"]
+    return dict(dollars)
+
+
+def test_a_failed_task_no_accepted_chain_reaches_is_a_seed_read_to_its_own_terminal_time(db):
+    _node(db, "lost", state="failed")
+    _fail(db, "lost")
+    _call(db, "lost")
+    _call(db, "lost", SONNET, at=AFTER)
+    assert _seeded(db, {"lost"}) == {"lost": pytest.approx(4)}
+    assert _chains(db) == {}
+
+
+def test_seeds_never_change_an_accepted_tasks_chain_nor_count_what_it_holds_twice(db):
+    _node(db, "top")
+    _node(db, "broke", parent="top", state="failed")
+    _fail(db, "broke")
+    _call(db, "top", SONNET)
+    _call(db, "broke", SONNET)  # under the accepted task: its chain holds the call, nothing seeds it again
+    assert {key: row["dollars"] for key, row in _chains(db).items()} == {("top", SONNET): pytest.approx(4)}
+    assert _seeded(db, {"top", "broke"}) == {"top": pytest.approx(4)}
+
+
+def test_a_sent_back_task_is_only_walked_from_its_revision(db):
+    _node(db, "sent", state="closed")
+    _fail(db, "sent")
+    _node(db, "again", state="failed", follow_up_of="sent", revision=True)
+    _fail(db, "again")
+    _call(db, "sent")
+    _call(db, "again", SONNET)
+    assert _seeded(db, {"sent", "again"}) == {"again": pytest.approx(6)}
+
+
+def test_a_seed_stops_at_another_seeds_attempts(db):
+    _node(db, "outer", state="closed")
+    _fail(db, "outer")
+    _node(db, "inner", parent="outer", state="failed")
+    _fail(db, "inner")
+    _call(db, "outer", SONNET)
+    _call(db, "inner")
+    assert _seeded(db, {"outer", "inner"}) == {"outer": pytest.approx(2), "inner": pytest.approx(4)}
+
+
+def test_whether_a_task_is_a_seed_does_not_depend_on_which_tasks_are_read(db):
+    _node(db, "step")
+    _node(db, "nested", parent="step", state="failed")
+    _fail(db, "nested")
+    _call(db, "step", SONNET)
+    _call(db, "nested")
+    assert _seeded(db, {"nested"}) == {}  # the accepted step's chain holds it, though that step is not read
+    assert _seeded(db, {"step", "nested"}) == {"step": pytest.approx(6)}
+
+
+def test_a_seed_is_reached_through_a_worker_plan_by_the_node_that_delegated_to_it(db):
+    _node(db, "step", worker="w1")
+    _worker(db, "w1", "w1plan", "plan")
+    _attach(db, "step", "w1plan")
+    _node(db, "leaf", "w1plan", state="failed")
+    _fail(db, "leaf")
+    _call(db, "leaf", thread="w1")
+    assert _seeded(db, {"leaf"}) == {}
+
+
+def test_a_seed_accepted_then_accepted_with_followup_is_read_to_its_first_acceptance(db):
+    _node(db, "kept", state="accepted_with_followup", at=None)
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+                   "VALUES ('fix-kept','kept','test','correction_created',?)", (BEFORE,))
+        for state, at in (("accepted", BEFORE), ("accepted_with_followup", SETTLED)):
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES (?,'kept','test',?,'active',?,?)", (f"end-{state}", state, state, at))
+    _call(db, "kept", at="2026-09-29T06:00:00Z")
+    _call(db, "kept", at="2026-09-29T18:00:00Z")  # after the first acceptance, before the later transition
+    assert _seeded(db, {"kept"}) == {"kept": pytest.approx(4)}
