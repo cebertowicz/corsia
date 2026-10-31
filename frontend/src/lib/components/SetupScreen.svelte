@@ -161,7 +161,7 @@
 			if (cliPicked(vendor)) connectFlow.pick(vendor);
 			else void connectFlow.stop(vendor);
 		}
-		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal(); // the installer skips the free download on a signed-in CLI; never over a failure its row shows with Retry
+		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal(); // the installer skips the free download once a CORSIA account is signed in; never over a failure its row shows with Retry
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
