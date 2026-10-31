@@ -20,9 +20,10 @@ describe('request ordering', () => {
 		vendorAccounts.set([account('codex')]);
 		vi.stubGlobal('fetch', vi.fn()
 			.mockResolvedValueOnce(response({ state: 'signed_out', vendor_signed_in: false, model_refresh_ok: null }))
-			.mockResolvedValueOnce(response({ detail: 'inventory unavailable' }, 500)));
+			.mockResolvedValueOnce(response({ detail: 'inventory unavailable', ref: 'req-7' }, 500)));
 		const result = await refreshVendorModels('work');
 		expect(result).toMatchObject({ ok: false, signedOut: true });
+		expect(result.error).toContain('Reference: req-7');
 		expect(get(vendorAccounts)[0]).toMatchObject({ state: 'signed_out', details_stale: true });
 	});
 

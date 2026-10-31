@@ -307,11 +307,19 @@ def _metadata(db: sqlite3.Connection) -> dict[str, str | None]:
     return dict(db.execute("SELECT id, metadata FROM messages"))
 
 
+def _converted_source(db: sqlite3.Connection) -> None:
+    # 166 -> 167 leaves no account signed in, so the vendor's source needs sign-in; nothing else changes.
+    status, config = db.execute("SELECT status,config FROM connections").fetchone()
+    config = json.loads(config)
+    assert (status, config.pop("source_check")["state"]) == ("needs_auth", "needs_auth")
+    assert config == {"binary": "/bin/synthetic"}
+
+
 def _accounts_adopted(db: sqlite3.Connection) -> None:
     # The uniform sign-in upgrade (166 -> 167) clears an adopted row's usage with its comparison and discovery.
     assert db.execute("SELECT usage_json FROM vendor_accounts").fetchone() == (None,)
     assert db.execute("SELECT auth_cleanup_json FROM vendor_accounts").fetchall() == [(None,)]
-    assert json.loads(db.execute("SELECT config FROM connections").fetchone()[0]) == {"binary": "/bin/synthetic"}
+    _converted_source(db)
     assert db.execute("SELECT vendor_account_id FROM llm_usage WHERE id='u'").fetchone() == (None,)
     for table in _CURRENT_POLICY_TABLES:
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -449,13 +457,15 @@ def test_genuine88_upgrade_maps_legacy_policy_to_fresh89_and_is_idempotent():
         migrate_to_current(db, 88)
         db.execute("UPDATE project_vendor_accounts SET switch_on_limit=1")
         db.commit()
-        unrelated = {table: rows for table, rows in unrelated_rows(db).items() if table != 'vendor_accounts'}
+        unrelated = unrelated_rows(db)['projects']
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.from_version, result.to_version) == (True, 88, SCHEMA_VERSION)
         assert 'project_vendor_accounts' not in _tables(db)
         assert [tuple(row) for row in db.execute('SELECT project_id,provider_key,rollover,order_json,disabled_json,revision FROM provider_policies')] == [('p', 'codex', 1, '["a", "b"]', '[]', 7)]
         assert [tuple(row) for row in db.execute('SELECT project_id,revision FROM project_policy_overrides')] == [('p', 7)]
-        assert {table: rows for table, rows in unrelated_rows(db).items() if table != 'vendor_accounts'} == unrelated
+        assert unrelated_rows(db)['projects'] == unrelated
+        # 166 -> 167 signs the ambient accounts out, so the vendor's source needs sign-in.
+        assert tuple(db.execute("SELECT status FROM connections").fetchone()) == ('needs_auth',)
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         with sqlite3.connect(':memory:') as fresh:
             initialize_schema(fresh)
@@ -629,7 +639,7 @@ def test_genuine_frozen_canonical78_startup_matches_every_fresh81_table(tmp_path
         assert db.execute("SELECT model FROM threads WHERE id='t'").fetchone() == (None,)
         assert db.execute("SELECT vendor_account_id FROM llm_usage WHERE id='u'").fetchone() == (None,)
         assert db.execute("SELECT usage_json FROM vendor_accounts").fetchone() == (None,)  # cleared by 166 -> 167
-        assert json.loads(db.execute("SELECT config FROM connections").fetchone()[0]) == {"binary": "/bin/synthetic"}
+        _converted_source(db)
         once = list(db.iterdump())
         assert initialize_schema(db) is False
         assert list(db.iterdump()) == once

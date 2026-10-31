@@ -42,6 +42,3 @@ def claude_login_status(report: object, code: int | None) -> str:
     if flag is False and code in (0, 1):
         return "signed_out"
     return "signed_in" if flag is True and code == 0 else "unknown"
-
-
-# Login identity reads are account-scoped; ambient identity is only a setup hint.

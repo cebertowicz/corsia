@@ -198,7 +198,7 @@ export async function refreshVendorModels(accountId: string): Promise<{ ok: bool
 	if (result.data.state === 'signed_out') {
 		confirmAccounts((accounts) => accounts.map((account) => account.id === accountId ? { ...account, state: 'signed_out', details_stale: true } : account));
 		const refreshed = await loadVendorAccounts();
-		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
 	}
 	if (result.data.vendor_signed_in === true && result.data.model_refresh_ok === true) return { ok: true };
 	// A newer login replaced the one this refresh read: nothing failed, and the reload shows the account as it now is.

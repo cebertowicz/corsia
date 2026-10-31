@@ -48,3 +48,29 @@ def test_upgrade_ambient_account(isolated_db, provider, shape):
     migrate_166_to_167(db)
     assert tuple(db.execute("SELECT * FROM vendor_accounts WHERE id='old'").fetchone()) == snapshot
     db.close()
+
+
+@pytest.mark.parametrize('provider', ['codex', 'claude-code'])
+@pytest.mark.parametrize('other_signed_in', [False, True])
+def test_conversion_leaves_source_ready_only_with_a_signed_in_account(isolated_db, provider, other_signed_in):
+    from connections.models import get_connection
+    from connections.source_state import row_state
+    from infra.database import get_db
+    from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
+
+    db = get_db()
+    connection_id = 'test-codex' if provider == 'codex' else 'test-cc'
+    db.execute("UPDATE connections SET config=? WHERE provider=?",
+               (json.dumps({'source_check': {'state': 'ready', 'prior_state': None, 'reason': None,
+                                            'checked_at': 't'}}), provider))
+    db.execute("INSERT INTO vendor_accounts(id,connection_id,name,is_default,state,identity_json,created_at,updated_at) "
+               "VALUES ('old',?,'Default',1,'legacy',?,'t','t')",
+               (connection_id, json.dumps({'default_comparison': {'auth_state': 'known'}})))
+    if other_signed_in:
+        db.execute("INSERT INTO vendor_accounts(id,connection_id,name,is_default,state,source_home,runtime_home,"
+                   "created_at,updated_at) VALUES ('added',?,'Work',0,'signed_in','/s','/r','t','t')", (connection_id,))
+    db.commit()
+    migrate_166_to_167(db)
+    db.commit()
+    assert row_state(get_connection(provider, db=db))['state'] == ('ready' if other_signed_in else 'needs_auth')
+    db.close()
