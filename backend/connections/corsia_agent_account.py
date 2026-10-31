@@ -79,8 +79,7 @@ def _vendor_rows(provider: str, *, db, accounts: list[dict] | None = None) -> tu
     return result, bool(catalog)
 
 
-def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None,
-                  source_state: str | None = None) -> tuple[str, str | None]:
+def account_state(account: dict, *, project_ids: list, db, rows: list[dict] | None = None) -> tuple[str, str | None]:
     """One account's first-run state, and when a limited one is back.
 
     Ready means at least one of its vendor's models passes the same per-account
@@ -303,19 +302,19 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
 
 
 def _scoped_states(provider: str, project, *, rows: list[dict], has_catalog: bool, db,
-                   accounts: list[dict] | None = None, source_state: str | None = None) -> list[tuple[dict, str, str | None]]:
+                   accounts: list[dict] | None = None) -> list[tuple[dict, str, str | None]]:
     """Each permitted, non-removed account's first-run state, preserving disabled-model suppression."""
     from connections.account_policy import permitted_accounts
 
     if not rows and has_catalog:
         return []  # The vendor's stored models were deliberately disabled.
-    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows, source_state=source_state))
+    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows))
             for account in permitted_accounts(provider, project_ids=[project], db=db, accounts=accounts)
             if account["state"] != "removed"]
 
 
 @fact_memo.fact_reads()
-def source_account_view(provider: str, *, source_state: str | None = None) -> tuple[list[dict], dict | None]:
+def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
     Lines: membership is the picker's: the accounts the CORSIA agent's scope
@@ -343,7 +342,7 @@ def source_account_view(provider: str, *, source_state: str | None = None) -> tu
         rows, has_catalog = _vendor_rows(provider, db=db, accounts=labels)  # reuse the account rows already read
         lines = []
         for account, state, resets_at in _scoped_states(provider, project, rows=rows, has_catalog=has_catalog,
-                                                       db=db, accounts=labels, source_state=source_state):
+                                                       db=db, accounts=labels):
             label = account_label(account, rows=labels)
             lines.append({"account_id": account["id"], "label": label["text"],
                           "label_verified": not (label["email"] is None and label["custom"]),
