@@ -184,7 +184,7 @@ class TestPermittedAccountSelection:
 
 
 class TestUnusableAccountsStayVisible:
-    @pytest.mark.parametrize("cause", ["usage_limited", "account_signed_out", "account_not_configured", "account_project_denied"])
+    @pytest.mark.parametrize("cause", ["usage_limited", "account_signed_out", "account_project_denied"])
     def test_no_review_runs_and_the_account_cause_is_reported(self, scope, cause):
         db, default, second = scope
         if cause == "usage_limited":
@@ -193,12 +193,8 @@ class TestUnusableAccountsStayVisible:
             _policy(db, allowlist=[default["id"], second["id"]], default_id=default["id"], switch=False)
         elif cause == "account_project_denied":
             _policy(db, allowlist=[], default_id=None, switch=False)
-        elif cause == "account_signed_out":
-            db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE id=?", (default["id"],))
-            db.commit()
         else:
-            # An unordered policy selects the next enabled account, so every account is removed.
-            db.execute("UPDATE vendor_accounts SET state='removed' WHERE id IN (?,?)", (default["id"], second["id"]))
+            db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE id=?", (default["id"],))
             db.commit()
 
         def invoke(*_args, **_kwargs):  # pragma: no cover - the assertion is that it is never reached
@@ -211,6 +207,21 @@ class TestUnusableAccountsStayVisible:
         description = failure.call_args[0][2]
         assert description.startswith("qa/llm-reviewer: model-unavailable")
         assert description.endswith(f"Reviewer account unavailable: {cause}")
+
+    def test_with_every_account_removed_no_review_runs_and_the_model_is_unavailable(self, scope):
+        db, default, second = scope
+        # An unordered policy selects the next enabled account, so every account is removed.
+        db.execute("UPDATE vendor_accounts SET state='removed' WHERE id IN (?,?)", (default["id"], second["id"]))
+        db.commit()
+
+        def invoke(*_args, **_kwargs):  # pragma: no cover - the assertion is that it is never reached
+            raise AssertionError("a review ran with no signed-in account")
+
+        result, _pending, failure = _run(invoke)
+
+        assert result is None
+        # With no signed-in account the reviewer model itself is unavailable (the status text is cut at its length cap).
+        assert failure.call_args[0][2].startswith("qa/llm-reviewer: model-unavailable — Reviewer model claude-code/")
 
     def test_a_removed_default_runs_on_the_next_permitted_account(self, scope):
         db, default, second = scope
@@ -233,7 +244,8 @@ class TestUnusableAccountsStayVisible:
         result, _pending, failure = _run(lambda *_a, **_k: "[]")
 
         assert result is None
-        assert failure.call_args[0][2].endswith("Reviewer account unavailable: account_not_configured")
+        # With no signed-in account the reviewer model itself is unavailable (the status text is cut at its length cap).
+        assert failure.call_args[0][2].startswith("qa/llm-reviewer: model-unavailable — Reviewer model claude-code/")
 
 
 class TestAccountContainment:

@@ -486,14 +486,14 @@ def test_a_limited_source_account_names_when_it_is_back(conductor):
 
 
 def test_needs_auth_source_projects_the_default_as_signed_out_without_mutating_its_lifecycle(conductor, monkeypatch):
-    from connections.source_state import apply_check
+    from connections.source_state import NEEDS_AUTH, harness_state
     from connections.vendor_accounts import default_account
     from vendor_account_fixtures import seed_default_account
 
     monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
     db, _work, _personal = conductor
     default = seed_default_account("claude-code", db=db)
-    apply_check("claude-code", "needs_auth", "signed out", db=db)
+    assert harness_state("claude-code", db=db)["state"] == NEEDS_AUTH
 
     line = next(line for line in source_accounts("claude-code") if line["account_id"] == default["id"])
 
@@ -526,15 +526,15 @@ def test_source_accounts_read_the_vendors_models_once_whatever_the_account_count
     assert both > 0 and model_reads() == both
 
 
-@pytest.mark.parametrize("state", ["not_installed", "unverified"])
+@pytest.mark.parametrize("state", ["not_installed", "needs_auth"])
 def test_empty_catalog_keeps_fresh_default_out_of_source_accounts(conductor, monkeypatch, state):
     from api import provider_sources
-    from connections.source_state import apply_check
 
     db, _work, _personal = conductor
     monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
     db.execute("DELETE FROM models WHERE harness='claude-code'")
-    apply_check("claude-code", state, "check failed", db=db)
+    db.execute("UPDATE connections SET status=? WHERE provider='claude-code'",
+               ("not_installed" if state == "not_installed" else "available",))
     db.commit()
     source = provider_sources._harness_source("claude-code")
     assert source["state"] == state

@@ -55,10 +55,9 @@ def _capacity():
                                           model="claude-code/sonnet")
 
 
-@pytest.mark.parametrize("rediscover", [True, False], ids=["recheck", "startup"])
 @pytest.mark.parametrize("reading", ["allowed", "limited", "missing", "failed", "write_failed"])
 async def test_catalog_sign_in_owns_new_usage_before_commit(
-    isolated_db, client, claude_session, monkeypatch, live_app_loop, rediscover, reading,
+    isolated_db, client, claude_session, monkeypatch, live_app_loop, reading,
 ):
     from connections import claude_usage, harness_usage_check
     from connections.source_state import check_harness_source
@@ -89,7 +88,7 @@ async def test_catalog_sign_in_owns_new_usage_before_commit(
     scheduled = Mock(wraps=harness_usage_check.schedule_account_check)
     monkeypatch.setattr(harness_usage_check, "schedule_account_check", scheduled)
 
-    await check_harness_source("claude-code", rediscover=rediscover)
+    await check_harness_source("claude-code")
     await asyncio.sleep(0)
     tasks = list(harness_usage_check._CHECKS.values())
     if tasks:
@@ -103,7 +102,7 @@ async def test_unreadable_refresh_preserves_the_same_accounts_known_limit(
 
     _seed_old_account(status="available")
     sessions = claude_session(_stream(_ok("corsia-model-list", {"models": []})))
-    await check_harness_source("claude-code", rediscover=True)
+    await check_harness_source("claude-code")
     assert sessions == ["list_models"]
     assert _capacity()["state"] == "limited"
     assert _capacity()["check"]["outcome"] == "unknown"

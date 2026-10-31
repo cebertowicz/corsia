@@ -91,8 +91,12 @@ def change_login(account: dict, *, revision: int, db) -> None:
 
 def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
                    cause: str | None = None, models: dict | None = None,
-                   harness_version: str | None = None, cache_receipt: dict | None = None, db) -> bool:
-    """Publish pending/success/failure only for the captured lifecycle AND login."""
+                   harness_version: str | None = None, cache_receipt: dict | None = None,
+                   reason: str | None = None, db) -> bool:
+    """Publish pending/success/failure only for the captured lifecycle AND login.
+
+    A failure's ``reason`` is the line a person reads about it; the next success clears it.
+    """
     if not receipt_is_current(receipt, db=db) or receipt.account_id != account_id:
         return False
     account = get_account(account_id, db=db)
@@ -102,10 +106,10 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
     if status == 'failed' and last.get('status') == 'ready' and last.get('receipt') == fence:
         # A run that cannot finish says nothing new about this login's models: the last good
         # discovery stays until a later run succeeds, and the failure rides along beside it.
-        last['refresh_failure'] = {'cause': cause, 'observed_at': utc_now_iso()}
+        last['refresh_failure'] = {'cause': cause, 'reason': reason, 'observed_at': utc_now_iso()}
         store_record(account_id, record, db=db)
         return True
-    record['discovery'] = {'status': status, 'cause': cause, 'observed_at': utc_now_iso(),
+    record['discovery'] = {'status': status, 'cause': cause, 'reason': reason, 'observed_at': utc_now_iso(),
                            'harness_version': harness_version,
                            'receipt': {'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq},
                            'cache_receipt': cache_receipt, 'models': models or {}}

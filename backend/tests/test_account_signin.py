@@ -342,25 +342,6 @@ def _observe(monkeypatch):
     return releases, stops, scheduled
 
 
-def _by_status(provider, *, schedule_usage_check):
-    from connections.models import set_connection_status
-
-    return set_connection_status(provider, "available", schedule_usage_check=schedule_usage_check)
-
-
-def _by_source_check(provider, *, schedule_usage_check):
-    from connections.models import record_source_check
-
-    return record_source_check(provider, status="available", check={"state": "ready"},
-                               schedule_usage_check=schedule_usage_check)
-
-
-def _by_apply_check(provider, *, schedule_usage_check):
-    from connections import source_state
-
-    return source_state.apply_check(provider, source_state.READY, schedule_usage_check=schedule_usage_check)
-
-
 @pytest.mark.asyncio
 async def test_completion_record_precedes_discovery_and_failure_preserves_it(accounts, monkeypatch):
     db, _, row, _ = accounts
@@ -1939,32 +1920,6 @@ def test_connector_upsert_does_not_change_account_usage(
     assert releases == [] and stops == []
 
 
-@pytest.mark.real_harness_cli
-@pytest.mark.parametrize("sign_in", [_by_status, _by_source_check, _by_apply_check])
-@pytest.mark.parametrize("schedule", [True, False])
-@pytest.mark.parametrize("provider", ["claude-code", "codex"])
-def test_source_status_writers_do_not_treat_a_ready_check_as_an_account_signin(
-    isolated_db, client, monkeypatch, provider, schedule, sign_in,
-):
-    from connections import harness_usage
-    from connections.vendor_accounts import set_account_state
-
-    default = seed_default_account(provider)
-    set_account_state(default['id'], 'signed_in', expected_revision=default['revision'])
-    _seed_old_account(provider=provider)
-    accounts = _seed_added_accounts(provider)
-    before = _added_state(accounts)
-    usage_before = harness_usage.stored_usage(provider=provider, account_id=default['id'])
-    releases, _stops, scheduled = _observe(monkeypatch)
-
-    assert sign_in(provider, schedule_usage_check=schedule)["status"] == "available"
-
-    scheduled.assert_not_called()
-    assert releases == []
-    assert harness_usage.stored_usage(provider=provider, account_id=default['id']) == usage_before
-    assert _added_state(accounts) == before
-
-
 def test_paged_out_initial_anchor_remains_raw_and_private(accounts):
     from api.thread_paging import page_messages
     from api.thread_message_rows import public_delivery_message
@@ -2061,7 +2016,6 @@ async def test_setup_recovers_after_first_discovery_fails(scripted_vendor_clis, 
     from connections import account_controls, harness_models
     from connections.account_discovery_types import AccountRefreshResult
     from connections.corsia_agent_account import FirstRunBind
-    from connections.source_state import apply_check
     from connections.vendor_accounts import add_account, list_accounts
     from infra.corsia_agent import set_corsia_agent
     from infra.database import get_db
@@ -2074,7 +2028,6 @@ async def test_setup_recovers_after_first_discovery_fails(scripted_vendor_clis, 
         db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES ('first-run','user',NULL,'t','t')")
         db.execute("DELETE FROM models WHERE harness=?", (provider,))
         assert set_corsia_agent('first-run', db=db)
-        apply_check(provider, 'needs_auth', 'signed out', db=db)
         db.commit()
     finally:
         db.close()

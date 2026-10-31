@@ -25,7 +25,7 @@ def _put(provider, status, **config):
                       config={"binary": f"/bin/{provider}", **config}, status=status)
 
 
-async def _no_check(_provider, *, rediscover=False):
+async def _no_check(_provider):
     return None
 
 
@@ -69,34 +69,56 @@ class TestSeedCodex:
             probe.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("ambient probe"))
             self._seed(probe)
             connections.seed_builtin_connections()
-        assert _sources(client)["codex"]["state"] == "unverified"
+        assert _sources(client)["codex"]["state"] == "needs_auth"
         monkeypatch.setattr("shutil.which", lambda name, *a, **k: None if name == "codex" else "/bin/x")
         monkeypatch.setattr("os.path.isfile", lambda p: False)
         connections.seed_builtin_connections()
         assert _sources(client)["codex"]["state"] == "not_installed"
 
-    def test_seeded_claude_is_not_ready_until_a_probe_says_so(self, isolated_db, client, monkeypatch):
+    def test_seeded_claude_is_not_ready_until_its_account_is_checked(self, isolated_db, client, monkeypatch):
         self._seed(monkeypatch)
         claude = _sources(client)["claude-code"]
-        assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
+        assert (claude["state"], claude["reason"]) == ("needs_auth", "Not signed in")
+        _signed_in_unchecked("claude-code")
+        claude = _sources(client)["claude-code"]
+        assert (claude["state"], claude["reason"], claude["checked_at"]) == ("unverified", "Not checked yet", None)
 
     def test_unverified_cli_reports_a_proven_package_manager(self, isolated_db, client, monkeypatch):
         import cli_location
 
         self._seed(monkeypatch)
+        _signed_in_unchecked("claude-code")
         monkeypatch.setattr(cli_location, "package_manager_for", lambda provider: "homebrew" if provider == "claude-code" else None)
 
         assert _sources(client)["claude-code"]["cli_package_manager"] == "homebrew"
 
-    def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
-        from connections.models import get_connection
-        from connections.source_state import apply_check
+    def test_a_missing_binary_reads_not_installed_with_a_signed_in_account(self, isolated_db, client, monkeypatch):
+        import connections
+        from vendor_account_fixtures import signed_in_default
 
         self._seed(monkeypatch)
-        apply_check("claude-code", "needs_auth", "signed out")
-        self._seed(monkeypatch)
-        assert get_connection("claude-code")["status"] == "needs_auth"
-        assert _sources(client)["claude-code"]["state"] == "needs_auth"
+        signed_in_default("claude-code")
+        assert _sources(client)["claude-code"]["state"] == "ready"
+        monkeypatch.setattr("shutil.which", lambda name, *a, **k: None if name == "claude" else f"/bin/{name}")
+        monkeypatch.setattr("os.path.isfile", lambda p: False)
+        connections.seed_builtin_connections()
+        claude = _sources(client)["claude-code"]
+        assert (claude["state"], claude["fix"]) == ("not_installed", _install_fix("claude-code"))
+
+
+def _signed_in_unchecked(provider):
+    """The vendor's Default, signed in, before its first discovery has a result."""
+    from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import seed_default_account
+
+    account = seed_default_account(provider)
+    return set_account_state(account["id"], "signed_in", expected_revision=account["revision"])
+
+
+def _install_fix(provider):
+    from api.provider_sources import _HARNESS_SOURCES
+
+    return _HARNESS_SOURCES[provider][1]
 
 
 
@@ -124,7 +146,6 @@ def claude_session(monkeypatch):
     """Claude Code's catalog session is faked; ``sessions`` counts the processes it started."""
     import connections.claude_discovery as claude_discovery
     import connections.harness_models as harness_models
-    import connections.source_state as source_state
 
     sessions: list[str] = []
     homes: list[str] = []
@@ -145,9 +166,6 @@ def claude_session(monkeypatch):
     monkeypatch.setattr(harness_models, "binary_version", version)
     monkeypatch.setattr("connections.resolve_builtin_binary",
                         lambda provider, *, db=None: ({}, f"/bin/{provider}"))
-    # The suite's startup stub is lifted here: the only session is the faked one.
-    monkeypatch.setattr("connections.startup.check_harness_source",
-                        source_state.check_harness_source)
 
     def answer(result):
         outcome[0] = result
@@ -163,7 +181,7 @@ async def test_claude_source_without_an_account_needs_signin_without_a_session(i
     from connections.source_state import check_harness_source
 
     _put('claude-code', 'available')
-    await check_harness_source('claude-code', rediscover=True)
+    await check_harness_source('claude-code')
     assert _sources(client)['claude-code']['state'] == 'needs_auth'
     assert claude_session.sessions == []
 
@@ -183,7 +201,7 @@ class TestClaudeSignIn:
     def _recheck(self):
         from connections.source_state import check_harness_source
 
-        asyncio.run(check_harness_source("claude-code", rediscover=True))
+        asyncio.run(check_harness_source("claude-code"))
 
     def test_a_session_that_lists_models_is_ready_and_starts_one_process(
         self, isolated_db, client, claude_session, signed_in_account,
@@ -214,8 +232,9 @@ class TestClaudeSignIn:
         claude_session(outcome)
         self._recheck()
         claude = _sources(client)["claude-code"]
+        # A first check that fails has no earlier ready result to fall back on.
         assert (claude["state"], claude["prior_state"], claude["reason"]) == (
-            "unverified", "ready", "Check failed",
+            "unverified", None, "Check failed",
         )
         assert get_account(signed_in_account['id'])['state'] == 'signed_in'
         assert claude_session.sessions == ['list_models']
@@ -224,8 +243,11 @@ class TestClaudeSignIn:
         self, isolated_db, client, claude_session,
     ):
         from connections.models import connection_available
+        from connections.vendor_accounts import get_account
 
         _put("claude-code", "available")
+        claude_session(_listed())
+        self._recheck()
         claude_session(_stream(_err(
             "corsia-model-list", "HTTP 401 from proxy; usage limit reached, run /login again")))
 
@@ -234,7 +256,8 @@ class TestClaudeSignIn:
         assert claude["state"] == "unverified"
         assert claude["prior_state"] == "ready"
         assert connection_available("claude-code") is True
-        assert claude_session.sessions == ["list_models"]
+        assert get_account(default_id("claude-code"))["state"] == "signed_in"
+        assert claude_session.sessions == ["list_models", "list_models"]
 
     def test_an_expired_unrefreshable_catalog_is_unverified_and_recovers(
         self, isolated_db, client, claude_session,
@@ -256,130 +279,50 @@ class TestClaudeSignIn:
         self._recheck()
         assert _sources(client)["claude-code"]["state"] == "ready"
 
-    def test_terminal_expired_login_rechecks_then_marks_needs_auth(self, isolated_db, client, claude_session):
-        from connections.claude_discovery import reconcile_turn_auth_failure
-
-        _put("claude-code", "available")
-        claude_session(RuntimeError(
-            "Claude Code list_models failed: Failed to authenticate: OAuth session expired and could not be refreshed",
-        ))
-
-
-        asyncio.run(reconcile_turn_auth_failure(
-            "Failed to authenticate: OAuth session expired and could not be refreshed",
-        ))
-
-        assert _sources(client)["claude-code"]["state"] == "needs_auth"
-        assert claude_session.sessions == ["list_models"]
-
-    def test_terminal_expired_login_keeps_a_successful_recheck_ready(
-        self, isolated_db, client, claude_session,
-    ):
-        from connections.claude_discovery import reconcile_turn_auth_failure
-
-        _put("claude-code", "available")
-        claude_session(_listed())
-
-        asyncio.run(reconcile_turn_auth_failure(
-            "Failed to authenticate: OAuth session expired and could not be refreshed",
-        ))
-
-        assert _sources(client)["claude-code"]["state"] == "ready"
-        assert claude_session.sessions == ["list_models"]
-
     @pytest.mark.asyncio
-    async def test_result_event_expired_login_rechecks_then_marks_needs_auth(
+    async def test_an_expired_login_on_a_turn_without_an_account_leaves_the_signed_in_account_ready(
         self, isolated_db, client, claude_session, monkeypatch,
     ):
+        """A turn with no account receipt cannot say whose login expired, so no account's state changes."""
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
 
         from core.turn_core import TurnIdentity, TurnTerminalResult
-        from subagents import cc_event_result, cc_runtime_errors
+        from subagents import cc_event_result
         from subagents.cc_event_context import CCEventContext
         from subagents.cc_runtime_state import _Live
+        from vendor_account_fixtures import signed_in_default
 
         _put("claude-code", "available")
+        signed_in_default("claude-code")
         claude_session(RuntimeError(
             "Claude Code list_models failed: Failed to authenticate: OAuth session expired and could not be refreshed",
         ))
-
-        identity = TurnIdentity("result-error-turn", 1)
-        live = _Live(
-            session=None, parent_thread_id=None, name="cc", corsia_turn=identity,
-        )
+        identity = TurnIdentity("account-less-turn", 1)
+        live = _Live(session=None, parent_thread_id=None, name="cc", corsia_turn=identity)
         live.turn_active = True
-        ctx = CCEventContext(live, "result-error-thread", lambda *_args: None, None)
+        ctx = CCEventContext(live, "account-less-thread", lambda *_args: None, None)
         monkeypatch.setattr(cc_event_result, "_flush_pending_reasoning", AsyncMock())
         monkeypatch.setattr(
             cc_event_result, "claim_terminal",
             AsyncMock(return_value=SimpleNamespace(result=TurnTerminalResult.APPLIED)),
         )
-        monkeypatch.setattr(
-            cc_event_result, "_insert_result_marker",
-            AsyncMock(return_value=("marker", "now")),
-        )
+        monkeypatch.setattr(cc_event_result, "_insert_result_marker", AsyncMock(return_value=("marker", "now")))
         monkeypatch.setattr(cc_event_result, "_announce_result_marker", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(cc_event_result, "_finish_result_postprocessing", AsyncMock())
         monkeypatch.setattr(cc_event_result, "_record_plan_error", AsyncMock())
-        monkeypatch.setattr(
-            cc_event_result, "_schedule_sparse_usage_control_read", lambda _ctx: None,
-        )
+        monkeypatch.setattr(cc_event_result, "_schedule_sparse_usage_control_read", lambda _ctx: None)
 
+        before = asyncio.all_tasks()
         await cc_event_result.on_result(ctx, {
             "_corsia_turn_identity": identity,
             "is_error": True,
             "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
         })
-        tasks = tuple(cc_runtime_errors._EXPIRED_LOGIN_RECONCILIATION_TASKS)
-        assert tasks, "result handling must retain its reconciliation task"
-        await asyncio.gather(*tasks)
-        await asyncio.sleep(0)
+        await asyncio.gather(*(asyncio.all_tasks() - before - {asyncio.current_task()}))
 
-        assert not set(tasks) & cc_runtime_errors._EXPIRED_LOGIN_RECONCILIATION_TASKS
-        assert _sources(client)["claude-code"]["state"] == "needs_auth"
-        assert claude_session.sessions == ["list_models"]
-
-
-    def test_a_state_write_that_fails_is_reported_unverified_not_as_the_old_row(
-        self, isolated_db, client, claude_session, monkeypatch,
-    ):
-        import connections.source_state as source_state
-
-        _put("claude-code", "needs_auth")
-        claude_session(_listed())
-        real = source_state.apply_check
-
-        def flaky(provider, state, reason=None, *, db=None, schedule_usage_check=True):
-            # The check's own write; the discovery commit's READY has no usage check and is in its transaction.
-            if state == source_state.READY and schedule_usage_check:
-                raise OSError("database is locked")
-            return real(provider, state, reason, db=db, schedule_usage_check=schedule_usage_check)
-
-        monkeypatch.setattr(source_state, "apply_check", flaky)
-        self._recheck()
-        claude = _sources(client)["claude-code"]
-        assert claude["state"] == "unverified"
-        assert claude["prior_state"] == "ready"
-        assert claude["reason"] == "Check failed: database is locked"
-
-    def test_a_state_write_that_finds_no_row_is_reported_unverified(
-        self, isolated_db, client, claude_session, monkeypatch,
-    ):
-        import connections.source_state as source_state
-
-        _put("claude-code", "needs_auth")
-        claude_session(_listed())
-        real = source_state.apply_check
-
-        def apply_check(provider, state, reason=None, *, db=None, schedule_usage_check=True):
-            if state == source_state.READY and db is None:  # the check's own write, as the real writer fails when the row is missing
-                raise RuntimeError(f"{provider} source state was not recorded")
-            return real(provider, state, reason, db=db, schedule_usage_check=schedule_usage_check)
-
-        monkeypatch.setattr(source_state, "apply_check", apply_check)
-        self._recheck()
-        assert _sources(client)["claude-code"]["state"] == "unverified"
+        assert _sources(client)["claude-code"]["state"] == "ready"
+        assert claude_session.sessions == []
 
     def test_an_unverified_session_keeps_a_ready_row_usable(
         self, isolated_db, client, claude_session,
@@ -395,21 +338,26 @@ class TestClaudeSignIn:
         assert (claude["state"], claude["prior_state"]) == ("unverified", "ready")
         assert connection_available("claude-code") is True
 
-    def test_a_failure_before_the_session_is_still_recorded(
-        self, isolated_db, client, claude_session, monkeypatch,
+    @pytest.mark.parametrize(("failure", "reason"), [
+        ("claude --version failed: bad install", "Check failed: claude --version failed: bad install"),
+        ("claude --version timed out", "Check timed out"),
+    ])
+    def test_not_checked_yet_ends_in_the_version_reads_failure(
+        self, isolated_db, client, claude_session, monkeypatch, failure, reason,
     ):
         import connections.harness_models as harness_models
 
         async def no_version(_binary, *, env=None):
-            raise RuntimeError("claude --version failed: bad install")
+            raise RuntimeError(failure)
 
-        _put("claude-code", "needs_auth")
+        _put("claude-code", "available")
+        assert _sources(client)["claude-code"]["reason"] == "Not checked yet"
         claude_session(_listed())
         monkeypatch.setattr(harness_models, "binary_version", no_version)
         self._recheck()
         claude = _sources(client)["claude-code"]
-        assert (claude["state"], claude["prior_state"]) == ("unverified", "needs_auth")
-        assert claude["reason"] == "Check failed: claude --version failed: bad install"
+        assert (claude["state"], claude["prior_state"], claude["reason"]) == ("unverified", None, reason)
+        assert claude["checked_at"]
         assert claude_session.sessions == []
 
     def test_a_catalog_without_usage_does_not_clear_the_accounts_limit(
@@ -475,38 +423,6 @@ class TestClaudeSignIn:
         assert sessions == ["list_models"]
         assert _sources(client)["claude-code"]["state"] == "ready"
 
-    def test_a_slow_catalog_refresh_does_not_ask_a_freshly_signed_in_row_again(
-        self, isolated_db, client, claude_session, monkeypatch,
-    ):
-        """The sign-in check cannot finish first and leave the refresh an available row."""
-        import app_lifecycle
-        import connections.harness_refresh as harness_refresh
-        import connections.startup as startup
-
-        real_check, real_refresh = startup.check_harness_source, harness_refresh.refresh_harness_catalogs
-        claude_checked = asyncio.Event()
-
-        async def check(provider, *, rediscover=False):
-            await real_check(provider, rediscover=rediscover)
-            if provider == "claude-code":
-                claude_checked.set()
-
-        async def slow_refresh(*, reason):
-            # Run beside the check, the refresh would start after it; run first, it never waits.
-            try:
-                await asyncio.wait_for(claude_checked.wait(), timeout=0.5)
-            except TimeoutError:
-                pass
-            return await real_refresh(reason=reason)
-
-        monkeypatch.setattr(startup, "check_harness_source", check)
-        monkeypatch.setattr(harness_refresh, "refresh_harness_catalogs", slow_refresh)
-        _put("claude-code", "needs_auth")
-        sessions = claude_session(_listed())
-        asyncio.run(app_lifecycle._startup_harness_discovery())
-        assert sessions == ["list_models"]
-        assert _sources(client)["claude-code"]["state"] == "ready"
-
     def test_a_failed_catalog_refresh_keeps_the_account_signed_in(
         self, isolated_db, client, claude_session, signed_in_account,
     ):
@@ -525,7 +441,15 @@ async def _noop(*_a, **_k):
 
 
 class TestHarnessCheck:
-    def _check(self, monkeypatch, provider, result, *, rediscover=False):
+    @pytest.fixture(autouse=True)
+    def installed(self, monkeypatch):
+        """The CLI is found wherever the test says, never by looking at this machine."""
+        found = {"binary": "found"}
+        monkeypatch.setattr("connections.resolve_builtin_binary",
+                            lambda provider, *, db=None: ({}, f"/bin/{provider}" if found["binary"] else None))
+        return found
+
+    def _check(self, monkeypatch, provider, result):
         from connections.source_state import check_harness_source
 
         async def refresh(_provider, **_kwargs):
@@ -533,26 +457,16 @@ class TestHarnessCheck:
                 "account_not_configured" if result[0] == "needs_auth" else None)}
 
         monkeypatch.setattr("connections.harness_models.refresh_provider", refresh)
-        asyncio.run(check_harness_source(provider, rediscover=rediscover))
-
-    def test_codex_results_persist(self, isolated_db, client, monkeypatch):
-        _put("codex", "available")
-        self._check(monkeypatch, "codex", ("needs_auth", None))
-        codex = _sources(client)["codex"]
-        assert codex["state"] == "needs_auth" and codex["fix"] == "Connect it in the app."
-        self._check(monkeypatch, "codex", ("ready", None))
-        assert _sources(client)["codex"]["state"] == "ready"
+        asyncio.run(check_harness_source(provider))
 
     def test_a_codex_source_check_does_not_clear_an_existing_limit(
         self, isolated_db, client, monkeypatch,
     ):
         from connections import harness_usage
-        from connections.vendor_accounts import set_account_state
-        from vendor_account_fixtures import seed_default_account
+        from vendor_account_fixtures import signed_in_default
 
-        account = seed_default_account("codex")
-        set_account_state(account["id"], "signed_in", expected_revision=account["revision"])
-        _put("codex", "needs_auth")
+        signed_in_default("codex")
+        _put("codex", "available")
         harness_usage.record_usage(provider="codex", verdict={
             "state": "limited", "reason": "five_hour_limit",
             "resets_at": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
@@ -562,17 +476,13 @@ class TestHarnessCheck:
         assert codex["state"] == "ready" and codex["limited"] is True
         assert harness_usage.active_limit(provider="codex", account_id=default_id("codex"))
 
-    def test_codex_unverified_reads_check_failed(self, isolated_db, client, monkeypatch):
-        _put("codex", "available")
-        self._check(monkeypatch, "codex", ("ready", None))
-        self._check(monkeypatch, "codex", ("unverified", None))
-        codex = _sources(client)["codex"]
-        assert (codex["state"], codex["prior_state"], codex["reason"]) == (
-            "unverified", "ready", "Check failed")
-        self._check(monkeypatch, "codex", ("needs_auth", None))
-        assert _sources(client)["codex"]["reason"] == "Not signed in"
+    def test_a_recheck_that_still_finds_no_cli_stays_not_installed_and_refreshes_nothing(
+        self, isolated_db, client, monkeypatch, installed,
+    ):
+        from vendor_account_fixtures import signed_in_default
 
-    def test_trigger_path_leaves_a_not_installed_row_alone(self, isolated_db, client, monkeypatch):
+        signed_in_default("codex")
+        installed["binary"] = None
         _put("codex", "not_installed")
         self._check(monkeypatch, "codex", ("ready", None))
         assert _sources(client)["codex"]["state"] == "not_installed"
@@ -583,7 +493,7 @@ class TestHarnessCheck:
         import connections.harness_models as harness_models
         from connections.source_state import check_harness_source
 
-        _put("claude-code", "needs_auth")
+        _put("claude-code", "available")
 
         async def boom(*_a, **_k):
             raise ValueError("boom")
@@ -739,14 +649,10 @@ class TestExternal:
 class TestLimited:
     def test_ready_harness_with_a_limited_verdict_adds_reset(self, isolated_db, client):
         from connections import harness_usage
-        from connections.source_state import apply_check
-        from connections.vendor_accounts import set_account_state
-        from vendor_account_fixtures import seed_default_account
+        from vendor_account_fixtures import signed_in_default
 
-        account = seed_default_account("codex")
-        set_account_state(account["id"], "signed_in", expected_revision=account["revision"])
         _put("codex", "available")
-        apply_check("codex", "ready")
+        signed_in_default("codex")
         reset = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
         harness_usage.record_usage(provider="codex", verdict={
             "state": "limited", "reason": "five_hour_limit", "resets_at": reset,
@@ -756,10 +662,11 @@ class TestLimited:
         assert codex["resets_at"] == reset
 
     def test_unlimited_source_has_no_limited_key(self, isolated_db, client):
-        from connections.source_state import apply_check
+        from vendor_account_fixtures import signed_in_default
 
         _put("codex", "available")
-        apply_check("codex", "ready")
+        signed_in_default("codex")
+        assert _sources(client)["codex"]["state"] == "ready"
         assert "limited" not in _sources(client)["codex"]
 
 
@@ -858,8 +765,8 @@ class TestRecheck:
         parked = _server(status="disabled", provider="external", kind="external", name="Off")
         calls: list = []
 
-        async def check(provider, *, rediscover=False):
-            calls.append(("check", provider, rediscover))
+        async def check(provider):
+            calls.append(("check", provider))
 
         async def sweep(_client, server):
             calls.append(("sweep", server["id"]))
@@ -877,7 +784,7 @@ class TestRecheck:
         body = client.post("/api/providers/sources/recheck").json()
 
         assert sorted(calls, key=str) == sorted([
-            ("check", "claude-code", True), ("check", "codex", True),
+            ("check", "claude-code"), ("check", "codex"),
             ("sweep", managed), ("test", external)], key=str)
         assert parked not in {c[1] for c in calls}
         by_source = {s["source"]: s for s in body["sources"]}
@@ -888,7 +795,7 @@ class TestRecheck:
     def test_one_unrecorded_check_fails_the_route(self, isolated_db, client, monkeypatch):
         from api import provider_sources
 
-        async def broken(provider, *, rediscover=False):
+        async def broken(provider):
             raise RuntimeError("probe crashed")
 
         monkeypatch.setattr(provider_sources, "check_harness_source", broken)
@@ -994,25 +901,19 @@ class TestRecheck:
 
 
 class TestStartupTrigger:
-    def test_startup_checks_each_harness_once_beside_the_catalog_refresh(self, monkeypatch):
+    def test_startup_only_refreshes_the_signed_in_accounts_catalogs(self, monkeypatch):
         import app_lifecycle
         import connections.harness_refresh as harness_refresh
-        import connections.startup as startup
 
         calls: list = []
-
-        async def check(provider, *, rediscover=False):
-            calls.append(("check", provider, rediscover))
 
         async def refresh(*, reason):
             calls.append(("refresh", reason))
             return [{"ok": True}]
 
-        monkeypatch.setattr(startup, "check_harness_source", check)
         monkeypatch.setattr(harness_refresh, "refresh_harness_catalogs", refresh)
         assert asyncio.run(app_lifecycle._startup_harness_discovery()) == [{"ok": True}]
-        assert sorted(calls) == [("check", "claude-code", False), ("check", "codex", False),
-                                 ("refresh", "startup")]
+        assert calls == [("refresh", "startup")]
 
     def test_startup_under_the_unit_test_guard_starts_no_host_cli(self, isolated_db, monkeypatch):
         """The sign-in check never reaches a host harness CLI from a unit test (#2792)."""

@@ -102,50 +102,24 @@ def agent_binary_from_config(cfg: dict) -> str | None:
 def seed_builtin_connections(*, db=None) -> int:
     """Detect installed CLI connectors on PATH and upsert their records.
 
-    Seed installation status without reading either vendor's ambient login.
-    Account-scoped source checks run at startup and on recheck.
+    Seed only whether each vendor's CLI is installed, never either vendor's
+    ambient login: sign-in state lives on its accounts (``source_state.harness_state``).
     """
-    from connections.models import (
-        SOURCE_CHECK_KEY,
-        ConnectionStatus,
-        ConnectionType,
-        get_connection,
-        upsert_connection,
-    )
-    from connections.source_state import resolve_check
+    from connections.models import SOURCE_CHECK_KEY, ConnectionStatus, ConnectionType, upsert_connection
 
-    claude_cfg, claude_bin = resolve_builtin_binary("claude-code", db=db)
-    previous = get_connection("claude-code", db=db) or {}
-    claude_status = ConnectionStatus.AVAILABLE if claude_bin else ConnectionStatus.NOT_INSTALLED
-    if (claude_bin and claude_cfg.get(SOURCE_CHECK_KEY)
-            and previous.get("status") != ConnectionStatus.NOT_INSTALLED.value):
-        # Keep the last probe's verdict until this start's probe replaces it.
-        claude_status = ConnectionStatus(previous["status"])
-    if not claude_bin:
-        claude_cfg = {k: v for k, v in claude_cfg.items() if k != SOURCE_CHECK_KEY}
-    upsert_connection(
-        type=ConnectionType.CLI,
-        provider="claude-code",
-        config={"permission_mode": "bypassPermissions", **claude_cfg,
-                "binary": claude_bin or "claude"},
-        status=claude_status,
-        db=db,
-    )
+    def seed(provider: str, binary_name: str, extra: dict) -> None:
+        cfg, binary = resolve_builtin_binary(provider, db=db)
+        cfg = {k: v for k, v in cfg.items() if k != SOURCE_CHECK_KEY}
+        upsert_connection(
+            type=ConnectionType.CLI, provider=provider,
+            config={**extra, **cfg, "binary": binary or binary_name},
+            status=ConnectionStatus.AVAILABLE if binary else ConnectionStatus.NOT_INSTALLED,
+            db=db,
+        )
 
+    seed("claude-code", "claude", {"permission_mode": "bypassPermissions"})
     refresh_github_connection(db=db)
-
-    codex_cfg, codex_bin = resolve_builtin_binary("codex", db=db)
-    codex_state = "unverified" if codex_bin else "not_installed"
-    codex_status, codex_check = resolve_check(
-        get_connection("codex", db=db), codex_state, None,
-    )
-    upsert_connection(
-        type=ConnectionType.CLI,
-        provider="codex",
-        config={**codex_cfg, SOURCE_CHECK_KEY: codex_check, "binary": codex_bin or "codex"},
-        status=codex_status,
-        db=db,
-    )
+    seed("codex", "codex", {})
 
     log.info("Seeded built-in connections: claude-code, github, codex")
     return 3

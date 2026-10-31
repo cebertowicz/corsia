@@ -108,10 +108,6 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
 
         record_refresh_attempt(provider, harness_version=harness_version, source=_ADAPTERS[provider][2],
                                timestamp=utc_now_iso(), error=None, db=connection)
-        # The vendor's source is ready once any account's discovery commits ready.
-        from connections.source_state import READY, apply_check
-
-        apply_check(provider, READY, db=connection, schedule_usage_check=False)
         refresh_account_holds(context.account_id, db=connection)
         from connections.account_rollover import offer_destination
 
@@ -125,11 +121,11 @@ def commit_discovery_bundle(provider, staged, rows, *, context, harness_version,
             model_count=len(models), effective_receipt=receipt)
 
 
-def record_discovery_failure(provider, *, context, cause, harness_version=None, db=None):
+def record_discovery_failure(provider, *, context, cause, harness_version=None, reason=None, db=None):
     with write_transaction(db, scope='account_discovery_failed') as connection:
         if not receipt_is_current(context.receipt, db=connection):
             return AccountRefreshResult(provider, context.account_id, cause='account_refresh_superseded')
         mark_discovery(context.account_id, receipt=context.receipt, status='failed', cause=cause,
-                       harness_version=harness_version, db=connection)
+                       harness_version=harness_version, reason=reason, db=connection)
         return AccountRefreshResult(provider, context.account_id, cause=cause,
                                     effective_receipt=context.receipt)

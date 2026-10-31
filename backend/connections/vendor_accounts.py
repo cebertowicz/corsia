@@ -313,10 +313,8 @@ def set_account_state(account_id: str, state: str, *, expected_revision: int, db
         if account["provider"] in VENDORS and account["state"] == "signed_in" and state != "signed_in":
             # A model is available only while a signed-in account's ready discovery lists it.
             from connections.account_discovery_commit import reproject_availability
-            from connections.source_state import record_last_account_left
 
             reproject_availability(account["provider"], db=connection)
-            record_last_account_left(account["provider"], db=connection)
         return get_account(account_id, db=connection)
 
 

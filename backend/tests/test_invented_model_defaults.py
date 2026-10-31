@@ -123,7 +123,7 @@ def test_legacy_fallback_sync_clears_defaults_stamped_on_existing_rows(isolated_
     db = get_db()
     try:
         _stale_harness_row(db, "codex/gpt-5-codex", "gpt-5-codex", "legacy_fallback")
-        sync_legacy_fallback("codex", status="not_installed", config={}, db=db)
+        sync_legacy_fallback("codex", config={}, db=db)
         assert _defaults(db, "codex/gpt-5-codex") == (None, None)
     finally:
         db.close()

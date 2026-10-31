@@ -15,11 +15,10 @@ import json
 import logging
 from typing import Any
 
-from connections import claude_usage, source_state
+from connections import claude_usage
 from connections.claude_context_probe import read_context_usage
 from connections.claude_control_turns import converse
 from connections.harness_process import killed_on_exit
-from infra.db_async import run_in_db
 from subagents.cc_env import clean_claude_env
 from subagents.managed_launch import claude_project_discovery_args
 
@@ -134,70 +133,6 @@ async def discover_claude_models(binary: str, *, context=None):
     usage = responses.get('corsia-usage') or {}
     report = usage.get('response') if usage.get('subtype') == 'success' else None
     return StagedDiscovery(payload, usage_report=report)
-
-
-async def reconcile_turn_auth_failure(detail: str) -> None:
-    """Recheck an exact expired session before marking the Claude source needs-auth.
-
-    The catalog control session is the existing bounded authentication check. A
-    matching terminal error forces ``needs_auth`` only if that check cannot
-    already give the definitive answer, so a generic 401 never changes state by
-    text alone.
-    """
-    from connections.auth_failure import auth_failure_kind
-    from connections.models import get_connection
-
-    if auth_failure_kind("claude-code", detail) is None:
-        return
-    try:
-        await source_state.check_harness_source("claude-code", rediscover=True)
-    except Exception as exc:  # noqa: BLE001 - terminal recovery must still name the expired login
-        log.warning("Claude Code auth recheck failed: %s", type(exc).__name__)
-    row = await run_in_db(get_connection, "claude-code")
-    if source_state.row_state(row)["state"] == source_state.UNVERIFIED:
-        await _record_sign_in(source_state.NEEDS_AUTH, detail)
-
-
-async def _record_sign_in(state: str, detail: str | None = None) -> None:
-    """Keep the session's outcome as Claude Code's source state.
-
-    A write that fails or finds no row raises, so the recheck cannot present
-    the row's old state as this check's result.
-    """
-    if await run_in_db(source_state.apply_check, "claude-code", state, detail) is None:
-        raise RuntimeError("Claude Code source state was not recorded")
-
-
-def _known_claude_context_identities() -> dict[str, str]:
-    """Return selectors whose exact resolved model already has a window.
-
-    Context-window evidence is identity-bound: a selector can keep its prior
-    window only while ``resolvedModel`` has not changed. Re-probing an
-    unchanged identity creates a fresh CLI control process without improving
-    catalog truth, so leave its existing observation to the account discovery commit.
-    """
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        rows = db.execute(
-            "SELECT provider_model_id,metadata_json FROM models "
-            "WHERE harness = 'claude-code' AND context_window IS NOT NULL"
-        ).fetchall()
-    finally:
-        db.close()
-    known: dict[str, str] = {}
-    for row in rows:
-        try:
-            metadata = json.loads(row["metadata_json"] or "{}")
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if not isinstance(metadata, dict):
-            continue
-        resolved = str(metadata.get("resolved_identity") or "").strip()
-        if resolved:
-            known[str(row["provider_model_id"])] = resolved
-    return known
 
 
 def _control_responses(stdout: bytes) -> dict[str, dict[str, Any]]:

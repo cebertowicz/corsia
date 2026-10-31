@@ -124,8 +124,7 @@ async def test_source_state_follows_the_accounts_through_sign_in_and_removal(iso
     from connections.account_discovery_commit import commit_discovery_bundle
     from connections.account_receipts import capture_receipt
     from connections.account_signin_commit import commit_signed_in
-    from connections.models import get_connection
-    from connections.source_state import NEEDS_AUTH, READY, row_state
+    from connections.source_state import NEEDS_AUTH, READY, harness_state
     from connections.vendor_accounts import get_account, set_account_state
     from infra.database import get_db
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
@@ -145,7 +144,7 @@ async def test_source_state_follows_the_accounts_through_sign_in_and_removal(iso
     identity = {'account_fp': 'journey'} if vendor == 'codex' else {'email': 'journey@example.test'}
     commit_signed_in('ambient', account['revision'], identity)
     # A login with no discovery proves nothing yet.
-    assert row_state(get_connection(vendor, db=db))['state'] != READY
+    assert harness_state(vendor, db=db)['state'] != READY
 
     receipt = capture_receipt(vendor, account_id='ambient', db=db)
     result = commit_discovery_bundle(
@@ -153,30 +152,28 @@ async def test_source_state_follows_the_accounts_through_sign_in_and_removal(iso
         [{'selector_id': 'journey', 'available': True}],
         context=SimpleNamespace(receipt=receipt, account_id='ambient'), harness_version='1', db=db)
     assert result.status == 'ready'
-    assert row_state(get_connection(vendor, db=db))['state'] == READY
+    assert harness_state(vendor, db=db)['state'] == READY
     source = await subscription_available()
     assert source is not None and source.provider == vendor
 
     current = get_account('ambient', db=db)
     set_account_state('ambient', 'removed', expected_revision=current['revision'], db=db)
     db.commit()
-    assert row_state(get_connection(vendor, db=db))['state'] == NEEDS_AUTH
+    assert harness_state(vendor, db=db)['state'] == NEEDS_AUTH
     assert await subscription_available() is None
     db.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('vendor', ['codex', 'claude-code'])
-async def test_stale_ready_row_with_only_a_signed_out_account_counts_for_no_subscription(isolated_db, vendor):
-    """An upgrade can leave the source reading ready until its first check: setup must not skip the local model on it."""
-    from connections.source_state import READY, apply_check
+async def test_an_installed_source_with_only_a_signed_out_account_counts_for_no_subscription(isolated_db, vendor):
+    """An upgrade leaves an installed source with only a signed-out account: setup must not skip the local model on it."""
     from infra.database import get_db
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
     from llm.local_setup_gates import limited_subscription_message, subscription_available
 
     db = get_db()
     _pre_upgrade_install(db, vendor, 'available')
-    apply_check(vendor, READY, db=db)
     db.commit()
     migrate_166_to_167(db)
     db.commit()

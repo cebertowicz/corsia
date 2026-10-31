@@ -27,9 +27,11 @@ class ConnectionType(str, Enum):
 class ConnectionStatus(str, Enum):
     """Setup state. Only AVAILABLE registers connector-backed tools.
 
-    UNVERIFIED means the last check timed out or errored. A row whose prior
-    state was ready never takes it: it stays AVAILABLE and records the
-    unverified result in its ``source_check`` (see ``connections.source_state``).
+    Claude Code and Codex rows take only AVAILABLE (installed) or NOT_INSTALLED;
+    their sign-in state lives on their accounts (``source_state.harness_state``).
+    GitHub's UNVERIFIED means its last check could not tell; a GitHub row whose
+    prior state was ready stays AVAILABLE and records the unverified result in
+    its ``source_check`` (see ``connections.source_state``).
     """
 
     AVAILABLE = "available"
@@ -76,9 +78,7 @@ def upsert_connection(*, type, provider: str, status, config: dict | None = None
         if provider in VENDORS:
             from connections.harness_legacy_fallback import sync_legacy_fallback
 
-            sync_legacy_fallback(
-                provider, status=status_value, config=config, db=_db,
-            )
+            sync_legacy_fallback(provider, config=config, db=_db)
         row = _db.execute("SELECT * FROM connections WHERE provider = ?", (provider,)).fetchone()
         return _row_to_dict(row)
 
@@ -110,31 +110,6 @@ def list_connections(*, status=None, type=None, db=None) -> list[dict[str, Any]]
     return [_row_to_dict(r) for r in rows]
 
 
-def set_connection_status(
-    provider: str, status, db=None, *, schedule_usage_check: bool = True,
-) -> dict[str, Any] | None:
-    """Update a connection's status. Returns the updated row, or None if absent."""
-    now = datetime.now(timezone.utc).isoformat()
-    status_value = _v(status)
-    with write_transaction(db, scope="set_connection_status") as _db:
-        _db.execute(
-            "UPDATE connections SET status = ?, updated_at = ? WHERE provider = ?",
-            (status_value, now, provider),
-        )
-        if provider in ("claude-code", "codex"):
-            row = _db.execute(
-                "SELECT config FROM connections WHERE provider = ?", (provider,)
-            ).fetchone()
-            config = json.loads(row["config"]) if row and row["config"] else None
-            from connections.harness_legacy_fallback import sync_legacy_fallback
-
-            sync_legacy_fallback(
-                provider, status=status_value, config=config, db=_db,
-            )
-        row = _db.execute("SELECT * FROM connections WHERE provider = ?", (provider,)).fetchone()
-        return _row_to_dict(row) if row else None
-
-
 def connection_available(provider: str, db=None) -> bool:
     """True iff a connection row exists for ``provider`` with status 'available'.
 
@@ -150,17 +125,16 @@ def connection_available(provider: str, db=None) -> bool:
 
 
 def provider_may_run(provider: str, db=None) -> bool:
-    """Whether a provider has an available connection or a signed-in account to try.
+    """Whether a provider's CLI is installed and it has a signed-in account to try.
 
     Per-account discovery and policy are checked at turn admission.
     """
     connection = db or get_db()
     try:
         row = connection.execute(
-            "SELECT 1 FROM connections c WHERE c.provider=? AND "
-            "(c.status='available' OR (c.status IN ('needs_auth','unverified') AND EXISTS "
-            "(SELECT 1 FROM vendor_accounts a WHERE a.connection_id=c.id "
-            "AND a.state='signed_in'))) LIMIT 1", (provider,)
+            "SELECT 1 FROM connections c WHERE c.provider=? AND c.status!='not_installed' "
+            "AND EXISTS (SELECT 1 FROM vendor_accounts a WHERE a.connection_id=c.id "
+            "AND a.state='signed_in') LIMIT 1", (provider,)
         ).fetchone()
         return row is not None
     finally:
@@ -170,28 +144,3 @@ def provider_may_run(provider: str, db=None) -> bool:
 
 SOURCE_CHECK_KEY = "source_check"
 
-
-def record_source_check(
-    provider: str, *, status, check: dict[str, Any], db=None, schedule_usage_check: bool = True,
-) -> dict[str, Any] | None:
-    """Keep a connection's last source check and set its status.
-
-    ``check`` is ``{state, prior_state, reason, checked_at}``; it lives in the
-    row's config beside the discovery envelope, so no column is added. The
-    status goes through ``set_connection_status``, the one writer of the
-    sign-in transition. Returns the updated row, or None if the provider has
-    no row.
-    """
-    with write_transaction(db, scope="record_source_check") as _db:
-        row = _db.execute(
-            "SELECT config FROM connections WHERE provider = ?", (provider,)
-        ).fetchone()
-        if row is None:
-            return None
-        config = json.loads(row["config"]) if row["config"] else {}
-        config[SOURCE_CHECK_KEY] = check
-        _db.execute(
-            "UPDATE connections SET config = ? WHERE provider = ?",
-            (json.dumps(config), provider),
-        )
-        return set_connection_status(provider, status, db=_db, schedule_usage_check=schedule_usage_check)

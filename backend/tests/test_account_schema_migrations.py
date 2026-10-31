@@ -308,11 +308,11 @@ def _metadata(db: sqlite3.Connection) -> dict[str, str | None]:
 
 
 def _converted_source(db: sqlite3.Connection) -> None:
-    # 166 -> 167 leaves no account signed in, so the vendor's source needs sign-in; nothing else changes.
+    # 166 -> 167 leaves no account signed in, which is what makes the source need sign-in;
+    # the connection row itself is left as it was.
     status, config = db.execute("SELECT status,config FROM connections").fetchone()
-    config = json.loads(config)
-    assert (status, config.pop("source_check")["state"]) == ("needs_auth", "needs_auth")
-    assert config == {"binary": "/bin/synthetic"}
+    assert (status, json.loads(config)) == ("available", {"binary": "/bin/synthetic"})
+    assert db.execute("SELECT COUNT(*) FROM vendor_accounts WHERE state='signed_in'").fetchone() == (0,)
 
 
 def _accounts_adopted(db: sqlite3.Connection) -> None:
@@ -464,8 +464,9 @@ def test_genuine88_upgrade_maps_legacy_policy_to_fresh89_and_is_idempotent():
         assert [tuple(row) for row in db.execute('SELECT project_id,provider_key,rollover,order_json,disabled_json,revision FROM provider_policies')] == [('p', 'codex', 1, '["a", "b"]', '[]', 7)]
         assert [tuple(row) for row in db.execute('SELECT project_id,revision FROM project_policy_overrides')] == [('p', 7)]
         assert unrelated_rows(db)['projects'] == unrelated
-        # 166 -> 167 signs the ambient accounts out, so the vendor's source needs sign-in.
-        assert tuple(db.execute("SELECT status FROM connections").fetchone()) == ('needs_auth',)
+        # 166 -> 167 signs the ambient accounts out and leaves the connection row as it was.
+        assert tuple(db.execute("SELECT status FROM connections").fetchone()) == ('available',)
+        assert db.execute("SELECT COUNT(*) FROM vendor_accounts WHERE state='signed_in'").fetchone()[0] == 0
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         with sqlite3.connect(':memory:') as fresh:
             initialize_schema(fresh)

@@ -52,9 +52,8 @@ def test_upgrade_ambient_account(isolated_db, provider, shape):
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
 @pytest.mark.parametrize('other_signed_in', [False, True])
-def test_conversion_leaves_source_ready_only_with_a_signed_in_account(isolated_db, provider, other_signed_in):
-    from connections.models import get_connection
-    from connections.source_state import row_state
+def test_conversion_leaves_source_needing_sign_in_only_without_a_signed_in_account(isolated_db, provider, other_signed_in):
+    from connections.source_state import harness_state
     from infra.database import get_db
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
@@ -72,5 +71,6 @@ def test_conversion_leaves_source_ready_only_with_a_signed_in_account(isolated_d
     db.commit()
     migrate_166_to_167(db)
     db.commit()
-    assert row_state(get_connection(provider, db=db))['state'] == ('ready' if other_signed_in else 'needs_auth')
+    # A stored ready check no longer counts: the added account, not yet checked, is what keeps the source usable.
+    assert harness_state(provider, db=db)['state'] == ('unverified' if other_signed_in else 'needs_auth')
     db.close()

@@ -151,7 +151,7 @@ async def _publish_process_exit(
     )
     marker_id = live.tool_boundary_marker_id or surface_exit_error(
         child_thread_id, code, detail, broadcast, db, None,
-        insert_message_fn=insert_message, logger=log, added_signed_out=bool(added_account),
+        insert_message_fn=insert_message, logger=log,
         added_account=added_account,
     )
     payload = {

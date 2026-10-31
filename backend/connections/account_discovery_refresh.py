@@ -1,12 +1,14 @@
 """Staged account adapter execution inside the canonical harness refresh owner."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
-from dataclasses import replace
 
 from connections.account_discovery_commit import commit_discovery_bundle, record_discovery_failure
 from connections.account_discovery_types import StagedDiscovery
 from infra.db_async import run_in_db
+
+log = logging.getLogger(__name__)
 
 
 def _version_environment(context):
@@ -32,9 +34,14 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
         try:
             version = harness_version or await version_read(binary, env=env)
         except Exception as error:
-            result = await db_call(record_discovery_failure, provider, context=context,
-                                   cause='account_discovery_failed', harness_version=harness_version, db=db)
-            return replace(result, source_error=str(error))
+            # The CLI's own words are a person's only clue to why it is broken: their first line
+            # is kept as the failure's reason, and the whole text goes to the log.
+            from connections.source_state import UNVERIFIED, user_reason
+
+            log.warning('%s version check failed: %s', provider, error)
+            return await db_call(record_discovery_failure, provider, context=context,
+                                 cause='account_discovery_failed', harness_version=harness_version,
+                                 reason=user_reason(UNVERIFIED, str(error)), db=db)
         try:
             staged = await discover(binary, context=context)
             if not isinstance(staged, StagedDiscovery):
@@ -53,7 +60,8 @@ async def refresh_account_once(provider, *, context, binary, harness_version, ad
             rows = normalize(staged.payload, harness_version=version,
                              timestamp=datetime.now(timezone.utc).isoformat())
         except Exception:
-            # The adapter's raw diagnostics are never stored on account evidence.
+            # An adapter's raw diagnostics are never stored on account evidence: only a failed
+            # version check (above) keeps a reason, the first line of the CLI's error.
             return await db_call(record_discovery_failure, provider, context=context,
                                  cause='account_discovery_failed', harness_version=harness_version, db=db)
         # Transaction/restoration/terminal cleanup failures must remain loud, not a failed adapter report.
@@ -74,10 +82,8 @@ async def refresh_signed_in_accounts(provider, *, reason, harness_version, binar
         provider, reason=reason, harness_version=harness_version, db=db, binary=binary,
         account_id=account['id']) for account in accounts if account['state'] == 'signed_in']
     ready = any(result.status == 'ready' for result in results)
-    error = None if ready else (next((result.source_error or result.cause for result in results
-                                 if result.source_error or result.cause), None)
-                                if results else 'account_not_configured')
     causes = [result.cause for result in results if result.cause]
+    error = None if ready else (next(iter(causes), None) if results else 'account_not_configured')
     if not ready and 'account_refresh_superseded' not in causes and (causes or not results):
         # The vendor clock records the sweep, never one account: an account's own failure
         # stays on its discovery and must not back off or reset the others' checks.

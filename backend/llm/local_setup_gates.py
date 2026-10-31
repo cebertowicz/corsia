@@ -45,19 +45,17 @@ def local_memory_ok(ram_bytes: int | None = None) -> bool:
 def _signed_in_accounts(provider: str) -> list[tuple[dict, dict | None]]:
     """Each signed-in CORSIA account of a vendor whose source is usable, with its active plan limit.
 
-    A vendor's source counts only through its accounts: one that last checked ready (or could
-    not tell but was ready before), and that has an account signed in now. A connection row
-    that still reads ready after its account signed out counts for nothing.
+    A vendor's source counts only through its accounts: it reads ready (or could not tell but
+    was ready before), and an account is signed in now.
     """
     from connections.harness_usage import active_limit
-    from connections.models import get_connection
-    from connections.source_state import READY, UNVERIFIED, row_state
+    from connections.source_state import READY, UNVERIFIED, harness_state
     from connections.vendor_accounts import list_accounts
     from infra.database import get_db
 
     db = get_db()
     try:
-        state = row_state(get_connection(provider, db=db))
+        state = harness_state(provider, db=db)
         if not (state["state"] == READY or (state["state"] == UNVERIFIED and state["prior_state"] == READY)):
             return []
         return [(account, active_limit(provider=provider, account_id=account["id"], db=db))

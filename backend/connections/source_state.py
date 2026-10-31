@@ -1,21 +1,20 @@
-"""The one state vocabulary for Claude Code and Codex, and where it is kept.
+"""The one state vocabulary for model sources, and where each fact lives.
 
-``ConnectionStatus`` stays the owner of whether a connector is usable. The last
-check's own result (``state``, ``prior_state``, ``reason``, ``checked_at``) sits
-in the connection row's config under ``source_check``.
+Claude Code and Codex: the connection row keeps only whether the CLI is
+installed and its ``binary``. Whether the vendor is signed in and whether its
+models were found live on its CORSIA accounts (``vendor_accounts`` and each
+account's discovery record); ``harness_state`` derives ``state``,
+``prior_state``, ``reason`` and ``checked_at`` from them on every read, and
+nothing writes a copy of that state back to the row.
 
-An unverified result never demotes a row that was ready: that row keeps status
-AVAILABLE, so dispatch keeps working, and reports ``unverified`` with
-``prior_state="ready"``. Any other row becomes UNVERIFIED, which is not
-available. Nothing here polls.
-
-Checks refresh the selected account's catalog through its account-owned home.
-An unconfigured account reports that sign-in is needed.
+GitHub keeps its last check in its connection row's config under
+``source_check`` (``resolve_check``). An unverified result never demotes a row
+that was ready: that row keeps status AVAILABLE and reports ``unverified`` with
+``prior_state="ready"``. Nothing here polls.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -26,7 +25,6 @@ from connections.models import (
     ConnectionStatus,
     ConnectionType,
     get_connection,
-    record_source_check,
     upsert_connection,
 )
 from infra.db_async import run_in_db
@@ -69,18 +67,6 @@ def _prior_state(existing: dict[str, Any] | None) -> str | None:
     return None if state == UNVERIFIED else state
 
 
-def refresh_check(result: dict) -> tuple[str, str | None]:
-    """The source state and raw detail one vendor refresh result proves.
-
-    The internal ``account_discovery_failed`` cause is not one a person reads.
-    """
-    if result.get("ok"):
-        return READY, None
-    error = result.get("error")
-    state = NEEDS_AUTH if error == "account_not_configured" else UNVERIFIED
-    return state, None if error == "account_discovery_failed" else error
-
-
 def user_reason(state: str, detail: str | None) -> str | None:
     """The reason a person reads, from a check's raw detail (which only the log keeps)."""
     if state == NEEDS_AUTH:
@@ -115,96 +101,60 @@ def resolve_check(
     }
 
 
-def row_state(row: dict[str, Any] | None) -> dict[str, Any]:
-    """``state``, ``prior_state``, ``reason`` and ``checked_at`` for a row."""
-    if row is None:
-        return {"state": NOT_INSTALLED, "prior_state": None, "reason": None, "checked_at": None}
-    check = (row.get("config") or {}).get(SOURCE_CHECK_KEY)
-    if check and check.get("state"):
-        return {key: check.get(key) for key in
-                ("state", "prior_state", "reason", "checked_at")}
-    if row.get("status") == ConnectionStatus.AVAILABLE.value:
-        # Usable, but no probe has ever confirmed it.
-        return {"state": UNVERIFIED, "prior_state": None,
-                "reason": "Not checked yet", "checked_at": None}
-    return {"state": _STATE_OF.get(row.get("status"), UNVERIFIED), "prior_state": None,
-            "reason": None, "checked_at": None}
+def harness_state(provider: str, *, db=None) -> dict[str, Any]:
+    """Claude Code's or Codex's ``state``, ``prior_state``, ``reason`` and ``checked_at``.
 
-
-def apply_check(
-    provider: str, state: str, reason: str | None = None, *, db=None,
-    schedule_usage_check: bool = True,
-):
-    """Record one check result against the stored row; the row must exist."""
-    status, check = resolve_check(get_connection(provider, db=db), state, reason)
-    row = record_source_check(provider, status=status, check=check, db=db,
-                              schedule_usage_check=schedule_usage_check)
-    if row is None:
-        raise RuntimeError(f"{provider} source state was not recorded")
-    return row
-
-
-def record_last_account_left(provider: str, *, db) -> None:
-    """Record that sign-in is needed once no signed-in account of the vendor remains.
-
-    The writer the account lifecycle calls inside its own transaction, the counterpart
-    of the READY an account's committed discovery records. A vendor that is not
-    installed keeps that state.
+    Not installed comes from the connection row; with no signed-in account it is
+    ``needs_auth``. Any signed-in account whose current login has a ready discovery
+    makes it ``ready``; when every such discovery's last refresh failed it keeps
+    dispatching as ``unverified`` with ``prior_state="ready"``. Otherwise it is
+    ``unverified``: "Not checked yet" until an account's discovery records a
+    failure, then that failure's reason. ``checked_at`` is the latest account check.
     """
+    from connections.account_evidence import current_ready_discovery, discovery_view
     from connections.vendor_accounts import list_accounts
 
-    if any(account["state"] == "signed_in" for account in list_accounts(provider=provider, db=db)):
-        return
     row = get_connection(provider, db=db)
     if row is None or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
-        return
-    apply_check(provider, NEEDS_AUTH, "account_not_configured", db=db, schedule_usage_check=False)
+        return {"state": NOT_INSTALLED, "prior_state": None, "reason": None, "checked_at": None}
+    accounts = [account for account in list_accounts(provider=provider, db=db) if account["state"] == "signed_in"]
+    if not accounts:
+        return {"state": NEEDS_AUTH, "prior_state": None, "reason": user_reason(NEEDS_AUTH, None),
+                "checked_at": None}
+    ready = [found for found in map(current_ready_discovery, accounts) if found]
+    failures = [found["refresh_failure"] for found in ready if found.get("refresh_failure")]
+    checks = [discovery_view(account)["discovery"] for account in accounts]
+    checked_at = max((check.get("observed_at") or "" for check in checks + failures), default="") or None
+    if len(failures) < len(ready):
+        return {"state": READY, "prior_state": None, "reason": None, "checked_at": checked_at}
+    failed = next(iter(failures), None) or next((check for check in checks if check.get("status") == "failed"), None)
+    return {"state": UNVERIFIED, "prior_state": READY if failures else None,
+            "reason": (failed.get("reason") or user_reason(UNVERIFIED, None)) if failed else "Not checked yet",
+            "checked_at": checked_at}
 
 
-def _ensure_row(provider: str, cfg: dict, binary: str | None) -> None:
-    """Create or refresh the row so the check has a place to land."""
-    existing = get_connection(provider)
-    if existing and (existing.get("config") or {}).get("binary") == (binary or provider):
-        return
+def _record_install(provider: str, cfg: dict, binary: str | None) -> None:
+    """Keep the CLI's binary and whether it is installed: all the row holds for this source."""
     upsert_connection(
-        type=ConnectionType.CLI, provider=provider,
-        config={**cfg, "binary": binary or provider},
-        status=existing["status"] if existing else ConnectionStatus.NOT_INSTALLED,
+        type=ConnectionType.CLI, provider=provider, config={**cfg, "binary": binary or provider},
+        status=ConnectionStatus.AVAILABLE if binary else ConnectionStatus.NOT_INSTALLED,
     )
 
 
-async def check_harness_source(provider: str, *, rediscover: bool = False) -> None:
-    """Re-check Claude Code / Codex; unrecordable outcomes raise, with no retry.
+async def check_harness_source(provider: str) -> None:
+    """Re-check Claude Code / Codex: find its binary again, then refresh its accounts.
 
-    Startup checks the stored binary and leaves a not-installed row alone. Only
-    the recheck route (``rediscover``) looks for a binary again, so an install
-    or a moved binary is picked up when the user asks.
-
-    An available Claude Code row is checked by the catalog refresh beside this
-    at startup. Other checks use the selected account's refresh result.
+    The binary and whether it is installed land on the connection row, so an
+    install or a moved binary is picked up when the user asks. Each signed-in
+    account's refresh records its own discovery, which ``harness_state`` reads.
+    A failure raises.
     """
     from connections import resolve_builtin_binary
     from connections.harness_models import refresh_provider
 
-    try:
-        if rediscover:
-            cfg, binary = await run_in_db(resolve_builtin_binary, provider)
-            await run_in_db(_ensure_row, provider, cfg, binary)
-        else:
-            row = await run_in_db(get_connection, provider)
-            if row is None or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
-                return
-            if provider == "claude-code" and row["status"] == ConnectionStatus.AVAILABLE.value:
-                return
-            binary = (row.get("config") or {}).get("binary") or provider
-    except Exception as exc:
-        await run_in_db(apply_check, provider, UNVERIFIED, str(exc))
-        return
-    if binary is None:
-        await run_in_db(apply_check, provider, NOT_INSTALLED)
-    else:
-        receipt = await refresh_provider(provider, reason="manual", binary=binary)
-        try:
-            await run_in_db(apply_check, provider, *refresh_check(receipt))
-        except Exception as exc:
-            await run_in_db(apply_check, provider, UNVERIFIED, str(exc))
+    cfg, binary = await run_in_db(resolve_builtin_binary, provider)
+    await run_in_db(_record_install, provider, cfg, binary)
+    if binary is not None:
+        await refresh_provider(provider, reason="manual", binary=binary)
+
+

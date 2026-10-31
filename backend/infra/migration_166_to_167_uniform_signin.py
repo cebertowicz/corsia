@@ -2,6 +2,8 @@
 
 Frozen: a migration reads and writes its tables directly and never imports
 account, registry or catalog code, which moves on after this step ships.
+The vendor's sign-in state is read from these accounts, so the connection row
+is left as it is.
 """
 from __future__ import annotations
 
@@ -95,9 +97,7 @@ def migrate_166_to_167(conn: sqlite3.Connection) -> None:
         "JOIN connections c ON c.id=a.connection_id "
         "WHERE c.provider IN ('claude-code','codex') AND a.source_home IS NULL AND a.state!='removed'"
     ).fetchall()
-    converted: set[str] = set()
     for account_id, identity_json, provider in accounts:
-        converted.add(provider)
         identity = json.loads(identity_json or '{}')
         comparison = identity.get('default_comparison') or {}
         facts = comparison.get('facts') or comparison.get('last_known') or {}
@@ -138,27 +138,3 @@ def migrate_166_to_167(conn: sqlite3.Connection) -> None:
             _retire_provider_session(conn, thread_id, provider, now)
             if running:
                 conn.execute("UPDATE threads SET runtime_context_epoch=runtime_context_epoch+1 WHERE id=?", (thread_id,))
-    for provider in converted:
-        _record_needs_sign_in(conn, provider)
-
-
-def _record_needs_sign_in(conn: sqlite3.Connection, provider: str) -> None:
-    """Record sign-in needed on the vendor's source once no signed-in account remains.
-
-    The frozen counterpart of ``source_state.record_last_account_left``: the ambient
-    login no longer makes the source ready, so its row must not keep reading ready.
-    """
-    if conn.execute(
-        "SELECT 1 FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id "
-        "WHERE c.provider=? AND a.state='signed_in' LIMIT 1", (provider,),
-    ).fetchone():
-        return
-    row = conn.execute("SELECT status,config FROM connections WHERE provider=?", (provider,)).fetchone()
-    if row is None or row[0] == 'not_installed':
-        return
-    now = datetime.now(timezone.utc).isoformat()
-    config = json.loads(row[1]) if row[1] else {}
-    config['source_check'] = {'state': 'needs_auth', 'prior_state': None,
-                              'reason': 'Not signed in', 'checked_at': now}
-    conn.execute("UPDATE connections SET status='needs_auth',config=?,updated_at=? WHERE provider=?",
-                 (json.dumps(config), now, provider))

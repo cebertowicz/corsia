@@ -121,16 +121,6 @@ def _reason(at: datetime, version: str = "2.1.268") -> str | None:
     return cache_refresh_reason("claude-code", harness_version=version, now=at)
 
 
-def test_known_context_identities_are_bound_to_resolved_model(isolated_db):
-    from connections.claude_discovery import _known_claude_context_identities
-
-    now = datetime(2026, 9, 10, 22, tzinfo=timezone.utc)
-    _store_discovery(_claude_payload(with_context=True), now)
-
-    known = _known_claude_context_identities()
-    assert known["claude-fable-5-1[1m]"] == "claude-fable-5-1"
-
-
 def test_missing_context_evidence_waits_for_stale_catalog_and_recovers(isolated_db):
     from connections.models import ConnectionStatus, ConnectionType, upsert_connection
 

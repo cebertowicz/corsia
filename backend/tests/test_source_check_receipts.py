@@ -13,39 +13,7 @@ from tests.test_provider_sources import (  # noqa: F401
 pytestmark = pytest.mark.usefixtures("mac_local_model_host")
 
 
-@pytest.mark.real_harness_cli
-@pytest.mark.parametrize("answer", [None, OSError("database is locked")])
-def test_primary_and_error_path_writes_failing_never_return_prior_row_as_fresh(
-    isolated_db, client, claude_session, monkeypatch, answer,
-):
-    from connections import source_state
-
-    _put("claude-code", "needs_auth")
-    claude_session(_listed())
-    calls = []
-
-    def failed(*args, **_kwargs):
-        calls.append(args)
-        if isinstance(answer, Exception):
-            raise answer
-        return None
-
-    async def check(provider, *, rediscover):
-        if provider == "claude-code":
-            await source_state.check_harness_source(provider, rediscover=rediscover)
-
-    monkeypatch.setattr(source_state, "record_source_check", failed)
-    monkeypatch.setattr("api.provider_sources.check_harness_source", check)
-    response = client.post("/api/providers/sources/recheck")
-    assert response.status_code == 503
-    assert "sources" not in response.json()
-    assert "database" not in response.text
-    assert len(calls) == 2  # READY and the explicit UNVERIFIED failure receipt
-    assert _sources(client)["claude-code"]["state"] == "needs_auth"
-
-
-@pytest.mark.parametrize("answer", [None, OSError("database is locked")])
-def test_all_check_writes_failing_returns_safe_error(isolated_db, client, monkeypatch, answer):
+def test_all_check_writes_failing_returns_safe_error(isolated_db, client, monkeypatch):
     import connections
     from connections import source_state
 
@@ -55,13 +23,11 @@ def test_all_check_writes_failing_returns_safe_error(isolated_db, client, monkey
 
     def failed(*args, **_kwargs):
         calls.append(args)
-        if isinstance(answer, Exception):
-            raise answer
-        return None
+        raise OSError("database is locked")
 
     monkeypatch.setattr(connections, "resolve_builtin_binary", lambda provider, *, db=None: ({}, None))
     monkeypatch.setattr("api.provider_sources.check_harness_source", source_state.check_harness_source)
-    monkeypatch.setattr(source_state, "record_source_check", failed)
+    monkeypatch.setattr(source_state, "_record_install", failed)
     response = client.post("/api/providers/sources/recheck")
     assert response.status_code == 503
     assert response.json() == {"detail": "Model source checks could not be completed. Check again."}
@@ -93,19 +59,19 @@ def test_network_failure_does_not_create_a_get_overlay(isolated_db, client, monk
 async def test_single_flight_settles_failures_and_can_recover(isolated_db, client, monkeypatch):
     from fastapi import HTTPException
     from api import provider_sources as api
-    from connections.source_state import apply_check
+    from tests.vendor_account_fixtures import signed_in_default
 
     _put("claude-code", "needs_auth")
     entered = asyncio.Event()
     release = asyncio.Event()
     finished = []
 
-    async def check(provider, *, rediscover):
+    async def check(provider):
         entered.set()
         await release.wait()
         finished.append(provider)
         if provider == "claude-code":
-            apply_check(provider, "ready")
+            signed_in_default(provider)
         if provider == "codex":
             raise OSError("private diagnostic must not enter response")
 
