@@ -15,7 +15,6 @@ dependencies.
 
 from __future__ import annotations
 
-import errno
 import os
 from pathlib import Path
 
@@ -62,10 +61,13 @@ def move_legacy_token(home: Path, override: Path | None, checkout: Path = _CHECK
     """Move a token left at an earlier location into the token folder, once.
 
     Afterwards no earlier copy remains. When the folder already holds a token,
-    an earlier copy is deleted rather than merged. Each step leaves either the
-    earlier copy or the new file in place, so an interrupted move finishes on
-    the next run. A file the person named in ``CORSIA_API_TOKEN_FILE`` is theirs
-    and stays where it is. Nothing here prints or logs the token.
+    an earlier copy is deleted rather than merged. The new file is always
+    written fresh by the hardened writer, never renamed or chmodded in from the
+    earlier path, which a leased shell can still swap for a link. Each step
+    leaves either the earlier copy or the new file in place, so an interrupted
+    move finishes on the next run. A file the person named in
+    ``CORSIA_API_TOKEN_FILE`` is theirs and stays where it is. Nothing here
+    prints or logs the token.
     """
     target = api_token_file(home)
     for legacy in (home / ".corsia" / _LEGACY_NAME, checkout / _LEGACY_NAME):
@@ -73,27 +75,10 @@ def move_legacy_token(home: Path, override: Path | None, checkout: Path = _CHECK
         # that cannot see the earlier copy cannot move it either.
         if not os.path.lexists(legacy) or (override is not None and _same_file(legacy, override)):
             continue
-        if os.path.lexists(target):
-            legacy.unlink()
-            continue
-        if legacy.is_symlink():
-            _copy_then_remove(legacy, target)
-            continue
-        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(legacy, 0o600)
-        try:
-            os.rename(legacy, target)
-        except OSError as error:
-            if error.errno != errno.EXDEV:
-                raise
-            _copy_then_remove(legacy, target)
-
-
-def _copy_then_remove(legacy: Path, target: Path) -> None:
-    """Write the token through the hardened writer, then remove the earlier copy."""
-    write_secret_file(target, legacy.read_text())
-    legacy.unlink()
+        if not os.path.lexists(target):
+            write_secret_file(target, legacy.read_text())
+        legacy.unlink()
 
 
 def _same_file(first: Path, second: Path) -> bool:
-    return os.path.abspath(first) == os.path.abspath(second)
+    return os.path.realpath(first) == os.path.realpath(second)

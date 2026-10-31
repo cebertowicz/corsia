@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import stat
 from pathlib import Path
 
 import pytest
 
-from infra import api_token_file
 from infra.api_token_file import api_token_file as token_path
 from infra.api_token_file import move_legacy_token, write_secret_file
 
@@ -101,34 +99,14 @@ def test_an_earlier_copy_is_deleted_when_the_folder_already_holds_a_token(places
     assert _leftovers(home) == ["api-token"]
 
 
-def test_a_move_across_filesystems_writes_the_new_file_then_removes_the_old(places, monkeypatch) -> None:
-    home, checkout = places
-    legacy = _legacy(home / ".corsia" / ".api-token")
-
-    def cross_device(*_args):
-        raise OSError(errno.EXDEV, "cross-device link")
-
-    monkeypatch.setattr(api_token_file.os, "rename", cross_device)
-    move_legacy_token(home, None, checkout)
-
-    assert not os.path.lexists(legacy)
-    assert token_path(home).read_text() == "earlier"
-    assert _mode(token_path(home)) == 0o600
-    assert _leftovers(home) == ["api-token"]
-
-
 def test_an_interrupted_move_finishes_on_the_next_run(places, monkeypatch) -> None:
     home, checkout = places
     legacy = _legacy(home / ".corsia" / ".api-token")
-
-    def cross_device(*_args):
-        raise OSError(errno.EXDEV, "cross-device link")
 
     def stop_before_removal(self, *args, **kwargs):
         raise KeyboardInterrupt
 
     with monkeypatch.context() as patch:
-        patch.setattr(api_token_file.os, "rename", cross_device)
         patch.setattr(Path, "unlink", stop_before_removal)
         with pytest.raises(KeyboardInterrupt):
             move_legacy_token(home, None, checkout)
@@ -154,6 +132,7 @@ def test_a_linked_earlier_copy_is_written_into_the_folder_and_the_link_removed(p
     assert not os.path.lexists(link)
     assert not token_path(home).is_symlink() and token_path(home).read_text() == "earlier"
     assert _mode(token_path(home)) == 0o600
+    assert _mode(chosen) == 0o644
 
 
 def test_a_file_named_by_the_override_stays_where_it_is(places) -> None:
@@ -161,6 +140,18 @@ def test_a_file_named_by_the_override_stays_where_it_is(places) -> None:
     chosen = _legacy(home / ".corsia" / ".api-token")
 
     move_legacy_token(home, chosen, checkout)
+
+    assert chosen.read_text() == "earlier"
+    assert not token_path(home).exists()
+
+
+def test_a_file_named_by_the_override_through_a_link_stays_where_it_is(places) -> None:
+    home, checkout = places
+    chosen = _legacy(checkout / ".api-token")
+    alias = home / "checkout-alias"
+    alias.symlink_to(checkout)
+
+    move_legacy_token(home, alias / ".api-token", checkout)
 
     assert chosen.read_text() == "earlier"
     assert not token_path(home).exists()
