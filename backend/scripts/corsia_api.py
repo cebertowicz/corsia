@@ -14,12 +14,10 @@ from pathlib import Path
 DEFAULT_PORT = 1956  # held equal to infra.default_port by tests/test_default_port.py
 DEFAULT_BASE = f"http://127.0.0.1:{DEFAULT_PORT}"
 
-def token_file(home: Path) -> Path:
-    """The API-token file: ``$CORSIA_API_TOKEN_FILE``, else ``<home>/.corsia/.api-token``."""
-    return Path(os.environ.get("CORSIA_API_TOKEN_FILE") or home / ".corsia" / ".api-token")
-
-
-TOKEN_FILE = token_file(Path.home())
+TOKEN_FILE = Path(
+    os.environ.get("CORSIA_API_TOKEN_FILE")
+    or Path.home() / ".corsia" / ".api-token"
+)
 
 
 def resolve_token(explicit: str | None) -> str:

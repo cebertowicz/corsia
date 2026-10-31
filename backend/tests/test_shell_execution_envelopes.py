@@ -295,14 +295,10 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     browser_profile_deny = (
         f'(deny file-read* file-write* (subpath "{state_root.resolve() / "browser-profile"}"))'
     )
-    api_token_deny = (
-        f'(deny file-read* file-write* (subpath "{Path.home().resolve() / ".corsia" / ".api-token"}"))'
-    )
     assert keys_deny in leased
     assert browser_profile_deny in leased
-    assert api_token_deny in leased
     assert f'(subpath "{state_root_text}")' not in leased
-    assert f'(subpath "{(Path.home() / ".corsia").resolve(strict=False)}")' not in leased
+    assert str((Path.home() / ".corsia").resolve(strict=False)) not in leased
     assert (
         str((Path.home() / ".config" / "safehouse").resolve(strict=False)) not in leased
     )
@@ -344,8 +340,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     credential_pins = {
         f'(deny file-write* (literal "{path}"))' for path in credential_ancestor_pins(policy.credential_roots)
     }
-    for folder in (Path.home().resolve() / ".corsia", state_root.resolve()):
-        assert f'(deny file-write* (literal "{folder}"))' in credential_pins
+    assert f'(deny file-write* (literal "{state_root.resolve()}"))' in credential_pins
     expected_denied_lines = {
         *workspace_git_rules(workspace_git_paths(workspace)),
         f'(deny file-write* (literal "{profile.resolve(strict=False)}"))',
@@ -358,7 +353,6 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny mach-priv-task-port)",
         keys_deny,
         browser_profile_deny,
-        api_token_deny,
         *credential_pins,
         *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }

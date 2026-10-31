@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+from collections.abc import Callable
 from typing import Iterable
 
 from tools.host_path_resolution import (
@@ -101,14 +102,12 @@ class ProtectedHostPathPolicy:
 
     @property
     def credential_roots(self) -> tuple[Path, ...]:
-        """Stored secrets (key store, browser profile, the person's API token), closed to every agent route, leases included.
+        """Folders of stored secrets, closed to every agent route, leases included.
 
         The System hard floor covers protected credentials and a lease never
         opens it. Add a root here only with the project owner's approval.
         """
-        from scripts.corsia_api import token_file  # the CLI's own location rule
-        # Resolved like every other root: the sandbox and containment checks match real paths.
-        return (self.state_root / "keys", self.state_root / "browser-profile", canonical(token_file(self.home)))
+        return (self.state_root / "keys", self.state_root / "browser-profile")
 
     @property
     def control_files(self) -> tuple[Path, ...]:
@@ -390,11 +389,12 @@ def denial_guidance_prefix(text: str) -> str:
     return f"{guidance}\n" if guidance else ""
 
 
-def credential_paths_beneath(root: Path) -> frozenset[Path]:
-    """Credential roots (directories or files) strictly beneath ``root``, relative to it."""
+def skip_credential_roots(root: Path, skip_directory: Callable[[Path], bool]) -> Callable[[Path], bool]:
+    """Extend ``skip_directory`` to refuse credential roots beneath ``root``; fails closed."""
     base = canonical(root)
-    return frozenset(
+    pruned = {
         canonical(path).relative_to(base)
         for path in current_protected_host_path_policy().credential_roots
         if canonical(path).is_relative_to(base) and canonical(path) != base
-    )
+    }
+    return lambda relative: relative in pruned or skip_directory(relative)

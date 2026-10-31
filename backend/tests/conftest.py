@@ -363,12 +363,6 @@ def _isolated_default_claude_root(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _no_developer_api_token_override(monkeypatch):
-    """The token path the floor protects never follows the developer's own override."""
-    monkeypatch.delenv("CORSIA_API_TOKEN_FILE", raising=False)
-
-
-@pytest.fixture(autouse=True)
 def _no_held_usage_between_tests():
     """Usage held through a lock window is process-wide; each test starts with none."""
     held = sys.modules.get("infra.retained_usage")

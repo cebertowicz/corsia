@@ -1,4 +1,4 @@
-"""Prove the hard floor (saved browser profile, API token) in a real macOS shell."""
+"""Prove the stored-credential hard floor (key store, saved browser profile) in a real macOS shell."""
 import os
 import subprocess
 
@@ -22,42 +22,21 @@ def _skip_without_nested_sandbox(result: subprocess.CompletedProcess) -> None:
         pytest.skip("nested macOS sandbox unavailable in this execution environment")
 
 
-def test_leased_floor_closes_the_api_token_but_not_the_rest_of_dot_corsia(tmp_path):
-    home = tmp_path / "home"
-    corsia = home / ".corsia"
-    corsia.mkdir(parents=True)
-    token = corsia / ".api-token"
-    token.write_text("fixture")
-    venv_file = corsia / ".venv" / "pyvenv.cfg"
-    venv_file.parent.mkdir()
-    venv_file.write_text("fixture")
-    link = tmp_path / "corsia-link"
-    link.symlink_to(corsia, target_is_directory=True)
-    policy = ProtectedHostPathPolicy(home=home, state_root=tmp_path / "state")
-    sandbox = "(version 1)(allow default)" + policy.hard_floor_sandbox_rules()
-    allowed = _run_in(sandbox, 'cat "$1"', venv_file)
-    _skip_without_nested_sandbox(allowed)
-    assert allowed.returncode == 0 and allowed.stdout == "fixture"
-    for path in (token, link / token.name):
-        for command in ('cat "$1" >/dev/null', 'printf denied > "$1"'):
-            assert _run_in(sandbox, command, path).returncode != 0, (path, command)
-    assert token.read_text() == "fixture"
-
-
 def test_leased_floor_keeps_the_folders_above_each_credential_in_place(tmp_path):
     home, state_root = tmp_path / "home", tmp_path / "state"
-    token = home / ".corsia" / ".api-token"
+    home.mkdir()
     key = state_root / "keys" / "fixture"
-    for secret in (token, key):
+    cookie = state_root / browser_launch.PROFILE_ROOT_NAME / "synthetic-cookie"
+    for secret in (key, cookie):
         secret.parent.mkdir(parents=True)
         secret.write_text("fixture")
     policy = ProtectedHostPathPolicy(home=home, state_root=state_root)
     sandbox = "(version 1)(allow default)" + policy.hard_floor_sandbox_rules()
-    allowed = _run_in(sandbox, 'printf ok > "$1/new" && cat "$1/new"', home)
+    allowed = _run_in(sandbox, 'printf ok > "$1/new" && cat "$1/new"', state_root)
     _skip_without_nested_sandbox(allowed)
     assert allowed.returncode == 0 and allowed.stdout == "ok"
-    for secret, folders in ((token, (home / ".corsia", home, tmp_path)), (key, (state_root, tmp_path))):
-        for folder in folders:
+    for secret in (key, cookie):
+        for folder in (state_root, tmp_path):
             moved = _run_in(sandbox, f'mv "$1" "$1-x" && cat "$1-x/{secret.relative_to(folder)}"', folder)
             assert moved.returncode != 0 and "fixture" not in moved.stdout, folder
             assert secret.read_text() == "fixture"
