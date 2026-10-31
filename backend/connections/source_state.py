@@ -205,8 +205,6 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
     else:
         receipt = await refresh_provider(provider, reason="manual", binary=binary)
         try:
-            recorded = await run_in_db(apply_check, provider, *refresh_check(receipt))
-            if recorded is None:
-                raise RuntimeError(f"{provider} source state was not recorded")
+            await run_in_db(apply_check, provider, *refresh_check(receipt))
         except Exception as exc:
             await run_in_db(apply_check, provider, UNVERIFIED, str(exc))

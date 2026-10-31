@@ -371,12 +371,13 @@ class TestClaudeSignIn:
         _put("claude-code", "needs_auth")
         claude_session(_listed())
         real = source_state.apply_check
-        monkeypatch.setattr(
-            source_state, "apply_check",
-            lambda provider, state, reason=None, *, db=None, schedule_usage_check=True: (
-                None if state == source_state.READY else real(
-                    provider, state, reason, db=db, schedule_usage_check=schedule_usage_check)),
-        )
+
+        def apply_check(provider, state, reason=None, *, db=None, schedule_usage_check=True):
+            if state == source_state.READY and db is None:  # the check's own write, as the real writer fails when the row is missing
+                raise RuntimeError(f"{provider} source state was not recorded")
+            return real(provider, state, reason, db=db, schedule_usage_check=schedule_usage_check)
+
+        monkeypatch.setattr(source_state, "apply_check", apply_check)
         self._recheck()
         assert _sources(client)["claude-code"]["state"] == "unverified"
 
