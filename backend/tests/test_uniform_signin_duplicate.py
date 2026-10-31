@@ -55,3 +55,27 @@ async def test_rename_during_cleanup_does_not_fail_the_duplicate_recovery(accoun
     await retry_unchecked(operation, target['id'], '/synthetic/codex', cleanup)
     assert operation.status == 'failed' and operation.cause == 'same_account'
     assert get_account(signer['id'], db=db)['state'] == 'removed'
+
+@pytest.mark.asyncio
+async def test_a_revision_fenced_removal_that_refuses_reads_as_superseded_not_failed(accounts, monkeypatch):
+    from connections.account_controls import SignIn
+    from connections.account_signin_retry import retry_unchecked
+    from connections.vendor_accounts import AccountError, add_account
+
+    db, old_default, target, _ = accounts
+    signer = add_account('codex', 'Signing in', db=db)
+    operation = SignIn(signer['id'], 'codex', signer['revision'])
+    finish = AsyncMock()
+    monkeypatch.setattr('connections.account_signin_retry.finish_signin', finish)
+
+    def refuse(account_id, **kwargs):
+        raise AccountError('account changed')
+
+    monkeypatch.setattr('connections.account_signin_retry.commit_if_leftover', refuse)
+
+    async def cleanup(account):
+        pass
+
+    await retry_unchecked(operation, target['id'], '/synthetic/codex', cleanup)
+    assert (operation.status, operation.cause) == ('superseded', 'account_changed')
+    finish.assert_not_awaited()

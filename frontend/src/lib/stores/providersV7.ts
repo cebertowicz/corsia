@@ -49,6 +49,11 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
+// The one Agent CLIs group definition; the view shows it empty while only a vendor's setup row exists.
+export function agentCliGroup(providers: HostProvider[] = []): HostGroup {
+	return { key: 'agent-clis', name: 'Agent CLIs', subname: 'Run by the CLI on this computer', netKind: 'localhost', providers };
+}
+
 // Network/resources/inventory loading owns this snapshot. `hostGroups` below is the canonical display
 // owner: harness card text follows accounts, and each server row is read live from `networkServers`.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
@@ -216,21 +221,15 @@ export function groupByHost(
 	}
 
 	if (harnesses.length) {
-		groups.push({
-			key: 'agent-clis',
-			name: 'Agent CLIs',
-			subname: 'Run by the CLI on this computer',
-			netKind: 'localhost',
-			providers: harnesses.map(h => ({
-				name: h.name,
-				label: h.label,
-				type: 'harness',
-				statusDot: h.ready > 0 ? 'online' : 'idle',
-				subline: _harnessSubline(h.name, h.total),
-				harnessModelCount: h.total,
-				raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
-			})),
-		});
+		groups.push(agentCliGroup(harnesses.map(h => ({
+			name: h.name,
+			label: h.label,
+			type: 'harness',
+			statusDot: h.ready > 0 ? 'online' : 'idle',
+			subline: _harnessSubline(h.name, h.total),
+			harnessModelCount: h.total,
+			raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
+		}))));
 	}
 
 	return groups;
