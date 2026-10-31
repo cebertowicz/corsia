@@ -248,6 +248,7 @@ async def maintain_native_checkpoint(
     if turn_identity is None or state.fit_ledger is None:
         return None
     await _refresh_native_window(state, thread_id)
+    from core.checkpoint_native_admission import system_input_tokens
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderBoundary,
@@ -298,7 +299,7 @@ async def maintain_native_checkpoint(
         render_installed=render,
         wait_scope=scope,
         eager_checkpoint_id=eager.id if eager is not None else None,
-        system_input_tokens=int(dict(state.context_usage.get("fit_section_tokens") or {}).get("fixed") or 0),
+        system_input_tokens=system_input_tokens(state),
     ))
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)

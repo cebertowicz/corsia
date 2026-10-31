@@ -21,6 +21,7 @@ from core.fork_native_tools import (
     measured_input,
     run_tool_calls as _run_tool_calls,
 )
+from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.fork_failures import ForkCredentialsUnavailable
 from core.fork_types import (
@@ -48,6 +49,11 @@ def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
         return request
     allowance = min(request.max_output_tokens, window // SMALL_WINDOW_OUTPUT_DIVISOR)
+    if request.system_tokens > 0:
+        # Half the room between the parent's fixed prompt and the launch point;
+        # the other half is left for turns before the chat folds again.
+        launch = window - soft_pressure_remaining(window)
+        allowance = min(allowance, max(0, (launch - request.system_tokens) // 2))
     if allowance == request.max_output_tokens:
         return request
     return replace(request, max_output_tokens=allowance)

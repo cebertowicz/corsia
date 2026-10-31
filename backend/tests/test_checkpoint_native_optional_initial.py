@@ -31,6 +31,7 @@ class _Request:
 @dataclass(frozen=True)
 class _ProviderRequest:
     same_model_cold: object = None
+    system_tokens: int = 0
 
 
 @dataclass(frozen=True)

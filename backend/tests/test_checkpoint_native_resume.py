@@ -179,7 +179,7 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
     result = await checkpoint_native_admission.prepare_native_checkpoint(
         "checkpoint-1",
         "thread-1",
-        object(),
+        SimpleNamespace(context_usage={}),
         SimpleNamespace(),
         SimpleNamespace(turn_id="turn-1"),
         None,

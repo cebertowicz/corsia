@@ -229,3 +229,76 @@ async def test_the_system_measure_ignores_history_a_tool_phase_refit_absorbed(mo
     )
 
     assert started is True
+
+
+def _fork_request(window: int, system: int):
+    from core.fork_types import ProviderForkRequest
+    from llm.resolution import ExecutionTarget
+
+    target = ExecutionTarget(
+        catalog_id="local/m", harness="native", provider="omlx", backend="local",
+        transport_model="m", expected_reported_model=None, context_window=window,
+        available=True, availability_reason=None, display_name="m",
+        supports_reasoning=True, preserve_thinking_default=True,
+    )
+    return ProviderForkRequest(
+        fork_id="f", thread_id="t", target=target, instruction="write",
+        reasoning_effort=None, working_dir="/w", system_tokens=system,
+    )
+
+
+@pytest.mark.parametrize("window,system,allowance", [
+    (48_000, 18_600, 8_700),  # was 9,600: launch 36,000, half of 17,400
+    (36_000, 18_600, 4_200),  # launch 27,000, half of 8,400
+    (262_144, 18_600, 16_384),  # a large window is unchanged
+    (48_000, 0, 9_600),  # no measurement: the existing allowance
+    (20_000, 18_600, 0),  # the fixed prompt is past the launch point
+])
+def test_the_fork_output_allowance_is_half_the_room_above_the_fixed_prompt(window, system, allowance):
+    from core.fork_native import _window_output
+
+    assert _window_output(_fork_request(window, system)).max_output_tokens == allowance
+
+
+def test_a_full_checkpoint_body_leaves_the_chat_below_its_launch_point():
+    from core.fork_native import _window_output
+    from core.fork_pressure import soft_pressure_remaining
+
+    window, system, current = 48_000, 18_600, 1_000
+    body = _window_output(_fork_request(window, system)).max_output_tokens
+    launch = window - soft_pressure_remaining(window)
+
+    assert system + body + current < launch
+    assert launch - (system + body + current) >= 7_000  # room left for turns
+
+
+@pytest.mark.asyncio
+async def test_the_measured_fixed_prompt_reaches_the_warm_and_cold_fork_requests(monkeypatch):
+    from core import checkpoint_cold_admission, checkpoint_native_admission as admission
+    from core.checkpoint_warm_request import CheckpointAdmission
+    from history.types import HistoryBoundary
+    from infra import database
+
+    request = _fork_request(48_000, 0)
+    context = SimpleNamespace(
+        target=request.target, boundary=HistoryBoundary("t", 1, 1, "m1"),
+        previous_generation_id=None, previous=None, projection=None, working_dir="/w",
+    )
+    state = SimpleNamespace(context_usage=_usage(18_600))
+
+    async def source(*_args):
+        return object()
+
+    monkeypatch.setattr(admission, "capture_native_checkpoint_source", source)
+    monkeypatch.setattr(database, "get_db", lambda: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(
+        checkpoint_cold_admission, "build_checkpoint_admission",
+        lambda **_kwargs: CheckpointAdmission(SimpleNamespace(), request),
+    )
+    warm = await admission.prepare_native_checkpoint(
+        "c1", "t", state, context, SimpleNamespace(turn_id="x"), None,
+    )
+    cold = await warm.provider_request.same_model_cold()
+
+    assert warm.provider_request.system_tokens == 18_600
+    assert cold.provider_request.system_tokens == 18_600
