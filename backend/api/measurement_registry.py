@@ -39,6 +39,13 @@ REGISTRY: dict[str, MetricDefinition] = {
     # the asks term is the one asks_per_outcome counts. No typed series exists: no correction carries a type yet.
     "corrections_per_outcome": MetricDefinition("corrections", "ratio", 20),
     "asks_plus_corrections_per_outcome": MetricDefinition("corrections", "ratio", 20),
+    # Coverage of the person's corrections by triage, recomputed on every read, so a late triage raises an old period; the
+    # period in progress is served, flagged partial. The last is registered but not served until the already-said check exists.
+    "corrections_detected": MetricDefinition("corrections", "count", 0),
+    "corrections_triaged_pct": MetricDefinition("corrections", "ratio", 20),
+    "corrections_untriaged_idle_pct": MetricDefinition("corrections", "ratio", 20, companion="idle_untriaged_threads"),
+    "idle_untriaged_threads": MetricDefinition("corrections", "count", 0),
+    "already_said_check_passed_pct": MetricDefinition("corrections", "ratio", 20, available=False),
     "took_recommendation_pct": MetricDefinition("decisions", "ratio", 10, companion="answered_other_pct"),
     "answered_other_pct": MetricDefinition("decisions", "ratio", 10, companion="took_recommendation_pct"),
     "answered_neither_pct": MetricDefinition("decisions", "ratio", 10),

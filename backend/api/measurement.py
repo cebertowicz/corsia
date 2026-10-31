@@ -18,7 +18,7 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
-from api.measurement_corrections import corrections_family
+from api.measurement_corrections import COVERAGE_METRICS, corrections_family, coverage_value
 from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
     next_comparability_boundary, period_comparable,
@@ -116,6 +116,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "corrections_per_outcome": value = source.get("corrections", 0) / n if n else None
     elif metric == "asks_plus_corrections_per_outcome":
         value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
+    elif metric in COVERAGE_METRICS: value, n = coverage_value(metric, source)
     elif metric == "took_recommendation_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("recommendation", 0) / n if n else None
@@ -239,6 +240,8 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             rows.extend(_row(metric, period, by_period.get(period), selected_scope["agent"] is not None, period == current_period and metric == "fresh_tokens", page_grain, first_presence, source_start, breaks[metric]) for period in periods)
         else:
             rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence, source_start=source_start, breaks=breaks[metric]) for period in drawn)
+            if metric in COVERAGE_METRICS and measured(metric, current_period):
+                rows.append(_row(metric, current_period, sources.get(current_period), selected_scope["agent"] is not None, True, page_grain, first_presence, source_start, breaks[metric]))
             if metric == "outcomes" and outcomes_so_far is not None:
                 rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence, source_start, breaks[metric]))
         pooling = {"measured": rate_measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,

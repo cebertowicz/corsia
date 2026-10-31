@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from core.correction_attribution import FIRST_ARRIVAL_SQL
+from core.correction_learning import TRIAGE_EVENT
 from core.measurement_token_contract import priceable_usage_predicate
 from core.size_rating import SIZE_EVENT
 
@@ -22,6 +23,8 @@ def source_group(metric: str) -> str:
         return "decisions"
     if metric in {"fresh_tokens", "fresh_tokens_per_outcome"}:
         return "tokens"
+    if metric in {"corrections_triaged_pct", "corrections_untriaged_idle_pct", "idle_untriaged_threads"}:
+        return "correction_triage"
     if metric in {"active_hours_per_outcome", "outcomes_per_active_hour", "time_on_platform_h"}:
         return "presence"
     return metric
@@ -56,6 +59,8 @@ _FIRST_ROW_SQL = {
         ORDER BY e.created_at LIMIT 1
     """,
     "classified_corrections": FIRST_ARRIVAL_SQL,
+    # Triage had no structured fact before it was first recorded, so coverage has no period earlier.
+    "first_correction_triage": f"SELECT MIN(ts) FROM outcome_events WHERE event_name='{TRIAGE_EVENT}'",
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
     """,
@@ -72,6 +77,8 @@ _LIVE_SOURCE = {
     # Corrections are measured from the earliest classified source (message, comment or decision answer): an earlier period had no classifier, so it is not a zero.
     "corrections_per_outcome": "classified_corrections",
     "asks_plus_corrections_per_outcome": "classified_corrections",
+    "corrections_detected": "classified_corrections",
+    "correction_triage": "first_correction_triage",
     "decisions": "answered_decisions",
     "tokens": "priceable_usage",
     "presence": "presence",
