@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import sqrt
-from statistics import NormalDist
+from statistics import NormalDist, stdev
 from typing import Mapping, Sequence
 
 from core.workflow_verdicts import (
-    DEFAULT_CONFIDENCE, PlannedMeasure, Run, baseline_spread,
+    DEFAULT_CONFIDENCE, PlannedMeasure, Run, baseline_values,
 )
 
 # Each look's multiple of the plan's minimum per half; its information fraction is the multiple over the last's.
@@ -38,27 +38,35 @@ def look_confidence(confidence: float, look: int) -> float:
     return 2 * NormalDist().cdf(OBRIEN_FLEMING[confidence] / sqrt(fraction)) - 1
 
 
-def minimum_detectable_change(confidence: float, look: int, spread: float | None, minimum: int) -> float | None:
-    """The smallest difference look ``look`` would call with 80% power: (z(1-a/2) + z(0.8)) * s * sqrt(2/n).
+def minimum_detectable_change(confidence: float, look: int, spread: float | None, minimum: int,
+                              fixed: int | None = None) -> float | None:
+    """The smallest difference look ``look`` would call with 80% power: (z(1-a/2) + z(0.8)) * s * sqrt(1/n + 1/m).
 
-    ``a`` is the look's level (one minus its confidence), ``s`` the baseline's per-run spread and ``n`` the runs per
-    half at the look. None, never 0, without a spread.
+    ``a`` is the look's level (one minus its confidence), ``s`` the baseline's per-run spread, ``n`` the new arm's
+    runs at the look and ``m`` the baseline's: ``fixed`` runs when the baseline arm was frozen (a workflow's
+    earlier version), else ``n`` (a lesson's halves grow together). None, never 0, without a spread.
     """
     if spread is None:
         return None
     normal = NormalDist()
     spent = 1 - look_confidence(confidence, look)
     runs = LOOK_MULTIPLES[look] * minimum
-    return float(f"{(normal.inv_cdf(1 - spent / 2) + normal.inv_cdf(POWER)) * spread * sqrt(2 / runs):.6g}")
+    baseline = runs if fixed is None else fixed
+    return float(f"{(normal.inv_cdf(1 - spent / 2) + normal.inv_cdf(POWER)) * spread * sqrt(1 / runs + 1 / baseline):.6g}")
 
 
 def planned_mdc(measures: Sequence[PlannedMeasure], baseline: Sequence[Run], minimum: int, confidence: float,
-                now: datetime) -> Mapping[str, tuple[float | None, ...]]:
-    """Each deciding measure's minimum detectable change at every look, from the baseline arm at freeze."""
+                now: datetime, *, fixed: bool) -> Mapping[str, tuple[float | None, ...]]:
+    """Each deciding measure's minimum detectable change at every look, from the baseline arm at freeze.
+
+    ``fixed``: the arm is all the baseline the looks will compare against, so its run count is the baseline's.
+    """
     planned: dict[str, tuple[float | None, ...]] = {}
     for measure in measures:
         if measure.role != "shown":
-            spread = baseline_spread(measure, baseline, now)
-            planned[measure.name] = tuple(minimum_detectable_change(confidence, look, spread, minimum)
-                                          for look in LOOK_MULTIPLES)
+            values = baseline_values(measure, baseline, now)
+            spread = stdev(values) if len(values) >= 2 else None
+            planned[measure.name] = tuple(
+                minimum_detectable_change(confidence, look, spread, minimum, len(values) if fixed else None)
+                for look in LOOK_MULTIPLES)
     return planned

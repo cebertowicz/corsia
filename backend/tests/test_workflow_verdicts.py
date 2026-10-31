@@ -682,9 +682,10 @@ def test_minimum_detectable_change_is_hand_computed_per_look_and_none_under_two_
     spread = sqrt(20 / 19)
     z_power = NormalDist().inv_cdf(0.8)
     frozen = freeze_plan(history(old, runs("v2", 1, count=20)), "v2")
-    # z(1 - a/2) at a look is c / sqrt(information fraction): 2.7008, 1.9098, 1.3504 for c = 1.3504
-    expected = [(2.7008 + z_power) * spread * sqrt(2 / 20), (1.9098 + z_power) * spread * sqrt(2 / 40),
-                (1.3504 + z_power) * spread * sqrt(2 / 80)]
+    # z(1 - a/2) at a look is c / sqrt(information fraction): 2.7008, 1.9098, 1.3504 for c = 1.3504. The baseline
+    # arm is frozen at its 20 runs, so every look compares 20, 40 and 80 new runs against those 20.
+    expected = [(2.7008 + z_power) * spread * sqrt(1 / 20 + 1 / 20), (1.9098 + z_power) * spread * sqrt(1 / 40 + 1 / 20),
+                (1.3504 + z_power) * spread * sqrt(1 / 80 + 1 / 20)]
     assert frozen.mdc[CORRECTIONS] == pytest.approx(expected, rel=1e-3)
     assert MINUTES not in frozen.mdc  # shown, never deciding
     assert FrozenPlan.decoded(frozen.encoded()).mdc == frozen.mdc

@@ -118,7 +118,7 @@ def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     arm = [] if baseline is None else baseline_runs(history, baseline, minimum, window, first_use)
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed,
                       confidence=confidence, confidence_reason=confidence_reason,
-                      mdc=planned_mdc(measures, arm, minimum, confidence, first_use))
+                      mdc=planned_mdc(measures, arm, minimum, confidence, first_use, fixed=True))
 
 
 def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verdict | None:
@@ -238,14 +238,14 @@ def decide_arms(plan: FrozenPlan, arms: TwoArms, now: datetime, *, inputs: Mappi
         return Verdict(first.word, first.reason, 1, first.calls, {**context, **first.inputs})
     second, reached = rule_at(2)
     if not reached:
-        return Verdict("collecting", "wait_for_look_2", 1, (), {**context, "minimum": 2 * plan.minimum})
+        return Verdict("collecting", "wait_for_look_2", 1, (), {**context, "minimum": LOOK_MULTIPLES[2] * plan.minimum})
     if second is not None:
         return Verdict(second.word, second.reason, 2, second.calls, {**context, **second.inputs})
     if not arms.continue_if_unclear:
         return Verdict("revert", "queued_after_look_2", 2, (), context)
     final, reached = rule_at(3)
     if not reached:
-        return Verdict("collecting", "wait_for_look_3", 2, (), {**context, "minimum": 4 * plan.minimum})
+        return Verdict("collecting", "wait_for_look_3", 2, (), {**context, "minimum": LOOK_MULTIPLES[3] * plan.minimum})
     assert final is not None
     return Verdict(final.word, final.reason, 3, final.calls, {**context, **final.inputs})
 

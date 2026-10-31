@@ -250,21 +250,21 @@ def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequen
     return draws[int(tail * (len(draws) - 1))], draws[int((1 - tail) * (len(draws) - 1))]
 
 
-def baseline_spread(measure: PlannedMeasure, runs: Sequence[Run], now: datetime) -> float | None:
-    """The standard deviation of a measure's per-run value over ``runs``, for the minimum detectable change.
+def baseline_values(measure: PlannedMeasure, runs: Sequence[Run], now: datetime) -> list[float]:
+    """A measure's per-run values over ``runs``, for the minimum detectable change.
 
     A run's value is its numerator over its denominator; a run with no denominator (a failed run's outcome count)
-    has none. None, never 0, under two runs with a value, or when the measure cannot be read from them.
+    has none, so the spread approximates the pooled measure, which still counts that run's numerator. Empty when
+    the measure cannot be read from them.
     """
     settled = [run for run in runs if run.settled(measure.window_days, now)]
     if _blocked(measure, settled, []) is not None:
-        return None
+        return []
     counter = _counter(measure, settled) if measure.name == CORRECTIONS else None
     if counter is False:
-        return None
+        return []
     samples = (_sample(measure, run, counter or None) for run in settled)  # type: ignore[arg-type]
-    values = [sample.num / sample.den for sample in samples if sample is not None and sample.den > 0]
-    return statistics.stdev(values) if len(values) >= 2 else None
+    return [sample.num / sample.den for sample in samples if sample is not None and sample.den > 0]
 
 
 def _call_from(better: str, difference: float, interval: tuple[float, float], margin: float) -> str:

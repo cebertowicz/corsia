@@ -208,3 +208,25 @@ def test_trial_detail_shows_the_recorded_plans_confidence_and_mdc_with_unknown_a
     assert [round(value, 4) for value in plan["look_confidence"]] == [0.9931, 0.9438, 0.8231]
     retired = source(state="retired")
     assert "verdict_plan" not in report(db, sources=[retired], lesson_id=retired["id"], version=retired["version"])["detail"]
+
+
+def test_the_trial_detail_reads_only_its_lessons_subjects_through_the_subject_index(db, monkeypatch):
+    from core import workflow_verdict_read
+
+    trial = source()
+    _record_plan(db, f"lesson:{trial['id']}@{trial['version']}", {})
+    _record_plan(db, f"lesson:{trial['id']}x@{trial['version']}", {})  # a neighbouring lesson id
+    seen: list[str] = []
+    real = workflow_verdict_read._recorded
+
+    def spy(conn, index, where, params):
+        seen.append(index)
+        plan = conn.execute(f"EXPLAIN QUERY PLAN SELECT 1 FROM outcome_events{index} WHERE event_name IN "
+                            f"(:planned, :reached) AND retracted_at IS NULL AND subject_key IS NOT NULL{where}",
+                            {"planned": "p", "reached": "r", **params}).fetchall()
+        assert any("idx_outcome_events_subject" in str(tuple(row)) for row in plan)
+        return real(conn, index, where, params)
+
+    monkeypatch.setattr(workflow_verdict_read, "_recorded", spy)
+    assert set(workflow_verdict_read.recorded_lesson_plans(db, trial["id"])) == {trial["version"]}
+    assert len(seen) == 1  # one query per detail read
