@@ -59,7 +59,7 @@ def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
     if request_refusals := REFUSALS.of(agent_thread_id):
         result["request_refusals"] = request_refusals
         result["request_refusals_note"] = (
-            "Requests from outside tools refused before any record was read, by cause. "
+            "Whole requests from outside tools that CORSIA refused after reading your key, so none of their records was stored, by cause. "
             "Held in memory and lost when CORSIA restarts."
         )
     unversioned = sum(window["counters"].get("unversioned", 0) for per_event in events.values() for window in [per_event["last_7_days"]])

@@ -65,11 +65,15 @@ def count_records(request: service.ExportLogsServiceRequest) -> int:
     return sum(len(scope.log_records) for resource in request.resource_logs for scope in resource.scope_logs)
 
 
-def _scalar(value: Any) -> Any:
+def _value(value: Any) -> Any:
     kind = value.WhichOneof("value")
+    if kind is None:
+        return None  # an empty value is an absent attribute
     if kind in ("string_value", "bool_value", "int_value", "double_value"):
         return getattr(value, kind)
-    return None  # arrays, maps and bytes carry no declared attribute kind
+    # An array, map or bytes value fits no declared kind, so it is kept in its OTLP JSON form:
+    # admission then drops and notes it, or refuses a stamp sent in that shape, instead of losing it here.
+    return json_format.MessageToDict(value)
 
 
 def _flat(pairs: Any, only_corsia: bool = False) -> dict[str, Any]:
@@ -77,7 +81,7 @@ def _flat(pairs: Any, only_corsia: bool = False) -> dict[str, Any]:
     for pair in pairs:
         if only_corsia and not pair.key.startswith("corsia."):
             continue
-        value = _scalar(pair.value)
+        value = _value(pair.value)
         if value is not None:
             out[pair.key] = value
     return out

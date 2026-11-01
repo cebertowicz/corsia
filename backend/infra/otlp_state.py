@@ -16,9 +16,8 @@ RECORDS_PER_MINUTE = 600
 RECORDS_PER_REQUEST = 500
 _WINDOW_SECONDS = 60.0
 
-# Why a request was refused, for counts: a request refused before its key resolves belongs to no agent.
-CAUSES = ("unauthorized", "unsupported", "length_required", "too_large", "malformed", "rate_limited", "busy", "draining")
-UNATTRIBUTED = ""
+# Why a request was refused after its key resolved, for the agent's counts.
+CAUSES = ("too_large", "malformed", "rate_limited", "busy")
 
 
 class Caps:

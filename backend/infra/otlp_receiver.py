@@ -25,7 +25,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db, run_read
 from infra.drain import is_draining
 from infra.measure_keys import KEY_SHAPE, KeyOwner, resolve
-from infra.otlp_state import CAPS, RECORDS_PER_REQUEST, REFUSALS, UNATTRIBUTED
+from infra.otlp_state import CAPS, RECORDS_PER_REQUEST, REFUSALS
 from infra.product_events import emit_product_event
 
 WIRE_LIMIT = 1024 * 1024
@@ -36,7 +36,7 @@ _FIRST_REFUSALS = 3
 
 
 class _Refused(Exception):
-    def __init__(self, status: int, cause: str, text: str, agent: str = UNATTRIBUTED, retry_after: str | None = None) -> None:
+    def __init__(self, status: int, cause: str, text: str, agent: str | None = None, retry_after: str | None = None) -> None:
         super().__init__(text)
         self.status, self.cause, self.text, self.agent, self.retry_after = status, cause, text, agent, retry_after
 
@@ -75,7 +75,8 @@ class OtlpReceiver:
         try:
             return await self._admitted(scope, receive)
         except _Refused as refusal:
-            REFUSALS.add(refusal.agent, refusal.cause)
+            if refusal.agent is not None:  # before the key resolves there is no agent to tell, so nothing is counted
+                REFUSALS.add(refusal.agent, refusal.cause)
             headers = {"Retry-After": refusal.retry_after} if refusal.retry_after else {}
             return Response(json.dumps({"error": refusal.text}), status_code=refusal.status, headers=headers, media_type="application/json")
         except Exception:  # noqa: BLE001 - one request's failure must not reach the listener

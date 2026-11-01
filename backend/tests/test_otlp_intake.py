@@ -383,6 +383,22 @@ async def test_a_numeric_run_id_is_kept_and_a_stamp_of_the_wrong_shape_is_refuse
 
 
 @pytest.mark.asyncio
+async def test_an_array_map_or_bytes_value_is_refused_as_a_stamp_and_noted_as_an_attribute(world) -> None:
+    client, measure_key, _ = world
+    request = request_of(*({"event.name": "qa.rec", "code": f"s{i}", "n": 1} for i in range(4)))
+    records = request.resource_logs[0].scope_logs[0].log_records
+    records[0].attributes.add(key="corsia.run_id").value.array_value.values.add(string_value="r1")
+    records[1].attributes.add(key="corsia.workflow.ref").value.kvlist_value.values.add(key="a").value.string_value = "b"
+    records[2].attributes.add(key="corsia.workflow.version").value.bytes_value = b"v1"
+    records[3].attributes.add(key="n").value.array_value.values.add(int_value=2)
+    del records[3].attributes[2]  # the scalar n, so only the array value is sent
+    count, text = rejected(await send(client, measure_key, request))
+    assert count == 3 and "corsia.run_id" in text and "corsia.workflow.ref" in text
+    assert rows("qa.rec") == 1
+    assert any('attribute "n"' in note for note in own_status()["recent_refusals"])
+
+
+@pytest.mark.asyncio
 async def test_a_plan_node_run_id_stamps_its_workflow_and_another_agents_node_is_refused(world) -> None:
     from tests.plan_writer_authorizer import raw_plan_seed
 
