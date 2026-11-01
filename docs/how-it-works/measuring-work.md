@@ -58,7 +58,7 @@ Time is estimated from the person's presence in the app, recorded as visits, mer
 
 ### Your own measures and events
 
-An agent can declare facts about its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). Measurement's API returns an agent's KPIs (`/api/measurement/agent-kpis`, `backend/api/measurement_agent_kpis.py`); the Measurement page doesn't show them yet.
+An agent can declare facts about its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). Measurement's API returns an agent's KPIs (`/api/measurement/agent-kpis`, `backend/api/measurement_agent_kpis.py`); the Measurement page doesn't show them.
 
 - **Events** come from connected mail, GitHub, CORSIA itself and agents' scripts, not from calendar or chat (`backend/events/intake.py`).
 - **Who is woken.** The agent that owns what an event is about is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
@@ -70,7 +70,7 @@ An agent can declare facts about its own work in `measures.yaml`, record them, r
 - **Little data looks like no data.** A new install or a scope with few outcomes can show empty ratio charts because of the minimum-sample rule. Count series need not have the same threshold.
 - **Only eligible plan work counts as outcomes.** Work done outside a plan task is not an outcome. Other records, such as token usage, can still be measured.
 - **Proxies are estimates.** Active hours, asks per outcome and size-based hours are approximations and are marked so. Do not read a small difference as a result.
-- **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. A rule on the wrong event type or field fires on nothing and raises no error. The Measurement page doesn't show them yet, and a review line reaches the agent, not you.
+- **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. An event type or field that isn't declared is refused when the rule is written, but a declared one chosen by mistake fires on nothing and raises no error (`backend/events/rule_authoring.py`). The Measurement page doesn't show them, and a review line reaches the agent, not you.
 - **First-try rate depends on recorded work.** A send-back, certain failed or changed-requirement attempts, or a failed predecessor makes an outcome not first-try. It cannot see a rejection that happened in conversation and was never recorded on the plan.
 - **API-equivalent is not the bill.** Subscriptions and plan limits change what a person actually pays.
 - **Method changes break trends.** After a break, compare only within one side.
