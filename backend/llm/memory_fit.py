@@ -90,8 +90,10 @@ def record_refusal(
 def end_turn(turn_id: str) -> None:
     """Drop what ``turn_id`` learned, leaving a newer Turn's observation in place.
 
-    Runs once the Turn's terminal write commits; a retried terminal finds
-    nothing left to drop.
+    Runs once the Turn's terminal write exits: its commit when ``finish_turn``
+    opened the transaction, before the outer commit when a caller passed one
+    (an outer rollback then leaves the Turn running without its cap until it
+    is refused again). A retried terminal finds nothing left to drop.
     """
     for key, obs in list(_OBSERVATIONS.items()):
         # Resolvers run on several threads: drop only the entry this read saw.

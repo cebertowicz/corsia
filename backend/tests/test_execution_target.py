@@ -68,6 +68,7 @@ def test_native_target_uses_catalog_transport_not_id_shape(target_db):
         available=True, availability_reason=None,
         display_name="codex/misleading", supports_reasoning=False,
         supports_vision=False, discovered_context_window=123456,
+        configured_context_window=123456,
     )
 
 

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from llm.context_window import WindowFacts, resolve_live_window_facts
+from llm.context_window import WindowFacts, cap_to_memory_fit, resolve_window_facts
 
 
 class ModelUnavailableError(Exception):
@@ -46,6 +46,9 @@ class ExecutionTarget:
     discovered_context_window: int | None = None
     #: Which rule produced ``context_window``; see ``WindowFacts.source``.
     context_window_source: str = "provider"
+    #: ``context_window`` before a live memory fit capped it: what refusal
+    #: settlement compares, read from the same row.
+    configured_context_window: int | None = None
 
     @property
     def windows(self) -> WindowFacts:
@@ -188,7 +191,8 @@ def resolve_execution_target(
                 row, available
             )
 
-        windows = resolve_live_window_facts(row, db=connection)
+        configured = resolve_window_facts(row, db=connection)
+        windows = cap_to_memory_fit(configured, row)
         preserve_thinking_default = metadata.get("preserve_thinking_default")
         if not isinstance(preserve_thinking_default, bool):
             preserve_thinking_default = None
@@ -202,6 +206,7 @@ def resolve_execution_target(
             context_window=windows.effective,
             discovered_context_window=windows.discovered,
             context_window_source=windows.source,
+            configured_context_window=configured.effective,
             available=available,
             availability_reason=reason,
             display_name=str(row.get("display_name") or row["id"]),

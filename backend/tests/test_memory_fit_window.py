@@ -124,13 +124,12 @@ def test_settings_and_catalog_resolvers_keep_the_configured_window():
     assert resolve_window_for_row(ROW, db=_db()) == 262_144
 
 
-def test_live_window_lookup_by_selector_is_capped_and_configured_is_not(monkeypatch):
+def test_live_window_lookup_by_selector_is_capped(monkeypatch):
     from llm import context_window
 
     _refuse(100_000)
     monkeypatch.setattr(context_window, "_catalog_row", lambda model, db=None: dict(ROW))
     assert get_context_window_or_none(SELECTOR, db=_db()) == _fit(100_000)
-    assert get_context_window_or_none(SELECTOR, db=_db(), live=False) == 262_144
 
 
 def test_window_never_exceeds_the_model_window():

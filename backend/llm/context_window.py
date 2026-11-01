@@ -253,9 +253,13 @@ def resolve_live_window_facts(row: Mapping[str, Any], *, db=None) -> WindowFacts
     It moves with live memory, so it serves dispatch, admission and checkpoint
     sizing, never a settings or catalog surface.
     """
+    return cap_to_memory_fit(resolve_window_facts(row, db=db), row)
+
+
+def cap_to_memory_fit(facts: WindowFacts, row: Mapping[str, Any]) -> WindowFacts:
+    """``facts`` from ``resolve_window_facts``, capped by this row's live memory fit."""
     from llm.memory_fit import memory_fit_window
 
-    facts = resolve_window_facts(row, db=db)
     if facts.effective is None:
         return facts
     fit = memory_fit_window(row)
@@ -366,16 +370,15 @@ def resolve_window_for_row(row: Mapping[str, Any], *, db=None) -> int | None:
     return resolve_window_facts(row, db=db).effective
 
 
-def get_context_window_or_none(model: str, *, db=None, live: bool = True) -> int | None:
-    """Resolve the live (or, with ``live=False``, configured) window, reporting absence as None."""
+def get_context_window_or_none(model: str, *, db=None) -> int | None:
+    """Resolve the live context window, reporting absence as None."""
     row = None
     try:
         row = _catalog_row(model, db=db)
     except Exception as exc:
         logger.warning("model catalog lookup failed for {}: {}", model, exc)
     if row is not None:
-        resolve = resolve_live_window_facts if live else resolve_window_facts
-        return resolve(row, db=db).effective
+        return resolve_live_window_facts(row, db=db).effective
     # No catalog row: an optional override keyed by the raw id may still pin it.
     return _optional_profile_context_window(model, db=db)
 

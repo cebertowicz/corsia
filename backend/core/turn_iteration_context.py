@@ -142,7 +142,6 @@ async def _refresh_native_window(state, thread_id: str) -> int | None:
     whole Turn here, before the call: later input then holds at admission on that cause.
     Returns the configured window when the resolved one is a live memory fit, else None.
     """
-    from llm.context_window import get_context_window_or_none
     from llm.resolution import resolve_locality_permitted
 
     ledger = state.fit_ledger
@@ -157,9 +156,7 @@ async def _refresh_native_window(state, thread_id: str) -> int | None:
             model=target.expected_reported_model or target.transport_model,
         )
         state.context_usage["model_context_window"] = target.context_window
-    if target.context_window_source != "memory":
-        return None
-    return await run_in_db(partial(get_context_window_or_none, ledger.target_catalog_id, live=False))
+    return target.configured_context_window if target.context_window_source == "memory" else None
 
 
 def _minimum_native_input(ledger) -> int:
