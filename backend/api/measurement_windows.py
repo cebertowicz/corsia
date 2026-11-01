@@ -14,11 +14,14 @@ from core.measurement_scope import Grain, Window
 
 
 def _summed(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Every numeric count of the periods' source rows, added; a missing count adds nothing."""
+    """Every numeric count of the periods' source rows, added, and every set of ids, joined, so a distinct
+    count stays distinct across periods; a missing count adds nothing."""
     total: dict[str, Any] = {}
     for row in rows:
         for key, value in row.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, frozenset):
+                total[key] = total.get(key, frozenset()) | value
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
                 total[key] = total.get(key, 0) + value
     return total
 

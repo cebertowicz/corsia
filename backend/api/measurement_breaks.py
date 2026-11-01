@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from api.measurement_size import counted_raters
 from core.measurement_scope import Grain
-from infra.measurement_starts import has_live_start, live_starts_query, source_group
+from infra.measurement_starts import has_live_start, live_source, live_starts_query, source_group
 
 
 def local_date(grain: Grain, value: str) -> str:
@@ -114,7 +114,7 @@ def _metadata(
     live_groups = tuple(group for group in groups if not seeded[group] and has_live_start(group))
     row = db.execute(_breaks_query(live_groups, with_marks)).fetchone() if live_groups or with_marks else None
     live = {
-        group: str(row[group]) if group in live_groups and row and row[group] else None
+        group: str(row[live_source(group)]) if group in live_groups and row and row[live_source(group)] else None
         for group in groups
     }
     starts = {group: _period(grain, seeded[group] or live[group]) for group in groups}
