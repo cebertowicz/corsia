@@ -3,9 +3,8 @@
 		activeThreadId, activeToolsByThread, isThreadTurnActive, liveReasoningByThread, streamContentByThread,
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
-	import { replyCommitsByThread } from '$lib/stores/liveStep';
 	import { renderMarkdown } from '$lib/markdown';
-	import { holdHeight } from '$lib/actions/holdHeight';
+	import { autoScroll } from '$lib/actions/autoScroll';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -25,13 +24,6 @@
 	const streamContent = $derived((boundThreadId && $streamContentByThread.get(boundThreadId)) || '');
 	const isStreaming = $derived(isThreadTurnActive($turnStates, boundThreadId));
 
-	function autoScroll(node: HTMLElement, _content: string) {
-		node.scrollTop = node.scrollHeight;
-		return {
-			update() { node.scrollTop = node.scrollHeight; }
-		};
-	}
-
 	const liveTools = $derived(activeTools.map((t) => ({
 		id: 'live-' + t.id,
 		name: t.name,
@@ -45,9 +37,11 @@
 		status: t.status,
 	})));
 
-	// The whole region is under `{#if isStreaming}`: a spinner never outlives its turn,
-	// whether or not the tool buffers have been cleared yet.
-	const showLiveTools = $derived(activeTools.length > 0);
+	// The live region belongs to a live turn, and a spinner must never outlive
+	// one. Tool buffers are cleared on every terminal, so this changes nothing in
+	// the ordinary case — it makes "the turn ended" sufficient to stop spinning,
+	// rather than depending on the clear having reached us.
+	const showLiveTools = $derived(isStreaming && activeTools.length > 0);
 
 	// #1083: once every known tool reaches 'done', the turn keeps generating
 	// (its next call_llm) with no interstitial frame — the finished tool set
@@ -60,9 +54,6 @@
 	);
 </script>
 
-{#if isStreaming}
-<!-- Between steps this slot swaps reasoning, tools and the quiet-gap dots; held at its tallest, it never shortens the transcript under a reader at the live edge. A reply committing to the transcript takes its height out of the slot into its row, and the person expanding or collapsing a step changes it themselves; both let the floor go. -->
-<div class="live-slot" use:holdHeight={`${boundThreadId}:${$replyCommitsByThread.get(boundThreadId ?? '') ?? 0}:${expandedTools.size}`}>
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -93,7 +84,7 @@
 			{/if}
 		</div>
 	</div>
-{:else}
+{:else if isStreaming}
 	<div class="message assistant">
 		<div class="assistant-msg">
 			{#if liveReasoning}
@@ -117,11 +108,8 @@
 		</div>
 	</div>
 {/if}
-</div>
-{/if}
 
 <style>
-	.live-slot { display: flow-root; }
 	.message { max-width: 760px; margin: 0 auto 20px; overflow-x: hidden; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
 	@keyframes fadeInUp {
@@ -155,7 +143,7 @@
 	.live-reasoning-text {
 		background: var(--bg-secondary); border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
 		padding: 6px 10px; border-radius: var(--radius-2xs);
-		max-height: 150px; overflow-y: auto;
+		max-height: var(--live-box-max-height); overflow-y: auto;
 	}
 
 	@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

@@ -1,11 +1,9 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { activeThreadId, messages, streamContentByThread } from '../stores/threads';
-import { replyCommitsByThread } from '../stores/liveStep';
+import { activeThreadId, messages } from '../stores/threads';
 import { compareMessageOrder } from '../messageHistory';
 import {
 	handleContextUsageUpdated,
-	handleStepText,
 	handleToolStart,
 	handleTurnActivity,
 	upsertMessageByServerOrder,
@@ -250,25 +248,5 @@ describe('turn frames carry visible-root lineage', () => {
 		});
 
 		expect(getTurnState('sub-cc').visibleRootThreadId).toBe('parent-1');
-	});
-});
-
-describe('a reply committing to the transcript', () => {
-	const frame = { thread_id: 'viewed', turn_id: 'turn-1', turn_order: 1, created_at: '2026-08-12T21:00:00.000000' };
-	beforeEach(() => replyCommitsByThread.set(new Map()));
-
-	it('is counted for the live slot whether or not it streamed first, and empties the slot of it', () => {
-		streamContentByThread.set(new Map([['viewed', 'streamed reply']]));
-		handleStepText({ ...frame, message_id: 'streamed', content: 'streamed reply', metadata: {} });
-		expect(get(replyCommitsByThread).get('viewed')).toBe(1);
-		expect(get(streamContentByThread).get('viewed')).toBe('');
-
-		handleStepText({ ...frame, message_id: 'quiet', content: 'never streamed', metadata: {} });
-		expect(get(replyCommitsByThread).get('viewed')).toBe(2);
-	});
-
-	it('is not counted for a step that says nothing, which hands no reply to a row', () => {
-		handleStepText({ ...frame, message_id: 'tools-only', content: '', metadata: {} });
-		expect(get(replyCommitsByThread).get('viewed') ?? 0).toBe(0);
 	});
 });

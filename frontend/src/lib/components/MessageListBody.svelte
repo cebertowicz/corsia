@@ -2,6 +2,7 @@
 	import TranscriptContent from './TranscriptContent.svelte';
 	import CheckpointStatus from './CheckpointStatus.svelte';
 	import PendingWakeRetry from './PendingWakeRetry.svelte';
+	import { holdTail } from '$lib/actions/holdTail';
 	import type { PlanLimitPauseDescriptor } from './planLimitPause';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
 	import type { WorkBlockLive } from './workBlockLive';
@@ -88,8 +89,11 @@
 		{#each retryRows as row (row.id)}<PendingWakeRetry msg={row} {threadId} />{/each}
 	</section>
 {/if}
+<!-- The scroller's last child: blank space so content getting shorter never moves a reader at the end. -->
+<div class="tail-hold" aria-hidden="true" use:holdTail={{ key: threadId ?? '', live: renderedStreaming }}></div>
 
 <style>
+	.tail-hold { flex: none; height: 0; overflow-anchor: none; }
 	.pending-input-region {
 		margin: 4px auto 0;
 		padding-top: 12px;

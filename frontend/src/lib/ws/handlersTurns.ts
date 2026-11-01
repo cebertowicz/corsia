@@ -11,7 +11,6 @@ import {
 	mergeMessageDelivery,
 } from '../stores/threads';
 import { settleActiveTool, startActiveTool } from '../stores/activeTools';
-import { commitLiveStep } from '../stores/liveStep';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { recordMeasuredUsage, setContextUsage } from '../stores/contextUsageByThread';
 import { readMessageDeliveryState } from '../messageDelivery';
@@ -373,7 +372,8 @@ export function handleStepText(data: any) {
 			tools => tools.filter(tool => !finalized.has(tool.id)),
 		);
 	}
-	commitLiveStep(threadId, data.content);
+	setThreadReasoning(threadId, '');
+	setThreadContent(threadId, '');
 	const streamSeq = typeof data.stream_seq === 'number'
 		? data.stream_seq
 		: data.seq;

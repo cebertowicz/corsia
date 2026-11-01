@@ -14,9 +14,7 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
 interface Sample { top: number | null; t: number; live: boolean }
 type Win = Window & { __eachPaintedFrame?: EachPaintedFrame; __samples?: Sample[]; __done?: boolean };
 
-/** The waiting dots leave when the turn ends, which a reader at the live edge can see as a drop of about this much; it is the only drop allowed, and only on the frames where the live region goes. */
-const WAITING_DOTS_PX = 60;
-/** While the turn is live the text under a reader at the live edge may only follow new text upward; any drop beyond rounding is the regression. */
+/** The text under a reader at the live edge may only follow new text upward, while the turn is live and when it ends; any drop beyond rounding is the regression. */
 const LIVE_DROP_PX = 2;
 
 const LINE = 'The reader keeps their place while the agent works and the reply keeps arriving below. ';
@@ -39,7 +37,7 @@ async function sampleAnchor(page: Page, y: number, ms: number): Promise<Sample[]
 		const start = performance.now();
 		win.__eachPaintedFrame!(() => ({
 			t: performance.now() - start,
-			live: document.querySelector('.live-slot') !== null,
+			live: document.querySelector('button[aria-label="Stop turn"]') !== null,
 			top: anchor && anchor.isConnected ? anchor.getBoundingClientRect().top - list.getBoundingClientRect().top : null,
 		}), (sample) => {
 			win.__samples!.push(sample);
@@ -101,7 +99,7 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge', 
 		await page.waitForTimeout(1500);
 		if (focus) {
 			await page.getByRole('button', { name: /^Expand current work/ }).click();
-			await expect(page.locator('.live-slot')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Stop turn' })).toBeVisible();
 		}
 		if (reading === 'scrolled up mid-transcript') {
 			await page.locator('.messages').evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight / 2 - el.clientHeight / 2); });
@@ -117,7 +115,153 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge', 
 		if (reading === 'scrolled up mid-transcript') expect(seen, 'the text under the reader moved while the turn worked').toEqual([]);
 		else {
 			expect(seen.filter((move) => move.liveBefore && move.liveAfter && move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge while the turn worked').toEqual([]);
-			expect(seen.filter((move) => move.by > WAITING_DOTS_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
+			expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
 		}
+	});
+}
+
+/**
+ * Where a turn ends, and after a step of many tool calls, the reader at the live edge is not moved either: the live
+ * row's tool list scrolls inside the height the reasoning box has, and what the live row loses when it goes is held as
+ * blank space under the transcript until the person sends again.
+ */
+const LIST_CAP_PX = 150;
+const widths = [{ name: '1440', width: 1440, height: 900 }, { name: '393 touch', width: 393, height: 852 }] as const;
+
+async function openEndThread(page: Page, request: Parameters<typeof createSession>[0], size: (typeof widths)[number], otherTitle?: string): Promise<string> {
+	await setFocusMode(request, false);
+	await page.setViewportSize({ width: size.width, height: size.height });
+	const title = `live-end-${Date.now()}`;
+	await createSession(request, title);
+	if (otherTitle) await createSession(request, otherTitle);
+	await openAppByUrl(page);
+	if (size.width < 700) { await page.waitForTimeout(2500); await page.getByRole('button', { name: 'Toggle sidebar' }).click(); }
+	await page.getByText(title, { exact: true }).first().click();
+	await waitForWsConnected(page);
+	await seedMockResponses(request, [0, 1, 2].map((index) => ({ content: `Reply ${index}. ${LINE.repeat(80)}`, finish_reason: 'stop' })));
+	for (let index = 0; index < 3; index++) {
+		await sendChatMessage(page, `history message ${index}.`);
+		await expect(page.locator('.messages .message.assistant').nth(index)).toBeVisible({ timeout: 20_000 });
+	}
+	await installPaintedFrames(page);
+	return title;
+}
+
+const heldSpace = (page: Page) => page.evaluate(() => Math.round(document.querySelector<HTMLElement>('.tail-hold')?.getBoundingClientRect().height ?? 0));
+
+for (const size of widths) {
+	for (const ending of ['a short reply', 'Stop'] as const) {
+		test(`@surface:chat-live-scroll the reader's place holds when a turn ends with ${ending} (${size.name})`, async ({ page, request }, testInfo) => {
+			test.setTimeout(120_000);
+			test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+			await openEndThread(page, request, size);
+			const gate = `hold-end-${Date.now()}`;
+			const steps = Array.from({ length: 3 }, (_, index) => ({
+				reasoning_content: `Looking at step ${index}. `.repeat(20), delay_ms: 500, finish_reason: 'tool_calls',
+				tool_calls: [{ id: `step-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }],
+			}));
+			const last = ending === 'Stop'
+				? { content: 'Done.', response_gate: gate, finish_reason: 'stop' }
+				: { reasoning_content: 'Wrapping up. '.repeat(20), content: 'Done.', completion_gate: gate, finish_reason: 'stop' };
+			await seedMockResponses(request, [...steps, last]);
+			await sendChatMessage(page, 'start the live turn');
+			await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+			await page.waitForTimeout(4500);
+			const sampling = sampleAnchor(page, 200, 3500);
+			await page.waitForTimeout(600);
+			if (ending === 'Stop') await page.getByRole('button', { name: 'Stop turn' }).click();
+			else await releaseMockGate(request, gate);
+			const samples = await sampling;
+			expect(samples.filter((sample) => sample.top !== null).length, 'the sampled text stayed on the page').toBeGreaterThan(samples.length / 2);
+			expect(moves(samples).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
+		});
+	}
+
+	test(`@surface:chat-live-scroll many live tool calls scroll inside the list and leave no tall blank band (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(120_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		await openEndThread(page, request, size);
+		const gate = `hold-many-${Date.now()}`;
+		const many = Array.from({ length: 30 }, (_, index) => ({ id: `many-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+			{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
+		]);
+		await sendChatMessage(page, 'start the live turn');
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		// The send's own scroll is not what is measured, so sampling starts 400ms after it. In the first 300ms at 393 the list moves 16px
+		// with its height unchanged, on dev as well (8 of 8 runs sampled from the send, 4 of them exactly 16px); it is not the live row.
+		await page.waitForTimeout(400);
+		const sampling = sampleAnchor(page, 200, 6000);
+		let tallest = 0;
+		let heldMost = 0;
+		const started = Date.now();
+		while (Date.now() - started < 5000) {
+			const read = await page.evaluate(() => ({
+				list: document.querySelector<HTMLElement>('.ta-rows')?.getBoundingClientRect().height ?? 0,
+				held: document.querySelector<HTMLElement>('.tail-hold')?.getBoundingClientRect().height ?? 0,
+			}));
+			tallest = Math.max(tallest, read.list);
+			heldMost = Math.max(heldMost, read.held);
+		}
+		expect(tallest, 'the live tool list ran past the height the reasoning box has').toBeLessThanOrEqual(LIST_CAP_PX + 10);
+		expect(heldMost, 'the held space is taller than the live row can lose').toBeLessThanOrEqual(LIST_CAP_PX + 60);
+		expect(moves(await sampling).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge').toEqual([]);
+		await releaseMockGate(request, gate);
+	});
+
+	test(`@surface:chat-live-scroll the held space carries into the next send without moving the reader (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(150_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		await openEndThread(page, request, size);
+		const gate = `hold-next-${Date.now()}`;
+		const many = Array.from({ length: 30 }, (_, index) => ({ id: `next-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+			{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
+		]);
+		await sendChatMessage(page, 'first live turn');
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		await page.waitForTimeout(3500);
+		await releaseMockGate(request, gate);
+		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
+		await page.waitForTimeout(800);
+		expect(await heldSpace(page), 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Next. '.repeat(20), delay_ms: 400, finish_reason: 'tool_calls', tool_calls: [{ id: `next-one-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }] },
+			{ content: `Again. ${LINE.repeat(6)}`, finish_reason: 'stop' },
+		]);
+		const sampling = sampleAnchor(page, 200, 3500);
+		await sendChatMessage(page, 'second turn');
+		const seen = moves(await sampling);
+		expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader when the next send began').toEqual([]);
+	});
+
+	test(`@surface:chat-live-scroll leaving the thread releases the held space (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(150_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		const other = `live-other-${Date.now()}`;
+		const title = await openEndThread(page, request, size, other);
+		const gate = `hold-leave-${Date.now()}`;
+		const many = Array.from({ length: 30 }, (_, index) => ({ id: `leave-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+			{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
+		]);
+		await sendChatMessage(page, 'first live turn');
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		await page.waitForTimeout(3500);
+		await releaseMockGate(request, gate);
+		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
+		await page.waitForTimeout(800);
+		expect(await heldSpace(page), 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
+		for (const next of [other, title]) {
+			if (size.width < 700) { await page.waitForTimeout(600); await page.getByRole('button', { name: 'Toggle sidebar' }).click(); }
+			await page.getByText(next, { exact: true }).first().click();
+			await page.waitForTimeout(800);
+		}
+		expect(await heldSpace(page), 'the held space stayed after the person left and came back').toBe(0);
+		const gap = await page.locator('.messages').evaluate((el) => Math.round(el.scrollHeight - el.clientHeight - el.scrollTop));
+		expect(gap, 'the chat is at its end after coming back').toBeLessThanOrEqual(1);
 	});
 }
