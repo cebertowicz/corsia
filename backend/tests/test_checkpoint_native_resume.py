@@ -84,7 +84,7 @@ async def test_native_live_warm_source_freezes_correlated_provider_receipt(monke
         captured["kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr("core.fork_native.capture_live_warm_source", capture)
+    monkeypatch.setattr("core.fork_native_warm.capture_live_warm_source", capture)
 
     result = await checkpoint_native_admission.capture_native_checkpoint_source(
         "thread-1", state, context, "high",

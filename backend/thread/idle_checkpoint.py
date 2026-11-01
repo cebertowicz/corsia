@@ -231,7 +231,8 @@ async def _complete_native_idle_checkpoint(
 ) -> CheckpointAdmission | IdleCheckpointSkip:
     """Fork the receipt's live prefix warm, or skip before any row exists."""
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
-    from core.fork_native import capture_live_warm_source, warm_input_fits
+    from core.fork_native import warm_input_fits
+    from core.fork_native_warm import capture_live_warm_source
     from core.checkpoint_warm_request import complete_warm_admission
 
     context = preparation.context

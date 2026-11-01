@@ -110,7 +110,7 @@ async def capture_native_checkpoint_source(
     thread_id, state, context, reasoning_effort,
 ):
     """Freeze exact live warmth only when its correlated receipt is present."""
-    from core.fork_native import capture_live_warm_source
+    from core.fork_native_warm import capture_live_warm_source
 
     if has_correlated_receipt(state):
         measured = effective_input_tokens(state.last_measured_call_usage)
