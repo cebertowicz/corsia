@@ -12,10 +12,10 @@ For an agent that needs to count, time or track something its work does, or be w
 | Time between A and B; where each thing stands | `since`; `latest` (5) |
 | Run this when X happens | A rule with `action: run_script` |
 | Wake me once when this task's wait ends | A plan watch (skill `plans-and-workers`), not a rule |
-| Tell me if a number goes over N | Weekly is enough: a KPI with `review: N` and `alert: wake` (3), judged once each week settles. Sooner: a scheduled check of yours that prints an event when it crosses N, with a rule that wakes you (4). Either way you then tell them |
+| Tell me if a number goes over N | Weekly is enough: a KPI with `review: N` and `alert: wake` (3), judged once each week ends. Sooner: a scheduled check of yours that prints an event when it crosses N, with a rule that wakes you (4). Either way you then tell them |
 | Show me a chart | Not built. No page shows a declared KPI; read its value with `measure_status` |
 
-Use only fields and values this reference shows: sync also accepts a field it doesn't know (or a misspelt `alert` value), and nothing acts on it.
+Use only fields and values this reference shows: sync accepts a KPI field it doesn't know (or a misspelt `alert` value), and nothing acts on it.
 
 ## 2. Does something produce the event?
 
@@ -49,12 +49,10 @@ Nothing feeds a calendar, chat or other service. A scheduled script can poll one
        formula: share
        num: {event: backup.checked, attr: result, values: [failed]}
        min_n: 7
-       review: 0.2
-       alert: wake
    ```
-   Use your own names and `min_n`. `use` is `record`, `route` or `both`; a routed event can't declare `login`. `formula` is `count`, `ratio` (needs `den`), `share` (`num.attr`, `num.values`), `percentile` (`num.attr`, `num.p`) or `rate_per_run` (workflows only); there is no mean, so use `percentile`, `p: 50`. `review` and `alert` are optional: once a day CORSIA judges each completed week, after it settles, and when it is worse than `review` (in `better`'s direction; a percent is a fraction, 0.2 is 20%) wakes you with `alert: wake` or sends a note with `digest`. Skill `movement-review` says what to do then.
+   Use your own names and `min_n`. `use` is `record`, `route` or `both`; a routed event can't declare `login`. `formula` is `count`, `ratio` (needs `den`), `share` (`num.attr`, `num.values`), `percentile` (`num.attr`, `num.p`) or `rate_per_run` (workflows only); there is no mean, so use `percentile`, `p: 50`. Add `review` and `alert` only when asked to be told: once a day CORSIA judges each week after it ends, and when it is worse than `review` (in `better`'s direction; a percent is a fraction, 0.2 is 20%) wakes you with `alert: wake` or sends a note with `digest`. Skill `movement-review` says what to do then.
 3. `measure_sync` with `path` relative to the workspace root. Fix what it refuses and sync again; nothing takes effect before it succeeds.
-4. Record each occurrence: `event_rules` `emit` with the full name (`backup.checked`) and `facts` (supply `id` when retrying the same event), or print the event line from a script registered with `automation_schedule` (`kind: script`, `cadence_seconds` at least 300; a `record` event prints `{"measure": {"event.name": "...", "attributes": {...}}}`). For a workflow's measures, also pass `workflow` to `automation_schedule`, or its rows carry no workflow or version. From an outside tool: `measure_key` `mint` with a `label` returns a key, shown once, and the endpoint; set them as its OTLP/HTTP logs exporter's endpoint and bearer header, and give each record the full declared name as `event.name` and declared attributes. Records may not claim another agent. `measure_key list` shows the endpoint if it moved; `revoke` stops a key.
+4. Record each occurrence: `event_rules` `emit` (refused for a `record` event) with the full name (`backup.checked`) and `facts` (supply `id` when retrying the same event), or print the event line from a script registered with `automation_schedule` (`kind: script`, `cadence_seconds` at least 300; a `record` event prints `{"measure": {"event.name": "...", "attributes": {...}}}`). For a workflow's measures, also pass `workflow` to `automation_schedule`, or its rows carry no workflow or version. From an outside tool: `measure_key` `mint` with a `label` returns a key, shown once, and the endpoint; set them as its OTLP/HTTP logs exporter's endpoint and bearer header, and give each record the full declared name as `event.name` and declared attributes. Records may not claim another agent. `measure_key list` shows the endpoint if it moved; `revoke` stops a key.
 5. `measure_status`. Each refusal says whether the row or only the attribute was dropped, and the fix: apply it, sync again, and record a dropped row again from your own record of what happened, or it is never counted. A KPI that reads "not tracked" gives its reason. Recording starts when you first record; earlier occurrences are not counted.
 
 ## 4. Wake or act
@@ -67,7 +65,7 @@ event_rules create  connector: backup  event_type: checked
   action: deliver  mode: wake  note: "Backup failed. Check it and tell the owner."
 ```
 
-- Tests are `eq`, `not_eq`, `in`, `prefix` (case-sensitive) and `present`, at most 4, on declared id, count, enum or login fields; not a `num` attribute or a `record` event.
+- Tests (operators and how many: the `event_rules` description) go on declared id, count, enum or login fields, not a `num` attribute or a `record` event. `prefix` is case-sensitive; `present` matches every event that has the field, so it narrows nothing.
 - `mode` defaults to `wake`; `mode: digest` makes the match a digest line instead. `action: run_script` runs a script registered without a cadence, giving it the event on stdin.
 - Prove it: `event_rules test` with sample `facts`; `explain` after a real event, or with an `event_type` for its recent refusals. A rule acts only while its writer is available: it holds while the writer is archived, and turns off without a message once the writer is deleted or leaves the rule's project. Write a rule from the agent that should keep receiving it; `list` (with when each rule last acted) and `explain` show why one went quiet.
 
