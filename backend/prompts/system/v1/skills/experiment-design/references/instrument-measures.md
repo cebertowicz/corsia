@@ -4,8 +4,6 @@ For an agent that needs to count, time or track something its work does, or be w
 
 ## 1. Pick the path
 
-Tell the person first what they get: their agent wakes and messages them. No rule wakes a different agent or pages them directly.
-
 | They ask | Path |
 |---|---|
 | Count or track X | Record (3). `measure_status` gives counts for today and the last 7 days, and with `kpis: true` a KPI's value for this week and the last complete week. There is no monthly history |
