@@ -12,6 +12,8 @@ a body shape cannot silently leave the schema behind.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 
@@ -26,21 +28,26 @@ def _schema() -> dict:
 
 
 def _body() -> dict:
-    """The body schema branches an agent receives."""
+    """The body schema an agent receives: one object, the union of the shapes."""
     return _schema()["properties"]["body"]
 
 
-def _branch_for(*keys: str) -> dict:
-    """The generated shape whose properties are exactly these keys.
+def _refuses(call: dict) -> str:
+    """The refusal the real tool path gives a call, or fail if it is accepted.
 
-    Read from the body's `oneOf`, which is where the shapes are declared
-    with their constraints, so these tests assert what an agent is given.
+    ``ToolRegistry.execute`` decodes and validates before any handler runs, so
+    a refusal here is the one an agent receives.
     """
-    wanted = set(keys)
-    for branch in _generated_shapes():
-        if set(branch["properties"]) == wanted:
-            return branch
-    raise AssertionError(f"no generated shape with properties {sorted(wanted)}")
+    import asyncio
+
+    from tools.continuity import ContinuityEditTool
+    from tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(ContinuityEditTool())
+    result = asyncio.run(registry.execute("continuity_edit", call))
+    assert result.startswith("Error: Invalid parameters for tool 'continuity_edit'"), result
+    return result
 
 
 def _decoded(call: dict) -> dict:
@@ -113,23 +120,42 @@ def test_body_exposes_every_key_the_validator_requires():
         for name, info in model.model_fields.items()
         if info.is_required()
     }
-    exposed = {
-        key
-        for branch in _generated_shapes()
-        for key in branch["properties"]
-    }
+    exposed = set(_body()["properties"])
 
     assert required, "validator exposed no required fields; test is not measuring"
     assert required <= exposed, f"hidden from the agent: {sorted(required - exposed)}"
 
 
-def test_schema_carries_the_validator_text_bound():
-    """A body that is schema-valid but too long would still be rejected."""
-    from core.continuity_types import MAX_TEXT_CHARS
+@pytest.mark.parametrize("operation", ["add", "replace"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"statement": "x" * 4097, "source_refs": [_REF]},
+        {"statement": "", "source_refs": [_REF]},
+        {"statement": "s", "source_refs": [_REF] * 17},
+    ],
+    ids=["too-long", "empty", "too-many-refs"],
+)
+def test_bounds_left_out_of_the_schema_are_enforced_by_the_server(operation, body):
+    """The advertised body omits length and item bounds the entry models hold.
 
-    statement = _branch_for("statement", "source_refs")["properties"]["statement"]
-    assert statement["maxLength"] == MAX_TEXT_CHARS
-    assert statement["minLength"] == 1
+    They are enforced where every body is validated (``validate_entry_body``
+    through ``body_errors``), so leaving them out of the prompt loses nothing.
+    """
+    call = {"operation": operation, "body": body}
+    call |= {"field": "facts"} if operation == "add" else {"entry_id": 1}
+
+    refusal = _refuses(call)
+
+    assert "invalid facts entry" in refusal or "does not match any continuity entry shape" in refusal
+
+
+def test_the_body_schema_does_not_restate_bounds_the_server_enforces():
+    """Guards the token saving: a bound back in the body costs every prompt."""
+    text = json.dumps(_body())
+
+    for bound in ("minLength", "maxLength", "maxItems"):
+        assert bound not in text
 
 
 def test_relevant_state_kind_is_the_restricted_vocabulary():
@@ -141,19 +167,8 @@ def test_relevant_state_kind_is_the_restricted_vocabulary():
     from core.continuity_types import RelevantState
     from typing import get_args
 
-    branch = _branch_for("kind", "reference", "state", "source_refs")
     expected = get_args(RelevantState.model_fields["kind"].annotation)
-    assert set(branch["properties"]["kind"]["enum"]) == set(expected)
-
-
-def _generated_shapes() -> list[dict]:
-    """Every generated body shape, from the one place they are declared.
-
-    The `oneOf` branches carry the real constraints (types, bounds,
-    vocabularies, `additionalProperties`). The per-field rules deliberately
-    carry only key names, so they are not the place to assert constraints.
-    """
-    return list(_body()["oneOf"])
+    assert set(_body()["properties"]["kind"]["enum"]) == set(expected)
 
 
 def test_unknown_body_keys_are_refused_by_the_schema():
@@ -162,11 +177,9 @@ def test_unknown_body_keys_are_refused_by_the_schema():
     Without this a body with a stray key passes the advertised schema and is
     rejected at runtime — the whole class of defect this change removes.
     """
-    for branch in _generated_shapes():
-        assert branch["additionalProperties"] is False
-        assert branch["properties"]["source_refs"]["items"][
-            "additionalProperties"
-        ] is False
+    body = _body()
+    assert body["additionalProperties"] is False
+    assert body["properties"]["source_refs"]["items"]["additionalProperties"] is False
 
 
 def test_source_refs_shape_is_declared_not_prose():
@@ -175,17 +188,16 @@ def test_source_refs_shape_is_declared_not_prose():
     The reported repro is an agent supplying a list of strings, which the bare
     object schema permitted and the validator rejected.
     """
-    from core.continuity_types import MAX_SOURCE_REFS, SourceKind
+    from core.continuity_types import SourceKind
     from typing import get_args
 
-    refs = _branch_for("statement", "source_refs")["properties"]["source_refs"]
+    refs = _body()["properties"]["source_refs"]
 
     assert refs["type"] == "array"
     items = refs["items"]
     assert items["type"] == "object"
     assert set(items["required"]) == {"kind", "reference"}
     assert set(items["properties"]["kind"]["enum"]) == set(get_args(SourceKind))
-    assert refs["maxItems"] == MAX_SOURCE_REFS
 
 
 @pytest.mark.parametrize(
@@ -203,7 +215,7 @@ def test_source_refs_shape_is_declared_not_prose():
         # The reported repro: source refs as bare strings.
         ("facts", {"statement": "s", "source_refs": ["thread 0fd264e6"]}, False),
         ("facts", {"statement": "s", "source_refs": [_REF], "stray": 1}, False),
-        ("facts", {"statement": "x" * 5000, "source_refs": [_REF]}, False),
+        ("facts", {"statement": "s", "source_refs": [_REF], "rationale": "w"}, False),
         (
             "relevant_state",
             {"kind": "nonsense", "reference": "r", "state": "s", "source_refs": [_REF]},
@@ -242,23 +254,26 @@ def test_schema_accepts_exactly_what_the_validator_accepts(field, body, valid):
 
 
 def test_every_validator_shape_has_exactly_one_generated_rule():
-    """One generated shape per distinct entry shape, and no duplicates.
+    """One per-field rule per distinct entry shape, and the body is their union.
 
     A shape declared twice would be two places to update; a shape missing
     means some field accepts anything.
     """
     from core.continuity_types import ENTRY_FIELD_MODELS
+    from tools.continuity_schema import field_body_rules
 
     shapes = {
         tuple(sorted(model.model_fields))
         for model in ENTRY_FIELD_MODELS.values()
     }
     generated = [
-        tuple(sorted(branch["properties"])) for branch in _generated_shapes()
+        tuple(sorted(rule["then"]["properties"]["body"]["properties"]))
+        for rule in field_body_rules()
     ]
 
     assert sorted(generated) == sorted(shapes)
     assert len(generated) == len(set(generated)), "duplicate generated shapes"
+    assert set(_body()["properties"]) == {key for shape in shapes for key in shape}
 
 
 def _shape_for(model) -> dict:
@@ -413,12 +428,10 @@ def test_replace_accepts_every_real_shape(model_name):
 
 
 def test_replace_refuses_a_body_of_no_known_shape_in_both_layers():
-    """The gap that closes without a new parameter.
+    """`{"junk": 1}` is no entry shape: refused in the schema and by the server.
 
-    `{"junk": 1}` matches none of the four shapes, so `oneOf` refuses it in
-    the advertised schema and `body_errors` refuses it in CORSIA's own
-    validator -- which matters because `Tool._validate` does not implement
-    `oneOf`, so the schema alone would not be enforced here.
+    The body schema is one object of every legal key, so a stray key fails it;
+    a body of legal keys that make no shape (below) is refused by `body_errors`.
     """
     from jsonschema import Draft202012Validator
     from tools.continuity import ContinuityEditTool
@@ -427,6 +440,65 @@ def test_replace_refuses_a_body_of_no_known_shape_in_both_layers():
 
     assert not Draft202012Validator(_schema()).is_valid(call)
     assert ContinuityEditTool().validate_params(call)
+
+
+def test_add_refuses_a_body_of_the_wrong_shape_for_its_field():
+    """The refusal lives in the server, through the real tool path.
+
+    A decision body sent to a statement field names the field it broke.
+    """
+    refusal = _refuses({
+        "operation": "add", "field": "facts",
+        "body": {"statement": "s", "rationale": "w", "source_refs": [_REF]},
+    })
+
+    assert "facts" in refusal
+    assert "rationale" in refusal
+
+
+@pytest.mark.parametrize("body", [
+    {"statement": "s", "result": "r", "source_refs": [_REF]},
+    {"statement": "s", "evidence": "e"},
+    {"statement": "s", "rationale": "w"},
+])
+def test_replace_refuses_legal_keys_that_make_no_shape(body):
+    """Every key is advertised, so a mix of shapes passes the body schema.
+
+    Replace names no field; the server still refuses a body that is no entry.
+    """
+    refusal = _refuses({"operation": "replace", "entry_id": 1, "body": body})
+
+    assert "does not match any continuity entry shape" in refusal
+
+
+def test_replace_refuses_a_valid_shape_that_is_not_the_entrys_shape():
+    """A decision body is a legal entry, but not for a facts entry: the store refuses.
+
+    The entry's field is a database fact the tool layer cannot see, so the
+    store validates against the stored field.
+    """
+    import sqlite3
+
+    from infra.continuity_schema import CONTINUITY_DDL
+    from infra.continuity_store import ContinuityError, add_entry, replace_entry
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("CREATE TABLE threads (id TEXT PRIMARY KEY)")
+    conn.execute("INSERT INTO threads (id) VALUES ('t1')")
+    for statement in CONTINUITY_DDL:
+        conn.execute(statement)
+    entry_id = add_entry(
+        conn, thread_id="t1", history_epoch=1, field="facts",
+        body={"statement": "s", "source_refs": []},
+    )
+
+    with pytest.raises(ContinuityError, match="invalid facts entry"):
+        replace_entry(
+            conn, thread_id="t1", history_epoch=1, entry_id=entry_id,
+            body={"statement": "s", "rationale": "w", "source_refs": []},
+        )
 
 
 def test_replace_accepts_a_redundant_matching_field_parameter():
