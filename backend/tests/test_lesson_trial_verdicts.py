@@ -331,7 +331,7 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
                         "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
 
     def kpi(name: str, decides_as: str) -> Definition:
-        spec = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
+        spec = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "min_n": 1, "better": "lower", "can_decide": True,
                 "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1, "review": 0.2,
                 "decides_as": decides_as}
         return Definition("kpi", name, 1, spec, "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
