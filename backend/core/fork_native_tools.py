@@ -13,6 +13,7 @@ from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
 from infra import state
 from infra.send_target import omlx_seat_and_model
+from infra.tool_result_errors import is_error_result
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -174,19 +175,29 @@ def assistant_message(response: Any) -> dict[str, Any]:
     }
 
 
+_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _OPERATION = re.compile(r"[a-z_]{1,24}")
+
+
+def _token(value: Any, pattern: re.Pattern[str]) -> str:
+    """A model-written value as one log token: itself when well-formed, else a marker."""
+    if isinstance(value, str) and pattern.fullmatch(value):
+        return value
+    return "-" if value is None else "other"
 
 
 def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
                    result: str) -> None:
-    """One content-free line per fork tool call: which call, its outcome, its size."""
+    """One content-free line per fork tool call: which call, its outcome, its size.
+
+    Diagnosis for checkpoints that make many tool rounds and stage nothing.
+    Delete it in the change that fixes those rounds.
+    """
     arguments = call.arguments if isinstance(call.arguments, dict) else {}
-    operation = arguments.get("operation")
-    if not (isinstance(operation, str) and _OPERATION.fullmatch(operation)):
-        operation = "-" if operation is None else "other"
     logger.info(
         "fork.tool_call fork={} kind={} tool={} operation={} outcome={} result_chars={}",
-        request.fork_id, kind.name, call.name, operation, outcome, len(result),
+        request.fork_id, kind.name, _token(call.name, _TOOL_NAME),
+        _token(arguments.get("operation"), _OPERATION), outcome, len(result),
     )
 
 
@@ -237,7 +248,7 @@ async def run_tool_calls(
                     thread_id=request.thread_id, invocation_id=call.id,
                     provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
-                outcome = "error" if result.startswith("Error") else "ok"
+                outcome = "error" if is_error_result(result) else "ok"
             reply = {
                 "role": "tool",
                 "tool_call_id": call.id,

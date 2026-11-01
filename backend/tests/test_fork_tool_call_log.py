@@ -57,10 +57,11 @@ async def test_each_call_logs_its_operation_and_outcome_without_contents(monkeyp
         (CHECKPOINT_TOOL_NAME, {"operation": "add", "field": "next_actions"}),
         (CHECKPOINT_TOOL_NAME, {"operation": SECRET}),
         (CHECKPOINT_TOOL_NAME, {}),
+        ("read the file\nfork.tool_call forged", {}),
     )
     results = [SECRET, "Error: next_actions is not a continuity field", "staged", "staged"]
 
-    fits_room, lines = await _batch(monkeypatch, response, results, [True] * 6)
+    fits_room, lines = await _batch(monkeypatch, response, results, [True] * 7)
 
     assert fits_room
     prefix = "fork.tool_call fork=checkpoint-1 kind=checkpoint tool="
@@ -71,8 +72,10 @@ async def test_each_call_logs_its_operation_and_outcome_without_contents(monkeyp
         prefix + "continuity_edit operation=add outcome=error result_chars=45",
         prefix + "continuity_edit operation=other outcome=ok result_chars=6",
         prefix + "continuity_edit operation=- outcome=ok result_chars=6",
+        prefix + "other operation=- outcome=refused result_chars="
+        + str(len(CHECKPOINT_KIND.tool_refusal)),
     ]
-    assert not any(SECRET in line or "/secret" in line for line in lines)
+    assert not any(SECRET in line or "/secret" in line or "forged" in line for line in lines)
 
 
 @pytest.mark.asyncio
