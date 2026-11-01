@@ -113,8 +113,6 @@ def _decide(agent: str, record: WireRecord, lookup: Lookup, workflows: dict[str,
     name = record.attributes.get("event.name")
     if not isinstance(name, str) or not name:
         return Item(None, ("record_refused", "an OTLP log record without an event.name was refused; only declared events are accepted, and plain logs are not stored here"))
-    if record.time_out_of_range:
-        return Item(name, ("record_refused", f"{name}: time is out of range; the record was dropped. Send a time inside the window, or leave time out to use now."))
     stamped = {"corsia.project_id": lookup.project_id, "corsia.agent_thread_id": agent}
     for key in _IDENTITY_KEYS:
         if (value := _claimed(record, key)) is not None and value != stamped[key]:

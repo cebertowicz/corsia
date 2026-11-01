@@ -352,14 +352,10 @@ async def test_list_returns_the_current_endpoint(world) -> None:
     assert "next free one" in minted["send"] and "action list" in minted["send"]
 
 
-def test_an_overflowing_time_is_none_and_its_record_is_refused_as_out_of_range() -> None:
+def test_the_largest_wire_time_decodes_to_a_real_timestamp() -> None:
     from infra import otlp_decode
-    from infra.otlp_admission import Lookup, prepare
 
-    assert otlp_decode._time(10**40) is None
-    record = otlp_decode.WireRecord({"event.name": "qa.rec"}, {}, None, time_out_of_range=True)
-    item = prepare(OWNER, [record], Lookup(None, {}, {}), {})[0]
-    assert item.refusal is not None and item.refusal[1].startswith("qa.rec: time is out of range;")
+    assert otlp_decode._time(2**64 - 1).startswith("2554-07-21T")
 
 
 @pytest.mark.asyncio

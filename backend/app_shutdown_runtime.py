@@ -32,3 +32,10 @@ async def shutdown_otlp_listener(logger, pending_cancel, run_cleanup_owner):
         "otlp listener", otlp_listener.stop(), logger,
     )
     return failure, pending_cancel or cancelled
+
+
+async def shutdown_listeners(logger, pending_cancel, run_cleanup_owner):
+    """Stop Devices, then the measure receiver; each owner keeps its own failure."""
+    devices_failure, pending_cancel = await shutdown_devices(logger, pending_cancel, run_cleanup_owner)
+    otlp_failure, pending_cancel = await shutdown_otlp_listener(logger, pending_cancel, run_cleanup_owner)
+    return (devices_failure, otlp_failure), pending_cancel

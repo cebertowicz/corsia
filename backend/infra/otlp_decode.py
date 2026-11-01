@@ -35,7 +35,6 @@ class WireRecord:
     attributes: dict[str, Any]
     resource: dict[str, Any]
     ts: str | None
-    time_out_of_range: bool = False
 
 
 def inflate(body: bytes, limit: int) -> bytes:
@@ -85,12 +84,10 @@ def _flat(pairs: Any, only_corsia: bool = False) -> dict[str, Any]:
 
 
 def _time(nanos: int) -> str | None:
+    # A uint64 of nanoseconds ends in 2554, inside datetime's range, so this can't overflow.
     if not nanos:
         return None
-    try:
-        return (_EPOCH + timedelta(microseconds=nanos // 1000)).isoformat()
-    except OverflowError:
-        return None
+    return (_EPOCH + timedelta(microseconds=nanos // 1000)).isoformat()
 
 
 def records(request: service.ExportLogsServiceRequest) -> list[WireRecord]:
@@ -99,8 +96,7 @@ def records(request: service.ExportLogsServiceRequest) -> list[WireRecord]:
         shared = _flat(resource.resource.attributes, only_corsia=True)
         for scope in resource.scope_logs:
             for record in scope.log_records:
-                ts = _time(record.time_unix_nano)
-                found.append(WireRecord(_flat(record.attributes), shared, ts, bool(record.time_unix_nano and ts is None)))
+                found.append(WireRecord(_flat(record.attributes), shared, _time(record.time_unix_nano)))
     return found
 
 
