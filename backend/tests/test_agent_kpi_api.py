@@ -48,9 +48,9 @@ def test_http_repository_resolution_without_mocking(isolated_db, monkeypatch):
         assert read(http)["kpis"] == []
 
 
-def definition(db, tmp_path: Path, kind, name, spec):
+def definition(db, tmp_path: Path, kind, name, spec, owner='owner'):
     db.execute("""INSERT INTO measure_definitions(owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at)
-        VALUES ('owner',?,?,1,?,?, 'hash','2026-01-01')""", (kind, name, json.dumps(spec), str(tmp_path / "measures.yaml")))
+        VALUES (?,?,?,1,?,?, 'hash','2026-01-01')""", (owner, kind, name, json.dumps(spec), str(tmp_path / "measures.yaml")))
 
 
 def fact(db, name, day, attrs, *, source="agent", agent="owner", project="p", subject=None):

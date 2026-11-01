@@ -4,14 +4,14 @@ from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_agent_kpi_api import client, definition, fact, item, period, read
 
 
-def task(db, name, version):
+def task(db, name, version, owner='owner'):
     with raw_plan_seed(db):
         db.execute("INSERT OR IGNORE INTO plans(id,owner_kind,owner_id,created_at,updated_at) "
-                   "VALUES ('plan','thread','owner','2026-01-01','2026-01-01')")
+                   "VALUES (?,'thread',?,'2026-01-01','2026-01-01')", ('plan-' + owner, owner))
         db.execute("INSERT INTO plan_nodes(id,plan_id,kind,title,acceptance_criteria,order_key,commitment_id,"
                    "workflow_ref,workflow_version,created_at,updated_at) "
-                   "VALUES (?,'plan','task','Task','done',1,?,'demo',?,'2026-01-01','2026-01-07')",
-                   (name, name, version))
+                   "VALUES (?,?,'task','Task','done',1,?,'demo',?,'2026-01-01','2026-01-07')",
+                   (name, 'plan-' + owner, name, version))
         db.execute("INSERT INTO plan_node_events(id,node_id,event,provenance,new_state,created_at) "
                    "VALUES (?,?,'accepted','test','accepted','2026-01-07')", ('end-'+name, name))
 
