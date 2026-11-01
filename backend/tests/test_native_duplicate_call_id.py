@@ -73,9 +73,19 @@ async def test_repeated_call_id_reaches_an_error_terminal(lab, monkeypatch, shap
     from infra.database import get_db
     from tests.plan_execution_helpers import registry_of, selected_plan
 
+    from infra import thread_execution
+    from infra.taken_in_rerun import rerun_message_id
+
     selected_plan(lab.db, "thread-1")
     lab.db.commit()
     tool, frames = _Effect(), []
+    successors = []
+
+    async def record_successor(batch):
+        successors.append([item.message_id for item in batch.items])
+
+    # The Turn's own terminal is under test, not the successor it may start.
+    monkeypatch.setattr(thread_execution, "drive_turn_admission", record_successor)
     agent = CORSIAAgent(workspace=lab.tmp_path)
     agent.tools = registry_of(tool)
 
@@ -123,6 +133,10 @@ async def test_repeated_call_id_reaches_an_error_terminal(lab, monkeypatch, shap
         ["unique-1"] if shape == "mixed" else []
     )
     assert tool.ran == {"executed": ["first"], "cancelled": [], "mixed": ["unique"]}[shape]
+    # Every shape errors with the person's input taken in and unanswered, so each
+    # owes one re-run. (A person's Stop sets user_stop_requested, which the real
+    # provider loop, replaced here, turns into a cancelled terminal that owes none.)
+    assert successors == [[rerun_message_id(lab.identity.turn_id)]]
     db = get_db()
     try:
         row = db.execute(

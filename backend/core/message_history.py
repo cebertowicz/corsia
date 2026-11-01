@@ -159,10 +159,13 @@ def _tool_history_message(
 
 
 def is_system_context_event(row: dict) -> bool:
-    """Return whether a visible system row was also provider input."""
+    """Return whether a system row was also provider input."""
     if row.get("role") != "system":
         return False
     meta = parse_meta(row.get("metadata"))
+    if meta.get("type") == "turn_rerun":
+        # Never drawn, but it is the re-run Turn's inbound input.
+        return True
     return (
         meta.get("type") == "context_event"
         and meta.get("event_disposition") in {"wake", "passive"}

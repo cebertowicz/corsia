@@ -313,6 +313,37 @@ def test_context_event_projection_is_once_and_equal_across_adapters(disposition)
     assert all(value.count("CANONICAL_CONTEXT_EVENT") == 1 for value in rendered)
 
 
+def test_rerun_turn_replays_its_note_as_inbound_input_on_every_adapter() -> None:
+    """A re-run Turn begins with its model-only note, never with a person row."""
+    from core.message_history import db_to_llm_history
+    from history.adapters import to_native_history
+    from history.projection import render_portable_history
+    from subagents.cc_context_reconstruction import cc_snapshot_history
+    from subagents.codex_context_reconstruction import codex_inject_items
+
+    db = _db()
+    _turn(db, "turn-1", "error")
+    _message(db, "u1", 1, "user", "question", turn_id="turn-1")
+    _turn(db, "turn-2", "completed")
+    _message(
+        db, "turn-rerun:turn-1", 2, "system", "CANONICAL_RERUN_NOTE",
+        turn_id="turn-2", metadata={"type": "turn_rerun", "failed_turn_id": "turn-1"},
+    )
+    _message(db, "a2", 3, "assistant", "answer", turn_id="turn-2")
+    db.commit()
+    projection = render_portable_history("thread-1", db=db)
+
+    assert [turn.messages[0].role for turn in projection.turns] == ["user", "user"]
+    rendered = (
+        json.dumps(to_native_history(projection)),
+        json.dumps(cc_snapshot_history(projection, cc_session_id="cc-rerun")),
+        json.dumps(codex_inject_items(projection)),
+    )
+    assert all(value.count("CANONICAL_RERUN_NOTE") == 1 for value in rendered)
+    rows = [dict(row) for row in db.execute("SELECT * FROM messages ORDER BY seq")]
+    assert {"role": "user", "content": "CANONICAL_RERUN_NOTE"} in db_to_llm_history(rows)
+
+
 def test_completed_turn_boundary_survives_later_nonsemantic_system_rows() -> None:
     from history.projection import render_portable_history
 
