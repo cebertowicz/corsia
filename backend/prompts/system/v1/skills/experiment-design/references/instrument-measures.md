@@ -4,7 +4,7 @@ For an agent that needs to count, time or track something its work does, or be w
 
 ## 1. Pick the path
 
-Tell the person first what they will get, in their terms: their agent wakes and messages them. No rule wakes a different agent or pages them directly.
+Tell the person first what they get: their agent wakes and messages them. No rule wakes a different agent or pages them directly.
 
 | They ask | Path |
 |---|---|
@@ -13,6 +13,7 @@ Tell the person first what they will get, in their terms: their agent wakes and 
 | ...and how often | `use: both`: the rule plus a KPI |
 | Time between A and B; where each thing stands | `since`; `latest` (5) |
 | Run this when X happens | A rule with `action: run_script` |
+| Wake me once when this task's wait ends | A plan watch (skill `plans-and-workers`), not a rule |
 | Tell me if a number goes over N | Not built. Offer a scheduled check of yours that prints an event when it crosses N, with a rule that wakes you |
 | Show me a chart | Not built. No page shows a declared KPI; read its value with `measure_status` |
 
@@ -20,8 +21,8 @@ OpenTelemetry intake is not built either. Use only fields this reference shows: 
 
 ## 2. Does something produce the event?
 
-A rule fires only on events that arrive; `event_rules` `types` lists types whether or not anything feeds them. Today:
-- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names (`gmail`, `microsoft` or `mailhost`). New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `label`, `thread_id`, `message_id`, `author_origin`, not the subject or body.
+A rule fires only on events that arrive; `event_rules` `types` lists types even if nothing feeds them. Today:
+- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `label`, `thread_id`, `message_id`, `author_origin`, not the subject or body.
 - **GitHub** pull requests, issues, checks, labels, comments; **CORSIA** plan blocks, review requests, document comments, worker results.
 - **Yours**: an event you declare and `emit`, or print from a scheduled script as `{"event": {"type": "<declared name>", "facts": {...}}}`. With a shell, `corsia event emit` does the same.
 
@@ -29,7 +30,7 @@ Nothing feeds a calendar, chat or other service. A scheduled script can poll one
 
 ## 3. Record
 
-1. Choose what identifies one occurrence, count every occurrence (so a share has its full denominator), and list every value each attribute can take (a value missing from an `enum` is refused).
+1. Choose what identifies one occurrence, count every occurrence (a share needs its full denominator), and list every value each attribute can take (a value missing from an `enum` is refused).
 2. Put `measures.yaml` in `.threads/<your thread id>/` under your scope's folder (a workflow's goes beside its `SKILL.md` and names `workflow`). Declare a namespace nobody holds and no connector uses.
 
    ```yaml
@@ -51,14 +52,14 @@ Nothing feeds a calendar, chat or other service. A scheduled script can poll one
        num: {event: backup.checked, attr: result, values: [failed]}
        min_n: 7
    ```
-   An example: use your own names and `min_n`. `use` is `record`, `route` or `both`; a routed event can't declare `login`. `formula` is `count`, `ratio` (needs `den`), `share` (`num.attr`, `num.values`), `percentile` (`num.attr`, `num.p`) or `rate_per_run` (workflows only); there is no mean, so use `percentile`, `p: 50`.
-3. `measure_sync` with `path` relative to the workspace root. Fix what it refuses and sync again; nothing takes effect until it succeeds.
+   Use your own names and `min_n`. `use` is `record`, `route` or `both`; a routed event can't declare `login`. `formula` is `count`, `ratio` (needs `den`), `share` (`num.attr`, `num.values`), `percentile` (`num.attr`, `num.p`) or `rate_per_run` (workflows only); there is no mean, so use `percentile`, `p: 50`.
+3. `measure_sync` with `path` relative to the workspace root. Fix what it refuses and sync again; nothing takes effect before it succeeds.
 4. Record each occurrence: `event_rules` `emit` with the full name (`backup.checked`) and `facts`, or print the event line from a script registered with `automation_schedule` (`kind: script`, `cadence_seconds` at least 300; a `record` event prints `{"measure": {"event.name": "...", "attributes": {...}}}`).
 5. `measure_status`. Each refusal says whether the row or only the attribute was dropped, and the fix. A KPI that reads "not tracked" gives its reason. Recording starts when you first record; earlier occurrences are not counted.
 
 ## 4. Wake or act
 
-A rule delivers to you, or with `to: registered_owner` to the agent that registered the event type; that agent is woken only if it wrote the rule or was started by its writer, otherwise it gets a digest line. You cannot wake another agent. A declared event is named by its short name: `connector: backup`, `event_type: checked`.
+A rule delivers to you, or with `to: registered_owner` to the agent that registered the event type; that agent is woken only if it wrote the rule or is a temporary worker started by its writer, otherwise it gets a digest line. You cannot wake another agent. A declared event is named by its short name: `connector: backup`, `event_type: checked`.
 
 ```
 event_rules create  connector: backup  event_type: checked
@@ -67,9 +68,9 @@ event_rules create  connector: backup  event_type: checked
 ```
 
 - Tests are `eq`, `not_eq`, `in`, `prefix` (case-sensitive) and `present`, at most 4, on declared id, count, enum or login fields; not a `num` attribute or a `record` event.
-- Without `mode: wake` the match is a digest line. `action: run_script` runs a script registered without a cadence, giving it the event on stdin.
-- Prove it: `event_rules test` with sample `facts`; `explain` after a real event, or with an `event_type` for its recent refusals. `list` shows your rules and when each last acted. A rule stops when its writer is gone, silently, so check `list` when a promised wake hasn't come.
+- `mode` defaults to `wake`; `mode: digest` makes the match a digest line instead. `action: run_script` runs a script registered without a cadence, giving it the event on stdin.
+- Prove it: `event_rules test` with sample `facts`; `explain` after a real event, or with an `event_type` for its recent refusals. A rule acts only while its writer is available: it holds while the writer is archived, and turns off without a message once the writer is deleted or leaves the rule's project. Write a rule from the agent that should keep receiving it; `list` (with when each rule last acted) and `explain` show why one went quiet.
 
 ## 5. Duration and latest
 
-Declare the end event with `since: {event: <start>, on: <shared id attribute>, as: <a num attribute>}`. Intake stamps whole minutes from the newest earlier start, or leaves it empty. Read the median with a `percentile` KPI on the `as` attribute. For each thing's current state, give a KPI operand `latest: [<id attribute>]`: it keeps the newest row per value.
+Declare the end event with `since: {event: <start>, on: <shared id attribute>, as: <a num attribute>}`. Intake stamps whole minutes from the newest earlier start, or leaves it empty. Read the median with a `percentile` KPI on `as`. For each thing's current state, give a KPI operand `latest: [<id attribute>]`: it keeps the newest row per value.
