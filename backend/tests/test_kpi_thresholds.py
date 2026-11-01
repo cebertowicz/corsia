@@ -123,6 +123,8 @@ def test_an_archived_owner_is_dead_lettered_and_not_listed_as_routed(seeded):
     db.commit()
     db.close()
     assert job.run_daily(now=NOW) == []
+    # A second run the same day finds the dead letter already parked (a duplicate with no thread).
+    assert job.run_daily(now=NOW) == []
     assert _wakes("owner") == 0
     assert _count("SELECT COUNT(*) FROM dead_letter_events WHERE reason='owner_inactive'") == 1
     assert _notes(conductor) == 0

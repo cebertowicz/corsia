@@ -1,7 +1,9 @@
 """The daily movement report: typed payload, validator, and routing to its owner.
 
-A report producer (Self-Improvement's, which reads the dashboard series) hands
-the platform one report per scope per day through :func:`deliver_movement_report`.
+A report producer hands the platform one report per scope per day through
+:func:`deliver_movement_report`. Today that is ``jobs.kpi_thresholds`` alone; the
+person-attention, cost and verdict cases below are the contract for moves a later
+producer adds to that same report, never a second report on the same key.
 Nothing else is needed to route it. The report goes to the scope's conductor
 as a passive digest note, or as a wake when ``breach`` is true. The workspace
 scope reaches the CORSIA agent; a project scope reaches that project's

@@ -44,7 +44,8 @@ def _report(scope: str, day: str, moves: list[Move], breach: bool) -> dict:
     return {"scope": scope, "report_date": day, "breach": breach, "moves": [m.as_payload() for m in moves]}
 
 
-# Outcomes that mean the owner has the report (a duplicate is today's earlier delivery).
+# Outcomes on the owner's own delivery that mean it has the report (a duplicate is today's earlier delivery);
+# a rule's extra recipient or a parked dead letter does not count.
 ROUTED = (WOKE, DIGESTED, DUPLICATE)
 
 
@@ -79,7 +80,7 @@ def run_daily(*, now: datetime | None = None, since: datetime | None = None) -> 
         except Exception:
             logger.exception("kpi threshold report failed for agent {}", owner)
             continue
-        if not any(d.outcome in ROUTED for d in outcomes):
+        if not any(d.thread_id == owner and d.outcome in ROUTED for d in outcomes):
             continue
         routed.append(f"{scope}:{day}")
         listed[project or WORKSPACE_SCOPE] += [m.move for m in moves]
