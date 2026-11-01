@@ -315,9 +315,7 @@ async def _shutdown_runtime_services(
     devices_failure, pending_cancel = await shutdown_devices(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
-    otlp_failure, pending_cancel = await shutdown_otlp_listener(
-        _log_shutdown, pending_cancel, _run_cleanup_owner,
-    )
+    otlp_failure, pending_cancel = await shutdown_otlp_listener(_log_shutdown, pending_cancel, _run_cleanup_owner)
     host_access_failure, host_access_cancel = await _shutdown_host_access(
         _log_shutdown,
     )
@@ -334,9 +332,7 @@ async def _shutdown_runtime_services(
     pending_cancel = pending_cancel or native_cancel
     harness_failure, harness_cancel = await _shutdown_harnesses(_log_shutdown)
     pending_cancel = pending_cancel or harness_cancel
-
     from tools.mcp_runtime import stop_mcp_runtime
-
     mcp_failure, mcp_cancel = await _run_cleanup_owner(
         "MCP sessions", stop_mcp_runtime(), _log_shutdown,
     )
