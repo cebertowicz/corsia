@@ -58,10 +58,10 @@ Time is estimated from the person's presence in the app, recorded as visits, mer
 
 ### Your own measures and events
 
-An agent can declare facts about its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). Measurement's API returns an agent's KPIs (`/api/measurement/agent-kpis`, `backend/api/measurement_agent_kpis.py`); the Measurement page doesn't show them.
+An agent can declare facts from its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). Measurement's API returns an agent's KPIs (`/api/measurement/agent-kpis`, `backend/api/measurement_agent_kpis.py`); the Measurement page doesn't show them.
 
 - **Events** come from connected mail, GitHub, CORSIA itself and agents' scripts, not from calendar or chat (`backend/events/intake.py`).
-- **Who is woken.** The agent that owns what an event is about is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
+- **Who is woken.** The agent that owns an event's subject is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
 - **KPI weeks** run on UTC; an agent reads the current and the last complete week (`backend/tools/measures.py`).
 - **Review lines.** A KPI with a `review` line and `alert: wake` or `alert: digest` is checked nightly. Once a week has settled (its end plus the KPI's settle days), a value worse than the line wakes the agent, or adds a line to its digest, once for that week; the project's report lists the move for the conductor (`backend/jobs/kpi_thresholds.py`).
 
