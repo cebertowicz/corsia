@@ -297,3 +297,82 @@ async def test_mint_refuses_while_not_listening(isolated_db) -> None:
     otlp_state.set_port(None)
     mk_session(OWNER, project_id="project-a")
     assert (await MeasureKeyTool().execute(_thread_id=OWNER, action="mint", label="x")).startswith("Error: the measure receiver is not listening")
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_thread_deletes_its_measure_keys(world, monkeypatch) -> None:
+    from api import thread_mutations
+
+    async def _quiesce(_thread_id, *, user_id):
+        return {}
+
+    monkeypatch.setattr(thread_mutations, "authenticate", lambda _credential: {"id": "user-1"})
+    monkeypatch.setattr(thread_mutations.runtime_boundary, "quiesce_thread_runtimes", _quiesce)
+    client, measure_key, _ = world
+    assert (await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "d1", "n": 1}))).status_code == 200
+    await thread_mutations.delete_thread(OWNER, "session")
+    db = get_db()
+    try:
+        assert measure_keys.resolve(db, measure_key) is None
+        assert measure_keys.list_keys(db, OWNER) == []
+    finally:
+        db.close()
+    assert (await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "d2", "n": 1}))).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_workflow_version_is_the_servers_and_a_different_claim_is_refused(world, monkeypatch) -> None:
+    import infra.otlp_admission as admission
+
+    monkeypatch.setattr(admission, "workflow_stamps", lambda agent, records: {"wf": ("wf", "v-server")})
+    client, measure_key, _ = world
+    base = {"event.name": "qa.rec", "n": 1, "corsia.workflow.ref": "wf"}
+    count, text = rejected(await send(client, measure_key, request_of({**base, "code": "w1", "corsia.workflow.version": "v-forged"})))
+    assert count == 1 and "corsia.workflow.version" in text
+    assert own_status()["events"]["qa.rec"]["today"]["counters"]["identity_mismatch"] == 1
+    assert rows("qa.rec") == 0
+    same = await send(client, measure_key, request_of({**base, "code": "w2", "corsia.workflow.version": "v-server"}, {**base, "code": "w3"}))
+    assert rejected(same) == (0, "")
+    assert rows("qa.rec") == 2
+
+
+@pytest.mark.asyncio
+async def test_run_id_that_is_not_a_plan_node_is_the_producers_label(world) -> None:
+    client, measure_key, _ = world
+    response = await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "r1", "n": 1, "corsia.run_id": "ci-1234"}))
+    assert rejected(response) == (0, "") and rows("qa.rec") == 1
+
+
+@pytest.mark.asyncio
+async def test_list_returns_the_current_endpoint(world) -> None:
+    _, _, port = world
+    listing = json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="list"))
+    assert listing["endpoint"] == f"http://127.0.0.1:{port}"
+    minted = json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="mint", label="ci"))
+    assert "next free one" in minted["send"] and "action list" in minted["send"]
+
+
+def test_an_overflowing_time_is_none_and_its_record_is_refused_as_out_of_range() -> None:
+    from infra import otlp_decode
+    from infra.otlp_admission import Lookup, prepare
+
+    assert otlp_decode._time(10**40) is None
+    record = otlp_decode.WireRecord({"event.name": "qa.rec"}, {}, None, time_out_of_range=True)
+    item = prepare(OWNER, [record], Lookup(None, {}, {}), {})[0]
+    assert item.refusal is not None and item.refusal[1].startswith("qa.rec: time is out of range;")
+
+
+@pytest.mark.asyncio
+async def test_mint_and_an_accepted_request_each_emit_one_product_event(world, monkeypatch) -> None:
+    import infra.otlp_receiver as receiver
+    import tools.measure_keys as tool
+
+    seen: list[tuple] = []
+    monkeypatch.setattr(receiver, "emit_product_event", lambda category, action, **kw: seen.append((category, action, kw)))
+    monkeypatch.setattr(tool, "emit_product_event", lambda category, action, **kw: seen.append((category, action, kw)))
+    client, measure_key, _ = world
+    minted = json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="mint", label="ci"))
+    await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "p1", "n": 1}, {"event.name": "qa.nope", "code": "p2"}))
+    assert [(c, a) for c, a, _ in seen] == [("measure_key", "minted"), ("otlp_intake", "request_accepted")]
+    assert seen[1][2]["properties"] == {"records": 2, "rejected": 1}
+    assert minted["key"] not in repr(seen)

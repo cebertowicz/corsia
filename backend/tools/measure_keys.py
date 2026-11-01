@@ -7,6 +7,7 @@ from typing import Any
 from infra import measure_keys, otlp_state
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
 from tools.base import Tool
 
 _ACTIONS = ("mint", "list", "revoke")
@@ -30,7 +31,8 @@ class MeasureKeyTool(Tool):
                 "is not a person's credential, so putting it in the outside tool's env or config is the intended "
                 "use. Never write it into a file CORSIA tracks or a message. The key stamps your identity: records "
                 "may not claim another. "
-                "action list shows your keys (never the key itself); action revoke (needs key_id) stops one.")
+                "action list shows your keys (never the key itself) and the current endpoint, which can change if the "
+                "port is taken at a later start; action revoke (needs key_id) stops one.")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -47,7 +49,8 @@ class MeasureKeyTool(Tool):
         thread_id, actor_row = context
         action = kwargs.get("action")
         if action == "list":
-            return json.dumps({"keys": await run_in_db(lambda: measure_keys.list_keys(get_db(), thread_id))}, sort_keys=True)
+            keys = await run_in_db(lambda: measure_keys.list_keys(get_db(), thread_id))
+            return json.dumps({"keys": keys, "endpoint": otlp_state.endpoint()}, sort_keys=True)
         if action == "revoke":
             key_id = kwargs.get("key_id")
             if not isinstance(key_id, str):
@@ -67,6 +70,8 @@ class MeasureKeyTool(Tool):
             except ValueError as exc:
                 return f"Error: {exc}"
             send = (f"POST {endpoint}/v1/logs (OTLP/HTTP, protobuf or JSON) with Authorization: Bearer <key>; "
-                    "each record needs an event.name attribute you declared in measures.yaml")
+                    "each record needs an event.name attribute you declared in measures.yaml. If the port is taken at a later "
+                    "start CORSIA uses the next free one; action list shows the current endpoint.")
+            emit_product_event("measure_key", "minted", thread_id=thread_id)
             return json.dumps({"key_id": key_id, "key": key, "endpoint": endpoint, "send": send, "shown_once": True})
         return f"Error: action must be one of {', '.join(_ACTIONS)}"

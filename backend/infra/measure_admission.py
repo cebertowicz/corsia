@@ -43,9 +43,10 @@ def admit(
 
     Callers: a script run's measure lines, event intake for a ``use: both`` event (any
     producer) and the OTLP receiver. ``source`` and ``provenance`` are the path's own and
-    have no default, so a caller can't forget them. ``run_id``, ``workflow_ref`` and
-    ``workflow_version`` are the caller's own stamps, resolved before admission; the producer
-    can't set them.
+    have no default, so a caller can't forget them. ``workflow_ref`` and ``workflow_version`` are
+    the caller's own stamps, resolved by the server before admission; the producer can't set
+    them. ``run_id`` is a plan node the server resolved, or else the producer's own run label
+    (for example a CI run id), which is kept as sent.
     """
     state = REGISTRY.ensure_loaded(db)
     entry = state.events.get(event_name)

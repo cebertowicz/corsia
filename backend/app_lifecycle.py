@@ -310,9 +310,12 @@ async def _shutdown_runtime_services(
 
     stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
-    from app_shutdown_runtime import shutdown_devices
+    from app_shutdown_runtime import shutdown_devices, shutdown_otlp_listener
 
     devices_failure, pending_cancel = await shutdown_devices(
+        _log_shutdown, pending_cancel, _run_cleanup_owner,
+    )
+    otlp_failure, pending_cancel = await shutdown_otlp_listener(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
     host_access_failure, host_access_cancel = await _shutdown_host_access(
@@ -372,7 +375,7 @@ async def _shutdown_runtime_services(
         (
             fork_failure, fork_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
-            process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
+            process_failure, host_access_failure, devices_failure, otlp_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,

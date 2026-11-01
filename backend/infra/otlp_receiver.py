@@ -25,6 +25,7 @@ from infra.db_async import run_in_db, run_off_db, run_read
 from infra.drain import is_draining
 from infra.measure_keys import KEY_SHAPE, KeyOwner, resolve
 from infra.otlp_state import CAPS, RECORDS_PER_REQUEST, REFUSALS, UNATTRIBUTED
+from infra.product_events import emit_product_event
 
 WIRE_LIMIT = 1024 * 1024
 INFLATED_LIMIT = 4 * 1024 * 1024
@@ -123,10 +124,14 @@ class OtlpReceiver:
         lookup = await run_read(_lookup, agent, wire)
         workflows = await run_off_db(admission.workflow_stamps, agent, wire)
         items = await run_off_db(admission.prepare, agent, wire, lookup, workflows)
-        refused = await run_in_db(admission.write_batch, agent, owner.key_class, lookup.project_id, lookup.uses, items)
+        refused = await run_in_db(admission.write_batch, agent, lookup.project_id, lookup.uses, items)
         for position, item in enumerate(items):
             if item.route and (text := await _route(owner, lookup.project_id, item)) is not None:
                 refused[position] = text
+        await run_off_db(
+            emit_product_event, "otlp_intake", "request_accepted", thread_id=agent,
+            properties={"records": count, "rejected": len(refused)},
+        )
         texts = [refused[position] for position in sorted(refused)][:_FIRST_REFUSALS]
         message = sanitize_credential_text("; ".join(texts))
         return Response(decode.response_body(content_type, len(refused), message), media_type=content_type)
@@ -165,7 +170,7 @@ async def _route(owner: KeyOwner, project_id: str | None, item: admission.Item) 
         json.dumps([owner.agent_thread_id, item.name, item.ts, item.run_id, item.attributes], sort_keys=True, default=str).encode()
     ).hexdigest()
     stamps = MeasureStamps(
-        source=admission.SOURCE, provenance=admission.PROVENANCE[owner.key_class], run_id=item.run_id,
+        source=admission.SOURCE, provenance=admission.PROVENANCE, run_id=item.run_id,
         workflow_ref=item.workflow_ref, workflow_version=item.workflow_version, project_id=project_id,
         ts=item.ts, subject_key=item.subject,
     )

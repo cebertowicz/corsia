@@ -17,10 +17,18 @@ async def shutdown_fork_owners():
 async def shutdown_devices(logger, pending_cancel, run_cleanup_owner):
     """Join the Devices runtime before later lifecycle owners tear down."""
     from core.devices_runtime import runtime as devices_runtime
-    from infra.otlp_listener import listener as otlp_listener
 
     failure, cancelled = await run_cleanup_owner(
         "devices listener", devices_runtime.disable(), logger,
     )
-    otlp_failure, otlp_cancelled = await run_cleanup_owner("otlp listener", otlp_listener.stop(), logger)
-    return failure or otlp_failure, pending_cancel or cancelled or otlp_cancelled
+    return failure, pending_cancel or cancelled
+
+
+async def shutdown_otlp_listener(logger, pending_cancel, run_cleanup_owner):
+    """Stop the loopback measure receiver so no outside tool writes during teardown."""
+    from infra.otlp_listener import listener as otlp_listener
+
+    failure, cancelled = await run_cleanup_owner(
+        "otlp listener", otlp_listener.stop(), logger,
+    )
+    return failure, pending_cancel or cancelled

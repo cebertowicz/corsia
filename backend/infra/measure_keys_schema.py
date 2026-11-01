@@ -1,9 +1,8 @@
 """Measure keys: what lets an outside tool write declared events to the OTLP receiver.
 
 A key is stored only as its SHA-256 and shown once. It resolves on the server to the
-account, the agent thread and the class that minted it; the payload never says which.
-``agent`` keys are minted by the agent and readable to it; ``emitter`` is reserved for a
-key the person mints for a product outside the agent's reach, which nothing mints yet.
+account and the agent thread that minted it; the payload never says which. The agent mints
+its own keys and can read their labels back, never the key.
 """
 
 MEASURE_KEYS_SCHEMA_SQL = """
@@ -12,7 +11,6 @@ MEASURE_KEYS_SCHEMA_SQL = """
         key_hash        TEXT NOT NULL UNIQUE,
         user_id         TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL,
-        class           TEXT NOT NULL CHECK (class IN ('agent', 'emitter')),
         label           TEXT NOT NULL,
         created_at      TEXT NOT NULL,
         revoked_at      TEXT

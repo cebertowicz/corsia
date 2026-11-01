@@ -10,7 +10,6 @@ _KEYS_DDL = """
         key_hash        TEXT NOT NULL UNIQUE,
         user_id         TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL,
-        class           TEXT NOT NULL CHECK (class IN ('agent', 'emitter')),
         label           TEXT NOT NULL,
         created_at      TEXT NOT NULL,
         revoked_at      TEXT
