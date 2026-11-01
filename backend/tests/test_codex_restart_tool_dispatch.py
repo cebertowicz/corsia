@@ -75,6 +75,47 @@ async def _read_probe(client, thread_id, call_id):
     return done[0]["turn_id"]
 
 
+async def _fail_on_stale_receipt(client, backend, thread_id):
+    """A write whose receipt never matches fails visibly, and one wake answers the person."""
+    await client.seed_replies([{
+        "tool_calls": [{
+            "id": "current-call", "receipt_call_id": "stale-call",
+            "name": "write_file", "arguments": {
+                "path": "must-not-exist.txt", "content": "unexpected effect",
+            },
+        }], "finish_reason": "tool_calls",
+    }, {"content": "WAKE_ANSWERED", "finish_reason": "stop"}])
+    async with TurnDriver(backend) as driver:
+        await driver.subscribe(thread_id)
+        await driver.send(thread_id, "Write the test file")
+        frames = await driver.collect(
+            thread_id, until=("turn_complete", "error"), timeout=15,
+        )
+    assert "turn_complete" in frame_types(frames) or "error" in frame_types(frames), frames
+    rows = await client.messages(thread_id)
+    assert any(
+        "Timed out waiting for the current Codex tool usage receipt after 0.1s"
+        in str(row.get("content", "")) for row in rows
+    ), rows
+    # The failed Turn never answered the person, so one wake answers it once
+    # (the mock's second reply; an exhausted queue would repeat the tool call).
+    for _ in range(150):
+        if await client.active_turn_count(thread_id) == 0:
+            break
+        await asyncio.sleep(0.1)
+    assert await client.active_turn_count(thread_id) == 0, backend.log_tail(60)
+    rows = await client.messages(thread_id)
+    assert sum(
+        (row.get("metadata") or {}).get("event_type") == "system.turn.unanswered_input"
+        for row in rows
+    ) == 1, rows
+    assert any(
+        row.get("role") == "assistant" and "WAKE_ANSWERED" in str(row.get("content") or "")
+        for row in rows
+    ), rows
+    assert not list(backend.workspace.rglob("must-not-exist.txt"))
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_first_tools_in_existing_and_fresh_conversations_after_restart(tmp_path):
@@ -125,43 +166,7 @@ async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monk
         await asyncio.to_thread(backend.boot)
         fresh = await client.create_session("fresh failure conversation")
         for thread_id in (existing, fresh):
-            await client.seed_replies([{
-                "tool_calls": [{
-                    "id": "current-call", "receipt_call_id": "stale-call",
-                    "name": "write_file", "arguments": {
-                        "path": "must-not-exist.txt", "content": "unexpected effect",
-                    },
-                }], "finish_reason": "tool_calls",
-            }, {"content": "WAKE_ANSWERED", "finish_reason": "stop"}])
-            async with TurnDriver(backend) as driver:
-                await driver.subscribe(thread_id)
-                await driver.send(thread_id, "Write the test file")
-                frames = await driver.collect(
-                    thread_id, until=("turn_complete", "error"), timeout=15,
-                )
-            assert "turn_complete" in frame_types(frames) or "error" in frame_types(frames), frames
-            rows = await client.messages(thread_id)
-            assert any(
-                "Timed out waiting for the current Codex tool usage receipt after 0.1s"
-                in str(row.get("content", "")) for row in rows
-            ), rows
-            # The failed Turn never answered the person, so one wake answers it once
-            # (the mock's second reply; an exhausted queue would repeat the tool call).
-            for _ in range(150):
-                if await client.active_turn_count(thread_id) == 0:
-                    break
-                await asyncio.sleep(0.1)
-            assert await client.active_turn_count(thread_id) == 0, backend.log_tail(60)
-            rows = await client.messages(thread_id)
-            assert sum(
-                (row.get("metadata") or {}).get("event_type") == "system.turn.unanswered_input"
-                for row in rows
-            ) == 1, rows
-            assert any(
-                row.get("role") == "assistant" and "WAKE_ANSWERED" in str(row.get("content") or "")
-                for row in rows
-            ), rows
-            assert not list(backend.workspace.rglob("must-not-exist.txt"))
+            await _fail_on_stale_receipt(client, backend, thread_id)
             await _read_probe(client, thread_id, "after-failure")
     finally:
         await asyncio.to_thread(backend.stop)
@@ -185,27 +190,7 @@ async def test_post_failure_probe_receipt_is_not_held_to_the_stale_budget(tmp_pa
     try:
         existing = await client.create_session("existing failure conversation")
         await _read_probe(client, existing, "seed")
-        await client.seed_replies([{
-            "tool_calls": [{
-                "id": "current-call", "receipt_call_id": "stale-call",
-                "name": "write_file", "arguments": {
-                    "path": "must-not-exist.txt", "content": "unexpected effect",
-                },
-            }], "finish_reason": "tool_calls",
-        }])
-        async with TurnDriver(backend) as driver:
-            await driver.subscribe(existing)
-            await driver.send(existing, "Write the test file")
-            frames = await driver.collect(
-                existing, until=("turn_complete", "error"), timeout=15,
-            )
-        assert "turn_complete" in frame_types(frames) or "error" in frame_types(frames), frames
-        rows = await client.messages(existing)
-        assert any(
-            "Timed out waiting for the current Codex tool usage receipt after 0.1s"
-            in str(row.get("content", "")) for row in rows
-        ), rows
-        assert await client.active_turn_count(existing) == 0
+        await _fail_on_stale_receipt(client, backend, existing)
         # The probe's receipt only becomes visible after 0.5s -- above the
         # stale budget, comfortably below the product default -- and must
         # still succeed, in the SAME process, without a restart.
