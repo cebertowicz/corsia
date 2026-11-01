@@ -77,6 +77,16 @@ describe('update screen percentage replays', () => {
 		expect(byCount).toBeGreaterThan(timeOnly.percent);
 	});
 
+	it('stays a number when the screen opens with the drain already at or past its cap', () => {
+		const model = new ProgressModel();
+		model.update(0, { step: 'waiting', count: null, alive: true, drainRemaining: 0 });
+		model.update(1_000, { step: 'waiting', count: null, alive: true, drainRemaining: 0 });
+		expect(Number.isFinite(model.percent)).toBe(true);
+		model.update(2_000, { step: 'restarting', count: null, alive: true });
+		expect(Number.isFinite(model.percent)).toBe(true);
+		expect(model.percent).toBeLessThan(100);
+	});
+
 	it('stops the clock when the source is not alive, and never goes back', () => {
 		const model = new ProgressModel();
 		model.update(0, { step: 'restarting', count: null, alive: true });

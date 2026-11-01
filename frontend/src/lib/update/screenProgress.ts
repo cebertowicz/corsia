@@ -116,7 +116,8 @@ export class ProgressModel {
 		let timeShare: number;
 		if (step === 'waiting') {
 			// The drain's length is live: its time share is the part of its own time already gone, and an agent count can beat it.
-			timeShare = input.drainRemaining != null ? phase.elapsed / (phase.elapsed + Math.max(0, input.drainRemaining)) : Math.min(1, phase.elapsed / phase.expected);
+			const length = phase.elapsed + Math.max(0, input.drainRemaining ?? 0);
+			timeShare = input.drainRemaining == null ? Math.min(1, phase.elapsed / phase.expected) : length > 0 ? phase.elapsed / length : 1;
 			this.value = Math.max(this.value, Math.min(at(Math.max(timeShare, countShare)), CEILING));
 		} else {
 			// A phase's own count lifts the value; its time keeps adding on top, so a count that stands still does not stall the bar.
