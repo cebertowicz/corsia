@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from core import turn_iteration_context as iteration_context
-from core import turn_provider_call, turns_steps
+from core import turn_measured_usage, turn_provider_call, turns_steps
 from core.turn_provider_error import (
     TurnProviderError, check_provider_error, end_if_overflow_unchanged, terminal_payload as _terminal_payload,
 )
@@ -167,7 +167,7 @@ async def _call_provider(
             state.last_measured_rendered_input_tokens = int(
                 state.fit_ledger.rendered_input_tokens
             )
-        usage = iteration_context._context_usage_from_latest_call(
+        usage = turn_measured_usage.context_usage_from_latest_call(
             state.context_usage, state.last_measured_call_usage,
             include_context_details=False)
         await provider_on_step("context_usage", {"context_usage": usage, "_context_usage_identity": state.context_identity})

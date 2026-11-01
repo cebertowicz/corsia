@@ -54,6 +54,9 @@ class ProviderBoundary:
     eager_checkpoint_id: str | None = None
     recovery_input_tokens: int | None = None
     fixed_input_tokens: int = 0
+    #: The configured window when ``context_window`` is a live memory fit, which
+    #: ends with this Turn; settlement compares configured windows only.
+    configured_window: int | None = None
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
@@ -61,7 +64,7 @@ class ProviderBoundary:
     ) -> CheckpointUnavailable:
         """Carry the observed facts to the existing input settlement owner."""
         return CheckpointUnavailable(
-            detail, context_window=self.context_window,
+            detail, context_window=self.configured_window or self.context_window,
             installed_checkpoint_id=(
                 self.installed_checkpoint.id if self.installed_checkpoint else None
             ),

@@ -366,15 +366,16 @@ def resolve_window_for_row(row: Mapping[str, Any], *, db=None) -> int | None:
     return resolve_window_facts(row, db=db).effective
 
 
-def get_context_window_or_none(model: str, *, db=None) -> int | None:
-    """Resolve the live context window, reporting absence as None."""
+def get_context_window_or_none(model: str, *, db=None, live: bool = True) -> int | None:
+    """Resolve the live (or, with ``live=False``, configured) window, reporting absence as None."""
     row = None
     try:
         row = _catalog_row(model, db=db)
     except Exception as exc:
         logger.warning("model catalog lookup failed for {}: {}", model, exc)
     if row is not None:
-        return resolve_live_window_facts(row, db=db).effective
+        resolve = resolve_live_window_facts if live else resolve_window_facts
+        return resolve(row, db=db).effective
     # No catalog row: an optional override keyed by the raw id may still pin it.
     return _optional_profile_context_window(model, db=db)
 
