@@ -1,9 +1,10 @@
 """The continuity_edit schema must describe what its validator enforces.
 
-An agent produces a call from the tool definition alone. When the schema is
-looser than the validator, that call is rejected at runtime and the shape has
-to be discovered by trial — which is the failure #1477 records, and which this
-lane hit twice in one session.
+An agent produces a call from the tool definition alone. When the schema does
+not describe a body's shape, that call is rejected at runtime and the shape
+has to be discovered by trial — which is the failure #1477 records, and which
+this lane hit twice in one session. The schema leaves out only the length and
+item bounds; the server refuses a body over one with the bound named.
 
 These tests are drift guards as much as assertions: they derive what the schema
 must expose from the validator models themselves, so adding a field or changing
@@ -64,8 +65,6 @@ def test_a_json_string_body_is_decoded_once_on_add():
     the model is not confused about the shape -- it serialised it twice. The
     registry decodes it for every tool; the body is declared an object.
     """
-    import json
-
     from tools.continuity import ContinuityEditTool
 
     body = {"statement": "s", "source_refs": [_REF]}
@@ -76,8 +75,6 @@ def test_a_json_string_body_is_decoded_once_on_add():
 
 
 def test_a_json_string_body_is_decoded_once_on_replace():
-    import json
-
     from tools.continuity import ContinuityEditTool
 
     body = {"statement": "s", "source_refs": [_REF]}
@@ -127,26 +124,32 @@ def test_body_exposes_every_key_the_validator_requires():
 
 @pytest.mark.parametrize("operation", ["add", "replace"])
 @pytest.mark.parametrize(
-    "body",
+    "body,bound",
     [
-        {"statement": "x" * 4097, "source_refs": [_REF]},
-        {"statement": "", "source_refs": [_REF]},
-        {"statement": "s", "source_refs": [_REF] * 17},
+        ({"statement": "x" * 4097, "source_refs": [_REF]}, "at most 4096 characters"),
+        ({"statement": "", "source_refs": [_REF]}, "at least 1 character"),
+        ({"statement": "s", "source_refs": [_REF] * 17}, "at most 16 items"),
     ],
     ids=["too-long", "empty", "too-many-refs"],
 )
-def test_bounds_left_out_of_the_schema_are_enforced_by_the_server(operation, body):
+def test_bounds_left_out_of_the_schema_are_refused_with_the_bound_named(
+    operation, body, bound
+):
     """The advertised body omits length and item bounds the entry models hold.
 
     They are enforced where every body is validated (``validate_entry_body``
-    through ``body_errors``), so leaving them out of the prompt loses nothing.
+    through ``body_errors``), and the refusal names the bound, so an agent
+    learns the limit from the first refusal rather than by trial. ``replace``
+    does not know the entry's field, so it must not fall back to the
+    no-shape message for a body of a real shape.
     """
     call = {"operation": operation, "body": body}
     call |= {"field": "facts"} if operation == "add" else {"entry_id": 1}
 
     refusal = _refuses(call)
 
-    assert "invalid facts entry" in refusal or "does not match any continuity entry shape" in refusal
+    assert bound in refusal
+    assert "does not match any continuity entry shape" not in refusal
 
 
 def test_relevant_state_kind_is_the_restricted_vocabulary():
@@ -191,36 +194,46 @@ def test_source_refs_shape_is_declared_not_prose():
     assert set(items["properties"]["kind"]["enum"]) == set(get_args(SourceKind))
 
 
-@pytest.mark.parametrize(
-    "field,body,valid",
-    [
-        ("facts", {"statement": "s", "source_refs": [_REF]}, True),
+_BOTH = (True, True)
+_NEITHER = (False, False)
+#: Schema passes, validator refuses: only the bounds the schema leaves out.
+_BOUND_ONLY = (True, False)
 
-        ("decisions", {"statement": "s", "rationale": "w", "source_refs": [_REF]}, True),
+
+@pytest.mark.parametrize(
+    "field,body,expected",
+    [
+        ("facts", {"statement": "s", "source_refs": [_REF]}, _BOTH),
+
+        ("decisions", {"statement": "s", "rationale": "w", "source_refs": [_REF]}, _BOTH),
         (
             "relevant_state",
             {"kind": "file", "reference": "r", "state": "s", "source_refs": [_REF]},
-            True,
+            _BOTH,
         ),
-        ("verification", {"result": "r", "evidence": "e", "source_refs": [_REF]}, True),
+        ("verification", {"result": "r", "evidence": "e", "source_refs": [_REF]}, _BOTH),
         # The reported repro: source refs as bare strings.
-        ("facts", {"statement": "s", "source_refs": ["thread 0fd264e6"]}, False),
-        ("facts", {"statement": "s", "source_refs": [_REF], "stray": 1}, False),
-        ("facts", {"statement": "s", "source_refs": [_REF], "rationale": "w"}, False),
+        ("facts", {"statement": "s", "source_refs": ["thread 0fd264e6"]}, _NEITHER),
+        ("facts", {"statement": "s", "source_refs": [_REF], "stray": 1}, _NEITHER),
+        ("facts", {"statement": "s", "source_refs": [_REF], "rationale": "w"}, _NEITHER),
         (
             "relevant_state",
             {"kind": "nonsense", "reference": "r", "state": "s", "source_refs": [_REF]},
-            False,
+            _NEITHER,
         ),
+        # Left out of the schema on purpose; the server names the bound.
+        ("facts", {"statement": "x" * 5000, "source_refs": [_REF]}, _BOUND_ONLY),
     ],
 )
-def test_schema_accepts_exactly_what_the_validator_accepts(field, body, valid):
+def test_schema_and_validator_differ_only_on_the_bounds_left_out(field, body, expected):
     """The property that actually matters, checked end to end.
 
     Every other test here inspects the schema's internals. This runs a real
-    JSON Schema validator and the real Pydantic validator over the same call
-    and requires them to agree, because the defect is precisely a body that
-    passes one and fails the other.
+    JSON Schema validator and the real Pydantic validator over the same call.
+    The schema must never refuse a body the validator accepts, and must refuse
+    every wrong key, type or vocabulary the validator refuses; the one place it
+    is looser is the length and item bounds, which the server refuses with the
+    bound named (see the bounds test above).
 
     The whole call is validated, not the body alone: the shapes are bound to
     fields, so a body checked without its field is not the thing an agent
@@ -239,7 +252,7 @@ def test_schema_accepts_exactly_what_the_validator_accepts(field, body, valid):
     except ValidationError:
         validator_ok = False
 
-    assert schema_ok == validator_ok == valid, (
+    assert (schema_ok, validator_ok) == expected, (
         f"schema says {schema_ok}, validator says {validator_ok}"
     )
 

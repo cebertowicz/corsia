@@ -1,10 +1,11 @@
 """The continuity_edit parameter schema, generated from its validators.
 
-The schema and the validator disagreeing is the defect #1477 records: a call
-an agent built from the tool definition alone was rejected at runtime, and the
-real shape had to be found by trial. So nothing here is written by hand -- the
-body's keys, the per-field rules and the prose are all derived from
-``ENTRY_FIELD_MODELS`` and the maps the executor enforces.
+The schema and the validator disagreeing on a body's shape is the defect #1477
+records: a call built from the tool definition alone was rejected at runtime,
+and the real shape had to be found by trial. So nothing here is written by
+hand -- the body's keys, the per-field rules and the prose are all derived
+from ``ENTRY_FIELD_MODELS`` and the maps the executor enforces. Length and
+item bounds are left out; the server refuses a body over one, naming it.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ _ONE_FIELD_PER_MODEL = tuple(
 def _body_key_groups() -> str:
     """Describe which body keys each continuity field needs.
 
-    Derived from the validator's own models rather than restated, because the
-    schema being looser than the validator is the defect this repairs: a
+    Derived from the validator's own models rather than restated, because a
+    shape the definition does not describe is the defect this repairs: a
     schema-valid call was rejected at runtime and the shape had to be found by
     trial (#1477).
     """
@@ -370,9 +371,8 @@ def body_errors(operation: str, params: dict[str, Any]) -> list[str]:
     mismatch there, where the field is known.
 
     Both call :func:`validate_entry_body`, the store's own definition of a
-    legal entry, rather than restating it. This is where a wrong-shape body is
-    refused, and where the length and item bounds the advertised body leaves
-    out are enforced.
+    legal entry. Here a wrong-shape body is refused, and the length and item
+    bounds the advertised body leaves out are enforced.
     """
     body = params.get("body")
     if body is None:
@@ -391,10 +391,10 @@ def body_errors(operation: str, params: dict[str, Any]) -> list[str]:
     for field in _ONE_FIELD_PER_MODEL:
         try:
             validate_entry_body(field, body)
-        except ContinuityError:
+        except ContinuityError as invalid:
+            # A real shape's keys, a value out of bounds: name the bound, not a field.
+            if set(body) == set(ENTRY_FIELD_MODELS[field].model_fields):
+                return [f"body is not a valid entry: {invalid.__cause__ or invalid}"]
             continue
         return []
-    return [
-        "body does not match any continuity entry shape: " + _body_key_groups()
-    ]
-
+    return ["body does not match any continuity entry shape: " + _body_key_groups()]
