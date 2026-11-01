@@ -513,10 +513,7 @@ def test_native_cold_admission_keeps_room_for_its_output_budget():
 
     request = _request(None)
     fitted = native._fit_cold_input(request, [])
-    messages = [
-        {"role": "system", "content": request.instruction},
-        *(dict(message) for message in fitted.messages),
-    ]
+    messages = native.cold_messages(request.instruction, fitted.messages)
 
     assert input_fits(request, messages, []) is True
 
