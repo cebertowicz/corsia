@@ -76,6 +76,8 @@ def _read_native_checkpoint_context(
     thread_id: str,
     target_catalog_id: str,
 ) -> _NativeCheckpointContext | None:
+    """Read one fold's source: None when the target cannot fold, NothingNewerToFold past the floor."""
+    from core.fork_types import NothingNewerToFold
     from history.boundaries import boundary_before_latest_assistant_step
     from history.projection import render_portable_history
     from history.scoped_source import assistant_step_through
@@ -108,7 +110,7 @@ def _read_native_checkpoint_context(
             ),
         )
         if boundary is None:
-            return None
+            raise NothingNewerToFold("no history boundary follows the installed floor")
         return _NativeCheckpointContext(
             target, boundary, previous, projection, previous.id if previous is not None else None,
             resolve_working_dir(thread_row["project_id"], db),
@@ -249,26 +251,18 @@ async def maintain_native_checkpoint(
     if turn_identity is None or state.fit_ledger is None:
         return None
     configured_window = await _refresh_native_window(state, thread_id)
-    from core.checkpoint_native_admission import fixed_input_tokens
-    from core.checkpoint_resume import (
-        CheckpointWaitScope,
-        ProviderBoundary,
-        maintain_before_provider_call,
+    from core.checkpoint_native_admission import (
+        fixed_input_tokens, maintain_native_boundary, prepare_native_checkpoint, skip_optional_cold_fold,
     )
+    from core.checkpoint_resume import CheckpointWaitScope, ProviderBoundary
     scope = getattr(cancel_event, "checkpoint_wait_scope", None)
     if not isinstance(scope, CheckpointWaitScope):
         raise RuntimeError("managed Native Turn has no checkpoint wait scope")
 
     async def prepare(checkpoint_id: str, required: bool):
-        from core.checkpoint_native_admission import (
-            prepare_native_checkpoint,
-            skip_optional_cold_fold,
-        )
-
         skip_optional_cold_fold(state, required)
         context = await run_in_db(
-            _read_native_checkpoint_context, thread_id,
-            state.fit_ledger.target_catalog_id,
+            _read_native_checkpoint_context, thread_id, state.fit_ledger.target_catalog_id,
         )
         if context is None:
             return None
@@ -289,7 +283,7 @@ async def maintain_native_checkpoint(
     adopted = state.context_usage.get("checkpoint_generation_id")
     if state.overflow_retry_pending and installed is not None and installed.id == adopted:
         installed = None  # the refused payload carried it; the overflow retry needs a newer one
-    continuation = await maintain_before_provider_call(ProviderBoundary(
+    boundary = ProviderBoundary(
         thread_id=thread_id,
         turn=turn_identity,
         context_window=ledger.effective_window_tokens,
@@ -305,7 +299,10 @@ async def maintain_native_checkpoint(
         eager_checkpoint_id=eager.id if eager is not None else None,
         fixed_input_tokens=fixed_input_tokens(state),
         configured_window=configured_window,
-    ), must_adopt=state.overflow_retry_pending)
+    )
+    continuation = await maintain_native_boundary(boundary, overflow_retry=state.overflow_retry_pending)
+    if continuation is None:
+        return None
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)
     if continuation.payload is not None:

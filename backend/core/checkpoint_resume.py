@@ -31,6 +31,8 @@ class InstalledContinuation:
     payload: object
 
 
+CHECKPOINT_TAIL_TOO_LARGE = "checkpoint plus tail does not fit the selected provider"
+
 PrepareCheckpoint = Callable[[str, bool], Awaitable[CheckpointAdmission | None]]
 RenderInstalled = Callable[[CheckpointRecord], Awaitable[InstalledContinuation]]
 
@@ -110,6 +112,7 @@ async def _start_checkpoint(
         CheckpointTargetLimited,
         request_checkpoint,
     )
+    from core.fork_types import NothingNewerToFold
 
     checkpoint_id = str(uuid4())
     try:
@@ -135,6 +138,8 @@ async def _start_checkpoint(
         )
         return None
     except (ColdFoldInputTooLarge, ForkNotAdmitted) as error:
+        if required and isinstance(error, NothingNewerToFold):
+            raise  # the provider's boundary owner decides what a fold that cannot start means
         if required:
             raise boundary.unavailable(str(error)) from error
         logger.warning("Optional checkpoint unavailable for {}: {}", boundary.thread_id, error)
@@ -203,9 +208,7 @@ async def _await_installed(
     installed = await boundary.render_installed(completed)
     if installed.input_tokens > boundary.context_window:
         if not allow_newer_fold:
-            raise boundary.unavailable(
-                "checkpoint plus tail does not fit the selected provider"
-            )
+            raise boundary.unavailable(CHECKPOINT_TAIL_TOO_LARGE)
         started = await _start_checkpoint(boundary, required=True)
         assert started is not None
         return await _await_installed(

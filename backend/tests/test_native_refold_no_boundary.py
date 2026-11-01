@@ -225,30 +225,91 @@ async def _outcome(state, thread: str, turn: str) -> str:
     return "replies"
 
 
-# Both end in "checkpoint admission is unavailable", on the retry and on the next
-# send alike. The capped window (25,600) is under the fixed prompt plus tools
-# (29,075), so no fold can make room; what replaces the error is an open choice.
-DEAD = pytest.mark.xfail(strict=True, raises=AssertionError, reason="no boundary newer than the installed floor")
+# The capped window (25,600) is under the fixed prompt plus tools (29,075), and
+# nothing newer than the installed floor exists to fold, so the installed
+# checkpoint plus its tail (33,175) is what cannot fit.
+TAIL_TOO_LARGE = "checkpoint plus tail does not fit the selected provider"
 
 
-@DEAD
+def _count_reads(monkeypatch) -> list[str]:
+    """Record each fold-source read, the history render the boundary pays for."""
+    from core import turn_iteration_context as iteration_context
+
+    reads: list[str] = []
+    read = iteration_context._read_native_checkpoint_context
+
+    def counted(thread_id, target_catalog_id):
+        reads.append(thread_id)
+        return read(thread_id, target_catalog_id)
+
+    monkeypatch.setattr(iteration_context, "_read_native_checkpoint_context", counted)
+    return reads
+
+
+def _new_chat(thread: str):
+    """A new chat's first send: one user message and no history to fold."""
+    from infra.database import get_db
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES (?,'u',?,'t','t')",
+        (thread, MODEL),
+    )
+    db.execute(
+        "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+        "VALUES ('turn-3',?,0,?,'running','t','boot')", (thread, MODEL),
+    )
+    db.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+        "VALUES (?,?,'user','hi',?,'t',1)",
+        (f"{thread}-u1", thread, json.dumps({"turn_id": "turn-3"})),
+    )
+    db.commit()
+    db.close()
+    return _state([{"role": "system", "content": FIXED}, {"role": "user", "content": "hi"}], usage={})
+
+
+async def _after_the_cap_clears(state, monkeypatch) -> list[str]:
+    """The next send in the same chat, and a new chat, once #1929's cap is gone."""
+    from llm import memory_fit
+
+    async def no_fold(*_args, **_kwargs):
+        return None  # an optional fold starts nothing here, so no provider is called
+
+    monkeypatch.setattr("core.checkpoint_runtime.request_checkpoint", no_fold)
+    memory_fit.reset_for_tests()
+    same_chat = await _outcome(_further_send("t1", state), "t1", "turn-2")
+    new_chat = await _outcome(_new_chat("t2"), "t2", "turn-3")
+    return [same_chat, new_chat]
+
+
 @pytest.mark.asyncio
-async def test_refused_retry_with_nothing_newer_to_fold_keeps_the_chat_replying(seat):
-    """(B) The retry after a refusal demanded a newer checkpoint than the floor."""
+async def test_refused_retry_with_nothing_newer_to_fold_ends_handled_without_a_second_call(
+    seat, monkeypatch,
+):
+    """(B) The retry adopts nothing, so the Turn ends on the refusal, handled."""
+    from core.turn_provider_error import TurnProviderError, end_if_overflow_unchanged
+
     checkpoint_id = _seed_setup_turn("t1")
-    state, installed_tokens = await _adopted_state("t1", checkpoint_id)
+    state, _installed_tokens = await _adopted_state("t1", checkpoint_id)
     assert state.context_usage["checkpoint_generation_id"] == checkpoint_id
     await _refuse(state)
 
-    retry = await _outcome(state, "t1", "turn-1")
-    next_send = await _outcome(_further_send("t1", state), "t1", "turn-2")
+    prepared = await _boundary(state, "t1", "turn-1")
+    steps: list[str] = []
 
-    assert [retry, next_send] == ["replies", "replies"]
+    async def on_step(kind, _payload):
+        steps.append(kind)
+
+    with pytest.raises(TurnProviderError, match="Retry the send"):
+        await end_if_overflow_unchanged(state, prepared, MODEL, on_step)
+
+    assert prepared is None and steps == ["error"]
+    assert await _after_the_cap_clears(state, monkeypatch) == ["replies", "replies"]
 
 
-@DEAD
 @pytest.mark.asyncio
-async def test_capped_installed_tail_with_nothing_newer_to_fold_keeps_the_chat_replying(seat):
+async def test_capped_installed_tail_with_nothing_newer_to_fold_reports_the_tail(seat, monkeypatch):
     """(A) The installed checkpoint plus its tail is over the capped window."""
     from llm.memory_fit import memory_fit_window
 
@@ -257,8 +318,28 @@ async def test_capped_installed_tail_with_nothing_newer_to_fold_keeps_the_chat_r
     await _refuse(state)
     state.overflow_retry_pending = False  # the window stays capped without the retry
     assert installed_tokens > memory_fit_window(SEAT)
+    reads = _count_reads(monkeypatch)
 
-    first = await _outcome(state, "t1", "turn-1")
-    next_send = await _outcome(_further_send("t1", state), "t1", "turn-2")
+    assert await _outcome(state, "t1", "turn-1") == TAIL_TOO_LARGE
+    assert reads == ["t1"]  # one render, from the required start's own read
+    assert await _outcome(_further_send("t1", state), "t1", "turn-2") == TAIL_TOO_LARGE
 
-    assert [first, next_send] == ["replies", "replies"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overflow_retry", [True, False])
+async def test_a_target_that_cannot_fold_still_reports_admission_unavailable(
+    seat, monkeypatch, overflow_retry,
+):
+    """A switched or unavailable target is not nothing-newer: its cause is unchanged."""
+    from llm import resolution
+
+    checkpoint_id = _seed_setup_turn("t1")
+    state, _installed_tokens = await _adopted_state("t1", checkpoint_id)
+    await _refuse(state)
+    state.overflow_retry_pending = overflow_retry
+    monkeypatch.setattr(
+        resolution, "resolve_thread_target",
+        lambda *_a, **_k: SimpleNamespace(catalog_id=MODEL, harness="native", available=False),
+    )
+
+    assert await _outcome(state, "t1", "turn-1") == "checkpoint admission is unavailable"
