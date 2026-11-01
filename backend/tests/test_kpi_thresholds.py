@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -116,14 +116,59 @@ def test_a_value_at_the_line_or_inside_the_settle_days_reports_nothing(seeded):
     assert _wakes("owner") == 0
 
 
-def test_an_archived_owner_is_dead_lettered_not_filtered_out(seeded):
+def test_an_archived_owner_is_dead_lettered_and_not_listed_as_routed(seeded):
+    _, conductor = seeded
     db = get_db()
     db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id='owner'")
     db.commit()
     db.close()
-    job.run_daily(now=NOW)
+    assert job.run_daily(now=NOW) == []
     assert _wakes("owner") == 0
     assert _count("SELECT COUNT(*) FROM dead_letter_events WHERE reason='owner_inactive'") == 1
+    assert _notes(conductor) == 0
+
+
+def test_a_settled_week_is_judged_once_not_every_day_it_stays_newest(seeded):
+    _, conductor = seeded
+    assert job.run_daily(now=NOW, since=None) == ["agent:owner:2026-01-20"]
+    for day in (1, 2, 6):  # the week of Jan 12 stays the newest settled one until Jan 27
+        assert job.run_daily(now=NOW + timedelta(days=day), since=NOW + timedelta(days=day - 1)) == []
+    assert _wakes("owner") == 1
+    assert _notes(conductor) == 1
+
+
+def test_a_week_that_settled_while_the_job_did_not_run_is_judged_on_the_next_run(seeded):
+    # The week ended Jan 19 and settled Jan 20 00:00; the last run before that was Jan 15.
+    assert job.run_daily(now=NOW, since=datetime(2026, 1, 15, 9, tzinfo=timezone.utc)) == ["agent:owner:2026-01-20"]
+
+
+def test_a_week_that_settled_before_the_previous_run_is_not_judged_again(seeded):
+    assert job.run_daily(now=NOW, since=datetime(2026, 1, 20, 1, tzinfo=timezone.utc)) == []
+    assert _wakes("owner") == 0
+
+
+def test_a_low_higher_is_better_count_on_too_small_a_base_is_not_judged(seeded):
+    db = get_db()
+    db.execute("UPDATE measure_definitions SET spec_json=? WHERE kind='kpi'",
+               (json.dumps({**KPI, "better": "higher", "review": 5, "min_n": 10}),))
+    db.commit()
+    db.close()
+    assert job.run_daily(now=NOW) == []  # 2 rows is under the line of 5, but below min_n 10
+    assert _wakes("owner") == 0
+
+
+def test_the_kpi_job_judges_what_settled_since_the_previous_days_maintenance(isolated_db):
+    from jobs.nightly import _previous_run_at
+
+    assert _previous_run_at("2026-01-20") is None
+    db = get_db()
+    db.executemany("INSERT INTO fact_extraction_runs (run_date, status, result_json, ran_at) VALUES (?,?,?,?)",
+                   [("2026-01-18", "ok", "{}", "2026-01-18T02:00:00"),
+                    ("2026-01-19", "ok", "{}", "2026-01-19T02:05:00"),
+                    ("2026-01-20", "running", "{}", "2026-01-20T02:00:00")])
+    db.commit()
+    db.close()
+    assert _previous_run_at("2026-01-20") == datetime(2026, 1, 19, 2, 5, tzinfo=timezone.utc)
 
 
 def test_a_plain_thread_that_is_not_a_promoted_agent_is_woken(seeded):

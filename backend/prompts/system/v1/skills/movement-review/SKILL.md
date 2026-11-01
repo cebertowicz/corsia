@@ -9,13 +9,13 @@ The digest is built without a model and arrives as a note, or as a wake when a p
 
 A project conductor works only the digest of its own project, against that project's objectives. Do not read other scopes' series.
 
-**If you own the moved series** (the digest's scope is `agent:<your thread id>` and every move's `owner_agent` is you), a KPI you declared in your `measures.yaml` settled worse than its `review` line. It wakes you when its `alert` is `wake`, and arrives as a note when it is `digest`; at most one per day, covering all your KPIs. Work it yourself, no `delegate_send`: steps 1 to 3 below on your own series, then the owner steps:
+**If you own the moved series** (the digest's scope is `agent:<your thread id>` and every move's `owner_agent` is you), a KPI you declared in your `measures.yaml` settled worse than its `review` line. It wakes you when its `alert` is `wake`, and arrives as a note when it is `digest`. Each week is judged once, after its settle days; one report a day covers all your KPIs. Work it yourself, no `delegate_send`: steps 1 to 3 below on your own series, then the owner steps:
 
 - Read `measure_status` for dropped or refused rows before you trust the value: a drop explains a low count.
 - Change what you control (your skill, workflow, sources or your own `measures.yaml`) and sync it with `measure_sync`. A change to the declaration or its `review` line needs the reason in your plan; never move a line only to clear the alert.
 - Record the series and date on your plan. The next report, if it comes, shows whether the KPI is still past its line.
 
-A conductor that sees one of your moves in its project digest, listed with `owner_agent` set to you, treats it as routed to you and acts only if the move is still out on the next digest.
+A conductor that sees one of your moves in its project digest, listed with `owner_agent` set to you, treats it as routed to you and acts only if the same KPI is still out when its next week is judged.
 
 For each move, in order:
 

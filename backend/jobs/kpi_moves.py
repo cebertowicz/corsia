@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
+from api.measurement_agent_kpis import settles_at
 from events.movement_report import Move, PrecedingChange
 
 ALERTS = ("wake", "digest")
@@ -45,18 +46,29 @@ def normal_range(spec: Mapping[str, Any]) -> list[float | None]:
 
 
 def settled_value(spec: Mapping[str, Any], period: Mapping[str, Any]) -> float | None:
-    """The reading to judge: a count needs only its count, every other formula needs min_n met."""
-    value = period.get("count") if spec["formula"] == "count" else period.get("value")
+    """The reading to judge: a lower-is-better count needs only its count, everything else needs min_n met.
+
+    Rows past a lower-is-better line are an excess however small the base; a low higher-is-better count
+    on a base below min_n is too little activity to judge.
+    """
+    count_only = spec["formula"] == "count" and spec["better"] == "lower"
+    value = period.get("count") if count_only else period.get("value")
     return value if _number(value) else None
 
 
 def latest_settled(
-    periods: Sequence[Mapping[str, Any]], bounds: Sequence[datetime], settle_days: int, now: datetime,
+    periods: Sequence[Mapping[str, Any]], bounds: Sequence[datetime], spec: Mapping[str, Any], now: datetime,
+    since: datetime | None,
 ) -> tuple[Mapping[str, Any], datetime, datetime] | None:
-    """The newest completed period whose settle days have passed, with its start and end."""
+    """The newest completed, settled period with its start and end, if it settled after ``since``.
+
+    ``since`` is the previous daily run, so each period is judged once: on the first run after it settles.
+    """
     for index in range(len(periods) - 2, -1, -1):
-        if now >= bounds[index + 1] + timedelta(days=settle_days):
-            return periods[index], bounds[index], bounds[index + 1]
+        settled = settles_at(bounds[index + 1], spec)
+        if now >= settled:
+            new = since is None or settled > since
+            return (periods[index], bounds[index], bounds[index + 1]) if new else None
     return None
 
 
@@ -89,15 +101,16 @@ def preceding_changes(
 
 def kpi_moves(
     db: sqlite3.Connection, owner: str, result: Mapping[str, Any], bounds: Sequence[datetime], now: datetime,
+    since: datetime | None = None,
 ) -> list[KpiMove]:
-    """One move per alerting KPI whose latest settled value is strictly worse than its review line."""
+    """One move per alerting KPI whose period settled since the last run strictly worse than its review line."""
     moves = []
     for item in result["kpis"]:
         spec = item["spec"]
         review = spec.get("review")
         if spec.get("alert") not in ALERTS or not _number(review) or spec.get("better") not in ("higher", "lower"):
             continue
-        settled = latest_settled(item["periods"], bounds, spec.get("settle_days", 0), now)
+        settled = latest_settled(item["periods"], bounds, spec, now, since)
         if settled is None:
             continue
         period, start, end = settled

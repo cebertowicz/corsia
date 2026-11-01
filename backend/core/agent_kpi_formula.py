@@ -156,7 +156,7 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
                        and row.attrs.get("_declared_by_owner", False) for row in facts)
     no_activity = formula == "count" and not num_builtin and not numerator and not any_activity
     too_few = n < spec["min_n"] or no_activity
-    # A count past its line wakes even below min_n (its n counts a base, not the rows being counted).
+    # The raw count, for judging a lower-is-better count below min_n (its n counts a base, not these rows).
     count = value if formula == "count" and not no_activity else None
     return {"value": None if too_few else value, "count": count, "n": n, "coverage": coverage,
             "label": label, "label_mix": label_mix, "unknown": unknown,

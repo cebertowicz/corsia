@@ -193,7 +193,7 @@ async def _run_job_safely() -> None:
     # the same once-per-day claim and never records or wakes while verdict writes are off.
     await _emit_learning_reports_safely()
     await _run_workflow_verdicts_safely()
-    await _run_kpi_thresholds_safely()
+    await _run_kpi_thresholds_safely(run_date)
     await _reap_worktrees_safely()
 
 
@@ -229,12 +229,25 @@ async def _run_workflow_verdicts_safely() -> None:
         logger.exception("nightly_job: workflow verdict evaluation failed")
 
 
-async def _run_kpi_thresholds_safely() -> None:
+def _previous_run_at(run_date: str) -> datetime | None:
+    """When the latest earlier day's maintenance was claimed, or None on an install's first run."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT MAX(ran_at) FROM fact_extraction_runs WHERE run_date < ?", (run_date,),
+        ).fetchone()
+    finally:
+        db.close()
+    return datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc) if row and row[0] else None
+
+
+async def _run_kpi_thresholds_safely(run_date: str) -> None:
     """Wake the owners of KPIs past their review line, without breaking maintenance."""
     try:
         from jobs.kpi_thresholds import run_daily
 
-        await asyncio.to_thread(run_daily)
+        since = _previous_run_at(run_date)
+        await asyncio.to_thread(run_daily, since=since)
     except Exception:
         logger.exception("nightly_job: kpi threshold wakes failed")
 

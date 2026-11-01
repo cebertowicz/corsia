@@ -21,6 +21,11 @@ from tools.workflow_task_fields import version_short_hash
 router = APIRouter()
 
 
+def settles_at(end: datetime, spec: dict[str, Any]) -> datetime:
+    """When a period ending at ``end`` has settled: its KPI's settle days after the end."""
+    return end + timedelta(days=spec.get("settle_days", 0))
+
+
 def _repositories(db, project: str | None) -> set[str]:
     if project is None:
         return set()
@@ -137,13 +142,13 @@ def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str 
             value = evaluate(spec, events, start, end,
                              builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
                              selected=selected)
-            value["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
+            value["partial"] |= now < settles_at(end, spec)
             by_version = []
             for version in versions:
                 part = evaluate(spec, events, start, end, version["version"],
                                 builtins={name: _builtin_value(result, version['version'])
                                           for name, result in builtin_results.items()}, selected=selected)
-                part["partial"] |= now < end + timedelta(days=spec.get("settle_days", 0))
+                part["partial"] |= now < settles_at(end, spec)
                 by_version.append({"version": version["version"], **part})
             periods.append({"period": period, **value, "versions": by_version})
         results.append({"name": item["name"], "definition_version": item["version"], "spec": spec,
