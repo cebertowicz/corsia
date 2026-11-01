@@ -186,6 +186,33 @@ def test_answering_the_card_writes_the_profile_lines(scene, tmp_path, monkeypatc
     assert user_profile.uses_community_improvements(tmp_path) is True
 
 
+def test_a_failed_review_leaves_no_draft_and_a_retry_raises_one_card(scene, monkeypatch):
+    real = public.parent_review_decision
+    calls = []
+
+    def fail_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("review failed")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(public, "parent_review_decision", fail_once)
+
+    scene.update("activate", scene.steps["7:common"])
+
+    assert scene.decisions() == []
+
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        step_cards.raise_for_current_step(scene.steps["7:common"], scene.plan_id, db=db)
+    finally:
+        db.close()
+
+    assert _only_card(scene)["state"] == "raised"
+
+
 def test_no_community_entry_raises_nothing(scene, monkeypatch):
     monkeypatch.setattr(step_cards.setup_decisions, "community_card", lambda: (_ for _ in ()).throw(KeyError("x")))
 

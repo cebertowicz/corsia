@@ -60,15 +60,21 @@ def _raise_community(db, node_id: str, plan_id: str) -> None:
         "provenance": _PROVENANCE, "db": db,
     }
     key = f"community-card:{node_id}"
-    drafted = public.draft_decision(
-        plan_id, source_node_id=node_id, mutation_id=f"{key}:draft", **common,
-        **{field: card[field] for field in _FIELDS},
-    )
-    decision = drafted.result["decision"]
-    public.deliver_deferred(drafted)
-    for step, operation in (("review", public.parent_review_decision), ("raise", public.raise_decision)):
-        result = operation(
-            decision["id"], expected_revision=decision["revision"], mutation_id=f"{key}:{step}", **common,
+    from infra.database import write_transaction
+
+    results = []
+    with write_transaction(db, scope="community_card"):
+        drafted = public.draft_decision(
+            plan_id, source_node_id=node_id, mutation_id=f"{key}:draft", **common,
+            **{field: card[field] for field in _FIELDS},
         )
-        decision = result.result["decision"]
+        results.append(drafted)
+        decision = drafted.result["decision"]
+        for step, operation in (("review", public.parent_review_decision), ("raise", public.raise_decision)):
+            result = operation(
+                decision["id"], expected_revision=decision["revision"], mutation_id=f"{key}:{step}", **common,
+            )
+            results.append(result)
+            decision = result.result["decision"]
+    for result in results:
         public.deliver_deferred(result)
