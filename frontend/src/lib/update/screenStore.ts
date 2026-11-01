@@ -98,7 +98,7 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		l.estimateFrom = null;
 		const step = httpStep(operation);
 		const drain = step === 'waiting' ? drainCount(operation?.drain_total, operation?.blocking) : null;
-		return { input: { step, count: drain, alive: true }, longer: false, estimated: false };
+		return { input: { step, count: drain, alive: true, drainRemaining: step === 'waiting' ? operation?.hard_cap_remaining ?? null : null }, longer: false, estimated: false };
 	}
 	l.downAt ??= now;
 	if (readError) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
