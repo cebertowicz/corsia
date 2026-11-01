@@ -121,6 +121,9 @@ class LivenessSource:
         matches the transition it was collected at would call a wake stale for
         having been delivered, and the Turn it waited for would never start.
         """
+        wake = plan_liveness.wake_for(thread_id, db)
+        if wake is not None and wake["status"] == plan_liveness.CANCELLED:
+            return False  # its episode ended (Stop, pause, archive): never claimed
         signal = self._signal(thread_id, db)
         return (
             signal.count > 0

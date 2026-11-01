@@ -131,6 +131,10 @@ async def _stop_receipt(
     return StopReceipt(sid, "already_terminal", turn_id)
 
 
+class _StopNotApplied(Exception):
+    """Rolls back a Stop's wake cancel when the terminal did not apply."""
+
+
 def _commit_stop_terminal(
     user_id: str,
     sid: str,
@@ -165,16 +169,24 @@ def _commit_stop_terminal(
         ambiguous_stale_writes(
             connection, turn_id, error="Stop ended the turn after provider dispatch",
         )
-        settlement = persist_turn_settlement(turn_id, "cancelled", cause, db=connection)
-        if settlement.result is not TurnTerminalResult.APPLIED:
-            return _turn_status(user_id, sid, turn_id, db=connection), None
-        # A Stop leaves no successor Turn, so an armed plan wake would restart
-        # the agent the user just stopped. A steer never commits here. A
-        # plan-limit pause is not a user Stop: its wake survives, held by admission.
-        if cause is None:
-            from automation import plan_liveness
+        # A user Stop must not restart the agent on a plan wake, armed or
+        # already queued. The wake's episode ends before the terminal claims its
+        # successor, so that claim drops the queued wake as stale. A steer never
+        # commits here. A plan-limit pause is not a user Stop: its wake survives,
+        # held by admission.
+        try:
+            with write_transaction(connection, scope="stop_turn_wake"):
+                if cause is None:
+                    from automation import plan_liveness
 
-            plan_liveness.cancel_plan_wake(sid, db=connection)
+                    plan_liveness.cancel_plan_wake(sid, db=connection)
+                settlement = persist_turn_settlement(
+                    turn_id, "cancelled", cause, db=connection,
+                )
+                if settlement.result is not TurnTerminalResult.APPLIED:
+                    raise _StopNotApplied
+        except _StopNotApplied:  # the rollback also undid the wake cancel
+            return _turn_status(user_id, sid, turn_id, db=connection), None
         inputs = tuple(str(item["id"]) for item in connection.execute(
             "SELECT id FROM messages WHERE active_turn_id=? ORDER BY input_order",
             (turn_id,),
