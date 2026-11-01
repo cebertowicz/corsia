@@ -30,12 +30,12 @@ def _recovery_changed(
 ) -> bool:
     """Whether an actual install or cap change outran this refusal."""
     from infra.checkpoint_queries import current_installed
-    from llm.context_window import resolve_window_for_row
+    from llm.context_window import resolve_live_window_facts
     from llm.resolution import _target_row
 
     head = current_installed(str(rows[0]["thread_id"]), db=db)
     model = _target_row(str(rows[0]["target_model"]), db=db)
-    window = resolve_window_for_row(model, db=db) if model is not None else None
+    window = resolve_live_window_facts(model, db=db).effective if model is not None else None
     return (
         (head.id if head else None) != error.installed_checkpoint_id
         or (window is not None and window != error.context_window)

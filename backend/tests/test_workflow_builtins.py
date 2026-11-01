@@ -77,10 +77,10 @@ def test_only_latest_active_classifier_counts(db):
     seed_correction(db, 'negative', version='inactive', classified='2026-10-05')
     seed_correction(db, 'positive', classified='2026-10-03', suffix='a')
     seed_correction(db, 'positive', classified='2026-10-04', suffix='b')
-    from core.correction_attribution import person_corrections
+    from core.correction_attribution import person_correction_coverage
     result = read(db, 'corrections').versions['v1']
     assert result.value == 1 and result.n == 1
-    assert len(person_corrections(db, '2026-10-01', '2026-10-04')) == result.value
+    assert len(person_correction_coverage(db, '2026-10-01', '2026-10-04')) == result.value
 
 
 def test_window_uses_sqlite_time_comparisons_in_one_query(db):

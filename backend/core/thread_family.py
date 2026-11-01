@@ -77,6 +77,9 @@ def _delete_one_thread_rows(
     # claiming runs for a thread that no longer exists, and its row would
     # block the thread's own deletion.
     db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
+    # Nor does its measure key: an outside tool's credential must stop
+    # resolving once the agent it was issued to is gone.
+    db.execute("DELETE FROM measure_keys WHERE agent_thread_id = ?", (thread_id,))
     # Its event rules go too, with every outcome naming them or the thread.
     thread_rules = 'SELECT id FROM event_rules WHERE created_by = ? OR "to" = \'thread:\' || ?'
     db.execute(

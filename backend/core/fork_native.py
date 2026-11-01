@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
-from history.types import HistoryBoundary
 from subagents.provider_context_limits import is_provider_context_limit
 
+from core.fork_native_warm import NativeWarmSource
 from core.fork_native_tools import (
     MeasuredInput,
     assistant_message,
@@ -21,6 +18,7 @@ from core.fork_native_tools import (
     measured_input,
     run_tool_calls as _run_tool_calls,
 )
+from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.fork_failures import ForkCredentialsUnavailable
 from core.fork_types import (
@@ -41,6 +39,11 @@ from core.fork_types import (
 # still covers the largest local checkpoint call measured (7,336 tokens).
 SMALL_WINDOW_OUTPUT_DIVISOR = 5
 
+COLD_CLOSING_TURN = {
+    "role": "user",
+    "content": "Carry out the system instruction now, using the conversation above as its source.",
+}
+
 
 def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     """Bound the fork's output allowance by its writer's window."""
@@ -48,82 +51,18 @@ def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
         return request
     allowance = min(request.max_output_tokens, window // SMALL_WINDOW_OUTPUT_DIVISOR)
+    if request.carried_tokens > 0:
+        # Half the room between what the parent carries (fixed prompt and tool
+        # definitions) and the launch point; the other half is left for turns
+        # before the chat folds again. No room to halve leaves the allowance as
+        # it was; a zero allowance cannot run.
+        launch = window - soft_pressure_remaining(window)
+        half_room = (launch - request.carried_tokens) // 2
+        if half_room > 0:
+            allowance = min(allowance, half_room)
     if allowance == request.max_output_tokens:
         return request
     return replace(request, max_output_tokens=allowance)
-
-
-@dataclass(frozen=True, slots=True)
-class NativeWarmSource:
-    """The exact message/tool prefix an ordinary Native send would use."""
-
-    thread_id: str
-    boundary: HistoryBoundary
-    prefix_messages: tuple[dict[str, Any], ...]
-    tool_definitions: tuple[dict[str, Any], ...]
-    prefix_sha256: str
-    provider_input_tokens: int
-    rendered_input_tokens: int
-
-
-def capture_live_warm_source(
-    thread_id: str,
-    boundary: HistoryBoundary,
-    *,
-    messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]],
-    reasoning_effort: str | None,
-    preserve_thinking: bool | None,
-    provider_input_tokens: int,
-    rendered_input_tokens: int,
-) -> NativeWarmSource:
-    """Freeze the exact live Native prefix already accepted by the provider."""
-    frozen_messages = tuple(deepcopy(message) for message in messages)
-    frozen_tools = tuple(deepcopy(tool) for tool in tools)
-    if (
-        isinstance(provider_input_tokens, bool)
-        or not isinstance(provider_input_tokens, int)
-        or provider_input_tokens < 0
-        or isinstance(rendered_input_tokens, bool)
-        or not isinstance(rendered_input_tokens, int)
-        or rendered_input_tokens < 0
-    ):
-        raise ValueError("Native warm source requires a nonnegative occupancy anchor")
-    return NativeWarmSource(
-        thread_id=thread_id,
-        boundary=boundary,
-        prefix_messages=frozen_messages,
-        tool_definitions=frozen_tools,
-        prefix_sha256=_prefix_sha256(
-            frozen_messages,
-            frozen_tools,
-            reasoning_effort,
-            preserve_thinking,
-        ),
-        provider_input_tokens=provider_input_tokens,
-        rendered_input_tokens=rendered_input_tokens,
-    )
-
-
-def _prefix_sha256(
-    messages: tuple[dict[str, Any], ...],
-    tools: tuple[dict[str, Any], ...],
-    reasoning_effort: str | None,
-    preserve_thinking: bool | None,
-) -> str:
-    payload = json.dumps(
-        {
-            "messages": messages,
-            "tools": tools,
-            "reasoning_effort": reasoning_effort or "",
-            "preserve_thinking": preserve_thinking,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 async def _get_agent():
@@ -184,14 +123,25 @@ async def _messages_and_tools(
         if tool.get("function", {}).get("name") in kind.tool_allowlist
     ]
     fitted = await asyncio.to_thread(_fit_cold_input, request, tools)
-    return (
-        [
-            {"role": "system", "content": request.instruction},
-            *(dict(message) for message in fitted.messages),
-        ],
-        tools,
-        fitted.first_included_seq,
-    )
+    return cold_messages(request.instruction, fitted.messages), tools, fitted.first_included_seq
+
+
+def cold_messages(
+    instruction: str, source: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Frame a cold source so the fork's next turn answers the instruction.
+
+    The source quotes history in its own roles. One that ends on an assistant
+    reply (a manual, idle or model-switch checkpoint) left the system text as
+    the last instruction, and a model echoed its frozen continuity index
+    instead of writing; the warm branch already closes with a user turn.
+    """
+    from history.adapters import merge_checkpoint_source_blocks
+
+    return [
+        {"role": "system", "content": instruction},
+        *merge_checkpoint_source_blocks([*source, COLD_CLOSING_TURN]),
+    ]
 
 
 async def warm_input_fits(

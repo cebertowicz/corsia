@@ -513,10 +513,7 @@ def test_native_cold_admission_keeps_room_for_its_output_budget():
 
     request = _request(None)
     fitted = native._fit_cold_input(request, [])
-    messages = [
-        {"role": "system", "content": request.instruction},
-        *(dict(message) for message in fitted.messages),
-    ]
+    messages = native.cold_messages(request.instruction, fitted.messages)
 
     assert input_fits(request, messages, []) is True
 
@@ -525,6 +522,7 @@ def test_native_cold_admission_keeps_room_for_its_output_budget():
 async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch):
     """Changing the prefix/tools or skipping the tool continuation is a bug."""
     from core import fork_native as native
+    from core import fork_native_warm
     from infra import state
 
     prefix = (
@@ -532,7 +530,7 @@ async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch
         {"role": "user", "content": "stable history"},
     )
     tools = ({"type": "function", "function": {"name": "continuity_edit"}},)
-    source = native.capture_live_warm_source(
+    source = fork_native_warm.capture_live_warm_source(
         "thread-1",
         _boundary(),
         messages=list(prefix),

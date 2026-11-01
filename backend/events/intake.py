@@ -51,12 +51,16 @@ class _ResolvedEvent:
 
 @dataclass(frozen=True)
 class MeasureStamps:
-    """The runner's stamps for a both type's record, so an event line dedupes like a measure line."""
+    """The producer's stamps for a both type's record, so an event line dedupes like a measure line."""
 
+    source: str
+    provenance: str
     run_id: str | None = None
     workflow_ref: str | None = None
     workflow_version: str | None = None
     project_id: str | None = None
+    ts: str | None = None  # the record's own time, when the producer gave one
+    subject_key: str | None = None
     unversioned: bool = False  # the schedule names a workflow its stamp has no version for
 
 
@@ -279,11 +283,13 @@ def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter",
 def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: str,
            stamps: MeasureStamps | None) -> IntakeResult | None:
     """Record a both type through the one measure admission; its refusal refuses the event."""
-    stamps = stamps or MeasureStamps()
+    stamps = stamps or MeasureStamps(source="agent", provenance="agent_recorded")
     admission = admit_measure(
         conn, owner_thread_id=owner, event_name=event_type, attributes=facts,
+        source=stamps.source, provenance=stamps.provenance,
         project_id=stamps.project_id or _owner_project(conn, owner), run_id=stamps.run_id or event_id,
         workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
+        ts=stamps.ts, subject_key=stamps.subject_key,
     )
     if admission.refusal is not None:
         return _refusal("record_refused", admission.refusal)

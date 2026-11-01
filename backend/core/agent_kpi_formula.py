@@ -43,67 +43,121 @@ def prepare(spec: Mapping[str, Any], facts: Sequence[Event]) -> dict[str, list[E
     return {name: select(operand, facts) for name, operand in operands.items()}
 
 
+def _count(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+    num_builtin = builtins.get(spec["num"].get('builtin'))
+    value = num_builtin.value if num_builtin else len(numerator)
+    if coverage:
+        n = coverage["n"]
+    return value, n, unknown
+
+
+def _ratio(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+    num_spec = spec["num"]
+    num_builtin = builtins.get(num_spec.get('builtin'))
+    den_spec = spec["den"]
+    den_builtin = builtins.get(den_spec.get('builtin'))
+    denominator = distinct(in_bucket(selected["den"]), den_spec.get("distinct"))
+    n = den_builtin.n if den_builtin else len(denominator)
+    divisor = den_builtin.value if den_builtin else len(denominator)
+    if den_builtin:
+        unknown += den_builtin.unknown
+    total = num_builtin.value if num_builtin else float(len(numerator))
+    if "sum" in num_spec:
+        values = [attribute(row, num_spec["sum"]) for row in numerator]
+        num_unknown = sum(value is None for value in values)
+        unknown += num_unknown
+        total = sum(value for value in values if value is not None) if num_unknown < len(values) else None
+    return (total / divisor if divisor and total is not None else None), n, unknown
+
+
+def _rate_per_run(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+    num_builtin = builtins.get(spec["num"].get('builtin'))
+    run_builtin = builtins.get('runs')
+    n = run_builtin.value if run_builtin else 0
+    total = num_builtin.value if num_builtin else len(numerator)
+    if run_builtin:
+        unknown += run_builtin.unknown
+    return (total / n if n and total is not None else None), n, unknown
+
+
+def _share(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+    num_spec = spec["num"]
+    values = num_spec["values"]
+    return (sum(attribute(row, num_spec["attr"]) in values for row in numerator) / n if n else None), n, unknown
+
+
+def _percentile(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+    num_spec = spec["num"]
+    values = sorted(attribute(row, num_spec["attr"]) for row in numerator if attribute(row, num_spec["attr"]) is not None)
+    unknown = n - len(values)
+    return (values[max(0, math.ceil(num_spec["p"] / 100 * len(values)) - 1)] if values else None), n, unknown
+
+
+# The one list of KPI formulas and the fields each reads: sync refuses a KPI that `unfit`
+# names, and evaluate reads such a stored KPI as not tracked.
+_FORMULAS = {"count": (_count, ()), "ratio": (_ratio, ("den",)), "rate_per_run": (_rate_per_run, ()),
+             "share": (_share, ("num.attr", "num.values")), "percentile": (_percentile, ("num.attr", "num.p"))}
+FORMULAS = tuple(_FORMULAS)
+
+
+def _has(spec: Mapping[str, Any], field: str) -> bool:
+    holder, _, key = field.rpartition(".")
+    owner = spec.get(holder) if holder else spec
+    return isinstance(owner, Mapping) and key in owner and (key not in ("num", "den") or isinstance(owner[key], Mapping))
+
+
+def unfit(spec: Mapping[str, Any]) -> str | None:
+    """Why evaluate cannot compute this KPI, or None."""
+    formula = spec.get("formula")
+    if formula is None:
+        return f"has no formula; add one of {', '.join(FORMULAS)} as its formula"
+    if formula not in _FORMULAS:
+        return f'formula "{formula}" is not one of {", ".join(FORMULAS)}; use one of them'
+    missing = [field for field in ("num", "min_n", *_FORMULAS[formula][1]) if not _has(spec, field)]
+    if missing:
+        return f"formula {formula} needs {', '.join(missing)}; add {'it' if len(missing) == 1 else 'them'}"
+    return None
+
+
+def _not_tracked(reason: str) -> dict[str, Any]:
+    return {'value': None, 'n': 0, 'coverage': None, 'label': None, 'label_mix': {},
+            'unknown': 0, 'status': 'not tracked', 'reason': reason, 'partial': False}
+
+
 def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, end: datetime,
              version: str | None = None, builtins: Mapping[str, Any] | None = None,
              selected: Mapping[str, Sequence[Event]] | None = None) -> dict[str, Any]:
     """Compute one KPI in a period and optional version; None selects all versions."""
+    problem = unfit(spec)
+    if problem:
+        return _not_tracked(f"{problem} in the measures file, then run measure_sync")
+    formula = spec["formula"]
     num_spec = spec["num"]
     selected = selected if selected is not None else prepare(spec, facts)
     builtins = builtins or {}
     needed = [op['builtin'] for op in (num_spec, spec.get('den', {})) if 'builtin' in op]
-    if spec['formula'] == 'rate_per_run' and 'runs' in builtins:
+    if formula == 'rate_per_run' and 'runs' in builtins:
         needed.append('runs')
     reason = next((builtins[name].reason for name in needed if builtins[name].reason), None)
     if reason:
-        return {'value': None, 'n': 0, 'coverage': None, 'label': None, 'label_mix': {},
-                'unknown': 0, 'status': 'not tracked', 'reason': reason, 'partial': False}
+        return _not_tracked(reason)
     raw_num = _in_bucket(selected["num"], start, end, version)
     numerator = distinct(raw_num, num_spec.get("distinct"))
-    formula = spec["formula"]
     coverage = _coverage(spec, raw_num, selected, start, end, version)
     num_builtin = builtins.get(num_spec.get('builtin'))
     n = num_builtin.n if num_builtin else len(numerator)
-    value: float | int | None = None
     unknown = num_builtin.unknown if num_builtin else 0
-    if formula == "count":
-        value = num_builtin.value if num_builtin else len(numerator)
-        if coverage:
-            n = coverage["n"]
-    elif formula == "ratio":
-        den_spec = spec["den"]
-        den_builtin = builtins.get(den_spec.get('builtin'))
-        denominator = distinct(_in_bucket(selected["den"], start, end, version), den_spec.get("distinct"))
-        n = den_builtin.n if den_builtin else len(denominator)
-        divisor = den_builtin.value if den_builtin else len(denominator)
-        if den_builtin:
-            unknown += den_builtin.unknown
-        total = num_builtin.value if num_builtin else float(len(numerator))
-        if "sum" in num_spec:
-            values = [attribute(row, num_spec["sum"]) for row in numerator]
-            num_unknown = sum(value is None for value in values)
-            unknown += num_unknown
-            total = sum(value for value in values if value is not None) if num_unknown < len(values) else None
-        value = total / divisor if divisor and total is not None else None
-    elif formula == "rate_per_run":
-        run_builtin = builtins.get('runs')
-        n = run_builtin.value if run_builtin else 0
-        total = num_builtin.value if num_builtin else len(numerator)
-        if run_builtin:
-            unknown += run_builtin.unknown
-        value = total / n if n and total is not None else None
-    elif formula == "share":
-        values = num_spec["values"]
-        value = sum(attribute(row, num_spec["attr"]) in values for row in numerator) / n if n else None
-    elif formula == "percentile":
-        values = sorted(attribute(row, num_spec["attr"]) for row in numerator if attribute(row, num_spec["attr"]) is not None)
-        unknown = n - len(values)
-        value = values[max(0, math.ceil(num_spec["p"] / 100 * len(values)) - 1)] if values else None
+    value, n, unknown = _FORMULAS[formula][0](spec, numerator, selected, builtins,
+                                           lambda rows: _in_bucket(rows, start, end, version), coverage, n, unknown)
     label, label_mix = _labels(numerator)
     if num_builtin:
         label, label_mix = 'Observed', {'Observed': num_builtin.n}
     any_activity = any(start <= row.ts < end and (version is None or (row.version or "") == version)
                        and row.attrs.get("_declared_by_owner", False) for row in facts)
-    too_few = n < spec["min_n"] or (formula == "count" and not num_builtin and not numerator and not any_activity)
-    return {"value": None if too_few else value, "n": n, "coverage": coverage,
+    no_activity = formula == "count" and not num_builtin and not numerator and not any_activity
+    too_few = n < spec["min_n"] or no_activity
+    # The raw count, for judging a lower-is-better count below min_n (its n counts a base, not these rows).
+    count = value if formula == "count" and not no_activity else None
+    return {"value": None if too_few else value, "count": count, "n": n, "coverage": coverage,
             "label": label, "label_mix": label_mix, "unknown": unknown,
             "status": "too few" if too_few else "ok", "partial": bool(unknown)}

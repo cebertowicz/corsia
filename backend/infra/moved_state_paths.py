@@ -56,7 +56,7 @@ def heal_moved_state_paths(
             changes: dict[str, str] = {}
             for column in _COLUMNS:
                 value = row[column]
-                target = _under_current(value, prefixes, str(current)) if value is not None else None
+                target = under_current(value, prefixes, str(current)) if value is not None else None
                 if target is None:
                     continue
                 if not os.path.lexists(target):
@@ -78,7 +78,7 @@ def heal_moved_state_paths(
     return moved
 
 
-def _under_current(value: str, prefixes: tuple[str, ...], current: str) -> str | None:
+def under_current(value: str, prefixes: tuple[str, ...], current: str) -> str | None:
     for prefix in prefixes:
         if value == prefix or value.startswith(prefix + os.sep):
             return current + value[len(prefix):]

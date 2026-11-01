@@ -88,10 +88,10 @@ async def test_native_next_call_resolves_changed_catalog_cap(isolated_db, monkey
         input_identity="input", current_input=messages[-1]).fit_ledger
     state = SimpleNamespace(fit_ledger=ledger, messages=messages, tool_definitions=[],
         fit_current_input=messages[-1], context_usage={}, last_measured_call_usage=None,
-        last_measured_rendered_input_tokens=None)
+        last_measured_rendered_input_tokens=None, overflow_retry_pending=False)
     boundaries = []
 
-    async def maintain(boundary):
+    async def maintain(boundary, *, must_adopt):
         boundaries.append(boundary)
         return SimpleNamespace(payload=None)
 

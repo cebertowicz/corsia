@@ -224,6 +224,7 @@ from infra.migration_163_to_164_chat_comment_roots import migrate_163_to_164
 from infra.migration_164_to_165_version_attr import migrate_164_to_165
 from infra.migration_165_to_166_retried_comments import migrate_165_to_166
 from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
+from infra.migration_167_to_168_measure_keys import migrate_167_to_168
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -879,6 +880,7 @@ MIGRATIONS[163] = migrate_163_to_164
 MIGRATIONS[164] = migrate_164_to_165
 MIGRATIONS[165] = migrate_165_to_166
 MIGRATIONS[166] = migrate_166_to_167
+MIGRATIONS[167] = migrate_167_to_168
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

@@ -31,6 +31,7 @@ class _Request:
 @dataclass(frozen=True)
 class _ProviderRequest:
     same_model_cold: object = None
+    carried_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,7 @@ def folds(monkeypatch):
     monkeypatch.setattr(turn_iteration_context, "run_in_db", iteration_db)
     monkeypatch.setattr(checkpoint_native_admission, "run_off_db", admission_db)
     monkeypatch.setattr(
-        "core.fork_native.capture_live_warm_source",
+        "core.fork_native_warm.capture_live_warm_source",
         lambda *_args, **_kwargs: object(),
     )
     monkeypatch.setattr("core.checkpoint_warm_request.build_warm_admission", build_warm_admission)

@@ -332,7 +332,7 @@ async def base_completion(
         on_reasoning_chunk=on_reasoning_chunk,
         on_content_chunk=on_content_chunk,
         on_tool_call_chunk=on_tool_call_chunk, on_response_started=on_response_started,
-        retry_transient_errors=retry_transient_errors,
+        retry_transient_errors=retry_transient_errors, omlx_server_id=omlx_server_id,
     )
 
 
@@ -344,7 +344,7 @@ async def _completion_with_retries(
     on_reasoning_chunk: Any,
     on_content_chunk: Any,
     on_tool_call_chunk: Any, on_response_started: Any,
-    retry_transient_errors: bool,
+    retry_transient_errors: bool, omlx_server_id: str | None = None,
 ) -> "LLMResponse":
     """Dispatch with transient retries and the I7 overflow discovery re-entry.
 
@@ -383,7 +383,7 @@ async def _completion_with_retries(
                 messages=kwargs.get("messages") or [],
                 tools=kwargs.get("tools"),
                 max_tokens=kwargs.get("max_tokens"),
-                already_retried=overflow_retried,
+                already_retried=overflow_retried, omlx_server_id=omlx_server_id,
             )
             if disposition is OverflowDisposition.RETRY:
                 overflow_retried = True

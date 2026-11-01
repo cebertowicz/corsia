@@ -12,6 +12,7 @@ from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
 from infra.database import write_transaction
+from infra.moved_state_paths import under_current
 from infra.time import utc_now_iso
 
 CHANGED = 'codex_auth_projection_changed'
@@ -78,7 +79,6 @@ def _fail(account, record, receipt, cause, source, destination, *, db):
 def repair_moved_projections(*, legacy_root: Path | None = None, state_root: Path | None = None, db=None) -> None:
     """Repair the legacy state-root move at startup; remove with heal_moved_state_paths."""
     from infra.config import STATE_ROOT
-    from infra.moved_state_paths import _under_current
     from infra.platform_paths import legacy_state_root
 
     legacy = Path(legacy_root) if legacy_root is not None else legacy_state_root()
@@ -102,7 +102,7 @@ def repair_moved_projections(*, legacy_root: Path | None = None, state_root: Pat
                     for field in ('source', 'destination'):
                         value = failed.get(field)
                         if isinstance(value, str):
-                            failed[field] = _under_current(value, prefixes, current) or value
+                            failed[field] = under_current(value, prefixes, current) or value
             if current not in prefixes:
                 _repair_moved_homes(projection, prefixes, current, account['revision'], record['login_seq'])
             if repr(projection) != before:
@@ -112,15 +112,13 @@ def repair_moved_projections(*, legacy_root: Path | None = None, state_root: Pat
 
 
 def _repair_moved_homes(projection, prefixes, current, revision, login_seq):
-    from infra.moved_state_paths import _under_current
-
     for old_destination, entry in list(projection['homes'].items()):
-        moved = _under_current(old_destination, prefixes, current)
+        moved = under_current(old_destination, prefixes, current)
         if moved is None:
             for field in ('source', 'destination', 'home'):
                 value = entry.get(field)
                 if isinstance(value, str):
-                    entry[field] = _under_current(value, prefixes, current) or value
+                    entry[field] = under_current(value, prefixes, current) or value
             continue
         old_source = entry['source']
         destination = Path(moved)
@@ -134,7 +132,7 @@ def _repair_moved_homes(projection, prefixes, current, revision, login_seq):
         for field in ('source', 'destination', 'home'):
             value = entry.get(field)
             if isinstance(value, str):
-                entry[field] = _under_current(value, prefixes, current) or value
+                entry[field] = under_current(value, prefixes, current) or value
         projection['homes'].setdefault(moved, entry)  # a launch after the home repair may own it already
         if _link_state(Path(entry['source']), destination) == 'intact':
             continue  # already linked to the moved source

@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI):
         from infra.settings import get_devices_enabled, get_devices_outside_address
         enabled, outside_address = await asyncio.gather(run_in_db(get_devices_enabled), run_in_db(get_devices_outside_address))
         await devices_runtime.restore(app, enabled, outside_address)
+        await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
         schedule_usage_rollup_refresh()
@@ -290,6 +291,17 @@ def _validate_shutdown_owners(
     )
 
 
+async def _start_otlp_listener() -> None:
+    """Open the loopback measure receiver; tests start it only when CORSIA_OTLP_PORT names a port."""
+    import os
+
+    from infra.otlp_listener import PORT_ENV, listener
+
+    if os.environ.get("CORSIA_TEST_MODE") == "1" and PORT_ENV not in os.environ:
+        return
+    await listener.start()
+
+
 async def _shutdown_runtime_services(
     startup_tasks: list[asyncio.Task | None],
 ) -> None:
@@ -298,9 +310,9 @@ async def _shutdown_runtime_services(
 
     stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
-    from app_shutdown_runtime import shutdown_devices
+    from app_shutdown_runtime import shutdown_listeners
 
-    devices_failure, pending_cancel = await shutdown_devices(
+    (devices_failure, otlp_failure), pending_cancel = await shutdown_listeners(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
     host_access_failure, host_access_cancel = await _shutdown_host_access(
@@ -360,7 +372,7 @@ async def _shutdown_runtime_services(
         (
             fork_failure, fork_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
-            process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
+            process_failure, host_access_failure, devices_failure, otlp_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,

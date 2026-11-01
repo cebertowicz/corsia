@@ -10,6 +10,7 @@ from api import measurement_agent_kpis as agent_kpis
 from infra.database import get_db
 from infra.measure_registry import WorkflowOwner
 from tests.test_agent_kpi_api import definition, fact
+from tests.test_agent_kpi_builtin_api import task
 from tests.test_measurement_api import _seed_thread
 from tools.measures import MeasureStatusTool
 
@@ -92,9 +93,50 @@ async def test_an_agent_outside_any_project_reads_its_kpis(owner) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_thread_that_is_not_an_active_agent_gets_the_usual_error(owner) -> None:
+async def test_a_plain_thread_reads_its_own_kpis_with_its_child_threads_events_and_workflow_builtins(owner, monkeypatch) -> None:
+    monkeypatch.setattr("core.agent_kpi_read.thread_workflow_owners",
+                        lambda thread, db: {"demo": WorkflowOwner(owner, "plain")})
     db = get_db()
     _seed_thread(db, "plain", project_id="p")
+    _seed_thread(db, "child", project_id="p", parent_id="plain")
+    definition(db, owner, "event", "demo.done", {"attributes": {}}, owner="plain")
+    definition(db, owner, "kpi", "items", {"title": "Items", "formula": "count", "num": {"event": "demo.done"}, "min_n": 1},
+               owner="plain")
+    definition(db, owner, "kpi", "runs", {"title": "Runs", "formula": "count", "num": {"builtin": "runs"}, "min_n": 1},
+               owner="plain")
+    fact(db, "demo.done", 14, {}, agent="plain")
+    fact(db, "demo.done", 15, {}, agent="child")
+    task(db, "run-one", "hash1", owner="plain")
     db.commit()
     db.close()
-    assert await MeasureStatusTool().execute(_thread_id="plain", kpis=True) == "Error: agent not found"
+    shown = json.loads(await MeasureStatusTool().execute(_thread_id="plain", kpis=True))
+    items, runs = sorted(shown["kpis"], key=lambda row: row["name"])
+    assert items["name"] == "items" and runs["name"] == "runs"
+    assert items["last_complete"]["value"] == 2
+    assert runs["last_complete"]["status"] != "not tracked" and "reason" not in runs["last_complete"]
+
+
+@pytest.mark.asyncio
+async def test_a_stored_kpi_the_evaluator_cannot_compute_reads_as_not_tracked_and_leaves_its_siblings(owner) -> None:
+    seed_kpis(owner)
+    db = get_db()
+    definition(db, owner, "kpi", "bad", {"title": "Bad", "formula": "mean", "num": {"event": "demo.done"}, "min_n": 1})
+    definition(db, owner, "kpi", "none", {"title": "None", "num": {"event": "demo.done"}, "min_n": 1})
+    definition(db, owner, "kpi", "half", {"title": "Half", "formula": "ratio", "num": {"event": "demo.done"}, "min_n": 1})
+    definition(db, owner, "kpi", "nonum", {"title": "No num", "formula": "count", "min_n": 1})
+    definition(db, owner, "kpi", "flatnum", {"title": "Flat num", "formula": "count", "num": "demo.done", "min_n": 1})
+    db.commit()
+    db.close()
+    shown = json.loads(await MeasureStatusTool().execute(_thread_id="owner", kpis=True))
+    rows = {row["name"]: row for row in shown["kpis"]}
+    then = " in the measures file, then run measure_sync"
+    reasons = {"bad": 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile; use one of them' + then,
+               "none": "has no formula; add one of count, ratio, rate_per_run, share, percentile as its formula" + then,
+               "half": "formula ratio needs den; add it" + then,
+               "nonum": "formula count needs num; add it" + then,
+               "flatnum": "formula count needs num; add it" + then}
+    for name, reason in reasons.items():
+        for period in ("current", "last_complete"):
+            assert rows[name][period]["status"] == "not tracked"
+            assert rows[name][period]["reason"] == reason
+    assert rows["items"]["last_complete"]["value"] == 2
