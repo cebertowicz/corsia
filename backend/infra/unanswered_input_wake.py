@@ -45,7 +45,7 @@ def _excluded(db: sqlite3.Connection, turn_id: str, error: str) -> bool:
     return bool(auth_failure_kind("claude-code", error)) or is_provider_usage_or_quota_limit(error)
 
 
-def _unanswered_input(db: sqlite3.Connection, turn_id: str) -> bool:
+def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
     """Whether the Turn took in a person's input that no assistant reply after it answered."""
     row = db.execute(
         "SELECT MAX(seq) AS seq FROM messages WHERE active_turn_id=? AND role='user' "
@@ -56,9 +56,9 @@ def _unanswered_input(db: sqlite3.Connection, turn_id: str) -> bool:
     if row is None or row["seq"] is None:
         return False
     return db.execute(
-        "SELECT 1 FROM messages WHERE role='assistant' AND seq>? AND TRIM(COALESCE(content,''))<>'' "
-        "AND json_extract(metadata,'$.turn_id')=? LIMIT 1",
-        (row["seq"], turn_id),
+        "SELECT 1 FROM messages WHERE thread_id=? AND role='assistant' AND seq>? "
+        "AND TRIM(COALESCE(content,''))<>'' AND json_extract(metadata,'$.turn_id')=? LIMIT 1",
+        (thread_id, row["seq"], turn_id),
     ).fetchone() is None
 
 
@@ -79,7 +79,7 @@ def queue_unanswered_input_wake(
         return
     if (
         _excluded(db, turn_id, str(outcome.get("error") or ""))
-        or not _unanswered_input(db, turn_id)
+        or not _unanswered_input(db, thread_id, turn_id)
         or _took_in_wake(db, turn_id)
     ):
         return
