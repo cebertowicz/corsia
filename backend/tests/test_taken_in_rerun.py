@@ -188,6 +188,24 @@ def test_queued_person_input_answers_without_a_rerun(db) -> None:
     assert _reruns(db) == []
 
 
+def test_a_requeued_unwritten_input_answers_without_a_rerun(db) -> None:
+    """A boundary input the failed Turn claimed but never wrote goes back to the FIFO and answers alone."""
+    from infra.input_admission import accept_thread_input
+    from infra.thread_inputs import claim_safe_boundary
+
+    _running_turn(db)
+    accept_thread_input(_THREAD, role="user", content="also this", intent="apply_now",
+                        message_id="m2", db=db)
+    db.commit()
+    boundary = claim_safe_boundary(_THREAD, "t1", db=db)
+    assert boundary is not None and [item.message_id for item in boundary.items] == ["m2"]
+
+    terminal = _finish(db)
+
+    assert [item.message_id for item in terminal.successor.items] == ["m2"]
+    assert _reruns(db) == []
+
+
 def _recover(db):
     from automation.restart_wakes import materialize_pending_registrations
     from infra.thread_recovery import recover_threads
