@@ -12,7 +12,7 @@ For an agent that needs to count, time or track something its work does, or be w
 | Time between A and B; where each thing stands | `since`; `latest` (5) |
 | Run this when X happens | A rule with `action: run_script` |
 | Wake me once when this task's wait ends | A plan watch (skill `plans-and-workers`), not a rule |
-| Tell me if a number goes over N | A KPI with `review: N` and `alert: wake` (3); it wakes you, and you then tell them |
+| Tell me if a number goes over N | Weekly is enough: a KPI with `review: N` and `alert: wake` (3), judged once each week settles. Sooner: a scheduled check of yours that prints an event when it crosses N, with a rule that wakes you (4). Either way you then tell them |
 | Show me a chart | Not built. No page shows a declared KPI; read its value with `measure_status` |
 
 Use only fields and values this reference shows: sync also accepts a field it doesn't know (or a misspelt `alert` value), and nothing acts on it.
