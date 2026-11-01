@@ -229,16 +229,21 @@ async def _run_workflow_verdicts_safely() -> None:
         logger.exception("nightly_job: workflow verdict evaluation failed")
 
 
-def _previous_run_at(run_date: str) -> datetime | None:
-    """When the latest earlier day's maintenance was claimed, or None on an install's first run."""
+def _kpi_window(run_date: str) -> tuple[datetime | None, datetime | None]:
+    """The recorded times of the latest earlier run and of this one: the KPI step judges what settled between.
+
+    Both ends are the same recorded ``ran_at`` values, so consecutive runs split time with no overlap and no gap.
+    """
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT MAX(ran_at) FROM fact_extraction_runs WHERE run_date < ?", (run_date,),
-        ).fetchone()
+        rows = [db.execute(sql, (run_date,)).fetchone() for sql in (
+            "SELECT MAX(ran_at) FROM fact_extraction_runs WHERE run_date < ?",
+            "SELECT ran_at FROM fact_extraction_runs WHERE run_date = ?")]
     finally:
         db.close()
-    return datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc) if row and row[0] else None
+    since, until = (datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc) if row and row[0] else None
+                    for row in rows)
+    return since, until
 
 
 async def _run_kpi_thresholds_safely(run_date: str) -> None:
@@ -246,8 +251,8 @@ async def _run_kpi_thresholds_safely(run_date: str) -> None:
     try:
         from jobs.kpi_thresholds import run_daily
 
-        since = _previous_run_at(run_date)
-        await asyncio.to_thread(run_daily, since=since)
+        since, until = _kpi_window(run_date)
+        await asyncio.to_thread(run_daily, now=until, since=since)
     except Exception:
         logger.exception("nightly_job: kpi threshold wakes failed")
 

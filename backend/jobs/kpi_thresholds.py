@@ -1,7 +1,8 @@
 """Model-free daily check of declared agent KPIs against their review lines (Agent KPIs design §4.7).
 
-The nightly scheduler owns the once-per-day cadence and passes the previous run's time, so each KPI's
-settled week is judged once, on the first run after it settles. Each thread with an alerting KPI is read
+The nightly scheduler owns the once-per-day cadence and passes the recorded times of the previous run and
+this one, so each KPI's settled week is judged once, on the first run after it settles. A run whose KPI step
+fails still consumes its window (debt ledger, 2026-10-31). Each thread with an alerting KPI is read
 outside any transaction; its moves go to it in one ``agent:<thread id>`` report (a wake when any move is
 ``alert: wake``). Moves that reached their owner are listed, with no breach, in the day's project report so the
 conductor sees them routed; a dead-lettered owner's moves are not.

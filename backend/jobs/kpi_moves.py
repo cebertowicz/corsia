@@ -1,6 +1,6 @@
 """The moves a declared KPI reports when its latest settled value is worse than its review line.
 
-Pure reads over an agent's KPI result (``api.measurement_agent_kpis._read``) and its journals; nothing
+Pure reads over an agent's KPI result (``api.measurement_agent_kpis.read_own``) and its journals; nothing
 here writes or wakes. ``jobs.kpi_thresholds`` delivers what this builds.
 """
 from __future__ import annotations
@@ -62,7 +62,8 @@ def latest_settled(
 ) -> tuple[Mapping[str, Any], datetime, datetime] | None:
     """The newest completed, settled period with its start and end, if it settled after ``since``.
 
-    ``since`` is the previous daily run, so each period is judged once: on the first run after it settles.
+    ``since`` and ``now`` are the previous and current runs' recorded times, so each period is judged once:
+    on the first run after it settles.
     """
     for index in range(len(periods) - 2, -1, -1):
         settled = settles_at(bounds[index + 1], spec)

@@ -157,18 +157,27 @@ def test_a_low_higher_is_better_count_on_too_small_a_base_is_not_judged(seeded):
     assert _wakes("owner") == 0
 
 
-def test_the_kpi_job_judges_what_settled_since_the_previous_days_maintenance(isolated_db):
-    from jobs.nightly import _previous_run_at
+def test_the_kpi_job_judges_between_the_previous_and_this_runs_recorded_times(isolated_db):
+    from jobs.nightly import _kpi_window
 
-    assert _previous_run_at("2026-01-20") is None
+    assert _kpi_window("2026-01-20") == (None, None)
     db = get_db()
     db.executemany("INSERT INTO fact_extraction_runs (run_date, status, result_json, ran_at) VALUES (?,?,?,?)",
                    [("2026-01-18", "ok", "{}", "2026-01-18T02:00:00"),
                     ("2026-01-19", "ok", "{}", "2026-01-19T02:05:00"),
-                    ("2026-01-20", "running", "{}", "2026-01-20T02:00:00")])
+                    ("2026-01-20", "ok", "{}", "2026-01-20T02:09:00")])
     db.commit()
     db.close()
-    assert _previous_run_at("2026-01-20") == datetime(2026, 1, 19, 2, 5, tzinfo=timezone.utc)
+    assert _kpi_window("2026-01-20") == (datetime(2026, 1, 19, 2, 5, tzinfo=timezone.utc),
+                                         datetime(2026, 1, 20, 2, 9, tzinfo=timezone.utc))
+
+
+def test_a_week_settling_after_a_runs_record_but_before_its_kpi_step_is_judged_once(seeded):
+    # The week settles Jan 20 00:00; the Jan 19 run recorded 23:58 and its KPI step judges as of that time.
+    recorded = datetime(2026, 1, 19, 23, 58, tzinfo=timezone.utc)
+    assert job.run_daily(now=recorded, since=recorded - timedelta(days=1)) == []
+    assert job.run_daily(now=NOW, since=recorded) == ["agent:owner:2026-01-20"]
+    assert _wakes("owner") == 1
 
 
 def test_a_plain_thread_that_is_not_a_promoted_agent_is_woken(seeded):
