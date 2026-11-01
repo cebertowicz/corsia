@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, NamedTuple
+
+from loguru import logger
 
 from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
@@ -171,6 +174,22 @@ def assistant_message(response: Any) -> dict[str, Any]:
     }
 
 
+_OPERATION = re.compile(r"[a-z_]{1,24}")
+
+
+def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
+                   result: str) -> None:
+    """One content-free line per fork tool call: which call, its outcome, its size."""
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
+    operation = arguments.get("operation")
+    if not (isinstance(operation, str) and _OPERATION.fullmatch(operation)):
+        operation = "-" if operation is None else "other"
+    logger.info(
+        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} result_chars={}",
+        request.fork_id, kind.name, call.name, operation, outcome, len(result),
+    )
+
+
 async def run_tool_calls(
     agent: Any,
     response: Any,
@@ -195,6 +214,7 @@ async def run_tool_calls(
         for call in response.tool_calls:
             if call.name not in kind.tool_allowlist:
                 result = kind.tool_refusal
+                outcome = "refused"
             else:
                 try:
                     result = await kind.tool_executor(
@@ -217,6 +237,7 @@ async def run_tool_calls(
                     thread_id=request.thread_id, invocation_id=call.id,
                     provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
+                outcome = "error" if result.startswith("Error") else "ok"
             reply = {
                 "role": "tool",
                 "tool_call_id": call.id,
@@ -232,8 +253,11 @@ async def run_tool_calls(
                     f"Error: this result ({len(result)} characters) is "
                     + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
+                _log_tool_call(request, kind, call, "over_room", result)
                 if not await input_fits_off_loop(request, messages, tools, 0, measured):
                     return False
+            else:
+                _log_tool_call(request, kind, call, outcome, result)
         return True
     except CompletedToolFailure:
         raise
