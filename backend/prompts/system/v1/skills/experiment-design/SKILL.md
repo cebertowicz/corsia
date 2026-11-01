@@ -1,11 +1,11 @@
 ---
 name: experiment-design
-description: Use before designing or reading out an experiment, A/B or comparison (model, prompt, workflow); when recording, counting or tracking something your work does, being woken or acting each time something happens, or an alert or chart for a number; and for defining or interpreting a KPI. Not for regression tests or source inspection.
+description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance); when recording, counting or tracking something your work does, being woken or acting each time something happens, or an alert or chart for a number; and for defining or interpreting a KPI. Not for regression tests or source inspection.
 ---
 
 # Experiment design
 
-Counting, tracking, being woken by or timing something your work does, or an alert or chart for a number, not testing a change? Go straight to `references/instrument-measures.md`. If they want to be told when something happens, tell them first that a rule wakes only you and you then message them; it never wakes another persistent agent or them directly. The rest of this file is for experiments and comparisons.
+Counting, tracking, being woken by or timing something your work does, or an alert or chart for a number, not testing a change? Go straight to `references/instrument-measures.md`. If they want to be told when something happens, tell them first that a rule wakes only you (or a temporary worker you started) and you then message them; it never wakes another persistent agent or them directly. The rest of this file is for experiments and comparisons.
 
 An experiment exists to inform one decision at the lowest cost that can inform it. Spending past that point is waste, not rigor.
 
