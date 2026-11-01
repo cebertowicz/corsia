@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.measurement_partial import grain_instant
 from api.measurement_scope import MeasurementScope, resolve_grain, validate_scope
-from core.agent_kpi_formula import evaluate, prepare
+from core.agent_kpi_formula import evaluate, prepare, unfit
 from core.agent_kpi_operands import Event, timestamp
 from core.agent_kpi_read import definitions, event_names, facts
 from core.correction_attribution import attributed_facts
@@ -93,7 +93,7 @@ def read_own(user_id: str, thread_id: str, grain) -> dict[str, Any]:
         db.close()
 
 
-def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str, grain) -> dict[str, Any]:
+def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str | None, grain) -> dict[str, Any]:
     agent = scope.agent
     declarations = definitions(db, agent)
     kpis = [item for item in declarations if item["kind"] == "kpi"]
@@ -102,8 +102,10 @@ def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str,
     boundaries = [grain_instant(start) for start in grain.starts] + [grain_instant(grain.current_end)]
     now = datetime.now(timezone.utc)
     workflow_names: dict[str, set[str]] = {}
-    for item in kpis:
-        if item['workflow'] and (needed := _builtins(item['spec'])):
+    # A KPI the evaluator can't compute selects no operands; evaluate reads it as not tracked.
+    fit = [unfit(item["spec"]) is None for item in kpis]
+    for item, ok in zip(kpis, fit):
+        if ok and item['workflow'] and (needed := _builtins(item['spec'])):
             workflow_names.setdefault(item['workflow'], set()).update(needed)
     ledger = attributed_facts(db) if any('corrections' in wanted for wanted in workflow_names.values()) else []
     scoped = scoped_runs(db, user_id, scope) if workflow_names else None
@@ -117,12 +119,12 @@ def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str,
                                  for name in wanted} for start, end in windows]
                      for workflow, wanted in workflow_names.items()}
     results = []
-    for item in kpis:
+    for item, ok in zip(kpis, fit):
         spec = item["spec"]
-        selected = prepare(spec, events)
+        selected = prepare(spec, events) if ok else {}
         file_events = {entry["name"] for entry in declarations
                        if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
-        builtin_names = _builtins(spec)
+        builtin_names = _builtins(spec) if ok else set()
         version_rows = [event for event in events if event.name in file_events or event.name in event_names(spec)]
         if builtin_names and item['workflow']:
             version_rows += [Event('', timestamp(row['created_at']), {}, None, row['workflow_version'], 'Observed')

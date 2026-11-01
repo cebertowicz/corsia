@@ -123,6 +123,8 @@ async def test_a_stored_kpi_the_evaluator_cannot_compute_reads_as_not_tracked_an
     definition(db, owner, "kpi", "bad", {"title": "Bad", "formula": "mean", "num": {"event": "demo.done"}, "min_n": 1})
     definition(db, owner, "kpi", "none", {"title": "None", "num": {"event": "demo.done"}, "min_n": 1})
     definition(db, owner, "kpi", "half", {"title": "Half", "formula": "ratio", "num": {"event": "demo.done"}, "min_n": 1})
+    definition(db, owner, "kpi", "nonum", {"title": "No num", "formula": "count", "min_n": 1})
+    definition(db, owner, "kpi", "flatnum", {"title": "Flat num", "formula": "count", "num": "demo.done", "min_n": 1})
     db.commit()
     db.close()
     shown = json.loads(await MeasureStatusTool().execute(_thread_id="owner", kpis=True))
@@ -130,7 +132,9 @@ async def test_a_stored_kpi_the_evaluator_cannot_compute_reads_as_not_tracked_an
     then = " in the measures file, then run measure_sync"
     reasons = {"bad": 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile; use one of them' + then,
                "none": "has no formula; add one of count, ratio, rate_per_run, share, percentile as its formula" + then,
-               "half": "formula ratio needs den; add it" + then}
+               "half": "formula ratio needs den; add it" + then,
+               "nonum": "formula count needs num; add it" + then,
+               "flatnum": "formula count needs num; add it" + then}
     for name, reason in reasons.items():
         for period in ("current", "last_complete"):
             assert rows[name][period]["status"] == "not tracked"
