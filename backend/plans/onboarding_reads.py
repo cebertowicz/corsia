@@ -79,11 +79,6 @@ def decision_owner_id(db, *, node_id: str) -> str | None:
     return str(row["owner_id"]) if row is not None else None
 
 
-def has_decision_from(db, *, node_id: str) -> bool:
-    """Whether any decision, open, answered or withdrawn, was drafted from this task."""
-    return bool(decision_projection.review_steps([node_id], db=db))
-
-
 def has_open_titled_node(db, *, thread_id: str, titles: Iterable[str]) -> bool:
     """Whether this thread's own plan holds an unsettled, unarchived node with one of these titles."""
     names = sorted(set(titles))

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 import sqlite3
 from dataclasses import asdict, dataclass
 
-import infra.community_card as community_card
 import plans.admission_attempts as attempts
 import plans.errors as errors
 import plans.node_states as node_states
@@ -92,22 +90,9 @@ def select(
     except sqlite3.IntegrityError:
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
-    if (node["workflow_ref"], node["workflow_step"]) == (community_card.WORKFLOW, community_card.COMMUNITY_STEP):
-        _schedule_step_start(node_id, str(node["plan_id"]), db)
     if touch:
         service.touch_node(db, node_id)
     return attempt, None
-
-
-def _schedule_step_start(node_id: str, plan_id: str, db) -> None:
-    """Run the step's start effect once this write commits; it never fails the selection."""
-    from infra.database import TransactionOwnershipError
-    from infra.write_effects import after_commit
-
-    try:
-        after_commit(db, lambda: community_card.raise_for_current_step(node_id, plan_id))
-    except TransactionOwnershipError:
-        logging.getLogger(__name__).warning("step-start effect not scheduled: transaction not owned by write_transaction")
 
 
 def release(node_id: str, reason: str, *, db) -> bool:
