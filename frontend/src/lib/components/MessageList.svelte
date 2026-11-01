@@ -255,7 +255,7 @@
 	export function scrollToBottomFromUser() {
 		if (initialLanding.targetFor(renderedThreadId) === 'divider') return;
 		if (initialLanding.targetFor(renderedThreadId) === 'opening') cancelInitialLanding();
-		scrollToBottom();
+		scrollControl.noteJump(); scrollToBottom();
 	}
 	/** Pin to the live edge right now — for high-frequency reveal ticks. */
 	export function followBottom() {
@@ -273,7 +273,7 @@
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
 	});
-	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom));
+	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom, (by) => scrollControl.shedBand(by)));
 	export const captureBottomOffset = () => scrollControl.captureBottomOffset();
 	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
 </script>
@@ -357,10 +357,10 @@
 	/* Padding-top would be added to a sticky child's `top`, so the lead-in under the header is a spacer;
 	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
-		flex: 1; overflow-y: auto;
+		flex: 1; overflow-y: auto; position: relative;
 		--sticky-top: calc(var(--header-bottom) + 8px);
 		--messages-lead: calc(var(--header-bottom) + 24px);
-		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
+		--messages-pad: calc(var(--input-bar-height, 100px) + 16px); padding: 0 16px var(--messages-pad);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
@@ -369,7 +369,7 @@
 			--messages-lead: var(--messages-pad-top, calc(var(--header-bottom) + 24px));
 			padding-left: 12px;
 			padding-right: 12px;
-			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);
+			--messages-pad: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px); padding-bottom: var(--messages-pad);
 			transform: translateY(var(--empty-parallax-offset, 0));
 		}
 	}

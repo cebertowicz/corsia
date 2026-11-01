@@ -89,11 +89,14 @@
 		{#each retryRows as row (row.id)}<PendingWakeRetry msg={row} {threadId} />{/each}
 	</section>
 {/if}
-<!-- The scroller's last child: blank space so content getting shorter never moves a reader at the end. -->
-<div class="tail-hold" aria-hidden="true" use:holdTail={{ key: threadId ?? '', live: renderedStreaming }}></div>
+<!-- Zero height, where the content ends: the floor below is measured from here. -->
+<div class="tail-end" aria-hidden="true"></div>
+<!-- The scroller's last child: a floor under its height, so content getting shorter never moves a reader at the end. -->
+<div class="tail-hold" aria-hidden="true" use:holdTail={{ key: threadId ?? '', live: renderedStreaming || pendingEntries.length > 0 }}></div>
 
 <style>
-	.tail-hold { flex: none; height: 0; overflow-anchor: none; }
+	.tail-end { height: 0; }
+	.tail-hold { --tail-high: 0px; position: absolute; left: 0; width: 1px; top: calc(var(--tail-high) + var(--messages-pad, 0px) - 1px); height: 0; visibility: hidden; pointer-events: none; overflow-anchor: none; }
 	.pending-input-region {
 		margin: 4px auto 0;
 		padding-top: 12px;

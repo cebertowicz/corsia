@@ -6,8 +6,20 @@ export function observeLayoutGrowth(
 	messagesEl: HTMLElement | undefined,
 	wasPinned: () => boolean,
 	followBottom: () => void,
+	shed: (by: number) => void = () => {},
 ): (() => void) | undefined {
 	if (typeof ResizeObserver === 'undefined' || !messagesEl) return;
+	// The band under the transcript is its bottom padding, so the box's content height moves with it. When it gets
+	// shorter, a view pinned past the content's end comes down with it, as a browser's clamp would have.
+	const bandPad = () => parseFloat(getComputedStyle(messagesEl).paddingBottom) || 0;
+	let lastPad = bandPad();
+	const bandObserver = new ResizeObserver(() => {
+		const pad = bandPad();
+		const by = lastPad - pad;
+		lastPad = pad;
+		if (by > 0 && wasPinned()) shed(by);
+	});
+	bandObserver.observe(messagesEl);
 	// This transcript's own reserved band: its container holds its composer.
 	// Reading a sibling's floater would re-pin it from another panel (#1949).
 	const container = messagesEl.parentElement;
@@ -15,7 +27,7 @@ export function observeLayoutGrowth(
 		container?.querySelector<HTMLElement>('.input-floater'),
 		container?.querySelector<HTMLElement>('.chat-attention-stack'),
 	].filter((element): element is HTMLElement => element !== null);
-	if (layoutOwners.length === 0) return;
+	if (layoutOwners.length === 0) return () => bandObserver.disconnect();
 	const heights = new Map(layoutOwners.map((element) => [element, element.getBoundingClientRect().height]));
 	// The attention slot publishes its reservation from its own ResizeObserver,
 	// which may run after this one; following now would pin to the old bottom
@@ -38,6 +50,7 @@ export function observeLayoutGrowth(
 	});
 	for (const owner of layoutOwners) observer.observe(owner);
 	return () => {
+		bandObserver.disconnect();
 		observer.disconnect();
 		if (pendingFollow !== null) cancelAnimationFrame(pendingFollow);
 	};

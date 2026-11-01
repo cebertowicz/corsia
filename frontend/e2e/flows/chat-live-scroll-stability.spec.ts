@@ -147,7 +147,15 @@ async function openEndThread(page: Page, request: Parameters<typeof createSessio
 	return title;
 }
 
-const heldSpace = (page: Page) => page.evaluate(() => Math.round(document.querySelector<HTMLElement>('.tail-hold')?.getBoundingClientRect().height ?? 0));
+/** The blank space the floor holds: how far the floor marker's edge sits below where the content actually ends. */
+function readHeld(): number {
+	const marker = document.querySelector<HTMLElement>('.tail-hold');
+	const end = document.querySelector<HTMLElement>('.tail-end');
+	if (!marker || !end || marker.offsetHeight === 0) return 0;
+	const list = marker.parentElement!;
+	return Math.max(0, Math.round(marker.offsetTop + marker.offsetHeight - (end.offsetTop + parseFloat(getComputedStyle(list).paddingBottom))));
+}
+const heldSpace = (page: Page) => page.evaluate(readHeld);
 
 for (const size of widths) {
 	for (const ending of ['a short reply', 'Stop'] as const) {
@@ -197,10 +205,10 @@ for (const size of widths) {
 		let heldMost = 0;
 		const started = Date.now();
 		while (Date.now() - started < 5000) {
-			const read = await page.evaluate(() => ({
-				list: document.querySelector<HTMLElement>('.ta-rows')?.getBoundingClientRect().height ?? 0,
-				held: document.querySelector<HTMLElement>('.tail-hold')?.getBoundingClientRect().height ?? 0,
-			}));
+			const read = {
+				list: await page.evaluate(() => document.querySelector<HTMLElement>('.ta-rows')?.getBoundingClientRect().height ?? 0),
+				held: await heldSpace(page),
+			};
 			tallest = Math.max(tallest, read.list);
 			heldMost = Math.max(heldMost, read.held);
 		}
@@ -235,6 +243,48 @@ for (const size of widths) {
 		await sendChatMessage(page, 'second turn');
 		const seen = moves(await sampling);
 		expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader when the next send began').toEqual([]);
+	});
+
+	test(`@surface:chat-live-scroll jump to latest ignores the held space (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(150_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		await openEndThread(page, request, size);
+		const gate = `hold-jump-${Date.now()}`;
+		const many = Array.from({ length: 30 }, (_, index) => ({ id: `jump-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+			{ content: 'Done.', completion_gate: gate, finish_reason: 'stop' },
+		]);
+		await sendChatMessage(page, 'start the live turn');
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		await page.waitForTimeout(3500);
+		const list = page.locator('.messages');
+		const jump = page.getByRole('button', { name: 'Scroll to bottom' });
+		/** Px of content below the view, measured to where the content ends, not to the held space. */
+		const belowView = async () => (await list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)) - (await heldSpace(page));
+		expect(await heldSpace(page), 'the held space is armed mid-turn').toBeGreaterThan(50);
+		// Mid-turn: scroll up, tap the control, and keep reading as the reply arrives and the turn ends.
+		await list.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 700); });
+		await expect(jump, 'the control shows once the reader is scrolled up').toBeVisible();
+		await jump.click();
+		await expect(jump, 'the control goes once the reader is back at the latest').toHaveCount(0);
+		// Live content may still shrink (a step's tools folding into a row), which leaves blank below, never content hidden below.
+		expect(await belowView(), 'the tap lands with the latest content in view').toBeLessThanOrEqual(2);
+		const sampling = sampleAnchor(page, 200, 3000);
+		await releaseMockGate(request, gate);
+		expect(moves(await sampling).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader after the tap').toEqual([]);
+		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
+		await page.waitForTimeout(800);
+		expect(await heldSpace(page), 'the space the live row lost is still held').toBeGreaterThan(50);
+		// After the turn: a reader whose view ends at the last message sees no control; scrolled up, the tap lands as on a thread with no held space.
+		const held = await heldSpace(page);
+		await list.evaluate((el, floor) => { el.scrollTop = el.scrollHeight - floor - el.clientHeight; }, held);
+		await expect(jump, 'no control while the reader is at the last message with only the held space below').toHaveCount(0);
+		await list.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 700); });
+		await expect(jump).toBeVisible();
+		await jump.click();
+		await expect(jump).toHaveCount(0);
+		expect(Math.abs(await belowView()), 'the tap after the turn lands with the last message at the bottom of the view').toBeLessThanOrEqual(2);
 	});
 
 	test(`@surface:chat-live-scroll leaving the thread releases the held space (${size.name})`, async ({ page, request }, testInfo) => {
