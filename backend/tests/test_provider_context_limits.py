@@ -43,3 +43,30 @@ def test_none_and_empty_do_not_match():
     assert not is_provider_context_limit(None)
     assert not is_provider_context_limit("")
     assert not is_provider_context_limit({})
+
+
+_OMLX_PREFILL_GUARD = (
+    "litellm.BadRequestError: OpenAIException - oMLX prefill memory guard rejected "
+    "this prompt: Prefill would require ~20.80 GB peak (current 18.80 GB + KV+SDPA "
+    "2.00 GB) but the prefill limit is 20.75 GB (metal_cap ceiling 22.56 GB - "
+    "safety margin 1.80 GB)"
+)
+
+
+def test_omlx_prefill_memory_guard_refusal_matches():
+    assert is_provider_context_limit(_OMLX_PREFILL_GUARD)
+
+
+def test_omlx_memory_monitor_refusal_matches():
+    # Same refusal prefix, memory monitor wording, metal_cap binding: still a prompt
+    # that does not fit, so it takes the overflow path like every other wording.
+    assert is_provider_context_limit(
+        "oMLX prefill memory guard rejected this prompt: Prefill would require ~23.10 GB "
+        "peak (current 21.10 GB + KV+SDPA 2.00 GB) but metal_cap ceiling is 22.56 GB "
+        "(usage 21.1 GB, ceiling 22.6 GB). Raise kernel iogpu.wired_limit_mb."
+    )
+
+
+def test_benign_memory_guard_mention_does_not_match():
+    assert not is_provider_context_limit({"setting": "Memory Guard: aggressive"})
+    assert not is_provider_context_limit("The memory guard protects the machine from prefill spikes.")
