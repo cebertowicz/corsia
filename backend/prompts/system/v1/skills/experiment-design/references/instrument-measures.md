@@ -7,7 +7,7 @@ For an agent that needs to count, time or track something its work does, or be w
 | They ask | Path |
 |---|---|
 | Count or track X | Record (3). `measure_status` gives counts for today and the last 7 days, and with `kpis: true` a KPI's value for this week and the last complete week. There is no monthly history |
-| Tell me when X happens | A rule that wakes you (4), once 2 shows something produces X. Ask what it waits for: a sender address, or a label their mail already carries |
+| Tell me when X happens | A rule that wakes you (4), once 2 shows something produces X. Ask what it waits for: on mail, a sender address |
 | ...and how often | `use: both`: the rule plus a KPI |
 | Time between A and B; where each thing stands | `since`; `latest` (5) |
 | Run this when X happens | A rule with `action: run_script` |
@@ -20,7 +20,7 @@ OpenTelemetry intake is not built either. Use only fields this reference shows: 
 ## 2. Does something produce the event?
 
 A rule fires only on events that arrive; `event_rules` `types` lists types even if nothing feeds them. Today:
-- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `label`, `thread_id`, `message_id`, `author_origin`, not the subject or body. On mail, `label` is always `INBOX` and `author_origin` always `outside`, so neither narrows anything; match `from` (or `to` when one agent watches several mailboxes).
+- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `thread_id` or `message_id`; `label` (always `INBOX`) and `author_origin` (always `outside`) narrow nothing, and the subject and body can't be matched.
 - **GitHub** pull requests, issues, checks, labels, comments; **CORSIA** plan blocks, review requests, document comments, worker results.
 - **Yours**: an event you declare and `emit`, or print from a scheduled script as `{"event": {"type": "<declared name>", "facts": {...}}}`. With a shell, `corsia event emit` does the same.
 
