@@ -36,8 +36,21 @@ def _ports() -> tuple[int, ...]:
     return (DEFAULT_PORT, *FALLBACK_PORTS)
 
 
+def _listening(port: int) -> bool:
+    """Whether something already accepts on loopback at ``port``.
+
+    Catches a collector bound to every address, which macOS lets SO_REUSEADDR bind loopback over,
+    silently taking its traffic. A port held only by TIME_WAIT refuses the connect, so it is reused.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.2)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
 def _prebind() -> socket.socket | None:
     for port in _ports():
+        if _listening(port):
+            continue
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

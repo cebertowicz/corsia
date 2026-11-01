@@ -93,10 +93,11 @@ def workflow_stamps(agent: str, records: list[WireRecord]) -> dict[str, tuple[st
     refs = {ref for r in records if isinstance(ref := _claimed(r, "corsia.workflow.ref"), str)}
     if not refs:
         return {}
-    from tools.workflow_owners import workflow_stamp
+    from tools.workflow_owners import thread_workflow_owners, workflow_stamp
 
     db = get_db()
-    return {ref: workflow_stamp(agent, ref, db) for ref in refs}
+    owners = thread_workflow_owners(agent, db)
+    return {ref: workflow_stamp(agent, ref, db, owners) for ref in refs}
 
 
 def _mismatch(name: str, what: str) -> Item:
@@ -124,6 +125,9 @@ def _decide(agent: str, record: WireRecord, lookup: Lookup, workflows: dict[str,
         if not node.own:
             return _mismatch(name, "corsia.run_id names a plan node outside this agent's plans and its workers' plans")
         ref, version = node.workflow_ref, node.workflow_version
+        for key, value in (("corsia.workflow.ref", ref), ("corsia.workflow.version", version)):
+            if (claimed := _claimed(record, key)) is not None and claimed != value:
+                return _mismatch(name, f"{key} is not the one CORSIA stamps for this run")
     elif isinstance(claimed_ref := _claimed(record, "corsia.workflow.ref"), str):
         current = workflows.get(claimed_ref)
         if current is None:

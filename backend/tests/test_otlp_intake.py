@@ -366,8 +366,13 @@ async def test_a_plan_node_run_id_stamps_its_workflow_and_another_agents_node_is
         "SELECT attributes FROM outcome_events WHERE event_name='qa.rec'"))
     assert stored == ["v-p-own", "v-p-worker"]
     count, text = rejected(await send(client, measure_key, request_of({**base, "code": "o3", "corsia.run_id": "n-p-other"})))
-    db.close()
     assert count == 1 and "corsia.run_id" in text and rows("qa.rec") == 2
+    forged = await send(client, measure_key, request_of(
+        {**base, "code": "o4", "corsia.run_id": "n-p-own", "corsia.workflow.version": "v-forged"},
+        {**base, "code": "o5", "corsia.run_id": "n-p-own", "corsia.workflow.ref": "other-wf"}))
+    count, text = rejected(forged)
+    db.close()
+    assert count == 2 and "corsia.workflow.version" in text and "corsia.workflow.ref" in text and rows("qa.rec") == 2
 
 
 @pytest.mark.asyncio
@@ -409,6 +414,21 @@ async def test_a_busy_port_falls_back_and_no_free_port_leaves_the_listener_off(m
         bound.close()
         monkeypatch.setattr(listener_module, "FALLBACK_PORTS", ())
         assert await OtlpListener().start() is False
+
+
+def test_a_collector_on_every_address_keeps_its_port(monkeypatch) -> None:
+    import infra.otlp_listener as listener_module
+
+    monkeypatch.delenv(PORT_ENV, raising=False)
+    with socket.socket() as collector:
+        collector.bind(("0.0.0.0", 0))  # macOS lets SO_REUSEADDR bind loopback over this and take its traffic
+        collector.listen()
+        free = _free_port()
+        monkeypatch.setattr(listener_module, "DEFAULT_PORT", collector.getsockname()[1])
+        monkeypatch.setattr(listener_module, "FALLBACK_PORTS", (free,))
+        bound = listener_module._prebind()
+        assert bound is not None and bound.getsockname()[1] == free
+        bound.close()
 
 
 @pytest.mark.asyncio

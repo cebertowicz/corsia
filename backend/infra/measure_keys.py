@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import re
 import secrets
 import sqlite3
@@ -76,9 +75,9 @@ def resolve(db: sqlite3.Connection, key: str) -> KeyOwner | None:
     """The owner of a live key, or None for an unknown or revoked one. Read-only."""
     wanted = digest(key)
     row = db.execute(
-        "SELECT key_id,user_id,agent_thread_id,key_hash FROM measure_keys WHERE key_hash=? AND revoked_at IS NULL",
+        "SELECT key_id,user_id,agent_thread_id FROM measure_keys WHERE key_hash=? AND revoked_at IS NULL",
         (wanted,),
     ).fetchone()
-    if row is None or not hmac.compare_digest(row[3], wanted):
+    if row is None:
         return None
     return KeyOwner(row[0], row[1], row[2])
