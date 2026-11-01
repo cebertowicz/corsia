@@ -7,6 +7,7 @@ provider size refusal, and the futile optional fold with its system-prompt floor
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -305,7 +306,9 @@ async def test_the_fixed_prompt_and_tools_reach_the_warm_and_cold_fork_requests(
     monkeypatch.setattr(database, "get_db", lambda: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(
         checkpoint_cold_admission, "build_checkpoint_admission",
-        lambda **_kwargs: CheckpointAdmission(SimpleNamespace(), request),
+        lambda **kwargs: CheckpointAdmission(SimpleNamespace(), replace(
+            request, carried_tokens=kwargs["carried_tokens"],
+        )),
     )
     warm = await admission.prepare_native_checkpoint(
         "c1", "t", state, context, SimpleNamespace(turn_id="x"), None,

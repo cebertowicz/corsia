@@ -255,6 +255,7 @@ async def _complete_native_idle_checkpoint(
         reasoning_effort=context.reasoning_effort,
         binary=context.binary,
         warm_source=source,
+        carried_tokens=receipt.carried_tokens,
     )
     if not await warm_input_fits(admission.provider_request, kind=CHECKPOINT_KIND):
         return _warm_refused("input_too_large")
