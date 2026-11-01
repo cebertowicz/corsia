@@ -28,7 +28,7 @@ Nothing feeds a calendar, chat or other service. A scheduled script can poll one
 
 ## 3. Record
 
-1. Choose what identifies one occurrence, count every occurrence (a share needs its full denominator), and list every value each attribute can take (a value missing from an `enum` is refused).
+1. Choose what identifies one occurrence and name it in `dedupe` on every event, a `since` end event included (`measure_sync` refuses an event without it). Count every occurrence (a share needs its full denominator), and list every value each attribute can take (a value missing from an `enum` is refused).
 2. Put `measures.yaml` in `.threads/<your thread id>/` under your scope's folder (a workflow's goes beside its `SKILL.md` and names `workflow`). Declare a namespace nobody holds and no connector uses, and start every event name with it.
 
    ```yaml
