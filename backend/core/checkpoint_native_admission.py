@@ -29,6 +29,21 @@ class NativeIdleReceipt:
     final_message_id: str | None = None
 
 
+def _fit_sections(state) -> dict:
+    return dict(state.context_usage.get("fit_section_tokens") or {})
+
+
+def fixed_input_tokens(state) -> int:
+    """The Turn's measured fixed prompt, as the initial render recorded it."""
+    return int(_fit_sections(state).get("fixed") or 0)
+
+
+def carried_input_tokens(state) -> int:
+    """The fixed prompt plus tool definitions: what every continuation carries."""
+    sections = _fit_sections(state)
+    return int(sections.get("fixed") or 0) + int(sections.get("tools") or 0)
+
+
 def effective_input_tokens(usage: dict | None) -> int | None:
     """Normalize one call without double-counting OpenAI-compatible cache."""
     if not isinstance(usage, dict):
@@ -95,7 +110,7 @@ async def capture_native_checkpoint_source(
     thread_id, state, context, reasoning_effort,
 ):
     """Freeze exact live warmth only when its correlated receipt is present."""
-    from core.fork_native import capture_live_warm_source
+    from core.fork_native_warm import capture_live_warm_source
 
     if has_correlated_receipt(state):
         measured = effective_input_tokens(state.last_measured_call_usage)
@@ -116,15 +131,17 @@ async def capture_native_checkpoint_source(
 
 def build_native_cold_checkpoint_admission(
     checkpoint_id, thread_id, context, turn_identity, reasoning_effort,
-    trigger="pressure",
+    trigger="pressure", carried_tokens=0,
 ):
     """Build the existing Native cold request from one frozen DB context."""
+    from dataclasses import replace
+
     from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
 
     db = get_db()
     try:
-        return build_checkpoint_admission(
+        admission = build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=thread_id,
             trigger=trigger,
@@ -139,6 +156,9 @@ def build_native_cold_checkpoint_admission(
             originating_turn_id=turn_identity.turn_id,
             db=db,
         )
+        return replace(admission, provider_request=replace(
+            admission.provider_request, carried_tokens=carried_tokens,
+        ))
     finally:
         db.close()
 
@@ -165,6 +185,7 @@ async def prepare_native_checkpoint(
             working_dir=context.working_dir, reasoning_effort=reasoning_effort,
             binary=None, warm_source=source,
         )
+        carried_tokens = carried_input_tokens(state)
         # Warmth proved by a past receipt can still exceed the window on the
         # next call; carry this boundary's own cold admission so the fork can
         # correct its path rather than ending the turn.
@@ -172,11 +193,12 @@ async def prepare_native_checkpoint(
             admission,
             provider_request=replace(
                 admission.provider_request,
+                carried_tokens=carried_tokens,
                 same_model_cold=partial(
                     run_off_db,
                     build_native_cold_checkpoint_admission,
                     checkpoint_id, thread_id, context, turn_identity,
-                    reasoning_effort, trigger,
+                    reasoning_effort, trigger, carried_tokens,
                 ),
             ),
         )
@@ -184,4 +206,5 @@ async def prepare_native_checkpoint(
     return await run_off_db(
         build_native_cold_checkpoint_admission,
         checkpoint_id, thread_id, context, turn_identity, reasoning_effort, trigger,
+        carried_input_tokens(state),
     )

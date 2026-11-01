@@ -160,10 +160,7 @@ async def _refresh_native_window(state, thread_id: str) -> None:
 
 def _minimum_native_input(ledger) -> int:
     sections = dict(ledger.section_tokens)
-    return sum(
-        int(sections.get(name) or 0)
-        for name in ("current_input", "tools", "provider_wrapper")
-    )
+    return sum(int(sections.get(name) or 0) for name in ("current_input", "tools", "provider_wrapper"))
 
 
 async def _render_native_installed(
@@ -251,6 +248,7 @@ async def maintain_native_checkpoint(
     if turn_identity is None or state.fit_ledger is None:
         return None
     await _refresh_native_window(state, thread_id)
+    from core.checkpoint_native_admission import fixed_input_tokens
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderBoundary,
@@ -287,6 +285,9 @@ async def maintain_native_checkpoint(
     active, installed, eager = await run_in_db(
         provider_boundary_snapshot, thread_id, "native", ledger.target_catalog_id,
     )
+    adopted = state.context_usage.get("checkpoint_generation_id")
+    if state.overflow_retry_pending and installed is not None and installed.id == adopted:
+        installed = None  # the refused payload carried it; the overflow retry needs a newer one
     continuation = await maintain_before_provider_call(ProviderBoundary(
         thread_id=thread_id,
         turn=turn_identity,
@@ -294,14 +295,15 @@ async def maintain_native_checkpoint(
         canonical_input_tokens=ledger.rendered_input_tokens,
         provider_input_tokens=_correlated_native_input(state),
         minimum_input_tokens=_minimum_native_input(ledger),
-        adopted_checkpoint_id=state.context_usage.get("checkpoint_generation_id"),
+        adopted_checkpoint_id=adopted,
         active_checkpoint=active,
         installed_checkpoint=installed,
         prepare_checkpoint=prepare,
         render_installed=render,
         wait_scope=scope,
         eager_checkpoint_id=eager.id if eager is not None else None,
-    ))
+        fixed_input_tokens=fixed_input_tokens(state),
+    ), must_adopt=state.overflow_retry_pending)
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)
     if continuation.payload is not None:

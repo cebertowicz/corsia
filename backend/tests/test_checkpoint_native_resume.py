@@ -84,7 +84,7 @@ async def test_native_live_warm_source_freezes_correlated_provider_receipt(monke
         captured["kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr("core.fork_native.capture_live_warm_source", capture)
+    monkeypatch.setattr("core.fork_native_warm.capture_live_warm_source", capture)
 
     result = await checkpoint_native_admission.capture_native_checkpoint_source(
         "thread-1", state, context, "high",
@@ -179,7 +179,7 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
     result = await checkpoint_native_admission.prepare_native_checkpoint(
         "checkpoint-1",
         "thread-1",
-        object(),
+        SimpleNamespace(context_usage={}),
         SimpleNamespace(),
         SimpleNamespace(turn_id="turn-1"),
         None,
@@ -269,7 +269,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
     selection = SimpleNamespace(tail=SimpleNamespace(messages=()))
 
     async def maintain(boundary, **options):
-        assert options == {}
+        assert options == {"must_adopt": False}
         adopted = boundary.adopted_checkpoint_id
         assert boundary.installed_checkpoint.id == current["id"]
         observed.append(adopted)
@@ -330,6 +330,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
         active_boundary_input=None,
         last_measured_call_usage=None,
         last_measured_rendered_input_tokens=None,
+        overflow_retry_pending=False,
     )
     cancel = SimpleNamespace(checkpoint_wait_scope=CheckpointWaitScope())
 
