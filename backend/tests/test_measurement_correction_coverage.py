@@ -241,3 +241,20 @@ def test_only_the_active_classifier_version_is_read_and_arrival_is_compared_thro
         assert [c.later_turn for c in person_correction_coverage(db, "2026-09-21 00", "2026-09-28 00")] == [False]
     finally:
         db.close()
+
+
+def test_corrections_in_a_period_with_no_outcomes_stay_out_of_the_per_outcome_ratios(monkeypatch):
+    from api import measurement_corrections
+    from api.measurement_windows import _summed
+
+    counts = {
+        "2026-09-21": {"detected": 2, "triaged": 1, "untriaged": 1, "untriaged_idle": 0, "idle_threads": frozenset()},
+        "2026-09-28": {"detected": 3, "triaged": 0, "untriaged": 3, "untriaged_idle": 1, "idle_threads": frozenset({"t"})},
+    }
+    monkeypatch.setattr(measurement_corrections, "corrections_by_period", lambda db, grain: counts)
+    decisions = [{"period": "2026-09-21", "outcomes": 5, "raised": 1, "user_holds": 0}]
+    pooled = _summed(measurement_corrections.corrections_family(None, None, decisions))
+    # The per-outcome numerator pools only the outcome period: 2 corrections over 5 outcomes, not 5.
+    assert (pooled["corrections"], pooled["outcomes"]) == (2, 5)
+    # The coverage series still count every drawn period's corrections.
+    assert pooled["detected"] == 5 and pooled["untriaged_idle"] == 1

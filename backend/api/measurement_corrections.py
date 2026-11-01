@@ -61,17 +61,17 @@ def corrections_by_period(db, grain: Grain) -> dict[str, dict[str, Any]]:
 
 
 def corrections_family(db, grain: Grain, decision_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per outcome period, and per drawn period with corrections but no outcome row:
-    its outcomes, asks (raised and user holds) and corrections."""
+    """One row per outcome period (its outcomes, asks and corrections), and per drawn period with
+    corrections but no outcome row (its coverage counts only)."""
     counts = corrections_by_period(db, grain)
     empty = {"detected": 0, "triaged": 0, "untriaged": 0, "untriaged_idle": 0, "idle_threads": frozenset()}
 
-    def fields(period: str) -> dict[str, Any]:
-        count = {**empty, **counts.get(period, {})}
-        return {"corrections": count["detected"], **count}
+    def coverage(period: str) -> dict[str, Any]:
+        return {**empty, **counts.get(period, {})}
 
-    rows = [{**row, **fields(row["period"])} for row in decision_rows]
+    rows = [{**row, **coverage(row["period"]), "corrections": coverage(row["period"])["detected"]} for row in decision_rows]
     known = {row["period"] for row in rows}
-    # A drawn period, the one in progress included, may have corrections but no outcome row.
-    rows.extend({"period": period, **fields(period)} for period in counts if period not in known)
+    # A drawn period, the one in progress included, may have corrections but no outcome row. It
+    # carries no `corrections` count, so the per-outcome ratios pool over outcome periods only.
+    rows.extend({"period": period, **coverage(period)} for period in counts if period not in known)
     return rows
