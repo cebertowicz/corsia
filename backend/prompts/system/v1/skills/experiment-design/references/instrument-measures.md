@@ -9,7 +9,7 @@ Tell the person first what they will get, in these terms, then take the path.
 | They ask | Path | Today |
 |---|---|---|
 | "Count or track how often I do X" | Record (section 3) | Works |
-| "Tell me when X happens" | A rule that wakes you (section 4), once section 2 shows something produces X | Works where something produces X |
+| "Tell me when X happens" | A rule that wakes you (section 4), once section 2 shows something produces X. Tell them it wakes only you, never another agent | Works where something produces X |
 | "...and how often" | Declare X `use: both`, add the rule and a KPI | Works |
 | "How long between A and B" | `since` on B (section 5) | Works |
 | "Where does each thing stand now" | A KPI operand with `latest` (section 5) | Works |
