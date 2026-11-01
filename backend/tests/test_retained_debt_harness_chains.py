@@ -65,10 +65,11 @@ def _debt(errors):
 
 @pytest.mark.asyncio
 async def test_cc_process_exit_ends_the_turn_when_its_retained_result_is_refused(
-    isolated_db, monkeypatch, errors, refuse_real_results,
+    isolated_db, monkeypatch, errors, refuse_real_results, rerun_dispatches,
 ):
     from api import cc_attach
     from infra.database import get_db
+    from infra.taken_in_rerun import rerun_message_id
     from subagents import cc_process_exit
     from subagents.cc_runtime_state import _LIVE
 
@@ -124,35 +125,73 @@ async def test_cc_process_exit_ends_the_turn_when_its_retained_result_is_refused
         assert all(REAL not in line for line in errors)
         assert len([frame for frame in frames if frame["type"] == "turn_complete"]) == 1
         assert len(calls) == 1
+        assert rerun_dispatches == [[rerun_message_id(identity.turn_id)]]
     finally:
         await session.terminate()
         _LIVE.pop("thread-1", None)
         db.close()
 
 
-@pytest.mark.asyncio
-async def test_codex_terminal_ends_the_turn_when_its_retained_result_is_refused(
-    isolated_db, monkeypatch, errors, refuse_real_results,
-):
-    from infra.database import get_db
+def _codex_spawns(monkeypatch, thread_id: str) -> list[tuple[str | None, bool]]:
+    """Record each Codex spawn the re-run reaches: its input and whether a writer still held the slot."""
     from subagents import codex_runtime
+
+    spawns: list[tuple[str | None, bool]] = []
+
+    async def spawn(_thread_id, _text, **kwargs):
+        spawns.append((kwargs["current_input_message_id"], thread_id in codex_runtime._LIVE))
+        return None
+
+    monkeypatch.setattr(codex_runtime, "_spawn_turn", spawn)
+    return spawns
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("released_in_transition", [True, False])
+async def test_codex_terminal_ends_the_turn_when_its_retained_result_is_refused(
+    isolated_db, monkeypatch, errors, refuse_real_results, released_in_transition,
+):
+    """The terminal ends the Turn, then its owed re-run dispatches once the writer is gone.
+
+    Released in its transition (retire, mark-dead): the re-run waits for the
+    lock. Still owning the slot (an unverified steer): the re-run is held and
+    the writer's release dispatches it.
+    """
+    from infra.database import get_db
+    from infra.taken_in_rerun import rerun_message_id
+    from subagents import codex_runtime
+    from subagents.codex_runtime_state import drain_live_writer_releases, finalize_live
 
     _reset_runtime()
     thread_id = "codex-retained-debt"
     session = _FenceSession(thread_id, request_idle=True)
     live, step_id = _active_live_with_persisted_tool(thread_id, session)
     identity = live.corsia_turn
+    spawns = _codex_spawns(monkeypatch, thread_id)
     failure = CompletedToolFailure((CompletedToolCall(
         name="write_file", result=REAL, arguments={"path": "one"}, thread_id=thread_id,
         turn_id=identity.turn_id, invocation_id="call-1", provider_tool_call_id="call-1",
         assistant_step_id=step_id,
     ),))
     frames: list[dict] = []
+
+    async def transition():
+        async with codex_runtime._LIVE.lock(thread_id):
+            await codex_runtime._end_owned_turn(
+                thread_id, live, identity, "error",
+                bcast=lambda _thread, frame: frames.append(frame), error=failure,
+            )
+            if released_in_transition:
+                finalize_live(thread_id, live)
+
     try:
-        await codex_runtime._end_owned_turn(
-            thread_id, live, identity, "error",
-            bcast=lambda _thread, frame: frames.append(frame), error=failure,
-        )
+        await asyncio.wait_for(transition(), 5)
+        await asyncio.wait_for(drain_live_writer_releases(), 5)
+        if not released_in_transition:
+            assert spawns == []
+            finalize_live(thread_id, live)
+            await asyncio.wait_for(drain_live_writer_releases(), 5)
+        assert spawns == [(rerun_message_id(identity.turn_id), False)]
     finally:
         _reset_runtime()
 

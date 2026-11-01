@@ -158,6 +158,33 @@ async def drain_live_writer_releases() -> None:
         await asyncio.gather(*tuple(_HOLD_RELEASES))
 
 
+def schedule_terminal_drive(thread_id: str, settlement) -> asyncio.Task[None]:
+    """Drive a committed terminal's successor once its transition lock is free.
+
+    A successor dispatch takes that same lock, so driving it inline under the
+    terminal's transition would wait on itself. A writer that still owns the
+    slot then refuses the successor into the live-writer hold, which its own
+    release lifts and drives.
+    """
+    task = asyncio.get_running_loop().create_task(
+        _drive_after_transition(thread_id, settlement), name=f"codex-terminal-drive:{thread_id}",
+    )
+    _HOLD_RELEASES.add(task)
+    task.add_done_callback(_HOLD_RELEASES.discard)
+    return task
+
+
+async def _drive_after_transition(thread_id: str, settlement) -> None:
+    from core.turn_core import drive_turn_settlement
+
+    try:
+        async with _LIVE.lock(thread_id):
+            pass
+        await drive_turn_settlement(settlement)
+    except Exception:
+        log.exception("codex_runtime: terminal successor drive for %s failed", thread_id)
+
+
 async def _release_live_writer_holds(thread_id: str) -> None:
     from infra.db_async import run_in_db
     from infra.live_writer_hold import release_live_writer_holds

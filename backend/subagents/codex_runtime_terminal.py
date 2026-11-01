@@ -11,8 +11,8 @@ from core.turn_core import (
     TerminalSettlement,
     TurnIdentity,
     TurnTerminalResult,
+    commit_turn_terminal,
     drive_turn_settlement,
-    settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
 from infra.context_receipts import (
@@ -30,6 +30,7 @@ from subagents.codex_runtime_state import (
     _LiveCodex,
     context_receipt_identity,
     finalize_live,
+    schedule_terminal_drive,
 )
 from subagents.codex_terminal_context import (  # noqa: F401 - public re-export
     context_usage_with_snapshot,
@@ -51,14 +52,18 @@ async def claim_live_terminal(
     *,
     identity: TurnIdentity | None = None,
 ) -> TurnTerminalResult:
-    """Quarantine an unsettled write, then terminalize its owning Turn."""
+    """Quarantine an unsettled write, then terminalize its Turn; its successor drives after the transition."""
     identity = identity or live.corsia_turn
     if identity is None:
         return TurnTerminalResult.CONFLICTING_TERMINAL
     if db is None:
-        return await settle_turn_terminal(
+        settlement = await commit_turn_terminal(
             identity.turn_id, outcome, error, quarantine=UNSETTLED_AT_TERMINAL,
         )
+        if settlement.thread_id is None:
+            return await drive_turn_settlement(settlement)
+        schedule_terminal_drive(settlement.thread_id, settlement)
+        return settlement.result
     from infra.thread_recovery import ambiguous_stale_writes
     from subagents import codex_runtime
 

@@ -285,6 +285,22 @@ def no_taken_in_rerun(monkeypatch):
     monkeypatch.setattr("infra.thread_driver.queue_taken_in_rerun", lambda *_args: None)
 
 
+@pytest.fixture
+def rerun_dispatches(monkeypatch):
+    """For a test whose failed Turn owes the ``infra.taken_in_rerun`` re-run: the fake harness.
+
+    Records the message ids of each successor batch instead of starting a
+    harness, so the test can assert the re-run ran exactly once.
+    """
+    batches: list[list[str]] = []
+
+    async def record(batch, **_kwargs):
+        batches.append([item.message_id for item in batch.items])
+
+    monkeypatch.setattr("infra.thread_execution.execute_claimed_batch", record)
+    return batches
+
+
 class _NoClose:
 
     def __init__(self, c):

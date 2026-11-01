@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from infra.taken_in_rerun import rerun_message_id
 from tools.recorded_call import CompletedToolFailure
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
@@ -234,8 +235,9 @@ async def test_codex_reply_failure_keeps_completed_output(isolated_db, monkeypat
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("fault", ["identity", "projection", "reply_settlement"])
 async def test_codex_completed_failure_reaches_exact_terminal_owner(
-    isolated_db, monkeypatch, managed, fault,
+    isolated_db, monkeypatch, managed, fault, rerun_dispatches,
 ):
+    """The Turn ends on its exact owner, and the input it never answered gets one re-run."""
     from core._tool_result_delivery_support import ToolResultBindingError
     from infra.database import get_db
     from subagents import codex_runtime, harness_tool_bridge
@@ -305,6 +307,7 @@ async def test_codex_completed_failure_reaches_exact_terminal_owner(
         assert [r[0] for r in rows] == ["completed Codex effect"]
         assert len([f for f in frames if f["type"] == "turn_complete"]) == 1
         assert _LIVE.get("thread-1") is None
+        assert rerun_dispatches == [[rerun_message_id(identity.turn_id)]]
     finally:
         await session.terminate(timeout=0.2)
         _LIVE.pop("thread-1", None)
@@ -313,9 +316,9 @@ async def test_codex_completed_failure_reaches_exact_terminal_owner(
 
 @pytest.mark.asyncio
 async def test_managed_codex_typed_failure_refuses_queued_second_effect(
-    isolated_db, monkeypatch,
+    isolated_db, monkeypatch, rerun_dispatches,
 ):
-    """The first typed terminal fault closes queued managed-tool admission."""
+    """The first typed terminal fault closes queued managed-tool admission; one re-run follows."""
     from core._tool_result_delivery_support import ToolResultBindingError
     from infra.database import get_db
     from subagents import codex_runtime, harness_tool_bridge
@@ -396,6 +399,7 @@ async def test_managed_codex_typed_failure_refuses_queued_second_effect(
             "SELECT content FROM messages WHERE role='tool'"
         )] == ["first exact Codex result"]
         assert len([frame for frame in frames if frame["type"] == "turn_complete"]) == 1
+        assert rerun_dispatches == [[rerun_message_id(identity.turn_id)]]
     finally:
         if session._tool_requests.lock.locked():
             session._tool_requests.lock.release()

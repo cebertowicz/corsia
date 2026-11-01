@@ -127,7 +127,7 @@ def owner_probe(monkeypatch):
 
     def _install(thread_id: str) -> _OwnerProbe:
         from core import turn_core
-        from subagents import codex_runtime, codex_runtime_events
+        from subagents import codex_runtime, codex_runtime_events, codex_runtime_terminal
 
         probe = _OwnerProbe(thread_id)
         original_sync = turn_core.persist_turn_terminal
@@ -145,7 +145,7 @@ def owner_probe(monkeypatch):
 
         for module in (turn_core, codex_runtime):
             monkeypatch.setattr(module, "persist_turn_terminal", recording_sync)
-        for module in (turn_core, codex_runtime, codex_runtime_events):
+        for module in (turn_core, codex_runtime, codex_runtime_events, codex_runtime_terminal):
             monkeypatch.setattr(module, "commit_turn_terminal", recording_commit)
         return probe
 

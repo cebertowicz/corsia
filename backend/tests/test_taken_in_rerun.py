@@ -186,3 +186,41 @@ def test_queued_person_input_answers_without_a_rerun(db) -> None:
 
     assert [item.message_id for item in terminal.successor.items] == ["m-next"]
     assert _reruns(db) == []
+
+
+def _recover(db):
+    from automation.restart_wakes import materialize_pending_registrations
+    from infra.thread_recovery import recover_threads
+
+    materialize_pending_registrations(db=db)
+    return recover_threads(
+        boot_epoch="boot-2", recovered_at="t3", successor_id=lambda _sid: "after-restart", db=db,
+    )
+
+
+def test_a_restart_ended_turn_reruns_through_its_one_settlement(db) -> None:
+    _running_turn(db)
+
+    recovery = _recover(db)
+
+    (settlement,) = recovery.settlements
+    assert [item.message_id for item in settlement.successor.items] == [rerun_message_id("t1")]
+    assert recovery.batches == ()
+
+
+def test_a_registered_restart_wake_answers_without_a_rerun(db) -> None:
+    """Restart recovery and the re-run never both start a successor for one Turn."""
+    from automation.restart_wakes import register_hard_recovery
+
+    _running_turn(db)
+    register_hard_recovery(_THREAD, "t1", db=db)
+
+    recovery = _recover(db)
+
+    (settlement,) = recovery.settlements
+    (item,) = settlement.successor.items
+    assert json.loads(db.execute(
+        "SELECT metadata FROM messages WHERE id=?", (item.message_id,),
+    ).fetchone()[0])["kind"] == "restart_recovery"
+    assert recovery.batches == ()
+    assert _reruns(db) == []

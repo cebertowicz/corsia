@@ -317,10 +317,18 @@ async def test_ownerless_stop_and_startup_have_one_terminal_winner(main_db, rest
     )
     assert len(recovery.settlements) == (1 if restart_first else 0)
     assert recovery.batches == ()
-    assert (await _stop(main_db, identity.turn_id)).outcome == "already_terminal"
-    assert main_db.execute(
-        "SELECT status FROM active_turns WHERE id='orphan'",
-    ).fetchone()[0] == ("error" if restart_first else "cancelled")
+    # A restart-ended Turn left its taken-in input unanswered, so its one
+    # settlement claimed the re-run successor; a late Stop on the ended Turn is
+    # then stale against that successor, as for any ended Turn whose successor runs.
+    assert (await _stop(main_db, identity.turn_id)).outcome == (
+        "stale_active" if restart_first else "already_terminal"
+    )
+    assert [tuple(row) for row in main_db.execute(
+        "SELECT id,status FROM active_turns ORDER BY turn_order",
+    )] == (
+        [("orphan", "error"), ("next", "running")] if restart_first
+        else [("orphan", "cancelled")]
+    )
 
 
 @pytest.mark.asyncio
