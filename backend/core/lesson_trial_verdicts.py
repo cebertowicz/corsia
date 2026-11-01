@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -235,15 +236,37 @@ def _project_of(path: Path, workspace: Path, db: sqlite3.Connection) -> str | No
     return project_id_for_root(workspace / "projects" / relative.parts[0], workspace, db) if relative.parts else None
 
 
-def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_BATCH_LIMIT) -> list[Evaluation]:
+@dataclass
+class TrialRead:
+    """What one ``evaluate_trials`` call read, for a caller that reports it: seconds per phase, the open trials
+    and each one's halves before pricing. Filled in place; asking for it changes no verdict."""
+
+    seconds: dict[str, float] = field(default_factory=dict)
+    trials: list[OpenTrial] = field(default_factory=list)
+    arms: dict[str, Arms] = field(default_factory=dict)
+
+    def lap(self, phase: str, started: float) -> float:
+        now = time.monotonic()
+        self.seconds[phase] = self.seconds.get(phase, 0.0) + now - started
+        return now
+
+
+def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_BATCH_LIMIT,
+                    read: TrialRead | None = None) -> list[Evaluation]:
     """Every open trial's evaluation, with the cost of each task priced; nothing is written."""
-    opened = open_trials(db, limit=limit)
+    read = read if read is not None else TrialRead()
+    lap = time.monotonic()
+    opened = read.trials = open_trials(db, limit=limit)
+    lap = read.lap("lesson_open_trials", lap)
     if not opened:
         return []
     plans, reached = recorded_verdicts(db, [item.subject for item in opened])
     definitions, _owners = workflow_definitions(db)
-    arms = {item.subject: read_arms(db, item) for item in opened}
+    lap = read.lap("lesson_setup", lap)
+    arms = read.arms = {item.subject: read_arms(db, item) for item in opened}
+    lap = read.lap("lesson_read_arms", lap)
     priced = _priced(db, now, arms)
+    lap = read.lap("lesson_pricing", lap)
     evaluations = []
     for item in opened:
         if item.subject in reached:
@@ -256,6 +279,7 @@ def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_
         verdict = decide_arms(plan, TwoArms(halves.without_runs, halves.with_runs, matched=True), now,
                               inputs=halves.inputs())
         evaluations.append(Evaluation(item.subject, trial_owner(db, item), plan, verdict, existing is None))
+    read.lap("lesson_decide", lap)
     return evaluations
 
 

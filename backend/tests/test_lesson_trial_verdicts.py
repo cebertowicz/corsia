@@ -444,3 +444,60 @@ def test_an_unavailable_owner_keeps_the_verdict_and_skips_the_wake(db, workspace
     monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
     assert workflow_verdicts.run_daily(now=NOW).recorded == 1
     assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name=?", (evaluator.REACHED_EVENT,)).fetchone()[0] == 1
+
+
+def test_the_job_line_reports_the_batch_by_kind_with_halves_send_backs_and_delegated_receipts(db, workspace) -> None:
+    from jobs import workflow_verdicts
+    from tests.test_workflow_verdict_read import node
+
+    trial = seed_finished_trial(db, workspace)
+    # A send-back's revision is its own task with its own receipt, drawn into the other arm; the sent-back task
+    # also drew a second receipt of its own.
+    task(db, "rev")
+    receipt(db, trial, "rev", "with")
+    receipt(db, trial, "o-0", "without", at="2026-10-02T00:00:01Z")
+    # Tasks handed to a delegated worker: a step with a receipt, a step without one, and a plain task without one.
+    for node_id, step in (("d-step-seen", "review"), ("d-step-missed", "review"), ("d-plain", None)):
+        task(db, node_id, step=step, sent_back=node_id == "d-step-seen")
+    receipt(db, trial, "d-step-seen", "without")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET follow_up_of='o-0' WHERE id='rev'")
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='root', created_at='2026-10-03T00:00:00Z' "
+                   "WHERE id LIKE 'd-%'")
+    node(db, "wf-run")
+    task(db, "wf-sent-back", sent_back=True)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET workflow_ref='sdlc-process', workflow_version='v1' WHERE id='wf-sent-back'")
+    db.commit()
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO")
+    try:
+        report = workflow_verdicts.run_daily(now=NOW)
+    finally:
+        logger.remove(sink)
+
+    detail = report.detail
+    assert (report.open_subjects, report.evaluated, report.reached) == (2, 2, 1)
+    assert detail["by_kind"] == {
+        "workflow": {"open": 1, "evaluated": 1, "by_word": {"not_enough_data": 1}},
+        "lesson": {"open": 1, "evaluated": 1, "by_word": {"keep": 1}}}
+    (reached,) = detail["reached_detail"]
+    assert reached == {"kind": "lesson", "word": "keep", "reason": "quality_better", "look": 1, "new": 20, "base": 20}
+    # with: 20 + the revision; without: 20 + the delegated step's receipt + the sent-back task's second receipt,
+    # which the arms count as a second run.
+    assert detail["lesson_halves"] == [[21, 22]] and detail["lesson_both_20"] == 1
+    assert detail["sent_back"] == {
+        "lesson_arms": {"receipt_rows": 43, "on_sent_back_nodes": 22, "nodes_with_many": 1, "revision_receipts": 1,
+                        "revision_after_source_receipt": 1, "revision_in_other_arm": 1},
+        "workflow_runs": {"settled": 2, "root_sent_back": 1, "continued_by_revision": 0}}
+    assert detail["delegated_receipts"] == {
+        "step": {"with_receipt": 1, "without_receipt": 1, "by_variant": {"without": 1}},
+        "other": {"with_receipt": 0, "without_receipt": 1, "by_variant": {}}}
+    assert set(detail["phase_seconds"]) == {  # type: ignore[call-overload]
+        "workflow_read", "workflow_pricing", "lesson_open_trials", "lesson_setup", "lesson_read_arms",
+        "lesson_pricing", "decide", "detail"}
+    (line,) = [text for text in lines if "workflow_verdict_daily:" in text]
+    for field_name in ("phase_seconds=", "by_kind=", "reached_detail=", "lesson_halves=", "lesson_both_20=1",
+                       "sent_back=", "delegated_receipts="):
+        assert field_name in line
+    assert LESSON not in line and trial.subject not in line and "wf-run" not in line
