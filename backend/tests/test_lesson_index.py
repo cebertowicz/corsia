@@ -315,7 +315,7 @@ def test_a_held_trial_does_not_hide_the_skill_it_overrode(db, workspace):
 
     sources = _sources(db, workspace)
 
-    assert f"- cite-the-head: Use the workspace procedure. ({shared.resolve()})" in \
+    assert "- cite-the-head: Use the workspace procedure." in \
         _index(sources).prompt_content
     assert _held(sources, "cite-the-head").stable_reference == \
         str(_path(workspace, "owner", "cite-the-head").resolve())
@@ -369,7 +369,7 @@ def test_a_retired_trial_does_not_displace_an_ordinary_skill_of_its_name(db, wor
 
     sources = _sources(db, workspace)
 
-    assert f"- cite-the-head: Use the workspace procedure. ({shared.resolve()})" in \
+    assert "- cite-the-head: Use the workspace procedure." in \
         _index(sources).prompt_content.splitlines()
     assert _index(sources).metadata["lessons"] == []
     assert _held(sources, "cite-the-head").reason == "trial lesson not offered: lesson is retired"
@@ -391,7 +391,7 @@ def test_a_workspace_skill_that_takes_an_offered_trials_name_stops_the_trial(db,
 
     index = _index(sources)
     assert [line for line in index.prompt_content.splitlines() if "cite-the-head" in line] == [
-        f"- cite-the-head: Use the workspace procedure. ({shared.resolve()})",
+        "- cite-the-head: Use the workspace procedure.",
     ]
     assert index.metadata["lessons"] == []
     held = _held(sources, "cite-the-head")
@@ -451,7 +451,7 @@ def test_a_project_skill_that_takes_an_offered_trials_name_stops_the_trial(db, w
 
     assert [line for line in _index(after).prompt_content.splitlines()
             if "cite-the-head" in line] == [
-        f"- cite-the-head: Use the project procedure. ({taken.resolve()})",
+        "- cite-the-head: Use the project procedure.",
     ]
     assert _index(after).metadata["lessons"] == []
     assert _held(after, "cite-the-head").reason == SAME_NAME
@@ -485,7 +485,7 @@ def test_a_child_does_not_inherit_a_trial_an_ordinary_skill_took_the_name_of(db,
 
     index = _index(_sources(db, workspace, "child"))
 
-    assert f"- cite-the-head: Use the workspace procedure. ({shared.resolve()})" in \
+    assert "- cite-the-head: Use the workspace procedure." in \
         index.prompt_content.splitlines()
     assert index.metadata["lessons"] == []
 
@@ -527,7 +527,7 @@ def test_an_ordinary_skill_under_two_trials_of_its_name_is_the_one_offered(
     sources = _sources(db, workspace, "child")
 
     index = _index(sources)
-    assert _named(index) == [f"- cite-the-head: Use the workspace procedure. ({shared.resolve()})"]
+    assert _named(index) == ["- cite-the-head: Use the workspace procedure."]
     assert index.metadata["lessons"] == []
     assert _held_reasons(sources) == {
         "child": SAME_NAME,
