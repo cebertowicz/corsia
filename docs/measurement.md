@@ -17,9 +17,9 @@ A new install has little to show until your agents have finished some work. A bl
 
 ## Track something of your own
 
-You can ask an agent to keep count of something its own work does, to wake it when something happens, or to time how long things take. A **measure** is one recorded fact; a **KPI** is a number worked out from measures, such as the share of emails you answered; a **rule** wakes the agent when a kind of event arrives. For example: "Each time you triage my email, record whether you replied, archived or deleted it," or "Wake me when the nightly backup fails."
+You can ask an agent to keep count of something its own work does, to wake it when something happens, or to time how long things take. A **measure** is one recorded fact; a **KPI** is a number worked out from measures, such as the share of emails you answered; a **rule** wakes the agent when a kind of event arrives, and the agent then tells you. For example: "Each time you triage my email, record whether you replied, archived or deleted it," or "When mail from my accountant arrives, look at it and tell me what it needs."
 
 - The agent sets up what it will record, then records each time it happens.
 - To check it's working, ask: "Is the email triage you're recording coming through?" The agent can tell you the counts for today and the last 7 days, any refusals and why, and a KPI's value for this week and last week.
-- New email in a connected mailbox, GitHub activity, CORSIA's own events and events the agent sends can wake it. A rule needs a sender address or a label your mail already carries, can't read the text, and wakes only the agent that wrote it.
-- Not yet: Measurement doesn't show your own measures, nothing alerts you when a number crosses a line, and calendar and chat apps don't reach CORSIA. An agent can check one on a schedule, no more often than every 5 minutes.
+- New email in a connected mailbox, GitHub activity, CORSIA's own events and events the agent sends can wake it. For mail, a rule matches a sender address or a label your mail already carries; it can't match on the subject or message text. A rule wakes only the agent that wrote it (or a helper it started).
+- Not yet: Measurement doesn't show your own measures, nothing alerts you when a number crosses a line, and calendar and chat apps don't reach CORSIA. An agent can run a script on a schedule, at most every 5 minutes, that checks the app or number and records or sends what it finds.

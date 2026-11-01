@@ -62,6 +62,7 @@ An agent can declare facts about its own work in `measures.yaml`, record them, r
 
 - **Events** come from connected mail, GitHub, CORSIA itself and agents' scripts, not from calendar or chat (`backend/events/intake.py`).
 - **Who is woken.** The agent that owns what an event is about is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
+- **KPI weeks** run on UTC; an agent reads the current and the last complete week (`backend/tools/measures.py`).
 
 ## What can go wrong
 
@@ -86,4 +87,5 @@ An agent can declare facts about its own work in `measures.yaml`, record them, r
 | Cost | `backend/api/measurement_cost.py`, `backend/llm/api_equivalent.py` |
 | Size series | `backend/api/measurement_size.py` |
 | Comparability breaks | `backend/api/measurement_breaks.py` |
+| In-app page and reading guide | [Measurement](../measurement.md) |
 | Declared measures, events and KPIs | `backend/infra/measure_registry.py`, `backend/events/intake.py`, `backend/events/rules.py`, `backend/core/agent_kpi_formula.py` |
