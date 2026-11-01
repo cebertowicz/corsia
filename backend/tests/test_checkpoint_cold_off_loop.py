@@ -73,4 +73,4 @@ async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
     assert counted and counted[0] != loop_thread
     assert fitted and fitted[0] != loop_thread
     assert sent_tools == tools and first_seq == 3
-    assert messages == [{"role": "system", "content": "fold"}]
+    assert messages == [{"role": "system", "content": "fold"}, fork.COLD_CLOSING_TURN]
