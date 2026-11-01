@@ -1,6 +1,6 @@
 ---
 name: experiment-design
-description: Use before designing or reading out an experiment, A/B or comparison (model, prompt, workflow); when counting or tracking something your work does, being woken or acting each time something happens, or an alert or chart for a number; and for defining or interpreting a KPI. Bar set by consequence. Not for regression tests or source inspection.
+description: Use before designing or reading out an experiment, A/B or comparison (model, prompt, workflow); when recording, counting or tracking something your work does, being woken or acting each time something happens, or an alert or chart for a number; and for defining or interpreting a KPI. Not for regression tests or source inspection.
 ---
 
 # Experiment design
