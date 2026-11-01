@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { setupLocalPhase, setupLocalRow, setupStartNote } from './setupProviderRows';
+import { setupLocalRow, setupStartNote } from './setupProviderRows';
 
 const actions = () => ({
 	start: vi.fn(),
@@ -126,16 +126,28 @@ describe('setup provider rows', () => {
 	const local = (localState?: string, extra: Partial<Parameters<typeof setupLocalRow>[0]> = {}) => {
 		const downloading = ['downloading', 'paused', 'starting'].includes(localState ?? '');
 		const row = setupLocalRow({ ...actions(), source: localState ? { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: localState } : undefined, pick: null, eligible: true, downloading, ready: false, startError: '', ...extra });
-		return { row, phase: setupLocalPhase(row, downloading) };
+		return { row, phase: row.phase };
 	};
 
-	it('says the local model is starting, never downloading, while its row shows it starting or loading', () => {
-		for (const { row, phase } of [local('starting'), local('ready'), local(undefined, { preparing: true }), local('ready', { startError: 'other' }), local('starting', { startError: 'other' })]) {
+	it('says the local model is loading, in the glossary word, while its row shows it starting or loading', () => {
+		for (const { row, phase } of [local('starting'), local('ready'), local('ready', { startError: 'other' }), local('starting', { startError: 'other' })]) {
 			expect(row.busy).toBe(true);
-			expect(phase).toBe('starting');
-			expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes starting.');
+			expect(phase).toBe('loading');
+			expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes loading.');
 			expect(setupStartNote(true, true, phase)).toBe('');
 		}
+	});
+
+	it('names the download while the local model is getting ready to download', () => {
+		const { row, phase } = local(undefined, { preparing: true });
+		expect(row.meta).toBe('Getting the local model ready…');
+		expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes downloading.');
+	});
+
+	it('offers the switch in the footer when a downloaded local model is off', () => {
+		const { row, phase } = local(undefined, { source: { source: 'omlx', name: 'Local model', state: 'needs_setup', reason_code: 'not_running', local_state: 'stopped' } });
+		expect(row.toggle?.on).toBe(false);
+		expect(setupStartNote(false, true, phase)).toBe('Turn on the local model, set up a subscription or add an API provider to continue.');
 	});
 
 	it('says the local model keeps downloading only while it downloads or is paused', () => {
