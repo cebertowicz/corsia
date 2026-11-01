@@ -5,7 +5,7 @@ description: Use before designing or reading out an experiment, A/B or compariso
 
 # Experiment design
 
-Counting, tracking, being woken by or timing something your work does, or an alert or chart for a number, not testing a change? Go straight to `references/instrument-measures.md`. The rest of this file is for experiments and comparisons.
+Counting, tracking, being woken by or timing something your work does, or an alert or chart for a number, not testing a change? Go straight to `references/instrument-measures.md`. Tell the person first that a rule can wake only you, never another agent or them directly. The rest of this file is for experiments and comparisons.
 
 An experiment exists to inform one decision at the lowest cost that can inform it. Spending past that point is waste, not rigor.
 
