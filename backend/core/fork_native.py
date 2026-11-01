@@ -42,6 +42,11 @@ from core.fork_types import (
 # still covers the largest local checkpoint call measured (7,336 tokens).
 SMALL_WINDOW_OUTPUT_DIVISOR = 5
 
+COLD_CLOSING_TURN = {
+    "role": "user",
+    "content": "Carry out the system instruction now, using the conversation above as its source.",
+}
+
 
 def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     """Bound the fork's output allowance by its writer's window."""
@@ -194,14 +199,25 @@ async def _messages_and_tools(
         if tool.get("function", {}).get("name") in kind.tool_allowlist
     ]
     fitted = await asyncio.to_thread(_fit_cold_input, request, tools)
-    return (
-        [
-            {"role": "system", "content": request.instruction},
-            *(dict(message) for message in fitted.messages),
-        ],
-        tools,
-        fitted.first_included_seq,
-    )
+    return cold_messages(request.instruction, fitted.messages), tools, fitted.first_included_seq
+
+
+def cold_messages(
+    instruction: str, source: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Frame a cold source so the fork's next turn answers the instruction.
+
+    The source quotes history in its own roles. One that ends on an assistant
+    reply (a manual, idle or model-switch checkpoint) left the system text as
+    the last instruction, and a model echoed its frozen continuity index
+    instead of writing; the warm branch already closes with a user turn.
+    """
+    from history.adapters import merge_checkpoint_source_blocks
+
+    return [
+        {"role": "system", "content": instruction},
+        *merge_checkpoint_source_blocks([*source, COLD_CLOSING_TURN]),
+    ]
 
 
 async def warm_input_fits(
