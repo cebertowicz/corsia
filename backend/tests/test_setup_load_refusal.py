@@ -238,3 +238,38 @@ def test_restored_failure_projects_through_ready_source(cause, monkeypatch, tmp_
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: {MODEL.model})
     assert local_sources._omlx_state(({"omlx@server"}, set()))["local_state"] == "start_failed"
     assert local_setup_operation.read().result["cause"] == cause
+
+
+def test_retry_after_refusal_projects_starting_until_loaded(monkeypatch, tmp_path):
+    from dataclasses import replace
+    from llm import local_setup_operation, local_sources
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+    operation = replace(local_setup_operation.Operation.for_model(MODEL, "setup", onboarding=True),
+                        result={"ok": False, "cause": "load_refused", "catalog_line": "Not loaded: needs 19 GB, 13 GB free for a model now", "verdict": "no_memory", "ref": "local-42"},
+                        downloaded=True)
+    local_setup_operation.write(operation)
+    local_setup.restore_terminal_flight(local_setup_operation.read())
+    monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: False)
+    monkeypatch.setattr(local_sources, "local_memory_ok", lambda: True)
+    monkeypatch.setattr("llm.local_setup_prepare.known_model", lambda: MODEL)
+    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda _rows: [{"id": "server", "status": "online"}])
+    monkeypatch.setattr(local_sources, "corsia_omlx_server", lambda: {"id": "server", "status": "online"})
+    monkeypatch.setattr("llm.catalog.get_model_by_litellm", lambda identity: {"litellm_model": identity, "available": True, "enabled": True})
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
+    states = ({"omlx@server"}, set())
+    assert local_sources._omlx_state(states)["local_state"] == "start_failed"
+
+    # Retry: the new flight clears the refusal and loads the model on disk. The row must never read
+    # as an idle, undownloaded model ("stopped" is what the Download offer is built on).
+    class Running:
+        def done(self):
+            return False
+
+    local_setup._flight.result, local_setup._flight.task = None, Running()
+    assert local_sources._omlx_state(states)["local_state"] == "starting"
+
+    local_setup._flight.task = None
+    local_setup._flight.result = {"ok": True}
+    assert local_sources._omlx_state(states)["local_state"] == "stopped"
