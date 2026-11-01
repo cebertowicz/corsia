@@ -70,7 +70,7 @@ An agent can declare facts about its own work in `measures.yaml`, record them, r
 - **Little data looks like no data.** A new install or a scope with few outcomes can show empty ratio charts because of the minimum-sample rule. Count series need not have the same threshold.
 - **Only eligible plan work counts as outcomes.** Work done outside a plan task is not an outcome. Other records, such as token usage, can still be measured.
 - **Proxies are estimates.** Active hours, asks per outcome and size-based hours are approximations and are marked so. Do not read a small difference as a result.
-- **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. A rule on the wrong event type or field fires on nothing and raises no error. The Measurement page doesn't show them yet, and a review line wakes the agent, not you.
+- **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. A rule on the wrong event type or field fires on nothing and raises no error. The Measurement page doesn't show them yet, and a review line reaches the agent, not you.
 - **First-try rate depends on recorded work.** A send-back, certain failed or changed-requirement attempts, or a failed predecessor makes an outcome not first-try. It cannot see a rejection that happened in conversation and was never recorded on the plan.
 - **API-equivalent is not the bill.** Subscriptions and plan limits change what a person actually pays.
 - **Method changes break trends.** After a break, compare only within one side.
