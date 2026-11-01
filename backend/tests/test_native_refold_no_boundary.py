@@ -137,8 +137,11 @@ def seat(isolated_db, monkeypatch):
     def live_window(_selector, *, thread_id):
         # context_window.resolve_live_window_facts: configured, capped by memory fit.
         fit = memory_fit.memory_fit_window(SEAT)
+        capped = fit is not None and fit < WINDOW
         return SimpleNamespace(
-            context_window=min(WINDOW, fit or WINDOW),
+            context_window=fit if capped else WINDOW,
+            context_window_source="memory" if capped else "provider",
+            configured_context_window=WINDOW,
             expected_reported_model=None, transport_model=MODEL,
         )
 
@@ -208,10 +211,15 @@ async def _boundary(state, thread: str, turn: str = "turn-1"):
 async def _refuse(state) -> None:
     """The provider's prefill refusal, through the dispatch and Turn paths that learn it."""
     from core.turn_provider_error import check_provider_error
+    from infra import state as runtime_state
     from llm.provider_overflow import _learn_memory_fit
     from llm.router import LLMResponse
 
-    _learn_memory_fit(RuntimeError(REFUSAL), "openai/qwen", state.messages, TOOLS, "srv")
+    bound = runtime_state._current_turn_identity.set(TurnIdentity("turn-1", 1))
+    try:  # the cap is the refused Turn's own (#1959)
+        _learn_memory_fit(RuntimeError(REFUSAL), "openai/qwen", state.messages, TOOLS, "srv")
+    finally:
+        runtime_state._current_turn_identity.reset(bound)
     response = LLMResponse(REFUSAL, finish_reason="error", error_kind="provider_context_overflow")
     assert await check_provider_error(state, response, MODEL, "t", _noop, True)
     assert state.overflow_retry_pending
@@ -322,7 +330,6 @@ async def test_capped_installed_tail_with_nothing_newer_to_fold_reports_the_tail
 
     assert await _outcome(state, "t1", "turn-1") == TAIL_TOO_LARGE
     assert reads == ["t1"]  # one render, from the required start's own read
-    assert await _outcome(_further_send("t1", state), "t1", "turn-2") == TAIL_TOO_LARGE
 
 
 @pytest.mark.asyncio
