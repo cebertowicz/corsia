@@ -14,7 +14,7 @@ import uuid
 from loguru import logger
 
 EVENT = "system.turn.unanswered_input"
-# Draft texts, awaiting the owner's approval; this is the one place they live.
+# The wake's texts live only here.
 SUMMARY = "The last turn ended with an error before replying, so the agent is answering again"
 GUIDANCE = (
     "Your previous turn ended with an error before it answered the person's last message. "
