@@ -74,7 +74,9 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
     ))
 
     assert len(wakes(lineage)) == 1
-    assert order == ["release:start", "release:done", "drive:parent"]
+    # An errored worker Turn also left its input unanswered, so its own wake drives last.
+    woken = ["drive:worker"] if kind == "child_turn_errored" else []
+    assert order == ["release:start", "release:done", "drive:parent", *woken]
 
 
 def test_a_codex_release_failure_still_drives_the_parent_it_woke(
@@ -108,7 +110,7 @@ def test_a_codex_release_failure_still_drives_the_parent_it_woke(
             {"kind": "turn_failed", "cause": "process_exited"}, live,
         ))
 
-    assert order == ["release:start", "drive:parent"]
+    assert order == ["release:start", "drive:parent", "drive:worker"]
 
 
 async def test_cc_result_keeps_event_db_but_uses_canonical_terminal_owner(
@@ -223,7 +225,7 @@ async def test_a_claude_code_childs_parent_is_driven_after_its_settlement(
     cc_stream_control.observe_terminal_event(session, delivered)
     await session._terminal_driver
 
-    assert order == ["release", "drive:parent"]
+    assert order == ["release", "drive:parent", "drive:worker"]
 
 
 async def test_cc_broadcast_failure_is_recoverable_after_commit(

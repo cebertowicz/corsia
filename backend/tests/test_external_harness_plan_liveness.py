@@ -17,7 +17,7 @@ from plans import admission as plan_admission, service
 from tests.event_routing_helpers import mk_session
 
 
-def _bind_active_turn(live, thread_id: str, *, db=None) -> None:
+def _bind_active_turn(live, thread_id: str, *, db=None, metadata=None) -> None:
     from infra.input_writes import begin_batch_write, settle_batch_write
     from infra.thread_driver import admit_input
 
@@ -31,6 +31,7 @@ def _bind_active_turn(live, thread_id: str, *, db=None) -> None:
         turn_id=turn_id,
         boot_epoch=BOOT_EPOCH,
         admitted_at="t",
+        metadata=metadata,
         db=db,
     )
     assert admission.batch is not None

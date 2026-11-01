@@ -84,6 +84,20 @@ async def test_an_error_after_an_unanswered_input_queues_one_wake(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_thread_being_deleted_skips_the_wake_and_keeps_the_turn_end(db) -> None:
+    from infra.admission_fence import fence
+
+    _take_in(db)
+
+    with fence() as held:
+        held.add([_THREAD])
+        effects = await _end(db)
+
+    assert _wakes(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
 async def test_a_turn_that_took_in_the_wake_and_errors_queues_no_other(db) -> None:
     """The woken Turn also took in a newer person input, and still queues no chain."""
     _take_in(db)
@@ -165,10 +179,11 @@ async def test_an_answered_input_queues_nothing(db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_wake_plan_liveness_armed_replaces_ours(db, monkeypatch) -> None:
+async def test_a_provider_reset_wake_replaces_ours(db, monkeypatch) -> None:
     from automation import plan_liveness
 
-    monkeypatch.setattr(plan_liveness, "on_turn_complete", lambda *a, **k: SimpleNamespace(provider_reset_at=None))
+    monkeypatch.setattr(plan_liveness, "on_turn_complete",
+                        lambda *a, **k: SimpleNamespace(provider_reset_at="2026-11-01T17:00:00Z"))
     _take_in(db)
 
     effects = await _end(db)
@@ -178,8 +193,25 @@ async def test_a_wake_plan_liveness_armed_replaces_ours(db, monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_an_agents_input_is_not_a_persons(db) -> None:
-    _take_in(db, sender_kind="agent")
+async def test_a_plan_backoff_wake_does_not_replace_ours(db, monkeypatch) -> None:
+    from automation import plan_liveness
+
+    monkeypatch.setattr(plan_liveness, "on_turn_complete", lambda *a, **k: SimpleNamespace(provider_reset_at=None))
+    _take_in(db)
+
+    effects = await _end(db)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", [
+    {"sender_kind": "agent"}, {"sender_kind": "eval"}, {"completion": True},
+    {"routed_event": "webhook.github.issue_comment"},
+])
+async def test_an_agents_input_is_not_a_persons(db, marker) -> None:
+    _take_in(db, **marker)
 
     await _end(db)
 

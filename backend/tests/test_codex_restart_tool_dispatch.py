@@ -145,8 +145,18 @@ async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monk
                 "Timed out waiting for the current Codex tool usage receipt after 0.1s"
                 in str(row.get("content", "")) for row in rows
             ), rows
-            assert not list(backend.workspace.rglob("must-not-exist.txt"))
+            # The failed Turn never answered the person, so one wake answers it once.
+            for _ in range(150):
+                if await client.active_turn_count(thread_id) == 0:
+                    break
+                await asyncio.sleep(0.1)
             assert await client.active_turn_count(thread_id) == 0
+            rows = await client.messages(thread_id)
+            assert sum(
+                (row.get("metadata") or {}).get("event_type") == "system.turn.unanswered_input"
+                for row in rows
+            ) == 1, rows
+            assert not list(backend.workspace.rglob("must-not-exist.txt"))
             await _read_probe(client, thread_id, "after-failure")
     finally:
         await asyncio.to_thread(backend.stop)
