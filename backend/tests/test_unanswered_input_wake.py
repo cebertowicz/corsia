@@ -17,6 +17,7 @@ from aiohttp.test_utils import TestServer
 
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
+from infra.thread_input_types import TurnIdentity
 from infra.unanswered_input_wake import EVENT, GUIDANCE
 
 _THREAD = "wake-thread"
@@ -44,7 +45,7 @@ def db(isolated_db):
         connection.close()
 
 
-def _take_in(db, turn="t1", message="m1", **metadata) -> None:
+def _take_in(db, turn="t1", message="m1", **metadata) -> TurnIdentity:
     from infra.input_writes import begin_batch_write, settle_batch_write
     from infra.thread_driver import admit_input
 
@@ -379,6 +380,7 @@ async def _run_native(refusals: int):
     app.router.add_get("/v1/models", provider.models)
     server = TestServer(app, host="127.0.0.1", port=0)
     await server.start_server()
+    assert server.port is not None
     try:
         await asyncio.to_thread(_seed, server.port)
         admission = await asyncio.to_thread(
