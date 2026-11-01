@@ -244,10 +244,10 @@ def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted(
     wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
     connection = db()
     sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
-    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
+    assert admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
     left_out = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert {item["name"]: item["status"] for item in left_out["items"]} == {"mail.triaged": "unchanged", "replied_share": "unchanged", "mail.sorted": "removed"}
-    refused = admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
+    refused = admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
     assert refused.refusal and "is not declared in your measures.yaml" in refused.refusal
     assert connection.execute("SELECT count(*) FROM outcome_events WHERE event_name='mail.sorted'").fetchone()[0] == 1  # old rows stay readable
     assert [version for (version,) in connection.execute("SELECT version FROM measure_definitions WHERE name='mail.sorted' ORDER BY version")] == [1, 2]
@@ -255,7 +255,7 @@ def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted(
     assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]  # a retired name is reported once
     back = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
     assert {item["name"]: item["status"] for item in back["items"]}["mail.sorted"] == "added"
-    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
+    assert admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
 
 
 def test_a_name_synced_from_another_file_is_not_removed_by_this_one(tmp_path: Path) -> None:
@@ -289,7 +289,7 @@ def test_one_stamped_set_governs_the_file_the_registry_and_admission(name: str) 
     connection = db()
     sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert all(name in event.specs for event in REGISTRY.events.values())  # the registry gives every event a spec for it
-    admitted = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied", name: "forged"}, run_id="r")
+    admitted = admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied", name: "forged"}, run_id="r")
     assert any(f'attribute "{name}" is stamped by the server' in note for note in admitted.notes)  # admission removes the emitter's value
     assert json.loads(connection.execute("SELECT attributes FROM outcome_events").fetchone()[0]).get(name) != "forged"
 

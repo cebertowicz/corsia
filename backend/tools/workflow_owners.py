@@ -39,13 +39,15 @@ def thread_workflow_owners(thread_id: str, db: Any) -> dict[str, WorkflowOwner]:
     return workflow_owners(thread_id, row[0] if row else None, db)
 
 
-def workflow_stamp(thread_id: str, workflow: str, db: Any) -> tuple[str, str | None] | None:
+def workflow_stamp(
+    thread_id: str, workflow: str, db: Any, owners: dict[str, WorkflowOwner] | None = None,
+) -> tuple[str, str | None] | None:
     """The (workflow_ref, workflow_version) a run of ``thread_id`` stamps for ``workflow``.
 
     None when the agent no longer owns it; the version is None when Git can't name one. Reads
-    Git, so run it off the database pool.
+    Git, so run it off the database pool. Pass ``owners`` to stamp several refs from one owner map.
     """
-    owners = thread_workflow_owners(thread_id, db)
+    owners = owners if owners is not None else thread_workflow_owners(thread_id, db)
     if workflow_problem(owners, thread_id, workflow):
         return None
     return workflow, _workflow_version(owners[workflow].skill)
