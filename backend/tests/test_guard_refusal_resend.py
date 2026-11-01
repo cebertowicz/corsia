@@ -2,14 +2,16 @@
 
 The guard prices the whole prompt as new KV before the prefix cache is consulted,
 so a call can be refused only because another request on the seat holds memory
-at that moment. Learning a window from that refusal shrank every later turn
-below its fixed prompt; the call now waits for the seat and is sent once more.
+at that moment. A first refusal teaches no window: the call waits for the seat
+and is sent once more.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -86,6 +88,8 @@ def _rediscovery(monkeypatch, window=41_681):
     ([_status()], 5.0, True, 1),
     ([None], 5.0, False, 1),  # unauthenticated or unreachable: resend now, never wait blind
     ([{"status": "ok"}], 5.0, False, 1),  # no activity fields to wait on
+    ([{"active_requests": 0}], 5.0, False, 1),  # no waiting count: never wait blind
+    ([{"active_requests": 0, "waiting_requests": 0}], 5.0, True, 1),  # no total needed
     ([_status(active=1)], 0.05, False, 2),  # still busy when the wait runs out
 ])
 async def test_wait_until_quiet(monkeypatch, readings, timeout, quiet, reads):
@@ -145,8 +149,8 @@ async def test_other_overflows_never_wait(monkeypatch, error, server_id):
 async def test_turn_call_refused_while_the_seat_is_busy_is_resent_and_answers(monkeypatch):
     """The c8 shape: another ~30k call holds memory; the turn's call is refused once.
 
-    Before the fix the refusal was learned first, rediscovery read the window capped
-    below the payload, and the call ended as a handled overflow with no resend.
+    Rediscovery reads this Turn's capped window, so a learned refusal would end the
+    call as a handled overflow; the resend must answer with nothing learned.
     """
     import llm.base as llm_base
 
@@ -173,4 +177,113 @@ async def test_turn_call_refused_while_the_seat_is_busy_is_resent_and_answers(mo
     )
     assert response.content == "answered"
     assert len(calls) == 2 and len(seen) == 2
+    assert not _capped()
+
+
+def _answer(content):
+    message = SimpleNamespace(content=content, tool_calls=None, reasoning_content=None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None)
+
+
+@pytest.mark.asyncio
+async def test_resent_turn_call_keeps_a_local_fork_gated_until_it_answers(monkeypatch):
+    """Composed with the fork gate (#1962) on one local seat.
+
+    A fork call already running when the Turn's call starts gets that call refused
+    once; the Turn waits for the seat, resends, and the fork's next call starts only
+    after the resent call answers.
+    """
+    import llm.base as llm_base
+    from core import fork_cold_count, fork_native as native
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from infra import state
+    from llm.router import LLMResponse, ToolCallRequest
+    from tests.test_fork_yields_to_turn_call import LOCAL_SEAT
+    from tests.test_native_cold_round_trip import THREAD, _admission
+
+    running: set[str] = set()  # calls holding memory on the seat right now
+    order: list[str] = []
+    probes: list[list[str]] = []
+    fork_running, fork_release = asyncio.Event(), asyncio.Event()
+    resent, turn_release = asyncio.Event(), asyncio.Event()
+
+    async def probe(client, server_id, host, port):
+        probes.append(sorted(running))
+        return (host, 1, _status(active=len(running)))
+
+    async def address(*_a):
+        return ("127.0.0.1", 8210)
+
+    monkeypatch.setattr("llm.providers.omlx_public_probe.probe_registered_status", probe)
+    monkeypatch.setattr(carry_in_capacity, "run_in_db", address)
+    monkeypatch.setattr("llm.provider_overflow.GUARD_QUIET_INTERVAL_SECONDS", 0.01, raising=False)
+    _rediscovery(monkeypatch)
+
+    async def fork_completion(**_kwargs):
+        order.append("fork")
+        if order.count("fork") > 1:
+            return LLMResponse(content="synthetic checkpoint", usage={})
+        running.add("fork")
+        fork_running.set()
+        await fork_release.wait()
+        running.discard("fork")
+        return LLMResponse(content="", tool_calls=[ToolCallRequest("t1", "read", {})], usage={})
+
+    async def get_agent():
+        return SimpleNamespace(max_iterations=3, tools=SimpleNamespace(get_definitions=lambda: []))
+
+    async def no_measure(*_a, **_k):
+        return None
+
+    async def tools_fit(*_a, **_k):
+        return True
+
+    monkeypatch.setattr(fork_cold_count, "_server_tokens", lambda text, _writer: len(text) // 4)
+    monkeypatch.setattr(native, "_get_agent", get_agent)
+    monkeypatch.setattr(native, "_provider_params", lambda _: {"model": "Qwen-test"})
+    monkeypatch.setattr(native, "_chat_completion", fork_completion)
+    monkeypatch.setattr(native, "_measured_after", no_measure)
+    monkeypatch.setattr(native, "_run_tool_calls", tools_fit)
+
+    async def turn_completion(**_kwargs):
+        order.append("turn")
+        if order.count("turn") == 1:
+            assert running == {"fork"}
+            raise Exception(GUARD)
+        running.add("turn")
+        resent.set()
+        await turn_release.wait()
+        running.discard("turn")
+        return _answer("answered")
+
+    monkeypatch.setattr(llm_base, "acompletion", turn_completion)
+
+    request = _admission(monkeypatch).provider_request
+    request = replace(request, target=replace(request.target, **LOCAL_SEAT))
+    fold = asyncio.create_task(native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND))
+    await asyncio.wait_for(fork_running.wait(), 5)
+
+    turn = asyncio.create_task(llm_base._completion_with_retries(
+        {"model": f"openai/{MODEL}", "messages": [{"role": "user", "content": "word " * 3000}]},
+        model=f"openai/{MODEL}", use_streaming=False,
+        on_reasoning_chunk=None, on_content_chunk=None, on_tool_call_chunk=None,
+        on_response_started=None, retry_transient_errors=True, omlx_server_id=SID,
+    ))
+    monkeypatch.setitem(state._active_llm_tasks, THREAD, turn)
+    for _ in range(100):
+        if probes:
+            break
+        await asyncio.sleep(0.01)
+    assert probes and probes[0] == ["fork"]  # refused while the fork's call held the seat
+
+    fork_release.set()
+    await asyncio.wait_for(resent.wait(), 5)
+    await asyncio.sleep(0.1)
+    assert order == ["fork", "turn", "turn"]  # the fork's next call waits behind the resend
+    assert not fold.done()
+
+    turn_release.set()
+    assert (await asyncio.wait_for(turn, 5)).content == "answered"
+    assert (await asyncio.wait_for(fold, 5)).raw_body == "synthetic checkpoint"
+    assert order == ["fork", "turn", "turn", "fork"]
     assert not _capped()

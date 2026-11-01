@@ -92,7 +92,9 @@ async def omlx_idle(server_id: str) -> bool:
 async def wait_until_quiet(server_id: str, *, timeout: float, interval: float) -> bool:
     """Wait until one ``/api/status`` reading shows no active or waiting request.
 
-    True once quiet; False when the timeout passes first or the status can't be read.
+    True once quiet; False when the timeout passes first or the status can't be read
+    or lacks either count. One reading is enough here because the caller only waits
+    out memory already held; the two-reading rule in :func:`omlx_idle` admits new work.
     """
     import httpx
 
@@ -106,9 +108,10 @@ async def wait_until_quiet(server_id: str, *, timeout: float, interval: float) -
         while True:
             probed = await probe_registered_status(client, server_id, *address)
             payload = probed[2] if probed else None
-            if not payload or "active_requests" not in payload:
+            counts = [(payload or {}).get(key) for key in ("active_requests", "waiting_requests")]
+            if None in counts:
                 return False
-            if idle_reading(payload) is not None:
+            if counts == [0, 0]:
                 return True
             if asyncio.get_running_loop().time() + interval > deadline:
                 return False
