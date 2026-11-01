@@ -3,7 +3,7 @@
 The schema and the validator disagreeing is the defect #1477 records: a call
 an agent built from the tool definition alone was rejected at runtime, and the
 real shape had to be found by trial. So nothing here is written by hand -- the
-branches, the per-field rules and the prose are all derived from
+body's keys, the per-field rules and the prose are all derived from
 ``ENTRY_FIELD_MODELS`` and the maps the executor enforces.
 """
 
@@ -129,7 +129,7 @@ def field_body_rules() -> list[dict[str, Any]]:
     """Narrow the body to the one shape a named field accepts.
 
     Deliberately NOT a second copy of the model schemas. Provider-side JSON
-    Schema validators apply the types, bounds and vocabularies in
+    Schema validators apply the types and vocabularies in
     :func:`_body_schema`; CORSIA applies the full rules, bounds included, by
     calling the store validator in :func:`body_errors`. All this clause must
     add is WHICH shape a named field takes. The key set alone discriminates the

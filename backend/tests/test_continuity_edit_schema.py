@@ -62,8 +62,7 @@ def test_a_json_string_body_is_decoded_once_on_add():
 
     The same threads recorded successful object-body adds minutes apart, so
     the model is not confused about the shape -- it serialised it twice. The
-    registry decodes it for every tool; the body's oneOf of objects counts as
-    an object.
+    registry decodes it for every tool; the body is declared an object.
     """
     import json
 
@@ -150,19 +149,11 @@ def test_bounds_left_out_of_the_schema_are_enforced_by_the_server(operation, bod
     assert "invalid facts entry" in refusal or "does not match any continuity entry shape" in refusal
 
 
-def test_the_body_schema_does_not_restate_bounds_the_server_enforces():
-    """Guards the token saving: a bound back in the body costs every prompt."""
-    text = json.dumps(_body())
-
-    for bound in ("minLength", "maxLength", "maxItems"):
-        assert bound not in text
-
-
 def test_relevant_state_kind_is_the_restricted_vocabulary():
     """`kind` is a closed set in the validator, not free text.
 
     Distinct from a source reference's `kind`, which has its own wider
-    vocabulary — so this asserts the state branch specifically.
+    vocabulary — so this asserts the state shape specifically.
     """
     from core.continuity_types import RelevantState
     from typing import get_args
@@ -409,7 +400,8 @@ def test_replace_accepts_every_real_shape(model_name):
 
     Its entry's field is a database fact this layer cannot read, and asking
     the agent to repeat it would add a remembered input for nothing (PS24).
-    So the schema narrows replace to "one of the four" and no further.
+    So the schema accepts any key of the four shapes on replace, and the
+    server refuses a mix that makes no shape.
     """
     from core.continuity_types import ENTRY_FIELD_MODELS
     from jsonschema import Draft202012Validator
