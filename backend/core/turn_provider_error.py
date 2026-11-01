@@ -8,10 +8,10 @@ from loguru import logger
 
 from core import turn_iteration_context as iteration_context
 from infra import state as runtime_state
-from llm.error_cause import response_error_fields
+from llm.error_cause import ProviderTurnFailure, response_error_fields
 
 
-class TurnProviderError(RuntimeError):
+class TurnProviderError(ProviderTurnFailure):
     """Provider-reported turn failure already surfaced by the step handler."""
 
 
@@ -57,9 +57,9 @@ async def end_on_provider_error(state, response, turn_model, provider_on_step, o
         message = response.content or (
             "The model call failed without a diagnostic message. Retry, or "
             "switch models if it persists.")
-    await provider_on_step("error", terminal_payload(
-        state, message=message, **response_error_fields(response)))
-    raise TurnProviderError(message)
+    fields = response_error_fields(response)
+    await provider_on_step("error", terminal_payload(state, message=message, **fields))
+    raise TurnProviderError(message, fields["cause_kind"])
 
 
 async def end_if_overflow_unchanged(state, prepared, turn_model, provider_on_step) -> None:

@@ -107,6 +107,7 @@ async def _deliver_terminal(on_event, live, event: dict) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_stale_app_server_exit_settles_old_tool_debt_without_quarantining_successor(
     isolated_db,
 ):
@@ -1146,6 +1147,7 @@ async def test_missing_results_retry_at_complete_assistant_step_boundary(
         }, "error"),
     ],
 )
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_natural_terminal_settles_missing_tool_result_before_removing_live(
     isolated_db, monkeypatch, terminal_event, expected_status,
 ):
@@ -1210,6 +1212,7 @@ async def test_natural_terminal_settles_missing_tool_result_before_removing_live
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_terminal_settlement_failure_retains_live_and_retries(
     isolated_db, monkeypatch,
 ):
@@ -1862,6 +1865,7 @@ async def test_steer_cancel_before_write_is_unaccepted(isolated_db):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["cancel", "reader_exit"])
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_steer_post_write_failure_is_ambiguous_and_quarantined(
     isolated_db, failure,
 ):
@@ -1912,6 +1916,7 @@ async def test_steer_post_write_failure_is_ambiguous_and_quarantined(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_ambiguous_steer_waits_for_prior_canonical_tool_result(
     isolated_db, monkeypatch,
 ) -> None:

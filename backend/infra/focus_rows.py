@@ -20,10 +20,11 @@ ACTIVITY_SYSTEM_TYPES = (
     "context_event", "activity_receipt", "subagent_ref", "subagent_done", "send_ref",
     "artifact_removed", "model_switch", "account_switch",
 )
-# System rows the transcript never draws: a `seed` is a session's starting context.
+# System rows the transcript never draws: a `seed` is a session's starting context, a
+# `turn_rerun` the model-only input that re-runs a failed Turn's unanswered input.
 # One is not visible, so it never splits a run or holds back an error's recovery,
 # and a Focus read neither counts it in a run nor sends it (`NEVER_DRAWN_FILTER`).
-NEVER_DRAWN_SYSTEM_TYPES = ("seed",)
+NEVER_DRAWN_SYSTEM_TYPES = ("seed", "turn_rerun")
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.
 ERROR_SYSTEM_TYPES = (

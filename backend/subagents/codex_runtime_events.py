@@ -21,7 +21,7 @@ from core.turn_core import (
 from infra.db_async import run_in_db
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
-from llm.error_cause import codex_failure_meta
+from llm.error_cause import codex_failure_meta, harness_failure
 from registry.observer import observe_settled_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed, register_codex_thread
@@ -562,7 +562,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
     cause = ev.get("cause", "process_exited")
     reset_at = ev.get("reset_at")
     msg = ev.get("message") or f"Codex turn failed: {cause}"
-    settlement = await commit_turn_terminal(identity.turn_id, "error", msg)
+    settlement = await commit_turn_terminal(identity.turn_id, "error", harness_failure("codex", cause, msg))
     if settlement.result is not TurnTerminalResult.APPLIED:
         return
     ev["_corsia_terminal_committed"] = True

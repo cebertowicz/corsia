@@ -144,10 +144,7 @@ async def test_cc_result_keeps_event_db_but_uses_canonical_terminal_owner(
 
     assert isinstance(terminal, cc_stream_control.TerminalWithPlanEffects)
     assert terminal.effects.plans_changed == ()
-    commit.assert_awaited_once_with(
-        identity.turn_id, "error", "provider ended",
-        quarantine=cc_event_context._UNSETTLED_AT_TERMINAL,
-    )
+    _assert_failed_terminal(commit, identity, cc_event_context._UNSETTLED_AT_TERMINAL)
     assert marker.call_args.kwargs["db"] is lineage
     row = lineage.execute(
         "SELECT status FROM active_turns WHERE id=?", (identity.turn_id,),
@@ -183,10 +180,17 @@ async def test_cc_non_owner_returns_no_terminal_carrier(lineage, monkeypatch):
         "SELECT 1 FROM messages WHERE thread_id='worker' AND role='system' "
         "AND json_extract(metadata, '$.type')='result'",
     ).fetchone() is None
-    claim.assert_awaited_once_with(
-        identity.turn_id, "error", "provider ended",
-        quarantine=cc_event_context._UNSETTLED_AT_TERMINAL,
-    )
+    _assert_failed_terminal(claim, identity, cc_event_context._UNSETTLED_AT_TERMINAL)
+
+
+def _assert_failed_terminal(commit, identity, quarantine) -> None:
+    """The result reached the terminal as one typed provider failure carrying its text."""
+    from llm.error_cause import ProviderTurnFailure
+
+    commit.assert_awaited_once()
+    (turn_id, outcome, error), kwargs = commit.await_args
+    assert (turn_id, outcome, kwargs) == (identity.turn_id, "error", {"quarantine": quarantine})
+    assert isinstance(error, ProviderTurnFailure) and str(error) == "provider ended"
 
 
 async def test_a_claude_code_childs_parent_is_driven_after_its_settlement(

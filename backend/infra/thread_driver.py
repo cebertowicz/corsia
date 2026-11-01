@@ -24,7 +24,10 @@ from infra.thread_driver_types import (
     TerminalSettlement,
 )
 from infra.thread_input_types import ClaimedBatch, HeldAdmission, TurnAdmission
-from infra.terminal_usage_limits import Recorded, TerminalLimits, Unrecorded, settle_terminal_limits
+from infra.taken_in_rerun import queue_taken_in_rerun
+from infra.terminal_usage_limits import (
+    NotALimit, Recorded, TerminalLimits, Unrecorded, settle_terminal_limits,
+)
 from infra.thread_inputs import fail_claimable_prefix, is_fenced, start_idle_turn
 from infra.turn_usage_receipts import project_thread_usage_before_turn_deletion
 
@@ -168,6 +171,18 @@ def _terminal_duplicate(
     return TerminalSettlement(result, str(row["thread_id"]))
 
 
+def _queue_after_terminal(
+    connection: sqlite3.Connection, turn_id: str, thread_id: str, outcome: str, limits: TerminalLimits,
+) -> None:
+    """Queue the one system input a stopped or failed Turn leaves for its successor claim."""
+    if outcome == "cancelled" and isinstance(limits.error, PlanLimitStop):
+        queue_plan_limit_continue(connection, turn_id, thread_id)
+    elif outcome == "error" and isinstance(limits.limit, Recorded):
+        queue_limit_refusal_continue(connection, turn_id, thread_id)
+    elif outcome == "error" and isinstance(limits.limit, NotALimit) and limits.fail_closed is None:
+        queue_taken_in_rerun(connection, turn_id, thread_id, limits.error)
+
+
 def _end_turn_previews(turn_id: str, outcome: str) -> None:
     """The backstop for every harness: no streamed edit preview outlives its Turn."""
     from doceditor.live_preview import turn_ended
@@ -225,10 +240,7 @@ def finish_turn(
             connection, turn_id, outcome=outcome, error=error,
         )
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
-        if outcome == "cancelled" and isinstance(error, PlanLimitStop):
-            queue_plan_limit_continue(connection, turn_id, thread_id)
-        elif outcome == "error" and isinstance(limits.limit, Recorded):
-            queue_limit_refusal_continue(connection, turn_id, thread_id)
+        _queue_after_terminal(connection, turn_id, thread_id, outcome, limits)
         successor, switch_transition, switch_request, idle = _claim_after_terminal(
             connection,
             thread_id=thread_id,

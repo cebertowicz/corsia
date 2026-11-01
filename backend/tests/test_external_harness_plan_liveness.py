@@ -159,6 +159,7 @@ def test_codex_turn_failed_carries_the_error_text_to_plan_liveness(isolated_db):
         {"kind": "result", "is_error": True, "result": "boom"},
     ],
 )
+@pytest.mark.usefixtures("no_taken_in_rerun")
 def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event, caplog):
     """A plan-side failure must never hide the user-visible failure marker."""
     from codex_runtime_fixtures import _reset_runtime, _run

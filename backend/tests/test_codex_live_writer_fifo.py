@@ -286,6 +286,7 @@ async def _delivered_after_removal() -> dict:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_process_exit_removal_releases_a_hold_written_before_it(isolated_db) -> None:
     from subagents import codex_runtime
 

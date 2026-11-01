@@ -147,6 +147,7 @@ async def test_stop_during_the_retry_completes_once_the_lock_clears(harness):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_locked_settlement_with_close_in_flight_still_terminalizes(harness):
     from subagents.cc_runtime_quiescence import fence_tool_failure, finish_tool_failure
     from subagents.cc_stream_control import retain_terminal_driver

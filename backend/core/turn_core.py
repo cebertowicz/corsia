@@ -37,12 +37,13 @@ class TurnTerminalOwnershipError(RuntimeError):
 
 
 def terminal_error_detail(error: BaseException) -> str | BaseException:
-    """Keep typed no-write facts until FIFO settlement; format ordinary errors."""
+    """Keep typed no-write and failure-cause facts until the terminal; format ordinary errors."""
     from connections.account_policy import AccountAdmissionError
-    from core.checkpoint_types import CheckpointUnavailable
+    from core.checkpoint_types import CheckpointContinuationError
+    from llm.error_cause import ProviderTurnFailure
     from tools.recorded_call import CompletedToolFailure
 
-    return error if isinstance(error, (AccountAdmissionError, CheckpointUnavailable, CompletedToolFailure)) else str(error)
+    return error if isinstance(error, (AccountAdmissionError, CheckpointContinuationError, CompletedToolFailure, ProviderTurnFailure)) else str(error)
 
 
 def persist_turn_start(

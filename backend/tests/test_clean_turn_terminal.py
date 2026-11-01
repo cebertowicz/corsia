@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
+import pytest
+
 
 def _db() -> sqlite3.Connection:
     from infra.schema import SCHEMA_SQL
@@ -220,6 +222,7 @@ def test_successor_claim_reads_added_accounts_once(monkeypatch) -> None:
     assert len(statements) == 1
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 def test_terminal_settles_an_unsettled_plan_dispatch_without_a_hold() -> None:
     """A Turn that dies mid-call closes its dispatch and keeps valid work.
 

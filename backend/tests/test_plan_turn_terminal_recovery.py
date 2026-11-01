@@ -550,6 +550,7 @@ def test_finish_turn_propagates_non_plan_admission_failures(monkeypatch) -> None
         db.close()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 def test_terminal_settlement_leaves_existing_uncertain_effect_rows_untouched() -> None:
     """Old hold, attempt and dispatch rows survive a terminal byte for byte.
 

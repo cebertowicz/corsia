@@ -431,6 +431,14 @@
       "metadata_raw": "{\"type\": \"seed\"}",
       "visible": false,
       "expected_kind": "other"
+    },
+    {
+      "name": "system turn rerun",
+      "role": "system",
+      "content": "answer the input",
+      "metadata_raw": "{\"type\": \"turn_rerun\", \"failed_turn_id\": \"t1\"}",
+      "visible": false,
+      "expected_kind": "other"
     }
   ]
 }

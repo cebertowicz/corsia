@@ -274,6 +274,17 @@ def signed_in_defaults(request, isolated_db):
         db.close()
 
 
+@pytest.fixture
+def no_taken_in_rerun(monkeypatch):
+    """For a test whose failed Turn's re-run is not its subject: the terminal queues none.
+
+    Its fixture Turn took in a person's input and fails before answering, so it
+    would otherwise start the successor ``infra.taken_in_rerun`` owes, which a
+    stub harness cannot run. ``test_taken_in_rerun`` owns that behaviour.
+    """
+    monkeypatch.setattr("infra.thread_driver.queue_taken_in_rerun", lambda *_args: None)
+
+
 class _NoClose:
 
     def __init__(self, c):

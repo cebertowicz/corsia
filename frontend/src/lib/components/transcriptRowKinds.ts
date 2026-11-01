@@ -13,9 +13,10 @@ const ACTIVITY_SYSTEM_TYPES = new Set([
 	'artifact_removed', 'model_switch', 'account_switch',
 ]);
 
-// System rows the transcript never draws: a `seed` is a session's starting context.
+// System rows the transcript never draws: a `seed` is a session's starting context, a
+// `turn_rerun` the model-only input that re-runs a failed Turn's unanswered input.
 // One is not visible, so it never closes a block, and no block holds or counts it.
-const NEVER_DRAWN_SYSTEM_TYPES = new Set(['seed']);
+const NEVER_DRAWN_SYSTEM_TYPES = new Set(['seed', 'turn_rerun']);
 
 // Rows that end a turn with an error. One stays a notice until the agent's next turn
 // starts with nothing to read in between; that start writes `recovered: true` on it.

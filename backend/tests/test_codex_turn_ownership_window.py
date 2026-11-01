@@ -238,6 +238,7 @@ _ROUTES_WITHOUT_TOOL_DEBT = (
 @pytest.mark.parametrize(
     "route", [*_ROUTES_WITH_TOOL_DEBT, *_ROUTES_WITHOUT_TOOL_DEBT],
 )
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_codex_turn_is_owned_until_its_terminal_commits(
     isolated_db, monkeypatch, owner_probe, route,
 ) -> None:
@@ -275,6 +276,7 @@ async def test_codex_turn_is_owned_until_its_terminal_commits(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", _ROUTES_WITH_TOOL_DEBT)
+@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_tool_debt_settlement_happens_inside_the_ownership_window(
     isolated_db, monkeypatch, owner_probe, route,
 ) -> None:

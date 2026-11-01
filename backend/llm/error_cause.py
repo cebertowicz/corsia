@@ -61,6 +61,23 @@ _SELF_NAMING = frozenset({
 })
 
 
+class ProviderTurnFailure(RuntimeError):
+    """A provider-reported Turn failure, carried to the terminal with its ``cause_kind``.
+
+    The terminal reads the kind to decide whether a re-run could answer the
+    person (``infra.taken_in_rerun``); its text is the Turn's error as before.
+    """
+
+    def __init__(self, message: str, kind: str = "unknown") -> None:
+        super().__init__(message)
+        self.cause_kind = kind
+
+
+def harness_failure(harness: str, cause: str | None, message: str) -> ProviderTurnFailure:
+    """The terminal error of one failed harness Turn, typed by :func:`harness_cause_kind`."""
+    return ProviderTurnFailure(message, harness_cause_kind(harness, cause, message))
+
+
 def cause_kind(code: object) -> str:
     """The kind for a native ``error_kind`` or a harness ``cause``; ``unknown`` otherwise."""
     return _KIND_OF_CODE.get(code, "unknown") if isinstance(code, str) else "unknown"

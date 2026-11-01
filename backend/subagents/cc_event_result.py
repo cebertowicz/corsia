@@ -12,7 +12,7 @@ from core.turn_core import TurnIdentity, TurnTerminalResult
 from infra.db_async import run_in_db_unless_owned
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
-from llm.error_cause import cause_fields
+from llm.error_cause import ProviderTurnFailure, cause_fields
 import subagents.cc_event_tool_boundary as tool_boundary
 import subagents.cc_trust as cc_trust
 from subagents.cc_event_context import CCEventContext, claim_terminal, event_identity, frame
@@ -100,6 +100,15 @@ def _result_metadata(
             "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
         ))
     return is_error, metadata
+
+
+def _terminal_error(ev: dict, metadata: dict, outcome: str) -> ProviderTurnFailure | None:
+    """The failed result's terminal error, carrying its ``cause_kind`` to the terminal."""
+    if outcome != "error":
+        return None
+    return ProviderTurnFailure(
+        ev.get("result") or "Claude Code turn failed", metadata.get("cause_kind", "unknown"),
+    )
 
 
 async def _retire_poisoned_session(ctx: CCEventContext, metadata: dict) -> None:
@@ -305,10 +314,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     )
     outcome = _result_outcome(is_error, metadata)
     await _handle_result_error(ctx, ev, metadata, is_error=is_error)
-    settlement = await claim_terminal(
-        identity, outcome,
-        (ev.get("result") or "Claude Code turn failed") if outcome == "error" else None,
-    )
+    settlement = await claim_terminal(identity, outcome, _terminal_error(ev, metadata, outcome))
     if settlement.result is not TurnTerminalResult.APPLIED:
         log.debug(
             "cc_runtime: suppressed non-owning terminal for %s: %s",

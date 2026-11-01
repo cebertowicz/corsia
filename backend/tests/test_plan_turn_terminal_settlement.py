@@ -481,6 +481,7 @@ def test_stop_mid_call_under_a_real_user_pause_keeps_the_pause_and_its_release()
         db.close()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 def test_terminal_settles_only_the_ending_turns_open_calls() -> None:
     """Another live Turn's in-flight call is not this terminal's to settle.
 
