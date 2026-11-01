@@ -6,7 +6,7 @@ from typing import Any
 
 from loguru import logger
 
-from core import turn_iteration_context as iteration_context
+from core.turn_measured_usage import context_usage_from_latest_call
 from infra import state as runtime_state
 from llm.error_cause import response_error_fields
 
@@ -17,7 +17,7 @@ class TurnProviderError(RuntimeError):
 
 def terminal_payload(state, **fields) -> dict:
     """The terminal step payload carrying the latest measured context usage."""
-    fields["context_usage"] = iteration_context._context_usage_from_latest_call(state.context_usage, state.last_measured_call_usage)
+    fields["context_usage"] = context_usage_from_latest_call(state.context_usage, state.last_measured_call_usage)
     if state.context_identity is not None:
         fields["_context_usage_identity"] = state.context_identity
     return fields

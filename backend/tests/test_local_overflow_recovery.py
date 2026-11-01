@@ -170,7 +170,7 @@ async def _folds_at_boundary(monkeypatch, *, window, rendered, usage, sections) 
     async def run_in_db(function, *_args):
         if function is snapshot:
             return None, None, None
-        return SimpleNamespace(context_window=window)
+        return SimpleNamespace(context_window=window, context_window_source="provider")
 
     async def prepare(checkpoint_id, *_args, **_kwargs):
         started.append(checkpoint_id)
@@ -323,7 +323,7 @@ async def _boundary_call(monkeypatch, *, retry, installed_id, adopted_id="ck-1")
     async def run_in_db(function, *_args):
         if function is iteration_context.provider_boundary_snapshot:
             return None, installed, None
-        return SimpleNamespace(context_window=28_672)
+        return SimpleNamespace(context_window=28_672, context_window_source="provider")
 
     async def maintain(boundary, *, must_adopt=False):
         seen.update(must_adopt=must_adopt, installed=boundary.installed_checkpoint)

@@ -3,11 +3,11 @@
 oMLX refuses a prompt whose prefill would not fit in memory before doing any
 work. The refusal states the limit L, the memory already in use C and the
 KV+SDPA cost K of this prompt of P tokens, so it teaches how many tokens fit:
-``P * (L - C_now) / K``. That is a physical runtime fact of one server and one
-loaded model, so it lives in process memory only, keyed by (server, model),
-and is dropped when the server's observation generation changes or the model
-is no longer loaded. ``context_window.resolve_live_window_facts`` caps the
-runtime window with it; settings and catalog surfaces keep the configured one.
+``P * (L - C) / K``. C includes whatever else the server is doing at that
+moment, so the fact holds only while the refused Turn recovers: it lives in
+process memory, keyed by (server, model), and ``end_turn`` drops it when that
+Turn ends. ``context_window.resolve_live_window_facts`` caps the runtime window
+with it; settings and catalog surfaces keep the configured one.
 """
 
 from __future__ import annotations
@@ -16,11 +16,6 @@ import re
 from typing import Any, Mapping, NamedTuple
 
 _GIB = 2 ** 30
-_MIB = 2 ** 20
-# The window moves with live headroom; a settled refusal compares it with the
-# window it recorded (``checkpoint_refusal_settlement._recovery_changed``), so
-# it only moves in whole steps of this many tokens.
-WINDOW_STEP = 1024
 
 _CURRENT_AND_KV = re.compile(
     r"current\s+([\d.]+)\s*GB\s*\+\s*KV\+SDPA\s+([\d.]+)\s*GB", re.IGNORECASE
@@ -31,12 +26,8 @@ _LIMIT = re.compile(r"(?:prefill limit|ceiling) is\s+([\d.]+)\s*GB", re.IGNORECA
 
 
 class _Observation(NamedTuple):
-    prompt_tokens: int
-    limit: int
-    current: int
-    kv: int
-    used0_mb: int | None
-    generation: int
+    turn_id: str
+    fit: int
 
 
 _OBSERVATIONS: dict[tuple[str, str], _Observation] = {}
@@ -71,58 +62,47 @@ def parse_guard_refusal(text: str) -> tuple[int, int, int] | None:
         return None
 
 
-def _server_used_mb(server_id: str) -> int | None:
-    """The server's oMLX model memory in MiB, as the status sweep last stored it."""
-    from llm.network_discovery import get_server
+def _current_turn_id() -> str | None:
+    from infra.state.context import _current_turn_identity
 
-    used = (get_server(server_id) or {}).get("memory_used_mb")
-    return int(used) if isinstance(used, int) and used > 0 else None
+    turn_id = getattr(_current_turn_identity.get(), "turn_id", None)
+    return turn_id if isinstance(turn_id, str) and turn_id else None
 
 
 def record_refusal(
     server_id: str, model_id: str, error_text: str, *, prompt_tokens: int
 ) -> None:
-    """Learn from one refusal for a local managed oMLX model; no-op if unparseable."""
-    from llm.server_observation import observation_generation
+    """Learn from one refusal for a local managed oMLX model; no-op if unparseable.
 
+    Outside a Turn nothing would end the observation, so nothing is recorded.
+    """
     key = (server_id, model_id)
     parsed = parse_guard_refusal(error_text)
-    if not all(key) or parsed is None or prompt_tokens <= 0 or parsed[2] <= 0:
+    turn_id = _current_turn_id()
+    if not all(key) or turn_id is None or parsed is None or prompt_tokens <= 0 or parsed[2] <= 0:
         return
     limit, current, kv = parsed
-    _OBSERVATIONS[key] = _Observation(
-        prompt_tokens, limit, current, kv,
-        _server_used_mb(key[0]), observation_generation(key[0]),
-    )
+    fit = int(prompt_tokens * (limit - current) / kv) if limit > current else 0
+    # Never zero: callers treat a zero window as "no window known".
+    _OBSERVATIONS[key] = _Observation(turn_id, max(1, fit))
 
 
-def _live_observation(server_id: str, model_id: str) -> _Observation | None:
-    from llm.network_discovery import get_loaded_model_ids
-    from llm.server_observation import observation_generation
+def end_turn(turn_id: str) -> None:
+    """Drop what ``turn_id`` learned, leaving a newer Turn's observation in place.
 
-    key = (server_id, model_id)
-    obs = _OBSERVATIONS.get(key)
-    if obs is None:
-        return None
-    if (observation_generation(server_id) != obs.generation
-            or model_id not in get_loaded_model_ids(server_id)):
-        # Resolvers run on several threads: drop only the entry this read saw,
-        # never one a newer refusal has recorded since.
-        if _OBSERVATIONS.get(key) is obs:
+    Runs once the Turn's terminal write exits: its commit when ``finish_turn``
+    opened the transaction, before the outer commit when a caller passed one
+    (an outer rollback then leaves the Turn running without its cap until it
+    is refused again). A retried terminal finds nothing left to drop.
+    """
+    for key, obs in list(_OBSERVATIONS.items()):
+        # Resolvers run on several threads: drop only the entry this read saw.
+        if obs.turn_id == turn_id and _OBSERVATIONS.get(key) is obs:
             _OBSERVATIONS.pop(key, None)
-        return None
-    return obs
 
 
 def memory_fit_window(row: Mapping[str, Any]) -> int | None:
-    """Tokens that fit in memory now for this catalog row, else None."""
+    """Tokens that fit in memory for this catalog row while a refused Turn runs."""
     key = split_omlx_selector(row.get("litellm_model"))
-    obs = _live_observation(*key) if key else None
-    if key is None or obs is None:
-        return None
-    used_now = _server_used_mb(key[0])
-    delta = (used_now - obs.used0_mb) * _MIB if used_now and obs.used0_mb else 0
-    headroom = obs.limit - (obs.current + delta)
-    fit = int(obs.prompt_tokens * headroom / obs.kv) if headroom > 0 else 0
-    # Never zero: callers treat a zero window as "no window known".
-    return max(WINDOW_STEP, fit // WINDOW_STEP * WINDOW_STEP)
+    obs = _OBSERVATIONS.get(key) if key else None
+    return obs.fit if obs else None

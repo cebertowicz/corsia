@@ -253,9 +253,13 @@ def resolve_live_window_facts(row: Mapping[str, Any], *, db=None) -> WindowFacts
     It moves with live memory, so it serves dispatch, admission and checkpoint
     sizing, never a settings or catalog surface.
     """
+    return cap_to_memory_fit(resolve_window_facts(row, db=db), row)
+
+
+def cap_to_memory_fit(facts: WindowFacts, row: Mapping[str, Any]) -> WindowFacts:
+    """``facts`` from ``resolve_window_facts``, capped by this row's live memory fit."""
     from llm.memory_fit import memory_fit_window
 
-    facts = resolve_window_facts(row, db=db)
     if facts.effective is None:
         return facts
     fit = memory_fit_window(row)
