@@ -347,7 +347,7 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     app = (skill / "references/first-run-app.md").read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)
     assert "`references/agent-import.md`" in steps[1].split("3. **Where your work lives,**", 1)[0]
-    assert "Raise it unchanged" in steps[1]
+    assert "Raise it as **Raising a decision** in `references/first-run.md` says" in steps[1]
     connected = (skill / "references/agent-import.md").read_text(encoding="utf-8").split("## Their connected apps", 1)[1]
     assert "only for the tools whose connected apps the consent card named" in connected
     assert "OpenClaw and Hermes Agent can be among them" in connected
