@@ -1,6 +1,6 @@
 """Model-free daily check of declared agent KPIs against their review lines (Agent KPIs design §4.7).
 
-The nightly scheduler owns the once-per-day cadence. Each agent with an alerting KPI is read outside any
+The nightly scheduler owns the once-per-day cadence. Each thread with an alerting KPI is read outside any
 transaction; its moves go to it in one ``agent:<thread id>`` report (a wake when any move is ``alert: wake``),
 and the same moves are listed, with no breach, in the day's project report so the conductor sees them routed.
 A report's key is its scope and day, so a second run the same day delivers nothing new.
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
-from api.measurement_agent_kpis import _read
+from api.measurement_agent_kpis import read_own
 from api.measurement_partial import grain_instant
 from api.measurement_scope import resolve_grain
 from events.movement_report import AGENT_SCOPE_PREFIX, Move, deliver_movement_report_sync
@@ -31,7 +31,6 @@ def _owners(db) -> list[tuple[str, str, str | None]]:
         """SELECT DISTINCT t.id, t.user_id, t.project_id FROM measure_definitions d
              JOIN threads t ON t.id = d.owner_thread_id
             WHERE d.kind='kpi' AND d.removed=0 AND json_extract(d.spec_json, '$.alert') IN ('wake', 'digest')
-              AND COALESCE(t.agent_enabled,0)=1 AND COALESCE(t.agent_status,'active')='active'
             ORDER BY t.id""")]
 
 
@@ -51,7 +50,7 @@ def run_daily(*, now: datetime | None = None) -> list[str]:
     try:
         for owner, user_id, project in _owners(db):
             try:
-                result = _read(user_id, project or "all", owner, grain)
+                result = read_own(user_id, owner, grain)
                 moves = kpi_moves(db, owner, result, bounds, instant)
             except Exception:
                 logger.exception("kpi threshold read failed for agent {}", owner)

@@ -116,21 +116,23 @@ def test_a_value_at_the_line_or_inside_the_settle_days_reports_nothing(seeded):
     assert _wakes("owner") == 0
 
 
-def test_an_owner_made_inactive_before_delivery_is_dead_lettered(seeded, monkeypatch):
-    real = job.kpi_moves
-
-    def archive_after_read(*args):
-        moves = real(*args)
-        db = get_db()
-        db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id='owner'")
-        db.commit()
-        db.close()
-        return moves
-
-    monkeypatch.setattr(job, "kpi_moves", archive_after_read)
+def test_an_archived_owner_is_dead_lettered_not_filtered_out(seeded):
+    db = get_db()
+    db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id='owner'")
+    db.commit()
+    db.close()
     job.run_daily(now=NOW)
     assert _wakes("owner") == 0
     assert _count("SELECT COUNT(*) FROM dead_letter_events WHERE reason='owner_inactive'") == 1
+
+
+def test_a_plain_thread_that_is_not_a_promoted_agent_is_woken(seeded):
+    db = get_db()
+    db.execute("UPDATE threads SET agent_enabled=0, agent_status=NULL WHERE id='owner'")
+    db.commit()
+    db.close()
+    assert job.run_daily(now=NOW) == ["agent:owner:2026-01-20"]
+    assert _wakes("owner") == 1
 
 
 MOVE = {"series_id": "kpi:ghost:escapes@v1", "owner_agent": "ghost", "value": 2,
