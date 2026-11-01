@@ -8,7 +8,7 @@ from copy import deepcopy
 from typing import Any
 
 from core.fork_capture import warm_capture_refused
-from core.fork_cold_count import cold_input_tokens
+from core import fork_cold_count
 from core.fork_types import FORK_OUTPUT_TOKENS
 
 COLD_FIT_FRAMING_MARGIN_DIVISOR = 20
@@ -121,7 +121,7 @@ def codex_cold_surface(
     payload: dict[str, object] = {"dynamicTools": dynamic_tool_specs}
     if developer is not None:
         payload["developerInstructions"] = developer
-    return cold_input_tokens(payload, writer), registry, dynamic_tool_specs, developer
+    return fork_cold_count.cold_input_tokens(payload, writer), registry, dynamic_tool_specs, developer
 
 
 def _cold_input_allowance(
@@ -150,7 +150,7 @@ def require_cold_fork_room(
     """Refuse a known-impossible fork input before loading a provider surface."""
     from core.fork_fit import ColdFoldInputTooLarge
 
-    minimum = cold_input_tokens(
+    minimum = fork_cold_count.cold_input_tokens(
         ({"role": "system", "content": instruction}, *protected), writer,
     )
     if minimum > _cold_input_allowance(window, output_tokens):
@@ -172,7 +172,7 @@ def fit_cold_fork_input(request, *, provider_surface_tokens: int, round_trip_tok
         raise ValueError("cold writer surface must be a non-negative integer")
 
     def count(messages) -> int:
-        return provider_surface_tokens + cold_input_tokens(
+        return provider_surface_tokens + fork_cold_count.cold_input_tokens(
             ({"role": "system", "content": request.instruction}, *messages), request.target,
         )
 
