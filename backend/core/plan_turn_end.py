@@ -45,6 +45,20 @@ async def settlement_with_turn_end(settlement, thread_id: str, identity, error: 
     return settlement if effects is None else dataclasses.replace(settlement, turn_end_effects=effects)
 
 
+async def ending_with_turn_end(ending, committed_failure, thread_id: str, identity, error: str, db=None):
+    """Await a process-exit terminal and attach its Turn end, also when publishing failed after the commit.
+
+    ``committed_failure`` is the harness's exception that carries the committed
+    settlement past a failed publication; its settlement gets the record too.
+    """
+    try:
+        settlement = await ending
+    except committed_failure as failure:
+        failure.settlement = await settlement_with_turn_end(failure.settlement, thread_id, identity, error, db)
+        raise
+    return await settlement_with_turn_end(settlement, thread_id, identity, error, db)
+
+
 async def record_turn_end_logged(
     thread_id: str,
     arm_failure: str,

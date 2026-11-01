@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from core import turn_core
-from core.plan_turn_end import settlement_with_turn_end
+from core.plan_turn_end import ending_with_turn_end
 from core.stop_causes import PlanLimitStop
 from infra.db_async import run_in_db, run_in_db_unless_owned
 from infra.database import get_db, write_transaction
@@ -427,24 +427,16 @@ async def _finish_process_exit(
         )
 
     retained = _tool_terminal.retained_error(stderr, detail)
-    try:
-        terminal = await _end_owned_turn(
-            thread_id, live, identity, "error",
-            error=retained, bcast=bcast,
-            source="codex-app-server:transport-exit",
-            marker=marker,
-            # cc_error rows are WS anchors, not eligible context owners.
-            marker_is_context_owner=False,
-            db=db,
-            defer_drive=defer_drive,
-        )
-    except CommittedTerminalFailure as failure:
-        # The terminal committed; its Turn end is recorded even though publishing failed.
-        failure.settlement = await settlement_with_turn_end(
-            failure.settlement, thread_id, identity, str(retained), db,
-        )
-        raise
-    return await settlement_with_turn_end(terminal, thread_id, identity, str(retained), db)
+    return await ending_with_turn_end(_end_owned_turn(
+        thread_id, live, identity, "error",
+        error=retained, bcast=bcast,
+        source="codex-app-server:transport-exit",
+        marker=marker,
+        # cc_error rows are WS anchors, not eligible context owners.
+        marker_is_context_owner=False,
+        db=db,
+        defer_drive=defer_drive,
+    ), CommittedTerminalFailure, thread_id, identity, str(retained), db)
 
 
 async def _settle_exited_generation(
