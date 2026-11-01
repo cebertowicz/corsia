@@ -214,6 +214,7 @@ def test_pressure_warm_admission_carries_its_cold_builder(harness, model):
         target=_target(harness), boundary=boundary,
         previous_generation_id=None, working_dir="/work",
         reasoning_effort=None, binary=harness, warm_source=WARM_SOURCE,
+        carried_tokens=0,
     )
 
     # The builder is attached by each pressure admission, not by the warm

@@ -93,7 +93,7 @@ def complete_warm_admission(
     reasoning_effort: str | None,
     binary: str | None,
     warm_source: object,
-    carried_tokens: int = 0,
+    carried_tokens: int,
 ) -> CheckpointAdmission:
     """Pair frozen provenance with one already-captured warm provider source."""
     from prompts.checkpoint import build_checkpoint_system_prompt
@@ -127,7 +127,7 @@ def build_warm_admission(
     reasoning_effort: str | None,
     binary: str | None,
     warm_source: object,
-    carried_tokens: int = 0,
+    carried_tokens: int,
 ) -> CheckpointAdmission:
     """Build one warm checkpoint operation from already-frozen provider input."""
     request = build_warm_request(

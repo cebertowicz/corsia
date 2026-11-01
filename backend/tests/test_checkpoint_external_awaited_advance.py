@@ -308,6 +308,7 @@ async def test_external_initial_boundary_advances_after_awaited_earlier_cut(
             reasoning_effort=None,
             binary=None,
             warm_source=preparation_source,
+            carried_tokens=0,
         )
 
     async def render(record, *, refresh_prepared):

@@ -29,7 +29,7 @@ def build_checkpoint_admission(
     source_target, writer_target, boundary, previous, projection, working_dir: str,
     reasoning_effort: str | None, binary: str | None, db,
     source_model: str | None = None, mcp_config: str | None = None,
-    originating_turn_id: str | None = None, carried_tokens: int = 0,
+    originating_turn_id: str | None = None, carried_tokens: int,
 ) -> CheckpointAdmission:
     """Freeze the exact checkpoint request and its matching provider invocation."""
     source = _cold_source(db, projection=projection, previous=previous, boundary=boundary)

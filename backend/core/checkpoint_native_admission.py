@@ -161,7 +161,7 @@ async def capture_native_checkpoint_source(
 
 def build_native_cold_checkpoint_admission(
     checkpoint_id, thread_id, context, turn_identity, reasoning_effort,
-    trigger="pressure", carried_tokens=0,
+    trigger, carried_tokens,
 ):
     """Build the existing Native cold request from one frozen DB context."""
     from core.checkpoint_cold_admission import build_checkpoint_admission

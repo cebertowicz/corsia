@@ -58,6 +58,7 @@ def _admission(monkeypatch, harness: str, *, window=262_144, projection=None):
         working_dir="/work/project",
         reasoning_effort="high",
         binary=harness,
+        carried_tokens=0,
         db=object(),
     )
 

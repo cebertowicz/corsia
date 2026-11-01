@@ -77,7 +77,7 @@ def _cold_request(monkeypatch, target: ExecutionTarget, turns):
         source_target=target, writer_target=target,
         boundary=projection.sealed_boundary, previous=None,
         projection=projection, working_dir="/work/project",
-        reasoning_effort=None, binary=target.harness, db=object(),
+        reasoning_effort=None, binary=target.harness, carried_tokens=0, db=object(),
     ).provider_request
 
 

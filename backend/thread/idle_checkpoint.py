@@ -223,6 +223,7 @@ async def complete_idle_checkpoint(
         reasoning_effort=context.reasoning_effort,
         binary=context.binary,
         warm_source=warm_source,
+        carried_tokens=0,
     )
 
 

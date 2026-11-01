@@ -9,12 +9,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from core.checkpoint_warm_request import CheckpointAdmission
 from core.fork_native import _window_output
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
@@ -112,24 +110,12 @@ def _thread_db(usage: dict | None, *, epoch: int = 3) -> sqlite3.Connection:
 
 
 def _manual_allowance(monkeypatch, db: sqlite3.Connection) -> int:
-    from core import checkpoint_cold_admission
     from core.checkpoint_agent_admission import _build_manual_cold_admission
-    from core.fork_types import ProviderForkRequest
     from infra import database
 
-    request = ProviderForkRequest(
-        fork_id="c1", thread_id="t", target=TARGET, instruction="write",
-        reasoning_effort=None, working_dir="/w",
-    )
     monkeypatch.setattr(database, "get_db", lambda: SimpleNamespace(
         execute=db.execute, close=lambda: None,
     ))
-    monkeypatch.setattr(
-        checkpoint_cold_admission, "build_checkpoint_admission",
-        lambda **kwargs: CheckpointAdmission(SimpleNamespace(), replace(
-            request, carried_tokens=kwargs["carried_tokens"],
-        )),
-    )
     context = SimpleNamespace(
         thread_id="t", target=TARGET, boundary=BOUNDARY, previous=None,
         projection=SimpleNamespace(), working_dir="/w", reasoning_effort=None, binary=None,
