@@ -17,10 +17,9 @@ A new install has little to show until your agents have finished some work. A bl
 
 ## Track something of your own
 
-You can ask an agent to keep count of something in its own work, for example: "Each time you triage my email, record whether you replied, archived or deleted it."
+You can ask an agent to keep count of something its own work does, to wake it when something happens, or to time how long things take. A **measure** is one recorded fact; a **KPI** is a number worked out from measures, such as the share of emails you answered; a **rule** wakes the agent when a kind of event arrives. For example: "Each time you triage my email, record whether you replied, archived or deleted it," or "Wake me when the nightly backup fails."
 
 - The agent sets up what it will record, then records each time it happens.
-- To check it's working, ask: "Is the email triage you're recording coming through?" The agent can tell you how many were recorded today and in the last 7 days, and whether any were refused and why.
-- Measurement charts only its own figures, not a count you set up this way. The agent can confirm the counts are being recorded, but it can't show you a trend such as your reply rate.
-
-To count something that happens in another app rather than in an agent's own work, that app's activity has to reach CORSIA first. Ask an agent whether it can connect that app.
+- To check it's working, ask: "Is the email triage you're recording coming through?" The agent can tell you the counts for today and the last 7 days, any refusals and why, and a KPI's value for this week and last week.
+- New email in a connected mailbox, GitHub activity, CORSIA's own events and events the agent sends can wake it. A rule needs a sender address or a label your mail already carries, can't read the text, and wakes only the agent that wrote it.
+- Not yet: Measurement doesn't show your own measures, nothing alerts you when a number crosses a line, and calendar and chat apps don't reach CORSIA. An agent can check one on a schedule, no more often than every 5 minutes.

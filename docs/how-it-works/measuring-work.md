@@ -56,11 +56,19 @@ Cost is computed at read time. The token ledger is priced at each provider's pub
 
 Time is estimated from the person's presence in the app, recorded as visits, merged and closed on events such as navigating away, hiding the page or going idle (`backend/infra/presence.py`). Measurement uses focused spans when recorded, counts older visits without focus data in full, and shares overlapping time among active threads (`backend/api/measurement_presence.py`). A visit with no thread belongs to the project or all work, never to an agent.
 
+### Your own measures and events
+
+An agent can declare facts about its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). The Measurement page doesn't read any of it.
+
+- **Events** come from connected mail, GitHub, CORSIA itself and agents' scripts, not from calendar or chat (`backend/events/intake.py`).
+- **Who is woken.** The agent that owns what an event is about is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
+
 ## What can go wrong
 
 - **Little data looks like no data.** A new install or a scope with few outcomes can show empty ratio charts because of the minimum-sample rule. Count series need not have the same threshold.
 - **Only eligible plan work counts as outcomes.** Work done outside a plan task is not an outcome. Other records, such as token usage, can still be measured.
 - **Proxies are estimates.** Active hours, asks per outcome and size-based hours are approximations and are marked so. Do not read a small difference as a result.
+- **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. A rule on the wrong event type or field fires on nothing and raises no error. A page or alert for them is not built yet.
 - **First-try rate depends on recorded work.** A send-back, certain failed or changed-requirement attempts, or a failed predecessor makes an outcome not first-try. It cannot see a rejection that happened in conversation and was never recorded on the plan.
 - **API-equivalent is not the bill.** Subscriptions and plan limits change what a person actually pays.
 - **Method changes break trends.** After a break, compare only within one side.
@@ -78,4 +86,4 @@ Time is estimated from the person's presence in the app, recorded as visits, mer
 | Cost | `backend/api/measurement_cost.py`, `backend/llm/api_equivalent.py` |
 | Size series | `backend/api/measurement_size.py` |
 | Comparability breaks | `backend/api/measurement_breaks.py` |
-| In-app page and reading guide | [Measurement](../measurement.md) |
+| Declared measures, events and KPIs | `backend/infra/measure_registry.py`, `backend/events/intake.py`, `backend/events/rules.py`, `backend/core/agent_kpi_formula.py` |
