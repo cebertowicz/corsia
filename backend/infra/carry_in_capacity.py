@@ -4,7 +4,8 @@ A sample runs only on the one ready local oMLX Native catalog row, never a
 substitute, and only while no other local Turn runs and that server's own
 authenticated ``/api/status`` proves it idle under the workspace's local
 admission contract. ``infra.carry_in_drain`` asks before each claim and again
-just before each sample's provider call.
+just before each sample's provider call. ``llm.provider_overflow`` reads the
+same status to resend a prefill-guard refusal once the seat has gone quiet.
 """
 
 from __future__ import annotations
@@ -86,6 +87,32 @@ async def omlx_idle(server_id: str) -> bool:
                 return False
             totals.append(total)
     return totals[0] == totals[1]
+
+
+async def wait_until_quiet(server_id: str, *, timeout: float, interval: float) -> bool:
+    """Wait until one ``/api/status`` reading shows no active or waiting request.
+
+    True once quiet; False when the timeout passes first or the status can't be read.
+    """
+    import httpx
+
+    from llm.providers.omlx_public_probe import probe_registered_status
+
+    address = await run_in_db(_status_address, server_id)
+    if address is None:
+        return False
+    deadline = asyncio.get_running_loop().time() + timeout
+    async with httpx.AsyncClient(timeout=httpx.Timeout(STATUS_TIMEOUT_SECONDS)) as client:
+        while True:
+            probed = await probe_registered_status(client, server_id, *address)
+            payload = probed[2] if probed else None
+            if not payload or "active_requests" not in payload:
+                return False
+            if idle_reading(payload) is not None:
+                return True
+            if asyncio.get_running_loop().time() + interval > deadline:
+                return False
+            await asyncio.sleep(interval)
 
 
 async def ready_idle(bound: str | None = None, exclude_thread: str | None = None) -> str | None:
