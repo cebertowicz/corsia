@@ -266,6 +266,26 @@ async def test_route_and_both_types_go_through_event_intake(world) -> None:
 
 
 @pytest.mark.asyncio
+async def test_route_records_differing_only_by_subject_are_two_events(world) -> None:
+    client, key, _ = world
+    response = await send(client, key, request_of({"event.name": "qa.route", "code": "r1", "corsia.subject": "alpha"},
+                                                  {"event.name": "qa.route", "code": "r1", "corsia.subject": "beta"}))
+    assert response.status_code == 200 and rejected(response) == (0, "")
+    db = get_db()
+    received = db.execute("SELECT count(*) FROM event_intake_records WHERE event_type='qa.route'").fetchone()[0]
+    db.close()
+    assert received == 2
+
+
+def test_a_record_with_no_event_time_takes_its_observed_time() -> None:
+    from infra import otlp_decode
+
+    request = request_of({"event.name": "qa.rec", "code": "o1", "n": 1})
+    request.resource_logs[0].scope_logs[0].log_records[0].observed_time_unix_nano = 1_700_000_000 * 10**9
+    assert otlp_decode.records(request)[0].ts.startswith("2023-11-14T22:13:20")
+
+
+@pytest.mark.asyncio
 async def test_main_app_has_no_otlp_route() -> None:
     from main import app
 

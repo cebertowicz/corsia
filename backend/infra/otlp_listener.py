@@ -14,8 +14,10 @@ import uvicorn
 from infra import otlp_state
 from infra.otlp_receiver import OtlpReceiver
 
-DEFAULT_PORT = 4318  # the standard OTLP/HTTP port, so an exporter's default endpoint works
-FALLBACK_PORTS = range(4319, 4328)
+# Not the standard 4318: a user's collector started after CORSIA could bind every address there and lose its
+# loopback traffic to this more specific socket. Every exporter sets the key header anyway, so it sets this endpoint.
+DEFAULT_PORT = 47921
+FALLBACK_PORTS = range(47922, 47931)
 PORT_ENV = "CORSIA_OTLP_PORT"
 logger = logging.getLogger(__name__)
 

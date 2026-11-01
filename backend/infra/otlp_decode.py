@@ -96,7 +96,9 @@ def records(request: service.ExportLogsServiceRequest) -> list[WireRecord]:
         shared = _flat(resource.resource.attributes, only_corsia=True)
         for scope in resource.scope_logs:
             for record in scope.log_records:
-                found.append(WireRecord(_flat(record.attributes), shared, _time(record.time_unix_nano)))
+                # OTLP: a zero event time means unknown; the SDK's observed time stands in for it.
+                when = record.time_unix_nano or record.observed_time_unix_nano
+                found.append(WireRecord(_flat(record.attributes), shared, _time(when)))
     return found
 
 

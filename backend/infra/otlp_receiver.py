@@ -169,7 +169,8 @@ async def _route(owner: KeyOwner, project_id: str | None, item: admission.Item) 
     """Hand a ``route`` or ``both`` record to event intake as an emitter's event; the refusal text, or None."""
     assert item.name is not None and item.attributes is not None
     identity = hashlib.sha256(
-        json.dumps([owner.agent_thread_id, item.name, item.ts, item.run_id, item.attributes], sort_keys=True, default=str).encode()
+        json.dumps([owner.agent_thread_id, item.name, item.ts, item.run_id, item.subject, item.attributes],
+                   sort_keys=True, default=str).encode()
     ).hexdigest()
     stamps = MeasureStamps(
         source=admission.SOURCE, provenance=admission.PROVENANCE, run_id=item.run_id,
