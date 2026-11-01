@@ -343,3 +343,51 @@ async def test_a_target_that_cannot_fold_still_reports_admission_unavailable(
     )
 
     assert await _outcome(state, "t1", "turn-1") == "checkpoint admission is unavailable"
+
+
+def _install_newer(thread: str, checkpoint_id: str) -> None:
+    """A second checkpoint through the same floor, installed after the Turn adopted the first."""
+    from infra.database import get_db
+
+    db = get_db()
+    row = db.execute(
+        "SELECT through_seq, through_message_id FROM checkpoints WHERE id=?", (checkpoint_id,),
+    ).fetchone()
+    db.execute(
+        "INSERT INTO checkpoints (id,thread_id,history_epoch,through_seq,through_message_id,trigger,"
+        " mode,status,source_harness,source_model,writer_harness,writer_model,"
+        " continuity_base_revision,continuity_base_snapshot_json,started_at,raw_result,"
+        " continuity_snapshot_json,captured_at,installed_at) "
+        "VALUES (?,?,0,?,?,'pressure','cold','installed','native',?,'native',?,0,'[]','t',?,'[]','t','t')",
+        (f"{thread}-c2", thread, row["through_seq"], row["through_message_id"], MODEL, MODEL,
+         "The person is partway through first-run setup; three references read again."),
+    )
+    db.commit()
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_refused_retry_over_a_newer_installed_tail_reports_the_tail(seat):
+    """A newer checkpoint is measured over the window and nothing past it can fold."""
+    checkpoint_id = _seed_setup_turn("t1")
+    state, _installed_tokens = await _adopted_state("t1", checkpoint_id)
+    await _refuse(state)
+    _install_newer("t1", checkpoint_id)
+
+    assert await _outcome(state, "t1", "turn-1") == TAIL_TOO_LARGE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overflow_retry", [True, False])
+async def test_nothing_to_fold_with_no_floor_keeps_its_cause(seat, monkeypatch, overflow_retry):
+    """No checkpoint is installed, so the tail-too-large cause would name one that does not exist."""
+    from history import boundaries
+
+    checkpoint_id = _seed_setup_turn("t1")
+    state, _installed_tokens = await _adopted_state("t1", checkpoint_id)
+    await _refuse(state)
+    first_send = _new_chat("t2")
+    first_send.overflow_retry_pending = overflow_retry
+    monkeypatch.setattr(boundaries, "boundary_before_latest_assistant_step", lambda *_a, **_k: None)
+
+    assert await _outcome(first_send, "t2", "turn-3") == "checkpoint admission is unavailable"

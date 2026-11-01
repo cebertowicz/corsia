@@ -76,7 +76,7 @@ def _read_native_checkpoint_context(
     thread_id: str,
     target_catalog_id: str,
 ) -> _NativeCheckpointContext | None:
-    """Read one fold's source: None when the target cannot fold, NothingNewerToFold past the floor."""
+    """Read one fold's source: NothingNewerToFold past an installed floor, else None when none can start."""
     from core.fork_types import NothingNewerToFold
     from history.boundaries import boundary_before_latest_assistant_step
     from history.projection import render_portable_history
@@ -109,8 +109,10 @@ def _read_native_checkpoint_context(
                 floor is not None and assistant_step_through(db, thread_id, floor.seq)
             ),
         )
-        if boundary is None:
+        if boundary is None and previous is not None:
             raise NothingNewerToFold("no history boundary follows the installed floor")
+        if boundary is None:
+            return None
         return _NativeCheckpointContext(
             target, boundary, previous, projection, previous.id if previous is not None else None,
             resolve_working_dir(thread_row["project_id"], db),

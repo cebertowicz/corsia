@@ -209,8 +209,7 @@ async def _await_installed(
     if installed.input_tokens > boundary.context_window:
         if not allow_newer_fold:
             raise boundary.unavailable(CHECKPOINT_TAIL_TOO_LARGE)
-        started = await _start_checkpoint(boundary, required=True)
-        assert started is not None
+        started = await _refold_over_installed(boundary)
         return await _await_installed(
             boundary,
             started,
@@ -239,9 +238,23 @@ async def _required_checkpoint_continuation(
         )
     if active is not None:
         return await _await_installed(boundary, active)
+    if installed is not None:
+        return await _await_installed(boundary, await _refold_over_installed(boundary))
     started = await _start_checkpoint(boundary, required=True)
     assert started is not None
     return await _await_installed(boundary, started)
+
+
+async def _refold_over_installed(boundary: ProviderBoundary) -> CheckpointRecord:
+    """Fold past an installed checkpoint measured over the window; nothing newer means its tail cannot fit."""
+    from core.fork_types import NothingNewerToFold
+
+    try:
+        started = await _start_checkpoint(boundary, required=True)
+    except NothingNewerToFold as error:
+        raise boundary.unavailable(CHECKPOINT_TAIL_TOO_LARGE) from error
+    assert started is not None
+    return started
 
 
 async def maintain_before_provider_call(
