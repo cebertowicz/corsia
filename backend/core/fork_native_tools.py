@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, NamedTuple
+
+from loguru import logger
 
 from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
 from infra import state
 from infra.send_target import omlx_seat_and_model
+from infra.tool_result_errors import is_error_result
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -171,6 +175,32 @@ def assistant_message(response: Any) -> dict[str, Any]:
     }
 
 
+_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_OPERATION = re.compile(r"[a-z_]{1,24}")
+
+
+def _token(value: Any, pattern: re.Pattern[str]) -> str:
+    """A model-written value as one log token: itself when well-formed, else a marker."""
+    if isinstance(value, str) and pattern.fullmatch(value):
+        return value
+    return "-" if value is None else "other"
+
+
+def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
+                   result: str) -> None:
+    """One content-free line per fork tool call: which call, its outcome, its size.
+
+    Diagnosis for checkpoints that make many tool rounds and stage nothing.
+    Delete it in the change that fixes those rounds.
+    """
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
+    logger.info(
+        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} result_chars={}",
+        request.fork_id, kind.name, _token(call.name, _TOOL_NAME),
+        _token(arguments.get("operation"), _OPERATION), outcome, len(result),
+    )
+
+
 async def run_tool_calls(
     agent: Any,
     response: Any,
@@ -195,6 +225,7 @@ async def run_tool_calls(
         for call in response.tool_calls:
             if call.name not in kind.tool_allowlist:
                 result = kind.tool_refusal
+                outcome = "refused"
             else:
                 try:
                     result = await kind.tool_executor(
@@ -217,6 +248,7 @@ async def run_tool_calls(
                     thread_id=request.thread_id, invocation_id=call.id,
                     provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
+                outcome = "error" if is_error_result(result) else "ok"
             reply = {
                 "role": "tool",
                 "tool_call_id": call.id,
@@ -232,8 +264,11 @@ async def run_tool_calls(
                     f"Error: this result ({len(result)} characters) is "
                     + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
+                _log_tool_call(request, kind, call, "over_room", result)
                 if not await input_fits_off_loop(request, messages, tools, 0, measured):
                     return False
+            else:
+                _log_tool_call(request, kind, call, outcome, result)
         return True
     except CompletedToolFailure:
         raise
