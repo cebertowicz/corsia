@@ -6,10 +6,11 @@ registry's public imports and renders the resolved inventory into context rows.
 
 from __future__ import annotations
 
+from itertools import groupby
 from pathlib import Path
 
 from core.effective_context import ContextSourceEntry
-from core.lesson_index import index_line, name_entry, partition
+from core.lesson_index import index_line, name_entry, partition, root_header, skill_root
 from core.lesson_trials import lesson_block
 from core.role_context_sources import RoleContextResolution, RoleName
 from core.skill_registry_types import SkillResolution, SkillRow, SkillScope
@@ -41,15 +42,23 @@ def _skills_index_content(
     lines = [
         "Available skills. Before answering, compare the user request to the skill descriptions below. "
         "If the user names a skill or the request matches a skill description, you MUST load that skill's "
-        "SKILL.md before responding. Load the listed SKILL.md path with your file-read "
+        "SKILL.md before responding. Its path is on its line, or else in its group's header with <name> "
+        "replaced by the skill's name. Load it with your file-read "
         f"tool: `{MCP_CORSIA_PREFIX}read_file` on Claude Code, `read_file` on other harnesses; "
         "when only the generic CORSIA tool is available, call it with name=read_file.",
     ]
-    lines.extend(index_line(row) for row in full_rows)
+    for root, run in groupby(full_rows, key=lambda row: skill_root(row.name, row.path)):
+        if root is not None:
+            lines.append(root_header(root))
+        lines.extend(index_line(row) for row in run)
     if name_only_rows:
+        runs = []
+        for root, run in groupby(name_only_rows, key=lambda row: skill_root(row.name, row.path)):
+            names = ", ".join(name_entry(row.name, row.path) for row in run)
+            runs.append(names if root is None else f"{root_header(root)} {names}")
         lines.append(
             "Also installed, listed by name only (read its SKILL.md when the request matches the name): "
-            + ", ".join(name_entry(row.name, row.path) for row in name_only_rows)
+            + "; ".join(runs)
         )
     if errors:
         lines.extend(["", "Not loaded — skill errors (these sources are skipped until repaired):"])

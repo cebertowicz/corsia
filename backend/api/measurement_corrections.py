@@ -13,23 +13,65 @@ from typing import Any
 
 from api.measurement_breaks import local_date
 from api.measurement_prepared import PREPARED_SCOPE
-from core.correction_attribution import person_corrections
+from core.correction_attribution import person_correction_coverage
 from core.measurement_scope import Grain
 
 
-def corrections_by_period(db, grain: Grain) -> Counter[str]:
-    """Corrections per drawn period (and the one in progress) whose target thread is in the scope."""
+# The series served from the coverage fields; the period in progress is served too, flagged partial.
+COVERAGE_METRICS = frozenset({
+    "corrections_detected", "corrections_triaged_pct", "corrections_untriaged_idle_pct", "idle_untriaged_threads",
+})
+
+
+def coverage_value(metric: str, source: dict[str, Any]) -> tuple[float | int | None, int]:
+    """One coverage series' value and the n behind it, from a family row: a count is its own n, a share's n is its denominator."""
+    def get(name: str) -> int:
+        return int(source.get(name, 0) or 0)
+
+    if metric == "corrections_detected": return get("detected"), get("detected")
+    if metric == "idle_untriaged_threads":
+        threads = len(source.get("idle_threads") or ())
+        return threads, threads
+    numerator, n = (get("triaged"), get("detected")) if metric == "corrections_triaged_pct" else (get("untriaged_idle"), get("untriaged"))
+    return (numerator / n if n else None), n
+
+
+def corrections_by_period(db, grain: Grain) -> dict[str, dict[str, Any]]:
+    """Per drawn period (and the one in progress), the corrections whose target thread is in the scope.
+
+    ``detected`` counts them all; ``triaged`` and ``untriaged`` split them; ``untriaged_idle`` are the
+    untriaged no turn has had since, and ``idle_threads`` is the set of threads those sit on, so a
+    window or average pooling several periods counts a thread idle in more than one of them once.
+    """
     in_scope = {str(row[0]) for row in db.execute(f"SELECT id FROM {PREPARED_SCOPE}")}
     drawn = {*grain.periods, grain.current}
-    counts: Counter[str] = Counter()
-    for arrived, thread in person_corrections(db, grain.starts[0], grain.current_end):
-        period = grain.period_of(local_date(grain, arrived))
-        if thread in in_scope and period in drawn:
-            counts[period] += 1
-    return counts
+    counts: dict[str, Counter[str]] = {}
+    idle: dict[str, set[str]] = {}
+    for item in person_correction_coverage(db, grain.starts[0], grain.current_end):
+        period = grain.period_of(local_date(grain, item.arrived))
+        if item.thread not in in_scope or period not in drawn:
+            continue
+        row = counts.setdefault(period, Counter())
+        row["detected"] += 1
+        row["triaged" if item.triaged else "untriaged"] += 1
+        if not item.triaged and not item.later_turn:
+            row["untriaged_idle"] += 1
+            idle.setdefault(period, set()).add(str(item.thread))
+    return {period: {**count, "idle_threads": frozenset(idle.get(period, ()))} for period, count in counts.items()}
 
 
 def corrections_family(db, grain: Grain, decision_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per outcome period: its outcomes, asks (raised and user holds) and corrections."""
+    """One row per outcome period (its outcomes, asks and corrections), and per drawn period with
+    corrections but no outcome row (its coverage counts only)."""
     counts = corrections_by_period(db, grain)
-    return [{**row, "corrections": counts.get(row["period"], 0)} for row in decision_rows]
+    empty = {"detected": 0, "triaged": 0, "untriaged": 0, "untriaged_idle": 0, "idle_threads": frozenset()}
+
+    def coverage(period: str) -> dict[str, Any]:
+        return {**empty, **counts.get(period, {})}
+
+    rows = [{**row, **coverage(row["period"]), "corrections": coverage(row["period"])["detected"]} for row in decision_rows]
+    known = {row["period"] for row in rows}
+    # A drawn period, the one in progress included, may have corrections but no outcome row. It
+    # carries no `corrections` count, so the per-outcome ratios pool over outcome periods only.
+    rows.extend({"period": period, **coverage(period)} for period in counts if period not in known)
+    return rows
