@@ -176,7 +176,8 @@ async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monk
 @pytest.mark.asyncio
 async def test_post_failure_probe_receipt_is_not_held_to_the_stale_budget(tmp_path, monkeypatch):
     """A genuinely delayed-but-real probe receipt must not inherit the
-    stale call's short budget in the same backend process (#2720)."""
+    stale call's short budget in the same backend process (#2720), after the
+    failed Turn's one re-run."""
     startup = _write_scoped_receipt_budget_sitecustomize(
         tmp_path, stale_call_ids={"current-call"},
         delay_call_id="after-failure", delay_seconds=0.5,
@@ -197,7 +198,7 @@ async def test_post_failure_probe_receipt_is_not_held_to_the_stale_budget(tmp_pa
                     "path": "must-not-exist.txt", "content": "unexpected effect",
                 },
             }], "finish_reason": "tool_calls",
-        }])
+        }, {"content": "RERUN_ANSWERED", "finish_reason": "stop"}])
         async with TurnDriver(backend) as driver:
             await driver.subscribe(existing)
             await driver.send(existing, "Write the test file")
@@ -205,12 +206,12 @@ async def test_post_failure_probe_receipt_is_not_held_to_the_stale_budget(tmp_pa
                 existing, until=("turn_complete", "error"), timeout=15,
             )
         assert "turn_complete" in frame_types(frames) or "error" in frame_types(frames), frames
-        rows = await client.messages(existing)
+        # The failed Turn took in the input and never answered it: one re-run does.
+        rows = await _await_rerun_answer(client, existing)
         assert any(
             "Timed out waiting for the current Codex tool usage receipt after 0.1s"
             in str(row.get("content", "")) for row in rows
         ), rows
-        assert await client.active_turn_count(existing) == 0
         # The probe's receipt only becomes visible after 0.5s -- above the
         # stale budget, comfortably below the product default -- and must
         # still succeed, in the SAME process, without a restart.
