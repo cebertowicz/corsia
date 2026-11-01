@@ -832,3 +832,34 @@ async def test_a_stop_that_does_not_apply_leaves_the_wake_untouched(main_db):
         "SELECT status FROM plan_liveness_wakes WHERE thread_id='main-1'",
     ).fetchone()
     assert row["status"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_a_stop_held_by_a_restart_still_never_runs_its_queued_wake(
+    main_db, monkeypatch,
+):
+    """A held claim leaves the wake queued; the re-armed row must not revive it."""
+    import uuid
+
+    from automation import plan_liveness, self_restart
+    from infra.thread_inputs import start_idle_turn
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-held")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+    monkeypatch.setattr(self_restart, "restart_holds_new_work", lambda db=None: True)
+
+    _status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert applied is not None and applied[1].successor is None
+    monkeypatch.undo()
+    plan_liveness.on_turn_complete("main-1", db=main_db)
+    main_db.commit()
+    assert start_idle_turn(
+        "main-1", turn_id=uuid.uuid4().hex, boot_epoch="test-boot",
+        started_at="t", db=main_db,
+    ) is None
+    assert _running_turns(main_db) == 0
+    assert _wake_state(main_db, wake_id) == ("cancelled", "stale_plan_wake", None)

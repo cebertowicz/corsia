@@ -162,6 +162,25 @@ def still_claimable(
     return current
 
 
+def cancel_queued_liveness_wakes(connection: sqlite3.Connection, thread_id: str) -> None:
+    """Cancel every unclaimed queued plan liveness wake: a user Stop ended its episode."""
+    from automation.continuation.sources.liveness import LivenessSource
+
+    rows = connection.execute(
+        "SELECT id,delivery_revision FROM messages WHERE thread_id=? "
+        "AND delivery_state='queued' AND active_turn_id IS NULL "
+        "AND json_extract(continuation_condition,'$.kind')=? ORDER BY input_order",
+        (thread_id, LivenessSource.kind),
+    ).fetchall()
+    _settle_queued(
+        connection,
+        thread_id,
+        [(str(row["id"]), int(row["delivery_revision"])) for row in rows],
+        state="cancelled",
+        error="stale_plan_wake",
+    )
+
+
 def cancel_queued_input(
     thread_id: str,
     message_id: str,
