@@ -4,7 +4,7 @@ For the CORSIA agent: in first run when `setup.setup_decisions` holds the import
 
 ## The consent
 
-In first run, raise the import decision from `setup.setup_decisions` unchanged. On request, call `agent_import` with no `consent_decision_id` (with `tools` when the person named some, e.g. `["codex"]`) and raise the `consent_decision` it returns unchanged. Its `source_node_id` is its task if your plan has one, else your current plan task. Never read or answer from memory before the answer.
+In first run, raise the import decision from `setup.setup_decisions` as **Raising a decision** in `references/first-run.md` says. On request, call `agent_import` with no `consent_decision_id` (with `tools` when the person named some, e.g. `["codex"]`) and raise the `consent_decision` it returns the same way. Its `source_node_id` is its task if your plan has one, else your current plan task. Never read or answer from memory before the answer.
 
 - **A:** call `agent_import` with `consent_decision_id`; mode `read` is the default.
 - **B:** post `Ask me any time to bring things over from them.` and carry on.
