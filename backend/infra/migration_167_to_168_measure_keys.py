@@ -8,7 +8,6 @@ _KEYS_DDL = """
     CREATE TABLE IF NOT EXISTS measure_keys (
         key_id          TEXT PRIMARY KEY,
         key_hash        TEXT NOT NULL UNIQUE,
-        user_id         TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL,
         label           TEXT NOT NULL,
         created_at      TEXT NOT NULL,

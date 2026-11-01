@@ -29,7 +29,6 @@ class KeyOwner:
     """What a key resolves to on the server; the payload never supplies any of it."""
 
     key_id: str
-    user_id: str
     agent_thread_id: str
 
 
@@ -37,7 +36,7 @@ def digest(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def mint(user_id: str, agent_thread_id: str, label: str, *, db: sqlite3.Connection | None = None) -> tuple[str, str]:
+def mint(agent_thread_id: str, label: str, *, db: sqlite3.Connection | None = None) -> tuple[str, str]:
     """Create a key for ``agent_thread_id``; returns ``(key_id, plaintext)``. The plaintext is never stored."""
     label = label.strip()
     if not label or len(label) > _LABEL_MAX:
@@ -46,8 +45,8 @@ def mint(user_id: str, agent_thread_id: str, label: str, *, db: sqlite3.Connecti
     key_id = uuid.uuid4().hex[:12]
     with write_transaction(db, scope="mint_measure_key") as conn:
         conn.execute(
-            "INSERT INTO measure_keys (key_id,key_hash,user_id,agent_thread_id,label,created_at) VALUES (?,?,?,?,?,?)",
-            (key_id, digest(key), user_id, agent_thread_id, label, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO measure_keys (key_id,key_hash,agent_thread_id,label,created_at) VALUES (?,?,?,?,?)",
+            (key_id, digest(key), agent_thread_id, label, datetime.now(timezone.utc).isoformat()),
         )
     return key_id, key
 
@@ -75,9 +74,9 @@ def resolve(db: sqlite3.Connection, key: str) -> KeyOwner | None:
     """The owner of a live key, or None for an unknown or revoked one. Read-only."""
     wanted = digest(key)
     row = db.execute(
-        "SELECT key_id,user_id,agent_thread_id FROM measure_keys WHERE key_hash=? AND revoked_at IS NULL",
+        "SELECT key_id,agent_thread_id FROM measure_keys WHERE key_hash=? AND revoked_at IS NULL",
         (wanted,),
     ).fetchone()
     if row is None:
         return None
-    return KeyOwner(row[0], row[1], row[2])
+    return KeyOwner(row[0], row[1])

@@ -66,7 +66,7 @@ async def world(isolated_db, tmp_path: Path, monkeypatch):
     monkeypatch.setenv(PORT_ENV, str(port))
     listener = OtlpListener()
     assert await listener.start()
-    _, key = measure_keys.mint("user-1", OWNER, "test")
+    _, key = measure_keys.mint(OWNER, "test")
     async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
         yield client, key, port
     await listener.stop()

@@ -46,7 +46,7 @@ class MeasureKeyTool(Tool):
         context = _context(kwargs)
         if isinstance(context, str):
             return context
-        thread_id, actor_row = context
+        thread_id, _ = context
         action = kwargs.get("action")
         if action == "list":
             keys = await run_in_db(lambda: measure_keys.list_keys(get_db(), thread_id))
@@ -66,7 +66,7 @@ class MeasureKeyTool(Tool):
             if not isinstance(label, str):
                 return "Error: label is required"
             try:
-                key_id, key = await run_in_db(measure_keys.mint, actor_row["user_id"], thread_id, label)
+                key_id, key = await run_in_db(measure_keys.mint, thread_id, label)
             except ValueError as exc:
                 return f"Error: {exc}"
             send = (f"POST {endpoint}/v1/logs (OTLP/HTTP, protobuf or JSON) with Authorization: Bearer <key>; "
