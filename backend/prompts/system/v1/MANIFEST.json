@@ -292,16 +292,16 @@
       "sha256": "fd74dc1306bc8cab9ad79060175df3b7cb225d6ac21b312c21ce37f09c6151f5"
     },
     {
-      "bytes": 4842,
+      "bytes": 4853,
       "kind": "skill",
       "path": "skills/experiment-design/SKILL.md",
-      "sha256": "2f2530936e60ae13b6ef80c41c0663382ca38475dc491d5e35e58ac874063473"
+      "sha256": "b58874e277e34b2d97253de143c4f50d7482ca2557d85edc2eb892a3b658c4bc"
     },
     {
-      "bytes": 5865,
+      "bytes": 6601,
       "kind": "skill",
       "path": "skills/experiment-design/references/instrument-measures.md",
-      "sha256": "89f0564b3171dd4386270293800962a4a81f968a44e5c9702a2364183a89682e"
+      "sha256": "4bfa5a21f2e4bc79b089cd92c139a984a282b498b23a41f1def936e7dfe7961d"
     },
     {
       "bytes": 3796,
