@@ -73,6 +73,7 @@ def _cold_request(request_id: str):
             source=ColdForkSource(projection, protected),
             working_dir=resolve_working_dir(thread["project_id"], db),
             reasoning_effort=thread["reasoning_effort"], binary=fork_binary(target, db),
+            carried_tokens=0,
         )
         return row, replace(request, tool_registry=build_tool_registry(request.working_dir))
     finally:

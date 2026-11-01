@@ -285,15 +285,15 @@ def test_a_full_checkpoint_body_leaves_the_chat_below_its_launch_point():
 
 @pytest.mark.asyncio
 async def test_the_fixed_prompt_and_tools_reach_the_warm_and_cold_fork_requests(monkeypatch):
-    from core import checkpoint_cold_admission, checkpoint_native_admission as admission
-    from core.checkpoint_warm_request import CheckpointAdmission
+    from core import checkpoint_native_admission as admission
     from history.types import HistoryBoundary
     from infra import database
 
     request = _fork_request(48_000, 0)
     context = SimpleNamespace(
         target=request.target, boundary=HistoryBoundary("t", 1, 1, "m1"),
-        previous_generation_id=None, previous=None, projection=None, working_dir="/w",
+        previous_generation_id=None, previous=None, projection=SimpleNamespace(),
+        working_dir="/w",
     )
     # The 32 GB seat: 14,000 fixed prompt + 4,618 tool definitions.
     state = SimpleNamespace(context_usage=_usage(14_000, 4_618))
@@ -303,10 +303,6 @@ async def test_the_fixed_prompt_and_tools_reach_the_warm_and_cold_fork_requests(
 
     monkeypatch.setattr(admission, "capture_native_checkpoint_source", source)
     monkeypatch.setattr(database, "get_db", lambda: SimpleNamespace(close=lambda: None))
-    monkeypatch.setattr(
-        checkpoint_cold_admission, "build_checkpoint_admission",
-        lambda **_kwargs: CheckpointAdmission(SimpleNamespace(), request),
-    )
     warm = await admission.prepare_native_checkpoint(
         "c1", "t", state, context, SimpleNamespace(turn_id="x"), None,
     )

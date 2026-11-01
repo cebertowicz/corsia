@@ -54,7 +54,7 @@ def _cold_admission(monkeypatch, harness: str, *, window: int = WINDOW):
         trigger="pressure", source_target=target, writer_target=target,
         boundary=projection.sealed_boundary, previous=None,
         projection=projection, working_dir="/work/project",
-        reasoning_effort="high", binary=harness, db=object(),
+        reasoning_effort="high", binary=harness, carried_tokens=0, db=object(),
     )
 
 

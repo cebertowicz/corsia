@@ -171,6 +171,7 @@ async def prepare_source_checkpoint(
         reasoning_effort=context.reasoning_effort,
         binary=context.source_binary,
         warm_source=warm_source,
+        carried_tokens=0,
     )
 
 
@@ -200,6 +201,7 @@ def _target_cold_admission(
             reasoning_effort=context.reasoning_effort,
             binary=context.destination_binary,
             mcp_config=context.destination_mcp_config,
+            carried_tokens=0,
             db=db,
         )
         from connections.vendor_accounts import VENDORS

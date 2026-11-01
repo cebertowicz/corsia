@@ -27,6 +27,7 @@ class NativeIdleReceipt:
     rendered_input_tokens: int
     generation_id: str | None
     final_message_id: str | None = None
+    carried_tokens: int = 0
 
 
 def _fit_sections(state) -> dict:
@@ -42,6 +43,34 @@ def carried_input_tokens(state) -> int:
     """The fixed prompt plus tool definitions: what every continuation carries."""
     sections = _fit_sections(state)
     return int(sections.get("fixed") or 0) + int(sections.get("tools") or 0)
+
+
+def last_carried_tokens(thread_id: str, target, db) -> int:
+    """A Native thread's fixed prompt plus tools from its last measured Turn.
+
+    For a checkpoint with no live Turn. The receipt on the last answer holds
+    the prompt sections the Turn partitions, less the continuity block; nothing
+    measured (no Turn yet, a new context epoch) is 0.
+    """
+    from infra.context_receipts import (
+        current_context_receipt_identity, latest_measured_context_receipt,
+    )
+
+    if target.harness != "native":
+        return 0
+    row = db.execute(
+        "SELECT runtime_context_epoch FROM threads WHERE id=?", (thread_id,),
+    ).fetchone()
+    identity = row and current_context_receipt_identity(
+        thread_id, harness="native", catalog_model_id=target.catalog_id,
+        runtime_context_epoch=int(row["runtime_context_epoch"]),
+    )
+    record = identity and latest_measured_context_receipt(thread_id, identity, db=db)
+    usage = record["context_usage"] if record else {}
+    return sum(
+        int(usage.get(field) or 0)
+        for field in ("system_tokens", "context_source_tokens", "tool_def_tokens")
+    )
 
 
 def effective_input_tokens(usage: dict | None) -> int | None:
@@ -103,6 +132,7 @@ def freeze_idle_receipt(state) -> NativeIdleReceipt | None:
         provider_input_tokens=provider_tokens,
         rendered_input_tokens=state.last_measured_rendered_input_tokens,
         generation_id=state.context_usage.get("checkpoint_generation_id"),
+        carried_tokens=carried_input_tokens(state),
     )
 
 
@@ -131,17 +161,15 @@ async def capture_native_checkpoint_source(
 
 def build_native_cold_checkpoint_admission(
     checkpoint_id, thread_id, context, turn_identity, reasoning_effort,
-    trigger="pressure", carried_tokens=0,
+    trigger, carried_tokens,
 ):
     """Build the existing Native cold request from one frozen DB context."""
-    from dataclasses import replace
-
     from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
 
     db = get_db()
     try:
-        admission = build_checkpoint_admission(
+        return build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=thread_id,
             trigger=trigger,
@@ -154,11 +182,9 @@ def build_native_cold_checkpoint_admission(
             reasoning_effort=reasoning_effort,
             binary=None,
             originating_turn_id=turn_identity.turn_id,
+            carried_tokens=carried_tokens,
             db=db,
         )
-        return replace(admission, provider_request=replace(
-            admission.provider_request, carried_tokens=carried_tokens,
-        ))
     finally:
         db.close()
 
@@ -171,6 +197,7 @@ async def prepare_native_checkpoint(
     source = await capture_native_checkpoint_source(
         thread_id, state, context, reasoning_effort,
     )
+    carried_tokens = carried_input_tokens(state)
     if source is not None:
         from dataclasses import replace
         from functools import partial
@@ -183,9 +210,8 @@ async def prepare_native_checkpoint(
             boundary=context.boundary,
             previous_generation_id=context.previous_generation_id,
             working_dir=context.working_dir, reasoning_effort=reasoning_effort,
-            binary=None, warm_source=source,
+            binary=None, warm_source=source, carried_tokens=carried_tokens,
         )
-        carried_tokens = carried_input_tokens(state)
         # Warmth proved by a past receipt can still exceed the window on the
         # next call; carry this boundary's own cold admission so the fork can
         # correct its path rather than ending the turn.
@@ -193,7 +219,6 @@ async def prepare_native_checkpoint(
             admission,
             provider_request=replace(
                 admission.provider_request,
-                carried_tokens=carried_tokens,
                 same_model_cold=partial(
                     run_off_db,
                     build_native_cold_checkpoint_admission,
@@ -206,5 +231,5 @@ async def prepare_native_checkpoint(
     return await run_off_db(
         build_native_cold_checkpoint_admission,
         checkpoint_id, thread_id, context, turn_identity, reasoning_effort, trigger,
-        carried_input_tokens(state),
+        carried_tokens,
     )

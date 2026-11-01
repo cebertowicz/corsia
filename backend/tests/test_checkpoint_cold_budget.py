@@ -73,6 +73,7 @@ def _admission(monkeypatch, harness: str, *, window: int = 131_072):
         working_dir="/work/project",
         reasoning_effort=None,
         binary=None if harness == "native" else "claude",
+        carried_tokens=0,
         db=object(),
     )
 
