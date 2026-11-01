@@ -170,10 +170,12 @@ def _register_access_tools(agent: CORSIAAgent) -> None:
 
 def _register_measure_tools(agent: CORSIAAgent) -> None:
     """Register the declared-measure tools: loading a measures.yaml and reading what intake did with it."""
+    from tools.measure_keys import MeasureKeyTool
     from tools.measures import MeasureStatusTool, MeasureSyncTool
 
     agent.tools.register(MeasureSyncTool())
     agent.tools.register(MeasureStatusTool())
+    agent.tools.register(MeasureKeyTool())
 
 
 def _register_automation_tools(agent: CORSIAAgent) -> None:

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from llm.context_window import WindowFacts, resolve_window_facts
+from llm.context_window import WindowFacts, cap_to_memory_fit, resolve_window_facts
 
 
 class ModelUnavailableError(Exception):
@@ -46,6 +46,9 @@ class ExecutionTarget:
     discovered_context_window: int | None = None
     #: Which rule produced ``context_window``; see ``WindowFacts.source``.
     context_window_source: str = "provider"
+    #: ``context_window`` before a live memory fit capped it: what refusal
+    #: settlement compares, read from the same row.
+    configured_context_window: int | None = None
 
     @property
     def windows(self) -> WindowFacts:
@@ -58,12 +61,10 @@ class ExecutionTarget:
 
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
-    if exact:
-        if exact['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import project_stored_row
+    from llm.harness_catalog import account_rows, project_stored_rows
 
-            return project_stored_row(exact, db=db)
-        return dict(exact)
+    if exact:
+        return project_stored_rows([exact], db=db)[0]
     matches = db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (model,)
     ).fetchall()
@@ -78,15 +79,9 @@ def _target_row(model: str, *, db) -> dict | None:
     if len(matches) > 1:
         raise ValueError(f"ambiguous model transport identity: {model}")
     if matches:
-        if matches[0]['harness'] in ('claude-code', 'codex'):
-            from llm.harness_catalog import project_stored_row
-
-            return project_stored_row(matches[0], db=db)
-        return dict(matches[0])
+        return project_stored_rows(matches[:1], db=db)[0]
     if model.startswith(('claude-code/', 'codex/')):
-        from llm.harness_catalog import added_rows
-
-        return added_rows(db=db, provider=model.partition('/')[0]).get(model)
+        return account_rows(db=db, provider=model.partition('/')[0]).get(model)
     return None
 
 
@@ -183,8 +178,6 @@ def resolve_execution_target(
 
         internal_reviewer = bool(metadata.get("internal_reviewer"))
         available = _dispatchable(row, harness)
-        if harness in ('claude-code', 'codex') and row.get('added_available'):
-            available = True
         if harness == "codex" and internal_reviewer:
             # The provider-owned review selector is intentionally hidden from
             # the user catalog but remains callable when Codex is connected.
@@ -198,7 +191,8 @@ def resolve_execution_target(
                 row, available
             )
 
-        windows = resolve_window_facts(row, db=connection)
+        configured = resolve_window_facts(row, db=connection)
+        windows = cap_to_memory_fit(configured, row)
         preserve_thinking_default = metadata.get("preserve_thinking_default")
         if not isinstance(preserve_thinking_default, bool):
             preserve_thinking_default = None
@@ -212,6 +206,7 @@ def resolve_execution_target(
             context_window=windows.effective,
             discovered_context_window=windows.discovered,
             context_window_source=windows.source,
+            configured_context_window=configured.effective,
             available=available,
             availability_reason=reason,
             display_name=str(row.get("display_name") or row["id"]),

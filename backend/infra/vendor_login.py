@@ -77,11 +77,9 @@ def stamp_initial_claim(db, turn_id: str, message_id: str) -> ReceiptFence | Non
     account = get_account(str(turn['vendor_account_id']), db=db)
     receipt = account_receipt(account)
     if receipt is None:
-        if not account['is_default']:
-            from connections.account_policy import AccountAdmissionError
+        from connections.account_policy import AccountAdmissionError
 
-            raise AccountAdmissionError('account_login_unverified')
-        return None  # A Default whose observed login is unknown stamps none; its limit writes are refused.
+        raise AccountAdmissionError('account_login_unverified')
     stamp = json.dumps({'turn_id': turn_id, 'account_revision': receipt.account_revision,
                         'login_seq': receipt.login_seq}, sort_keys=True)
     db.execute("UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),"

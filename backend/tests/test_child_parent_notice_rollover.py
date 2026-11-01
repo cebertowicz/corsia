@@ -19,7 +19,7 @@ from infra.input_admission import accept_thread_input
 from infra.thread_driver import finish_turn
 from infra.thread_inputs import start_idle_turn
 from tests.child_parent_notice_helpers import db, delegated, wakes
-from vendor_account_fixtures import set_legacy_policy
+from vendor_account_fixtures import set_legacy_policy, signed_in_default
 
 _REFUSED = "You've hit your session limit."
 
@@ -39,7 +39,7 @@ def _rollover_accounts(db, *, enabled=True, destination_ready=True):
     upsert_connection(
         type="cli", provider="codex", status="available", config={"binary": "/bin/test"}, db=db,
     )
-    first = default_account("codex", db=db)
+    first = signed_in_default("codex", db=db)
     second = set_account_state(
         add_account("codex", "Second", db=db)["id"], "signed_in", expected_revision=0, db=db,
     )

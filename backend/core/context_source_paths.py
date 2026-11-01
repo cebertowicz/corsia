@@ -273,13 +273,13 @@ def _project_change(path: Path, workspace: Path, db) -> ContextSourceChange | No
     label = _scope_context_label(path, project_root) or role_file_label(path, project_root)
     if label is None:
         return None
-    project_id = _project_id_for_root(project_root, workspace, db)
+    project_id = project_id_for_root(project_root, workspace, db)
     if project_id is None:
         return None
     return ContextSourceChange("project_context", project_id, label)
 
 
-def _project_id_for_root(root: Path, workspace: Path, db) -> str | None:
+def project_id_for_root(root: Path, workspace: Path, db) -> str | None:
     """Resolve a planning directory back to the project that owns it.
 
     Both sides are resolved for this comparison only. Project roots are plain

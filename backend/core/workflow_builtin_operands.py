@@ -50,7 +50,7 @@ def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -
     from core.workflow_verdict_read import run_roots  # imports api.*, which imports this module
 
     rows = db.execute(scope_cte() + """
-        SELECT n.id,n.parent_id,n.workflow_ref,n.workflow_version,n.created_at
+        SELECT n.id,n.parent_id,n.follow_up_of,n.workflow_ref,n.workflow_version,n.created_at
         FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
         WHERE p.owner_kind='thread' AND p.owner_id IN (SELECT id FROM scope_threads)
     """, scope.params(user_id)).fetchall()

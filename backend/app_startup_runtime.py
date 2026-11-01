@@ -77,10 +77,10 @@ async def resume_local_setup() -> None:
 
 
 async def _startup_harness_discovery() -> list[dict]:
-    """Re-ask Claude/Codex for their catalogs and sign-in once at backend startup."""
-    from connections.startup import startup_harness_discovery
+    """Re-ask Claude/Codex for every signed-in account's catalog once at backend startup."""
+    from connections.startup import reask_harness_catalogs
 
-    return await startup_harness_discovery()
+    return await reask_harness_catalogs()
 
 
 async def _cleanup_terminal_lease_processes(lease: dict) -> None:

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from vendor_account_fixtures import seed_catalog, signed_in_default
+
 
 def _row(selector: str, name: str, *, available: bool = True) -> dict:
     return {
@@ -20,25 +22,22 @@ def _row(selector: str, name: str, *, available: bool = True) -> dict:
 
 
 def _discover(provider: str, *rows: dict, at: str = "2026-09-25T00:00:00+00:00") -> None:
-    from connections.harness_models import store_success
 
-    store_success(
+    seed_catalog(
         provider, list(rows), harness_version="2.1.300",
         source="test", timestamp=at,
     )
 
 
 def _catalog(provider: str) -> dict[str, dict]:
+    """Each stored row as readers see it: the operator's choices over what discovery lists now."""
     from infra.database import get_db
+    from llm.harness_catalog import project_stored_rows
 
     db = get_db()
     try:
-        return {
-            row["provider_model_id"]: dict(row)
-            for row in db.execute(
-                "SELECT * FROM models WHERE harness = ?", (provider,),
-            ).fetchall()
-        }
+        stored = db.execute("SELECT * FROM models WHERE harness = ?", (provider,)).fetchall()
+        return {row["provider_model_id"]: row for row in project_stored_rows(stored, db=db)}
     finally:
         db.close()
 
@@ -51,6 +50,7 @@ def claude_code(isolated_db):
         type=ConnectionType.CLI, provider="claude-code",
         status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/claude"},
     )
+    signed_in_default("claude-code")
 
 
 def test_a_hidden_and_renamed_model_stays_that_way_across_discovery(claude_code):

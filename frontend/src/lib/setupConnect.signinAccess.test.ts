@@ -75,7 +75,7 @@ describe('a completed sign-in while models are checked', () => {
 		await flow.tick();
 		expect(refresh).toHaveBeenCalledOnce();
 		expect(flow.active).toBe(false);
-		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+		expect(flow.row(current).meta).toBe('Signed in as me@example.com');
 	});
 
 	it.each([claude, codex])('shows Ready when a repeat sign-in recovers an existing $name account', async (source) => {
@@ -86,7 +86,7 @@ describe('a completed sign-in while models are checked', () => {
 		await flow.signIn(source);
 		expect(refresh).toHaveBeenCalledOnce();
 		expect(flow.active).toBe(false);
-		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+		expect(flow.row(current).meta).toBe('Signed in as me@example.com');
 	});
 
 	it('stops polling and refreshes when the backend has lost the sign-in', async () => {
@@ -100,7 +100,7 @@ describe('a completed sign-in while models are checked', () => {
 		await flow.tick();
 		expect(refresh).toHaveBeenCalledOnce();
 		expect(flow.active).toBe(false);
-		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+		expect(flow.row(current).meta).toBe('Signed in as me@example.com');
 		await flow.tick();
 		expect(calls.filter((call) => call.endsWith('/signin/check'))).toHaveLength(2);
 	});
@@ -135,7 +135,7 @@ describe('an account the service records as signed in with no usable model', () 
 
 	it('leaves a working, limited or still-unchecked account to its own row', () => {
 		const flow = flowFor(claude);
-		expect(flow.row(signedIn(claude, 'no_usable_model', 'ready')).meta).toBe('Ready · me@example.com');
+		expect(flow.row(signedIn(claude, 'no_usable_model', 'ready')).meta).toBe('Signed in as me@example.com');
 		expect(flow.row(signedIn(claude, 'no_usable_model', 'limited')).meta).not.toContain('has no models for');
 		expect(flow.row(signedIn(claude, 'no_usable_model', 'unchecked')).meta).not.toContain('has no models for');
 	});

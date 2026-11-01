@@ -186,19 +186,21 @@ def _apply(
 
 
 def drop_delivery(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
-    """Suppress an event dropped by a rule or caused by the routed thread."""
+    """Suppress an event dropped by a rule or caused by the routed thread; park a rule-only label."""
     from events.connectors import github_pr_notice
+    from events.github_mapper import LABEL_RULE_ONLY
     from events.router import RouteOutcome, RouteResult
 
     if prepared.notice:
         github_pr_notice.release_notice(prepared.thread_id, prepared.identity)
         prepared.notice = None
     external_id = prepared.identity.external_id if prepared.identity else None
-    # Suppressed before anything else can fail: a released notice is never delivered.
-    prepared.result = RouteResult(RouteOutcome.SUPPRESSED, thread_id=prepared.thread_id,
+    outcome = RouteOutcome.PARKED if reason == LABEL_RULE_ONLY else RouteOutcome.SUPPRESSED
+    # Settled before anything else can fail: a released notice is never delivered.
+    prepared.result = RouteResult(outcome, thread_id=prepared.thread_id,
                                   external_id=external_id, reason=reason)
     emit_product_event(
-        "event_route", RouteOutcome.SUPPRESSED.value,
+        "event_route", outcome.value,
         properties={"internal_event": internal_event, "thread_id": prepared.thread_id,
                     "external_id": external_id, "reason": reason},
     )

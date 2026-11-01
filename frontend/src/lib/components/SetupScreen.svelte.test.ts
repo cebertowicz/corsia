@@ -82,7 +82,7 @@ const APPROVED_WELCOME = {
 	rows: [
 		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
 		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
-		'Asks you first: sending or posting as you, spending money, and opening files outside your work folder.',
+		'Asks you first: sending or posting as you, and spending money.',
 	],
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -174,11 +174,28 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('#setup-email')?.closest('.field')?.querySelector('.hint')?.textContent).toBe('Used only to sign you up for services you choose, such as web search.');
 	});
 
-	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+	it('labels the name field Full name and prefills the username from the first name', async () => {
 		await settle(); button('Continue')?.click(); await settle();
 		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
 		setInput('setup-name', 'Ada Lovelace'); await settle();
-		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+	});
+
+	it('leaves a cleared or edited username alone when the name changes', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		const username = () => (host.querySelector('#setup-username') as HTMLInputElement).value;
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		setInput('setup-username', ''); await settle();
+		expect(username()).toBe('');
+		setInput('setup-name', 'Ada King'); await settle();
+		expect(username()).toBe('');
+		// Clearing the name too makes the suggestion empty; the cleared username still stays cleared.
+		setInput('setup-name', ''); await settle();
+		setInput('setup-name', 'Grace Hopper'); await settle();
+		expect(username()).toBe('');
+		setInput('setup-username', 'countess'); await settle();
+		setInput('setup-name', 'Augusta King'); await settle();
+		expect(username()).toBe('countess');
 	});
 
 	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {
@@ -439,6 +456,16 @@ describe('SetupScreen', () => {
 			await providersStep([{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true } as never]);
 			expect(rowNames()).not.toContain('Local model');
 		});
+
+		it.each([
+			{ host: 'a server that is not macOS', supported: null, extra: [] },
+			{ host: 'a host that never runs one, with a failed local row', supported: true, extra: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true, local_state: 'failed' }] },
+		])('keeps the footer off the hidden Local model row on $host', async ({ supported, extra }) => {
+			localEligible = true; macosSupported = supported;
+			await providersStep(extra as never);
+			expect(rowNames()).not.toContain('Local model');
+			expect(host.querySelector('.footer-note')?.textContent).toBe('Set up a subscription or add an API provider to continue.');
+		});
 	});
 
 	it('explains the subscriptions screen: a lede, and under neither-signed-in the subscription and the free-model line this computer can honor', async () => {
@@ -460,23 +487,17 @@ describe('SetupScreen', () => {
 		await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
 		await passFolder();
 		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
-		expect(host.textContent).toContain('No subscription? The free model downloading to this computer works too, or add an API key.');
+		expect(host.textContent).toContain('No subscription? Choose Neither and the free model downloads to this computer, or add an API key.');
 		expect(host.textContent).not.toContain('Add an API key on the next screen.');
 	});
 
-	it('explains the ChatGPT question when Claude Code is signed in, and the Claude question when Codex is', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+	it.each([['Claude Code', 'claude-code'], ['Codex', 'codex']])('asks the same four-answer question when %s is signed in', async (_name, signedIn) => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: signedIn === 'claude-code' ? 'ready' : 'not_installed' }, { source: 'codex', name: 'Codex', state: signedIn === 'codex' ? 'ready' : 'not_installed' }];
 		await passFolder();
 		expect(host.querySelector('.lede')?.textContent).toBe('CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.');
-		expect(host.textContent).toContain('A ChatGPT subscription uses Codex (a Claude subscription uses Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
-	});
-
-	it('explains the Claude question when Codex is signed in', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'ready' }];
-		await passFolder();
-		expect(host.textContent).toContain('A Claude subscription uses Claude Code (a ChatGPT subscription uses Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
+		expect(host.textContent).toContain('Which do you pay for?');
+		expect([...host.querySelectorAll('.choices button')].map((choice) => choice.textContent?.trim())).toEqual(['Claude', 'ChatGPT', 'Both', 'Neither']);
+		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
 	});
 
 	it('says what the work folder is for beside its row on the account form', async () => {
@@ -484,12 +505,11 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Your projects and files live here.');
 	});
 
-	it('asks only about the other subscription when one tool is signed in', async () => {
+	it('asks the four-answer question when one tool is signed in, and Claude alone leaves Claude Code on the models screen', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
-		expect(host.textContent).toContain('Claude Code is signed in.');
-		expect(host.textContent).toContain('Do you also pay for ChatGPT?');
-		button('No')?.click(); await settle();
+		expect(host.textContent).toContain('Which do you pay for?');
+		button('Claude')?.click(); await settle();
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 	});
 
@@ -525,10 +545,29 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toContain('Codex');
 	});
 
-	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
+	it('keeps the saved subscription answer in a resumed setup: the declined tool stays hidden and Back shows the answer', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/api/setup/progress' && (init?.method ?? 'GET') === 'GET') return json({ setup_completed: false, picks: { claude: true, chatgpt: false }, status: { local_eligible: false, work_folder: '~/CORSIA' } });
+			return base(input, init);
+		}));
+		await unmount(component);
+		token.set('setup-token');
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync(); await settle(); await settle();
+		expect(rowNames()).toContain('Claude Code');
+		expect(rowNames()).not.toContain('Codex');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(button('Claude')?.getAttribute('aria-description')).toBe('Your earlier answer');
+		expect(button('ChatGPT')?.hasAttribute('aria-description')).toBe(false);
+	});
+
+	it('asks the subscription question even when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
-		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your account');
 		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');

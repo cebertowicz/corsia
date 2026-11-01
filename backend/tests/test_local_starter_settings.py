@@ -7,7 +7,8 @@ from llm.local_model import LocalModel
 from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 
 
-def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment_override(monkeypatch):
+def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment_override(monkeypatch, tmp_path):
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)  # no values saved in oMLX yet
     calls: list[tuple[str, str, dict]] = []
     model = LocalModel("Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp", 14_450_611_912, 90_890)
 

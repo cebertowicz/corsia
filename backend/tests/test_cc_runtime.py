@@ -825,8 +825,9 @@ class TestDeadChildResume:
     ):
         import subagents.cc_runtime as rt
         import connections.models as cm
-        isolated_claude_dir = tmp_path / ".claude"
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(isolated_claude_dir))
+        isolated_claude_dir = Path(child_db.execute(
+            "SELECT source_home FROM vendor_accounts WHERE is_default=1 AND connection_id='test-cc'"
+        ).fetchone()[0])
         monkeypatch.setattr(cm, "get_connection",
                             lambda provider, db=None: {"config": {"binary": fake_claude}})
 
@@ -861,8 +862,8 @@ class TestDeadChildResume:
             None,
         )
         assert art is not None
-        from subagents.cc_sessions import resolve_claude_dir
-        installed_root = Path(resolve_claude_dir(None))
+        from connections.account_runtime import thread_claude_dir
+        installed_root = Path(thread_claude_dir(child_id, db=child_db))
         assert installed_root == isolated_claude_dir.resolve()
         assert any(installed_root.rglob(f"{art['external_id']}.jsonl")), (
             "resumed child's transcript was not installed under the isolated CC home"

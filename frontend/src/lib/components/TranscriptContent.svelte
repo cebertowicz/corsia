@@ -29,6 +29,8 @@
 	import type { TranscriptMessage } from './messageListModel';
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
+	import { heldSignedOutInput, heldSignedOutNotice } from './heldAccountNotice';
+	import { loadThreadVendorAccounts, threadVendorAccounts } from '$lib/stores/threadVendorAccounts';
 	import { sourceMembers } from './contextEventModel';
 	import { PAUSED_AT_USAGE_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
@@ -141,6 +143,10 @@
 	// pendingInputIds covers only this tab's send before its first receipt; the transcript row is the server's
 	// truth for an input it still holds (queued, or Queue-after-turn), after a reload or from another tab too.
 	const inputAwaiting = $derived($messages.some((msg) => msg.thread_id === boundThreadId && isAwaitingDelivery(msg, false)));
+	// A chat's input held for a signed-out account gets the expired-login line, with its Sign in, under that input.
+	const heldInput = $derived(heldSignedOutInput($messages, boundThreadId));
+	$effect(() => { if (heldInput && boundThreadId) void loadThreadVendorAccounts(boundThreadId, `held-${heldInput.id}`); });
+	const heldNotice = $derived(heldInput && boundThreadId ? heldSignedOutNotice(heldInput, $threadVendorAccounts.get(boundThreadId)?.accounts ?? []) : null);
 	const focusMode = $derived($coreSettings?.features?.focus_mode === true);
 	const waitState = $derived(boundThreadId ? $threadPlanStates[boundThreadId] : undefined);
 	const wait = $derived(
@@ -217,6 +223,7 @@
 			/>
 		{/if}
 	</div>
+	{#if heldNotice && heldInput?.id === msg.id}<div class="message system"><SystemMessageRow msg={heldNotice} /></div>{/if}
 {/snippet}
 
 {#snippet deliveryWarning(msg: TranscriptMessage)}

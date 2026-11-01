@@ -12,7 +12,6 @@ from typing import Any
 from loguru import logger
 
 from history.types import HistoryBoundary
-from infra.context_usage_attribution import merge_context_usage_with_snapshot
 from infra.db_async import run_in_db
 from infra.runtime_truth import provider_boundary_snapshot
 from core.checkpoint_native_admission import effective_input_tokens
@@ -77,6 +76,8 @@ def _read_native_checkpoint_context(
     thread_id: str,
     target_catalog_id: str,
 ) -> _NativeCheckpointContext | None:
+    """Read one fold's source: NothingNewerToFold past an installed floor, else None when none can start."""
+    from core.fork_types import NothingNewerToFold
     from history.boundaries import boundary_before_latest_assistant_step
     from history.projection import render_portable_history
     from history.scoped_source import assistant_step_through
@@ -108,6 +109,8 @@ def _read_native_checkpoint_context(
                 floor is not None and assistant_step_through(db, thread_id, floor.seq)
             ),
         )
+        if boundary is None and previous is not None:
+            raise NothingNewerToFold("no history boundary follows the installed floor")
         if boundary is None:
             return None
         return _NativeCheckpointContext(
@@ -136,11 +139,12 @@ def remaining_native_input(state) -> int:
     return max(0, state.fit_ledger.effective_window_tokens - occupied)
 
 
-async def _refresh_native_window(state, thread_id: str) -> None:
+async def _refresh_native_window(state, thread_id: str) -> int | None:
     """Rebind the same payload to a freshly resolved cap at its next call boundary.
 
     The resolution is the thread's, so a model its locality policy now forbids stops the
     whole Turn here, before the call: later input then holds at admission on that cause.
+    Returns the configured window when the resolved one is a live memory fit, else None.
     """
     from llm.resolution import resolve_locality_permitted
 
@@ -156,14 +160,12 @@ async def _refresh_native_window(state, thread_id: str) -> None:
             model=target.expected_reported_model or target.transport_model,
         )
         state.context_usage["model_context_window"] = target.context_window
+    return target.configured_context_window if target.context_window_source == "memory" else None
 
 
 def _minimum_native_input(ledger) -> int:
     sections = dict(ledger.section_tokens)
-    return sum(
-        int(sections.get(name) or 0)
-        for name in ("current_input", "tools", "provider_wrapper")
-    )
+    return sum(int(sections.get(name) or 0) for name in ("current_input", "tools", "provider_wrapper"))
 
 
 async def _render_native_installed(
@@ -250,26 +252,19 @@ async def maintain_native_checkpoint(
     """Apply the shared checkpoint boundary before one Native provider call."""
     if turn_identity is None or state.fit_ledger is None:
         return None
-    await _refresh_native_window(state, thread_id)
-    from core.checkpoint_resume import (
-        CheckpointWaitScope,
-        ProviderBoundary,
-        maintain_before_provider_call,
+    configured_window = await _refresh_native_window(state, thread_id)
+    from core.checkpoint_native_admission import (
+        fixed_input_tokens, maintain_native_boundary, prepare_native_checkpoint, skip_optional_cold_fold,
     )
+    from core.checkpoint_resume import CheckpointWaitScope, ProviderBoundary
     scope = getattr(cancel_event, "checkpoint_wait_scope", None)
     if not isinstance(scope, CheckpointWaitScope):
         raise RuntimeError("managed Native Turn has no checkpoint wait scope")
 
     async def prepare(checkpoint_id: str, required: bool):
-        from core.checkpoint_native_admission import (
-            prepare_native_checkpoint,
-            skip_optional_cold_fold,
-        )
-
         skip_optional_cold_fold(state, required)
         context = await run_in_db(
-            _read_native_checkpoint_context, thread_id,
-            state.fit_ledger.target_catalog_id,
+            _read_native_checkpoint_context, thread_id, state.fit_ledger.target_catalog_id,
         )
         if context is None:
             return None
@@ -287,21 +282,29 @@ async def maintain_native_checkpoint(
     active, installed, eager = await run_in_db(
         provider_boundary_snapshot, thread_id, "native", ledger.target_catalog_id,
     )
-    continuation = await maintain_before_provider_call(ProviderBoundary(
+    adopted = state.context_usage.get("checkpoint_generation_id")
+    if state.overflow_retry_pending and installed is not None and installed.id == adopted:
+        installed = None  # the refused payload carried it; the overflow retry needs a newer one
+    boundary = ProviderBoundary(
         thread_id=thread_id,
         turn=turn_identity,
         context_window=ledger.effective_window_tokens,
         canonical_input_tokens=ledger.rendered_input_tokens,
         provider_input_tokens=_correlated_native_input(state),
         minimum_input_tokens=_minimum_native_input(ledger),
-        adopted_checkpoint_id=state.context_usage.get("checkpoint_generation_id"),
+        adopted_checkpoint_id=adopted,
         active_checkpoint=active,
         installed_checkpoint=installed,
         prepare_checkpoint=prepare,
         render_installed=render,
         wait_scope=scope,
         eager_checkpoint_id=eager.id if eager is not None else None,
-    ))
+        fixed_input_tokens=fixed_input_tokens(state),
+        configured_window=configured_window,
+    )
+    continuation = await maintain_native_boundary(boundary, overflow_retry=state.overflow_retry_pending)
+    if continuation is None:
+        return None
     if continuation.payload is None and not ledger.fits:
         state.fit_ledger = replace(ledger, fits=True, block_reason=None)
     if continuation.payload is not None:
@@ -334,56 +337,6 @@ def current_fit_input(messages: list[dict[str, Any]] | None) -> dict[str, Any] |
     barrier different bytes would reject the call before provider contact.
     """
     return messages[-1] if messages else None
-
-
-def _context_usage_from_latest_call(
-    preflight_usage: dict,
-    last_call_usage: dict | None,
-    *,
-    include_context_details: bool = True,
-) -> dict:
-    """Project the latest measured model call onto the context record."""
-    effective_input = effective_input_tokens(last_call_usage)
-    measured = dict(preflight_usage)
-    if not include_context_details:
-        measured.pop("context_snapshot", None)
-        measured.pop("source_artifacts", None)
-        measured.pop("lesson_index_estimates", None)
-    if effective_input is None:
-        measured.update(
-            total_used=None,
-            utilization=None,
-            token_usage_available=False,
-            stale_reason="terminal_without_measurement",
-        )
-        measured.pop("token_source", None)
-        return measured
-
-    measured.update(
-        effective_input_tokens=effective_input,
-        total_used=effective_input,
-        provider_reported_total_used=effective_input,
-        token_usage_available=True, token_source="measured")
-    measured.pop("stale_reason", None)
-    window = measured.get("provider_reported_model_context_window") or measured.get(
-        "model_context_window"
-    )
-    if isinstance(window, (int, float)) and window > 0:
-        measured["provider_reported_utilization"] = round(effective_input / int(window), 3)
-    for source, destination in (
-        ("prompt_tokens", "provider_reported_input_tokens"),
-        ("cache_read_tokens", "provider_reported_cache_read_input_tokens"),
-        ("cache_creation_tokens", "provider_reported_cache_creation_input_tokens"),
-    ):
-        value = last_call_usage.get(source) if last_call_usage else None
-        if isinstance(value, (int, float)) and value >= 0:
-            measured[destination] = int(value)
-    if not include_context_details:
-        return measured
-    return merge_context_usage_with_snapshot(
-        measured, snapshot=measured.get("context_snapshot"),
-        snapshot_id=measured.get("snapshot_id"), source_artifacts=measured.get("source_artifacts"),
-        continuity_mode=measured.get("continuity_mode") or "full") or measured
 
 
 def refit_provider_payload(ledger, messages, tools, *, input_identity, current_input, model=None):

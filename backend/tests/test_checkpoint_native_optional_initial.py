@@ -31,6 +31,7 @@ class _Request:
 @dataclass(frozen=True)
 class _ProviderRequest:
     same_model_cold: object = None
+    carried_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,7 @@ def folds(monkeypatch):
 
     async def iteration_db(function, *args):
         if getattr(function, "func", None) is resolution.resolve_locality_permitted:
-            return SimpleNamespace(context_window=WINDOW)
+            return SimpleNamespace(context_window=WINDOW, context_window_source="provider")
         if function is boundary_snapshot:
             return None, None, None
         if function is turn_iteration_context._read_native_checkpoint_context:
@@ -112,9 +113,9 @@ def folds(monkeypatch):
     holder = {"context": context}
     monkeypatch.setattr(turn_iteration_context, "provider_boundary_snapshot", boundary_snapshot)
     monkeypatch.setattr(turn_iteration_context, "run_in_db", iteration_db)
-    monkeypatch.setattr(checkpoint_native_admission, "run_in_db", admission_db)
+    monkeypatch.setattr(checkpoint_native_admission, "run_off_db", admission_db)
     monkeypatch.setattr(
-        "core.fork_native.capture_live_warm_source",
+        "core.fork_native_warm.capture_live_warm_source",
         lambda *_args, **_kwargs: object(),
     )
     monkeypatch.setattr("core.checkpoint_warm_request.build_warm_admission", build_warm_admission)

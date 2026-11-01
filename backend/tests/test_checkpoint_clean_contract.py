@@ -247,6 +247,7 @@ async def test_same_installed_generation_does_not_adopt_twice() -> None:
         installed_checkpoint=record,
         eager_checkpoint_id=record.id,
         recovery_input_tokens=None,
+        fixed_input_tokens=0,
     )
 
     continuation = await checkpoint_resume.maintain_before_provider_call(boundary)

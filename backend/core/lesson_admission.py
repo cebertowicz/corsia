@@ -158,10 +158,17 @@ def admit(
     rendered = lesson_files.read_trial(text)
     assert rendered is not None
     additive_only(replace(decision, case_metadata=rendered.lesson.case_metadata))
-    payload = delivery_for_trial(rendered, write_path, text.encode()).payload
+    payload = delivery_for_trial(rendered, write_path, text.encode(), _binding(rendered)).payload
     if _text_tokens(payload, None) > START_TOKEN_CAP:
         return Admission(identity, capture_id, "over-budget", case_metadata=pending)
     return Admission(identity, capture_id, None, text, destination_path=write_path)
+
+
+def _binding(trial):
+    """The step binding the target file itself declares, the one task start delivers in every thread."""
+    from core.workflow_step_binding import declared_binding
+
+    return declared_binding(trial, {})[0]
 
 
 def _section_taken(

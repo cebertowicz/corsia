@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from vendor_account_fixtures import signed_in_default
+
 
 def test_settings_inventory_exposes_saved_and_resolved_windows(isolated_db):
     from api.discovered_models import _settings_inventory
@@ -28,6 +30,7 @@ def test_settings_inventory_exposes_saved_and_resolved_windows(isolated_db):
             [(codex_id, 262_144), (omlx_id, 262_144)],
         )
         db.commit()
+        signed_in_default("codex", db=db)  # the account lists the Codex row's 1M window
     finally:
         db.close()
 
@@ -79,6 +82,7 @@ def test_settings_inventory_projects_harness_alias_of_only_for_alias_rows(isolat
             ],
         )
         db.commit()
+        signed_in_default("codex", db=db)  # the account lists the alias and what it aliases
     finally:
         db.close()
 

@@ -97,6 +97,24 @@ def refused(tmp_path: Path, text: str) -> str:
     return str(caught.value)
 
 
+def test_a_kpi_formula_the_evaluator_lacks_is_refused(tmp_path: Path) -> None:
+    text = small("mean:\n  title: Mean\n  unit: count\n  better: higher\n  formula: mean\n  num: {event: qa.done}\n  min_n: 1")
+    message = refused(tmp_path, text)
+    assert 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile' in message
+
+
+def test_a_kpi_without_a_formula_is_refused(tmp_path: Path) -> None:
+    text = small("nameless:\n  title: Nameless\n  unit: count\n  better: higher\n  num: {event: qa.done}\n  min_n: 1")
+    assert "kpi nameless has no formula; add one of count, ratio, rate_per_run, share, percentile as its formula." in refused(tmp_path, text)
+
+
+def test_a_kpi_missing_a_field_its_formula_reads_is_refused(tmp_path: Path) -> None:
+    ratio = small("half:\n  title: Half\n  unit: ratio\n  better: higher\n  formula: ratio\n  num: {event: qa.done}\n  min_n: 1")
+    assert "kpi half formula ratio needs den; add it." in refused(tmp_path, ratio)
+    share = small("mix:\n  title: Mix\n  unit: percent\n  better: higher\n  formula: share\n  num: {event: qa.done}")
+    assert "kpi mix formula share needs min_n, num.attr, num.values; add them." in refused(tmp_path, share)
+
+
 def deciding(extra: str = "", *, name: str = "rate") -> str:
     return (
         f"{name}:\n  title: Rate\n  unit: percent\n  better: higher\n  formula: share\n"
@@ -194,9 +212,9 @@ def test_can_decide_check_1_needs_target_and_review(tmp_path: Path) -> None:
 def test_can_decide_check_2_needs_a_workflow_version(tmp_path: Path) -> None:
     carrying = "kpi rate can_decide: true needs a KPI that can carry a workflow version (no operand anchors on a workflow event). Add match … anchor: true on a workflow event, or set can_decide: false."
     assert carrying in refused(tmp_path, small(deciding(), workflow=False))
-    foreign = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged")
+    foreign = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, attr: verdict, values: [pass]")
     assert carrying in refused(tmp_path, small(foreign))
-    anchored = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, match: [{event: qa.done, on: pr, mode: exists, anchor: true}]")
+    anchored = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, attr: verdict, values: [pass], match: [{event: qa.done, on: pr, mode: exists, anchor: true}]")
     text = small(anchored, corroborate=False)  # a platform numerator, versioned through the anchor on a file event
     path = skill_file(tmp_path, text)
     sync_skill(db(), path, text)
@@ -226,10 +244,10 @@ def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted(
     wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
     connection = db()
     sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
-    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
+    assert admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
     left_out = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert {item["name"]: item["status"] for item in left_out["items"]} == {"mail.triaged": "unchanged", "replied_share": "unchanged", "mail.sorted": "removed"}
-    refused = admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
+    refused = admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
     assert refused.refusal and "is not declared in your measures.yaml" in refused.refusal
     assert connection.execute("SELECT count(*) FROM outcome_events WHERE event_name='mail.sorted'").fetchone()[0] == 1  # old rows stay readable
     assert [version for (version,) in connection.execute("SELECT version FROM measure_definitions WHERE name='mail.sorted' ORDER BY version")] == [1, 2]
@@ -237,7 +255,7 @@ def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted(
     assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]  # a retired name is reported once
     back = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
     assert {item["name"]: item["status"] for item in back["items"]}["mail.sorted"] == "added"
-    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
+    assert admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
 
 
 def test_a_name_synced_from_another_file_is_not_removed_by_this_one(tmp_path: Path) -> None:
@@ -271,7 +289,7 @@ def test_one_stamped_set_governs_the_file_the_registry_and_admission(name: str) 
     connection = db()
     sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert all(name in event.specs for event in REGISTRY.events.values())  # the registry gives every event a spec for it
-    admitted = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied", name: "forged"}, run_id="r")
+    admitted = admit(connection, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied", name: "forged"}, run_id="r")
     assert any(f'attribute "{name}" is stamped by the server' in note for note in admitted.notes)  # admission removes the emitter's value
     assert json.loads(connection.execute("SELECT attributes FROM outcome_events").fetchone()[0]).get(name) != "forged"
 

@@ -39,10 +39,10 @@ def discovery_view(account: dict) -> dict:
 
 
 def current_ready_discovery(account: dict) -> dict | None:
-    """Return an added account's ready discovery only for its current login."""
+    """Return an account's ready discovery only for its current login."""
     from connections.account_receipts import account_receipt
 
-    if account['is_default'] or account['state'] != 'signed_in':
+    if account['state'] != 'signed_in':
         return None
     receipt = account_receipt(account)
     discovery = discovery_view(account)['discovery']
@@ -69,7 +69,7 @@ def invalidate_discovery(account: dict, *, login_seq: int, auth_state: str, db) 
 
 
 def change_login(account: dict, *, revision: int, db) -> None:
-    """New explicit custom login invalidates receipts and retains managed cleanup evidence."""
+    """A new explicit login invalidates receipts and retains managed cleanup evidence."""
     record = discovery_record(account)
     generation = record['login_seq'] + 1
     projection = record['auth_projection']
@@ -91,8 +91,12 @@ def change_login(account: dict, *, revision: int, db) -> None:
 
 def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
                    cause: str | None = None, models: dict | None = None,
-                   harness_version: str | None = None, cache_receipt: dict | None = None, db) -> bool:
-    """Publish pending/success/failure only for the captured lifecycle AND login."""
+                   harness_version: str | None = None, cache_receipt: dict | None = None,
+                   reason: str | None = None, db) -> bool:
+    """Publish pending/success/failure only for the captured lifecycle AND login.
+
+    A failure's ``reason`` is the line a person reads about it; the next success clears it.
+    """
     if not receipt_is_current(receipt, db=db) or receipt.account_id != account_id:
         return False
     account = get_account(account_id, db=db)
@@ -102,10 +106,10 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
     if status == 'failed' and last.get('status') == 'ready' and last.get('receipt') == fence:
         # A run that cannot finish says nothing new about this login's models: the last good
         # discovery stays until a later run succeeds, and the failure rides along beside it.
-        last['refresh_failure'] = {'cause': cause, 'observed_at': utc_now_iso()}
+        last['refresh_failure'] = {'cause': cause, 'reason': reason, 'observed_at': utc_now_iso()}
         store_record(account_id, record, db=db)
         return True
-    record['discovery'] = {'status': status, 'cause': cause, 'observed_at': utc_now_iso(),
+    record['discovery'] = {'status': status, 'cause': cause, 'reason': reason, 'observed_at': utc_now_iso(),
                            'harness_version': harness_version,
                            'receipt': {'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq},
                            'cache_receipt': cache_receipt, 'models': models or {}}
@@ -117,24 +121,13 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
     """One evaluator for claim, catalog and batched advisory readers.
 
-    Reads stored records, plus at most two stats of a custom account's source home
+    Reads stored records, plus at most two stats of the account's source home
     (``missing_home_reason``); never a vendor or network call.
     """
     from connections.account_receipts import account_receipt
-    from connections.vendor_accounts import DEFAULT_COMPARISON
 
     record = discovery_view(account)
-    # A built-in Default runs on the ambient login its own CLI already holds, and
-    # its models come from the vendor catalog rather than from an account-scoped
-    # discovery record. Nothing that record can do may hide those rows.
-    ambient = account['source_home'] is None
-    if ambient:
-        comparison = account['identity'].get(DEFAULT_COMPARISON)
-        if not isinstance(comparison, dict) or 'auth_state' not in comparison:
-            return None  # Existing unobserved legacy Default compatibility.
-        if comparison['auth_state'] != 'known':
-            return 'account_login_unverified'
-    # A custom account whose homes cannot launch is held before its receipt is read: the
+    # An account whose homes cannot launch is held before its receipt is read: the
     # same rule launch validation applies, so a hold never lifts on a home launch refuses.
     if reason := missing_home_reason(account):
         return reason
@@ -149,8 +142,6 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
         return failed['cause']
     if any(item.get('phase') == 'pending' for item in projection['stale']):
         return 'codex_auth_projection_changed'
-    if ambient:
-        return None
     discovery = record['discovery']
     if discovery.get('status') != 'ready' or discovery.get('receipt') != {
             'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq}:

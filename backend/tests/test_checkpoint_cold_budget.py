@@ -22,6 +22,8 @@ from history.types import (
 from llm.resolution import ExecutionTarget
 from llm.router import LLMResponse
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _admission(monkeypatch, harness: str, *, window: int = 131_072):
     """Keep real history construction; isolate only the continuity DB read."""
@@ -71,6 +73,7 @@ def _admission(monkeypatch, harness: str, *, window: int = 131_072):
         working_dir="/work/project",
         reasoning_effort=None,
         binary=None if harness == "native" else "claude",
+        carried_tokens=0,
         db=object(),
     )
 

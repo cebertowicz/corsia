@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import AccountsBlock from './AccountsBlock.svelte';
-import { vendorAccounts, type VendorAccount } from '$lib/stores/vendorAccounts';
+import { vendorAccounts, signin, type VendorAccount } from '$lib/stores/vendorAccounts';
 import { token } from '$lib/stores/auth';
 import { requestSettingsSection, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
@@ -25,7 +25,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 /** The accounts list, an empty policy, and `signinResult` for a POST to /signin; every call is recorded. */
-function serve(accounts: VendorAccount[], signinResult: unknown = null) {
+function serve(accounts: VendorAccount[], signinResult: unknown = null, verifyResult: unknown = { state: 'signed_in', vendor_signed_in: true, model_refresh_ok: true, model_refresh_cause: null, model_refresh_ref: null }) {
 	const calls: string[] = [];
 	vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
 		const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -33,6 +33,7 @@ function serve(accounts: VendorAccount[], signinResult: unknown = null) {
 		const method = init?.method ?? 'GET';
 		calls.push(`${method} ${path}`);
 		if (path.startsWith('/api/provider-policy')) return Promise.resolve(response({ providers: [] }));
+		if (path.endsWith('/verify')) return Promise.resolve(response(verifyResult));
 		if (path.endsWith('/signin/check')) return Promise.resolve(response({ detail: 'no sign-in is in progress for this account' }, 404));
 		if (path.endsWith('/signin') && method === 'POST') return Promise.resolve(response(signinResult));
 		return Promise.resolve(response({ accounts }));
@@ -56,78 +57,76 @@ describe('Sign in again on an account row', () => {
 	afterEach(() => {
 		token.set(null);
 		vendorAccounts.set([]);
+		signin.set({});
 		resetSettingsNavigation();
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
 	});
 
-	it('puts Sign in again after Rename on a signed-in added account and starts the existing sign-in', async () => {
-		const calls = serve([personal, signedIn], { account_id: 'fomrrt1', route: 'browser', status: 'waiting', cause: null });
+	it('offers Rename, Sign out and Remove on a signed-in account, and no Sign in again', async () => {
+		serve([personal, signedIn]);
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		await openMenu('fomrrt1');
-		expect(menuLabels()).toEqual(['Rename', 'Sign in again', 'Sign out', 'Remove']);
-		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
-		await vi.waitFor(() => expect(calls).toContain('POST /api/vendor-accounts/fomrrt1/signin'));
-		// The vendor's answer was "not signed in": the sign-in runs on the existing status line.
-		await vi.waitFor(() => expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')?.textContent).toContain('Waiting for sign-in in your browser'));
-		expect(document.querySelector('[role="menu"]')).toBeNull();
+		expect(menuLabels()).toEqual(['Rename', 'Sign out', 'Remove']);
+		expect(document.querySelector('[data-menu-id="sign-in-again"]')).toBeNull();
 		unmount(component);
 	});
 
-	it('is on a signed-out added account too, beside its Sign in button', async () => {
+	it('offers Rename and Remove on a signed-out account, whose Sign in is on its row', async () => {
 		serve([personal, signedOut]);
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		await openMenu('fomrrt2');
-		expect(menuLabels()).toContain('Sign in again');
+		expect(menuLabels()).toEqual(['Rename', 'Remove']);
+		expect(document.querySelector('#vendor-account-fomrrt2 .account-signin-action')?.textContent?.trim()).toBe('Sign in');
 		unmount(component);
 	});
 
-	it('is not on the Default account or one the provider manages', async () => {
-		const managed = account('managed', 'Managed', { state: 'legacy' });
-		serve([personal, managed]);
+	it('offers the Default the same menu as any signed-in account', async () => {
+		serve([personal, signedIn]);
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		await openMenu('personal');
 		expect(menuLabels()).toEqual(['Rename', 'Sign out', 'Remove']);
-		document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
-		await settle();
-		await openMenu('managed');
-		expect(menuLabels()).toEqual(['Rename']);
 		unmount(component);
 	});
 
 	it('says so on the status line when the vendor still has the account signed in', async () => {
-		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'already_signed_in', cause: null });
+		serve([personal, signedIn]);
+		signin.set({ fomrrt1: { account_id: 'fomrrt1', route: null, status: 'already_signed_in', cause: null } });
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
-		await openMenu('fomrrt1');
-		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
-		await vi.waitFor(() => expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')?.textContent?.trim()).toBe('FOMRRT1 is still signed in. Its model list is up to date.'));
+		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')?.textContent?.trim()).toBe('FOMRRT1 is still signed in. Its model list is up to date.');
 		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state button')).toBeNull();
 		unmount(component);
 	});
 
-	it('reports a failed model reload on the status line with its reference and no control of its own', async () => {
-		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'model_refresh_failed', cause: 'account_refresh_failed', ref: 'R-7K2M' });
+	it('offers Refresh models on a failed model reload, and a good retry replaces the line', async () => {
+		const calls = serve([personal, signedIn]);
+		signin.set({ fomrrt1: { account_id: 'fomrrt1', route: null, status: 'model_refresh_failed', cause: null, ref: 'R-7K2M' } });
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
-		await openMenu('fomrrt1');
-		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
-		await vi.waitFor(() => expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')?.textContent?.trim()).toBe('FOMRRT1 is still signed in, but its model list couldn’t be reloaded. Use Sign in again to retry. Reference: R-7K2M'));
-		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state button')).toBeNull();
-		await openMenu('fomrrt1');
-		expect(menuLabels()).toContain('Sign in again');
+		const row = '#vendor-account-fomrrt1 .signin-state';
+		expect(document.querySelector(row)?.textContent).toContain('FOMRRT1 is still signed in, but its model list couldn’t be reloaded. Use Refresh models to retry. Reference: R-7K2M');
+		const button = document.querySelector<HTMLButtonElement>(row + ' button')!;
+		expect(button.textContent?.trim()).toBe('Refresh models');
+		button.click();
+		flushSync();
+		expect(button.textContent?.trim()).toBe('Refreshing…');
+		expect(button.disabled).toBe(true);
+		await vi.waitFor(() => expect(calls).toContain('POST /api/vendor-accounts/fomrrt1/verify'));
+		await vi.waitFor(() => expect(document.querySelector(row)?.textContent?.trim()).toContain('FOMRRT1 is still signed in. Its model list is up to date.'));
+		expect(document.querySelector(row + ' button')).toBeNull();
 		unmount(component);
 	});
 
 	it('does not show an error when a model refresh was superseded', async () => {
-		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'superseded', cause: 'account_refresh_superseded' });
+		serve([personal, signedIn], null, { state: 'signed_in', vendor_signed_in: true, model_refresh_ok: null, model_refresh_cause: 'account_refresh_superseded', model_refresh_ref: null });
+		signin.set({ fomrrt1: { account_id: 'fomrrt1', route: null, status: 'model_refresh_failed', cause: null, ref: 'R-7K2M' } });
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
-		await openMenu('fomrrt1');
-		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
+		document.querySelector<HTMLButtonElement>('#vendor-account-fomrrt1 .signin-state button')!.click();
 		await settle();
 		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')).toBeNull();
 		unmount(component);
@@ -138,6 +137,7 @@ describe('Sign in on a signed-out account row', () => {
 	afterEach(() => {
 		token.set(null);
 		vendorAccounts.set([]);
+		signin.set({});
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
 	});
@@ -185,45 +185,37 @@ describe('a settings link to one account', () => {
 		Element.prototype.scrollIntoView = originalScroll;
 		token.set(null);
 		vendorAccounts.set([]);
+		signin.set({});
 		resetSettingsNavigation();
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
 	});
 
-	it('focuses Sign in on a signed-out account and marks it as the link did elsewhere', async () => {
+	it('focuses Sign in on a signed-out account', async () => {
 		serve([personal, signedIn, signedOut]);
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		requestSettingsSection('providers', 'account-fomrrt2');
-		await vi.waitFor(() => expect(document.querySelector('[data-chat-link-focus]')).not.toBeNull());
-		const target = document.querySelector<HTMLButtonElement>('#vendor-account-fomrrt2 [data-chat-link-focus] .btn')!;
-		expect(target.textContent?.trim()).toBe('Sign in');
-		// Drawn like Sign in again, so the link lands on a control with a box of its own.
-		expect(target.classList.contains('secondary')).toBe(true);
+		const target = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('#vendor-account-fomrrt2 [data-link-target] button');
+		await vi.waitFor(() => expect(document.activeElement).toBe(target()));
+		expect(target()?.textContent?.trim()).toBe('Sign in');
 		expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
-		expect(document.activeElement).toBe(target);
-		expect(document.querySelectorAll('[data-chat-link-focus]')).toHaveLength(1);
 		expect(get(settingsNavigation).anchor).toBeNull();
-		// Leaving the button clears the mark.
-		target.blur();
-		await vi.waitFor(() => expect(document.querySelector('[data-chat-link-focus]')).toBeNull());
 		unmount(component);
 	});
 
-	it('opens a signed-in account’s menu with Sign in again focused', async () => {
+	it('only scrolls to and focuses a signed-in account row, and opens no menu', async () => {
 		serve([personal, signedIn, signedOut]);
 		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 		await settle();
 		requestSettingsSection('providers', 'account-fomrrt1');
-		await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
-		expect(document.activeElement?.getAttribute('data-menu-id')).toBe('sign-in-again');
-		expect(menuLabels()).toEqual(['Rename', 'Sign in again', 'Sign out', 'Remove']);
+		await vi.waitFor(() => expect(document.activeElement?.id).toBe('vendor-account-fomrrt1'));
+		expect(document.querySelector('[role="menu"]')).toBeNull();
 		expect(get(settingsNavigation).anchor).toBeNull();
-		// A menu the person opens themselves still starts on its first item.
-		document.querySelector<HTMLButtonElement>('.menu-backdrop')!.click();
-		await settle();
+		// A menu the person opens themselves starts on its first item.
 		await openMenu('fomrrt1');
 		expect(document.activeElement?.getAttribute('data-menu-id')).toBe('rename');
+		expect(menuLabels()).toEqual(['Rename', 'Sign out', 'Remove']);
 		unmount(component);
 	});
 

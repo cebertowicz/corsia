@@ -19,6 +19,7 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "replaces",
         "workflow",
         "instruction",
+        "by",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
@@ -51,6 +52,10 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
             errors.append(
                 f"{label}.difficulty.default must be one of routine, standard, hard"
             )
+    if "by" in step and step["by"] not in ("agent", "reviewer", "person"):
+        errors.append(f"{label}.by must be one of agent, reviewer, person")
+    elif "workflow" in step and step.get("by", "agent") != "agent":
+        errors.append(f"{label}.by can't be set on a step that runs a workflow; set by on that workflow's own steps")
     if "instruction" in step and not _is_heading(step["instruction"]):
         errors.append(f"{label}.instruction must be a SKILL.md heading, such as '## Draft'")
     quality = step.get("quality")

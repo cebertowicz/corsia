@@ -53,6 +53,7 @@ Pygments==2.20.0
 # by the seam-latency scorer and null-tool protocol.
 inspect-ai==0.3.239
 opentelemetry-api==1.42.1
+opentelemetry-proto==1.43.0
 opentelemetry-sdk==1.42.1
 # Product analytics uses a local DuckDB store behind the thin emit wrapper in
 # backend/infra/product_events.py.

@@ -32,7 +32,9 @@ async def test_warm_instruction_waits_for_loaded_capacity(loaded, truncated, iso
 
     process = Process(b"", stderr=b"")
     target = replace(_target("claude-code"), context_window=100_000)
-    request = _request(target, object(), binary="unused")
+    from core.fork_account import admit_fork
+
+    request = admit_fork(_request(target, object(), binary="unused"))
     if truncated:
         with pytest.raises(ProviderForkRejected, match="initial.*input"):
             await asyncio.wait_for(communicate_fork(process, request, asyncio.Event(), spawned_at=0.0), 2)

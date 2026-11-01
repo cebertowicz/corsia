@@ -7,6 +7,8 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 @pytest.mark.parametrize(
     ("harness", "register", "integration", "artifact_type"),
@@ -268,8 +270,11 @@ def test_cc_eviction_prepares_the_same_provider_resume(
         db.close()
     _LIVE.pop("thread-1", None)
     # The evicted session's transcript stays in the root its resume launches in.
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
-    transcript = tmp_path / ".claude" / "projects" / "-p" / "provider-session-1.jsonl"
+    from pathlib import Path
+
+    from vendor_account_fixtures import default_home
+
+    transcript = Path(default_home("claude-code")) / "projects" / "-p" / "provider-session-1.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text("{}\n")
     seed = SimpleNamespace(seed_text="opaque provider seed")

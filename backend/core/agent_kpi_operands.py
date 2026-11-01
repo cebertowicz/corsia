@@ -46,17 +46,30 @@ def matches_where(row: Event, where: Mapping[str, Any]) -> bool:
     return True
 
 
+def _one_per_key(rows: Sequence[Event], keys: Sequence[str], *, newest: bool) -> list[Event]:
+    """One row per key value, by source time."""
+    selected: dict[tuple[Any, ...], Event] = {}
+    for row in sorted(rows, key=lambda item: item.ts, reverse=newest):
+        selected.setdefault(tuple(attribute(row, key) for key in keys), row)
+    return list(selected.values())
+
+
 def select(operand: Mapping[str, Any], facts: Sequence[Event]) -> list[Event]:
-    """Select and optionally deduplicate an operand before applying joins."""
+    """Select and optionally deduplicate an operand before applying joins.
+
+    ``latest`` reads each item's current row, so ``where`` applies after it: a relabelled item leaves its
+    old value. ``first`` reads the earliest row that qualifies, so ``where`` applies before it.
+    """
     names = operand.get("event", [])
     names = [names] if isinstance(names, str) else names
-    rows = [row for row in facts if row.name in names and matches_where(row, operand.get("where", {}))]
-    order = "latest" if "latest" in operand else "first" if "first" in operand else None
-    if order:
-        selected: dict[tuple[Any, ...], Event] = {}
-        for row in sorted(rows, key=lambda item: item.ts, reverse=order == "latest"):
-            selected.setdefault(tuple(attribute(row, key) for key in operand[order]), row)
-        rows = list(selected.values())
+    rows = [row for row in facts if row.name in names]
+    where = operand.get("where", {})
+    if "latest" in operand:
+        rows = [row for row in _one_per_key(rows, operand["latest"], newest=True) if matches_where(row, where)]
+    else:
+        rows = [row for row in rows if matches_where(row, where)]
+        if "first" in operand:
+            rows = _one_per_key(rows, operand["first"], newest=False)
     clauses = operand.get("match", [])
     indexes = []
     for clause in clauses:

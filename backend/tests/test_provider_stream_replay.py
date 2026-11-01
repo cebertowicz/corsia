@@ -18,7 +18,8 @@ import pytest
 from tests.provider_stream_fixtures import StreamFixture
 from tests.provider_stream_replay import replay, snapshot
 
-pytestmark = pytest.mark.asyncio
+# A harness turn needs a signed-in Default: no ambient login.
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("signed_in_defaults")]
 
 
 def _stream(frames: list[dict]) -> StreamFixture:

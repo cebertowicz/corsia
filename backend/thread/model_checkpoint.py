@@ -171,6 +171,7 @@ async def prepare_source_checkpoint(
         reasoning_effort=context.reasoning_effort,
         binary=context.source_binary,
         warm_source=warm_source,
+        carried_tokens=0,
     )
 
 
@@ -200,6 +201,7 @@ def _target_cold_admission(
             reasoning_effort=context.reasoning_effort,
             binary=context.destination_binary,
             mcp_config=context.destination_mcp_config,
+            carried_tokens=0,
             db=db,
         )
         from connections.vendor_accounts import VENDORS
@@ -231,9 +233,10 @@ async def prepare_target_checkpoint(
     checkpoint_id: str,
 ) -> CheckpointAdmission:
     """Prepare the one selected-destination cold request and fixed local fit."""
-    from infra.db_async import run_in_db
+    from infra.db_async import run_off_db
 
-    return await run_in_db(_target_cold_admission, request, checkpoint_id)
+    # A local writer's cold count asks its own server; that wait holds no DB worker.
+    return await run_off_db(_target_cold_admission, request, checkpoint_id)
 
 
 def relevant_checkpoint(request: SwitchRequest) -> CheckpointSummary | None:

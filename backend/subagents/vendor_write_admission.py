@@ -61,11 +61,10 @@ def prepare_session_launch(session, provider: str) -> None:
                 session.vendor_catalog_source = Path(cache['path']) if cache else None
         session.vendor_account_id, session.vendor_account_receipt = identity, receipt
         session.vendor_account_bound = True
-        session.vendor_account_custom = bool(account and account['source_home'])
         session.vendor_catalog_model = model
     finally:
         db.close()
-    if provider == 'codex' and session.vendor_account_custom:
+    if provider == 'codex' and account is not None:
         from connections.account_projection import ensure_projection
 
         ensure_projection(receipt, home=Path(session.codex_home), kind='live', owner_turn_id=turn_id)

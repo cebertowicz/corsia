@@ -17,6 +17,13 @@ included, and its own bootstrap. Prints no run, message or node: only
 
 Run it with ``CORSIA_WORKSPACE`` pointed at the real workspace whose owner workflows and KPI definitions are being calibrated;
 ``CORSIA_STATE_DIR`` may be throwaway and defaults to a fresh temporary folder.
+
+    scripts/verdict_calibration.py --null-trials N [--fixed-baseline] [--seed S]
+
+needs no database. It simulates N versions that changed nothing (both arms drawn from one distribution) through all
+three looks with the production rule, and prints how many were falsely called: reached keep or revert on evidence
+(any reason but the two defaults, no gain and not cheaper, or unclear after look 3), and at which look. Halves grow
+together to 20, 40 and 80 runs; ``--fixed-baseline`` holds the earlier arm at 40 as a workflow's previous version is.
 """
 from __future__ import annotations
 
@@ -28,7 +35,9 @@ import tempfile
 from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timezone
+from math import exp
 from pathlib import Path
+from random import Random
 
 os.environ.setdefault("CORSIA_STATE_DIR", tempfile.mkdtemp(prefix="verdict-calibration-"))
 os.environ.setdefault("CORSIA_ANALYTICS_DISABLE", "1")
@@ -36,9 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from core.workflow_verdict_read import price_snapshot, read_snapshot  # noqa: E402
 from core.workflow_verdict_rules import (  # noqa: E402
-    WorkflowHistory, compute, decide, freeze_plan, sides,
+    BUILTINS, FrozenPlan, TwoArms, WorkflowHistory, compute, decide, decide_arms, freeze_plan, sides,
 )
-from core.workflow_verdicts import measure_call, parse_ts  # noqa: E402
+from core.workflow_verdicts import CorrectionFact, Run, measure_call, parse_ts  # noqa: E402
 
 CALIBRATED = ("sdlc-process", "decision-brief")
 
@@ -125,10 +134,59 @@ def correction_lags(histories: list[WorkflowHistory]) -> list[float]:
     return lags
 
 
+NULL_NOW = datetime(2026, 10, 30, tzinfo=timezone.utc)
+NULL_GROUP = ("model", "standard", "M")
+DEFAULTS = {"no_gain_not_cheaper", "unclear_after_look_3"}  # what a version that changed nothing should end in
+
+
+def _null_arm(rng: Random, version: str, count: int) -> tuple[Run, ...]:
+    """Settled runs of one distribution: Poisson(1) corrections, log-normal cost, one in ten failed."""
+    arm = []
+    for index in range(count):
+        stop, corrections, limit = rng.random(), 0, exp(-1)
+        while stop > limit:  # Knuth's Poisson draw
+            stop *= rng.random()
+            corrections += 1
+        facts = tuple(CorrectionFact("message", f"{version}{index}-{k}", "2026-10-01T00:00:00+00:00", "c1", True)
+                      for k in range(corrections))
+        arm.append(Run(f"{version}{index}", version, NULL_GROUP, "2026-09-20T00:00:00+00:00", "2026-09-30T00:00:00+00:00",
+                       "failed" if rng.random() < 0.1 else "accepted", facts, exp(rng.gauss(0, 0.3))))
+    return tuple(arm)
+
+
+def null_trial(job: tuple[int, int, bool]) -> tuple[str, str, int]:
+    """One version that changed nothing: its verdict word, reason and look."""
+    seed, runs, fixed = job
+    rng = Random(seed)
+    plan = FrozenPlan(f"null:{seed}", "b", "a", (), BUILTINS, 20, (), seed)
+    control, changed = _null_arm(rng, "a", 2 * 20 if fixed else runs), _null_arm(rng, "b", runs)
+    verdict = decide_arms(plan, TwoArms(control, changed, matched=not fixed), NULL_NOW)
+    return verdict.word, verdict.reason, verdict.look
+
+
+def null_false_calls(trials: int, *, fixed: bool = False, seed: int = 0) -> dict[str, object]:
+    """Simulate ``trials`` versions that changed nothing through the three looks; count each look's false calls."""
+    results = [null_trial((seed + index, 80, fixed)) for index in range(trials)]
+    false = [look for word, reason, look in results if word in {"keep", "revert"} and reason not in DEFAULTS]
+    return {"trials": trials, "false_calls": len(false), "rate": len(false) / trials,
+            "by_look": {look: false.count(look) for look in (1, 2, 3)},
+            "undecided": sum(word == "collecting" for word, _, _ in results)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("db", help="path to a CORSIA SQLite database (opened read-only)")
+    parser.add_argument("db", nargs="?", help="path to a CORSIA SQLite database (opened read-only)")
+    parser.add_argument("--null-trials", type=int, metavar="N", help="simulate N versions that changed nothing; no database")
+    parser.add_argument("--fixed-baseline", action="store_true", help="with --null-trials: hold the earlier arm at 40 runs")
+    parser.add_argument("--seed", type=int, default=0, help="with --null-trials: first trial's seed, so runs can be split")
     args = parser.parse_args(argv)
+    if args.null_trials:
+        found = null_false_calls(args.null_trials, fixed=args.fixed_baseline, seed=args.seed)
+        print(f"null trials {found['trials']}: false calls {found['false_calls']} ({found['rate']:.3f}); "
+              f"by look {found['by_look']}; unfinished {found['undecided']}")
+        return 0
+    if not args.db:
+        parser.error("a database path or --null-trials N is required")
     db = connect(args.db)
     now = datetime.now(timezone.utc)
     snapshot = price_snapshot(db, read_snapshot(db, now=now))

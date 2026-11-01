@@ -27,7 +27,7 @@ def turn_on_other(claude, login=1):
 @pytest.mark.asyncio
 async def test_added_claude_failure_signs_out_only_its_account_before_returning(claude, monkeypatch):
     """The exact expired-login error is the answer, so no status read can keep the account signed in."""
-    from connections import account_controls, claude_discovery
+    from connections import account_controls
     from connections.models import get_connection
     from connections.vendor_accounts import get_account
     from subagents.turn_account_error import claude_turn_signed_out
@@ -38,14 +38,11 @@ async def test_added_claude_failure_signs_out_only_its_account_before_returning(
     before_source = get_connection('claude-code', db=db)
     vendor_status = AsyncMock(return_value=(True, {}, None))
     monkeypatch.setattr(account_controls, '_vendor_status', vendor_status)
-    source_check = AsyncMock()
-    monkeypatch.setattr(claude_discovery, 'reconcile_turn_auth_failure', source_check)
     assert await claude_turn_signed_out('claude-turn', EXPIRED, db=db) is True
     assert get_account(claude.other, db=db)['state'] == 'signed_out'
     assert get_account(claude.first, db=db) == before_default
     assert get_connection('claude-code', db=db) == before_source
     vendor_status.assert_not_awaited()
-    source_check.assert_not_awaited()
 
 
 @pytest.mark.asyncio

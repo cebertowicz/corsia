@@ -28,10 +28,6 @@ def admit_operation(provider, model, request, *, actor_thread_id=None):
             actor_thread_id=actor_thread_id, account_id=request.vendor_account_id,
             frozen=request.vendor_account_bound, db=db)
         launch = launch_homes(identity, db=db)
-        if not launch.custom:
-            from connections.account_profiles import profile_for
-
-            launch = replace(launch, warm_home=profile_for(provider).default_warm_home())
         receipt = capture_receipt(provider, account_id=identity, db=db) if identity is not None else None
         return replace(request, vendor_account_id=identity, vendor_account_bound=True,
             vendor_account_receipt=receipt, vendor_launch=launch)
@@ -48,14 +44,13 @@ def require_operation(provider, model, request, *, actor_thread_id=None, db=None
 def prepare_operation_home(request, home: Path, *, kind, model=None):
     """A current receipt must pass admission before any first managed projection."""
     launch = request.vendor_launch
-    if launch.custom:
-        from connections.account_projection import ensure_projection
-        from connections.account_policy import require_claim
+    from connections.account_projection import ensure_projection
+    from connections.account_policy import require_claim
 
-        require_claim('codex', thread_id=request.thread_id, model=_model(request, model),
-            account_id=request.vendor_account_id, frozen=True,
-            actor_thread_id=getattr(request, 'actor_thread_id', None))
-        ensure_projection(request.vendor_account_receipt, home=home, kind=kind)
+    require_claim('codex', thread_id=request.thread_id, model=_model(request, model),
+        account_id=request.vendor_account_id, frozen=True,
+        actor_thread_id=getattr(request, 'actor_thread_id', None))
+    ensure_projection(request.vendor_account_receipt, home=home, kind=kind)
     return replace(request, vendor_launch=replace(launch, codex_runtime=str(home), isolated=True))
 
 
@@ -70,19 +65,16 @@ def bind_operation_session(request, session, *, kind, model=None):
     session.vendor_account_id = request.vendor_account_id
     session.vendor_account_receipt = request.vendor_account_receipt
     session.vendor_account_bound = True
-    session.vendor_account_custom = launch.custom
     session.vendor_operation_kind = kind
-    session.vendor_warm_home = launch.warm_home
     session.vendor_catalog_model = _model(request, model)
-    if launch.custom:
-        from connections.account_evidence import discovery_record
-        from connections.vendor_accounts import get_account
+    from connections.account_evidence import discovery_record
+    from connections.vendor_accounts import get_account
 
-        cache = discovery_record(get_account(request.vendor_account_id))['discovery']['cache_receipt']
-        session.vendor_cache_receipt = cache
-        session.vendor_catalog_source = Path(cache['path']) if cache else None
+    cache = discovery_record(get_account(request.vendor_account_id))['discovery']['cache_receipt']
+    session.vendor_cache_receipt = cache
+    session.vendor_catalog_source = Path(cache['path']) if cache else None
     if session.vendor_catalog_model.startswith('codex/'):
-        session.source_codex_home = launch.codex_source or launch.warm_home
+        session.source_codex_home = launch.codex_source
         session.codex_home = launch.codex_runtime
     else:
         session.claude_dir = launch.claude_dir
@@ -94,9 +86,7 @@ def require_same_operation_home(request, source_home):
     if request.warm_source is None:
         return
     launch = request.vendor_launch
-    expected = launch.claude_dir or launch.codex_runtime or launch.warm_home
-    if source_home is None and not launch.custom:
-        source_home = launch.warm_home
+    expected = launch.claude_dir or launch.codex_runtime
     if source_home is None or Path(source_home).absolute() != Path(expected).absolute():
         _refuse_warm_source('warm_fork_home_mismatch')
     receipt = getattr(request, 'vendor_account_receipt', None)
@@ -127,8 +117,7 @@ def operation_directory(request, *, prefix, kind, home_subdir=None, model=None):
             try:
                 yield request, root
             finally:
-                if request.vendor_launch.custom:
-                    retired = begin_retirement(request.vendor_account_receipt, home=home, owner_turn_id=None)
+                retired = begin_retirement(request.vendor_account_receipt, home=home, owner_turn_id=None)
     finally:
         if retired:
             complete_retirement(request.vendor_account_receipt, home=home, owner_turn_id=None)

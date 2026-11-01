@@ -10,6 +10,9 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from test_checkpoint_external_adapters import _target, vendor_thread
 from core.fork_fit import ColdFoldInput
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"codex": (_target("codex").catalog_id,)}  # the Default lists the model under test
+
 
 def target(window=131_072):
     return replace(_target("codex"), context_window=window,

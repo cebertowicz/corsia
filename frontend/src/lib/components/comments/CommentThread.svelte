@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
+	import type { Snippet } from 'svelte';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
 	import { lineDiff } from '$lib/diff';
@@ -34,16 +35,19 @@
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
-	import { retryPlacement } from '$lib/stores/docComments';
 	import CommentMeta from './CommentMeta.svelte';
+	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
+		header?: Snippet;
+		/** Keep resolved threads in the drawer's card presentation. */
+		drawerCard?: boolean;
 		focused?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
 		linked?: boolean;
@@ -81,9 +85,9 @@
 		decisionError?: string;
 		/** The document has an owner thread, so a re-open reaches someone and the card may say so. */
 		reopenReachesOwner?: boolean;
-		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		/** Resolved by someone else while this person was replying (docKeptThreads): shown as the full card, not the resolved row. */
 		kept?: boolean;
+		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		replyText?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
@@ -100,14 +104,6 @@
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
-	// A placement normally completes in the same render turn as a new card. Do not flash a line that cannot be read,
-	// or change the phone sheet's height during the composer-to-card swap.
-	let showPlacement = $state(false);
-	$effect(() => {
-		if (comment.drawn || comment.placement !== 'placing') { showPlacement = false; return; }
-		const timer = window.setTimeout(() => { showPlacement = true; }, 200);
-		return () => window.clearTimeout(timer);
-	});
 	let resolvedOpen = $state(false);
 	let el = $state<HTMLElement>();
 	let replyField = $state<ReplyField>();
@@ -231,17 +227,19 @@
 
 <svelte:window onvisibilitychange={onVisibilityChange} />
 
+{#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
+	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
+		<svg class="ct-{mark}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={mark === 'check' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>
+		{#if comment.regionNumber != null && !isSuggestion}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+		<span class="ct-res-text">{label}</span>
+		<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+	</button>
+{/snippet}
+
 {#if isSuggestion && comment.decision}
-	<div class="ct resolved" class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}">
-		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
-			{#if comment.decision === 'accepted'}
-				<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-			{:else}
-				<svg class="ct-cross" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-			{/if}
-			<span class="ct-res-text">Suggested by {author.name} · {comment.decision === 'accepted' ? 'Accepted' : 'Rejected'} by {comment.decidedBy ?? 'you'}</span>
-			<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-		</button>
+	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}">
+		{@render header?.()}
+		{@render resolvedHead(comment.decision === 'accepted' ? 'check' : 'cross', `Suggested by ${author.name} · ${comment.decision === 'accepted' ? 'Accepted' : 'Rejected'} by ${comment.decidedBy ?? 'you'}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
@@ -251,13 +249,9 @@
 		{/if}
 	</div>
 {:else if comment.resolved && !kept && !leaving}
-	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
-		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
-			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
-			<span class="ct-res-text">Resolved · {comment.replies.length + 1} message{comment.replies.length ? 's' : ''}</span>
-			<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-		</button>
+	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
+		{@render header?.()}
+		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} />
@@ -273,6 +267,7 @@
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus ? pressCard : undefined}>
+		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
@@ -290,14 +285,7 @@
 				</button>
 			{/if}
 		</div>
-		{#if showPlacement}
-			<p class="ct-placement" id="comment-placement-{comment.id}" data-comment-placement>Finding its place…</p>
-		{:else if !comment.drawn && comment.placement === 'not_placed'}
-			<p class="ct-placement" id="comment-placement-{comment.id}" data-comment-placement>
-				Couldn’t find its place
-				<button class="ct-link" data-placement-retry onclick={(e) => { e.stopPropagation(); retryPlacement(comment.id); }}>Retry</button>
-			</p>
-		{/if}
+		<CommentPlacementLine {comment} />
 
 		{#if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
@@ -355,7 +343,6 @@
 	.ct-head { display: flex; align-items: center; gap: 7px; }
 	.ct-reply-count { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* Avatar owns the shared initials presentation. */
-	.ct-placement { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.ct-act { display: flex; padding: 3px; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
 	.ct-act.ack { margin-left: auto; }
 	.ct-act.ack:hover { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
@@ -385,7 +372,7 @@
 
 	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } }
 
-	.ct.resolved { padding: 0; background: none; cursor: default; gap: 0; }
+	.ct.resolved:not(.drawerCard) { padding: 0; background: none; cursor: default; gap: 0; }
 	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
 	.ct-check { color: var(--green); flex-shrink: 0; }
 	.ct-cross { color: var(--text-secondary); flex-shrink: 0; }

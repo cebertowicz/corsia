@@ -69,6 +69,22 @@ def test_bound_walk_never_descends_into_a_credential_root(tmp_path, monkeypatch)
         assert "corsia.db" in names
 
 
+def test_bound_walk_never_descends_into_the_api_token_folder(tmp_path, monkeypatch) -> None:
+    from tools.filesystem_effects import walk_bound_files
+
+    home = tmp_path / "home"
+    (home / ".corsia" / "credentials").mkdir(parents=True)
+    (home / ".corsia" / "credentials" / "api-token").write_text("t\n", encoding="utf-8")
+    (home / ".corsia" / "config.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+
+    for root in (home, home / ".corsia"):
+        with walk_bound_files(root, skip_directory=lambda _relative: False) as files:
+            names = {entry.relative.name for entry in files}
+        assert "api-token" not in names
+        assert "config.json" in names
+
+
 def test_bound_search_closes_nested_descriptors_after_early_exit(tmp_path) -> None:
     from tools.filesystem_effects import walk_bound_files
 

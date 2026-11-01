@@ -195,6 +195,19 @@ def test_editable_version_of_a_skill_without_a_sidecar_is_its_single_commit(monk
     assert _workflow_version(SimpleNamespace(name="plain", scope="thread", path=path)) == "c1"
 
 
+def test_editable_version_of_an_unborn_repository_is_unavailable(monkeypatch, tmp_path):
+    """A Linux shell launch leaves a repository with no commit; that must read as no version, not a SHA."""
+    import subprocess
+
+    from infra import config
+
+    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+    subprocess.run(["git", "init", "--quiet"], cwd=str(tmp_path), check=True, timeout=30)
+    path = _skills_root(tmp_path, "plain", "---\nname: plain\ndescription: Plain.\n---\n") / "skills/plain/SKILL.md"
+
+    assert workflow_task_fields._editable_workflow_version(path) is None
+
+
 def test_editable_version_covers_the_sidecar_commit(monkeypatch, tmp_path):
     path = _skills_root(tmp_path, "flow", THREAD_SKILL, "workflow: {}") / "skills/flow/SKILL.md"
     skill = SimpleNamespace(name="flow", scope="thread", path=path)

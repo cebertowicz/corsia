@@ -6,6 +6,12 @@ import os
 from pathlib import Path
 
 import pytest
+from types import SimpleNamespace
+
+
+def _account(tmp_path):
+    """Control sessions run inside an account's home: there is no ambient one."""
+    return SimpleNamespace(source_home=str(tmp_path / "account-home"))
 
 
 async def _wait_for_path(path: Path) -> None:
@@ -63,7 +69,7 @@ async def test_control_timeout_preserves_error_and_reaps_its_harness(tmp_path, m
 
     monkeypatch.setattr(claude_discovery.asyncio, "wait_for", timeout_after_ready)
     with pytest.raises(RuntimeError, match="Claude Code get_usage timed out"):
-        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage")
+        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage", context=_account(tmp_path))
     await _wait_for_pid_exit(ready)
 
 
@@ -73,7 +79,7 @@ async def test_control_reader_preserves_invalid_and_fragmented_output(tmp_path):
 
     invalid = _control_harness(tmp_path, "invalid-bytes", "printf '\\377'")
     assert await claude_discovery.run_claude_control(
-        invalid, _usage_frame(), operation="get_usage",
+        invalid, _usage_frame(), operation="get_usage", context=_account(tmp_path),
     ) == b"\xff"
 
     response = '{"response":{"request_id":"corsia-usage","subtype":"success"}}\n'
@@ -82,7 +88,7 @@ async def test_control_reader_preserves_invalid_and_fragmented_output(tmp_path):
         f"printf '%s' '{response[:27]}'; sleep 0.01; printf '%s' '{response[27:]}'",
     )
     assert await claude_discovery.run_claude_control(
-        fragmented, _usage_frame(), operation="get_usage",
+        fragmented, _usage_frame(), operation="get_usage", context=_account(tmp_path),
     ) == response.encode()
 
 
@@ -96,12 +102,12 @@ async def test_control_reader_drains_stderr_and_preserves_nonzero_error(tmp_path
         f"dd if=/dev/zero bs=65536 count=2 2>/dev/null >&2; printf '%s' '{response}'",
     )
     assert await asyncio.wait_for(claude_discovery.run_claude_control(
-        large_stderr, _usage_frame(), operation="get_usage",
+        large_stderr, _usage_frame(), operation="get_usage", context=_account(tmp_path),
     ), timeout=3) == response.encode()
 
     nonzero = _control_harness(tmp_path, "nonzero", "printf 'synthetic failure' >&2; exit 3")
     with pytest.raises(RuntimeError, match="Claude Code get_usage failed: synthetic failure"):
-        await claude_discovery.run_claude_control(nonzero, _usage_frame(), operation="get_usage")
+        await claude_discovery.run_claude_control(nonzero, _usage_frame(), operation="get_usage", context=_account(tmp_path))
 
 
 @pytest.mark.asyncio
@@ -110,7 +116,7 @@ async def test_cancelled_control_reader_reaps_its_harness(tmp_path):
 
     binary, ready = _barrier_harness(tmp_path, "cancelled", "trap '' TERM")
     task = asyncio.create_task(claude_discovery.run_claude_control(
-        binary, _usage_frame(), operation="get_usage",
+        binary, _usage_frame(), operation="get_usage", context=_account(tmp_path),
     ))
     await _wait_for_path(ready)
     assert not task.done(), "producer must still be running before cancellation"
@@ -122,7 +128,7 @@ async def test_cancelled_control_reader_reaps_its_harness(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invalid_control_frame_does_not_spawn_a_process(monkeypatch):
+async def test_invalid_control_frame_does_not_spawn_a_process(tmp_path, monkeypatch):
     from connections import claude_discovery
 
     spawns = 0
@@ -136,7 +142,7 @@ async def test_invalid_control_frame_does_not_spawn_a_process(monkeypatch):
 
     with pytest.raises(TypeError):
         await claude_discovery.run_claude_control(
-            "synthetic", [{"unserializable": object()}], operation="get_usage",
+            "synthetic", [{"unserializable": object()}], operation="get_usage", context=_account(tmp_path),
         )
 
     assert spawns == 0

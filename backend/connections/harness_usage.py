@@ -150,7 +150,7 @@ def record_usage(
         from connections.vendor_accounts import get_account
 
         account = get_account(identity, db=connection)
-        runtime_effects = account['source_home'] is None or readiness_reason(account) is None
+        runtime_effects = readiness_reason(account) is None
         key = scope_key(verdict.get("scope_model")) if isinstance(verdict, dict) else None
         current_verdict = verdicts(usage).get(key) if isinstance(usage, dict) and key else None
         if observed_before is not None and isinstance(current_verdict, dict):

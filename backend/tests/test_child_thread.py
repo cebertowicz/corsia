@@ -179,6 +179,10 @@ def child_db(tmp_path, monkeypatch):
     factory = lambda: wrapper  # noqa: E731
     monkeypatch.setattr(database, "get_db", factory)
     monkeypatch.setattr(child_thread, "get_db", factory)
+    # A child's launch is admitted on a signed-in account that lists its model.
+    from vendor_account_fixtures import signed_in_default
+
+    signed_in_default("claude-code", db=wrapper, models=("claude-code/sonnet",))
 
     yield wrapper
     conn.close()
@@ -438,7 +442,7 @@ class TestCanonicalPersistence:
         assert meta["tool_invocation_id"] == "provider:toolu_1"
 
     def test_oversized_tool_result_is_byte_exact_with_integrity_stamp(
-        self, isolated_db,
+        self, signed_in_defaults,
     ):
         from infra.database import get_db
         from subagents.child_thread import persist_tool_result
@@ -461,7 +465,7 @@ class TestCanonicalPersistence:
         ).hexdigest()
 
     def test_tool_result_at_former_cap_is_byte_identical(
-        self, isolated_db,
+        self, signed_in_defaults,
     ):
         from infra.database import get_db
         from subagents.child_thread import persist_tool_result
@@ -477,7 +481,7 @@ class TestCanonicalPersistence:
 
         assert _tool_rows(db, cid)[0]["content"] == content
 
-    def test_normal_tool_result_is_byte_identical(self, isolated_db):
+    def test_normal_tool_result_is_byte_identical(self, signed_in_defaults):
         from infra.database import get_db
         from subagents.child_thread import persist_tool_result
 

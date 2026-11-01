@@ -12,6 +12,9 @@ from core.turn_core import TurnIdentity
 from external_harness_usage_helpers import persist_turn
 from llm.resolution import ExecutionTarget
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('claude-code/test',), 'codex': ('codex/test',)}
+
 
 def _target(harness: str) -> ExecutionTarget:
     return ExecutionTarget(

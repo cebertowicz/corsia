@@ -8,26 +8,22 @@ export function accountMenuItems(account: VendorAccount | undefined, pending: Re
 	const disabled = account.details_stale || !!pending[account.id];
 	return [
 		{ id: 'rename', label: 'Rename', disabled },
-		...(account.state === 'legacy' || account.is_default ? [] : [{ id: 'sign-in-again', label: 'Sign in again', disabled }]),
-		...(account.state === 'legacy' ? [] : [
-			{ id: 'sign-out', label: 'Sign out', disabled },
-			{ id: 'remove', label: 'Remove', danger: true, disabled },
-		]),
+		...(account.state === 'signed_in' ? [{ id: 'sign-out', label: 'Sign out', disabled }] : []),
+		{ id: 'remove', label: 'Remove', danger: true, disabled },
 	];
 }
 
 export const displayName = (account: VendorAccount): string => account.label.text;
 
 export function accountStateLabel(account: VendorAccount): string | null {
-	if (account.state === 'signed_out') return 'Signed out';
-	if (account.state === 'legacy') return 'Managed by provider';
+	if (account.state === 'signed_out') return account.upgrade_reason === 'sign_in_to_keep_using_account' ? 'Signed out. Sign in to keep using this account.' : 'Signed out';
 	if (account.state === 'removed') return 'Removed';
 	const vendor = VENDORS[account.provider];
-	if (account.no_usable_model && vendor) return `This ${vendor.name} account has no models for ${vendor.cli}. Sign in with another account, or turn this account off.`;
+	if (account.no_usable_model && vendor) return `This ${vendor.name} account has no models for ${vendor.cli}. Sign in with another account, or remove this one.`;
 	return null;
 }
 
-export async function landOnAccount(account: VendorAccount, focusRow: (id: string) => void, openMenu: (row: HTMLElement) => void) {
+export async function landOnAccount(account: VendorAccount) {
 	await tick();
 	const row = document.getElementById(`vendor-account-${account.id}`);
 	if (!row) return;
@@ -36,12 +32,8 @@ export async function landOnAccount(account: VendorAccount, focusRow: (id: strin
 		const button = row.querySelector<HTMLButtonElement>('[data-link-target] button');
 		if (button && !button.disabled) {
 			button.focus();
-			if (document.activeElement === button) focusRow(account.id);
 			return;
 		}
-	} else if (account.state === 'signed_in' && !account.is_default) {
-		openMenu(row);
-		return;
 	}
 	row.focus();
 }

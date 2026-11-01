@@ -56,7 +56,7 @@ describe('loadHostGroups harness cards', () => {
 
 	it('summarizes harness account and model counts from their separate owners', async () => {
 		vendorAccounts.set([
-			{ id: 'one', provider: 'codex', name: 'One', is_default: true, state: 'legacy', revision: 1, identity: {}, label: { name: 'One', email: null, text: 'One' } },
+			{ id: 'one', provider: 'codex', name: 'One', is_default: true, state: 'signed_in', revision: 1, identity: {}, label: { name: 'One', email: null, text: 'One' } },
 			{ id: 'two', provider: 'codex', name: 'Two', is_default: false, state: 'signed_in', revision: 1, identity: {}, label: { name: 'Two', email: null, text: 'Two' } },
 		]);
 		stubFetch(true, 'ready');
@@ -73,7 +73,7 @@ describe('loadHostGroups harness cards', () => {
 
 		vendorAccounts.set([{ id: 'signed-in', provider: 'codex', name: 'One', is_default: true, state: 'signed_in', revision: 1, identity: {}, label: { name: 'One', email: null, text: 'One' } }]);
 		expect(codexSubline()).toBe('1 account · 1 model');
-		vendorAccounts.update((accounts) => [...accounts, { id: 'added', provider: 'codex', name: 'Two', is_default: false, state: 'legacy', revision: 1, identity: {}, label: { name: 'Two', email: null, text: 'Two' } }]);
+		vendorAccounts.update((accounts) => [...accounts, { id: 'added', provider: 'codex', name: 'Two', is_default: false, state: 'signed_in', revision: 1, identity: {}, label: { name: 'Two', email: null, text: 'Two' } }]);
 		expect(codexSubline()).toBe('2 accounts · 1 model');
 		vendorAccounts.update((accounts) => accounts.map((account) => account.id === 'added' ? { ...account, state: 'removed' as const } : account));
 		expect(codexSubline()).toBe('1 account · 1 model');

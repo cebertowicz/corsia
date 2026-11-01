@@ -240,6 +240,13 @@ async function backToDocument(page: Page): Promise<void> {
 const chipButton = (page: Page) => page.locator('[data-doc-reply-chip]').getByRole('button');
 const chipBox = (page: Page) => page.locator('[data-doc-reply-chip]');
 
+/** Stay on the thread the chip opened until its dwell has read it: its New replies show, then clear. */
+async function awaitFocusedRead(page: Page): Promise<void> {
+	const fresh = page.locator('[data-comment-id].focused .ct-reply.new');
+	await expect(fresh.first()).toBeVisible();
+	await expect(fresh).toHaveCount(0);
+}
+
 /** The button's extended hit area is a pseudo-element, not the visible face's bounding box. */
 async function chipHitBox(page: Page) {
 	return chipButton(page).evaluate((button) => {
@@ -737,7 +744,7 @@ for (const theme of ['light', 'dark'] as const) {
 
 			await holdDwell(page, false);
 			// The first reply is read after its dwell. Put the comments list away: the document's chip is back, counting the other two.
-			await page.waitForTimeout(1700);
+			await awaitFocusedRead(page);
 			await page.getByRole('button', { name: 'Close comments' }).click();
 			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			await expectChip(page, '2 new replies');
@@ -782,8 +789,8 @@ for (const theme of ['light', 'dark'] as const) {
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await chipBox(page).count())) break;
 				await chipButton(page).click();
-				// The comments list opens over the document and covers the chip; read it for the dwell, then put it away to tap again.
-				await page.waitForTimeout(1700);
+				// The comments list opens over the document and covers the chip; stay until the dwell reads it, then put it away to tap again.
+				await awaitFocusedRead(page);
 				await page.getByRole('button', { name: 'Close comments' }).click();
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}

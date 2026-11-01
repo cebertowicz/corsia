@@ -152,7 +152,7 @@ def test_printed_names_never_become_counter_rows(tmp_path: Path) -> None:
 
 def test_another_agents_namespace_is_refused_and_counted(tmp_path: Path) -> None:
     db = world(tmp_path)
-    refused = admit(db, owner_thread_id=OTHER, event_name="qa.review.completed", attributes=GOOD, run_id="r")
+    refused = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=OTHER, event_name="qa.review.completed", attributes=GOOD, run_id="r")
     assert refused.result is None and refused.refusal.startswith('Namespace "qa" belongs to another agent (thread agent-qg); you own no namespace yet')
     assert counter(db, "namespace_not_owned") == 1 and rows(db) == []
     assert [tuple(row) for row in db.execute("SELECT event_name, agent_thread_id FROM outcome_event_counters")] == [(NOT_YOURS, OTHER)]
@@ -160,7 +160,7 @@ def test_another_agents_namespace_is_refused_and_counted(tmp_path: Path) -> None
 
 def test_missing_dedupe_attribute_is_refused_with_the_prescribed_text(tmp_path: Path) -> None:
     db = world(tmp_path)
-    refused = admit(db, owner_thread_id=QG, event_name="qa.audit.label", attributes={"label": "correct_block"}, run_id="r")
+    refused = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=QG, event_name="qa.audit.label", attributes={"label": "correct_block"}, run_id="r")
     assert refused.refusal == 'qa.audit.label: dedupe needs run_id and finding; "finding" is missing; the record was dropped. Send "finding" with the record.'
     assert counter(db, "record_refused") == 1 and rows(db) == []
 
@@ -168,14 +168,14 @@ def test_missing_dedupe_attribute_is_refused_with_the_prescribed_text(tmp_path: 
 @pytest.mark.parametrize("when", ["2020-01-02T00:00:00Z", "2999-01-01T00:00:00Z", "yesterday"])
 def test_time_outside_the_window_is_refused(tmp_path: Path, when: str) -> None:
     db = world(tmp_path)
-    refused = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", ts=when)
+    refused = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", ts=when)
     assert refused.refusal.startswith(f"qa.review.completed: time {when} is outside the window (not older than 400 days, not more than 5 minutes ahead)")
     assert counter(db, "record_refused") == 1 and rows(db) == []
 
 
 def test_invalid_attribute_values_keep_the_row_and_explain_each_drop(tmp_path: Path) -> None:
     db = world(tmp_path)
-    admitted = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes={**GOOD, "model": "abfa9122 draft", "blocks": -1, "cost_usd": 1.5, "extra": "x"}, run_id="r")
+    admitted = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=QG, event_name="qa.review.completed", attributes={**GOOD, "model": "abfa9122 draft", "blocks": -1, "cost_usd": 1.5, "extra": "x"}, run_id="r")
     assert admitted.result and admitted.result.inserted
     assert set(admitted.result.dropped_keys) == {"model", "blocks", "extra"}
     joined = " | ".join(admitted.notes)
@@ -187,14 +187,14 @@ def test_invalid_attribute_values_keep_the_row_and_explain_each_drop(tmp_path: P
 def test_registry_loads_from_the_database_after_a_restart(tmp_path: Path) -> None:
     db = world(tmp_path)
     REGISTRY.reset()
-    admitted = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", workflow_ref="llm-pr-review", workflow_version=VERSION)
+    admitted = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", workflow_ref="llm-pr-review", workflow_version=VERSION)
     assert admitted.refusal is None and json.loads(rows(db)[0][6])["workflow_ref"] == "llm-pr-review"
 
 
 def test_credential_looking_value_is_not_echoed_in_the_refusal_text(tmp_path: Path) -> None:
     db = world(tmp_path)
     secret = "sk-" + "a1B2c3D4" * 5
-    admitted = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes={**GOOD, "model": secret}, run_id="r")
+    admitted = admit(db, source="agent", provenance="agent_recorded", owner_thread_id=QG, event_name="qa.review.completed", attributes={**GOOD, "model": secret}, run_id="r")
     assert secret not in " ".join(admitted.notes) and "[credential]" in " ".join(admitted.notes)
 
 

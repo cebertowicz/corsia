@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
+from vendor_account_fixtures import seed_catalog, signed_in_default
 from PIL import Image
 
 from core.media_projection import ValidatedImage, ValidatedMediaProjection
@@ -64,7 +66,7 @@ def test_cc_discovery_enables_images_only_for_proven_cli_grammar() -> None:
 
 
 def test_proven_cc_discovery_persists_vision_target(isolated_db) -> None:
-    from connections.harness_models import normalize_claude_models, store_success
+    from connections.harness_models import normalize_claude_models
     from infra.database import get_db
     from llm.resolution import resolve_execution_target
 
@@ -81,7 +83,7 @@ def test_proven_cc_discovery_persists_vision_target(isolated_db) -> None:
     )
     db = get_db()
     try:
-        store_success(
+        seed_catalog(
             "claude-code",
             rows,
             harness_version="2.1.218",
@@ -118,10 +120,10 @@ def _target():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("is_subagent", [False, True])
 async def test_cc_dispatch_forwards_same_projection(
+    isolated_db,
     monkeypatch,
     is_subagent: bool,
 ) -> None:
-    from connections import models
     from infra import effort, send_dispatch, state
     from infra.send_dispatch import DispatchContext, _accept_cc
 
@@ -129,7 +131,7 @@ async def test_cc_dispatch_forwards_same_projection(
     accepted = TurnIdentity("cc-turn", 1)
     adapter = AsyncMock(return_value=("cc-runtime", accepted))
     monkeypatch.setattr(effort, "resolve_effort", lambda *_args: None)
-    monkeypatch.setattr(models, "connection_available", lambda _name: True)
+    signed_in_default("claude-code")
     monkeypatch.setattr(state, "owner_broadcast", lambda _owner: None)
     monkeypatch.setattr(
         send_dispatch,
@@ -229,6 +231,7 @@ async def test_cc_runtime_cold_and_live_paths_forward_fresh_projection(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("signed_in_defaults")  # the queued input needs a signed-in Default: no ambient login
 @pytest.mark.parametrize("mutate_before_restart", [False, True])
 async def test_cc_queued_image_is_idempotent_and_revalidated_on_restart(
     isolated_db,
@@ -259,6 +262,7 @@ async def test_cc_queued_image_is_idempotent_and_revalidated_on_restart(
     try:
         db.execute("UPDATE models SET supports_vision=1 WHERE id=?", (model_id,))
         db.commit()
+        signed_in_default("claude-code", db=db)  # the Default lists the model with image input
         thread_row = dict(db.execute(
             "SELECT * FROM threads WHERE id=?",
             (thread_id,),

@@ -40,6 +40,7 @@ def world(isolated_db, tmp_path):
     """Two projects, one with cloud models off, a model on this Mac and one on the LAN."""
     from llm.locality import set_project_cloud_models_off
     from tests.unavailable_model_support import seed_model
+    from tests.vendor_account_fixtures import signed_in_default
 
     db = get_db()
     try:
@@ -56,6 +57,8 @@ def world(isolated_db, tmp_path):
         db.close()
     seed_model(LOCAL)
     seed_model(LAN_MODEL)
+    # The thread's own cloud model is otherwise runnable: Claude Code has a signed-in account.
+    signed_in_default("claude-code")
     return isolated_db
 
 

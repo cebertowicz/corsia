@@ -21,6 +21,13 @@ from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from subagents.harness_checkpoint_context import ExternalCheckpointContext
 
+DISCOVERED_MODELS = {
+    "claude-code": ("claude-code/awaited-advance",),
+    "codex": ("codex/awaited-advance",),
+}
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")
+
 
 def _target(harness: str) -> ExecutionTarget:
     return ExecutionTarget(
@@ -301,6 +308,7 @@ async def test_external_initial_boundary_advances_after_awaited_earlier_cut(
             reasoning_effort=None,
             binary=None,
             warm_source=preparation_source,
+            carried_tokens=0,
         )
 
     async def render(record, *, refresh_prepared):

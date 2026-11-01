@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import logging
 from typing import TypeGuard
 
-from connections.vendor_accounts import DEFAULT_COMPARISON, get_account, resolve_account_id
+from connections.vendor_accounts import get_account, resolve_account_id
 
 log = logging.getLogger(__name__)
 
@@ -23,12 +23,6 @@ def nonnegative_integer(value: object) -> TypeGuard[int]:
     return type(value) is int and value >= 0
 
 
-def unobserved_default(account: dict) -> bool:
-    """Whether ``account`` is a legacy Default whose login no one has observed yet (login 0)."""
-    comparison = account['identity'].get(DEFAULT_COMPARISON)
-    return (account['is_default'] and account['source_home'] is None and account['state'] == 'legacy'
-            and (not isinstance(comparison, dict) or 'auth_state' not in comparison))
-
 
 def generation_revision(account: dict) -> int:
     """The row revision the account's current login generation was established at.
@@ -44,19 +38,10 @@ def generation_revision(account: dict) -> int:
 
 
 def account_receipt(account: dict) -> ReceiptFence | None:
-    """Read only the account's canonical generation owner; never mint evidence.
-
-    A Default no one has observed yet is login 0 of its row: the first
-    observation starts login 1, so anything captured before it goes stale.
-    """
-    if account['state'] not in ('legacy', 'signed_in'):
+    """Read only the account's canonical generation owner; never mint evidence."""
+    if account['state'] != 'signed_in':
         return None
-    if unobserved_default(account):
-        record = {'auth_state': 'known', 'login_seq': 0}
-    elif account['is_default']:
-        record = account['identity'].get(DEFAULT_COMPARISON)
-    else:
-        record = account['discovery']
+    record = account['discovery']
     if not isinstance(record, dict) or record.get('auth_state') != 'known':
         return None
     generation = record.get('login_seq')

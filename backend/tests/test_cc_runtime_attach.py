@@ -239,11 +239,10 @@ class TestArtifactRegistration:
         monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
         monkeypatch.setattr(cm, "get_connection",
                             lambda provider, db=None: {"config": {"binary": fake_claude}})
-        # rt.feed() (used below for the resume) has no claude_dir passthrough;
-        # it only reaches subagents.cc_sessions.resolve_claude_dir() via
-        # CLAUDE_CONFIG_DIR. Isolate it there too, or the resume install
-        # falls back to the developer's real ~/.claude.
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", fake_claude_home)
+        # Spawn and resume must use the same account-owned home.
+        child_db.execute("UPDATE vendor_accounts SET source_home=? WHERE is_default=1 AND connection_id='test-cc'",
+                         (fake_claude_home,))
+        child_db.commit()
         _seed_parent(child_db)
         child_id = await _spawn(
             "parent", "task", binary=fake_claude,

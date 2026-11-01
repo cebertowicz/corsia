@@ -26,8 +26,17 @@ def test_terminal_delivery_failure_keeps_its_reason(
     from infra.input_writes import begin_batch_write, settle_batch_write
     from infra.thread_inputs import start_idle_turn
 
+    from connections.models import upsert_connection
+    from vendor_account_fixtures import signed_in_default
+
     connection = get_db()
     try:
+        upsert_connection(
+            type="cli", provider="claude-code", status="available",
+            config={"binary": "/bin/test"}, db=connection,
+        )
+        connection.commit()
+        signed_in_default("claude-code", db=connection)  # an input is admitted only on a signed-in account
         connection.execute(
             "INSERT INTO threads "
             "(id,user_id,model,execution_epoch,created_at,updated_at) "

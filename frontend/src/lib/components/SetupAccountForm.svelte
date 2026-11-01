@@ -11,17 +11,19 @@
 	let { name = $bindable(), username = $bindable(), password = $bindable(), confirmation = $bindable(),
 		email = $bindable(), usernameError, confirmationError, requiredUsername, editing = false, accountError, onSubmit,
 		onValidateConfirmation }: Props = $props();
-	let suggested = $state('');
+	// The username follows the first name until the person types in it; after that, even a cleared field stays cleared.
+	// A username already there on arrival (Back to this step) counts as the person's own.
+	let usernameTyped = !!username;
 	$effect(() => {
-		const next = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
-		if (!requiredUsername && !editing && (!username || username === suggested)) username = next;
-		suggested = next;
+		const first = name.trim().split(/\s+/)[0] ?? '';
+		const next = first.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
+		if (!requiredUsername && !editing && !usernameTyped) username = next;
 	});
 </script>
 
 <form class="form" onsubmit={(event) => { event.preventDefault(); onSubmit(); }}>
 	<Field variant="chip" layout="stacked" label="Full name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
-	<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!requiredUsername || editing} /></Field>
+	<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} oninput={() => (usernameTyped = true)} readonly={!!requiredUsername || editing} /></Field>
 	<div class="passwords">
 		<Field variant="chip" layout="stacked" label={editing ? 'New password (optional)' : 'Password'} labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
 		<Field variant="chip" layout="stacked" label={editing ? 'Confirm new password' : 'Confirm password'} labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={onValidateConfirmation} /></Field>

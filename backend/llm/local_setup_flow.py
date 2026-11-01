@@ -9,7 +9,6 @@ from infra.failure_reference import new_reference
 from llm import local_setup as ls, local_setup_operation, local_setup_prepare as prepare
 from llm.local_keep_loaded import keep_loaded
 from llm.local_model import LocalModel, record_set_up
-from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
 from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
@@ -87,9 +86,7 @@ async def _setup_new_omlx(report: Callable[..., None], events: list[str],
         await asyncio.to_thread(record_set_up, model)
     report("Loading model", finishing=True)
     await _check_load(server_id, model)
-    ls._emit("completed", model=model.repository)
-    return {"ok": True, "server_id": server_id, "model": model.model,
-            "download_size": format_size(model.download_size_bytes), "progress": events}
+    return {**ls.setup_succeeded(server_id, model), "progress": events}
 
 
 async def _run_flight(*, model: LocalModel | None = None, retry_after_load_failure: bool = False,

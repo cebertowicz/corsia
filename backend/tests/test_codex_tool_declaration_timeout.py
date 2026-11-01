@@ -5,6 +5,8 @@ import pytest
 
 from test_tool_result_same_step_binding import _Proc
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.mark.asyncio
 async def test_unreleased_declaration_barrier_rejects_and_releases_the_lock(

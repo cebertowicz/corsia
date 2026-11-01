@@ -35,6 +35,7 @@ _REASON_WORDS = {
     "account_not_configured": "no signed-in account",
     "account_model_not_discovered": "the account doesn't offer this model",
     "discovered_model_unavailable": "the account doesn't offer this model",
+    "not_returned_by_discovery": "the account doesn't offer this model",
     "model_not_in_catalog": "not in the catalog",
     # Settings lists every such project in one sentence, so the words name no
     # single project the way the agent-facing "this project" phrase does.

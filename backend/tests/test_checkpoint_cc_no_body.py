@@ -17,6 +17,9 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from native_checkpoint_fixtures import seed_vendor_checkpoint_thread
 from test_checkpoint_external_adapters import _request, _target
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
+
 _THINKING_ONLY = {"type": "assistant", "message": {
     "id": "reply", "role": "assistant", "stop_reason": None,
     "content": [{"type": "thinking", "thinking": "Considering the history.", "signature": "c2ln"}],

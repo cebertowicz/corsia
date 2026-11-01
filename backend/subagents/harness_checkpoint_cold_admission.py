@@ -52,6 +52,7 @@ def build_external_cold_admission(
             binary=context.binary,
             mcp_config=mcp_config,
             originating_turn_id=identity.turn_id,
+            carried_tokens=0,
             db=db,
         )
     finally:

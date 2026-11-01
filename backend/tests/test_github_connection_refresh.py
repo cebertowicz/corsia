@@ -125,7 +125,7 @@ def test_a_missing_binary_is_a_completed_not_installed_check(gh, monkeypatch):
 def api(gh, client, monkeypatch):  # noqa: F811
     from api import provider_sources
 
-    async def no_check(_provider, *, rediscover=False):
+    async def no_check(_provider):
         return None
 
     monkeypatch.setattr(provider_sources, "_inflight", None)

@@ -1,4 +1,4 @@
-"""Look up added accounts and report model refresh outcomes during verification."""
+"""Look up accounts and report model refresh outcomes during verification."""
 from __future__ import annotations
 
 from connections import harness_models
@@ -7,10 +7,10 @@ from connections.vendor_accounts import AccountError, VENDORS, get_account
 from infra.db_async import run_in_db
 
 
-async def custom_account(account_id):
+async def account_with_home(account_id):
     account = await run_in_db(get_account, account_id)
     if account["source_home"] is None:
-        raise AccountError("the Default account signs in through the vendor's own CLI")
+        raise AccountError("account home is missing")
     if account["state"] == "removed":
         raise AccountError("account was removed; choose another permitted account")
     return account

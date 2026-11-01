@@ -27,6 +27,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from core.correction_learning import TRIAGE_EVENT
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
     COMMENT_SUBJECT_PREFIX,
@@ -69,26 +70,26 @@ _SOURCES_SQL = f"""
     ), sources AS (
       SELECT '{SOURCE_KIND_MESSAGE}' AS source_kind,
         substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1) AS source_id,
-        m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id AS target_thread
+        m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id AS target_thread,f.subject_key
       FROM facts f LEFT JOIN messages m
         ON m.id=substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{MESSAGE_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DOC_COMMENT}',substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1),
-        c.created_at,f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
+        c.created_at,f.agent_thread_id,NULL,f.attributes,f.agent_thread_id,f.subject_key
       FROM facts f LEFT JOIN doc_comments c
         ON c.id=substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_CHAT_COMMENT}',substr(f.subject_key,length('{CHAT_COMMENT_SUBJECT_PREFIX}') + 1),
-        c.created_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id
+        c.created_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id,f.subject_key
       FROM facts f LEFT JOIN chat_comments c
         ON c.cid={_chat_cid} AND c.user_message_id={_chat_message}
       LEFT JOIN messages m ON m.id=c.user_message_id AND m.thread_id=c.thread_id
       WHERE f.subject_key LIKE '{CHAT_COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),
-        {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
+        {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes,f.agent_thread_id,f.subject_key
       FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
@@ -112,9 +113,19 @@ _ACTIVE_VERSION_ONLY = f"""{version_key_sql('s.attributes')}=(
 FIRST_ARRIVAL_SQL = _SOURCES_SQL + f"SELECT MIN(source_at) FROM sources s WHERE {_ACTIVE_VERSION_ONLY}"
 """The earliest arrival of a source the active version classified: where corrections began to be measured."""
 
-_TIMED_SQL = _SOURCES_SQL + f"""
-    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread FROM sources s
-    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
+_COVERAGE_SQL = _SOURCES_SQL + f""", windowed AS (
+      SELECT * FROM sources s
+      WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
+    ), last_turns AS (
+      SELECT t.thread_id,MAX({_ts('t.started_at')}) AS started FROM active_turns t
+      WHERE t.thread_id IN (SELECT target_thread FROM windowed) GROUP BY t.thread_id
+    )
+    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread,
+      EXISTS(SELECT 1 FROM outcome_events t
+        WHERE t.event_name='{TRIAGE_EVENT}' AND t.subject_key=s.subject_key) AS triaged,
+      (s.source_kind='{SOURCE_KIND_MESSAGE}' AND s.active_turn_id IS NOT NULL)
+        OR COALESCE(l.started > {_ts('s.source_at')}, 0) AS later_turn
+    FROM windowed s LEFT JOIN last_turns l ON l.thread_id=s.target_thread
 """
 
 
@@ -188,13 +199,28 @@ def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
-def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
-    """Latest active person classifications and plan-sourced correction facts."""
-    return _measured_attributed_facts(db) + _plan_attributed_facts(db)
+def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None = None) -> list[AttributedFact]:
+    """Latest active person classifications and plan-sourced correction facts, optionally only those
+    attributed to selected plan nodes."""
+    selected = None if node_ids is None else frozenset(node_ids)
+    if selected is not None and not selected:
+        return []
+    facts = _measured_attributed_facts(db) + _plan_attributed_facts(db)
+    return facts if selected is None else [fact for fact in facts if fact.node_id in selected]
 
 
-def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:
-    """The person's corrections arriving in [start, end) as (arrival time, target thread), one per source.
+@dataclass(frozen=True)
+class CorrectionCoverage:
+    """One correction's arrival, target thread, whether it was triaged, and whether a turn has had it since."""
+
+    arrived: str
+    thread: str | None
+    triaged: bool
+    later_turn: bool
+
+
+def person_correction_coverage(db: sqlite3.Connection, start: str, end: str) -> list[CorrectionCoverage]:
+    """The person's corrections arriving in [start, end), one per source, each with its triage and idle state.
 
     ``start`` and ``end`` are stored UTC instants (``YYYY-MM-DD HH``), so rows outside the window are
     dropped by the read and never decoded.
@@ -204,11 +230,18 @@ def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tup
     (``active_corrections_version``): a version still backfilling, or never activated, is not
     served. A source that version classified more than once counts once, by its latest fact.
     A source whose arrival cannot be resolved has no time and is left out.
+
+    ``triaged`` is a ``learning_loop.correction_triage`` fact on the same subject, any tier.
+    ``later_turn`` is a turn that has had the correction: one that took the message in (a steer into a
+    running turn included), or any turn started in the target thread after it arrived. An archived
+    thread that never ran again, or a deleted one (its turn rows go with it), has none and reads as idle.
+    The last turn start is read once per target thread, not once per correction.
     """
-    rows = db.execute(_TIMED_SQL, {"start": start, "end": end}).fetchall()
+    rows = db.execute(_COVERAGE_SQL, {"start": start, "end": end}).fetchall()
     timed = (row for row in rows if row["source_at"] is not None)
     return [
-        (str(row["source_at"]), None if row["target_thread"] is None else str(row["target_thread"]))
+        CorrectionCoverage(str(row["source_at"]), None if row["target_thread"] is None else str(row["target_thread"]),
+                           bool(row["triaged"]), bool(row["later_turn"]))
         for row in _latest_classifications(timed)
         if json.loads(row["attributes"]).get("label") == LABEL_CORRECTION
     ]

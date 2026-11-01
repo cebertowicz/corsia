@@ -77,7 +77,7 @@ def _cold_request(monkeypatch, target: ExecutionTarget, turns):
         source_target=target, writer_target=target,
         boundary=projection.sealed_boundary, previous=None,
         projection=projection, working_dir="/work/project",
-        reasoning_effort=None, binary=target.harness, db=object(),
+        reasoning_effort=None, binary=target.harness, carried_tokens=0, db=object(),
     ).provider_request
 
 
@@ -152,6 +152,112 @@ def test_family_selection_is_exact_bytes_or_claude(target):
         assert counted == -(-_o200k(_serialized(payload)) * 5 // 3)
     else:
         assert counted == size
+
+
+class _Backend:
+    def __init__(self, params=None, error=None):
+        self.params, self.error, self.asked = params, error, []
+
+    def make_provider_params(self, model):
+        self.asked.append(model)
+        if self.error is not None:
+            raise self.error
+        return self.params
+
+
+def _serve(monkeypatch, backend, reply):
+    """Route local writers to ``backend`` and answer /tokenize with ``reply``."""
+    import httpx
+
+    posts = []
+
+    def post(url, *, json, headers, timeout):
+        posts.append((url, json, headers, timeout))
+        if isinstance(reply, Exception):
+            raise reply
+        return httpx.Response(200, json=reply, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(
+        "llm.local_backends.find_backend",
+        lambda model: backend if model.startswith("omlx@") else None,
+    )
+    monkeypatch.setattr(httpx, "post", post)
+    return posts
+
+
+def test_local_writer_counts_with_its_own_servers_tokenizer(monkeypatch):
+    """A local model's own tokenizer counts its cold input, not UTF-8 bytes."""
+    from core.fork_cold_count import cold_input_tokens
+
+    backend = _Backend({
+        "model": "openai/Qwen3.8-Flash-Next", "api_base": "http://127.0.0.1:8210/v1",
+        "api_key": "local-key",
+    })
+    posts = _serve(monkeypatch, backend, {"count": 3_610, "tokens": []})
+    payload = ({"role": "user", "content": PROSE * 100},)
+
+    counted = cold_input_tokens(payload, LOCAL)
+
+    assert counted == 3_610 < len(_serialized(payload).encode())
+    assert backend.asked == ["omlx@ns-test/Qwen3.8-Flash-Next"]
+    url, body, headers, _timeout = posts[0]
+    assert url == "http://127.0.0.1:8210/tokenize"
+    assert body == {"model": "Qwen3.8-Flash-Next", "prompt": _serialized(payload)}
+    assert headers == {"Authorization": "Bearer local-key"}
+
+
+@pytest.mark.parametrize("reply", (
+    {"error": "not found"},
+    {"count": "many"},
+    ["not", "a", "body"],
+))
+def test_local_server_without_a_token_count_keeps_bytes(monkeypatch, reply):
+    from core.fork_cold_count import cold_input_tokens
+
+    backend = _Backend({"model": "openai/qwen", "api_base": "http://127.0.0.1:11434/v1"})
+    _serve(monkeypatch, backend, reply)
+    payload = {"text": PROSE * 10}
+
+    assert cold_input_tokens(payload, LOCAL) == len(_serialized(payload).encode())
+
+
+def test_unreachable_or_refusing_local_server_keeps_bytes(monkeypatch):
+    import httpx
+
+    from core.fork_cold_count import cold_input_tokens
+
+    payload = {"text": PROSE * 10}
+    size = len(_serialized(payload).encode())
+    backend = _Backend({"model": "openai/qwen", "api_base": "http://127.0.0.1:1234/v1"})
+    _serve(monkeypatch, backend, httpx.ConnectError("refused"))
+    assert cold_input_tokens(payload, LOCAL) == size
+
+    def not_found(url, *, json, headers, timeout):
+        return httpx.Response(404, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", not_found)
+    assert cold_input_tokens(payload, LOCAL) == size
+
+    stale = _Backend(error=ValueError("oMLX server has no reachable endpoint: ns-test"))
+    posts = _serve(monkeypatch, stale, {"count": 1})
+    assert cold_input_tokens(payload, LOCAL) == size
+    assert posts == []
+
+
+def test_only_an_openai_compatible_execution_target_is_asked(monkeypatch):
+    """The send-time cap check passes a bare model id and must not call out."""
+    from core.fork_cold_count import cold_input_tokens
+
+    payload = {"text": PROSE * 10}
+    size = len(_serialized(payload).encode())
+    anthropic = _Backend({"model": "anthropic/qwen", "api_base": "http://127.0.0.1:9000"})
+    posts = _serve(monkeypatch, anthropic, {"count": 1})
+
+    assert cold_input_tokens(payload, LOCAL) == size
+    assert cold_input_tokens(payload, "omlx@ns-test/Qwen3.8-Flash-Next") == size
+    assert cold_input_tokens(payload, CODEX) == _o200k(_serialized(payload))
+    assert posts == []
+    assert anthropic.asked == ["omlx@ns-test/Qwen3.8-Flash-Next"]
 
 
 def test_native_cold_loop_counts_like_its_admission():

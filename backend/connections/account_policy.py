@@ -96,7 +96,7 @@ def account_fact_reason(account: dict | None, *, provider: str, policies: list,
                         execution: bool, model: str | None = None) -> str | None:
     """Evaluate loaded account/policy facts for both claim and advisory batches."""
     if account is None:
-        return None
+        return NOT_CONFIGURED
     if account["provider"] != provider:
         return "account_vendor_mismatch"
     if any(account["id"] in p["disabled"] for p in policies):
@@ -117,14 +117,6 @@ def account_reason(account: dict, *, provider: str, project_ids: list, execution
     """Evaluate lifecycle and project state without interpreting usage limits."""
     reason = account_fact_reason(account, provider=provider, execution=execution, model=model,
                                  policies=_policies(provider, project_ids, db=db))
-    if reason is None and execution and model and account and account['source_home'] is None:
-        from llm.harness_catalog import harness_row
-
-        row = harness_row(model, db=db)
-        if row is not None and row.get('default_listed') is False:
-            return 'account_model_not_discovered'
-        if row is not None and row.get('added_available') and not row.get('available'):
-            return 'account_runtime_pending'
     return reason
 
 
@@ -164,9 +156,7 @@ def _turn_identity(provider: str, *, thread_id: str | None, project_id: str | No
     the answer is the same without a second read.
     """
     if binding is _READ:
-        binding = db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
-                             "WHERE thread_id=? AND provider=?",
-                             (thread_id, provider)).fetchone() if thread_id and account_id is None else None
+        binding = thread_binding(thread_id, provider, db=db) if thread_id and account_id is None else None
     if binding is not None and binding["pending_account_id"] is not None:
         # A person's choice made during a running turn: the next claim moves to it, and it never rolls over.
         return str(binding["pending_account_id"])
@@ -183,11 +173,16 @@ def _turn_identity(provider: str, *, thread_id: str | None, project_id: str | No
     return rollover_destination(provider, source, harness_base_row(model, db=db), project_id, db=db) or source
 
 
+def thread_binding(thread_id: str, provider: str, *, db):
+    """The thread's own account binding row for the provider, or ``None``."""
+    return db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
+                      "WHERE thread_id=? AND provider=?", (thread_id, provider)).fetchone()
+
+
 def pending_account(thread_id: str, provider: str, *, db) -> str | None:
     """The account a person chose while a turn was running, which the next claim moves to."""
-    row = db.execute("SELECT pending_account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?",
-                     (thread_id, provider)).fetchone()
-    return str(row[0]) if row is not None and row[0] is not None else None
+    row = thread_binding(thread_id, provider, db=db)
+    return str(row["pending_account_id"]) if row is not None and row["pending_account_id"] is not None else None
 
 
 def turn_account(provider: str, *, thread_id: str | None = None, project_id: str | None = None,
@@ -201,11 +196,11 @@ def turn_account(provider: str, *, thread_id: str | None = None, project_id: str
     """
     require_inference(provider)
     project = thread_scope(thread_id, db=db)["project_id"] if thread_id else project_id
-    return _scoped_turn_account(provider, thread_id=thread_id, project=project, account_id=account_id,
+    return scoped_turn_account(provider, thread_id=thread_id, project=project, account_id=account_id,
                                 model=model, db=db)
 
 
-def _scoped_turn_account(provider: str, *, thread_id: str | None, project: str | None,
+def scoped_turn_account(provider: str, *, thread_id: str | None, project: str | None,
                          account_id: str | None, model: str | None, db,
                          binding=_READ) -> tuple[str | None, str | None]:
     """``turn_account`` for a caller that already holds the thread's project, and optionally its binding."""
@@ -238,20 +233,16 @@ def admit_account(provider, identity, projects, *, execution, model=None, db):
     The one admission rule shared by every account writer: ``execution`` adds the launch checks.
     """
     if identity is None:
-        # No account is selectable; an explicit disabled policy is a denial, not ambient absence.
-        policies = _policies(provider, projects, db=db)
-        if any(policy["disabled"] for policy in policies):
+        # No account is selectable; an explicit disabled policy is a denial, not a missing account.
+        if any(policy["disabled"] for policy in _policies(provider, projects, db=db)):
             raise AccountAdmissionError("account_project_denied")
-        reason = account_fact_reason(None, provider=provider, execution=execution, model=model, policies=policies)
-        if reason:
-            raise AccountAdmissionError(reason)
-        return None
+        raise AccountAdmissionError(NOT_CONFIGURED)
     account = get_account(identity, db=db)
     reason = account_reason(account, provider=provider, project_ids=projects,
                             execution=execution, model=model, db=db)
     if reason:
         alternatives = [public_account(item) for item in permitted_accounts(provider, project_ids=projects, db=db)
-                        if item["state"] in ("legacy", "signed_in")]
+                        if item["state"] == "signed_in"]
         raise AccountAdmissionError(reason, alternatives)
     return identity
 
@@ -325,7 +316,7 @@ def require_launch(provider: str, *, thread_id: str | None = None, account_id: s
         identity, projects = _write_choice(provider, thread_id, account_id, turn_id, actor_thread_id, frozen, db=connection)
         admit_account(provider, identity, projects, execution=False, db=connection)
         account = get_account(identity, db=connection) if identity is not None else None
-        if account is not None and account['source_home'] is not None and launch is None:
+        if account is not None and launch is None:
             raise AccountAdmissionError(RUNTIME_PENDING)
         admit_account(provider, identity, projects, execution=True, model=model, db=connection)
         if launch is not None:

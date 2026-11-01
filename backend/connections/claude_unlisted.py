@@ -43,8 +43,8 @@ async def add_accepted_unlisted(
     ``prior`` holds ``selector``, ``resolved_identity`` and ``display_name``
     for each non-placeholder catalog row. An appended entry copies the listed
     model's capabilities and records which listed selector it aliases.
-    Returns why each probed selector was not kept, so its row says so: a
-    rejection, a timeout and a probe fault each keep their own message.
+    Returns, and logs, why each probed selector was not kept: a rejection,
+    a timeout and a probe fault each keep their own message.
     """
     models = payload.setdefault("models", [])
     listed: dict[str, dict[str, Any]] = {}

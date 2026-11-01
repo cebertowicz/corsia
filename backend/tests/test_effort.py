@@ -12,6 +12,8 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
+from tests.vendor_account_fixtures import signed_in_default  # noqa: E402
+
 
 def _config_values(cmd: list[str]) -> list[str]:
     return [cmd[index + 1] for index, arg in enumerate(cmd[:-1]) if arg == "-c"]
@@ -192,15 +194,13 @@ class TestDispatchResolveEffort:
         )
 
     @pytest.mark.asyncio
-    async def test_cc_default_effort_is_high(self, monkeypatch):
+    async def test_cc_default_effort_is_high(self, isolated_db, monkeypatch):
         from unittest.mock import patch
         from infra import send_dispatch as sd
         from infra import effort as e
         monkeypatch.setattr(e, "_configured_effort_defaults", lambda: {})
         monkeypatch.setattr(e, "_seed_effort_defaults", lambda: {"cc": "high"})
-        monkeypatch.setattr(
-            "connections.models.connection_available", lambda _provider: True,
-        )
+        signed_in_default("claude-code")
 
         captured = {}
 
@@ -217,15 +217,13 @@ class TestDispatchResolveEffort:
         assert captured.get("effort") == "high"
 
     @pytest.mark.asyncio
-    async def test_cc_explicit_effort_overrides_default(self, monkeypatch):
+    async def test_cc_explicit_effort_overrides_default(self, isolated_db, monkeypatch):
         from unittest.mock import patch
         from infra import send_dispatch as sd
         from infra import effort as e
         monkeypatch.setattr(e, "_configured_effort_defaults", lambda: {})
         monkeypatch.setattr(e, "_seed_effort_defaults", lambda: {"cc": "high"})
-        monkeypatch.setattr(
-            "connections.models.connection_available", lambda _provider: True,
-        )
+        signed_in_default("claude-code")
 
         captured = {}
 

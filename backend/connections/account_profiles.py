@@ -42,8 +42,7 @@ class AccountProfile:
     # Stored fact -> key in the vendor's JSON status report, where it reports one.
     status_report_keys: Mapping[str, str]
     clean_env: Callable[[], dict[str, str]]
-    # Where the Default account's warm sessions live.
-    default_warm_home: Callable[[], str]
+
     # A provider-supplied validator for the hint stored at add time, where it takes one.
     validate_hint: Callable[[dict], dict] | None
     # Whether this provider's workspace default may be chosen at all.
@@ -111,18 +110,6 @@ def _codex_paid_capacity(usage: dict, verdict: dict) -> bool:
     return paid_capacity(usage, verdict)
 
 
-def _claude_warm_home() -> str:
-    from subagents import cc_sessions
-
-    return cc_sessions.resolve_claude_dir()
-
-
-def _codex_warm_home() -> str:
-    from llm import codex_rollout_files
-
-    return str(codex_rollout_files.default_codex_sessions_root().parent)
-
-
 _SHOWN_FACTS = ("email", "org_name", "org_id", "plan")
 # Keep Codex sign-in in the account's own auth.json, never the OS keyring.
 _FILE_STORE = ("-c", 'cli_auth_credentials_store="file"')
@@ -134,7 +121,7 @@ _PROFILES: dict[str, AccountProfile] = {
         missing_cause="claude_executable_missing", in_progress_cause="claude_signin_in_progress",
         identity_facts=_SHOWN_FACTS, comparison_keys=("email", "org_id"),
         status_report_keys={"email": "email", "org_name": "orgName", "org_id": "orgId", "plan": "subscriptionType"},
-        clean_env=_claude_env, default_warm_home=_claude_warm_home,
+        clean_env=_claude_env,
         validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
         status_ends_login=True),
     "codex": AccountProfile(
@@ -146,7 +133,7 @@ _PROFILES: dict[str, AccountProfile] = {
         identity_facts=_SHOWN_FACTS, comparison_keys=("account_fp",),
         # Codex identity comes from its auth file, not a status report.
         status_report_keys={},
-        clean_env=_codex_env, default_warm_home=_codex_warm_home,
+        clean_env=_codex_env,
         validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
         paid_capacity=_codex_paid_capacity),
     # The agents' own GitHub account. ``--insecure-storage`` keeps the token in the home's
@@ -161,7 +148,7 @@ _PROFILES: dict[str, AccountProfile] = {
                   "logout": ("auth", "logout", "--hostname", "github.com")},
         missing_cause="github_executable_missing", in_progress_cause="github_signin_in_progress",
         identity_facts=("login",), comparison_keys=("login",), status_report_keys={},
-        clean_env=github_agent_home.clean_env, default_warm_home=lambda: str(github_agent_home.default_home()),
+        clean_env=github_agent_home.clean_env,
         validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
         parse_status=github_agent_home.parse_status, signin_prompt=github_agent_home.signin_prompt,
         signin_refusal=github_person.signin_refusal, single_account=True, logout_before_login=True),
@@ -192,40 +179,34 @@ def profile_for(provider: str) -> AccountProfile:
 async def sign_out_account(account: dict) -> dict:
     """Run a vendor's sign-out hook for one account, after its state is committed.
 
-    The one caller of every profile's hook. An account with no home of its own
-    (a vendor's Default) is skipped: its ambient login is never touched.
+    The one caller of every profile's hook. An account with no home (a removed
+    tombstone kept from before every account had one) has nothing to sign out.
     """
     if account["source_home"] is None:
-        return {"status": "skipped", "cause": "default_home_untouched"}
+        return {"status": "skipped", "cause": "no_home"}
     return await profile_for(account["provider"]).sign_out(
         account, Path(account["source_home"]), Path(account["runtime_home"]))
 
 
-def account_label(account: dict, *, rows: list[dict] | None = None) -> dict:
-    """Return the one person-facing label.
-
-    ``identified`` is False only on the last rung: no email, no own name and
-    no plan, just the vendor. A built-in account is identified by its missing
-    source home, never its mutable name. It reads its last ambient-login
-    observation. When its login identifier is unobserved, this projection
-    falls back to vendor and plan, never an ordinal or the internal Default
-    name.
-    """
-    from connections.vendor_accounts import DEFAULT_ACCOUNT_NAME, DEFAULT_COMPARISON, list_accounts
+def account_label(account: dict, *, rows: list[dict] | None = None, db=None) -> dict:
+    """Return the person-facing label from this account's own evidence."""
+    from connections.vendor_accounts import DEFAULT_ACCOUNT_NAME, list_accounts
 
     if rows is None:
-        rows = list_accounts(provider=account["provider"], include_removed=True)
+        rows = list_accounts(provider=account["provider"], include_removed=True, db=db)
     provider_rows = [row for row in rows if row["provider"] == account["provider"]]
     if not any(row["id"] == account["id"] for row in provider_rows):
         raise AccountError("account is not present in its supplied label rows")
 
     identity = account["identity"]
-    if account["source_home"] is None:
-        record = identity.get(DEFAULT_COMPARISON) or {}
-        identity = record.get("facts") or record.get("last_known") or {}
+    if (account["provider"] in {"claude-code", "codex"} and account["state"] == "signed_out"
+            and identity.get("upgrade_reason") == "sign_in_to_keep_using_account"):
+        hint = identity.get("hint")
+        if isinstance(hint, dict):
+            identity = hint
     email = identity.get("email")
     email = email if isinstance(email, str) and email else None
-    custom_name = account["name"] if account["source_home"] is not None or account["name"] != DEFAULT_ACCOUNT_NAME else None
+    custom_name = None if account["is_default"] and account["name"] == DEFAULT_ACCOUNT_NAME else account["name"]
 
     if email is None:
         if custom_name:

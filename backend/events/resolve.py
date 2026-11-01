@@ -11,6 +11,9 @@ handles exactly five outcomes and names no connector:
 4. **ownerless triage** — an ``ownerless_ok`` event with no owner.
 5. **dead-letter** — no artifact / no owner and not ownerless.
 
+``resolve_direct`` is the one other entry: a producer that names its recipient itself (resolution
+``direct``), with no artifact to resolve.
+
 S4a built the resolution; S4b attaches the **disposition** (wake|digest) from the
 disposition table and the **live health sink** for failure/dead-letter outcomes.
 ``delivery_failure`` (mechanism fault, watch-expiry) is kept DISTINCT from
@@ -35,7 +38,7 @@ class Target:
     """One resolved recipient + how it was resolved + how it should be delivered."""
 
     thread: str | None
-    resolution: str                       # path_a_resolve|path_b_declaration_bind|path_b_rule_bind|triage|dead_letter|repair|delivery_failure
+    resolution: str                       # path_a_resolve|path_b_declaration_bind|path_b_rule_bind|direct|triage|dead_letter|repair|delivery_failure
     relationship: str                     # owner | triage | repair | none
     reason: str | None = None
     routing_state: dict[str, Any] | None = None
@@ -146,6 +149,13 @@ def resolve_targets(
                        routing_state=routing_state,
                        disposition=_disp("triage", ec))]
     return [_dead_letter("no_owner", routing_state, db=db)]
+
+
+def resolve_direct(thread: str, event_class: str, *, db=None) -> Target:
+    """A recipient the producer names itself: that thread, or an ``owner_inactive`` dead letter."""
+    if delivery.thread_exists_and_active(thread, db=db):
+        return Target(thread, "direct", "owner", disposition=_disp("owner", event_class))
+    return _dead_letter("owner_inactive", None, db=db)
 
 
 def resolve_delivery_failure(

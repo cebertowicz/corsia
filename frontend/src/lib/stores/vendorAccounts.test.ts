@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { addVendorAccount, cancelVendorSignin, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, startVendorSignin, type VendorAccount, vendorAccounts } from './vendorAccounts';
+import { addVendorAccount, cancelVendorSignin, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, refreshVendorModels, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, startVendorSignin, type VendorAccount, vendorAccounts } from './vendorAccounts';
 
 describe('request ordering', () => {
 	const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -15,6 +15,17 @@ describe('request ordering', () => {
 		return { resolve, promise };
 	}
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); });
+
+	it('keeps a confirmed signed-out result when the account reload fails', async () => {
+		vendorAccounts.set([account('codex')]);
+		vi.stubGlobal('fetch', vi.fn()
+			.mockResolvedValueOnce(response({ state: 'signed_out', vendor_signed_in: false, model_refresh_ok: null }))
+			.mockResolvedValueOnce(response({ detail: 'inventory unavailable', ref: 'req-7' }, 500)));
+		const result = await refreshVendorModels('work');
+		expect(result).toMatchObject({ ok: false, signedOut: true });
+		expect(result.error).toContain('Reference: req-7');
+		expect(get(vendorAccounts)[0]).toMatchObject({ state: 'signed_out', details_stale: true });
+	});
 
 	it('reports a failed account reload after a lost login starts', async () => {
 		vendorAccounts.set([account('codex')]);
@@ -236,7 +247,7 @@ describe('stale read races', () => {
 	});
 
 	it.each(['codex', 'claude-code'])('an earlier inventory read cannot remove a newly added account for %s', async (provider) => {
-	 const ambient = { ...account(provider), id: 'default', name: 'Default', state: 'legacy' as const, is_default: true, revision: 0 };
+	 const ambient = { ...account(provider), id: 'default', name: 'Default', state: 'signed_in' as const, is_default: true, revision: 0 };
 	 const added = { ...account(provider), state: 'signed_out' as const, revision: 0 };
 	 vendorAccounts.set([ambient]);
 	 let resolveOld!: (reply: Response) => void;

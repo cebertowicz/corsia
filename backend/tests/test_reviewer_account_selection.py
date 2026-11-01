@@ -26,15 +26,20 @@ def scope(tmp_path, monkeypatch):
     """The reviewed project, a Default and a signed-in second Claude account, and a writable db."""
     from connections.account_evidence import mark_discovery
     from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import add_account, default_account, set_account_state
+    from connections.vendor_accounts import add_account, set_account_state
     from infra.database import get_db
+    from vendor_account_fixtures import seed_default_account
 
     monkeypatch.setattr("infra.config.WORKSPACE", tmp_path)
     (tmp_path / "projects" / "corsia").mkdir(parents=True)
     db = get_db()
     db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,'t','t')",
                (PROJECT, "corsia", str(tmp_path / "projects" / "corsia")))
-    default = default_account("claude-code", db=db)
+    default = seed_default_account('claude-code', db=db)
+    default = set_account_state(default['id'], 'signed_in', expected_revision=0, db=db)
+    receipt = capture_receipt('claude-code', account_id=default['id'], db=db)
+    assert mark_discovery(default['id'], receipt=receipt, status='ready',
+                          models={MODEL: {'available': True, 'resolved_identity': 'synthetic'}}, db=db)
     second = add_account("claude-code", "Second", db=db)
     second = set_account_state(second["id"], "signed_in", expected_revision=0, db=db)
     receipt = capture_receipt("claude-code", account_id=second["id"], db=db)
@@ -124,7 +129,7 @@ class TestPermittedAccountSelection:
         assert len(seen) == 1 and seen[0]["model"] == "claude-opus-4-8"
         assert _config_dir(seen[0]["env"]) == Path(second["source_home"]).resolve()
 
-    def test_a_usable_default_keeps_the_ambient_claude_root(self, scope):
+    def test_a_usable_default_uses_its_own_claude_root(self, scope):
         db, default, second = scope
         _policy(db, allowlist=[default["id"], second["id"]], default_id=default["id"], switch=True)
         seen = []
@@ -133,12 +138,28 @@ class TestPermittedAccountSelection:
 
         assert result == ("[]", "claude-opus-4-8")
         failure.assert_not_called()
-        assert seen[0]["env"].get("CLAUDE_CONFIG_DIR") == os.environ.get("CLAUDE_CONFIG_DIR")
+        assert _config_dir(seen[0]["env"]) == Path(default["source_home"]).resolve()
         assert "ANTHROPIC_API_KEY" not in seen[0]["env"]
 
-    def test_the_codex_reviewer_runs_in_an_isolated_account_home(self, scope, monkeypatch):
+    def test_the_codex_reviewer_runs_in_an_isolated_account_home(self, scope, monkeypatch, tmp_path):
+        import json
+        from connections.account_evidence import mark_discovery
+        from connections.account_receipts import capture_receipt
+        from connections.model_cache_stage import ModelCacheStage
+        from connections.vendor_accounts import add_account, set_account_state
         from reviewer.reviewer_runner import run_cc_review
 
+        db, _, _ = scope
+        account = add_account('codex', 'Codex', db=db)
+        account = set_account_state(account['id'], 'signed_in', expected_revision=0, db=db)
+        (Path(account['source_home']) / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'}}))
+        cache_file = tmp_path / 'models.json'
+        cache_file.write_text(json.dumps({'models': [{'slug': 'gpt-5-codex'}]}))
+        cache = ModelCacheStage.prepare(cache_file, Path(account['runtime_home']) / 'models_cache.json').promote()
+        receipt = capture_receipt('codex', account_id=account['id'], db=db)
+        mark_discovery(account['id'], receipt=receipt, status='ready',
+                       models={'codex/gpt-5-codex': {'available': True}}, cache_receipt=cache, db=db)
+        db.commit()
         monkeypatch.setenv("CORSIA_REVIEWER_MODEL", "codex/gpt-5-codex")
         monkeypatch.setenv("OPENAI_API_KEY", "synthetic-must-not-leak")
         seen = []
@@ -163,7 +184,7 @@ class TestPermittedAccountSelection:
 
 
 class TestUnusableAccountsStayVisible:
-    @pytest.mark.parametrize("cause", ["usage_limited", "account_signed_out", "account_removed", "account_project_denied"])
+    @pytest.mark.parametrize("cause", ["usage_limited", "account_signed_out", "account_project_denied"])
     def test_no_review_runs_and_the_account_cause_is_reported(self, scope, cause):
         db, default, second = scope
         if cause == "usage_limited":
@@ -172,12 +193,8 @@ class TestUnusableAccountsStayVisible:
             _policy(db, allowlist=[default["id"], second["id"]], default_id=default["id"], switch=False)
         elif cause == "account_project_denied":
             _policy(db, allowlist=[], default_id=None, switch=False)
-        elif cause == "account_signed_out":
-            db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE id=?", (default["id"],))
-            db.commit()
         else:
-            # An unordered policy selects the next enabled account, so every account is removed.
-            db.execute("UPDATE vendor_accounts SET state='removed' WHERE id IN (?,?)", (default["id"], second["id"]))
+            db.execute("UPDATE vendor_accounts SET state='signed_out' WHERE id=?", (default["id"],))
             db.commit()
 
         def invoke(*_args, **_kwargs):  # pragma: no cover - the assertion is that it is never reached
@@ -190,6 +207,21 @@ class TestUnusableAccountsStayVisible:
         description = failure.call_args[0][2]
         assert description.startswith("qa/llm-reviewer: model-unavailable")
         assert description.endswith(f"Reviewer account unavailable: {cause}")
+
+    def test_with_every_account_removed_no_review_runs_and_the_model_is_unavailable(self, scope):
+        db, default, second = scope
+        # An unordered policy selects the next enabled account, so every account is removed.
+        db.execute("UPDATE vendor_accounts SET state='removed' WHERE id IN (?,?)", (default["id"], second["id"]))
+        db.commit()
+
+        def invoke(*_args, **_kwargs):  # pragma: no cover - the assertion is that it is never reached
+            raise AssertionError("a review ran with no signed-in account")
+
+        result, _pending, failure = _run(invoke)
+
+        assert result is None
+        # With no signed-in account the reviewer model itself is unavailable (the status text is cut at its length cap).
+        assert failure.call_args[0][2].startswith("qa/llm-reviewer: model-unavailable — Reviewer model claude-code/")
 
     def test_a_removed_default_runs_on_the_next_permitted_account(self, scope):
         db, default, second = scope
@@ -212,7 +244,8 @@ class TestUnusableAccountsStayVisible:
         result, _pending, failure = _run(lambda *_a, **_k: "[]")
 
         assert result is None
-        assert failure.call_args[0][2].endswith("Reviewer account unavailable: account_not_configured")
+        # With no signed-in account the reviewer model itself is unavailable (the status text is cut at its length cap).
+        assert failure.call_args[0][2].startswith("qa/llm-reviewer: model-unavailable — Reviewer model claude-code/")
 
 
 class TestAccountContainment:

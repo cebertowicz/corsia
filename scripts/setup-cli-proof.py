@@ -3,8 +3,7 @@
 
 The script intentionally writes only under its output directory. It uses the
 real binary resolver with empty search roots, the production source-row shape,
-the production installer route, and the vendors' own auth checks. It never
-prints installer or auth output.
+and the production installer route. It never prints installer output.
 """
 from __future__ import annotations
 
@@ -97,27 +96,6 @@ def _binary(provider: str, candidate_roots: tuple[Path, ...] | None = None) -> s
     return binary_from_config(provider, {}, candidate_roots=candidate_roots)
 
 
-async def _auth_checks(candidate_roots: tuple[Path, ...] | None = None) -> tuple[dict[str, str], list[str]]:
-    """Run each actual vendor auth check without keeping its output."""
-    from connections import _codex_sign_in_state
-    from connections.claude_discovery import auth_status
-
-    checks: dict[str, str] = {}
-    limits: list[str] = []
-    for provider, _name in SOURCES:
-        binary = _binary(provider, candidate_roots)
-        if binary is None:
-            checks[provider] = "not_proven_here: binary_not_found"
-            continue
-        if provider == "codex":
-            checks[provider] = _codex_sign_in_state(binary)
-        else:
-            checks[provider] = (await auth_status(binary))[0]
-    if checks.get("claude-code", "").startswith("not_proven_here"):
-        limits.append("Claude Code auth state is not proven here because no Claude binary resolved.")
-    return checks, limits
-
-
 @contextmanager
 def _route_uses_empty_roots(roots: tuple[Path, ...], http_status: dict[str, str]) -> Iterator[None]:
     """Make Set up call the real resolver, restricted to proof-owned roots."""
@@ -198,16 +176,12 @@ async def _run(output: Path, *, install: bool) -> int:
         "CORSIA_ANALYTICS_DISABLE": "1",
     })
     sys.path.insert(0, str(BACKEND))
-    existing_auth, existing_limits = await _auth_checks()
     _prepare_environment(home, runtime)
     roots = (runtime / "empty-bin",)
     installed_roots = (home / ".local/bin",)
 
     proof: dict[str, Any] = {
         "sources": _absent_rows(runtime),
-        "before_install_host_auth_checks": existing_auth,
-        "before_install_temporary_home_auth_checks": {},
-        "post_install_auth_checks": {},
         "installed_binaries": {},
         "installer": {},
         "outside_write_accounting": {
@@ -221,9 +195,6 @@ async def _run(output: Path, *, install: bool) -> int:
     }
     _write(output, proof)
 
-    auth, limitations = await _auth_checks()
-    proof["before_install_temporary_home_auth_checks"] = auth
-    proof["limitations"] = list(dict.fromkeys([*existing_limits, *limitations]))
     outside_before = _outside_write_snapshot(original_home)
     if install:
         for vendor, _name in SOURCES:
@@ -234,11 +205,8 @@ async def _run(output: Path, *, install: bool) -> int:
     else:
         proof["installer"] = {provider: {"state": "not_run", "reason": "skipped_by_argument"} for provider, _ in SOURCES}
     if install:
-        proof["post_install_auth_checks"] = {provider: "not proven here: host review blocks reading CLI credential config"
-                                              for provider, _ in SOURCES}
         proof["installed_binaries"] = {provider: binary.name for provider, _ in SOURCES
                                        if (binary := _binary(provider, installed_roots)) is not None}
-        proof["limitations"].append("Post-install CLI auth is not proven here: host review blocks reading CLI credential config.")
     outside_writes = _outside_writes(outside_before, original_home)
     proof["outside_write_accounting"]["writes_outside_home"] = outside_writes
     proof["outside_write_accounting"]["status"] = "failed" if outside_writes else "passed_for_watched_directory_metadata"

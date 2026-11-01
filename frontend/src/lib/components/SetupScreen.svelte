@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
-	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupShell, { type SetupJob } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupSourceError from './SetupSourceError.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -11,7 +11,7 @@
 	import SetupWorkFolder, { type FolderNotice } from './SetupWorkFolder.svelte';
 	import SetupConnect from './SetupConnect.svelte';
 	import SetupConnectBack from './SetupConnectBack.svelte';
-	import SetupSubscriptions, { subscriptionQuestion, type SetupPicks } from './SetupSubscriptions.svelte';
+	import SetupSubscriptions, { type SetupPicks } from './SetupSubscriptions.svelte';
 	import AddProviderModal from './v7/AddProviderModal.svelte';
 	import ProviderSettingsModal from './v7/ProviderSettingsModal.svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -23,13 +23,14 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, readySetupEndpoint, type SetupModel } from '$lib/setupModels';
+	import { readLocalRow, readPreauthLocal, withLocalRow } from '$lib/setupLocalSources';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
-	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
+	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart, setupSteps } from '$lib/setupFormSupport';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
@@ -63,7 +64,7 @@
 	let preauthLocal = $state<LocalRowState | undefined>();
 	const local = $derived(($token ? sources.find((source) => source.source === 'omlx') : preauthLocal) as LocalRowState | undefined);
 	const eligible = $derived(status.local_eligible !== false);
-	// On a server that is not macOS, setup lists no Local model row or memory reason.
+	// On a server that is not macOS, setup lists no Local model row, memory reason or footer line about it.
 	const neverLocal = $derived(local?.never_local === true || status.macos_supported === null);
 	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
 	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
@@ -71,7 +72,6 @@
 	const canFinish = $derived(hasReadySetupModel(catalog, tested) || Boolean(endpoint));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
 	const cliPicked = (vendor: string) => !toolsOff.includes(vendor) && (picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude));
-	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
 	const localReady = $derived(catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)));
@@ -83,12 +83,7 @@
 	const folderDecisionPending = $derived(folderNotice !== null);
 	// A new account needs every field; an existing one needs a name, and a password only when one is being changed.
 	const canSubmitAccount = $derived(!folderDecisionPending && (editing ? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password))) : Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password)));
-	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
-		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && $token) ? 'done' : 'todo' },
-		{ label: 'Your subscriptions', icon: 'card', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
-		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
-	]);
+	const steps = $derived(page === 'connect' ? remote.steps : setupSteps(page, Boolean($token)));
 	/** Every failed row's cause and reference, so the saved report says what went wrong where. */
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
@@ -101,6 +96,9 @@
 			meta: localFailed ? [localStartError ? startFix : local?.fix, local?.detail].filter(Boolean).join(' ') : local?.local_state === 'starting' ? 'Starting the local model…' : [`Downloading ${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), accentMeta: !localFailed && local?.local_state !== 'starting' }] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
+	const localRow = $derived(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
+		confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = CLI_VENDORS.filter((vendor) => cliSignedIn(vendor) || cliPicked(vendor)).map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
@@ -114,16 +112,13 @@
 			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
-		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
-			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
-			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
+		if (!neverLocal) rows.push(withReportAction({ ...localRow, localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		const ready = provider || endpoint;
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : endpoint ? `${endpoint.name} · added` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.', pill: ready ? { state: 'success', label: 'Ready' } : undefined, action: ready ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
-	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading || localPreparing, local?.download_eta_seconds));
+	const finishNote = $derived(setupStartNote(canFinish, eligible && !neverLocal, localRow.phase, local?.download_eta_seconds));
 	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
@@ -144,8 +139,8 @@
 		if (!canSubmitAccount) return;
 		if (editing) await updateAccount(); else if (!get(token)) await createAccount();
 	}
-	/** The subscriptions screen is asked only while a CLI is still not signed in. */
-	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
+	/** The subscriptions screen is always asked: a CLI already signed in from a terminal still needs its own CORSIA sign-in. */
+	function afterAccount() { page = 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function recordPicks(next: SetupPicks) {
 		picks = next; toolsOff = [];
@@ -166,6 +161,7 @@
 			if (cliPicked(vendor)) connectFlow.pick(vendor);
 			else void connectFlow.stop(vendor);
 		}
+		if (!next.claude && !next.chatgpt && !localModelActive && !localFailed) void startLocal(); // the installer skips the free download once a CORSIA account is signed in; never over a failure its row shows with Retry
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
@@ -211,16 +207,7 @@
 		await localPick.start();
 		await readLocalProgress();
 	}
-	async function readLocalProgress() {
-		try {
-			const response = await fetch('/api/setup/local-download');
-			if (!response.ok) return;
-			const live = await response.json();
-			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
-				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix, detail: live.cause === 'load_refused' ? live.catalog_line ?? undefined : undefined };
-		} catch { /* Preserve the last job projection until the next successful read. */ }
-	}
+	async function readLocalProgress() { preauthLocal = (await readPreauthLocal()) ?? preauthLocal; }
 	async function startLocal() {
 		if (!eligible || localBusy) return;
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
@@ -332,7 +319,7 @@
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as Status; setFolderState(status);
+		status = (progress.status ?? {}) as Status; setFolderState(status); picks = progress.picks ?? null; // the saved answer keeps a declined tool's row hidden
 		page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
 		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
@@ -344,20 +331,33 @@
 		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
+	/** Signed in, the download's percent reaches every setup page: models_updated comes only every 10%. Its state changes arrive by models_updated, heard on every page once signed in. */
+	let pollingLocal = false;
+	async function pollLocalSources() {
+		const current = get(token);
+		if (!current || pollingLocal) return;
+		pollingLocal = true;
+		try { const row = await readLocalRow(current); if (row) sources = withLocalRow(sources, row); }
+		catch { /* Keep the last reading until the next one succeeds. */ } finally { pollingLocal = false; }
+	}
 	$effect(() => {
-		// Authenticated source/catalog state arrives through models_updated. Poll only the two setup-owned jobs
-		// that have no event while running: CLI install/sign-in, and the pre-account local downloader.
-		if (!connectFlow.active && (!downloading || get(token))) return;
+		// Other authenticated state arrives through models_updated; poll the setup-owned jobs that have no event: CLI install/sign-in and the local download.
+		if (!connectFlow.active && !downloading) return;
 		const timer = setInterval(() => {
 			if (connectFlow.active) void connectFlow.tick();
-			if (!get(token) && downloading) void readLocalProgress();
+			if (downloading) void (get(token) ? pollLocalSources() : readLocalProgress());
 		}, POLL_MS);
 		return () => clearInterval(timer);
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
+	let localAutoStarted = false; // a failed Claude Code or Codex sign-in can leave no model when the installer skipped the free download: start it without a click
+	$effect(() => {
+		if (page !== 'models' || localAutoStarted || !eligible || neverLocal || localModelActive || localFailed || !CLI_VENDORS.some((vendor) => connectFlow.attempts[vendor]?.attempt === 'signin_failed')) return;
+		localAutoStarted = true; void startLocal();
+	});
 	onMount(() => {
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
-		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
+		const offModels = on('models_updated', () => { if (get(token)) void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const focus = () => { if (page === 'models') void refreshSources(true); void classifier.retryIfFailed(); };
 		window.addEventListener('focus', focus);
@@ -370,7 +370,7 @@
 		{:else if page === 'welcome' && canConnect && !$token}<Button variant="chip" onclick={() => downloading ? (confirmConnect = true) : void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'account'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'welcome'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
-		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = 'subscriptions'; }}>Back</Button>
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
@@ -385,7 +385,7 @@
 		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
-	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
+	{:else if page === 'subscriptions'}<SetupSubscriptions {eligible} localActive={localModelActive} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} disableRetry={sourceRetry !== null} />
 		<SetupSourceError error={sourceRetry?.error ?? sourceError} retrying={sourceRetry !== null} retry={retrySources} />

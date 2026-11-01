@@ -95,7 +95,10 @@ def test_a_claude_account_chosen_on_a_codex_thread_applies_at_its_first_claude_c
     from connections.models import upsert_connection
     from connections.vendor_accounts import add_account, set_account_state
 
+    from vendor_account_fixtures import signed_in_default
+
     db, legacy, _, _ = accounts
+    signed_in_default("codex", db=db)
     select_account("destination", "codex", db=db)
     register_codex_thread("destination", "live-codex-rollout", db=db)
     upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/synthetic"})

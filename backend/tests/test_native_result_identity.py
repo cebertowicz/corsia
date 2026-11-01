@@ -26,6 +26,8 @@ from infra.completed_tool_results import persist_completed_tool_results
 from infra.thread_driver import TerminalResult
 from tests import native_tool_result_lab as tray
 from tools.base import Tool
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 from tools.recorded_call import CompletedToolFailure
 
 

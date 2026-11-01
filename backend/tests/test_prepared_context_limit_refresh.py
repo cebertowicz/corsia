@@ -18,10 +18,12 @@ async def test_initial_boundary_uses_current_cap_without_replacing_warm_input(
     from llm.resolution import resolve_execution_target
     from subagents.harness_checkpoint_resume import maintain_external_initial_boundary
     from test_provider_continuation_admission import _claim, _thread_row
+    from vendor_account_fixtures import signed_in_default
 
     main_db.execute("UPDATE threads SET model=? WHERE id='main-1'", (model,))
     main_db.execute("UPDATE models SET context_window=1000000 WHERE id=?", (model,))
     main_db.commit()
+    signed_in_default(harness, db=main_db)  # the account lists the model at that window
     target = resolve_execution_target(model, db=main_db)
     dispatch = await prepare_claimed_batch(_claim(main_db), thread_row=_thread_row(main_db), target=target)
     prepared = dispatch.prepared_context
@@ -86,10 +88,10 @@ async def test_native_next_call_resolves_changed_catalog_cap(isolated_db, monkey
         input_identity="input", current_input=messages[-1]).fit_ledger
     state = SimpleNamespace(fit_ledger=ledger, messages=messages, tool_definitions=[],
         fit_current_input=messages[-1], context_usage={}, last_measured_call_usage=None,
-        last_measured_rendered_input_tokens=None)
+        last_measured_rendered_input_tokens=None, overflow_retry_pending=False)
     boundaries = []
 
-    async def maintain(boundary):
+    async def maintain(boundary, *, must_adopt):
         boundaries.append(boundary)
         return SimpleNamespace(payload=None)
 
@@ -113,12 +115,14 @@ async def test_external_release_uses_raised_catalog_cap(main_db, monkeypatch, mo
     """An old handle cap must not cause a premature checkpoint after a profile edit."""
     from core.checkpoint_resume import CheckpointWaitScope
     from subagents.harness_checkpoint_resume import maintain_external_tool_boundary
+    from vendor_account_fixtures import signed_in_default
 
     main_db.execute("UPDATE threads SET model=? WHERE id='main-1'", (model,))
     main_db.execute("UPDATE models SET context_window=1000000 WHERE id=?", (model,))
     main_db.execute("INSERT INTO model_profiles(model_id,context_window,updated_at) VALUES (?,262144,'t2') "
                     "ON CONFLICT(model_id) DO UPDATE SET context_window=262144", (model,))
     main_db.commit()
+    signed_in_default(harness, db=main_db)  # the account lists the model at that window
     session = SimpleNamespace(peek_active_usage=lambda: {
         "input_tokens": 200000, "model_context_window": 1000000,
     })

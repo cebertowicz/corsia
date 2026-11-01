@@ -1,46 +1,43 @@
 """Scoped subscription projection with a display-only capability fallback."""
 from __future__ import annotations
 
+from typing import Any
+
 from connections import fact_memo
-from connections.account_policy import account_reason, pending_account, permitted_accounts, thread_scope, turn_account
+from connections.account_policy import account_reason, permitted_accounts, scoped_turn_account, thread_binding, thread_scope
 from connections.harness_usage import project_for_model, stored_usage
 from connections.vendor_accounts import get_account
 from infra.database import get_db
 
 _DEFAULT_EVIDENCE = ("resolved_identity", "is_default", "alias_of", "cache_marker")
+_UNREAD = object()
 
 
-def account_model_status(account: dict, row: dict, *, project_ids: list, db, move: bool = False) -> dict:
+def account_model_status(account: dict, row: dict, *, project_ids: list, db, move: bool = False,
+                         stored: Any = _UNREAD) -> dict:
     """The one decision whether ``row``'s model can run on ``account`` for these projects.
 
-    ``row`` is the model's account-independent catalog row. The built-in Default
-    runs the vendor catalog its ambient CLI discovered; an added account runs its
-    own discovered models. Lifecycle and project policy come next, then that
-    account's own usage. Returns ``status``, ``status_reason`` and ``usage``.
-
-    A fenced or stale discovery record never hides the Default's vendor rows
-    (``readiness_reason`` tolerates it too); only a rollover ``move`` onto the
-    Default still requires that record.
+    ``row`` is the account-independent catalog row. Each account uses its own
+    discovery, lifecycle, project policy and usage evidence. ``stored`` is the
+    account's stored usage when the caller already read it for another model.
+    Returns ``status``, ``status_reason`` and ``usage``.
     """
     from connections.account_evidence import discovery_view
     from llm.model_status import USAGE_LIMITED
 
     model = row["litellm_model"]
     provider = account["provider"]
-    usage = project_for_model(stored_usage(provider=provider, account_id=account["id"], db=db), model=model, provider=provider)
+    if stored is _UNREAD:
+        stored = stored_usage(provider=provider, account_id=account["id"], db=db)
+    usage = project_for_model(stored, model=model, provider=provider)
     reason: str | None
-    if account["source_home"] is None and row.get("default_listed") is False:
-        status, reason = "unavailable", "account_model_not_discovered"
-    elif account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
+    if row.get("status_reason") == "connection_unavailable":
         status, reason = row["status"], row.get("status_reason")
     else:
         own = discovery_view(account)["discovery"].get("models", {}).get(model, {})
         status = "ready" if own.get("available", True) else "unavailable"
         reason = None if status == "ready" else own.get("availability_reason") or "discovered_model_unavailable"
     policy = account_reason(account, provider=provider, project_ids=project_ids, execution=True, model=model, db=db)
-    if (policy == "account_model_not_discovered" and account["source_home"] is None
-            and row.get("default_listed") is not False and not move):
-        policy = None
     if policy:
         status, reason = "unavailable", policy
     elif status == "ready" and not usage["usable"]:
@@ -74,7 +71,9 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             cloud_off=project_cloud_models_off(project, db=connection),
         )
         result = []
-        pending: dict[str, str | None] = {}
+        # What one account or thread says about every model is read once per scope, never per row.
+        bindings: dict[str, Any] = {}
+        usage_of: dict[str, dict | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
@@ -84,21 +83,30 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
             explicit = account_id if requested is not None and requested["provider"] == provider else None
-            selected, selection_reason = turn_account(provider, thread_id=thread_id, project_id=project,
-                                                      account_id=explicit, model=row["litellm_model"], db=connection)
-            row["runs_on"] = [_runs_on(item, row, project, selected, connection) for item in permitted]
+            owned: dict[str, Any] = {}
             if thread_id and explicit is None:
-                if provider not in pending:
-                    pending[provider] = pending_account(thread_id, provider, db=connection)
+                if provider not in bindings:
+                    bindings[provider] = thread_binding(thread_id, provider, db=connection)
+                owned["binding"] = bindings[provider]
+            selected, selection_reason = scoped_turn_account(
+                provider, thread_id=thread_id, project=project, account_id=explicit,
+                model=row["litellm_model"], db=connection, **owned)
+            for item in permitted:
+                if item["id"] not in usage_of:
+                    usage_of[item["id"]] = stored_usage(provider=provider, account_id=item["id"], db=connection)
+            row["runs_on"] = [_runs_on(item, row, project, selected, connection, usage_of[item["id"]])
+                              for item in permitted]
+            pending = owned.get("binding") and owned["binding"]["pending_account_id"]
+            if pending is not None:
                 for entry in row["runs_on"]:
-                    if entry["selected"] and entry["account_id"] == pending[provider]:
+                    if entry["selected"] and entry["account_id"] == pending:
                         entry["pending"] = True
             chosen = next((item for item in permitted if item["id"] == selected), None)
             if chosen is None:
                 if selection_reason == "account_project_denied" or selected is not None:
                     _clear_evidence(row)
                     row.update(status="unavailable", status_reason="account_project_denied")
-            elif chosen["source_home"] is not None:
+            else:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
             _apply_locality(row, cloud_refusal)
@@ -118,7 +126,7 @@ def _apply_locality(row: dict, refusal: str | None) -> None:
             row["runnable"] = {"status": "unavailable", "status_reason": refusal}
 
 
-def _runs_on(account, row, project, selected, db) -> dict:
+def _runs_on(account, row, project, selected, db, stored) -> dict:
     """One account's whole decision for the model, as ``account_model_status`` made it.
 
     ``usage`` is that decision's own projection (the windows that bind this
@@ -128,7 +136,7 @@ def _runs_on(account, row, project, selected, db) -> dict:
     from connections.harness_usage_check import is_checking
     from llm.model_status import USAGE_LIMITED
 
-    decision = account_model_status(account, row, project_ids=[project], db=db)
+    decision = account_model_status(account, row, project_ids=[project], db=db, stored=stored)
     usage = decision["usage"]
     limited = decision["status_reason"] == USAGE_LIMITED
     entry = {"account_id": account["id"], "selected": account["id"] == selected, "status": decision["status"],

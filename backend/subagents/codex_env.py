@@ -123,7 +123,6 @@ def _write_governed_model_catalog(*, source: Path, destination: Path,
         path
         for path in {
             source / _MODEL_CACHE_FILENAME,
-            _default_app_server_home() / _MODEL_CACHE_FILENAME,
             destination / _MODEL_CACHE_FILENAME,
         }
         if path.is_file()
@@ -203,10 +202,10 @@ def clean_codex_app_server_env(
     The managed app-server gets its own persistent home for thread/SQLite state
     and an atomic link to the user's subscription credential only.
     """
-    source = Path(source_home).expanduser().resolve() if source_home else default_codex_home()
-    destination = Path(
-        isolated_home or _default_app_server_home()
-    ).expanduser().resolve()
+    if source_home is None or isolated_home is None:
+        raise RuntimeError('account_home_missing')
+    source = Path(source_home).expanduser().resolve()
+    destination = Path(isolated_home).expanduser().resolve()
     if source == destination:
         raise RuntimeError(
             "Codex app-server isolated home must differ from the user Codex home"
@@ -268,15 +267,9 @@ def build_session_env(session) -> dict[str, str]:
                 isolated_home=Path(session.codex_home),
                 govern_model_catalog=not session.control_only,
                 confined=getattr(session, "confined", False),
-                **({'projection_receipt': session.vendor_account_receipt,
-                    'catalog_source': getattr(session, 'vendor_catalog_source', None),
-                    'cache_receipt': getattr(session, 'vendor_cache_receipt', None)}
-                   if getattr(session, 'vendor_account_custom', False) else {}),
+                projection_receipt=getattr(session, 'vendor_account_receipt', None),
+                catalog_source=getattr(session, 'vendor_catalog_source', None),
+                cache_receipt=getattr(session, 'vendor_cache_receipt', None),
             )
         )
-    return dict(
-        clean_codex_app_server_env(
-            govern_model_catalog=not session.control_only,
-            confined=getattr(session, "confined", False),
-        )
-    )
+    raise RuntimeError('account_home_missing')

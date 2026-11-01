@@ -486,17 +486,18 @@ def test_a_limited_source_account_names_when_it_is_back(conductor):
 
 
 def test_needs_auth_source_projects_the_default_as_signed_out_without_mutating_its_lifecycle(conductor, monkeypatch):
-    from connections.source_state import apply_check
+    from connections.source_state import NEEDS_AUTH, harness_state
     from connections.vendor_accounts import default_account
+    from vendor_account_fixtures import seed_default_account
 
     monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
     db, _work, _personal = conductor
-    default = default_account("claude-code", db=db)
-    apply_check("claude-code", "needs_auth", "signed out", db=db)
+    default = seed_default_account("claude-code", db=db)
+    assert harness_state("claude-code", db=db)["state"] == NEEDS_AUTH
 
     line = next(line for line in source_accounts("claude-code") if line["account_id"] == default["id"])
 
-    assert default_account("claude-code", db=db)["state"] == "legacy"
+    assert default_account("claude-code", db=db)["state"] == "signed_out"
     assert line["state"] == "signed_out"
     # The bind path reads the same state the card shows.
     assert bind_corsia_agent_account(CONDUCTOR, default["id"], user_id="user") == {
@@ -525,15 +526,15 @@ def test_source_accounts_read_the_vendors_models_once_whatever_the_account_count
     assert both > 0 and model_reads() == both
 
 
-@pytest.mark.parametrize("state", ["not_installed", "unverified"])
+@pytest.mark.parametrize("state", ["not_installed", "needs_auth"])
 def test_empty_catalog_keeps_fresh_default_out_of_source_accounts(conductor, monkeypatch, state):
     from api import provider_sources
-    from connections.source_state import apply_check
 
     db, _work, _personal = conductor
     monkeypatch.setattr("connections.harness_legacy_fallback.sync_legacy_fallback", lambda *_args, **_kwargs: None)
     db.execute("DELETE FROM models WHERE harness='claude-code'")
-    apply_check("claude-code", state, "check failed", db=db)
+    db.execute("UPDATE connections SET status=? WHERE provider='claude-code'",
+               ("not_installed" if state == "not_installed" else "available",))
     db.commit()
     source = provider_sources._harness_source("claude-code")
     assert source["state"] == state
@@ -610,14 +611,10 @@ async def _signin(monkeypatch, db, account, refresh, *, bind=CONDUCTOR):
     async def status(*_args):
         return True, {"account_fp": f"synthetic-{account['id']}"}, None
 
-    async def no_default(_provider):
-        return None
-
     async def discovery(provider, **kwargs):
         return await refresh(provider, **kwargs)
 
     monkeypatch.setattr(account_controls, "_vendor_status", status)
-    monkeypatch.setattr(account_controls, "refresh_default_identity", no_default)
     monkeypatch.setattr(harness_models, "refresh_provider", discovery)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: broadcasts.append("sign-in"))
     monkeypatch.setattr("infra.state.ws.schedule_models_changed", lambda *_a, **_k: broadcasts.append("commit"))
@@ -699,7 +696,7 @@ async def test_same_identity_retry_reports_bound_original_ready(conductor, monke
     assert next(line for line in lines if line["account_id"] == personal["id"])["state"] == "ready"
     assert [account["id"] for account in list_accounts(provider="codex", db=db)
             if not account["is_default"] and account["state"] == "signed_in"] == [personal["id"]]
-    assert get_account(work["id"], db=db)["state"] == "removed"
+    assert get_account(work["id"], db=db)["state"] == "signed_out"
     assert cleanup_calls == [work['id']]
     from llm.model_status import scoped_status_rows
     model = next(row for row in scoped_status_rows(account_id=personal["id"]) if row["id"] == MODEL)
@@ -838,12 +835,10 @@ def test_clean_default_added_discovery_binds_setup(conductor):
     from types import SimpleNamespace
     from connections.account_discovery_commit import commit_discovery_bundle
     from connections.corsia_agent_account import signin_outcome
-    from connections.vendor_accounts import record_default_identity
 
     db, work, _ = conductor
     db.execute("UPDATE connections SET status='needs_auth' WHERE provider='codex'")
     db.commit()
-    record_default_identity('codex', {}, db=db)
     receipt = receipt_of('codex', work['id'], db=db)
     result = commit_discovery_bundle('codex', SimpleNamespace(usage_report=None, cache_stage=None),
         [{'selector_id': 'setup-model', 'available': True, 'resolved_identity': 'setup-model', 'context_window': 200000}],

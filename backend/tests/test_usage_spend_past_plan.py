@@ -108,10 +108,10 @@ def _claude(accounts, *, allow, extra):
 
 def _claude_default(db):
     from connections.models import upsert_connection
-    from connections.vendor_accounts import default_account
+    from vendor_account_fixtures import signed_in_default
 
     upsert_connection(type='cli', provider='claude-code', status='available', config={'binary': '/bin/synthetic'})
-    return default_account('claude-code')['id']
+    return signed_in_default('claude-code')['id']
 
 
 def _claude_projection(db, account):

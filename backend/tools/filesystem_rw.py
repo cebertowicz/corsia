@@ -207,10 +207,14 @@ class ReadFileTool(Tool):
         # The observer touches only loop-owned document and read-base state.
         record_read_base(kwargs.get("_thread_id"), authorized.resolved, outcome.data)
         await self._record_skill_read(authorized.resolved, outcome, kwargs)
-        annotation = await self._shared_document_annotation(
-            authorized.resolved, outcome, offset,
-        )
-        annotation = sanitize_credential_text(annotation) if annotation else None
+        from tools.workflow_task_fields import skill_read_notice
+
+        notes = [
+            await self._shared_document_annotation(authorized.resolved, outcome, offset),
+            await skill_read_notice(authorized.resolved, outcome.data, offset),
+        ]
+        joined = "\n".join(note for note in notes if note)
+        annotation = sanitize_credential_text(joined) if joined else None
         if not annotation:
             return outcome.text
         rendered = f"{annotation}\n{outcome.text}"

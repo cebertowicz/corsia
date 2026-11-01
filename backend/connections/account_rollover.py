@@ -29,7 +29,7 @@ def rollover_order(provider: str, project: str | None, policy: dict, *, db) -> l
     """The one ordered list rollover moves along, or ``None`` when rollover is off.
 
     A saved order is used as saved. With none saved (every account permitted),
-    the order is every signed-in or legacy account, the built-in Default first,
+    the order is every signed-in account, the built-in Default first,
     then the rest by creation.
     """
     if not policy['rollover']:
@@ -37,7 +37,7 @@ def rollover_order(provider: str, project: str | None, policy: dict, *, db) -> l
     from connections.provider_policy import ordered_accounts
 
     return [item['id'] for item in ordered_accounts(provider, policy, db=db)
-            if item['state'] in ('legacy', 'signed_in')]
+            if item['state'] == 'signed_in']
 
 
 def rollover_destination(

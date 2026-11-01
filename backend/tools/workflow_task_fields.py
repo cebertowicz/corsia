@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.skill_sidecar import SIDECAR_FILE
-from core.skill_validation import declares_sidecar, parse_frontmatter
+from core.skill_validation import declares_sidecar, instruction_section, parse_frontmatter
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.database import get_db
@@ -107,7 +107,7 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
         difficulty = step.get("difficulty")
         built: dict[str, Any] = {
             "id": step_id, "title": step.get("title"), "check": step.get("check"),
-            "required": step.get("required") is True,
+            "required": step.get("required") is True, "by": step.get("by", "agent"),
             "after": [value.strip() for value in step.get("after") or () if isinstance(value, str)],
             "difficulty": difficulty.get("default") if isinstance(difficulty, dict) else None,
         }
@@ -115,7 +115,7 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
         if isinstance(heading, str):
             if body is None:
                 body = _skill_body(name, step_id, workflow.skill)
-            built["instruction"] = _section(body, heading)
+            built["instruction"] = instruction_section(body, heading)
             if built["instruction"] is None:
                 raise PlanInputError(
                     f"step {step_id} names instruction {heading.strip()!r}, which {name}'s SKILL.md doesn't have"
@@ -144,25 +144,6 @@ def _skill_body(name: str, step_id: str, skill) -> str:
         return parse_frontmatter(Path(skill.body_path).read_text(encoding="utf-8"))[1]
     except (OSError, ValueError) as exc:
         raise PlanInputError(f"step {step_id}'s instruction can't be read from {name}'s SKILL.md") from exc
-
-
-def _section(body: str, heading: str) -> str | None:
-    """The heading's section: from it through the line before the next heading of its level or higher."""
-    wanted = heading.strip()
-    level = len(wanted) - len(wanted.lstrip("#"))
-    lines = body.splitlines()
-    start, fenced = None, False
-    for index, line in enumerate(lines):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        hashes = 0 if fenced else len(line) - len(line.lstrip("#"))
-        if not hashes or line[hashes:hashes + 1] not in (" ", ""):
-            continue
-        if start is None and level and line.strip() == wanted:
-            start = index
-        elif start is not None and hashes <= level:
-            return "\n".join(lines[start:index]).strip()
-    return None if start is None else "\n".join(lines[start:]).strip()
 
 
 def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:
@@ -308,6 +289,38 @@ def _system_workflow_version(skill) -> str | None:
             return None
         digests.append(entry.sha256)
     return f"system:{relative}:{manifest.version}:{'+'.join(digests)}"
+
+
+START_NOTICE = (
+    "[Workflow skill · When you apply it and any \"Applying these steps\" note covers this run, "
+    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty "
+    "and a size. CORSIA builds the steps; don't add them yourself. More: skill task-discipline, "
+    "Declared workflows.]"
+)
+
+
+async def skill_read_notice(path: Path, data: bytes | None, offset: int | None) -> str | None:
+    """How to start the workflow on a first-page read of a workflow ``SKILL.md``; None for any other read.
+
+    The skill's own text never has to say it, so a workflow written or shared by
+    anyone starts the same way.
+    """
+    from core.skill_validation import is_skill_file
+
+    if data is None or offset not in (None, 1) or not is_skill_file(path):
+        return None
+    return await run_off_db(_start_notice, path)
+
+
+def _start_notice(skill_md: Path) -> str | None:
+    """Blocking. The start line for the workflow this ``SKILL.md`` and its sidecar declare."""
+    from core.skill_validation import validate_skill_file
+
+    validation = validate_skill_file(skill_md)
+    workflow = validation.corsia.get("workflow") if isinstance(validation.corsia, dict) else None
+    if not validation.ok or not isinstance(workflow, dict) or not isinstance(workflow.get("steps"), list):
+        return None
+    return START_NOTICE.format(name=validation.name)
 
 
 def _append_notice(result: dict, notice: str) -> None:

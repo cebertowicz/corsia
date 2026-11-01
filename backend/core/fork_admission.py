@@ -8,7 +8,8 @@ from core.fork_types import ColdForkSource, ForkNotAdmitted, ProviderForkRequest
 def build_cold_fork_admission(*, fork_id: str, thread_id: str, target,
                                kind: ForkKind, instruction: str, source: ColdForkSource,
                                working_dir: str, reasoning_effort: str | None,
-                               binary: str | None, mcp_config: str | None = None) -> ProviderForkRequest:
+                               binary: str | None, mcp_config: str | None = None,
+                               carried_tokens: int) -> ProviderForkRequest:
     """Freeze a kind's instruction and source before provider invocation."""
     if target.harness not in kind.step_limits:
         raise ForkNotAdmitted(f"{kind.name} cannot enforce its policy on {target.harness}")
@@ -19,5 +20,5 @@ def build_cold_fork_admission(*, fork_id: str, thread_id: str, target,
         fork_id=fork_id, thread_id=thread_id, target=target,
         instruction=instruction, instruction_candidates=(instruction,), cold_source=source,
         reasoning_effort=reasoning_effort, working_dir=working_dir, binary=binary,
-        mcp_config=mcp_config,
+        mcp_config=mcp_config, carried_tokens=carried_tokens,
     )

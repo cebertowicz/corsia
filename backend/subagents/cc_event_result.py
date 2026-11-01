@@ -22,10 +22,7 @@ from subagents.cc_event_context_usage import (
 from subagents.cc_event_steps import on_assistant_step
 from subagents.cc_event_tool_settlement import settle_missing_tool_results
 from subagents.cc_event_usage import record_terminal_llm_usage
-from subagents.cc_runtime_errors import (
-    is_empty_text_block_rejection,
-    reconcile_expired_login,
-)
+from subagents.cc_runtime_errors import is_empty_text_block_rejection
 from subagents.terminal_marker_writer import insert_terminal_marker
 
 log = logging.getLogger("subagents.cc_runtime_events")
@@ -269,8 +266,7 @@ async def _handle_result_error(
         return
     from subagents.turn_account_error import claude_turn_signed_out
 
-    if not await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db):
-        reconcile_expired_login(ev.get("result"), log)
+    await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 

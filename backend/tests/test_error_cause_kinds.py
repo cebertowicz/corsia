@@ -280,8 +280,6 @@ def test_process_exit_rows_carry_cause_and_cause_kind(monkeypatch, module, harne
 
     errors = importlib.import_module(module)
     monkeypatch.setattr(errors, "broadcast_stored_message", lambda *a, **kw: None)
-    if module.endswith("cc_runtime_errors"):
-        monkeypatch.setattr(errors, "reconcile_expired_login", lambda *a, **kw: None)
     stored: list[dict] = []
 
     def _insert(thread_id, role, text, meta, **kw):

@@ -68,7 +68,7 @@ async def test_tool_and_route_share_one_run_and_one_result(api, monkeypatch):
 
     entered, release, runs = asyncio.Event(), asyncio.Event(), []
 
-    async def check(provider, *, rediscover):
+    async def check(provider):
         runs.append(provider)
         entered.set()
         await release.wait()
@@ -90,18 +90,18 @@ async def test_tool_and_route_share_one_run_and_one_result(api, monkeypatch):
 async def test_incomplete_recheck_fails_both_callers_alike_then_recovers(api, monkeypatch):
     from fastapi import HTTPException
 
-    from connections.source_state import apply_check
+    from tests.vendor_account_fixtures import signed_in_default
     from tools.model_sources import ModelSourcesTool
 
     _put("claude-code", "needs_auth")
     entered, release, finished = asyncio.Event(), asyncio.Event(), []
 
-    async def check(provider, *, rediscover):
+    async def check(provider):
         entered.set()
         await release.wait()
         finished.append(provider)
         if provider == "claude-code":
-            apply_check(provider, "ready")
+            signed_in_default(provider)
         if provider == "codex":
             raise OSError("private diagnostic must not enter response")
 
@@ -150,7 +150,7 @@ async def test_recheck_refreshes_github_once_off_the_loop_for_concurrent_callers
 
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def check(_provider, *, rediscover):
+    async def check(_provider):
         entered.set()
         await release.wait()
 
@@ -190,7 +190,6 @@ def test_startup_still_stores_a_failed_github_probe_as_needs_auth(api, monkeypat
 
     probed = []
     _gh(monkeypatch, lambda binary: probed.append(binary))
-    monkeypatch.setattr(connections, "_codex_sign_in_state", lambda _binary: "ready")
     connections.seed_builtin_connections()
 
     assert probed == ["/opt/test/github"]
@@ -201,7 +200,7 @@ def test_startup_still_stores_a_failed_github_probe_as_needs_auth(api, monkeypat
 async def test_a_cancelled_caller_leaves_the_shared_run_to_finish(api, monkeypatch):
     entered, release, finished = asyncio.Event(), asyncio.Event(), []
 
-    async def check(provider, *, rediscover):
+    async def check(provider):
         entered.set()
         await release.wait()
         finished.append(provider)

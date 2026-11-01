@@ -4,8 +4,8 @@ function readableCause(cause: string | null, cli: string | null): string {
 	if (!cause) return 'Sign-in didn’t complete.';
 	if (cause === 'vendor_login_failed') return 'Sign-in didn’t complete.';
 	if (cause === 'signin_timed_out') return cli
-		? `Couldn’t finish signing in. If your browser said this account doesn’t include ${cli}, sign in with another account or turn this account off. Otherwise, sign in again.`
-		: 'Couldn’t finish signing in. Sign in again, or turn this account off.';
+		? `Couldn’t finish signing in. If your browser said this account doesn’t include ${cli}, sign in with another account or remove this one. Otherwise, sign in again.`
+		: 'Couldn’t finish signing in. Sign in again, or remove this account.';
 	if (cause === 'vendor_not_signed_in') return 'The vendor did not report this account as signed in.';
 	if (cause === 'signin_check_failed') return 'CORSIA could not check the vendor sign-in.';
 	if (cause === 'vendor_login_unavailable') return 'Sign-in is unavailable.';
@@ -21,7 +21,7 @@ export function signinMessage(result: SigninResult, nameOf: (id: string | null |
 	}
 	if (result.status === 'model_refresh_failed') {
 		const name = nameOf(result.account_id);
-		return `${name ?? 'This account'} is still signed in, but its model list couldn’t be reloaded. Use Sign in again to retry.${result.ref ? ` Reference: ${result.ref}` : ''}`;
+		return `${name ?? 'This account'} is still signed in, but its model list couldn’t be reloaded. Use Refresh models to retry.${result.ref ? ` Reference: ${result.ref}` : ''}`;
 	}
 	if (result.status === 'completed') return 'Signed in';
 	if (result.status === 'cancelled') return 'Sign-in cancelled';

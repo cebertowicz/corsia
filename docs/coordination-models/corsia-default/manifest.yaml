@@ -41,8 +41,8 @@ files:
     sha256: 3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f
   - kind: responsibility-template
     path: templates/RESPONSIBILITY.md
-    bytes: 4580
-    sha256: 1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f
+    bytes: 4548
+    sha256: f1681dcca10c9a00dec62dff6b5076d854c0b750b625be17bd9a1cf316cc1df4
   - kind: responsibility-standard
     path: standards/RESPONSIBILITY-STANDARD.md
     bytes: 3492

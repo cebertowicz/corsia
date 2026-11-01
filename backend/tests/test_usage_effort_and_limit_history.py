@@ -31,6 +31,8 @@ from subagents.codex_runtime_state import _LiveCodex
 from subagents.usage_model import usage_effort
 from vendor_account_fixtures import default_receipt
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 USAGE = {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14, "cost_usd": None}
 
 
@@ -202,7 +204,7 @@ def test_the_history_index_serves_an_account_window_between_two_times(isolated_d
 
 
 def test_the_step_is_registered_at_97() -> None:
-    assert SCHEMA_VERSION == 166
+    assert SCHEMA_VERSION == 168
     assert MIGRATIONS[97] is migrate_97_to_98
 
 

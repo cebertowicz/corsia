@@ -230,14 +230,15 @@ def _mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
 def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, db):
     """Submit for review, reject, fail, attach a worker, or accept.
 
-    Acceptance first attributes a still-unbound reviewer Turn to the accepted
-    node's commitment, so verification cost lands on the work it judged rather
-    than on the reviewer's own plan. That attribution never refuses acceptance.
+    Acceptance first binds a still-unbound reviewer Turn to the accepted node's
+    commitment, so verification cost lands on the work it judged; that never refuses.
     """
     node_id = params["node_id"]
     # Who is acting. A human actor executes nothing, so every executor this
     # settlement touches learns about it.
     acting = actor.thread_id if actor.kind == "thread" else None
+    from plans import workflow_fields
+    workflow_fields.refuse_reviewer_self_close(db, node_id, operation)
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":
@@ -259,7 +260,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         mutations.fail_node(node_id, **fields.expected(params), **common)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
-        from plans import closure, workflow_fields
+        from plans import closure
         workflow_fields.refuse_required_skip(db, node_id)
         closure.close_node(
             node_id, reason=fields.text(params, "reason"),
@@ -278,7 +279,6 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
 
     fields.require_passed_verification(params)
     from plans import archival, review_usage
-
     archival.settle_watches(db, node_id)
 
     review_usage.bind(

@@ -81,9 +81,11 @@ def _execute(
             if action not in {"search", "install", "update", "remove", "fetch_pack"}:
                 result = _error("invalid_action", "action must be search, install, update, remove, or fetch_pack")
             elif action in {"search", "install", "update", "fetch_pack"} and not uses_community_improvements(_workspace()):
+                from onboarding.setup_strings import COMMUNITY
+
                 result = _error(
                     "community_off",
-                    "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. remove still works on a copy you already hold.",
+                    "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. During first-run setup, that answer comes from the decision titled '" + COMMUNITY["title"] + "' in setup.setup_decisions; raise it there without rewording it, and nowhere else. remove still works on a copy you already hold.",
                 )
             else:
                 owner_id = _persistent_owner(thread_id, db)

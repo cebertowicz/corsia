@@ -14,10 +14,12 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from infra.backend_git import git_argv
 from infra.worktree_reaper_probe import (
     GIT_TIMEOUT_SECONDS,
     _is_disposable,
     is_tool_output_dir,
+    worktree_git_env,
 )
 
 
@@ -25,12 +27,12 @@ class SalvageError(RuntimeError):
     """A worktree could not be completely salvaged."""
 
 
-def _git_output(worktree: Path, args: list[str]) -> bytes:
+def _git_output(worktree: Path, git_env: dict[str, str], args: list[str]) -> bytes:
     try:
         result = subprocess.run(
-            ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null", *args],
+            git_argv("--no-optional-locks", *args),
             cwd=worktree, capture_output=True, timeout=GIT_TIMEOUT_SECONDS,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env={**os.environ, "LC_ALL": "C", "LANG": "C", **git_env},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SalvageError(f"git {args[0]} failed: {exc}") from exc
@@ -39,9 +41,12 @@ def _git_output(worktree: Path, args: list[str]) -> bytes:
     return result.stdout
 
 
-def _selected(worktree: Path) -> list[Path]:
-    status = _git_output(worktree, [
-        "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignored=matching",
+def _selected(worktree: Path, git_env: dict[str, str]) -> list[Path]:
+    index = _git_output(worktree, git_env, ["ls-files", "--stage", "-z"])
+    if any(record.startswith(b"160000 ") for record in index.split(b"\0")):
+        raise SalvageError("worktree contains a submodule")
+    status = _git_output(worktree, git_env, [
+        "status", "--porcelain=v2", "-z", "--ignore-submodules=all", "--untracked-files=all", "--ignored=matching",
     ])
     records = iter(os.fsdecode(status).split("\0"))
     selected: list[Path] = []
@@ -99,11 +104,15 @@ def _selected(worktree: Path) -> list[Path]:
     return selected
 
 
-def salvage_worktree(repo: Path, worktree: Path, name: str, now: float, origin: Path) -> Path:
+def salvage_worktree(
+    repo: Path, worktree: Path, admin: Path, name: str, now: float, origin: Path,
+) -> Path:
     """Copy tracked changes and non-disposable scratch, or remove the partial copy.
 
-    ``worktree`` is the quarantined tree being read; ``origin`` is where it lived.
+    ``worktree`` is the quarantined tree being read, ``admin`` its verified admin
+    directory (quarantine does not move it), and ``origin`` where it lived.
     """
+    git_env = worktree_git_env(repo, admin, worktree)
     day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
     root = repo.parent / f"{repo.name}-salvage" / day
     destination = root / name
@@ -115,18 +124,20 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float, origin: 
     try:
         destination.mkdir(parents=True)
         created = True
-        branch = os.fsdecode(_git_output(worktree, ["rev-parse", "--abbrev-ref", "HEAD"])).strip()
-        head = os.fsdecode(_git_output(worktree, ["rev-parse", "HEAD"])).strip()
+        branch = os.fsdecode(
+            _git_output(worktree, git_env, ["rev-parse", "--abbrev-ref", "HEAD"]),
+        ).strip()
+        head = os.fsdecode(_git_output(worktree, git_env, ["rev-parse", "HEAD"])).strip()
         pin = f"refs/corsia-salvage/{day}/{destination.name}"
         # The person's diff settings (external tool, textconv, color) would
         # write display output instead of a patch that applies.
-        patch = _git_output(worktree, [
-            "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color",
+        patch = _git_output(worktree, git_env, [
+            "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--ignore-submodules=all",
         ])
         if patch:
             (destination / "changes.patch").write_bytes(patch)
         skipped: list[str] = []
-        for relative in _selected(worktree):
+        for relative in _selected(worktree, git_env):
             source = worktree / relative
             if not (source.is_symlink() or source.is_file()):
                 skipped.append(relative.as_posix())  # a socket or FIFO holds no work
@@ -139,7 +150,9 @@ def salvage_worktree(repo: Path, worktree: Path, name: str, now: float, origin: 
         (destination / "meta.txt").write_text(
             "\n".join(lines) + "\n", encoding="utf-8", errors="surrogateescape",
         )
-        _git_output(worktree, ["update-ref", pin, head])
+        # Refs follow the admin ``commondir`` file, not GIT_COMMON_DIR, so the pin
+        # is written from the repository's own directory, where that file has no say.
+        _git_output(repo, {"GIT_DIR": str(repo / ".git")}, ["update-ref", pin, head])
         return destination
     except (OSError, UnicodeError, SalvageError) as exc:
         if created:

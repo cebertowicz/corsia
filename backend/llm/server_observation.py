@@ -64,7 +64,8 @@ _PENDING: set[asyncio.Task] = set()
 _UNLISTED: dict[str, str | None] = {}
 
 
-# Observation generation per server: an exit or going offline starts a new one. A
+# Observation generation per server: a process exit, or any source finding the server
+# unreachable (even one already offline), starts a new one. A
 # probe or load captures it before awaiting and publishes only if it is unchanged,
 # so a result begun before the server died never revives what it held.
 _GENERATION: dict[str, int] = {}
@@ -112,6 +113,9 @@ async def record_reachable(
         nd._LOADED_BY_SERVER[sid] = set(loaded)
         if changed:
             nd._notify_models_changed_safe()
+        from llm.local_setup import settle_load_failure
+
+        await settle_load_failure(server, loaded)
     if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
         _schedule(nd._discover_and_notify(sid))
 
