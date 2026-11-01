@@ -26,8 +26,10 @@ class MeasureKeyTool(Tool):
     def description(self) -> str:
         return ("Manage the keys an outside tool (anything that speaks OpenTelemetry) uses to send your declared "
                 "measure events to CORSIA. action mint (needs label) returns the key once, with the endpoint to "
-                "send to; CORSIA keeps only a hash, so store it where the tool reads it and never write it into "
-                "a file CORSIA tracks or a message. The key stamps your identity: records may not claim another. "
+                "send to; CORSIA keeps only a hash. CORSIA mints it for you and it works only on this machine; it "
+                "is not a person's credential, so putting it in the outside tool's env or config is the intended "
+                "use. Never write it into a file CORSIA tracks or a message. The key stamps your identity: records "
+                "may not claim another. "
                 "action list shows your keys (never the key itself); action revoke (needs key_id) stops one.")
 
     @property
