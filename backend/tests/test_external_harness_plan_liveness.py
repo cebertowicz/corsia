@@ -203,7 +203,7 @@ def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event,
     try:
         metadata = json.loads(db.execute(
             "SELECT metadata FROM messages WHERE thread_id=? AND role='system' "
-            "ORDER BY seq DESC LIMIT 1",
+            "AND json_extract(metadata,'$.type')='cc_error' ORDER BY seq DESC LIMIT 1",
             (thread_id,),
         ).fetchone()["metadata"])
     finally:

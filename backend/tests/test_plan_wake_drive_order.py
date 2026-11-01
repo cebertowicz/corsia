@@ -273,7 +273,8 @@ async def test_cc_broadcast_failure_is_recoverable_after_commit(
     cc_stream_control.observe_terminal_event(session, completed)
     await session._terminal_driver
 
-    assert order == ["release", "drive:parent"]
+    # The errored worker Turn took in an input it never answered, so it is also woken.
+    assert order == ["release", "drive:parent", "drive:worker"]
     process.kill.assert_not_called()
     assert any(
         "Post-commit plans_changed delivery failed" in message
