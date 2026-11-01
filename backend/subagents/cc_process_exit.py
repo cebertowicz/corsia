@@ -100,7 +100,6 @@ def remember_process_exit(
     return True
 
 
-
 async def _settle_process_exit(
     child_thread_id: str, live: _Live, identity: TurnIdentity,
     pending: PendingProcessExit, detail: str, broadcast: Broadcast, db,
@@ -200,10 +199,11 @@ async def finish_process_exit(
     pending = live.pending_process_exit
     assert pending is not None
     barrier = live.turn_terminal
+    # Settle undriven: the successor starts after the Turn end, outside event_lock.
     terminal, resolved, complete = await _settle_process_exit(
         child_thread_id, live, identity, pending, detail, broadcast, db,
         replaying=replaying,
-        defer_drive=defer_drive,
+        defer_drive=defer_drive or db is None,
     )
     if complete and resolved:
         try:
@@ -214,16 +214,19 @@ async def finish_process_exit(
             # After the exit marker and any sign-out are written; db is None
             # on every production path (record_turn_end opens its own write).
             terminal = await settlement_with_turn_end(
-                terminal, child_thread_id, identity, detail, db,
+                terminal, child_thread_id, identity, str(retained_error(pending.stderr, detail)), db,
             )
         except BaseException as error:
-            if defer_drive:
-                assert isinstance(terminal, TerminalSettlement)
-                raise _CommittedTerminalFailure(terminal, error) from error
+            if isinstance(terminal, TerminalSettlement):
+                if defer_drive:
+                    raise _CommittedTerminalFailure(terminal, error) from error
+                await drive_turn_settlement(terminal)
             raise
         finally:
             if barrier is not None:
                 barrier.set()
+    if isinstance(terminal, TerminalSettlement) and not defer_drive:
+        return await drive_turn_settlement(terminal)
     return terminal
 
 

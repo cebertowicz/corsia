@@ -247,6 +247,40 @@ async def test_a_claude_code_sign_in_expired_process_exit_queues_no_wake(db, dri
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cc", "codex"])
+async def test_a_usage_limit_text_only_in_stderr_queues_no_wake(db, driven, kind) -> None:
+    identity = _take_in(db)
+
+    _live, settlement = await _exit(
+        kind, db, error="You've hit your usage limit. It resets at 5pm.", identity=identity)
+
+    assert _wakes(db) == []
+    assert _THREAD not in settlement.turn_end_effects.drives
+
+
+@pytest.mark.asyncio
+async def test_a_close_that_does_not_defer_still_queues_and_drives_the_wake(db, driven) -> None:
+    """A pending exit settled by a non-deferring close path (feed, idle retire, shutdown)."""
+    from subagents import cc_runtime as rt
+    from subagents.cc_handle_close import finalize_pending_process_exit
+    from subagents.cc_process_exit import remember_process_exit
+
+    identity = _take_in(db)
+    live = rt._Live(session=None, parent_thread_id=None, name="cc",
+                    corsia_turn=identity, turn_active=True)
+    rt._LIVE.put(_THREAD, live)
+    assert remember_process_exit(live, identity, 1, "provider process died")
+
+    try:
+        assert await finalize_pending_process_exit(_THREAD, live, lambda *_a: None) is True
+    finally:
+        rt._LIVE.pop(_THREAD, None)
+
+    assert len(_wakes(db)) == 1
+    assert driven == [_THREAD]
+
+
+@pytest.mark.asyncio
 async def test_a_turn_a_result_event_recorded_is_not_recorded_again_by_its_exit(db, driven) -> None:
     from subagents import cc_runtime as rt
     from subagents.cc_runtime_events import _make_on_event

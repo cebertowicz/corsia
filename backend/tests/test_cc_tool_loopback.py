@@ -1115,6 +1115,7 @@ async def test_exit_callback_failure_still_finalizes_tool_authority(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_process_exit_retains_guard_when_admitted_tool_does_not_quiesce(
     main_db,
     tmp_path,
@@ -1266,6 +1267,7 @@ async def test_resolved_natural_exit_already_removed_by_callback_is_settled():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_exit_settlement_failure_retains_exact_outcome_for_close_retry(
     main_db, tmp_path, monkeypatch,
 ):
