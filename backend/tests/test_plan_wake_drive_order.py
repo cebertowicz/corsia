@@ -402,8 +402,8 @@ async def test_failed_invalidation_broadcast_does_not_strand_the_parent(
     )
 
 
-async def test_a_claude_code_process_exit_now_drives_the_parent_it_woke(lineage, order) -> None:
-    """A worker crash never reached plan liveness; its exit terminal now records the Turn."""
+async def test_a_claude_code_process_exit_drives_the_parent_it_woke(lineage, order) -> None:
+    """A worker's process exit records its Turn end, which wakes and drives the parent."""
     from core.turn_core import drive_turn_settlement
     from subagents import cc_runtime as rt
     from tests.test_cc_turn_preempt import _admit_active_turn

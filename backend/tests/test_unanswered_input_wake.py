@@ -218,6 +218,37 @@ async def test_an_agents_input_is_not_a_persons(db, marker) -> None:
     assert _wakes(db) == []
 
 
+@pytest.mark.asyncio
+async def test_a_turn_a_restart_registration_resumes_queues_nothing(db) -> None:
+    """The restart's own recovery wake resumes the Turn; a second instruction would double it."""
+    from infra.thread_recovery import RESTART_TURN_ERROR
+
+    _take_in(db)
+    db.execute(
+        "INSERT INTO restart_wake_registrations (id,thread_id,reason,status,registered_at,operation_id,turn_id) "
+        "VALUES ('reg-1',?,'restart_recovery','pending','t1','op-1','t1')", (_THREAD,),
+    )
+    db.commit()
+
+    effects = await _end(db, error=RESTART_TURN_ERROR)
+
+    assert _wakes(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_unregistered_restart_end_still_queues_the_wake(db) -> None:
+    """No registration resumes a Turn a crash ended, so the person's message is still answered."""
+    from infra.thread_recovery import RESTART_TURN_ERROR
+
+    _take_in(db)
+
+    effects = await _end(db, error=RESTART_TURN_ERROR)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
 # --- process exits: no result event records the Turn, so the exit terminal does ---
 
 
@@ -265,6 +296,41 @@ async def test_a_process_exit_after_an_unanswered_input_queues_one_wake_and_driv
     assert settlement.turn_end_effects is not None
     assert driven == []  # nothing drives before the settlement is released
     await drive_turn_settlement(settlement)
+    assert driven == [_THREAD]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cc", "codex"])
+async def test_a_process_exit_whose_publishing_fails_still_records_the_turn_end(
+    db, driven, kind, monkeypatch,
+) -> None:
+    """The terminal committed before publishing raised, so its Turn end and wake still land."""
+    from core.turn_core import drive_turn_settlement
+
+    def publish_down(*_args, **_kwargs):
+        raise RuntimeError("publish down")
+
+    async def publish_down_async(*_args, **_kwargs):
+        publish_down()
+
+    if kind == "cc":
+        from subagents import cc_process_exit
+        from subagents.cc_process_exit import _CommittedTerminalFailure as Failure
+
+        monkeypatch.setattr(cc_process_exit, "_publish_process_exit", publish_down_async)
+    else:
+        from subagents import codex_runtime
+        from subagents.codex_runtime_terminal import CommittedTerminalFailure as Failure
+
+        monkeypatch.setattr(codex_runtime, "_surface_exit_error", publish_down)
+    identity = _take_in(db)
+
+    with pytest.raises(Failure) as failure:
+        await _exit(kind, db, error="provider process died", identity=identity)
+
+    assert len(_wakes(db)) == 1
+    assert failure.value.settlement.turn_end_effects is not None
+    await drive_turn_settlement(failure.value.settlement)
     assert driven == [_THREAD]
 
 

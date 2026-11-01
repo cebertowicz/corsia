@@ -79,13 +79,22 @@ def _took_in_wake(db: sqlite3.Connection, turn_id: str) -> bool:
     ).fetchone() is not None
 
 
+def _restart_resumes(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
+    """Whether a restart registration already owns resuming this Turn (``automation.restart_wakes``)."""
+    return db.execute(
+        "SELECT 1 FROM restart_wake_registrations WHERE thread_id=? AND turn_id=? LIMIT 1",
+        (thread_id, turn_id),
+    ).fetchone() is not None
+
+
 def queue_unanswered_input_wake(
     db: sqlite3.Connection, thread_id: str, outcome: dict, liveness_wake, pending,
 ) -> None:
     """Queue one wake and mark the thread for the post-release drive, or do nothing.
 
     A provider-reset liveness wake replaces it (the provider can't serve the
-    thread yet); a plan backoff wake does not, since it neither fires soon nor
+    thread yet), and so does a restart registration for the Turn, whose own wake
+    resumes it; a plan backoff wake does not, since it neither fires soon nor
     names the person's message.
     """
     turn_id = outcome.get("turn_id")
@@ -97,6 +106,7 @@ def queue_unanswered_input_wake(
         not _unanswered_input(db, thread_id, turn_id)
         or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
         or _took_in_wake(db, turn_id)
+        or _restart_resumes(db, thread_id, turn_id)
     ):
         return
     from events.delivery import enqueue_event_wake

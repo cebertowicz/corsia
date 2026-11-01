@@ -207,15 +207,18 @@ async def finish_process_exit(
     )
     if complete and resolved:
         try:
-            await _publish_process_exit(
-                child_thread_id, live, identity, pending.code, detail,
-                broadcast, db,
-            )
-            # After the exit marker and any sign-out are written; db is None
-            # on every production path (record_turn_end opens its own write).
-            terminal = await settlement_with_turn_end(
-                terminal, child_thread_id, identity, str(retained_error(pending.stderr, detail)), db,
-            )
+            try:
+                await _publish_process_exit(
+                    child_thread_id, live, identity, pending.code, detail,
+                    broadcast, db,
+                )
+            finally:
+                # After the exit marker and any sign-out are written, and also when
+                # publishing failed, since the terminal committed; db is None on every
+                # production path (record_turn_end opens its own write).
+                terminal = await settlement_with_turn_end(
+                    terminal, child_thread_id, identity, str(retained_error(pending.stderr, detail)), db,
+                )
         except BaseException as error:
             if isinstance(terminal, TerminalSettlement):
                 if defer_drive:
