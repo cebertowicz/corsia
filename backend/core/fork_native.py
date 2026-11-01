@@ -86,14 +86,18 @@ def _provider_params(model: str) -> dict[str, Any]:
 def _fit_cold_input(
     request: ProviderForkRequest, tools: list[dict[str, Any]],
 ) -> Any:
-    """Count the tool surface and fit the cold input; blocking, run off the loop."""
+    """Count the tool surface and fit the cold input; blocking, run off the loop.
+
+    The round trip is never less than the loop's first-call reserve: an
+    allowance halved below it fitted input that first call then refused.
+    """
     from core.fork_cold_count import cold_input_tokens
     from core.fork_render import fit_cold_fork_input
 
     return fit_cold_fork_input(
         request,
         provider_surface_tokens=cold_input_tokens(tools, request.target),
-        round_trip_tokens=request.max_output_tokens,
+        round_trip_tokens=max(request.max_output_tokens, FORK_TOOL_ROUND_TRIP_TOKENS),
     )
 
 
