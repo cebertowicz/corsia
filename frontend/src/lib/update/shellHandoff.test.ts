@@ -6,7 +6,7 @@ const NOW = 1_800_000_000_000;
 function screen(overrides: Partial<ScreenHandoff> = {}): ScreenHandoff {
 	return {
 		v: 1, operationId: 'update-1',
-		model: { value: 41.3, step: 'upgrading', mode: 'migration', lifted: 0, visitedMigration: true, lastAt: NOW - 1_000 },
+		model: { value: 41.3, step: 'upgrading', lifted: 0, visitedMigration: true, lastAt: NOW - 1_000, phase: { from: 30, to: 60, expected: 60, elapsed: 12 } },
 		fromVersion: '2026.10.12', toVersion: '2026.10.13', usualSeconds: 45,
 		downAt: NOW - 70_000, seqChangedAt: NOW - 61_000, lastSeq: 12, lastPid: 4242,
 		failure: null, theme: 'light', route: '/?project=abc',
@@ -26,6 +26,7 @@ describe('the update screen handoff', () => {
 	it.each([
 		['another version', { v: 2 }],
 		['a percentage past 100', { model: { ...screen().model, value: 140 } }],
+		['a phase that ends before it starts', { model: { ...screen().model, phase: { from: 50, to: 40, expected: 60, elapsed: 1 } } }],
 		['an unknown step', { model: { ...screen().model, step: 'start_fresh' } }],
 		['a clock from another day', { downAt: NOW - 3 * 86_400_000 }],
 		['a fractional pid', { lastPid: 1.5 }],

@@ -12,6 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - The chat no longer jumps up and back down while an agent works and its thinking, actions and waiting dots change, and a long run of tool calls scrolls inside its own box instead of stretching the chat.
+- The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
