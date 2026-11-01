@@ -289,7 +289,7 @@ async def test_interrupted_turn_settles_tool_debt_before_terminal(
     async def record_settle(child_id, live_arg, bcast) -> None:
         order.append("settle")
 
-    async def record_claim(live_arg, outcome, error=None, db=None, *, identity=None):
+    async def record_claim(live_arg, outcome, error=None, db=None, *, identity=None, under_lock=False):
         order.append("claim")
         return TurnTerminalResult.CONFLICTING_TERMINAL
 

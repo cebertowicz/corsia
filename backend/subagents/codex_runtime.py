@@ -287,7 +287,7 @@ async def _end_owned_turn(
     marker_is_context_owner: bool = False,
     terminal_type: str = "turn_complete",
     db=None,
-    defer_drive: bool = False,
+    defer_drive: bool = False, under_lock: bool = False,
 ) -> TurnTerminalResult | TerminalSettlement:
     """Settle tool results, commit this exact Turn, then publish its terminal."""
     if identity is None:
@@ -301,7 +301,7 @@ async def _end_owned_turn(
     if not defer_drive:
         terminal = await _claim_live_terminal(
             live, outcome, error, db,
-            identity=identity,
+            identity=identity, under_lock=under_lock,
         )
     else:
         assert db is None, "deferred Codex terminal requires its own transaction"
@@ -350,7 +350,7 @@ async def _finish_unverified_input_delivery(
     thread_id: str,
     live: _LiveCodex,
     identity: TurnIdentity | None,
-    bcast,
+    bcast, *, under_lock: bool = False,
 ) -> TurnTerminalResult:
     """Close a turn whose provider write cannot be causally proved.
 
@@ -392,7 +392,7 @@ async def _finish_unverified_input_delivery(
         "error",
         error=_UNVERIFIED_INPUT_DELIVERY_DETAIL,
         bcast=bcast,
-        source="codex-app-server:input-delivery-unverified",
+        source="codex-app-server:input-delivery-unverified", under_lock=under_lock,
     )
 
 
@@ -478,7 +478,7 @@ async def _finish_interrupted_turn(
     bcast, db=None,
     *,
     create_marker: bool = True,
-    defer_drive: bool = False,
+    defer_drive: bool = False, under_lock: bool = False,
     stop_error: PlanLimitStop | None = None,
 ) -> TurnTerminalResult | TerminalSettlement:
     async def marker(identity: TurnIdentity | None = live.corsia_turn) -> str | None:
@@ -508,7 +508,7 @@ async def _finish_interrupted_turn(
         marker_is_context_owner=True,
         terminal_type=terminal_type,
         db=db,
-        defer_drive=defer_drive,
+        defer_drive=defer_drive, under_lock=under_lock,
     )
 
 
@@ -1272,7 +1272,7 @@ async def _finish_fenced_live(
         live,
         cause,
         bcast,
-        db=db,
+        db=db, under_lock=True,  # Every caller holds the transition lock.
     ):
         return False
     return await _terminate_exact_live(thread_id, live)
@@ -1503,7 +1503,7 @@ async def _steer_live_input(
                 thread_id,
                 live,
                 live.corsia_turn,
-                bcast,
+                bcast, under_lock=True,
             )
             raise
         _discard_delivery_event_barrier(live)
@@ -2053,7 +2053,7 @@ async def _retire_locked(
                 "retire_requested",
                 bcast,
                 db,
-                create_marker=False,
+                create_marker=False, under_lock=True,
             )
         live.provider_context_untrusted = True
     live_session = getattr(live, "session", None) if live is not None else None
@@ -2129,7 +2129,7 @@ async def _mark_dead_locked(thread_id: str, *, broadcast=None) -> None:
                 live,
                 "mark_dead_requested",
                 bcast,
-                create_marker=False,
+                create_marker=False, under_lock=True,
             )
         live.provider_context_untrusted = True
     if not await _terminate_app_session(thread_id):

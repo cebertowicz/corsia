@@ -50,9 +50,9 @@ async def claim_live_terminal(
     error: str | BaseException | None = None,
     db=None,
     *,
-    identity: TurnIdentity | None = None,
+    identity: TurnIdentity | None = None, under_lock: bool = False,
 ) -> TurnTerminalResult:
-    """Quarantine an unsettled write, then terminalize its Turn; its successor drives after the transition."""
+    """Quarantine an unsettled write, then terminalize its Turn; ``under_lock`` drives the successor after that lock."""
     identity = identity or live.corsia_turn
     if identity is None:
         return TurnTerminalResult.CONFLICTING_TERMINAL
@@ -60,7 +60,7 @@ async def claim_live_terminal(
         settlement = await commit_turn_terminal(
             identity.turn_id, outcome, error, quarantine=UNSETTLED_AT_TERMINAL,
         )
-        if settlement.thread_id is None:
+        if not under_lock or settlement.thread_id is None:
             return await drive_turn_settlement(settlement)
         schedule_terminal_drive(settlement.thread_id, settlement)
         return settlement.result
@@ -105,7 +105,6 @@ async def release_and_drive_terminal(ctx, settlement) -> None:
         await release
 
 
-
 async def finish_interrupted_if_still_owned(
     thread_id: str,
     live: _LiveCodex,
@@ -113,7 +112,7 @@ async def finish_interrupted_if_still_owned(
     bcast,
     *,
     db=None,
-    defer_drive: bool = False,
+    defer_drive: bool = False, under_lock: bool = False,
     stop_error: PlanLimitStop | None = None,
 ) -> bool | tuple[bool, TerminalSettlement | None]:
     """Terminalize only while one fenced generation retains the live slot."""
@@ -127,6 +126,7 @@ async def finish_interrupted_if_still_owned(
         return (False, None) if defer_drive else False
     terminal = await runtime._finish_interrupted_turn(
         thread_id, live, cause, bcast, db, defer_drive=defer_drive, stop_error=stop_error,
+        under_lock=under_lock,
     )
     settlement = terminal if isinstance(terminal, TerminalSettlement) else None
     result = settlement.result if settlement is not None else terminal

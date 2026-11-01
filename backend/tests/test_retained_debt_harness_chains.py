@@ -151,7 +151,7 @@ def _codex_spawns(monkeypatch, thread_id: str) -> list[tuple[str | None, bool]]:
 async def test_codex_terminal_ends_the_turn_when_its_retained_result_is_refused(
     isolated_db, monkeypatch, errors, refuse_real_results, released_in_transition,
 ):
-    """The terminal ends the Turn, then its owed re-run dispatches once the writer is gone.
+    """A terminal under the transition lock ends the Turn, then its re-run dispatches once the writer is gone.
 
     Released in its transition (retire, mark-dead): the re-run waits for the
     lock. Still owning the slot (an unverified steer): the re-run is held and
@@ -180,6 +180,7 @@ async def test_codex_terminal_ends_the_turn_when_its_retained_result_is_refused(
             await codex_runtime._end_owned_turn(
                 thread_id, live, identity, "error",
                 bcast=lambda _thread, frame: frames.append(frame), error=failure,
+                under_lock=True,
             )
             if released_in_transition:
                 finalize_live(thread_id, live)
