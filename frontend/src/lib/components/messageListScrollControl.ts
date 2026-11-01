@@ -7,15 +7,11 @@ function bottomTop(el: HTMLElement, offset: number): number {
 	return Math.max(0, contentEnd(el) - el.clientHeight - offset);
 }
 
-/** How long after a jump the hiding control's band shrink still counts as part of the landing. */
-const JUMP_SETTLE_MS = 600;
-
 /** Keeps transcript scrolling separate from the component's rendering and landing state. */
 export class MessageListScrollControl {
 	#pendingReleaseFrame: number | null = null;
 	#userScrollEpoch = 0;
 	#savedBottomOffset = 0;
-	#jumpedAt = -Infinity;
 
 	constructor(
 		private readonly element: () => HTMLElement | undefined,
@@ -68,13 +64,10 @@ export class MessageListScrollControl {
 		});
 	}
 
-	/** The reader just tapped the jump control: it hides as they land, which shortens the band under the transcript. */
-	noteJump(): void { this.#jumpedAt = performance.now(); }
-
-	/** The band got `by` px shorter right after a jump: the view comes down with it to the content's end, and no further. */
+	/** The band under the transcript got `by` px shorter under a pinned reader: the view comes down with it to the content's end, and no further. */
 	shedBand(by: number): void {
 		const el = this.element();
-		if (!el || performance.now() - this.#jumpedAt > JUMP_SETTLE_MS) return;
+		if (!el) return;
 		const end = bottomTop(el, 0);
 		if (el.scrollTop <= end) return;
 		this.beginProgrammaticScroll(() => { el.scrollTop = Math.max(end, el.scrollTop - by); });

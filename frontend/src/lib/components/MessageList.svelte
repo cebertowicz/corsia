@@ -255,7 +255,7 @@
 	export function scrollToBottomFromUser() {
 		if (initialLanding.targetFor(renderedThreadId) === 'divider') return;
 		if (initialLanding.targetFor(renderedThreadId) === 'opening') cancelInitialLanding();
-		scrollControl.noteJump(); scrollToBottom();
+		scrollToBottom();
 	}
 	/** Pin to the live edge right now — for high-frequency reveal ticks. */
 	export function followBottom() {

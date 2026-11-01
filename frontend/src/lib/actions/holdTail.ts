@@ -1,6 +1,8 @@
 /**
  * Keeps what a scroller shows from getting shorter while an agent works, and after it stops, until the person leaves
- * the thread. A next send keeps the blank space it finds and gives it back as the new turn's content grows into it, so
+ * the thread. The floor only rises while a turn is live: when it ends the floor stays where it reached, so what the
+ * person does afterwards (expanding then collapsing a step) behaves as it always did. A next send keeps the blank space
+ * it finds and gives it back as the new turn's content grows into it, so
  * the send never shortens the scroller under a reader. `node`, an absolutely placed 1px marker in the scroller, sets a
  * floor under the scroller's height: its bottom edge sits at the tallest the content has been, plus the scroller's
  * bottom padding as it is now (the composer's band), so a band that shrinks shortens the scroller as it always did. Whatever the rest of the
@@ -9,7 +11,7 @@
  * layout, so no layout ever shows the scroller shorter and a browser never pulls a reader at the end up; it only moves
  * up when the content grows past it.
  *
- * A person's own toggle needs no release: what it shortens is held too, which keeps their place.
+ * A person's own toggle during a turn needs no release: what it shortens is held too, which keeps their place.
  */
 /**
  * Where the scroller's content ends, as a scrollTop-style height: `scrollHeight` less the blank floor the marker holds.
@@ -49,12 +51,20 @@ export function holdTail(node: HTMLElement, params: { key: string; live: boolean
 			place(high);
 		}
 	};
+	const watch = () => {
+		if (!scroller || mutations) return;
+		mutations = new MutationObserver(settle);
+		mutations.observe(scroller, { childList: true, subtree: true, characterData: true });
+	};
+	const unwatch = () => {
+		mutations?.disconnect();
+		mutations = null;
+	};
 	const stop = () => {
 		holding = false;
 		high = 0;
-		mutations?.disconnect();
+		unwatch();
 		resizes?.disconnect();
-		mutations = null;
 		resizes = null;
 		place(0);
 	};
@@ -65,8 +75,6 @@ export function holdTail(node: HTMLElement, params: { key: string; live: boolean
 			stop();
 			holding = true;
 			width = scroller.clientWidth;
-			mutations = new MutationObserver(settle);
-			mutations.observe(scroller, { childList: true, subtree: true, characterData: true });
 			// A different width reflows the text, so the old height means nothing: start again from the new one.
 			resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
 				if (scroller.clientWidth === width) return;
@@ -77,6 +85,7 @@ export function holdTail(node: HTMLElement, params: { key: string; live: boolean
 			});
 			resizes?.observe(scroller);
 		}
+		watch();
 		high = Math.max(carry ? high : 0, endTop());
 		place(high);
 	};
@@ -92,6 +101,8 @@ export function holdTail(node: HTMLElement, params: { key: string; live: boolean
 				return;
 			}
 			if (next.live && !live) start(true);
+			// The turn ended: take its last growth, then stop raising the floor.
+			if (!next.live && live) { settle(); unwatch(); }
 			live = next.live;
 		},
 		destroy: stop,

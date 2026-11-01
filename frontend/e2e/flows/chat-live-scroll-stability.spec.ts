@@ -245,6 +245,32 @@ for (const size of widths) {
 		expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader when the next send began').toEqual([]);
 	});
 
+	test(`@surface:chat-live-scroll expanding and collapsing a step after the turn ends leaves no more blank space (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(150_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		await openEndThread(page, request, size);
+		const gate = `hold-toggle-${Date.now()}`;
+		const many = Array.from({ length: 30 }, (_, index) => ({ id: `toggle-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+		await seedMockResponses(request, [
+			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+			{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
+		]);
+		await sendChatMessage(page, 'start the live turn');
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		await page.waitForTimeout(3500);
+		await releaseMockGate(request, gate);
+		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
+		await page.waitForTimeout(800);
+		const afterTurn = await heldSpace(page);
+		expect(afterTurn, 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
+		const summary = page.locator('.messages .ta-summary').last();
+		await summary.click();
+		await page.waitForTimeout(500);
+		await summary.click();
+		await page.waitForTimeout(500);
+		expect(await heldSpace(page), 'collapsing a step after the turn left more blank space than the turn did').toBeLessThanOrEqual(afterTurn + 2);
+	});
+
 	test(`@surface:chat-live-scroll jump to latest ignores the held space (${size.name})`, async ({ page, request }, testInfo) => {
 		test.setTimeout(150_000);
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
