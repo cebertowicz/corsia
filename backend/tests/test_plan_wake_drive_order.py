@@ -398,3 +398,24 @@ async def test_failed_invalidation_broadcast_does_not_strand_the_parent(
         "Post-commit plans_changed delivery failed" in message
         for message in caplog.messages
     )
+
+
+async def test_a_claude_code_process_exit_now_drives_the_parent_it_woke(lineage, order) -> None:
+    """A worker crash never reached plan liveness; its exit terminal now records the Turn."""
+    from core.turn_core import drive_turn_settlement
+    from subagents import cc_runtime as rt
+    from tests.test_cc_turn_preempt import _admit_active_turn
+
+    delegated(lineage)
+    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    live = rt._Live(session=None, parent_thread_id="parent", name="cc",
+                    corsia_turn=identity, turn_active=True)
+
+    settlement = await rt._finish_process_exit(
+        "worker", live, 1, "provider died", lambda *_a: None, None, defer_drive=True,
+    )
+
+    assert len(wakes(lineage)) == 1
+    assert order == []
+    await drive_turn_settlement(settlement)
+    assert "drive:parent" in order

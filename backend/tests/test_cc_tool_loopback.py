@@ -751,6 +751,7 @@ async def test_resume_rejection_immediately_revokes_tool_authority(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_post_acceptance_resume_rejection_finishes_the_admitted_turn(
     main_db, tmp_path, monkeypatch, caplog,
 ):
@@ -886,6 +887,7 @@ async def test_post_acceptance_resume_rejection_finishes_the_admitted_turn(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_post_acceptance_resume_rejection_settles_even_when_retirement_fails(
     main_db, tmp_path, monkeypatch, caplog,
 ):

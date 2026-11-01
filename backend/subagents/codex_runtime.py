@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from core import turn_core
+from core.plan_turn_end import settlement_with_turn_end
 from core.stop_causes import PlanLimitStop
 from infra.db_async import run_in_db, run_in_db_unless_owned
 from infra.database import get_db, write_transaction
@@ -425,11 +426,8 @@ async def _finish_process_exit(
             emit_terminal=False,
         )
 
-    return await _end_owned_turn(
-        thread_id,
-        live,
-        identity,
-        "error",
+    return await settlement_with_turn_end(await _end_owned_turn(
+        thread_id, live, identity, "error",
         error=_tool_terminal.retained_error(stderr, detail),
         bcast=bcast,
         source="codex-app-server:transport-exit",
@@ -438,7 +436,7 @@ async def _finish_process_exit(
         marker_is_context_owner=False,
         db=db,
         defer_drive=defer_drive,
-    )
+    ), thread_id, identity, detail, db)
 
 
 async def _settle_exited_generation(

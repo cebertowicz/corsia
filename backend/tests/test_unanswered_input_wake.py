@@ -56,6 +56,7 @@ def _take_in(db, turn="t1", message="m1", **metadata) -> None:
     begin_batch_write(admission.batch, attempt_id=f"w-{turn}", started_at="t1", db=db)
     settle_batch_write(f"w-{turn}", outcome="accepted", db=db)
     db.commit()
+    return admission.batch.identity
 
 
 async def _end(db, turn="t1", *, outcome="error", error="provider exploded", **more):
@@ -182,6 +183,87 @@ async def test_an_agents_input_is_not_a_persons(db) -> None:
     await _end(db)
 
     assert _wakes(db) == []
+
+
+# --- process exits: no result event records the Turn, so the exit terminal does ---
+
+
+async def _exit(kind: str, db, *, error: str, identity):
+    """The real production exit path (db=None, deferred drive); returns its settlement."""
+    if kind == "cc":
+        from subagents import cc_runtime as rt
+
+        live = rt._Live(session=None, parent_thread_id=None, name="cc",
+                        corsia_turn=identity, turn_active=True)
+        return live, await rt._finish_process_exit(
+            _THREAD, live, 1, error, lambda *_a: None, None, defer_drive=True)
+    from subagents import codex_runtime
+
+    live = codex_runtime._LiveCodex(
+        codex_thread_id="codex-thread", session=None, parent_thread_id=None, name="codex")
+    live.corsia_turn = identity
+    return live, await codex_runtime._finish_process_exit(
+        _THREAD, live, 1, error, lambda *_a: None, None, defer_drive=True)
+
+
+@pytest.fixture
+def driven(monkeypatch):
+    seen: list[str] = []
+
+    async def capture(threads):
+        seen.extend(threads)
+
+    monkeypatch.setattr("plans.notifications.drive_threads", capture)
+    return seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cc", "codex"])
+async def test_a_process_exit_after_an_unanswered_input_queues_one_wake_and_drives_it(
+    db, driven, kind,
+) -> None:
+    from core.turn_core import drive_turn_settlement
+
+    identity = _take_in(db)
+
+    _live, settlement = await _exit(kind, db, error="provider process died", identity=identity)
+
+    assert len(_wakes(db)) == 1
+    assert settlement.turn_end_effects is not None
+    assert driven == []  # nothing drives before the settlement is released
+    await drive_turn_settlement(settlement)
+    assert driven == [_THREAD]
+
+
+@pytest.mark.asyncio
+async def test_a_claude_code_sign_in_expired_process_exit_queues_no_wake(db, driven) -> None:
+    identity = _take_in(db)
+
+    _live, settlement = await _exit(
+        "cc", db, error="Not logged in \u00b7 Please run /login", identity=identity)
+
+    assert _wakes(db) == []
+    assert _THREAD not in settlement.turn_end_effects.drives
+
+
+@pytest.mark.asyncio
+async def test_a_turn_a_result_event_recorded_is_not_recorded_again_by_its_exit(db, driven) -> None:
+    from subagents import cc_runtime as rt
+    from subagents.cc_runtime_events import _make_on_event
+
+    identity = _take_in(db)
+    live = rt._Live(session=None, parent_thread_id=None, name="cc",
+                    corsia_turn=identity, turn_active=True)
+    first = await _make_on_event(live, _THREAD, lambda *_a: None, None)(
+        {"kind": "result", "result": "provider ended", "is_error": True})
+    assert first.effects is not None
+    assert len(_wakes(db)) == 1
+
+    exit_terminal = await rt._finish_process_exit(
+        _THREAD, live, 1, "died after", lambda *_a: None, None, defer_drive=True)
+
+    assert getattr(exit_terminal, "turn_end_effects", None) is None
+    assert len(_wakes(db)) == 1
 
 
 # --- native end to end: a real Turn over a loopback provider, no model process ---

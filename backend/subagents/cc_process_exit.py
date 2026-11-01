@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TypeAlias
 
+from core.plan_turn_end import settlement_with_turn_end
 from core.stop_causes import PlanLimitStop, frame_cause
 from core.turn_core import (
     TerminalSettlement,
@@ -209,6 +210,11 @@ async def finish_process_exit(
             await _publish_process_exit(
                 child_thread_id, live, identity, pending.code, detail,
                 broadcast, db,
+            )
+            # After the exit marker and any sign-out are written; db is None
+            # on every production path (record_turn_end opens its own write).
+            terminal = await settlement_with_turn_end(
+                terminal, child_thread_id, identity, detail, db,
             )
         except BaseException as error:
             if defer_drive:
