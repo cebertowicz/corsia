@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { setupLocalRow, setupStartNote } from './setupProviderRows';
+import { setupLocalPhase, setupLocalRow, setupStartNote } from './setupProviderRows';
 
 const actions = () => ({
 	start: vi.fn(),
@@ -113,12 +113,38 @@ describe('setup provider rows', () => {
 	});
 
 	it('explains the gate from the current working and download states', () => {
-		expect(setupStartNote(false, false, false))
+		expect(setupStartNote(false, false, 'idle'))
 			.toBe('Set up a subscription or add an API provider to continue.');
-		expect(setupStartNote(false, true, true, 720))
+		expect(setupStartNote(false, true, 'downloading', 720))
 			.toBe('Ready when the local model finishes downloading (12 min left).');
-		expect(setupStartNote(true, true, true))
+		expect(setupStartNote(true, true, 'downloading'))
 			.toBe('The local model keeps downloading. Follow it in Settings › Providers.');
+		expect(setupStartNote(false, true, 'idle'))
+			.toBe('Download the local model, set up a subscription or add an API provider to continue.');
+	});
+
+	it('says the local model is starting, never downloading, while it starts or loads', () => {
+		for (const [state, preparing] of [['starting', false], ['ready', false], [undefined, true]] as const) {
+			const phase = setupLocalPhase(state, false, preparing);
+			expect(phase).toBe('starting');
+			expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes starting.');
+			expect(setupStartNote(true, true, phase)).toBe('');
+		}
+	});
+
+	it('says the local model keeps downloading only while it downloads or is paused', () => {
+		expect(setupLocalPhase('downloading', false, false)).toBe('downloading');
+		expect(setupLocalPhase('paused', false, false)).toBe('downloading');
+		for (const state of ['starting', 'ready', 'stopped', undefined]) expect(setupStartNote(true, true, setupLocalPhase(state, false, true))).toBe('');
+	});
+
+	it('points a failed local model at its Retry button, never at Download', () => {
+		for (const state of ['failed', 'setup_failed', 'start_failed', 'ready', undefined]) {
+			const phase = setupLocalPhase(state, true, false);
+			expect(phase).toBe('failed');
+			expect(setupStartNote(false, true, phase)).toBe('Press Retry, set up a subscription or add an API provider to continue.');
+		}
+		expect(setupStartNote(false, false, 'failed')).toBe('Set up a subscription or add an API provider to continue.');
 	});
 });
 
