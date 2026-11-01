@@ -344,6 +344,74 @@ async def test_run_id_that_is_not_a_plan_node_is_the_producers_label(world) -> N
 
 
 @pytest.mark.asyncio
+async def test_a_plan_node_run_id_stamps_its_workflow_and_another_agents_node_is_refused(world) -> None:
+    from tests.plan_writer_authorizer import raw_plan_seed
+
+    mk_session("otlp-worker", spawned_by=OWNER, project_id="project-a")
+    db = get_db()
+    with raw_plan_seed(db):
+        for plan, owner in (("p-own", OWNER), ("p-worker", "otlp-worker"), ("p-other", OTHER)):
+            db.execute("INSERT INTO plans(id,owner_kind,owner_id,created_at,updated_at) VALUES (?,'thread',?,'2026-01-01','2026-01-01')", (plan, owner))
+            db.execute("INSERT INTO plan_nodes(id,plan_id,kind,title,acceptance_criteria,order_key,commitment_id,"
+                       "workflow_ref,workflow_version,created_at,updated_at) "
+                       "VALUES (?,?,'task','Task','done',1,?,'wf',?,'2026-01-01','2026-01-01')",
+                       (f"n-{plan}", plan, f"n-{plan}", f"v-{plan}"))
+    db.commit()
+    client, measure_key, _ = world
+    base = {"event.name": "qa.rec", "n": 1}
+    accepted = await send(client, measure_key, request_of(
+        {**base, "code": "o1", "corsia.run_id": "n-p-own"}, {**base, "code": "o2", "corsia.run_id": "n-p-worker"}))
+    assert rejected(accepted) == (0, "")
+    stored = sorted(json.loads(row[0])["workflow_version"] for row in db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='qa.rec'"))
+    assert stored == ["v-p-own", "v-p-worker"]
+    count, text = rejected(await send(client, measure_key, request_of({**base, "code": "o3", "corsia.run_id": "n-p-other"})))
+    db.close()
+    assert count == 1 and "corsia.run_id" in text and rows("qa.rec") == 2
+
+
+@pytest.mark.asyncio
+async def test_a_bad_subject_is_refused_and_other_corsia_attributes_reach_admission(world) -> None:
+    client, measure_key, _ = world
+    count, text = rejected(await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "s1", "n": 1, "corsia.subject": "no spaces allowed"})))
+    assert count == 1 and "corsia.subject" in text and rows("qa.rec") == 0
+    kept = await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "s2", "n": 1, "corsia.extra": "x"}))
+    assert rejected(kept) == (0, "") and rows("qa.rec") == 1
+    assert any("corsia.extra" in note for note in REGISTRY.refusals[OWNER])
+
+
+@pytest.mark.asyncio
+async def test_a_sender_stalled_mid_body_does_not_hold_the_write_slot(world) -> None:
+    client, measure_key, port = world
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write((f"POST /v1/logs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {measure_key}\r\n"
+                  f"Content-Type: {PROTOBUF}\r\nContent-Length: 100\r\n\r\n").encode() + b"0123456789")
+    await writer.drain()
+    await asyncio.sleep(0.1)
+    response = await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "t1", "n": 1}))
+    writer.close()
+    assert response.status_code == 200 and rows("qa.rec") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_busy_port_falls_back_and_no_free_port_leaves_the_listener_off(monkeypatch) -> None:
+    import infra.otlp_listener as listener_module
+
+    monkeypatch.delenv(PORT_ENV, raising=False)
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        free = _free_port()
+        monkeypatch.setattr(listener_module, "DEFAULT_PORT", busy.getsockname()[1])
+        monkeypatch.setattr(listener_module, "FALLBACK_PORTS", (free,))
+        bound = listener_module._prebind()
+        assert bound is not None and bound.getsockname()[1] == free
+        bound.close()
+        monkeypatch.setattr(listener_module, "FALLBACK_PORTS", ())
+        assert await OtlpListener().start() is False
+
+
+@pytest.mark.asyncio
 async def test_list_returns_the_current_endpoint(world) -> None:
     _, _, port = world
     listing = json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="list"))

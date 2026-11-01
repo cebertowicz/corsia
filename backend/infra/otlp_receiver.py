@@ -1,10 +1,11 @@
 """The loopback OTLP/HTTP logs receiver: ``POST /v1/logs`` for declared measure events.
 
 Mounted only on the loopback listener (``infra.otlp_listener``), never on the main app, so the
-main app answers 404 for this path. Nothing reads or decodes a body until the header checks and
-the key have passed, in this order: key shape, restart hold, content type and encoding, content
-length, key lookup, request cap, then the single write job slot. Refused requests never write to
-the database; their counts are kept in memory (``infra.otlp_state``).
+main app answers 404 for this path. Nothing reads a body until the header checks and the key have
+passed, in this order: key shape, restart hold, content type and encoding, content length, key
+lookup, request cap. The body is then read outside the single write job slot, which is taken only
+to decode and write. Refused requests never write to the database; their counts are kept in
+memory (``infra.otlp_state``).
 """
 from __future__ import annotations
 
@@ -100,14 +101,15 @@ class OtlpReceiver:
         agent = owner.agent_thread_id
         if (wait := CAPS.charge_request(agent)) is not None:
             raise _Refused(429, "rate_limited", "too many requests this minute", agent, str(wait))
+        # Read the body before taking the slot, so a sender that stalls mid-body holds only its own connection.
+        body = await _read_body(receive, int(length), agent)
         if self._slot.locked():
             raise _Refused(503, "busy", "another telemetry request is being written; retry shortly", agent, RETRY_AFTER_BUSY)
         async with self._slot:
-            return await self._write(owner, content_type, headers, int(length), receive)
+            return await self._write(owner, content_type, headers, body)
 
-    async def _write(self, owner: KeyOwner, content_type: str, headers: dict[str, str], length: int, receive: Any) -> Response:
+    async def _write(self, owner: KeyOwner, content_type: str, headers: dict[str, str], body: bytes) -> Response:
         agent = owner.agent_thread_id
-        body = await _read_body(receive, length, agent)
         try:
             if headers.get("content-encoding", "").lower() == "gzip":
                 body = await run_off_db(decode.inflate, body, INFLATED_LIMIT)

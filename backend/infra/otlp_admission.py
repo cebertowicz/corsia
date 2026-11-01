@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from infra.database import get_db, write_transaction
-from infra.measure_admission import UNNAMED_LINE, admit
+from infra.measure_admission import _KIND_RULES, UNNAMED_LINE, admit
 from infra.measure_registry import REGISTRY
 from infra.otlp_decode import WireRecord
 from infra.outcome_event_attributes import AttributeSpec
@@ -32,6 +32,8 @@ _NODE_SQL = (
     "FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE n.id IN ({marks})"
 )
 _IDENTITY_KEYS = ("corsia.project_id", "corsia.agent_thread_id")
+# The stamps a record may repeat; every other attribute, corsia.* included, goes to admit() as sent.
+_STAMP_KEYS = frozenset((*_IDENTITY_KEYS, "corsia.run_id", "corsia.workflow.ref", "corsia.workflow.version", "corsia.subject"))
 
 
 @dataclass(frozen=True)
@@ -86,7 +88,7 @@ def read_lookup(db: sqlite3.Connection, agent: str, records: list[WireRecord]) -
 def workflow_stamps(agent: str, records: list[WireRecord]) -> dict[str, tuple[str, str | None] | None]:
     """The (ref, current version) of each workflow ref a record names, None when the agent doesn't own it.
 
-    Reads Git for the version, so it runs off the database pool, on a connection of its own.
+    Reads Git for the version, so it runs off the database pool, on this worker thread's pooled connection.
     """
     refs = {ref for r in records if isinstance(ref := _claimed(r, "corsia.workflow.ref"), str)}
     if not refs:
@@ -94,10 +96,7 @@ def workflow_stamps(agent: str, records: list[WireRecord]) -> dict[str, tuple[st
     from tools.workflow_owners import workflow_stamp
 
     db = get_db()
-    try:
-        return {ref: workflow_stamp(agent, ref, db) for ref in refs}
-    finally:
-        db.close()
+    return {ref: workflow_stamp(agent, ref, db) for ref in refs}
 
 
 def _mismatch(name: str, what: str) -> Item:
@@ -134,8 +133,9 @@ def _decide(agent: str, record: WireRecord, lookup: Lookup, workflows: dict[str,
             return _mismatch(name, "corsia.workflow.version is not the version CORSIA stamps for this workflow")
         ref, version = claimed_ref, current[1]
     subject = _claimed(record, "corsia.subject")
-    subject = subject if isinstance(subject, str) and AttributeSpec("id").accepts(subject) else None
-    attributes = {k: v for k, v in record.attributes.items() if k != "event.name" and not k.startswith("corsia.")}
+    if subject is not None and not (isinstance(subject, str) and AttributeSpec("id").accepts(subject)):
+        return Item(name, ("record_refused", f"{name}: corsia.subject is not an id ({_KIND_RULES['id']}); the record was dropped. Send an id, or leave corsia.subject out."))
+    attributes = {k: v for k, v in record.attributes.items() if k != "event.name" and k not in _STAMP_KEYS}
     return Item(
         name, route=lookup.uses.get(name, "record") != "record", attributes=attributes, ts=record.ts,
         subject=subject, run_id=run_id,
