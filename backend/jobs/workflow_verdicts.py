@@ -95,7 +95,7 @@ def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMI
     finally:
         db.close()
     by_word = Counter(item.verdict.word for item in evaluations)
-    reached = sum(count for word, count in by_word.items() if word in detail.REACHED_WORDS)
+    reached = sum(count for word, count in by_word.items() if word in evaluator.STORED)
     recorded = woken = 0
     if evaluator.VERDICT_WRITES_ENABLED:
         with write_transaction(None, scope="workflow_verdict_daily") as db:

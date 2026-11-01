@@ -3,6 +3,9 @@
 There is no supported route to read the live database, so the job's log line is how its owner reads the outcome
 on real data. Everything here is a count, a size or a reason word computed inside the job over the open batch or the
 open trials' window: no lesson, workflow, task, node, thread or person name or id leaves this module. Reads only.
+
+Temporary: these aggregates answer the checks owed before verdict writes are enabled. Delete this module, the
+fields it feeds and ``TrialRead`` before ``VERDICT_WRITES_ENABLED`` flips, so none of it sits on the write path.
 """
 from __future__ import annotations
 
@@ -11,11 +14,11 @@ import sqlite3
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
+from core.workflow_verdict_evaluator import STORED
 from core.workflow_verdict_read import json_ids
 from core.workflow_verdict_types import Evaluation, split_subject
 from core.workflow_verdicts import DEFAULT_MINIMUM
 
-REACHED_WORDS = frozenset({"keep", "revert"})
 HALVES_CAP = 50
 _KEYS = "keys AS (SELECT json_extract(value,'$[0]') AS lesson, json_extract(value,'$[1]') AS sha FROM json_each(:keys))"
 # Every receipt row of the open trials, with its task's send-back count and the task it revises (a send-back's
@@ -78,7 +81,7 @@ def reached_detail(evaluations: Sequence[Evaluation]) -> list[dict[str, Any]]:
     found = []
     for item in evaluations:
         verdict = item.verdict
-        if verdict.word not in REACHED_WORDS:
+        if verdict.word not in STORED:
             continue
         used = [call for call in verdict.calls if call.role != "shown" and (call.n_new or call.n_base)]
         found.append({"kind": kind_of(item), "word": verdict.word, "reason": verdict.reason, "look": verdict.look,
