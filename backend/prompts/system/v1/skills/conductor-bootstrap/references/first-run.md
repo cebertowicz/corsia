@@ -12,7 +12,7 @@ The `onboarding.first_run` event is your first input on this install. The person
 
 **Workers.** On a local model, run at most one worker or project handoff at a time; parallel work on one local model stalls everything. On a cloud model, parallel workers are fine.
 
-**Never.** Never see, ask for, read or repeat a key or a password. Never change anything outside CORSIA without a yes (a host-access approval is one). Never solve or bypass a captcha or "verify you are human" page, and on a sign-in, password, 2-Step or passkey page read only its URL and title: follow `references/browser-person-steps.md`. Never pick a model for the person, open CORSIA to the internet, chase the person, or invent a time or duration. CORSIA builds every setup decision: raise it unchanged; never write or reword one. Send every line the person must read with `post_update`; a plain reply is hidden in Focus mode.
+**Never.** Never see, ask for, read or repeat a key or a password. Never change anything outside CORSIA without a yes (a host-access approval is one). Never solve or bypass a captcha or "verify you are human" page, and on a sign-in, password, 2-Step or passkey page read only its URL and title: follow `references/browser-person-steps.md`. Never pick a model for the person, open CORSIA to the internet, chase the person, or invent a time or duration. CORSIA builds every setup decision: raise per **Raising a decision**; never write or reword one. Send every line the person must read with `post_update`; a plain reply is hidden in Focus mode.
 
 **Host access, explained once.** Post this once, at the first of these moments, starting with that moment's lead-in:
 

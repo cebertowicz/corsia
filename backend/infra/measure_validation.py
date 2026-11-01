@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from core.agent_kpi_formula import unfit
 from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
@@ -294,6 +295,8 @@ def _operand_events(spec: dict[str, Any]) -> list[str]:
 def _check_kpi(name: str, spec: dict[str, Any], context: _Context) -> None:
     """The ``can_decide`` sync test (§4.2): each check is a field check, with its §5 refusal."""
     path = ("kpis", name)
+    if problem := unfit(spec):
+        raise fail(context.lines, path, f"kpi {name} {problem}.")
     deciding, decides_as = spec.get("can_decide", False), spec.get("decides_as")
     if not isinstance(deciding, bool):
         raise fail(context.lines, path + ("can_decide",), f"kpi {name} can_decide must be true or false.")

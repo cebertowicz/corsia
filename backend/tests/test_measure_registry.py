@@ -97,6 +97,24 @@ def refused(tmp_path: Path, text: str) -> str:
     return str(caught.value)
 
 
+def test_a_kpi_formula_the_evaluator_lacks_is_refused(tmp_path: Path) -> None:
+    text = small("mean:\n  title: Mean\n  unit: count\n  better: higher\n  formula: mean\n  num: {event: qa.done}\n  min_n: 1")
+    message = refused(tmp_path, text)
+    assert 'formula "mean" is not one of count, ratio, rate_per_run, share, percentile' in message
+
+
+def test_a_kpi_without_a_formula_is_refused(tmp_path: Path) -> None:
+    text = small("nameless:\n  title: Nameless\n  unit: count\n  better: higher\n  num: {event: qa.done}\n  min_n: 1")
+    assert "kpi nameless has no formula; add one of count, ratio, rate_per_run, share, percentile as its formula." in refused(tmp_path, text)
+
+
+def test_a_kpi_missing_a_field_its_formula_reads_is_refused(tmp_path: Path) -> None:
+    ratio = small("half:\n  title: Half\n  unit: ratio\n  better: higher\n  formula: ratio\n  num: {event: qa.done}\n  min_n: 1")
+    assert "kpi half formula ratio needs den; add it." in refused(tmp_path, ratio)
+    share = small("mix:\n  title: Mix\n  unit: percent\n  better: higher\n  formula: share\n  num: {event: qa.done}")
+    assert "kpi mix formula share needs min_n, num.attr, num.values; add them." in refused(tmp_path, share)
+
+
 def deciding(extra: str = "", *, name: str = "rate") -> str:
     return (
         f"{name}:\n  title: Rate\n  unit: percent\n  better: higher\n  formula: share\n"
@@ -194,9 +212,9 @@ def test_can_decide_check_1_needs_target_and_review(tmp_path: Path) -> None:
 def test_can_decide_check_2_needs_a_workflow_version(tmp_path: Path) -> None:
     carrying = "kpi rate can_decide: true needs a KPI that can carry a workflow version (no operand anchors on a workflow event). Add match … anchor: true on a workflow event, or set can_decide: false."
     assert carrying in refused(tmp_path, small(deciding(), workflow=False))
-    foreign = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged")
+    foreign = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, attr: verdict, values: [pass]")
     assert carrying in refused(tmp_path, small(foreign))
-    anchored = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, match: [{event: qa.done, on: pr, mode: exists, anchor: true}]")
+    anchored = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, attr: verdict, values: [pass], match: [{event: qa.done, on: pr, mode: exists, anchor: true}]")
     text = small(anchored, corroborate=False)  # a platform numerator, versioned through the anchor on a file event
     path = skill_file(tmp_path, text)
     sync_skill(db(), path, text)

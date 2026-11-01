@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from llm.context_window import WindowFacts, resolve_window_facts
+from llm.context_window import WindowFacts, resolve_live_window_facts
 
 
 class ModelUnavailableError(Exception):
@@ -188,7 +188,7 @@ def resolve_execution_target(
                 row, available
             )
 
-        windows = resolve_window_facts(row, db=connection)
+        windows = resolve_live_window_facts(row, db=connection)
         preserve_thinking_default = metadata.get("preserve_thinking_default")
         if not isinstance(preserve_thinking_default, bool):
             preserve_thinking_default = None

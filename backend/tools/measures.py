@@ -66,17 +66,17 @@ def _kpi_summary(result: dict[str, Any]) -> list[dict[str, Any]]:
             for item in result["kpis"]]
 
 
-async def _own_kpis(user_id: str, project: str | None, thread_id: str) -> list[dict[str, Any]] | str:
+async def _own_kpis(user_id: str, thread_id: str) -> list[dict[str, Any]] | str:
     from fastapi import HTTPException
 
-    from api.measurement_agent_kpis import _read
+    from api.measurement_agent_kpis import read_own
     from api.measurement_scope import resolve_grain
 
     try:
         weeks = resolve_grain("weeks", "UTC")
         # Only the two periods the summary keeps are read: the last complete week and the current one.
         grain = replace(weeks, periods=weeks.periods[-1:], starts=weeks.starts[-2:])
-        return _kpi_summary(await run_bulk(_read, user_id, project or "all", thread_id, grain))
+        return _kpi_summary(await run_bulk(read_own, user_id, thread_id, grain))
     except HTTPException as exc:
         return f"Error: {exc.detail}"
 
@@ -141,7 +141,7 @@ class MeasureStatusTool(Tool):
             return status(get_db(), thread_id)
         result = await run_in_db(read)
         if kwargs.get("kpis"):
-            kpis = await _own_kpis(actor_row["user_id"], actor_row.get("project_id"), thread_id)
+            kpis = await _own_kpis(actor_row["user_id"], thread_id)
             if isinstance(kpis, str):
                 return kpis
             result["kpis"] = kpis

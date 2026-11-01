@@ -30,6 +30,10 @@ def is_provider_context_limit(value: Any) -> bool:
         # mention ("a maximum context length of N tokens"), which must not
         # classify.
         "maximumcontextlengthis",
+        # oMLX refuses a prompt whose prefill cannot fit in memory: "oMLX prefill
+        # memory guard rejected this prompt: ...". Anchored on the refusal verb so
+        # a settings label such as "Memory Guard: aggressive" does not classify.
+        "prefillmemoryguardrejected",
         "promptistoolong",
         "prompttoolong",
         "ranoutofroom",

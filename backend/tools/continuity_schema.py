@@ -1,10 +1,11 @@
 """The continuity_edit parameter schema, generated from its validators.
 
-The schema and the validator disagreeing is the defect #1477 records: a call
-an agent built from the tool definition alone was rejected at runtime, and the
-real shape had to be found by trial. So nothing here is written by hand -- the
-branches, the per-field rules and the prose are all derived from
-``ENTRY_FIELD_MODELS`` and the maps the executor enforces.
+The schema and the validator disagreeing on a body's shape is the defect #1477
+records: a call built from the tool definition alone was rejected at runtime,
+and the real shape had to be found by trial. So nothing here is written by
+hand -- the body's keys, the per-field rules and the prose are all derived
+from ``ENTRY_FIELD_MODELS`` and the maps the executor enforces. Length and
+item bounds are left out; the server refuses a body over one, naming it.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ _ONE_FIELD_PER_MODEL = tuple(
 def _body_key_groups() -> str:
     """Describe which body keys each continuity field needs.
 
-    Derived from the validator's own models rather than restated, because the
-    schema being looser than the validator is the defect this repairs: a
+    Derived from the validator's own models rather than restated, because a
+    shape the definition does not describe is the defect this repairs: a
     schema-valid call was rejected at runtime and the shape had to be found by
     trial (#1477).
     """
@@ -57,6 +58,13 @@ def _body_key_groups() -> str:
         f"{{{', '.join(keys)}}}"
         for keys, fields in groups.items()
     )
+
+
+#: Keys left out of the generated shapes. The length and item bounds are held
+#: by the entry models (``BoundedText``, ``SourceRefs`` in
+#: :mod:`core.continuity_types`) and applied to every body by the store
+#: validator, so advertising them again only costs prompt tokens.
+_LEFT_OUT = ("title", "$defs", "minLength", "maxLength", "maxItems")
 
 
 def _inline_refs(schema: Any, defs: dict[str, Any]) -> Any:
@@ -73,7 +81,7 @@ def _inline_refs(schema: Any, defs: dict[str, Any]) -> Any:
         return {
             key: _inline_refs(value, defs)
             for key, value in schema.items()
-            if key not in ("title", "$defs")
+            if key not in _LEFT_OUT
         }
     if isinstance(schema, list):
         return [_inline_refs(item, defs) for item in schema]
@@ -81,21 +89,24 @@ def _inline_refs(schema: Any, defs: dict[str, Any]) -> Any:
 
 
 def _body_schema() -> dict[str, Any]:
-    """Declare the four legal entry shapes, once, with their real constraints.
+    """One body object: the union of the four entry shapes' generated keys.
 
-    Generated from the validator models, so the text bound, the restricted
-    ``relevant_state.kind`` vocabulary and ``extra="forbid"`` all carry across
-    rather than being restated (#1477 is a restatement drifting from what it
-    restated).
-
-    ``oneOf`` here does the work that does not depend on which field an entry
-    belongs to: a body matching none of the four is refused for every
-    operation, including ``replace``, which names its entry by id and cannot
-    say which field that is. :func:`field_body_rules` then narrows to the one
-    shape when the field IS known.
+    Generated from the validator models (the restricted ``relevant_state.kind``
+    vocabulary and ``extra="forbid"`` carry across; #1477 is a restatement
+    drifting), and a key two shapes declare differently fails at import. Which
+    keys go together is in the description; a wrong shape is refused by the
+    server, not here: :func:`body_errors` for ``add`` and ``replace``,
+    :func:`field_body_rules` for any call that names its field.
     """
+    properties: dict[str, Any] = {}
+    for model in _distinct_models():
+        for key, schema in _model_schema(model)["properties"].items():
+            if properties.setdefault(key, schema) != schema:
+                raise RuntimeError(f"body key {key!r} is declared two ways")
     return {
-        "oneOf": [_model_schema(model) for model in _distinct_models()],
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
         "description": (
             "The continuity entry body. Its required shape is set by the "
             "field: " + _body_key_groups() + ". source_refs is a list of "
@@ -119,22 +130,20 @@ def field_body_rules() -> list[dict[str, Any]]:
     """Narrow the body to the one shape a named field accepts.
 
     Deliberately NOT a second copy of the model schemas. Provider-side JSON
-    Schema validators apply the types, bounds and vocabularies in
-    :func:`_body_schema`; CORSIA applies those same rules by calling the store
-    validator in :func:`body_errors`, because :class:`tools.base.Tool` does not
-    implement ``oneOf``. All this clause must add is WHICH shape a named field
-    takes. The key set alone discriminates the four mutually exclusive shapes,
-    so it carries bare key names with empty schemas -- enough to select,
-    nothing restated.
+    Schema validators apply the types and vocabularies in
+    :func:`_body_schema`; CORSIA applies the full rules, bounds included, by
+    calling the store validator in :func:`body_errors`. All this clause must
+    add is WHICH shape a named field takes. The key set alone discriminates the
+    four mutually exclusive shapes, so it carries bare key names with empty
+    schemas -- enough to select, nothing restated.
 
     That is what makes the field-precise guarantee affordable. Repeating the
-    full shapes here cost about 740 tokens in every agent's prompt for
-    information ``oneOf`` already carried.
+    full shapes here cost about 740 tokens in every agent's prompt.
 
     One clause per distinct model rather than per field, because thirteen
     fields share four shapes. Each applies only when ``field`` is present, so
-    ``replace`` and ``drop`` keep the ``oneOf`` guarantee and no more --
-    which is all any schema can offer them, since the entry's field is a
+    ``replace`` and ``drop`` get :func:`body_errors` and no more --
+    which is all a schema can offer them, since the entry's field is a
     database fact this layer cannot read.
     """
     rules = []
@@ -351,8 +360,6 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 
-
-
 def body_errors(operation: str, params: dict[str, Any]) -> list[str]:
     """Check the body with the validator that owns it, not an approximation.
 
@@ -364,8 +371,8 @@ def body_errors(operation: str, params: dict[str, Any]) -> list[str]:
     mismatch there, where the field is known.
 
     Both call :func:`validate_entry_body`, the store's own definition of a
-    legal entry, rather than restating it -- and this is what enforces the
-    ``oneOf`` that :meth:`Tool._validate` does not implement.
+    legal entry. Here a wrong-shape body is refused, and the length and item
+    bounds the advertised body leaves out are enforced.
     """
     body = params.get("body")
     if body is None:
@@ -384,10 +391,10 @@ def body_errors(operation: str, params: dict[str, Any]) -> list[str]:
     for field in _ONE_FIELD_PER_MODEL:
         try:
             validate_entry_body(field, body)
-        except ContinuityError:
+        except ContinuityError as invalid:
+            # A real shape's keys, a value out of bounds: name the bound, not a field.
+            if set(body) == set(ENTRY_FIELD_MODELS[field].model_fields):
+                return [f"body is not a valid entry: {invalid.__cause__ or invalid}"]
             continue
         return []
-    return [
-        "body does not match any continuity entry shape: " + _body_key_groups()
-    ]
-
+    return ["body does not match any continuity entry shape: " + _body_key_groups()]

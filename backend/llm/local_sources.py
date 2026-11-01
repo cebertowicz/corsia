@@ -191,7 +191,10 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         # A finished setup whose server has since stopped was turned off, not still finishing.
         turned_off = flight is not None and flight["state"] == "ready" and result.get("reason_code") == "not_running"
         load_unsuccessful = flight is not None and flight["state"] == "start_failed" and flight.get("cause") in LOAD_FAILURE_CAUSES
-        _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or load_unsuccessful else None)
+        # A retry after a refused load is still loading the model: its server already lists it, so say
+        # "starting" rather than letting the row read as an idle model that was never downloaded.
+        retrying_load = flight is not None and flight["state"] == "starting"
+        _project_local_flight(result, flight if (result["state"] != "ready" and not turned_off) or load_unsuccessful or retrying_load else None)
     return result
 
 

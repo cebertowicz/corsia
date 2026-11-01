@@ -69,10 +69,10 @@ async def _new_install_picks(model: str) -> str:
 class TestRender:
     def test_instructions_are_the_served_reference_whole(self):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions, first_run_wake
 
         text = first_run_wake.instructions()
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text()
         assert text == reference.strip()
 
     def test_the_same_facts_render_the_same_bytes(self):
@@ -91,6 +91,41 @@ class TestRender:
         assert first_run_wake.INLINE_SUMMARY in wake
         assert wake.index("Do the steps.") < wake.index("## Setup facts")
         assert wake.endswith(json.dumps(FACTS, sort_keys=True, ensure_ascii=False))
+
+    def test_inlined_references_name_their_workspace_path(self):
+        from onboarding import first_run_wake
+
+        wake = first_run_wake.render(FACTS, (
+            "Follow `references/look-up-the-person.md`, then `references/about-you-doc.md`. "
+            "Then skill `github` › `references/agent-account.md`; "
+            "see `.corsia/skills/conductor-bootstrap/references/web-search.md`."
+        ))
+
+        projection = ".corsia/skills/conductor-bootstrap/references/"
+        assert f"`{projection}look-up-the-person.md`" in wake
+        assert f"`{projection}about-you-doc.md`" in wake
+        assert "skill `github` › `.corsia/skills/github/references/agent-account.md`" in wake
+        assert f"`{projection}web-search.md`" in wake
+        assert ".corsia/.corsia/" not in wake
+
+    def test_an_unserved_reference_stays_as_written(self):
+        from onboarding import first_run_instructions
+
+        text = "See `references/no-such-file.md` and skill `github` › `references/no-such-file.md`."
+        assert first_run_instructions.anchored(text) == text
+
+    @pytest.mark.parametrize("reference", ["FIRST_RUN_REFERENCE", "APP_REFERENCE", "APP_START_REFERENCE"])
+    def test_every_skill_reference_an_instruction_names_is_projected(self, reference):
+        import re
+
+        from infra.system_package import system_resource_source
+        from onboarding import first_run_instructions as wake_text
+
+        text = wake_text.anchored(system_resource_source(getattr(wake_text, reference)).read_text())
+        named = set(re.findall(r"\.corsia/(skills/[\w-]+/references/[\w.-]+\.md)", text))
+        assert named
+        assert all(system_resource_source(path).is_file() for path in named)
+        assert not re.findall(r"(?<![\w./-])references/[\w.-]+\.md", text)
 
 
 class TestFirstModelChoice:
@@ -111,12 +146,12 @@ class TestFirstModelChoice:
     @pytest.mark.asyncio
     async def test_the_served_file_is_embedded_whole(self, fresh_install):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions
 
         await _new_install_picks("claude-code/sonnet")
 
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text().strip()
-        assert reference in _wake_row()["content"]
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text().strip()
+        assert first_run_instructions.anchored(reference) in _wake_row()["content"]
 
     @pytest.mark.asyncio
     async def test_an_escaping_error_fails_the_pick_instead_of_changing_the_wake(
@@ -210,9 +245,9 @@ class TestFirstModelChoice:
 
     def test_every_unavailable_read_is_named_in_the_reference(self):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions
 
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text()
         assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key", "auto_approve"))
 
 

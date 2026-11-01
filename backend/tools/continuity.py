@@ -245,9 +245,9 @@ class ContinuityEditTool(Tool):
         Which parameters an operation takes, and which body keys a named field
         needs, are conditional clauses in :attr:`parameters` that both
         :meth:`Tool._validate` and an ordinary JSON Schema validator apply.
-        What neither applies is the body's ``oneOf``, because
-        :meth:`Tool._validate` does not implement that keyword -- so the body
-        goes to the store's own validator rather than to a restatement of it.
+        What neither applies is the body's bounds and the match of its shape to
+        an entry, so the body goes to the store's own validator rather than to
+        a restatement of it.
         A body a model sent as JSON text is already decoded by the registry
         (``Tool.decode_string_arguments``, #1653).
         """
