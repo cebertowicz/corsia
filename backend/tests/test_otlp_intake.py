@@ -76,6 +76,8 @@ def _attr(key: str, value) -> common.KeyValue:
     pair = common.KeyValue(key=key)
     if isinstance(value, int):
         pair.value.int_value = value
+    elif isinstance(value, float):
+        pair.value.double_value = value
     else:
         pair.value.string_value = value
     return pair
@@ -361,6 +363,23 @@ async def test_run_id_that_is_not_a_plan_node_is_the_producers_label(world) -> N
     client, measure_key, _ = world
     response = await send(client, measure_key, request_of({"event.name": "qa.rec", "code": "r1", "n": 1, "corsia.run_id": "ci-1234"}))
     assert rejected(response) == (0, "") and rows("qa.rec") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_numeric_run_id_is_kept_and_a_stamp_of_the_wrong_shape_is_refused(world) -> None:
+    client, measure_key, _ = world
+    base = {"event.name": "qa.rec", "n": 1}
+    assert rejected(await send(client, measure_key, request_of({**base, "code": "k1", "corsia.run_id": 4321}))) == (0, "")
+    db = get_db()
+    stored = [json.loads(row[0]).get("run_id") for row in db.execute("SELECT attributes FROM outcome_events WHERE event_name='qa.rec'")]
+    db.close()
+    assert stored == ["4321"]
+    count, text = rejected(await send(client, measure_key, request_of(
+        {**base, "code": "k2", "corsia.run_id": 1.5},
+        {**base, "code": "k3", "corsia.workflow.version": "v1"},
+        {**base, "code": "k4", "corsia.workflow.ref": 7})))
+    assert count == 3 and rows("qa.rec") == 1
+    assert "corsia.run_id" in text and "corsia.workflow.version" in text and "corsia.workflow.ref" in text
 
 
 @pytest.mark.asyncio

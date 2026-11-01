@@ -6,7 +6,8 @@ workflow ref and version from the plan node the record's run id names or, with n
 agent's own workflow in Git. The payload may only repeat those values: one that names another
 project, agent or plan node, a workflow the agent does not own, or a different workflow version is
 refused as an identity mismatch. A run id that is not a plan node, the subject and the time are the
-producer's own labels (for example a CI run id) and are kept as sent. Lookups here only read, so the receiver runs them on the read lane; the writes
+producer's own labels (for example a CI run id, whose whole number is kept as its text) and are kept as sent;
+a stamp of the wrong type is refused, never dropped. Lookups here only read, so the receiver runs them on the read lane; the writes
 come last, in transactions of at most :data:`WRITE_CHUNK` rows.
 """
 from __future__ import annotations
@@ -104,6 +105,10 @@ def _mismatch(name: str, what: str) -> Item:
     return Item(name, ("identity_mismatch", f"{name}: {what}; the record was dropped. Remove it: the key already says who sends."))
 
 
+def _refused(name: str, what: str) -> Item:
+    return Item(name, ("record_refused", f"{name}: {what}; the record was dropped."))
+
+
 def prepare(agent: str, records: list[WireRecord], lookup: Lookup, workflows: dict[str, Any]) -> list[Item]:
     """Decide every record without touching the database."""
     return [_decide(agent, record, lookup, workflows) for record in records]
@@ -118,7 +123,11 @@ def _decide(agent: str, record: WireRecord, lookup: Lookup, workflows: dict[str,
         if (value := _claimed(record, key)) is not None and value != stamped[key]:
             return _mismatch(name, f"{key} does not match the {'project' if 'project' in key else 'agent'} this key is bound to")
     run_id = _claimed(record, "corsia.run_id")
-    run_id = run_id if isinstance(run_id, str) else None
+    if isinstance(run_id, int) and not isinstance(run_id, bool):
+        run_id = str(run_id)
+    if run_id is not None and not isinstance(run_id, str):
+        return _refused(name, "corsia.run_id is not a string or whole number. Send it as one, or leave it out")
+    claimed_ref = _claimed(record, "corsia.workflow.ref")
     ref = version = None
     node = lookup.nodes.get(run_id) if run_id else None
     if node is not None:
@@ -128,17 +137,19 @@ def _decide(agent: str, record: WireRecord, lookup: Lookup, workflows: dict[str,
         for key, value in (("corsia.workflow.ref", ref), ("corsia.workflow.version", version)):
             if (claimed := _claimed(record, key)) is not None and claimed != value:
                 return _mismatch(name, f"{key} is not the one CORSIA stamps for this run")
-    elif isinstance(claimed_ref := _claimed(record, "corsia.workflow.ref"), str):
-        current = workflows.get(claimed_ref)
+    elif claimed_ref is not None:
+        current = workflows.get(claimed_ref) if isinstance(claimed_ref, str) else None
         if current is None:
             return _mismatch(name, "corsia.workflow.ref is not a workflow this agent owns")
         claimed_version = _claimed(record, "corsia.workflow.version")
         if claimed_version is not None and claimed_version != current[1]:
             return _mismatch(name, "corsia.workflow.version is not the version CORSIA stamps for this workflow")
         ref, version = claimed_ref, current[1]
+    elif _claimed(record, "corsia.workflow.version") is not None:
+        return _refused(name, "corsia.workflow.version was sent without corsia.workflow.ref or a corsia.run_id that names a plan node. Send the ref with it, or leave it out")
     subject = _claimed(record, "corsia.subject")
     if subject is not None and not (isinstance(subject, str) and AttributeSpec("id").accepts(subject)):
-        return Item(name, ("record_refused", f"{name}: corsia.subject is not an id ({_KIND_RULES['id']}); the record was dropped. Send an id, or leave corsia.subject out."))
+        return _refused(name, f"corsia.subject is not an id ({_KIND_RULES['id']}). Send an id, or leave corsia.subject out")
     attributes = {k: v for k, v in record.attributes.items() if k != "event.name" and k not in _STAMP_KEYS}
     return Item(
         name, route=lookup.uses.get(name, "record") != "record", attributes=attributes, ts=record.ts,
