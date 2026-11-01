@@ -8,6 +8,8 @@ from typing import Any, NamedTuple
 
 from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
+from infra import state
+from infra.send_target import omlx_seat_and_model
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -32,6 +34,26 @@ async def await_or_cancel(awaitable, cancel_event: asyncio.Event):
             if not task.done():
                 task.cancel()
         await asyncio.gather(operation, stopped, return_exceptions=True)
+
+
+async def yield_to_turn_call(request: ProviderForkRequest, cancel_event: asyncio.Event) -> None:
+    """On a local oMLX seat, start no fork call while this thread's Turn call runs.
+
+    oMLX's prefill memory guard charges both sequences, so a fork call beside the
+    Turn's call can get the Turn refused on a small Mac. The Turn's own task is
+    only watched, never cancelled.
+    """
+    if omlx_seat_and_model(request.target) is None:
+        return
+    while (turn_call := state._active_llm_tasks.get(request.thread_id)) is not None and not turn_call.done():
+        stopped = asyncio.create_task(cancel_event.wait())
+        try:
+            await asyncio.wait({turn_call, stopped}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            stopped.cancel()
+            await asyncio.gather(stopped, return_exceptions=True)
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
 
 
 def _tool_call_dicts(response) -> list[dict[str, Any]]:

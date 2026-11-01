@@ -17,6 +17,7 @@ from core.fork_native_tools import (
     input_room,
     measured_input,
     run_tool_calls as _run_tool_calls,
+    yield_to_turn_call,
 )
 from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
@@ -301,6 +302,7 @@ async def invoke_fork(
                     partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
                     request, messages, tools, response, measured,
                 )
+            await yield_to_turn_call(request, cancel_event)
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
             if request.on_usage is not None:
