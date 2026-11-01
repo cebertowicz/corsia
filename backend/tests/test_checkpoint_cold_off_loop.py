@@ -56,9 +56,8 @@ async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
         assert round_trip_tokens == 16_384
         return SimpleNamespace(messages=(), first_included_seq=3)
 
-    # Import fork_render (via its patch) first, or it binds the stub counter for the session.
-    monkeypatch.setattr("core.fork_render.fit_cold_fork_input", fit)
     monkeypatch.setattr("core.fork_cold_count.cold_input_tokens", count)
+    monkeypatch.setattr("core.fork_render.fit_cold_fork_input", fit)
     # A cold fork only ever advertises its one executable tool (#2116); use it
     # here too so this off-loop-threading contract stays meaningful.
     tools = [{"type": "function", "function": {"name": "continuity_edit"}}]

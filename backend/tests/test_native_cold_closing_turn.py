@@ -23,12 +23,11 @@ async def test_source_ending_on_an_assistant_reply_gets_a_closing_user_turn(monk
         {"role": "user", "content": "[CORSIA checkpoint] prior narrative"},
         {"role": "assistant", "content": "[msg a] Correction triaged; replied noted."},
     )
-    # Import fork_render (via its patch) first, or it binds the stub counter for the session.
+    monkeypatch.setattr("core.fork_cold_count.cold_input_tokens", lambda payload, writer: 7)
     monkeypatch.setattr(
         "core.fork_render.fit_cold_fork_input",
         lambda request, **_: SimpleNamespace(messages=source, first_included_seq=64),
     )
-    monkeypatch.setattr("core.fork_cold_count.cold_input_tokens", lambda payload, writer: 7)
     tools = [{"type": "function", "function": {"name": "continuity_edit"}}]
     agent = SimpleNamespace(tools=SimpleNamespace(get_definitions=lambda: tools))
     request = SimpleNamespace(
