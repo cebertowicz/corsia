@@ -13,7 +13,7 @@ from typing import Any
 
 from google.protobuf import json_format
 from google.protobuf.message import DecodeError as ProtobufDecodeError
-from opentelemetry.proto.collector.logs.v1 import logs_service_pb2 as service
+import opentelemetry.proto.collector.logs.v1.logs_service_pb2 as service
 
 PROTOBUF = "application/x-protobuf"
 JSON = "application/json"
