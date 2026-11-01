@@ -39,7 +39,7 @@ def test_valid_operands() -> None:
     data = declaration()
     del data["events"]["demo.end"]["since"]
     data["kpis"] = {"k": {"formula": "ratio", "num": {"event": ["demo.start", "demo.end"], "latest": ["key"]},
-                          "den": {"event": "demo.start", "first": ["pr", "key"]}}}
+                          "den": {"event": "demo.start", "first": ["pr", "key"]}, "min_n": 1}}
     check(data)
 
 

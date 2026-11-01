@@ -10,6 +10,10 @@ running conversation.
 
 The same rendered index line is the unit of the lesson budget and of every
 later per-lesson estimate, so the parts never add up to more than the index.
+A skill stored at ``<root>/<name>/SKILL.md`` has no path on its line: the index
+states the root once in a group header, which no lesson is charged for and
+which stays in the block's remainder. A trial's line keeps its path: it is
+delivered per task, outside the index and under no header.
 That line marks a trial, so a reader of the index can tell an unproven rule
 its owner wrote from an approved skill before loading it.
 
@@ -66,12 +70,28 @@ def index_line(row: SkillRow) -> str:
     if row.scope != "system":
         description = description[:NON_SYSTEM_DESCRIPTION_LIMIT]
     trial = lesson_block(row.metadata) is not None
+    if not trial and skill_root(row.name, row.path) is not None:
+        return f"- {row.name}: {description}"
     return line_for(row.name, description, row.path, trial=trial)
+
+
+def skill_root(name: str, path: object) -> str | None:
+    """``<root>/`` when ``path`` is exactly ``<root>/<name>/SKILL.md``, else None."""
+    head, sep, file = str(path).rpartition("/")
+    root, sep2, folder = head.rpartition("/")
+    if file != "SKILL.md" or not sep or not sep2 or not root or folder != name:
+        return None
+    return f"{root}/"
+
+
+def root_header(root: str) -> str:
+    """The line naming a shared root and how to build each skill's path from it."""
+    return f"Skills in {root} (read {root}<name>/SKILL.md):"
 
 
 def name_entry(name: str, path: object) -> str:
     """The compact findable entry for a names-only overflow skill."""
-    return f"{name} ({path})"
+    return name if skill_root(name, path) is not None else f"{name} ({path})"
 
 
 def line_for(name: str, description: str, path: object, *, trial: bool = False) -> str:

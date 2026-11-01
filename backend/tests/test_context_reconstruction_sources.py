@@ -196,14 +196,16 @@ def test_provider_reconstructions_include_skills_index_not_skill_body(tmp_path, 
     expected_skills_header = (
         "Available skills. Before answering, compare the user request to the skill descriptions below. "
         "If the user names a skill or the request matches a skill description, you MUST load that skill's "
-        "SKILL.md before responding. Load the listed SKILL.md path with your file-read "
+        "SKILL.md before responding. Its path is on its line, or else in its group's header with <name> "
+        "replaced by the skill's name. Load it with your file-read "
         "tool: `mcp__corsia__read_file` on Claude Code"
     )
     for provider_text in (cc.seed_text, codex.task_text):
         assert expected_skills_header in provider_text
         assert "name=read_file" in provider_text
         assert "review: Use when reviewing code." in provider_text
-        assert str(skill_path.resolve()) in provider_text
+        root = f"{skill_path.parent.parent.resolve()}/"
+        assert f"Skills in {root} (read {root}<name>/SKILL.md):" in provider_text
         assert "Inspect the diff and report defects first." not in provider_text
 
 

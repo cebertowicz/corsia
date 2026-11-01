@@ -165,7 +165,7 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
 
 def _definitions(db, *, can_decide: bool = True, workflow: str = "sdlc-process", owner: str = "owner") -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
-    kpi = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": can_decide,
+    kpi = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "min_n": 1, "better": "lower", "can_decide": can_decide,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 1, {**kpi, "review": 0.2}, "2026-09-01T00:00:00Z"),

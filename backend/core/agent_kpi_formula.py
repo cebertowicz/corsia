@@ -93,10 +93,30 @@ def _percentile(spec, numerator, selected, builtins, in_bucket, coverage, n, unk
     return (values[max(0, math.ceil(num_spec["p"] / 100 * len(values)) - 1)] if values else None), n, unknown
 
 
-# The one list of KPI formulas: what sync accepts is exactly what evaluate can compute.
-_FORMULAS = {"count": _count, "ratio": _ratio, "rate_per_run": _rate_per_run,
-             "share": _share, "percentile": _percentile}
+# The one list of KPI formulas and the fields each reads: sync refuses a KPI that `unfit`
+# names, and evaluate reads such a stored KPI as not tracked.
+_FORMULAS = {"count": (_count, ()), "ratio": (_ratio, ("den",)), "rate_per_run": (_rate_per_run, ()),
+             "share": (_share, ("num.attr", "num.values")), "percentile": (_percentile, ("num.attr", "num.p"))}
 FORMULAS = tuple(_FORMULAS)
+
+
+def _has(spec: Mapping[str, Any], field: str) -> bool:
+    holder, _, key = field.rpartition(".")
+    owner = spec.get(holder) if holder else spec
+    return isinstance(owner, Mapping) and key in owner and (key not in ("num", "den") or isinstance(owner[key], Mapping))
+
+
+def unfit(spec: Mapping[str, Any]) -> str | None:
+    """Why evaluate cannot compute this KPI, or None."""
+    formula = spec.get("formula")
+    if formula is None:
+        return f"has no formula; add one of {', '.join(FORMULAS)} as its formula"
+    if formula not in _FORMULAS:
+        return f'formula "{formula}" is not one of {", ".join(FORMULAS)}; use one of them'
+    missing = [field for field in ("num", "min_n", *_FORMULAS[formula][1]) if not _has(spec, field)]
+    if missing:
+        return f"formula {formula} needs {', '.join(missing)}; add {'it' if len(missing) == 1 else 'them'}"
+    return None
 
 
 def _not_tracked(reason: str) -> dict[str, Any]:
@@ -108,9 +128,10 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
              version: str | None = None, builtins: Mapping[str, Any] | None = None,
              selected: Mapping[str, Sequence[Event]] | None = None) -> dict[str, Any]:
     """Compute one KPI in a period and optional version; None selects all versions."""
-    formula = spec.get("formula")
-    if formula not in _FORMULAS:
-        return _not_tracked(f'formula "{formula}" is not one of {", ".join(FORMULAS)}; sync the file again')
+    problem = unfit(spec)
+    if problem:
+        return _not_tracked(f"{problem} in the measures file, then run measure_sync")
+    formula = spec["formula"]
     num_spec = spec["num"]
     selected = selected if selected is not None else prepare(spec, facts)
     builtins = builtins or {}
@@ -126,7 +147,7 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
     num_builtin = builtins.get(num_spec.get('builtin'))
     n = num_builtin.n if num_builtin else len(numerator)
     unknown = num_builtin.unknown if num_builtin else 0
-    value, n, unknown = _FORMULAS[formula](spec, numerator, selected, builtins,
+    value, n, unknown = _FORMULAS[formula][0](spec, numerator, selected, builtins,
                                            lambda rows: _in_bucket(rows, start, end, version), coverage, n, unknown)
     label, label_mix = _labels(numerator)
     if num_builtin:
