@@ -144,7 +144,7 @@ def test_a_node_maps_to_its_nearest_run_or_says_why_not() -> None:
 
 def test_deciding_refusal_reruns_the_sync_test_when_a_verdict_is_read() -> None:
     events = {"qg.escape": {"attributes": {"pr": "id"}}}
-    kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "can_decide": True,
+    kpi = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "can_decide": True,
            "target": 0.1, "review": 0.2, "coverage": {"of": "qg.escape", "by": "audit"}}
     assert deciding_refusal("escapes", kpi, events, "sdlc-process") is None
     missing = {key: value for key, value in kpi.items() if key != "review"}
