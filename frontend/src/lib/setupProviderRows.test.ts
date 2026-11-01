@@ -113,12 +113,64 @@ describe('setup provider rows', () => {
 	});
 
 	it('explains the gate from the current working and download states', () => {
-		expect(setupStartNote(false, false, false))
+		expect(setupStartNote(false, false, 'idle'))
 			.toBe('Set up a subscription or add an API provider to continue.');
-		expect(setupStartNote(false, true, true, 720))
+		expect(setupStartNote(false, true, 'downloading', 720))
 			.toBe('Ready when the local model finishes downloading (12 min left).');
-		expect(setupStartNote(true, true, true))
+		expect(setupStartNote(true, true, 'downloading'))
 			.toBe('The local model keeps downloading. Follow it in Settings › Providers.');
+		expect(setupStartNote(false, true, 'idle'))
+			.toBe('Download the local model, set up a subscription or add an API provider to continue.');
+	});
+
+	const local = (localState?: string, extra: Partial<Parameters<typeof setupLocalRow>[0]> = {}) => {
+		const downloading = ['downloading', 'paused', 'starting'].includes(localState ?? '');
+		const row = setupLocalRow({ ...actions(), source: localState ? { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: localState } : undefined, pick: null, eligible: true, downloading, ready: false, startError: '', ...extra });
+		return { row, phase: row.phase };
+	};
+
+	it('says the local model is loading, in the glossary word, while its row shows it starting or loading', () => {
+		for (const { row, phase } of [local('starting'), local('ready'), local('ready', { startError: 'other' }), local('starting', { startError: 'other' })]) {
+			expect(row.busy).toBe(true);
+			expect(phase).toBe('loading');
+			expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes loading.');
+			expect(setupStartNote(true, true, phase)).toBe('');
+		}
+	});
+
+	it('names the download while the local model is getting ready to download', () => {
+		const { row, phase } = local(undefined, { preparing: true });
+		expect(row.meta).toBe('Getting the local model ready…');
+		expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes downloading.');
+	});
+
+	it('offers the switch in the footer when a downloaded local model is off', () => {
+		const { row, phase } = local(undefined, { source: { source: 'omlx', name: 'Local model', state: 'needs_setup', reason_code: 'not_running', local_state: 'stopped' } });
+		expect(row.toggle?.on).toBe(false);
+		expect(setupStartNote(false, true, phase)).toBe('Turn on the local model, set up a subscription or add an API provider to continue.');
+	});
+
+	it('says the local model keeps downloading only while it downloads or is paused', () => {
+		expect(local('downloading').phase).toBe('downloading');
+		expect(local('paused').phase).toBe('downloading');
+		for (const state of ['starting', 'ready', 'stopped', undefined]) expect(setupStartNote(true, true, local(state).phase)).toBe('');
+	});
+
+	it('points the footer at Retry only when the row shows Retry', () => {
+		const pickFailed = { state: 'failed' as const, model: null, message: null, cause: 'memory', ref: 'local-1' };
+		for (const { row, phase } of [local('failed'), local('setup_failed'), local('start_failed'), local(undefined, { startError: 'other' }), local(undefined, { pick: pickFailed })]) {
+			expect(row.action?.label).toBe('Retry');
+			expect(phase).toBe('failed');
+			expect(setupStartNote(false, true, phase)).toBe('Press Retry, set up a subscription or add an API provider to continue.');
+		}
+		expect(setupStartNote(false, false, 'failed')).toBe('Set up a subscription or add an API provider to continue.');
+	});
+
+	it('offers Download in the footer only when the row offers it', () => {
+		expect(local(undefined).phase).toBe('idle');
+		const full = local(undefined, { pick: { state: 'picked', model: { name: 'M', repository: 'r', download_size_bytes: 1, download_size_gb: 10, context_window: 1 }, message: null }, freeDisk: 2 });
+		expect(full.row.action?.label).toBe('Check again');
+		expect(setupStartNote(false, true, full.phase)).toBe('Set up a subscription or add an API provider to continue.');
 	});
 });
 
