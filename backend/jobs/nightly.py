@@ -193,6 +193,7 @@ async def _run_job_safely() -> None:
     # the same once-per-day claim and never records or wakes while verdict writes are off.
     await _emit_learning_reports_safely()
     await _run_workflow_verdicts_safely()
+    await _run_kpi_thresholds_safely()
     await _reap_worktrees_safely()
 
 
@@ -226,6 +227,16 @@ async def _run_workflow_verdicts_safely() -> None:
         await asyncio.to_thread(run_daily)
     except Exception:
         logger.exception("nightly_job: workflow verdict evaluation failed")
+
+
+async def _run_kpi_thresholds_safely() -> None:
+    """Wake the owners of KPIs past their review line, without breaking maintenance."""
+    try:
+        from jobs.kpi_thresholds import run_daily
+
+        await asyncio.to_thread(run_daily)
+    except Exception:
+        logger.exception("nightly_job: kpi threshold wakes failed")
 
 
 async def _reap_worktrees_safely() -> None:

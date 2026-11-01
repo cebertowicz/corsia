@@ -148,6 +148,13 @@ def resolve_targets(
     return [_dead_letter("no_owner", routing_state, db=db)]
 
 
+def resolve_direct(thread: str, event_class: str, *, db=None) -> Target:
+    """A recipient the producer names itself: that thread, or an ``owner_inactive`` dead letter."""
+    if delivery.thread_exists_and_active(thread, db=db):
+        return Target(thread, "path_a_resolve", "owner", disposition=_disp("owner", event_class))
+    return _dead_letter("owner_inactive", None, db=db)
+
+
 def resolve_delivery_failure(
     owner_thread: str | None, *, reason: str, db=None
 ) -> Target:
