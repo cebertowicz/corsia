@@ -57,6 +57,19 @@ async def _send(client, thread_id, content):
     return frames
 
 
+async def _await_rerun_answer(client, thread_id, timeout=15.0):
+    """Wait until the one re-run of a failed Turn's unanswered input answers and ends."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        rows = await client.messages(thread_id)
+        answered = any("RERUN_ANSWERED" in str(row.get("content", "")) for row in rows)
+        if answered and await client.active_turn_count(thread_id) == 0:
+            return rows
+        assert loop.time() < deadline, rows
+        await asyncio.sleep(0.1)
+
+
 async def _read_probe(client, thread_id, call_id):
     await client.seed_replies([
         {"tool_calls": [{"id": call_id, "name": "read_file",
@@ -110,7 +123,8 @@ async def test_first_tools_in_existing_and_fresh_conversations_after_restart(tmp
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monkeypatch):
-    """The real transport exit persists a failure and releases both conversations."""
+    """The real transport exit persists a failure, re-runs the unanswered input
+    once, and releases both conversations."""
     startup = _write_scoped_receipt_budget_sitecustomize(tmp_path, stale_call_ids={"current-call"})
     backend = IsolatedBackend(tmp_path)
     environment = backend._env
@@ -132,7 +146,7 @@ async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monk
                         "path": "must-not-exist.txt", "content": "unexpected effect",
                     },
                 }], "finish_reason": "tool_calls",
-            }])
+            }, {"content": "RERUN_ANSWERED", "finish_reason": "stop"}])
             async with TurnDriver(backend) as driver:
                 await driver.subscribe(thread_id)
                 await driver.send(thread_id, "Write the test file")
@@ -140,13 +154,19 @@ async def test_unmatched_tool_receipts_fail_visibly_after_restart(tmp_path, monk
                     thread_id, until=("turn_complete", "error"), timeout=15,
                 )
             assert "turn_complete" in frame_types(frames) or "error" in frame_types(frames), frames
-            rows = await client.messages(thread_id)
+            # The failed Turn took in the input and never answered it: one re-run does.
+            rows = await _await_rerun_answer(client, thread_id)
             assert any(
                 "Timed out waiting for the current Codex tool usage receipt after 0.1s"
                 in str(row.get("content", "")) for row in rows
             ), rows
             assert not list(backend.workspace.rglob("must-not-exist.txt"))
-            assert await client.active_turn_count(thread_id) == 0
+            with sqlite3.connect(backend.state / "corsia.db") as db:
+                assert db.execute(
+                    "SELECT COUNT(*) FROM messages WHERE thread_id=? "
+                    "AND json_extract(metadata,'$.type')='turn_rerun'",
+                    (thread_id,),
+                ).fetchone() == (1,)
             await _read_probe(client, thread_id, "after-failure")
     finally:
         await asyncio.to_thread(backend.stop)
