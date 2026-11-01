@@ -11,7 +11,8 @@ import json
 import pytest
 
 from infra import accounts, config, user_profile
-from onboarding import setup_strings, step_cards
+import infra.community_card as community_card
+from onboarding import setup_strings
 from plans import public
 from plans.boundary import PlanActor, mutate
 from tests.test_app_first_run_seed import (  # noqa: F401 - shared fixtures
@@ -45,7 +46,7 @@ class Scene:
         try:
             return mutate(
                 self.plan_id, operation, {"node_id": node_id, "expected_revision": revision, **params},
-                actor=self.actor, provenance="test.step_cards",
+                actor=self.actor, provenance="test.community_card",
                 mutation_id=f"{operation}-{node_id}-{revision}", db=db,
             )
         finally:
@@ -98,12 +99,45 @@ def test_the_card_never_exists_before_step_7_is_current(scene):
     assert scene.decisions() == []
 
 
-def test_another_steps_start_raises_nothing(scene):
+def test_another_steps_start_schedules_nothing(scene, monkeypatch):
+    from plans import admission
+
+    scheduled = []
+    monkeypatch.setattr(admission, "_schedule_step_start", lambda *args: scheduled.append(args))
     for step in ("5:common", "8:common"):
         scene.update("activate", scene.steps[step])
         scene.finish(step)
 
+    assert scheduled == []
     assert scene.decisions() == []
+
+
+def test_plan_read_of_step_7_shows_whether_the_card_is_waiting(scene, monkeypatch):
+    """Step 7's guidance tells a model to look for this: a raised card is a ``decision_raised`` wait."""
+    from infra.database import get_db
+    from plans import service, status
+
+    def waiting() -> list[str]:
+        db = get_db()
+        try:
+            plan = service._plan_row(db, scene.plan_id)
+            node = status.node_detail(db, plan, scene.steps["7:common"], actor=scene.actor)
+        finally:
+            db.close()
+        return [cause["reason_key"] for cause in node["execution"]["causes"]]
+
+    real = community_card.raise_for_current_step
+    monkeypatch.setattr(community_card, "raise_for_current_step", lambda *args, **kwargs: None)
+    scene.update("activate", scene.steps["7:common"])
+    assert "decision_raised" not in waiting()
+
+    monkeypatch.setattr(community_card, "raise_for_current_step", real)
+    db = get_db()
+    try:
+        community_card.raise_for_current_step(scene.steps["7:common"], scene.plan_id, db=db)
+    finally:
+        db.close()
+    assert "decision_raised" in waiting()
 
 
 def test_reselecting_step_7_after_a_release_raises_no_second_card(scene):
@@ -131,7 +165,7 @@ def test_pausing_and_resuming_step_7_raises_no_second_card(scene):
         try:
             return mutate(
                 scene.plan_id, operation, {"node_id": node_id, "expected_revision": revision, **params},
-                actor=human, provenance="test.step_cards", mutation_id=f"{operation}-{revision}", db=db,
+                actor=human, provenance="test.community_card", mutation_id=f"{operation}-{revision}", db=db,
             )
         finally:
             db.close()
@@ -178,7 +212,7 @@ def test_answering_the_card_writes_the_profile_lines(scene, tmp_path, monkeypatc
     try:
         public.answer_decision(
             card["id"], option_id="A", expected_revision=card["revision"], mutation_id="answer-step-7",
-            actor=PlanActor(None, scene.actor.user_id, None, kind="user"), provenance="test.step_cards", db=db,
+            actor=PlanActor(None, scene.actor.user_id, None, kind="user"), provenance="test.community_card", db=db,
         )
     finally:
         db.close()
@@ -206,7 +240,7 @@ def test_a_failed_review_leaves_no_draft_and_a_retry_raises_one_card(scene, monk
 
     db = get_db()
     try:
-        step_cards.raise_for_current_step(scene.steps["7:common"], scene.plan_id, db=db)
+        community_card.raise_for_current_step(scene.steps["7:common"], scene.plan_id, db=db)
     finally:
         db.close()
 
@@ -214,7 +248,9 @@ def test_a_failed_review_leaves_no_draft_and_a_retry_raises_one_card(scene, monk
 
 
 def test_no_community_entry_raises_nothing(scene, monkeypatch):
-    monkeypatch.setattr(step_cards.setup_decisions, "community_card", lambda: (_ for _ in ()).throw(KeyError("x")))
+    from onboarding import setup_decisions
+
+    monkeypatch.setattr(setup_decisions, "community_card", lambda: (_ for _ in ()).throw(KeyError("x")))
 
     scene.update("activate", scene.steps["7:common"])
 

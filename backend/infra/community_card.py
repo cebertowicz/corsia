@@ -1,31 +1,29 @@
-"""The card CORSIA raises itself when a first-run step becomes current, so no model has to.
+"""The community card CORSIA raises itself when first-run step 7 becomes current, so no model has to.
 
 Step 7 of the app path ("How CORSIA gets better") asks the community decision.
 Copying a long payload into three exact tool calls is the part small local models
-get wrong, and the payload is code-built, so code raises it. Plans calls
-``raise_for_current_step`` after the commit that made a node current; this module
-decides whether that node is step 7.
+get wrong, and the payload is code-built, so code raises it. Plans schedules
+``raise_for_current_step`` after the commit that selected the step; the answer side
+of the same card is ``infra/community_answer.py``.
 """
 
 from __future__ import annotations
 
 import logging
 
-from onboarding import setup_decisions
-
 log = logging.getLogger(__name__)
 
 WORKFLOW = "first-run-app"
 COMMUNITY_STEP = "7:common"
-_PROVENANCE = "onboarding.step_cards"
+_PROVENANCE = "infra.community_card"
 _FIELDS = ("title", "context", "tradeoff", "recommendation", "rationale", "options", "other_enabled")
 
 
 def raise_for_current_step(node_id: str, plan_id: str, *, db=None) -> None:
     """Raise the community card when step 7 is current; never raises, never repeats.
 
-    Acts only in the CORSIA agent's own plan, because the profile write after the
-    answer needs that owner, and never when the step already has a decision.
+    Plans calls it only for step 7. Acts only in the CORSIA agent's own plan, because the
+    profile write after the answer needs that owner, and never when the step already has a decision.
     """
     from infra.database import get_db
 
@@ -41,11 +39,10 @@ def raise_for_current_step(node_id: str, plan_id: str, *, db=None) -> None:
 
 def _raise_community(db, node_id: str, plan_id: str) -> None:
     from infra.corsia_agent import get_corsia_agent
+    from infra.database import write_transaction
+    from onboarding import setup_decisions
     from plans import public
 
-    found = public.workflow_step_of(db, node_id=node_id)
-    if found != (plan_id, WORKFLOW, COMMUNITY_STEP):
-        return
     owner = public.decision_owner_id(db, node_id=node_id)
     if owner is None or get_corsia_agent(db=db) != owner:
         return
@@ -60,8 +57,6 @@ def _raise_community(db, node_id: str, plan_id: str) -> None:
         "provenance": _PROVENANCE, "db": db,
     }
     key = f"community-card:{node_id}"
-    from infra.database import write_transaction
-
     results = []
     with write_transaction(db, scope="community_card"):
         drafted = public.draft_decision(

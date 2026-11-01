@@ -174,10 +174,7 @@ async def _app_setup(model: str | None = None) -> dict[str, list[dict[str, Any]]
     # The import card names who receives what is read: the model this conductor runs on.
     facts = await setup_decisions.read_facts(self_check_passed=True, probe_web_search=False, agent_model=model)
     # No address in the wake, and no projects consent: the app path never raises it.
-    # The community card is raised by code when its step starts (``step_cards``), so it is not shown.
-    community = setup_decisions.community_card()["title"]
-    decisions = setup_decisions.build_decisions(replace(facts, email="", session_apps=()))
-    return {"setup_decisions": [item for item in decisions if item["title"] != community]}
+    return {"setup_decisions": setup_decisions.build_decisions(replace(facts, email="", session_apps=()))}
 
 
 def _unavailable(name: str) -> dict[str, str]:
