@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 
 from core.stop_causes import PlanLimitStop
 from core.turn_core import TerminalSettlement, TurnIdentity, TurnTerminalResult
@@ -206,10 +207,15 @@ async def _settle_and_finalize_retired_live_for_identity(
     emit_closed: bool,
     emit_terminal: bool,
     finalize_callback,
-    defer_drive: bool = False,
     stop_error: PlanLimitStop | None = None,
 ) -> tuple[bool, TerminalSettlement | None]:
-    """Settle and retire a drained live only while its identity is exact."""
+    """Settle and retire a drained live only while its identity is exact.
+
+    The terminal is claimed under ``live.event_lock`` and its successor is
+    returned, never driven: a successor's dispatch re-enters this live's
+    locks, so the caller drives it once they are released.
+    """
+    defer_drive = db is None
     current = _LIVE.get(child_thread_id)
     if current is None:
         return live.process_exit_resolved, None
@@ -270,12 +276,11 @@ async def settle_and_finalize_retired_live_for_identity(
     emit_terminal: bool,
     finalize_callback,
 ) -> bool:
-    finalized, _settlement = await _settle_and_finalize_retired_live_for_identity(
+    return await _drive_after_unlock(_settle_and_finalize_retired_live_for_identity(
         child_thread_id, live, broadcast, identity, db,
         emit_closed=emit_closed, emit_terminal=emit_terminal,
         finalize_callback=finalize_callback,
-    )
-    return finalized
+    ))
 
 
 async def finalize_pending_process_exit(
@@ -325,10 +330,12 @@ async def _close_and_finalize(
     emit_closed: bool = True,
     finalize_callback=finalize,
     expected_identity: TurnIdentity | None = None,
-    defer_drive: bool = False,
     stop_error: PlanLimitStop | None = None,
 ) -> tuple[bool, TerminalSettlement | None]:
-    """Revoke, drain, settle, terminalize, then retire the exact live."""
+    """Revoke, drain, settle, terminalize, then retire the exact live.
+
+    Returns the committed settlement undriven, as its settle step does.
+    """
     identity = expected_identity or live.corsia_turn
     prepared = await prepare_live_close(
         child_thread_id, live, identity, timeout_s=_CLOSE_LIVE_TIMEOUT_S
@@ -349,8 +356,7 @@ async def _close_and_finalize(
         finalized, settlement = await _settle_and_finalize_retired_live_for_identity(
             child_thread_id, live, broadcast, identity, db,
             emit_closed=emit_closed, emit_terminal=True,
-            finalize_callback=finalize_callback,
-            defer_drive=defer_drive, stop_error=stop_error,
+            finalize_callback=finalize_callback, stop_error=stop_error,
         )
     if retirement_error is not None:
         if settlement is not None:
@@ -371,9 +377,24 @@ async def close_and_finalize(
     finalize_callback=finalize,
     expected_identity: TurnIdentity | None = None,
 ) -> bool:
-    finalized, _settlement = await _close_and_finalize(
+    return await _drive_after_unlock(_close_and_finalize(
         child_thread_id, live, broadcast, db,
         emit_closed=emit_closed, finalize_callback=finalize_callback,
         expected_identity=expected_identity,
-    )
+    ))
+
+
+async def _drive_after_unlock(
+    closing: Awaitable[tuple[bool, TerminalSettlement | None]],
+) -> bool:
+    """Drive a close's committed terminal once the live's locks are free."""
+    from core.turn_core import drive_turn_settlement
+
+    try:
+        finalized, settlement = await closing
+    except _CommittedTerminalFailure as failure:
+        await drive_turn_settlement(failure.settlement)
+        raise failure.publication_error
+    if settlement is not None:
+        await drive_turn_settlement(settlement)
     return finalized

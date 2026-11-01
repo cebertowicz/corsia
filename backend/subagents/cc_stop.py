@@ -39,7 +39,7 @@ async def _close_live_for_stop(
         return False, None
     finalized, settlement = await _close_and_finalize(
         child_thread_id, live, broadcast or _default_broadcast,
-        expected_identity=identity, defer_drive=True, stop_error=stop_error,
+        expected_identity=identity, stop_error=stop_error,
     )
     if finalized:
         purge_tool_token_grace(child_thread_id)

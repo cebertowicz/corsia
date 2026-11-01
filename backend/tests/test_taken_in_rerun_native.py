@@ -148,6 +148,19 @@ def _person_rows() -> list[tuple]:
         db.close()
 
 
+def _error_recovered() -> list[bool]:
+    """Each Turn error row's `recovered` mark, oldest first."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [json.loads(row[0]).get("recovered") is True for row in db.execute(
+            "SELECT metadata FROM messages WHERE thread_id=? AND role='system' "
+            "AND json_extract(metadata, '$.type')='llm_error' ORDER BY seq", (THREAD,))]
+    finally:
+        db.close()
+
+
 def _carries_person_input(request: dict) -> bool:
     return any(PERSON_TEXT in json.dumps(message.get("content")) for message in request["messages"])
 
@@ -180,6 +193,8 @@ async def test_refused_native_turn_reruns_the_person_input_once(isolated_db, no_
     assert "Answer that input now." in json.dumps(provider.requests[1]["messages"][-1])
     contents = [json.dumps(message.get("content")) for message in provider.requests[1]["messages"]]
     assert sum(PERSON_TEXT in content for content in contents) == 1  # never re-written
+    # The re-run answered it, so the failed Turn's error is past, not a live Retry.
+    assert _error_recovered() == [True]
 
 
 @pytest.mark.asyncio
@@ -195,3 +210,5 @@ async def test_a_second_refusal_starts_no_third_run(isolated_db, no_retry_delay)
     assert [status for _id, status in turns] == ["error", "error"]
     assert _person_rows() == [("person-1", PERSON_TEXT, "delivered")]
     assert len(provider.requests) == 2
+    # Only the error a successor moved past is recovered; the last one stays live.
+    assert _error_recovered() == [True, False]

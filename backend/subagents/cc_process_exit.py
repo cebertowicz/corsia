@@ -150,9 +150,9 @@ async def _publish_process_exit(
         identity.turn_id, detail, db=db, include_account=True,
     )
     marker_id = live.tool_boundary_marker_id or surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, None,
+        child_thread_id, code, detail, broadcast, db, identity,
         insert_message_fn=insert_message, logger=log,
-        account=account,
+        account=account, emit_terminal=False,
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,

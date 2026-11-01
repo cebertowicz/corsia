@@ -17,6 +17,8 @@ from typing import Callable
 
 from loguru import logger
 
+from infra.database import write_transaction
+from infra.error_recovery import stamped_on_arrival
 from infra.failure_reference import new_error_reference
 from infra.focus_rows import ERROR_SYSTEM_TYPES
 
@@ -65,13 +67,22 @@ def insert_turn_error(
     db=None,
     created_at: str | None = None,
 ) -> str:
-    """Persist one terminal error with its stable operator-facing reference."""
+    """Persist one terminal error with its stable operator-facing reference.
+
+    Written after the terminal commit, it can arrive once its Turn's successor
+    already started; it is then written `recovered` by the turn-start rule.
+    """
     metadata["turn_id"] = turn_id
     metadata["reference"] = new_error_reference()
-    message_id = insert_message_fn(
-        thread_id, "system", content, metadata, msg_id=msg_id, db=db,
-        created_at=created_at,
-    )
+    with write_transaction(db, scope="insert_turn_error") as connection:
+        if metadata.get("type") in ERROR_SYSTEM_TYPES and stamped_on_arrival(
+            connection, thread_id, turn_id,
+        ):
+            metadata["recovered"] = True
+        message_id = insert_message_fn(
+            thread_id, "system", content, metadata, msg_id=msg_id, db=connection,
+            created_at=created_at,
+        )
     logger.info(
         "turn_error reference={} turn_id={} thread={} kind={}",
         metadata["reference"], turn_id, thread_id, metadata.get("type"),

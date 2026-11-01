@@ -1266,11 +1266,59 @@ async def test_resolved_natural_exit_already_removed_by_callback_is_settled():
     finalizer.assert_not_awaited()
 
 
+def _record_successor_drives(monkeypatch, live) -> list:
+    """Record each driven successor instead of spawning Claude Code for it.
+
+    A real CC dispatch re-enters ``live.event_lock`` (``require_idle`` replays
+    the retained exit through ``prepare_live_close``), so the recorder takes
+    that lock too, bounded, before recording.
+    """
+    from infra import thread_execution
+
+    driven: list = []
+
+    async def drive(admission):
+        await asyncio.wait_for(live.event_lock.acquire(), 2)
+        live.event_lock.release()
+        driven.append([item.message_id for item in admission.items])
+
+    monkeypatch.setattr(thread_execution, "drive_turn_admission", drive)
+    return driven
+
+
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("no_taken_in_rerun")
 async def test_exit_settlement_failure_retains_exact_outcome_for_close_retry(
     main_db, tmp_path, monkeypatch,
 ):
+    from infra.taken_in_rerun import rerun_message_id
+
+    driven, recovered = await _close_retry_after_failed_exit_settlement(
+        main_db, tmp_path, monkeypatch, queue_next=False,
+    )
+
+    assert driven == [[rerun_message_id("cc-exit-retry-turn")]]
+    # The re-run moves past the failed Turn's error, so it is no live Retry.
+    assert recovered == [True]
+
+
+@pytest.mark.asyncio
+async def test_close_retry_drives_its_successor_after_releasing_the_live(
+    main_db, tmp_path, monkeypatch,
+):
+    driven, recovered = await _close_retry_after_failed_exit_settlement(
+        main_db, tmp_path, monkeypatch, queue_next=True,
+    )
+
+    assert driven == [["queued-next:input"]]
+    # The person's queued message starts the next Turn: the error stays shown.
+    assert recovered == [False]
+
+
+async def _close_retry_after_failed_exit_settlement(
+    main_db, tmp_path, monkeypatch, *, queue_next: bool,
+) -> tuple[list, list[bool]]:
+    from core.turn_core import BOOT_EPOCH
+    from infra.thread_driver import admit_input
     from subagents import cc_runtime as runtime
     from subagents import cc_runtime_lifecycle as lifecycle
     from subagents import cc_runtime_resume as resume
@@ -1327,7 +1375,14 @@ async def test_exit_settlement_failure_retains_exact_outcome_for_close_retry(
     live.tool_step_ids["call-1"] = step_id
     live.tool_names["call-1"] = "Read"
     live.tools_settled.clear()
+    if queue_next:
+        admit_input(
+            "main-1", role="user", content="next", intent="queue_after_turn",
+            message_id="queued-next:input", turn_id="queued-next",
+            boot_epoch=BOOT_EPOCH, admitted_at="t2", db=main_db,
+        )
     main_db.commit()
+    driven = _record_successor_drives(monkeypatch, live)
 
     original_persist = cc_event_tool_settlement.persist_tool_result
     fail_once = True
@@ -1351,7 +1406,9 @@ async def test_exit_settlement_failure_retains_exact_outcome_for_close_retry(
     assert live.pending_process_exit.code == 7
     assert live.pending_process_exit.stderr == "exact natural stderr"
 
-    assert await lifecycle.close_and_finalize("main-1", live, bcast) is True
+    assert await asyncio.wait_for(
+        lifecycle.close_and_finalize("main-1", live, bcast), 10,
+    ) is True
 
     turn = main_db.execute(
         "SELECT status, error FROM active_turns WHERE id=?", (identity.turn_id,),
@@ -1364,6 +1421,14 @@ async def test_exit_settlement_failure_retains_exact_outcome_for_close_retry(
     assert len(tool_rows) == 1
     assert runtime._LIVE.get("main-1") is None
     assert live.pending_process_exit is None
+    recovered = [
+        json.loads(row["metadata"]).get("recovered") is True
+        for row in main_db.execute(
+            "SELECT metadata FROM messages WHERE thread_id='main-1' AND role='system' "
+            "AND json_extract(metadata, '$.type')='cc_error' ORDER BY seq",
+        )
+    ]
+    return driven, recovered
 
 
 @pytest.mark.asyncio

@@ -228,6 +228,8 @@ def test_native_error_step_writes_cause_kind_to_the_row_and_the_live_frame(monke
 
     monkeypatch.setattr("core.step_handler.run_in_db", _run_in_db)
     monkeypatch.setattr("core.step_handler.write_transaction", lambda *a, **kw: _Tx())
+    monkeypatch.setattr("infra.turn_errors.write_transaction", lambda *a, **kw: _Tx())
+    monkeypatch.setattr("infra.turn_errors.stamped_on_arrival", lambda *a, **kw: False)
     monkeypatch.setattr("core.step_handler.record_turn_end_logged", _turn_end)
     monkeypatch.setattr(
         "core.turn_error_surface.apply_error_next_steps",

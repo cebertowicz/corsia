@@ -1009,6 +1009,7 @@ class TestLoudFailure:
         ).fetchone()
         assert turn["status"] == "cancelled"
 
+    @pytest.mark.usefixtures("no_taken_in_rerun")
     @pytest.mark.asyncio
     async def test_cancelled_resume_verdict_wait_releases_lock_and_later_refusal_ends_turn(
         self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
@@ -1055,6 +1056,7 @@ class TestLoudFailure:
             if live is not None and live.session is not None:
                 await live.session.terminate()
 
+    @pytest.mark.usefixtures("no_taken_in_rerun")
     @pytest.mark.asyncio
     async def test_cancel_after_refusal_settled_the_verdict_still_ends_turn(
         self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
@@ -1112,6 +1114,7 @@ class TestLoudFailure:
             if live is not None and live.session is not None:
                 await live.session.terminate()
 
+    @pytest.mark.usefixtures("no_taken_in_rerun")
     @pytest.mark.parametrize("dropped_by", ["no_identity", "replaced_live", "accept_raises"])
     @pytest.mark.asyncio
     async def test_refusal_during_accept_runs_its_terminal_once(

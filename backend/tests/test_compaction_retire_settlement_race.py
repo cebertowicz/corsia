@@ -115,6 +115,7 @@ async def test_inbox_trigger_does_not_settle_a_turn_while_adoption_is_pending(
         _reset_runtime()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_failed_adoption_and_inbox_trigger_settle_one_exit_once(
     isolated_db, monkeypatch,
@@ -153,6 +154,7 @@ async def test_failed_adoption_and_inbox_trigger_settle_one_exit_once(
         _reset_runtime()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_cancelled_retirement_settles_with_a_named_reason_and_releases_exit(
     isolated_db, monkeypatch,
@@ -181,6 +183,7 @@ async def test_cancelled_retirement_settles_with_a_named_reason_and_releases_exi
         _reset_runtime()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_adoption_that_never_finishes_is_bounded_and_settled(
     isolated_db, monkeypatch,
@@ -208,6 +211,7 @@ async def test_adoption_that_never_finishes_is_bounded_and_settled(
         _reset_runtime()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_exit_is_released_even_when_the_owner_cannot_settle_yet(
     isolated_db, monkeypatch,

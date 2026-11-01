@@ -78,6 +78,7 @@ async def test_transport_exit_retires_live_after_committed_publication_failure(
         _reset_runtime()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_transport_exit_retires_after_commit_without_durability_probe(
     isolated_db, monkeypatch,

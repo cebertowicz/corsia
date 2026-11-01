@@ -9,6 +9,7 @@ from cc_runtime_fixtures import _seed_parent, child_db, settle_test_input  # noq
 from test_cc_runtime_wedge import _admit_turn
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_launch_exit_before_first_event_ends_turn(child_db, monkeypatch):
     from subagents.cc_handle_close import finalize

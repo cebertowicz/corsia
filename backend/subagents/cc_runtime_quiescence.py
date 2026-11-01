@@ -116,7 +116,7 @@ async def finish_tool_failure(
                 return
             finalized, settlement = await _close_and_finalize(
                 child_thread_id, live, _default_broadcast,
-                expected_identity=identity, defer_drive=True,
+                expected_identity=identity,
             )
             if not finalized:
                 raise RuntimeError(f"Claude tool failure did not retire its exact handle: {child_thread_id}")

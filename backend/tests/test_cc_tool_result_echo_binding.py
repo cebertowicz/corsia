@@ -427,6 +427,7 @@ async def test_cc_bridge_waits_for_durable_assistant_step_before_execution(
     db.close()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 def test_echo_zero_candidate_binds_as_final_row_and_allows_continuation(
     isolated_db,
 ) -> None:

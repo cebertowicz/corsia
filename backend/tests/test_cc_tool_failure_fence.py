@@ -48,6 +48,7 @@ async def _live_with_result_step(db, identity, broadcast, calls, *, with_step=Tr
     return live
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", ["failure", "stop", "natural_exit", "late_result"])
 async def test_post_result_failure_fences_before_reply_and_keeps_one_canonical_result(
@@ -122,6 +123,7 @@ async def test_post_result_failure_fences_before_reply_and_keeps_one_canonical_r
         db.close()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["reply", "persistence"])
 async def test_cc_reply_settlement_failure_retains_completed_result(isolated_db, monkeypatch, fault):
@@ -168,6 +170,7 @@ async def test_cc_reply_settlement_failure_retains_completed_result(isolated_db,
         db.close()
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_concurrent_cc_failure_retains_peer_cancelled_after_effect(
     isolated_db, monkeypatch,
@@ -274,6 +277,7 @@ async def test_late_failure_does_not_fence_successor_or_reused_turn():
         _LIVE.pop("thread-1", None)
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_error", [False, True])
 @pytest.mark.parametrize("stop_first", [False, True])

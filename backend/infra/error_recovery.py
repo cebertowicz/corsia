@@ -7,6 +7,9 @@ is one durable write (metadata `recovered: true`), so a Focus page and the clien
 read the same answer on any page. Two callers share one rule:
 
 * `stamp_at_turn_start` runs inside the claim that starts a turn.
+* `stamped_on_arrival` applies it to an error written after its Turn's
+  successor already started (a harness writes its error row after the
+  terminal commit that claims that successor).
 * `backfill` applies the rule to existing rows.
 
 A row the user must read (their message, an update for them, any other notice)
@@ -58,6 +61,34 @@ def stamp_at_turn_start(
              WHERE thread_id=? AND seq > ? AND {_OPEN_ERROR} RETURNING id""",
         (thread_id, newest_blocking[0] if newest_blocking else 0),
     )]
+
+
+def stamped_on_arrival(db: sqlite3.Connection, thread_id: str, turn_id: str | None) -> bool:
+    """Whether an error of `turn_id` written now is already past: a later Turn started.
+
+    That Turn's claim ran `stamp_at_turn_start` before this row existed, so the
+    same rule decides here: the error is past unless that Turn started with a
+    row Focus shows on its own.
+    """
+    if turn_id is None:
+        return False
+    successor = db.execute(
+        """SELECT later.id FROM active_turns later
+             JOIN active_turns failed ON failed.id=? AND failed.thread_id=later.thread_id
+            WHERE later.thread_id=? AND later.turn_order > failed.turn_order
+            ORDER BY later.turn_order LIMIT 1""",
+        (turn_id, thread_id),
+    ).fetchone()
+    if successor is None:
+        return False
+    claimed = db.execute(
+        "SELECT role, content, metadata FROM messages WHERE thread_id=? AND active_turn_id=?",
+        (thread_id, successor[0]),
+    ).fetchall()
+    return not any(
+        is_focus_visible({"role": role, "content": content, "metadata": metadata})
+        for role, content, metadata in claimed
+    )
 
 
 def backfill(db: sqlite3.Connection) -> int:

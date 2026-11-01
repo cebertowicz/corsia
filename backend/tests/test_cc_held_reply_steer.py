@@ -462,6 +462,7 @@ async def test_cc_accepted_settle_failure_is_quarantined_at_turn_end(
     _assert_unsettled_write_quarantined(cc_turn, terminal)
 
 
+@pytest.mark.usefixtures("no_taken_in_rerun")
 @pytest.mark.asyncio
 async def test_cc_failed_ambiguous_settle_is_quarantined_at_process_exit(
     cc_turn, monkeypatch, caplog,

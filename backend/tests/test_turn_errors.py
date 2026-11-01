@@ -183,9 +183,9 @@ def test_projection_is_identical_for_history_and_live_rows():
 def test_next_step_is_recovered_or_failed_and_older_errors_are_not_held():
     with closing(_db()) as db:
         _turn(db, "turn-1")
-        _turn(db, "turn-2")
         recovered = _error(db, "recovered", "tool_bridge_unavailable", recovered=True)
         old = _error(db, "old", "cc_error")
+        _turn(db, "turn-2")
         newest = _error(db, "new", "tool_boundary_violation", turn_id="turn-2")
         _queued_input(db)
 
