@@ -96,6 +96,9 @@
 			meta: localFailed ? [localStartError ? startFix : local?.fix, local?.detail].filter(Boolean).join(' ') : local?.local_state === 'starting' ? 'Starting the local model…' : [`Downloading ${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), accentMeta: !localFailed && local?.local_state !== 'starting' }] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
+	const localRow = $derived(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed, start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
+		confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = CLI_VENDORS.filter((vendor) => cliSignedIn(vendor) || cliPicked(vendor)).map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
@@ -109,16 +112,13 @@
 			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
-		if (!neverLocal) rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
-			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
-			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
+		if (!neverLocal) rows.push(withReportAction({ ...localRow, localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		const ready = provider || endpoint;
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : endpoint ? `${endpoint.name} · added` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.', pill: ready ? { state: 'success', label: 'Ready' } : undefined, action: ready ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
-	const finishNote = $derived(setupStartNote(canFinish, eligible, setupLocalPhase(local?.local_state, localFailed || localPick.pick?.state === 'failed', localPreparing), local?.download_eta_seconds));
+	const finishNote = $derived(setupStartNote(canFinish, eligible, setupLocalPhase(localRow, downloading), local?.download_eta_seconds));
 	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;

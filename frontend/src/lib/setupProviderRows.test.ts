@@ -123,9 +123,15 @@ describe('setup provider rows', () => {
 			.toBe('Download the local model, set up a subscription or add an API provider to continue.');
 	});
 
-	it('says the local model is starting, never downloading, while it starts or loads', () => {
-		for (const [state, preparing] of [['starting', false], ['ready', false], [undefined, true]] as const) {
-			const phase = setupLocalPhase(state, false, preparing);
+	const local = (localState?: string, extra: Partial<Parameters<typeof setupLocalRow>[0]> = {}) => {
+		const downloading = ['downloading', 'paused', 'starting'].includes(localState ?? '');
+		const row = setupLocalRow({ ...actions(), source: localState ? { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: localState } : undefined, pick: null, eligible: true, downloading, ready: false, startError: '', ...extra });
+		return { row, phase: setupLocalPhase(row, downloading) };
+	};
+
+	it('says the local model is starting, never downloading, while its row shows it starting or loading', () => {
+		for (const { row, phase } of [local('starting'), local('ready'), local(undefined, { preparing: true }), local('ready', { startError: 'other' }), local('starting', { startError: 'other' })]) {
+			expect(row.busy).toBe(true);
 			expect(phase).toBe('starting');
 			expect(setupStartNote(false, true, phase)).toBe('Ready when the local model finishes starting.');
 			expect(setupStartNote(true, true, phase)).toBe('');
@@ -133,18 +139,26 @@ describe('setup provider rows', () => {
 	});
 
 	it('says the local model keeps downloading only while it downloads or is paused', () => {
-		expect(setupLocalPhase('downloading', false, false)).toBe('downloading');
-		expect(setupLocalPhase('paused', false, false)).toBe('downloading');
-		for (const state of ['starting', 'ready', 'stopped', undefined]) expect(setupStartNote(true, true, setupLocalPhase(state, false, true))).toBe('');
+		expect(local('downloading').phase).toBe('downloading');
+		expect(local('paused').phase).toBe('downloading');
+		for (const state of ['starting', 'ready', 'stopped', undefined]) expect(setupStartNote(true, true, local(state).phase)).toBe('');
 	});
 
-	it('points a failed local model at its Retry button, never at Download', () => {
-		for (const state of ['failed', 'setup_failed', 'start_failed', 'ready', undefined]) {
-			const phase = setupLocalPhase(state, true, false);
+	it('points the footer at Retry only when the row shows Retry', () => {
+		const pickFailed = { state: 'failed' as const, model: null, message: null, cause: 'memory', ref: 'local-1' };
+		for (const { row, phase } of [local('failed'), local('setup_failed'), local('start_failed'), local(undefined, { startError: 'other' }), local(undefined, { pick: pickFailed })]) {
+			expect(row.action?.label).toBe('Retry');
 			expect(phase).toBe('failed');
 			expect(setupStartNote(false, true, phase)).toBe('Press Retry, set up a subscription or add an API provider to continue.');
 		}
 		expect(setupStartNote(false, false, 'failed')).toBe('Set up a subscription or add an API provider to continue.');
+	});
+
+	it('offers Download in the footer only when the row offers it', () => {
+		expect(local(undefined).phase).toBe('idle');
+		const full = local(undefined, { pick: { state: 'picked', model: { name: 'M', repository: 'r', download_size_bytes: 1, download_size_gb: 10, context_window: 1 }, message: null }, freeDisk: 2 });
+		expect(full.row.action?.label).toBe('Check again');
+		expect(setupStartNote(false, true, full.phase)).toBe('Set up a subscription or add an API provider to continue.');
 	});
 });
 

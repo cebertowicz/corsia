@@ -82,19 +82,20 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	return { ...row, meta: `Free and private. Runs on this computer, even offline.${size ? ` ${size} download.` : ''}`, action: { label: 'Download', run: start } };
 }
 
-export type LocalPhase = 'downloading' | 'starting' | 'failed' | 'idle';
+export type LocalPhase = 'downloading' | 'starting' | 'failed' | 'idle' | 'unavailable';
 
-/** What the local model is doing for the footer: downloading, starting or loading, or failed with Retry on its row. */
-export function setupLocalPhase(localState: string | undefined, failed: boolean, preparing: boolean): LocalPhase {
-	if (localState === 'downloading' || localState === 'paused') return 'downloading';
-	if (failed) return 'failed';
-	return localState === 'starting' || localState === 'ready' || preparing ? 'starting' : 'idle';
+/** What the footer says the local model is doing, read from its row so the two never disagree. */
+export function setupLocalPhase(row: AiRow, downloading: boolean): LocalPhase {
+	if (row.busy) return 'starting';
+	if (downloading) return 'downloading';
+	if (row.action?.label === 'Retry') return 'failed';
+	return row.action?.label === 'Download' ? 'idle' : 'unavailable';
 }
 
 /** The footer follows the working path, independently of a background download. */
 export function setupStartNote(ready: boolean, eligible: boolean, phase: LocalPhase, eta?: number | null): string {
 	if (ready) return phase === 'downloading' ? 'The local model keeps downloading. Follow it in Settings › Providers.' : '';
-	if (!eligible) return 'Set up a subscription or add an API provider to continue.';
+	if (!eligible || phase === 'unavailable') return 'Set up a subscription or add an API provider to continue.';
 	if (phase === 'downloading') return `Ready when the local model finishes downloading${measuredDownloadTime(eta) ? ` (${measuredDownloadTime(eta)})` : ''}.`;
 	if (phase === 'starting') return 'Ready when the local model finishes starting.';
 	if (phase === 'failed') return 'Press Retry, set up a subscription or add an API provider to continue.';
