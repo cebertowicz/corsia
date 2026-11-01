@@ -20,7 +20,7 @@ OpenTelemetry intake is not built either. Use only fields this reference shows: 
 ## 2. Does something produce the event?
 
 A rule fires only on events that arrive; `event_rules` `types` lists types even if nothing feeds them. Today:
-- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `label`, `thread_id`, `message_id`, `author_origin`, not the subject or body. On mail `author_origin` is always `outside`, so it narrows nothing; match `from`, `to` or `label`.
+- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person now wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `label`, `thread_id`, `message_id`, `author_origin`, not the subject or body. On mail, `label` is always `INBOX` and `author_origin` always `outside`, so neither narrows anything; match `from` (or `to` when one agent watches several mailboxes).
 - **GitHub** pull requests, issues, checks, labels, comments; **CORSIA** plan blocks, review requests, document comments, worker results.
 - **Yours**: an event you declare and `emit`, or print from a scheduled script as `{"event": {"type": "<declared name>", "facts": {...}}}`. With a shell, `corsia event emit` does the same.
 
