@@ -298,10 +298,10 @@
       "sha256": "7a1068821ed8a08205ba9b719999976a747af06300b4648a679a537a1377c02b"
     },
     {
-      "bytes": 7100,
+      "bytes": 7279,
       "kind": "skill",
       "path": "skills/experiment-design/references/instrument-measures.md",
-      "sha256": "bfdbfd430d4d85e1ceeaf54e20445f5997f8778884ad4cac7320cdcf0e05a152"
+      "sha256": "db7d1d545f3aa4ca0cfed24884452f15a2eeea5a3540565dcb8d403f5c66c9fc"
     },
     {
       "bytes": 3796,

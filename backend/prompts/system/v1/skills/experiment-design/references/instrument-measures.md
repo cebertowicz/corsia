@@ -20,7 +20,7 @@ Use only fields and values this reference shows: sync accepts a KPI field it doe
 ## 2. Does something produce the event?
 
 A rule fires only on events that arrive; `event_rules` `types` lists types even if nothing feeds them.
-- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `thread_id` or `message_id`; `label` (always `INBOX`) and `author_origin` (always `outside`) narrow nothing, and the subject and body can't be matched.
+- **Email** from a connected mailbox your chat may use: `email.received` on the connector `types` names. New mail only. Mail screened as needing a person wakes its owner agent; other mail is a digest line. A rule can match `from`, `to`, `thread_id` or `message_id`. `from` may carry a name (`Sam <sam@example.com>`) or be the bare address, so match a sender with `in` on both forms; no test matches a domain. `label` (always `INBOX`) and `author_origin` (always `outside`) narrow nothing, and the subject and body can't be matched.
 - **GitHub** pull requests, issues, checks, labels, comments; **CORSIA** plan blocks, review requests, document comments, worker results.
 - **Yours**: an event you declare and `emit`, or print from a scheduled script as `{"event": {"type": "<declared name>", "facts": {...}}}`. With a shell, `corsia event emit` does the same. An outside tool that speaks OpenTelemetry can send it itself (3, step 4).
 
@@ -29,7 +29,7 @@ Nothing feeds a calendar, chat or other service. A scheduled script can poll one
 ## 3. Record
 
 1. Choose what identifies one occurrence, count every occurrence (a share needs its full denominator), and list every value each attribute can take (a value missing from an `enum` is refused).
-2. Put `measures.yaml` in `.threads/<your thread id>/` under your scope's folder (a workflow's goes beside its `SKILL.md` and names `workflow`). Declare a namespace nobody holds and no connector uses.
+2. Put `measures.yaml` in `.threads/<your thread id>/` under your scope's folder (a workflow's goes beside its `SKILL.md` and names `workflow`). Declare a namespace nobody holds and no connector uses, and start every event name with it.
 
    ```yaml
    schema: corsia.measures/1
