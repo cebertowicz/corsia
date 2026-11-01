@@ -47,12 +47,14 @@ async def _invoke(
         index = await run_in_db(
             frozen_continuity_index, request.fork_id, request.thread_id,
         )
+        # The index goes first so the instruction is the last text the writer reads.
         request = replace(
             request,
             instruction=(
-                request.instruction
-                + "\n\n[CORSIA frozen continuity index]\n"
+                "[CORSIA frozen continuity index]\n"
                 + index
+                + "\n\n"
+                + request.instruction
             ),
         )
     from core.placement_review import attach_review
