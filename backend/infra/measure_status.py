@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from infra.measure_registry import REFUSAL_LIMIT, REGISTRY
+from infra.otlp_state import REFUSALS
 
 _WINDOW_DAYS = {"today": 0, "last_7_days": 6}
 # Both reads are index ranges: observed_ts text starts with the UTC day, so a day string bounds it.
@@ -55,6 +56,12 @@ def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
         "refusals_note": f"The last {REFUSAL_LIMIT} refusal texts are held in memory and are lost when CORSIA restarts; the counters above are kept.",
         "synced_files": synced_files(db, agent_thread_id),
     }
+    if request_refusals := REFUSALS.of(agent_thread_id):
+        result["request_refusals"] = request_refusals
+        result["request_refusals_note"] = (
+            "Requests from outside tools refused before any record was read, by cause. "
+            "Held in memory and lost when CORSIA restarts."
+        )
     unversioned = sum(window["counters"].get("unversioned", 0) for per_event in events.values() for window in [per_event["last_7_days"]])
     if unversioned:
         result["unversioned"] = (

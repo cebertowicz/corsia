@@ -11,6 +11,9 @@ event, counter so an agent's recent window is one index range.
 
 from __future__ import annotations
 
+from infra.measure_keys_schema import MEASURE_KEYS_SCHEMA_SQL
+
+# The keys outside tools write these events with sit beside the table they write to.
 OUTCOME_EVENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS outcome_events (
         id              TEXT PRIMARY KEY,
@@ -54,7 +57,7 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS outcome_event_counters (
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
-            'name_undeclared', 'namespace_not_owned',
+            'name_undeclared', 'namespace_not_owned', 'identity_mismatch',
             'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL DEFAULT '',
@@ -77,4 +80,4 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name
         ON measure_definitions(kind, name);
-"""
+""" + MEASURE_KEYS_SCHEMA_SQL

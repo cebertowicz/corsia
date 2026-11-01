@@ -36,14 +36,16 @@ class Admission:
 
 def admit(
     db: sqlite3.Connection, *, owner_thread_id: str, event_name: str, attributes: dict[str, Any],
-    project_id: str | None = None, run_id: str | None = None, workflow_ref: str | None = None,
+    source: str, provenance: str, subject_key: str | None = None, project_id: str | None = None, run_id: str | None = None, workflow_ref: str | None = None,
     workflow_version: str | None = None, ts: str | None = None,
 ) -> Admission:
     """Admit one record for the stamped agent, or count and explain its refusal.
 
-    Callers: a script run's measure lines, and event intake for a ``use: both`` event (any
-    producer). ``run_id``, ``workflow_ref`` and ``workflow_version`` are the caller's own
-    stamps, resolved before admission; the producer can't set them.
+    Callers: a script run's measure lines, event intake for a ``use: both`` event (any
+    producer) and the OTLP receiver. ``source`` and ``provenance`` are the path's own and
+    have no default, so a caller can't forget them. ``run_id``, ``workflow_ref`` and
+    ``workflow_version`` are the caller's own stamps, resolved before admission; the producer
+    can't set them.
     """
     state = REGISTRY.ensure_loaded(db)
     entry = state.events.get(event_name)
@@ -68,8 +70,8 @@ def admit(
         return refuse("record_refused", problem)
     try:
         result = record_outcome_event(
-            db, dedupe_key=key, event_name=event_name, source="agent", provenance="agent_recorded",
-            ts=event_ts, project_id=project_id,
+            db, dedupe_key=key, event_name=event_name, source=source, provenance=provenance,
+            ts=event_ts, subject_key=subject_key, project_id=project_id,
             agent_thread_id=owner_thread_id, attribution="caller", attributes=merged, declared_specs=entry.specs,
         )
     except OutcomeInputRefusal as exc:

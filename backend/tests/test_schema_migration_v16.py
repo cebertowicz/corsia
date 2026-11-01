@@ -69,7 +69,7 @@ def _migrated() -> sqlite3.Connection:
 def test_fresh_schema_is_current_version() -> None:
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 167
+    assert SCHEMA_VERSION == 168
 
 
 def test_a_settled_condition_can_be_waited_on_again_and_a_live_one_still_cannot() -> None:

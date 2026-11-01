@@ -98,7 +98,7 @@ def world(tmp_path: Path, data: dict | None = None) -> sqlite3.Connection:
 
 
 def emit(db: sqlite3.Connection, event: str, attrs: dict, when: datetime, project: str | None = "project") -> dict:
-    result = admit(db, owner_thread_id="owner", event_name=event, attributes=attrs, project_id=project, ts=when.isoformat())
+    result = admit(db, source="agent", provenance="agent_recorded", owner_thread_id="owner", event_name=event, attributes=attrs, project_id=project, ts=when.isoformat())
     assert result.refusal is None and result.result and result.result.inserted
     row = db.execute("SELECT attributes FROM outcome_events WHERE id=?", (result.result.event_id,)).fetchone()
     return json.loads(row[0])

@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI):
         from infra.settings import get_devices_enabled, get_devices_outside_address
         enabled, outside_address = await asyncio.gather(run_in_db(get_devices_enabled), run_in_db(get_devices_outside_address))
         await devices_runtime.restore(app, enabled, outside_address)
+        await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
         schedule_usage_rollup_refresh()
@@ -288,6 +289,17 @@ def _validate_shutdown_owners(
         "shutdown process cleanup reported a failure after retaining no live "
         f"owners; process exit will continue: {owner_failure}"
     )
+
+
+async def _start_otlp_listener() -> None:
+    """Open the loopback measure receiver; tests start it only when CORSIA_OTLP_PORT names a port."""
+    import os
+
+    from infra.otlp_listener import PORT_ENV, listener
+
+    if os.environ.get("CORSIA_TEST_MODE") == "1" and PORT_ENV not in os.environ:
+        return
+    await listener.start()
 
 
 async def _shutdown_runtime_services(

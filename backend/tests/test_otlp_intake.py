@@ -1,0 +1,299 @@
+"""Outside tools send declared measure events over OTLP/HTTP to the real loopback listener."""
+from __future__ import annotations
+
+import asyncio
+import gzip
+import json
+import socket
+from pathlib import Path
+
+import httpx
+import pytest
+import pytest_asyncio
+from opentelemetry.proto.collector.logs.v1 import logs_service_pb2 as service
+from opentelemetry.proto.common.v1 import common_pb2 as common
+
+from infra import database, otlp_state
+from infra import measure_keys
+from infra.database import get_db
+from infra.measure_registry import REGISTRY, sync
+from infra.measure_status import status
+from infra.otlp_listener import PORT_ENV, OtlpListener
+from tests.event_routing_helpers import mk_session
+from tools.measure_keys import MeasureKeyTool
+
+OWNER, OTHER = "otlp-owner", "otlp-other"
+PROTOBUF = "application/x-protobuf"
+DECLARATION = """schema: corsia.measures/1
+namespace: qa
+events:
+  qa.rec:
+    attributes: {code: id, n: count}
+    dedupe: [code]
+  qa.route:
+    attributes: {code: id}
+    dedupe: [code]
+    use: route
+  qa.both:
+    attributes: {code: id}
+    dedupe: [code]
+    use: both
+"""
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest_asyncio.fixture
+async def world(isolated_db, tmp_path: Path, monkeypatch):
+    REGISTRY.reset()
+    otlp_state.REFUSALS.reset()
+    otlp_state.CAPS.__init__()
+    mk_session(OWNER, project_id="project-a")
+    mk_session(OTHER, project_id="project-a")
+    folder = tmp_path / ".threads" / OWNER
+    folder.mkdir(parents=True)
+    path = folder / "measures.yaml"
+    path.write_text(DECLARATION)
+    db = get_db()
+    sync(db, owner_thread_id=OWNER, path=str(path), text=DECLARATION)
+    db.commit()
+    db.close()
+    port = _free_port()
+    monkeypatch.setenv(PORT_ENV, str(port))
+    listener = OtlpListener()
+    assert await listener.start()
+    _, key = measure_keys.mint("user-1", OWNER, "test")
+    async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+        yield client, key, port
+    await listener.stop()
+
+
+def _attr(key: str, value) -> common.KeyValue:
+    pair = common.KeyValue(key=key)
+    if isinstance(value, int):
+        pair.value.int_value = value
+    else:
+        pair.value.string_value = value
+    return pair
+
+
+def request_of(*records: dict, resource: dict | None = None) -> service.ExportLogsServiceRequest:
+    request = service.ExportLogsServiceRequest()
+    block = request.resource_logs.add()
+    for key, value in (resource or {}).items():
+        block.resource.attributes.append(_attr(key, value))
+    scope = block.scope_logs.add()
+    for attributes in records:
+        record = scope.log_records.add()
+        for key, value in attributes.items():
+            record.attributes.append(_attr(key, value))
+    return request
+
+
+def send(client, key, request, *, headers=None, content=None):
+    merged = {"Authorization": f"Bearer {key}", "Content-Type": PROTOBUF, **(headers or {})}
+    return client.post("/v1/logs", content=request.SerializeToString() if content is None else content, headers=merged)
+
+
+def rejected(response: httpx.Response) -> tuple[int, str]:
+    reply = service.ExportLogsServiceResponse()
+    reply.ParseFromString(response.content)
+    return reply.partial_success.rejected_log_records, reply.partial_success.error_message
+
+
+def own_status() -> dict:
+    db = get_db()
+    try:
+        return status(db, OWNER)
+    finally:
+        db.close()
+
+
+def rows(name: str) -> int:
+    return own_status()["events"].get(name, {}).get("today", {}).get("rows", 0)
+
+
+@pytest.mark.asyncio
+async def test_declared_record_lands_as_the_keys_agent(world) -> None:
+    client, key, _ = world
+    response = await send(client, key, request_of({"event.name": "qa.rec", "code": "a1", "n": 3}))
+    assert response.status_code == 200 and rejected(response) == (0, "")
+    assert rows("qa.rec") == 1
+    db = get_db()
+    stamped = db.execute("SELECT agent_thread_id, source, provenance, project_id FROM outcome_events WHERE event_name='qa.rec'").fetchone()
+    db.close()
+    assert tuple(stamped) == (OWNER, "otlp", "agent_recorded", "project-a")
+
+
+@pytest.mark.asyncio
+async def test_json_and_gzip_bodies_are_accepted(world) -> None:
+    client, key, _ = world
+    request = request_of({"event.name": "qa.rec", "code": "j1", "n": 1}, {"event.name": "qa.rec", "code": "j2", "n": 2})
+    from google.protobuf import json_format
+    plain = json_format.MessageToJson(request).encode()
+    first = await send(client, key, request, headers={"Content-Type": "application/json"}, content=plain)
+    second = await send(client, key, request_of({"event.name": "qa.rec", "code": "z1", "n": 1}),
+                        headers={"Content-Encoding": "gzip"}, content=gzip.compress(request_of({"event.name": "qa.rec", "code": "z1", "n": 1}).SerializeToString()))
+    assert first.status_code == 200 and second.status_code == 200
+    assert json.loads(first.content) == {} and rows("qa.rec") == 3
+
+
+@pytest.mark.asyncio
+async def test_undeclared_name_is_refused_with_a_reason_and_other_records_land(world) -> None:
+    client, key, _ = world
+    response = await send(client, key, request_of({"event.name": "qa.nope", "code": "x"}, {"event.name": "qa.rec", "code": "ok", "n": 1}))
+    count, text = rejected(response)
+    assert response.status_code == 200 and count == 1 and "qa.nope" in text
+    assert rows("qa.rec") == 1
+
+
+@pytest.mark.asyncio
+async def test_record_without_event_name_is_refused(world) -> None:
+    client, key, _ = world
+    count, text = rejected(await send(client, key, request_of({"body": "plain log line"})))
+    assert count == 1 and "event.name" in text
+
+
+@pytest.mark.asyncio
+async def test_claiming_another_identity_is_refused_and_counted(world) -> None:
+    client, key, _ = world
+    response = await send(client, key, request_of({"event.name": "qa.rec", "code": "m1", "n": 1, "corsia.agent_thread_id": OTHER}))
+    count, text = rejected(response)
+    assert count == 1 and "corsia.agent_thread_id" in text
+    assert rows("qa.rec") == 0
+    assert own_status()["events"]["qa.rec"]["today"]["counters"]["identity_mismatch"] == 1
+    resource_claim = await send(client, key, request_of({"event.name": "qa.rec", "code": "m2", "n": 1}, resource={"corsia.project_id": "project-b"}))
+    assert rejected(resource_claim)[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_malformed_or_revoked_key_is_401_and_writes_nothing(world) -> None:
+    client, key, _ = world
+    body = request_of({"event.name": "qa.rec", "code": "k1", "n": 1})
+    assert (await client.post("/v1/logs", content=body.SerializeToString(), headers={"Content-Type": PROTOBUF})).status_code == 401
+    assert (await send(client, "mlk_short", body)).status_code == 401
+    assert (await send(client, "mlk_" + "A" * 43, body)).status_code == 401
+    key_id = measure_keys.list_keys(get_db(), OWNER)[0]["key_id"]
+    assert measure_keys.revoke(OWNER, key_id)
+    assert (await send(client, key, body)).status_code == 401
+    assert rows("qa.rec") == 0
+
+
+@pytest.mark.asyncio
+async def test_request_cap_answers_429_with_retry_after(world, monkeypatch) -> None:
+    client, key, _ = world
+    monkeypatch.setattr(otlp_state, "REQUESTS_PER_MINUTE", 2)
+    body = request_of({"event.name": "qa.rec", "code": "c1", "n": 1})
+    assert [(await send(client, key, body)).status_code for _ in range(2)] == [200, 200]
+    refused = await send(client, key, body)
+    assert refused.status_code == 429 and int(refused.headers["Retry-After"]) >= 1
+    assert own_status()["request_refusals"] == {"rate_limited": 1}
+
+
+@pytest.mark.asyncio
+async def test_record_cap_and_batch_size(world, monkeypatch) -> None:
+    client, key, _ = world
+    many = request_of(*({"event.name": "qa.rec", "code": f"b{i}", "n": 1} for i in range(501)))
+    assert (await send(client, key, many)).status_code == 413
+    monkeypatch.setattr(otlp_state, "RECORDS_PER_MINUTE", 2)
+    three = request_of(*({"event.name": "qa.rec", "code": f"d{i}", "n": 1} for i in range(3)))
+    assert (await send(client, key, three)).status_code == 429
+    assert rows("qa.rec") == 0
+
+
+@pytest.mark.asyncio
+async def test_drain_answers_503_before_reading(world, monkeypatch) -> None:
+    client, key, _ = world
+    monkeypatch.setattr("infra.otlp_receiver.is_draining", lambda: True)
+    response = await send(client, key, request_of({"event.name": "qa.rec", "code": "r1", "n": 1}))
+    assert response.status_code == 503 and response.headers["Retry-After"]
+    assert rows("qa.rec") == 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_type_and_encoding_are_415(world) -> None:
+    client, key, _ = world
+    body = request_of({"event.name": "qa.rec", "code": "t1", "n": 1})
+    assert (await send(client, key, body, headers={"Content-Type": "text/plain"})).status_code == 415
+    assert (await send(client, key, body, headers={"Content-Encoding": "br"})).status_code == 415
+
+
+async def _raw(port: int, head: str) -> int:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(head.encode())
+    await writer.drain()
+    status_line = await asyncio.wait_for(reader.readline(), 5)
+    writer.close()
+    return int(status_line.split(b" ")[1])
+
+
+@pytest.mark.asyncio
+async def test_length_is_required_and_capped_before_the_body_is_read(world) -> None:
+    _, key, port = world
+    common_head = f"POST /v1/logs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {key}\r\nContent-Type: {PROTOBUF}\r\n"
+    assert await _raw(port, common_head + "Transfer-Encoding: chunked\r\n\r\n") == 411
+    assert await _raw(port, common_head + f"Content-Length: {2 * 1024 * 1024}\r\n\r\n") == 413
+
+
+@pytest.mark.asyncio
+async def test_inflated_body_over_four_mib_is_413(world) -> None:
+    client, key, _ = world
+    bomb = gzip.compress(b"\0" * (5 * 1024 * 1024))
+    assert len(bomb) < 1024 * 1024
+    assert (await send(client, key, request_of(), headers={"Content-Encoding": "gzip"}, content=bomb)).status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_garbage_body_is_400(world) -> None:
+    client, key, _ = world
+    assert (await send(client, key, request_of(), content=b"\xff\xff\xff not protobuf")).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_route_and_both_types_go_through_event_intake(world) -> None:
+    client, key, _ = world
+    response = await send(client, key, request_of({"event.name": "qa.route", "code": "r1"}, {"event.name": "qa.both", "code": "b1"}))
+    assert response.status_code == 200 and rejected(response) == (0, "")
+    db = get_db()
+    received = db.execute("SELECT event_type, count(*) FROM event_intake_records GROUP BY event_type").fetchall()
+    db.close()
+    assert {row[0] for row in received} >= {"qa.route", "qa.both"}
+    assert rows("qa.both") == 1 and rows("qa.route") == 0
+
+
+@pytest.mark.asyncio
+async def test_main_app_has_no_otlp_route() -> None:
+    from main import app
+
+    assert "/v1/logs" not in {getattr(route, "path", None) for route in app.routes}
+
+
+@pytest.mark.asyncio
+async def test_get_and_unknown_paths(world) -> None:
+    client, key, _ = world
+    assert (await client.get("/v1/logs")).status_code == 405
+    assert (await client.post("/v1/metrics", content=b"")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_measure_key_tool_mints_once_lists_and_revokes(world) -> None:
+    client, _, port = world
+    minted = json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="mint", label="ci"))
+    assert minted["endpoint"] == f"http://127.0.0.1:{port}" and minted["key"].startswith("mlk_")
+    assert (await send(client, minted["key"], request_of({"event.name": "qa.rec", "code": "tk", "n": 1}))).status_code == 200
+    listing = await MeasureKeyTool().execute(_thread_id=OWNER, action="list")
+    assert minted["key"] not in listing and "ci" in listing
+    assert json.loads(await MeasureKeyTool().execute(_thread_id=OWNER, action="revoke", key_id=minted["key_id"])) == {"revoked": minted["key_id"]}
+    assert (await send(client, minted["key"], request_of({"event.name": "qa.rec", "code": "tk2", "n": 1}))).status_code == 401
+    assert (await MeasureKeyTool().execute(_thread_id=OTHER, action="revoke", key_id=minted["key_id"])).startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_mint_refuses_while_not_listening(isolated_db) -> None:
+    otlp_state.set_port(None)
+    mk_session(OWNER, project_id="project-a")
+    assert (await MeasureKeyTool().execute(_thread_id=OWNER, action="mint", label="x")).startswith("Error: the measure receiver is not listening")
