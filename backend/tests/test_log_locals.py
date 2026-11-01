@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,8 @@ import pytest
 
 BACKEND = Path(__file__).resolve().parents[1]
 MARKER = "synthetic-held-value-7f3a"
+# loguru colours stderr under CI (CI plus GITHUB_ACTIONS), which splits the phrases asserted below.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Run from a file: loguru annotates variables only on lines it can read the source of. The value
 # comes from argv, so it never appears in a source line, only in a frame's variables.
@@ -44,7 +47,7 @@ def _log_exception(tmp_path: Path, mode: str) -> str:
         [sys.executable, str(script), mode, MARKER], cwd=BACKEND, env=env,
         capture_output=True, text=True, timeout=60, check=True,
     )
-    return result.stderr
+    return _ANSI.sub("", result.stderr)
 
 
 @pytest.mark.parametrize("mode, shows_value", [("default", True), ("drop", False)])
