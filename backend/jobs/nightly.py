@@ -193,6 +193,7 @@ async def _run_job_safely() -> None:
     # the same once-per-day claim and never records or wakes while verdict writes are off.
     await _emit_learning_reports_safely()
     await _run_workflow_verdicts_safely()
+    await _run_kpi_thresholds_safely(run_date)
     await _reap_worktrees_safely()
 
 
@@ -226,6 +227,34 @@ async def _run_workflow_verdicts_safely() -> None:
         await asyncio.to_thread(run_daily)
     except Exception:
         logger.exception("nightly_job: workflow verdict evaluation failed")
+
+
+def _kpi_window(run_date: str) -> tuple[datetime | None, datetime | None]:
+    """The recorded times of the latest earlier run and of this one: the KPI step judges what settled between.
+
+    Both ends are the same recorded ``ran_at`` values, so consecutive runs split time with no overlap and no gap.
+    """
+    db = get_db()
+    try:
+        rows = [db.execute(sql, (run_date,)).fetchone() for sql in (
+            "SELECT MAX(ran_at) FROM fact_extraction_runs WHERE run_date < ?",
+            "SELECT ran_at FROM fact_extraction_runs WHERE run_date = ?")]
+    finally:
+        db.close()
+    since, until = (datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc) if row and row[0] else None
+                    for row in rows)
+    return since, until
+
+
+async def _run_kpi_thresholds_safely(run_date: str) -> None:
+    """Wake the owners of KPIs past their review line, without breaking maintenance."""
+    try:
+        from jobs.kpi_thresholds import run_daily
+
+        since, until = _kpi_window(run_date)
+        await asyncio.to_thread(run_daily, now=until, since=since)
+    except Exception:
+        logger.exception("nightly_job: kpi threshold wakes failed")
 
 
 async def _reap_worktrees_safely() -> None:

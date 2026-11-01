@@ -364,10 +364,10 @@
       "sha256": "2b46dc74b1121c334dff1d659f33620b01aa7f89c161fa88da6a316d52a250ab"
     },
     {
-      "bytes": 2714,
+      "bytes": 3858,
       "kind": "skill",
       "path": "skills/movement-review/SKILL.md",
-      "sha256": "0516ad6edb96e5cc37045912d13953c8b6c28aac04f66c86c0cc479b4eebdd47"
+      "sha256": "f658c0bab99aba6d162bf4df10952e39ba7a9e0530163596b4cdd81f27e25e06"
     },
     {
       "bytes": 6249,
