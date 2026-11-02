@@ -48,7 +48,7 @@ OBSERVED = "observed"  # both measures are read straight from the plan: a row fa
 WITH, WITHOUT = "with", "without"
 NO_STEP = "none"
 # Why a task is in neither half, in precedence order: the first cause that matches is the one counted.
-DROP_CAUSES = ("revision", "legacy_crossover", "prior_with", "late_open", "omitted")
+DROP_CAUSES = ("revision", "prior_with", "late_open", "omitted")
 # Open trials: a delivered (lesson, version) with no reached verdict yet. Whether the trial file still says
 # `trial` at that version is confirmed against the file, so a retired or edited lesson drops out.
 OPEN_TRIALS_SQL = """
@@ -64,17 +64,21 @@ OPEN_TRIALS_SQL = """
     ORDER BY first_at, g.lesson_id
 """
 # ``prior_with``: the task's thread (or a node spawned into it) already had a with receipt for this trial earlier in
-# the same checkpoint generation (NULL is the generation before the first checkpoint). Decided here, on the read
-# side, for both halves alike; delivery records the raw draw. ``revision``: a revision of a sent-back task, so the
-# root task stays the unit.
+# the same checkpoint generation. A generation id is a per-thread checkpoint record, so "the same generation" is
+# read against the task's own thread: the with came at or after the install of the checkpoint the task sits in
+# (NULL is the generation before the first checkpoint, so any earlier with counts; a missing checkpoint row or
+# install time counts as exposed). Decided here, on the read side, for both halves alike; delivery records the raw
+# draw, and a legacy ``crossover`` row (stored only for a without draw) is read as ``without``. ``revision``: a
+# revision of a sent-back task, so the root task stays the unit.
 ARM_ROWS_SQL = """
-    SELECT g.node_id, g.thread_id, g.variant, g.created_at AS received_at, n.state, n.created_at, n.updated_at,
-      n.workflow_step, n.sent_back,
+    SELECT g.node_id, g.thread_id, CASE g.variant WHEN 'crossover' THEN 'without' ELSE g.variant END AS variant,
+      g.created_at AS received_at, n.state, n.created_at, n.updated_at, n.workflow_step, n.sent_back,
       EXISTS (SELECT 1 FROM guidance_loads w LEFT JOIN plan_nodes wn ON wn.id=w.node_id
         WHERE w.lesson_id=g.lesson_id AND w.lesson_behavioral_sha256=g.lesson_behavioral_sha256
           AND w.variant='with' AND w.node_id IS NOT g.node_id
           AND (w.thread_id=g.thread_id OR wn.spawned_thread_id=g.thread_id)
-          AND w.checkpoint_generation_id IS g.checkpoint_generation_id
+          AND (g.checkpoint_generation_id IS NULL OR julianday(w.created_at) >= COALESCE(julianday(
+            (SELECT c.installed_at FROM checkpoints c WHERE c.id=g.checkpoint_generation_id)), 0))
           AND (w.created_at<g.created_at OR (w.created_at=g.created_at AND w.id<g.id))) AS prior_with,
       EXISTS (SELECT 1 FROM plan_nodes root WHERE root.id=n.follow_up_of AND root.sent_back>0) AS revision
     FROM guidance_loads g LEFT JOIN plan_nodes n ON n.id=g.node_id
@@ -87,7 +91,7 @@ OPENED_SQL = """
     LEFT JOIN plan_nodes n ON n.id=r.node_id
     JOIN guidance_loads m ON m.thread_id IN (r.thread_id, n.spawned_thread_id) AND m.path=r.path
       AND m.lesson_id IS NULL AND m.created_at>=r.created_at
-    WHERE r.lesson_id=:lesson AND r.lesson_behavioral_sha256=:sha AND r.variant='without'
+    WHERE r.lesson_id=:lesson AND r.lesson_behavioral_sha256=:sha AND r.variant IN ('without', 'crossover')
 """
 RESTARTED_SQL = f"""
     SELECT DISTINCT node_id FROM plan_node_attempts
@@ -187,8 +191,6 @@ def _drop_cause(row: Mapping[str, object], end: str | None, opened: Sequence[str
     drawn = row["variant"] in (WITH, WITHOUT)
     if row["revision"]:
         return "revision"
-    if row["variant"] == "crossover":
-        return "legacy_crossover"
     if drawn and row["prior_with"]:
         return "prior_with"
     if drawn and row["variant"] == WITHOUT and any(end is None or parse_ts(at) <= parse_ts(end) for at in opened):

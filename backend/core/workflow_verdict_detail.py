@@ -14,13 +14,14 @@ import sqlite3
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
+from core.lesson_trial_verdicts import DROP_CAUSES, WITH, WITHOUT
 from core.workflow_verdict_evaluator import STORED
 from core.workflow_verdict_read import json_ids
 from core.workflow_verdict_types import Evaluation, split_subject
 from core.workflow_verdicts import DEFAULT_MINIMUM
 
 HALVES_CAP = 50
-HALVES_KEYS = ("with", "without", "prior_with", "late_open", "legacy_crossover", "revision", "omitted")
+HALVES_KEYS = (WITH, WITHOUT, *DROP_CAUSES)
 _KEYS = "keys AS (SELECT json_extract(value,'$[0]') AS lesson, json_extract(value,'$[1]') AS sha FROM json_each(:keys))"
 # Every receipt row of the open trials, with its task's send-back count and the task it revises (a send-back's
 # revision is a follow-up of the sent-back task and draws its own receipt).

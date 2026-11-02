@@ -169,7 +169,7 @@ def test_crossed_over_omitted_and_opened_without_tasks_belong_to_neither_half(db
     deliver(db, trial, "w", "with", 1)
     deliver(db, trial, "o", "without", 1)
     task(db, "x")
-    receipt(db, trial, "x", "crossover")
+    receipt(db, trial, "x", "crossover")  # stored by older delivery for a without draw; read as one
     task(db, "skip")
     receipt(db, trial, "skip", None, omission="count_cap")
     deliver(db, trial, "peek", "without", 1)
@@ -178,9 +178,24 @@ def test_crossed_over_omitted_and_opened_without_tasks_belong_to_neither_half(db
     read_of_file(db, trial, "late-0", at="2026-10-09T00:00:00Z")  # after the task ended: it did not affect it
     arms = lessons.read_arms(db, trial)
     assert [run.run_id for run in arms.with_runs] == ["w-0"]
-    assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0"]
-    assert arms.dropped == {"revision": 0, "legacy_crossover": 1, "prior_with": 0, "late_open": 1, "omitted": 1}
-    assert arms.crossed_over == 2
+    assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0", "x"]
+    assert arms.dropped == {"revision": 0, "prior_with": 0, "late_open": 1, "omitted": 1}
+    assert arms.crossed_over == 1
+
+
+def test_a_legacy_crossover_row_is_judged_as_a_without_task(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with")])
+    task(db, "x-clean")
+    receipt(db, trial, "x-clean", "crossover", at="2026-10-02T00:00:09Z", thread="elsewhere")
+    task(db, "x-exposed")
+    receipt(db, trial, "x-exposed", "crossover", at="2026-10-02T00:00:09Z", thread="shared")
+    task(db, "x-peek")
+    receipt(db, trial, "x-peek", "crossover", at="2026-10-02T00:00:10Z", thread="peeker")
+    read_of_file(db, trial, "x-peek", at="2026-10-03T00:00:00Z", thread="peeker")
+    arms = lessons.read_arms(db, trial)
+    assert [run.run_id for run in arms.without_runs] == ["x-clean"]
+    assert arms.dropped == {"revision": 0, "prior_with": 1, "late_open": 1, "omitted": 0}
 
 
 def test_a_worker_the_task_was_handed_to_that_opens_the_lesson_crosses_it_over(db, workspace) -> None:
@@ -216,14 +231,55 @@ def test_a_task_after_a_with_on_its_thread_counts_in_neither_arm_whichever_arm_i
     assert arms.dropped["prior_with"] == 2  # the old rule dropped only the without task and kept w2
 
 
+def checkpoint(db, checkpoint_id: str, thread: str, installed_at: str) -> None:
+    """A thread's installed checkpoint: a receipt's ``checkpoint_generation_id`` names one of these."""
+    db.execute("INSERT INTO checkpoints (id,thread_id,history_epoch,through_seq,through_message_id,trigger,mode,"
+               "status,source_harness,source_model,writer_harness,writer_model,continuity_base_revision,"
+               "continuity_base_snapshot_json,started_at,installed_at) VALUES (?,?,0,0,'m','idle','cold','installed',"
+               "'x','x','x','x',0,'[]','t',?)", (checkpoint_id, thread, installed_at))
+
+
 def test_a_with_in_an_earlier_checkpoint_generation_does_not_exclude(db, workspace) -> None:
     trial = trial_at(workspace, db)
+    checkpoint(db, "gen-1", "shared", "2026-10-02T00:00:00.500000")  # installed between the with and the next task
     _exposed_thread(db, trial, [("w1", "with"), ("o2", "without"), ("w3", "with")],
                     generations=(None, "gen-1", "gen-1"))
     arms = lessons.read_arms(db, trial)
     # w1 is in the generation before the first checkpoint; neither later task has a with in its own generation
     assert [run.run_id for run in arms.with_runs] == ["w1", "w3"]
     assert [run.run_id for run in arms.without_runs] == ["o2"] and arms.dropped["prior_with"] == 0
+
+
+def _spawned_worker_after_parent_with(db, trial: lessons.OpenTrial, installed_at: str) -> lessons.Arms:
+    """A parent's with on a node handed to worker W, then a task on W in W's own checkpoint (installed at
+    ``installed_at``); the parent has checkpointed too, and a generation id is per thread."""
+    checkpoint(db, "cp-parent", "parent", "2026-10-01T12:00:00")
+    checkpoint(db, "cp-worker", "W", installed_at)
+    task(db, "wn")
+    receipt(db, trial, "wn", "with", at="2026-10-02T00:00:00", thread="parent", generation="cp-parent")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='W' WHERE id='wn'")
+    task(db, "g")
+    receipt(db, trial, "g", "without", at="2026-10-02T00:00:09", thread="W", generation="cp-worker")
+    return lessons.read_arms(db, trial)
+
+
+def test_a_with_on_a_spawned_node_before_the_workers_checkpoint_install_excludes_the_workers_task(
+        db, workspace) -> None:
+    arms = _spawned_worker_after_parent_with(db, trial_at(workspace, db), "2026-10-01T18:00:00")
+    assert arms.without_runs == () and arms.dropped["prior_with"] == 1
+
+
+def test_a_with_on_a_spawned_node_after_the_workers_checkpoint_install_does_not_exclude(db, workspace) -> None:
+    arms = _spawned_worker_after_parent_with(db, trial_at(workspace, db), "2026-10-02T00:00:05")
+    assert [run.run_id for run in arms.without_runs] == ["g"] and arms.dropped["prior_with"] == 0
+
+
+def test_a_missing_checkpoint_row_counts_as_exposed(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with"), ("o2", "without")], generations=(None, "no-such-checkpoint"))
+    arms = lessons.read_arms(db, trial)
+    assert arms.without_runs == () and arms.dropped["prior_with"] == 1
 
 
 def test_a_with_in_an_unrelated_thread_does_not_exclude(db, workspace) -> None:
@@ -562,7 +618,7 @@ def test_the_job_line_reports_the_batch_by_kind_with_halves_send_backs_and_deleg
     # with: 20 (the revision of a sent-back task is out, the root task being the unit); without: 20 + the delegated
     # step's receipt + the sent-back task's second receipt, which the arms count as a second run.
     assert detail["lesson_halves"] == [{"with": 20, "without": 22, "prior_with": 0, "late_open": 0,
-                                        "legacy_crossover": 0, "revision": 1, "omitted": 0}]
+                                        "revision": 1, "omitted": 0}]
     assert detail["lesson_both_20"] == 1
     assert detail["sent_back"] == {
         "lesson_arms": {"receipt_rows": 43, "on_sent_back_nodes": 22, "nodes_with_many": 1, "revision_receipts": 1,
