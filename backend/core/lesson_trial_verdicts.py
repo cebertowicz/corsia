@@ -120,14 +120,9 @@ class Arms:
     without_runs: tuple[Run, ...]
     dropped: Mapping[str, int]
 
-    @property
-    def crossed_over(self) -> int:
-        """Tasks left out because the thread was exposed or the lesson was opened (every cause but omitted)."""
-        return sum(count for cause, count in self.dropped.items() if cause != "omitted")
-
     def inputs(self) -> dict[str, object]:
         return {"with": len(self.with_runs), "without": len(self.without_runs),
-                "crossed_over": self.crossed_over, **{cause: self.dropped[cause] for cause in DROP_CAUSES}}
+                **{cause: self.dropped[cause] for cause in DROP_CAUSES}}
 
 
 def open_trials(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LIMIT) -> list[OpenTrial]:

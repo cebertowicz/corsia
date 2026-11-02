@@ -164,7 +164,7 @@ def test_each_task_is_one_run_in_its_half_and_its_workflow_step(db, workspace) -
     assert sent_back == {"w-0": 1.0, "w-1": 0.0}
 
 
-def test_crossed_over_omitted_and_opened_without_tasks_belong_to_neither_half(db, workspace) -> None:
+def test_omitted_and_opened_tasks_are_in_neither_half_and_a_crossover_row_is_without(db, workspace) -> None:
     trial = trial_at(workspace, db)
     deliver(db, trial, "w", "with", 1)
     deliver(db, trial, "o", "without", 1)
@@ -180,7 +180,6 @@ def test_crossed_over_omitted_and_opened_without_tasks_belong_to_neither_half(db
     assert [run.run_id for run in arms.with_runs] == ["w-0"]
     assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0", "x"]
     assert arms.dropped == {"revision": 0, "prior_with": 0, "late_open": 1, "omitted": 1}
-    assert arms.crossed_over == 1
 
 
 def test_a_legacy_crossover_row_is_judged_as_a_without_task(db, workspace) -> None:
@@ -327,7 +326,7 @@ def test_a_late_open_without_task_is_counted_as_late_open_after_the_exposure_rul
     read_of_file(db, trial, "peek-0", at="2026-10-03T00:00:00Z")
     arms = lessons.read_arms(db, trial)
     assert arms.dropped["prior_with"] == 1 and arms.dropped["late_open"] == 1
-    assert arms.inputs()["crossed_over"] == 2
+    assert {cause: arms.inputs()[cause] for cause in ("prior_with", "late_open")} == {"prior_with": 1, "late_open": 1}
 
 
 def test_an_open_task_is_a_run_without_facts_and_a_restart_is_a_failed_or_changed_attempt(db, workspace) -> None:
@@ -366,8 +365,8 @@ def test_a_trial_collects_until_each_half_has_twenty_tasks_then_judges(db, works
     keep = evaluate(db)
     assert (keep.verdict.word, keep.verdict.reason, keep.verdict.look) == ("keep", "quality_better", 1)
     assert keep.plan_is_new and keep.plan.subject == trial.subject
-    assert {key: keep.verdict.inputs[key] for key in ("with", "without", "crossed_over", "omitted")} == {
-        "with": 20, "without": 20, "crossed_over": 0, "omitted": 0}
+    assert {key: keep.verdict.inputs[key] for key in ("with", "without", *lessons.DROP_CAUSES)} == {
+        "with": 20, "without": 20, "revision": 0, "prior_with": 0, "late_open": 0, "omitted": 0}
 
 
 def test_equal_halves_wait_for_the_next_look_then_revert_after_the_third(db, workspace) -> None:
