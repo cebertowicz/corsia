@@ -2,7 +2,7 @@
 
 Whether the library turns on rides on the card's answer (``infra.community_answer``),
 so the card is raised here, by code, rather than left to the model to remember.
-Runs after a committed close (``plans.close_next_event``). Every write carries a
+Runs at the end of the CORSIA agent's Turn (``core.plan_turn_end``), so a run of closes in one Turn, such as "skip the rest", is settled first. Every write carries a
 fixed id, so a repeat is a replay and changes nothing.
 """
 
@@ -34,17 +34,19 @@ def _step_node(conductor_id: str, db: sqlite3.Connection) -> sqlite3.Row | None:
     )
 
 
-def _card_present(node: sqlite3.Row, db: sqlite3.Connection) -> bool:
+def _card_shown(node: sqlite3.Row, db: sqlite3.Connection) -> bool:
+    """Whether the card already reached the person; a draft or reviewed one is still to be finished."""
     from plans.decision_projection import rows_for_plans
 
     return any(
         item["source_node_id"] == node["id"] and item["title"] == text.COMMUNITY["title"]
+        and item["state"] in ("raised", "answered")
         for item in rows_for_plans([node["plan_id"]], db=db)
     )
 
 
-def raise_when_next() -> bool:
-    """Post the intro and raise the card once; True when this call raised it."""
+def raise_when_next(thread_id: str) -> bool:
+    """At the CORSIA agent's Turn end, post the intro and raise the card once; True when this call raised it."""
     from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
     from infra.queries import insert_message
@@ -54,13 +56,13 @@ def raise_when_next() -> bool:
     db = get_db()
     try:
         conductor_id = get_corsia_agent(db=db)
-        if not conductor_id:
+        if not conductor_id or conductor_id != thread_id:
             return False
         thread = db.execute(
             "SELECT user_id, project_id FROM threads WHERE id=?", (conductor_id,),
         ).fetchone()
         node = _step_node(conductor_id, db) if thread is not None else None
-        if thread is None or node is None or _card_present(node, db):
+        if thread is None or node is None or _card_shown(node, db):
             return False
         card = next(item for item in setup_decisions.build_decisions(setup_decisions.Facts())
                     if item["title"] == text.COMMUNITY["title"])

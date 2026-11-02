@@ -9,7 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
-- During first-run setup, CORSIA now always shows the “Use and share improvements with the CORSIA community?” card itself, so saying yes reliably turns on the improvement library.
+- During setup, CORSIA now shows the “Use and share improvements with the CORSIA community?” card itself, so saying yes reliably turns on community improvements.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%.

@@ -40,3 +40,10 @@ async def record_turn_end_logged(
         await public.drive_threads(effects.drives)
     except Exception as error:
         logger.log(level, f"{drive_failure}: {error}")
+    try:
+        from infra.db_async import run_in_db
+        from onboarding.community_card import raise_when_next
+
+        await run_in_db(raise_when_next, thread_id)
+    except Exception as error:  # noqa: BLE001 - a committed Turn end never fails on the card; the next one retries
+        logger.warning(f"community card not raised after turn end: {error}")

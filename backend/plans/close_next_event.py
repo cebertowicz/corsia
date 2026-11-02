@@ -17,9 +17,6 @@ from prompts import plan_tools as text
 
 logger = logging.getLogger(__name__)
 
-#: Closes that settle a step. Not an archive: first-run reconciliation archives steps inside its own write.
-SETTLING_OPERATIONS = frozenset({"mark_done", "accept", "accept_with_follow_up", "close_node", "fail"})
-
 #: What the description properties say when the fact beside ``next`` could not
 #: be measured: unknown, never a claim that nothing was carried.
 UNMEASURED = {"description_carried": None, "description_bytes": None, "description_cut": None}
@@ -78,10 +75,3 @@ def emit_close_event(operation: str, result: dict, actor) -> None:
     except Exception:  # noqa: BLE001 - evidence may never break a committed close
         logger.warning("plans close_next emit failed for %s", operation, exc_info=True)
     onboarding_events.note_close(operation, actor.project_id)
-    if operation in SETTLING_OPERATIONS:
-        try:
-            from onboarding import community_card
-
-            community_card.raise_when_next()
-        except Exception:  # noqa: BLE001 - a committed close never fails on the card; the next close retries
-            logger.warning("community card not raised", exc_info=True)

@@ -63,16 +63,30 @@ def _intros(conductor_id: str) -> list[dict]:
     return _rows("SELECT content, metadata FROM messages WHERE id=?", f"community-card:{conductor_id}:intro")
 
 
-def test_card_is_raised_once_when_step_7_becomes_next_and_not_before(conductor):
+async def _turn_end(thread_id: str) -> None:
+    """End a Turn for the thread through the production seam."""
+    from core.plan_turn_end import record_turn_end_logged
+
+    await record_turn_end_logged(thread_id, "arm failed", "drive failed")
+
+
+def _raised() -> list[dict]:
+    bodies = [json.loads(card["metadata"])["plan_decision"] for card in _cards()]
+    return [body for body in bodies if body["state"] == "raised"]
+
+
+async def test_card_is_raised_once_at_turn_end_after_the_last_earlier_step_settles(conductor):
     earlier = _earlier()
     for title in earlier[:-1]:
         _close(conductor, title)
+    await _turn_end(conductor)
     assert _cards() == [] and _intros(conductor) == []
 
     _close(conductor, earlier[-1])
+    assert _cards() == [] and _intros(conductor) == []  # nothing at close time, only at Turn end
+    await _turn_end(conductor)
 
-    [card] = _cards()
-    body = json.loads(card["metadata"])["plan_decision"]
+    [body] = _raised()
     assert (body["title"], body["state"]) == (TITLE, "raised")
     [step] = _rows("SELECT id FROM plan_nodes WHERE title=?", STEP_7)
     assert body["source_node_id"] == step["id"]
@@ -81,35 +95,58 @@ def test_card_is_raised_once_when_step_7_becomes_next_and_not_before(conductor):
     assert json.loads(intro["metadata"])["turn_unbound_reason"] == "server_scripted"
 
 
-def test_skip_the_rest_raises_nothing(conductor):
+async def test_skip_the_rest_in_the_agents_order_raises_nothing(conductor):
     earlier = _earlier()
-    for title in earlier[:-1]:
+    for title in earlier:
         _close(conductor, title)
     _close(conductor, STEP_7)
-    _close(conductor, earlier[-1])
+    _close(conductor, "Your files, and when agents ask first")
+    await _turn_end(conductor)
 
     assert _cards() == [] and _intros(conductor) == []
 
 
-def test_a_second_trigger_raises_nothing_more(conductor, monkeypatch):
+async def test_a_second_turn_end_raises_nothing_more(conductor):
     for title in _earlier():
         _close(conductor, title)
-    assert community_card.raise_when_next() is False
-    _close(conductor, "Your files, and when agents ask first")
+    await _turn_end(conductor)
+    await _turn_end(conductor)
 
-    # A restart forgets what the card already shows: the fixed ids still make it a replay.
-    monkeypatch.setattr(community_card, "_card_present", lambda node, db: False)
-    community_card.raise_when_next()
-
-    assert len(_cards()) == 1 and len(_intros(conductor)) == 1
+    assert len(_raised()) == 1 and len(_cards()) == 1 and len(_intros(conductor)) == 1
 
 
-def test_a_card_the_model_already_drafted_is_not_raised_again(conductor):
+async def test_a_failed_raise_is_finished_at_the_next_turn_end(conductor, monkeypatch):
+    from plans import public
+
+    for title in _earlier():
+        _close(conductor, title)
+    real = public.raise_decision
+    monkeypatch.setattr(public, "raise_decision", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    await _turn_end(conductor)
+    assert len(_cards()) == 1 and _raised() == []  # drafted and reviewed, not yet raised
+
+    monkeypatch.setattr(public, "raise_decision", real)
+    await _turn_end(conductor)
+
+    assert len(_cards()) == 1 and len(_raised()) == 1 and len(_intros(conductor)) == 1
+
+
+async def test_another_threads_turn_end_raises_nothing(conductor):
+    for title in _earlier():
+        _close(conductor, title)
+
+    assert community_card.raise_when_next("someone-else") is False
+    await _turn_end("someone-else")
+
+    assert _cards() == [] and _intros(conductor) == []
+
+
+async def test_a_card_the_model_only_drafted_does_not_replace_the_one_the_server_raises(conductor):
     from infra.database import get_db
     from plans import public
 
     earlier = _earlier()
-    for title in earlier[:-1]:
+    for title in earlier:
         _close(conductor, title)
     db = get_db()
     try:
@@ -125,12 +162,13 @@ def test_a_card_the_model_already_drafted_is_not_raised_again(conductor):
     finally:
         db.close()
 
-    _close(conductor, earlier[-1])
+    await _turn_end(conductor)
 
-    assert len(_cards()) == 1 and _intros(conductor) == []
+    [body] = _raised()
+    assert body["options"][0]["label"] == setup_strings.COMMUNITY["options"][0][0]
 
 
-def test_a_script_path_account_raises_nothing(fresh_install, app_seed_facts, monkeypatch):  # noqa: F811
+async def test_a_script_path_account_raises_nothing(fresh_install, app_seed_facts, monkeypatch):  # noqa: F811
     from infra import accounts
     from onboarding import first_run_wake
 
@@ -139,6 +177,7 @@ def test_a_script_path_account_raises_nothing(fresh_install, app_seed_facts, mon
     conductor_id = _conductor_id()
     for title in ("Getting started", "Additional provider setup", "Configuration checks", "Connect web search"):
         _close(conductor_id, title)
+    await _turn_end(conductor_id)
 
     assert _cards() == [] and _intros(conductor_id) == []
 
