@@ -4,7 +4,7 @@ import {
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
 import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
-import { withhold } from './docCommentHolds';
+import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
 export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
@@ -86,16 +86,53 @@ function startLoad(artifactId: string): Promise<CommentFeedback> {
 	return load;
 }
 
+/**
+ * Per document whose socket dropped, whether it is back. Frames sent meanwhile
+ * never come back, so every load from the drop through the first one after the
+ * reconnect to succeed looks for the suggestions they missed. Each note is a new
+ * object, so a load clears only the note it started under.
+ */
+const framesLost = new Map<string, { back: boolean }>();
+/** The socket dropped while this document was open. */
+export function noteFramesLost(artifactId: string): void {
+	framesLost.set(artifactId, { back: false });
+}
+/** The socket is back, or the document closed: the next load to succeed is the last that looks. */
+export function noteFramesBack(artifactId: string): void {
+	if (framesLost.has(artifactId)) framesLost.set(artifactId, { back: true });
+}
+
+type UnseenListener = (artifactId: string, rows: DocComment[]) => void;
+const unseenListeners = new Set<UnseenListener>();
+/** Told, before a load shows them, of the open agent suggestions a reload while frames were lost finds that this canvas never showed. */
+export function onUnseenSuggestions(listener: UnseenListener): () => void {
+	unseenListeners.add(listener);
+	return () => unseenListeners.delete(listener);
+}
+
 async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 	// A refresh of comments already shown (a change frame from any canvas or
 	// agent) stays 'ready': only a first load, or a retry after an error, reads
 	// as loading and disables the comments control.
-	if (get(commentLoads)[artifactId]?.state !== 'ready') {
+	const reload = get(commentLoads)[artifactId]?.state === 'ready';
+	// Only frames lost to a drop stay missing; on a live socket a suggestion's own frames are still on their way.
+	const lost = framesLost.get(artifactId);
+	if (!reload) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'loading' } }));
 	}
 	try {
 		const { comments, feedback } = await fetchComments(artifactId);
-		placements.show(artifactId, withhold(artifactId, comments.map(fromServer)));
+		const rows = comments.map(fromServer);
+		if (lost?.back && framesLost.get(artifactId) === lost) framesLost.delete(artifactId);
+		// What this canvas already showed stays through a failed load, so a retry after one still finds what is new.
+		const shown = get(docComments)[artifactId];
+		if (shown && lost) {
+			const known = new Set([...shown.map((row) => row.id), ...heldIds(artifactId)]);
+			const unseen = rows.filter((row) => !known.has(row.id) && row.authorKind === 'agent' && row.authorThreadId
+				&& row.replacement != null && !row.resolved && !row.decision);
+			if (unseen.length) unseenListeners.forEach((listener) => listener(artifactId, unseen));
+		}
+		placements.show(artifactId, withhold(artifactId, rows));
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
 		return feedback;
 	} catch (error) {

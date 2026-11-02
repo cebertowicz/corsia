@@ -1,7 +1,7 @@
 import { fetchContent, markArtifactVerified } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
+import { ackComment, addReply, loadComments, noteFramesBack, noteFramesLost, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -125,5 +125,34 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 		},
 		resolve(id: string, resolved: boolean) { const artifact = artifactId(); if (artifact) resolveComment(artifact, id, resolved); },
 		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
+	};
+}
+
+/** Change and activity frames sent while the socket was down never come back: call `track` with each connection state, and `close` when the viewer closes. It tells the open document's comments of the drop, and once the connection returns reloads them. */
+export function reloadAfterReconnect(artifactId: () => string | null, reload: () => void): { track: (connection: string | null) => void; close: () => void } {
+	let dropped = false;
+	// The document told of the drop; told it is back even if another document opened meanwhile.
+	let lost: string | null = null;
+	const back = () => {
+		if (lost) noteFramesBack(lost);
+		lost = null;
+	};
+	return {
+		track(connection) {
+			const artifact = artifactId();
+			if (connection === 'disconnected' || connection === 'reconnecting') {
+				dropped = true;
+				if (artifact !== lost) {
+					back();
+					if (artifact) noteFramesLost(artifact);
+					lost = artifact;
+				}
+			} else if (connection === 'connected' && dropped) {
+				dropped = false;
+				back();
+				reload();
+			}
+		},
+		close: back,
 	};
 }

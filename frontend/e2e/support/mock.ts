@@ -18,6 +18,8 @@ export interface MockReply {
         arguments: Record<string, unknown> | string;
     }>;
     finish_reason?: string;
+    // One tool call whose input streams in pieces (the first carries id and name), `delay_ms` apart.
+    tool_call_stream?: { id: string; name: string; pieces: string[]; delay_ms?: number };
     // Serves this reply only to the named native thread's turns; other threads get the default.
     match_thread?: string;
 }
