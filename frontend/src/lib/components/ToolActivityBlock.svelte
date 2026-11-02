@@ -10,6 +10,7 @@
 		type ToolKind,
 	} from '$lib/toolMeta';
 	import { lineDiff, diffStats } from '$lib/diff';
+	import { autoScroll } from '$lib/actions/autoScroll';
 	import ToolDiff from './ToolDiff.svelte';
 
 	export interface ActivityTool {
@@ -73,6 +74,10 @@
 	const visibleRows = $derived(
 		isExpanded ? tools : anyRunning ? tools.filter((t) => t.status === 'running') : []
 	);
+	// Live calls running side by side scroll inside the same height the live reasoning box does, newest in view, so
+	// many of them never make the live row as tall as the screen. A person who opens the block or a call asked for
+	// more room, so the cap steps aside for them.
+	const capped = $derived(live && !isExpanded && !tools.some((t) => expandedTools.has(t.id)));
 
 	function rowDiff(t: ActivityTool) {
 		const payload = diffPayload(t.name, t.args);
@@ -146,7 +151,7 @@
 	</button>
 
 	{#if visibleRows.length > 0}
-		<div class="ta-rows">
+		<div class="ta-rows" class:capped use:autoScroll={capped ? visibleRows.length : null}>
 			{#each visibleRows as t (t.id)}
 				{@const displayArgs = toolDisplayArgs(t.name, t.args)}
 				{@const displayResult = toolDetailResult(t.name, t.result)}
@@ -272,11 +277,16 @@
 		display: flex; flex-direction: column;
 		animation: ta-in var(--dur-tight) ease-out;
 	}
-	.ta-rows::before {
+	.ta-rows.capped { max-height: var(--live-box-max-height); overflow-y: auto; }
+	.ta-rows::before, .ta-rows.capped .ta-row-wrap::before {
 		content: ''; position: absolute;
 		left: 17px; top: 8px; bottom: 8px; width: 1px;
 		background: var(--border-subtle);
 	}
+	/* The rail is sized to the box, so in a box that scrolls it would scroll away: each row carries its own stretch. */
+	.ta-rows.capped::before { display: none; }
+	.ta-rows.capped .ta-row-wrap { position: relative; }
+	.ta-rows.capped .ta-row-wrap::before { top: 0; bottom: 0; }
 	.ta-row-wrap { display: flex; flex-direction: column; }
 	.ta-row {
 		display: flex; align-items: center; gap: 8px;

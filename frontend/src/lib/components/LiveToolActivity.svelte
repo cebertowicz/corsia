@@ -4,6 +4,7 @@
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
 	import { renderMarkdown } from '$lib/markdown';
+	import { autoScroll } from '$lib/actions/autoScroll';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -22,13 +23,6 @@
 	const liveReasoning = $derived((boundThreadId && $liveReasoningByThread.get(boundThreadId)) || '');
 	const streamContent = $derived((boundThreadId && $streamContentByThread.get(boundThreadId)) || '');
 	const isStreaming = $derived(isThreadTurnActive($turnStates, boundThreadId));
-
-	function autoScroll(node: HTMLElement, _content: string) {
-		node.scrollTop = node.scrollHeight;
-		return {
-			update() { node.scrollTop = node.scrollHeight; }
-		};
-	}
 
 	const liveTools = $derived(activeTools.map((t) => ({
 		id: 'live-' + t.id,
@@ -149,7 +143,7 @@
 	.live-reasoning-text {
 		background: var(--bg-secondary); border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
 		padding: 6px 10px; border-radius: var(--radius-2xs);
-		max-height: 150px; overflow-y: auto;
+		max-height: var(--live-box-max-height); overflow-y: auto;
 	}
 
 	@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

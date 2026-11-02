@@ -9,7 +9,7 @@
 	import { threadPlanStates, waitsOutside } from '$lib/stores/threadPlanStates';
 	import EmptyChatState from './EmptyChatState.svelte';
 	import MessageListBody from './MessageListBody.svelte';
-	import { LOAD_OLDER_TRIGGER_PX, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
+	import { contentFitsView, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
 	import Button from '$lib/components/ui/Button.svelte';
 	import OlderHistoryRow from './OlderHistoryRow.svelte';
 	import { activeCheckpoint, checkpointsByThread, latestCheckpoint } from '$lib/stores/checkpoints';
@@ -243,7 +243,7 @@
 		if (!el || messageRows.length === 0 || autoPaged) return;
 		tick().then(() => {
 			const needsVisibleEntry = focusMode && countVisibleEntries(transcriptEntries) === 0;
-			const requested = needsVisibleEntry ? requestOlderForVisibleEntry({ hasMore: hasMoreMessages, loading: loadingOlderMessages, error: olderLoadFailed }, loadOlderForVisibleEntry) : el.scrollHeight - el.clientHeight <= LOAD_OLDER_TRIGGER_PX && loadOlderIfTopInView();
+			const requested = needsVisibleEntry ? requestOlderForVisibleEntry({ hasMore: hasMoreMessages, loading: loadingOlderMessages, error: olderLoadFailed }, loadOlderForVisibleEntry) : contentFitsView(el) && loadOlderIfTopInView();
 			if (requested) autoPaged = true;
 		});
 	});
@@ -357,10 +357,10 @@
 	/* Padding-top would be added to a sticky child's `top`, so the lead-in under the header is a spacer;
 	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
-		flex: 1; overflow-y: auto;
+		flex: 1; overflow-y: auto; position: relative;
 		--sticky-top: calc(var(--header-bottom) + 8px);
 		--messages-lead: calc(var(--header-bottom) + 24px);
-		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
+		--messages-pad: calc(var(--input-bar-height, 100px) + 16px); padding: 0 16px var(--messages-pad);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
@@ -369,7 +369,7 @@
 			--messages-lead: var(--messages-pad-top, calc(var(--header-bottom) + 24px));
 			padding-left: 12px;
 			padding-right: 12px;
-			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);
+			--messages-pad: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px); padding-bottom: var(--messages-pad);
 			transform: translateY(var(--empty-parallax-offset, 0));
 		}
 	}
