@@ -99,9 +99,15 @@ async def test_a_result_over_the_room_logs_as_over_room(monkeypatch):
     ("Error: continuity entry 9 does not exist", "missing_entry"),
     ("Error: continuity entry 9 is retired", "inactive_entry"),
     ("Error: decisions already holds the maximum active entries", "field_full"),
+    ("Error: decisions already holds the maximum 12 active entries", "field_full"),
     ("Error: checkpoint execution is no longer running", "fork_ended"),
     ("Error: replace requires entry_id", "missing_arg"),
     ("Error: " + SECRET, "other"),
+    # Runtime state and model-written values never borrow a known class.
+    ("Error: checkpoint ckpt-1 does not exist", "other"),
+    ("Error: thread t-1 does not exist", "other"),
+    ("Error: unknown continuity field: 'x does not exist'", "other"),
+    ("Error: verdict written requires placement", "other"),
 ])
 @pytest.mark.asyncio
 async def test_an_error_logs_its_fixed_class_never_its_text(monkeypatch, result, expected):

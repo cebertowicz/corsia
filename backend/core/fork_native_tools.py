@@ -177,18 +177,18 @@ def assistant_message(response: Any) -> dict[str, Any]:
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _OPERATION = re.compile(r"[a-z_]{1,24}")
-# Fixed error classes keyed by the tool's own wording; the text itself is never logged.
-_ERROR_CLASSES = (
-    ("Error: Invalid parameters for tool", "invalid_params"),
-    ("Error: next_actions takes no new entries", "next_actions"),
-    ("records an in-turn fact", "in_turn_op"),
-    ("does not exist", "missing_entry"),
-    ("is retired", "inactive_entry"),
-    ("is not active", "inactive_entry"),
-    ("already holds the maximum active entries", "field_full"),
-    ("checkpoint execution is no longer running", "fork_ended"),
-    (" requires ", "missing_arg"),
-)
+# Fixed error classes, each anchored to one tool message template so a model-written value
+# or a runtime-state error never borrows a class; the text itself is never logged.
+_ERROR_CLASSES = tuple((re.compile(pattern), name) for pattern, name in (
+    (r"Error: Invalid parameters for tool ", "invalid_params"),
+    (r"Error: next_actions takes no new entries\. ", "next_actions"),
+    (r"Error: [a-z_]+ records an in-turn fact; use it outside a checkpoint\Z", "in_turn_op"),
+    (r"Error: continuity entry \d+ does not exist\Z", "missing_entry"),
+    (r"Error: continuity entry \d+ is (?:retired|not active)\Z", "inactive_entry"),
+    (r"Error: [a-z_]+ already holds the maximum (?:\d+ )?active entries\Z", "field_full"),
+    (r"Error: checkpoint execution is no longer running\Z", "fork_ended"),
+    (r"Error: [a-z_]+ requires [a-z_]+\Z", "missing_arg"),
+))
 
 
 def _token(value: Any, pattern: re.Pattern[str]) -> str:
@@ -205,7 +205,7 @@ def _error_class(outcome: str, result: str) -> str:
     """
     if outcome != "error":
         return "-"
-    return next((name for marker, name in _ERROR_CLASSES if marker in result), "other")
+    return next((name for pattern, name in _ERROR_CLASSES if pattern.match(result)), "other")
 
 
 def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
