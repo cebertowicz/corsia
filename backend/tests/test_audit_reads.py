@@ -539,8 +539,8 @@ def test_http_route_authenticates_and_refuses_foreign_thread(isolated_db, monkey
     assert "narrow the activity window" in narrowed.json()["detail"]["next"]
 
 
-def _usage(uid, thread, account, model, p, c, cw, cr, total, at):
-    return (uid, thread, account, model, p, c, cw, cr, total, at)
+CLAUDE = "external_harness:claude-code"
+CODEX_ID = "0123456789abcdef01234567"
 
 
 def _seed_seat_usage(path) -> None:
@@ -554,31 +554,34 @@ def _seed_seat_usage(path) -> None:
             "UPDATE threads SET lifecycle_state='archived' WHERE id='steve-p2'"
         )
         db.executemany(
-            "INSERT INTO llm_usage (id,thread_id,vendor_account_id,model,prompt_tokens,"
+            "INSERT INTO llm_usage (id,thread_id,vendor_account_id,model,source,prompt_tokens,"
             "completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,"
-            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             [
-                _usage("u1", "steve-p1", "acct-a", "claude-code/x", 100, 10, 40, 1000, 1150,
-                       "2026-09-22T00:00:00"),
+                ("u1", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 100, 10, 40, 1000, 1150,
+                 "2026-09-22T00:00:00"),
                 # Other project of the same user, archived thread: still counts.
-                _usage("u2", "steve-p2", "acct-a", "claude-code/x", 20, 2, 0, 500, 522,
-                       "2026-09-22T12:00:00.5"),
-                # Unattributed subscription traffic.
-                _usage("u3", "steve-p1", None, "codex/gpt-6.1-sol", 7, 1, 0, 0, 8,
-                       "2026-09-23T00:00:00"),
-                _usage("u4", "steve-p1", None, "claude-code/y", 3, 1, 0, 0, 4,
-                       "2026-09-23T01:00:00"),
+                ("u2", "steve-p2", "acct-a", "claude-code/x", CLAUDE, 20, 2, 0, 500, 522,
+                 "2026-09-22T12:00:00.5"),
+                # Unattributed subscription traffic, one row per harness.
+                (CODEX_ID, "steve-p1", None, "codex/gpt-6.1-sol", "external_harness:codex",
+                 7, 1, 0, 0, 8, "2026-09-23T00:00:00"),
+                ("u4", "steve-p1", None, "claude-code/y", CLAUDE, 3, 1, 0, 0, 4,
+                 "2026-09-23T01:00:00"),
                 # Unattributed API-key and local traffic is excluded.
-                _usage("u5", "steve-p1", None, "anthropic/claude", 999, 999, 0, 0, 1998,
-                       "2026-09-23T02:00:00"),
-                _usage("u6", "steve-p1", None, "omlx@x/qwen", 999, 999, 0, 0, 1998,
-                       "2026-09-23T02:00:00"),
+                ("u5", "steve-p1", None, "anthropic/claude", "conversation", 999, 999, 0, 0, 1998,
+                 "2026-09-23T02:00:00"),
+                ("u6", "steve-p1", None, "omlx@x/qwen", "conversation", 999, 999, 0, 0, 1998,
+                 "2026-09-23T02:00:00"),
                 # Another user's usage, even on the same account, is excluded.
-                _usage("u7", "leksi-p1", "acct-a", "claude-code/x", 5000, 5000, 0, 0, 10000,
-                       "2026-09-23T03:00:00"),
+                ("u7", "leksi-p1", "acct-a", "claude-code/x", CLAUDE, 5000, 5000, 0, 0, 10000,
+                 "2026-09-23T03:00:00"),
+                # A total that disagrees with its buckets fails Measurement's contract.
+                ("u9", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 1, 1, 0, 0, 99,
+                 "2026-09-23T04:00:00"),
                 # Window end is exclusive.
-                _usage("u8", "steve-p1", "acct-a", "claude-code/x", 9000, 0, 0, 0, 9000,
-                       "2026-09-29T00:00:00"),
+                ("u8", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 9000, 0, 0, 0, 9000,
+                 "2026-09-29T00:00:00"),
             ],
         )
 
@@ -594,12 +597,13 @@ def test_seat_usage_sums_per_account_scoped_to_user(isolated_db, monkeypatch):
     )
     assert result["scope"] == "caller_user"
     assert result["rows"] == [
-        {"account_id": None, "account_name": None, "calls": 2, "prompt": 10,
-         "completion": 2, "cache_write": 0, "cache_read": 0, "total": 12,
-         "weighted": 20},
-        {"account_id": "acct-a", "account_name": "Seat A", "calls": 2, "prompt": 120,
-         "completion": 12, "cache_write": 40, "cache_read": 1500, "total": 1672,
-         "weighted": 380},
+        {"account_id": None, "account_name": None, "harness": "claude-code", "calls": 1,
+         "prompt": 3, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 4},
+        {"account_id": None, "account_name": None, "harness": "codex", "calls": 1,
+         "prompt": 7, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 8},
+        {"account_id": "acct-a", "account_name": "Seat A", "harness": None, "calls": 2,
+         "prompt": 120, "completion": 12, "cache_write": 40, "cache_read": 1500,
+         "total": 1672},
     ]
     assert "steve-p" not in json.dumps(result)
 
