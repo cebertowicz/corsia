@@ -291,3 +291,40 @@ def test_large_negative_owner_plan_has_no_historical_contact(db):
     assert public.has_genuine_decision_raised_at_or_after(
         db, owner_thread_id="owner", boundary=_boundary(),
     ) is False
+
+
+def test_decision_states_name_only_this_nodes_decisions_under_this_title(db):
+    decision = _raised_decision(db)
+    source = decision["source_node_id"]
+
+    assert public.decision_states(db, source_node_id=source, title=decision["title"]) == ["raised"]
+    assert public.decision_states(db, source_node_id=source, title="Another question") == []
+    assert public.decision_states(db, source_node_id="missing", title=decision["title"]) == []
+
+
+def test_workflow_steps_are_this_threads_open_top_level_steps_in_plan_order(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    foreign = service.ensure_plan("thread", "foreign", db=db)
+    with raw_plan_seed(db):
+        db.executemany(
+            """INSERT INTO plan_nodes
+               (id, plan_id, parent_id, order_key, kind, title, acceptance_criteria, state,
+                commitment_id, revision, created_at, updated_at, workflow_ref, workflow_step, archived_at)
+               VALUES (?, ?, ?, ?, 'task', ?, 'DOD', ?, ?, 1, 't', 't', ?, ?, ?)""",
+            [
+                ("second", plan.id, None, 2, "Second", "pending", "second", "run", "2:b", None),
+                ("first", plan.id, None, 1, "First", "closed", "first", "run", "1:a", None),
+                ("child", plan.id, "first", 1, "Child", "pending", "child", "run", "1:c", None),
+                ("retired", plan.id, None, 3, "Retired", "pending", "retired", "run", "3:d", "t"),
+                ("other-run", plan.id, None, 4, "Other", "pending", "other-run", "other", "1:a", None),
+                ("foreign", foreign.id, None, 1, "Foreign", "pending", "foreign", "run", "1:a", None),
+            ],
+        )
+    db.commit()
+
+    steps = public.workflow_steps(db, thread_id="owner", workflow_ref="run")
+
+    assert [(step["id"], step["workflow_step"], step["settled"]) for step in steps] == [
+        ("first", "1:a", True), ("second", "2:b", False),
+    ]
+    assert steps[0]["plan_id"] == plan.id and steps[1]["state"] == "pending"
