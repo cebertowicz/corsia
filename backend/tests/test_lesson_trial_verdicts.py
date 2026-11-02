@@ -164,12 +164,10 @@ def test_each_task_is_one_run_in_its_half_and_its_workflow_step(db, workspace) -
     assert sent_back == {"w-0": 1.0, "w-1": 0.0}
 
 
-def test_omitted_and_opened_tasks_are_in_neither_half_and_a_crossover_row_is_without(db, workspace) -> None:
+def test_omitted_and_opened_without_tasks_belong_to_neither_half(db, workspace) -> None:
     trial = trial_at(workspace, db)
     deliver(db, trial, "w", "with", 1)
     deliver(db, trial, "o", "without", 1)
-    task(db, "x")
-    receipt(db, trial, "x", "crossover")  # stored by older delivery for a without draw; read as one
     task(db, "skip")
     receipt(db, trial, "skip", None, omission="count_cap")
     deliver(db, trial, "peek", "without", 1)
@@ -178,11 +176,13 @@ def test_omitted_and_opened_tasks_are_in_neither_half_and_a_crossover_row_is_wit
     read_of_file(db, trial, "late-0", at="2026-10-09T00:00:00Z")  # after the task ended: it did not affect it
     arms = lessons.read_arms(db, trial)
     assert [run.run_id for run in arms.with_runs] == ["w-0"]
-    assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0", "x"]
+    assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0"]
     assert arms.dropped == {"revision": 0, "prior_with": 0, "late_open": 1, "omitted": 1}
 
 
-def test_a_legacy_crossover_row_is_judged_as_a_without_task(db, workspace) -> None:
+def test_migration_170_turns_stored_crossover_rows_into_without_tasks_judged_by_the_same_rules(db, workspace) -> None:
+    from infra.migration_169_to_170_trial_crossover import migrate_169_to_170
+
     trial = trial_at(workspace, db)
     _exposed_thread(db, trial, [("w1", "with")])
     task(db, "x-clean")
@@ -192,12 +192,15 @@ def test_a_legacy_crossover_row_is_judged_as_a_without_task(db, workspace) -> No
     task(db, "x-peek")
     receipt(db, trial, "x-peek", "crossover", at="2026-10-02T00:00:10Z", thread="peeker")
     read_of_file(db, trial, "x-peek", at="2026-10-03T00:00:00Z", thread="peeker")
+    migrate_169_to_170(db)
+    migrate_169_to_170(db)  # idempotent
+    assert db.execute("SELECT COUNT(*) FROM guidance_loads WHERE variant='crossover'").fetchone()[0] == 0
     arms = lessons.read_arms(db, trial)
     assert [run.run_id for run in arms.without_runs] == ["x-clean"]
     assert arms.dropped == {"revision": 0, "prior_with": 1, "late_open": 1, "omitted": 0}
 
 
-def test_a_worker_the_task_was_handed_to_that_opens_the_lesson_crosses_it_over(db, workspace) -> None:
+def test_a_worker_the_task_was_handed_to_that_opens_the_lesson_drops_it_as_late_open(db, workspace) -> None:
     trial = trial_at(workspace, db)
     deliver(db, trial, "w", "with", 1)
     deliver(db, trial, "held", "without", 1)  # the receipt is the parent's; the task then went to a worker

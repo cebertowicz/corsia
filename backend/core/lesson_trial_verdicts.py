@@ -68,10 +68,11 @@ OPEN_TRIALS_SQL = """
 # read against the task's own thread: the with came at or after the install of the checkpoint the task sits in
 # (NULL is the generation before the first checkpoint, so any earlier with counts; a missing checkpoint row or
 # install time counts as exposed). Decided here, on the read side, for both halves alike; delivery records the raw
-# draw, and a legacy ``crossover`` row (stored only for a without draw) is read as ``without``. ``revision``: a
-# revision of a sent-back task, so the root task stays the unit.
+# draw. ``revision``: a revision of a sent-back task, so the root task stays the unit. This differs from a workflow
+# run (``run_roots``), which a same-``workflow_ref`` follow-up continues: a lesson trial is not scoped to a
+# workflow, and each task draws its own receipt, so only a send-back's revision repeats a task already counted.
 ARM_ROWS_SQL = """
-    SELECT g.node_id, g.thread_id, CASE g.variant WHEN 'crossover' THEN 'without' ELSE g.variant END AS variant,
+    SELECT g.node_id, g.thread_id, g.variant,
       g.created_at AS received_at, n.state, n.created_at, n.updated_at, n.workflow_step, n.sent_back,
       EXISTS (SELECT 1 FROM guidance_loads w LEFT JOIN plan_nodes wn ON wn.id=w.node_id
         WHERE w.lesson_id=g.lesson_id AND w.lesson_behavioral_sha256=g.lesson_behavioral_sha256
@@ -91,7 +92,7 @@ OPENED_SQL = """
     LEFT JOIN plan_nodes n ON n.id=r.node_id
     JOIN guidance_loads m ON m.thread_id IN (r.thread_id, n.spawned_thread_id) AND m.path=r.path
       AND m.lesson_id IS NULL AND m.created_at>=r.created_at
-    WHERE r.lesson_id=:lesson AND r.lesson_behavioral_sha256=:sha AND r.variant IN ('without', 'crossover')
+    WHERE r.lesson_id=:lesson AND r.lesson_behavioral_sha256=:sha AND r.variant='without'
 """
 RESTARTED_SQL = f"""
     SELECT DISTINCT node_id FROM plan_node_attempts

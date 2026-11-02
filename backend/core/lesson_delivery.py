@@ -30,8 +30,7 @@ from core.skill_validation import is_skill_file
 from core.token_estimation import _text_tokens
 from core.workflow_step_binding import StepBinding, declared_binding
 
-#: "crossover" rows were stored by older delivery for a without draw; the verdict read treats them as without.
-Variant = Literal["with", "without", "crossover"]
+Variant = Literal["with", "without"]
 
 #: Most trials and tokens one task start may admit; excess trials are omitted.
 START_TRIAL_CAP = 40
