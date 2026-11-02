@@ -55,25 +55,6 @@ def _close(conductor_id: str, title: str) -> None:
         db.close()
 
 
-def _mark_done(conductor_id: str, title: str) -> None:
-    """The agent marks the step with this title done."""
-    from infra.database import get_db
-    from plans import public
-
-    db = get_db()
-    try:
-        actor = public.PlanActor(conductor_id, "newcomer", None)
-        plan_id = public.ensure_current_plan(actor=actor, include_folded=True, db=db)["plan"]["id"]
-        node = db.execute("SELECT id, revision FROM plan_nodes WHERE plan_id=? AND title=?", (plan_id, title)).fetchone()
-        public.mutate(
-            plan_id, "mark_done",
-            {"node_id": node["id"], "expected_revision": node["revision"], "evidence": "done for the test"},
-            actor=actor, provenance="test", mutation_id=f"done:{node['id']}", db=db,
-        )
-    finally:
-        db.close()
-
-
 def _cards() -> list[dict]:
     return _rows("SELECT id, metadata FROM artifact_identities WHERE type='plan-decision'")
 
@@ -124,17 +105,6 @@ async def test_skip_the_rest_in_the_agents_order_raises_nothing(conductor):
     await _turn_end(conductor)
 
     assert _cards() == [] and _intros(conductor) == []
-
-
-async def test_a_step_7_the_agent_marked_done_in_the_same_turn_still_gets_its_card(conductor):
-    for title in _earlier():
-        _close(conductor, title)
-    _mark_done(conductor, STEP_7)
-    await _turn_end(conductor)
-
-    assert len(_raised()) == 1 and len(_cards()) == 1 and len(_intros(conductor)) == 1
-    await _turn_end(conductor)
-    assert len(_cards()) == 1 and len(_intros(conductor)) == 1
 
 
 async def test_a_second_turn_end_raises_nothing_more(conductor):

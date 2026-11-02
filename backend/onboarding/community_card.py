@@ -2,8 +2,7 @@
 
 Whether the library turns on rides on the card's answer (``infra.community_answer``),
 so the card is raised here, by code, rather than left to the model to remember.
-Runs at the end of the CORSIA agent's Turn (``automation.turn_end_effects.record_turn_end``), so a run of closes in one Turn, such as "skip the rest", is settled first. An open step 7, or one the agent marked done
-before the card was raised, gets its card; a closed one gets none. Every write carries a
+Runs at the end of the CORSIA agent's Turn (``automation.turn_end_effects.record_turn_end``), so a run of closes in one Turn, such as "skip the rest", is settled first. Every write carries a
 fixed id, so a repeat is a replay and changes nothing.
 """
 
@@ -15,12 +14,10 @@ from onboarding import setup_decisions, setup_strings as text
 
 _PROVENANCE = "onboarding.community_card"
 _STEP = 7
-#: Marked done (``mark_done`` settles as accepted): the card is still owed. Closed, the person's skip, owes nothing.
-_DONE = ("accepted", "accepted_with_followup")
 
 
 def _step_node(conductor_id: str, db: sqlite3.Connection) -> dict | None:
-    """The first-run-app step 7 while open or marked done, only while every earlier top-level step is settled."""
+    """The open first-run-app step 7 node, only while every earlier top-level step is settled."""
     from plans import public
 
     steps = [
@@ -29,10 +26,7 @@ def _step_node(conductor_id: str, db: sqlite3.Connection) -> dict | None:
     ]
     if any(not step["settled"] for number, step in steps if number < _STEP):
         return None
-    return next(
-        (step for number, step in steps
-         if number == _STEP and (not step["settled"] or step["state"] in _DONE)), None,
-    )
+    return next((step for number, step in steps if number == _STEP and not step["settled"]), None)
 
 
 def _card_shown(node: dict, db: sqlite3.Connection) -> bool:
