@@ -177,6 +177,18 @@ def assistant_message(response: Any) -> dict[str, Any]:
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _OPERATION = re.compile(r"[a-z_]{1,24}")
+# Fixed error classes, each anchored to one tool message template so a model-written value
+# or a runtime-state error never borrows a class; the text itself is never logged.
+_ERROR_CLASSES = tuple((re.compile(pattern), name) for pattern, name in (
+    (r"Error: Invalid parameters for tool ", "invalid_params"),
+    (r"Error: next_actions takes no new entries\. ", "next_actions"),
+    (r"Error: [a-z_]+ records an in-turn fact; use it outside a checkpoint\Z", "in_turn_op"),
+    (r"Error: continuity entry \d+ does not exist\Z", "missing_entry"),
+    (r"Error: continuity entry \d+ is (?:retired|not active)\Z", "inactive_entry"),
+    (r"Error: [a-z_]+ already holds the maximum (?:\d+ )?active entries\Z", "field_full"),
+    (r"Error: checkpoint execution is no longer running\Z", "fork_ended"),
+    (r"Error: [a-z_]+ requires [a-z_]+\Z", "missing_arg"),
+))
 
 
 def _token(value: Any, pattern: re.Pattern[str]) -> str:
@@ -184,6 +196,16 @@ def _token(value: Any, pattern: re.Pattern[str]) -> str:
     if isinstance(value, str) and pattern.fullmatch(value):
         return value
     return "-" if value is None else "other"
+
+
+def _error_class(outcome: str, result: str) -> str:
+    """The fixed class of an error result, ``other`` when unknown, ``-`` for non-errors.
+
+    Deleted with :func:`_log_tool_call`.
+    """
+    if outcome != "error":
+        return "-"
+    return next((name for pattern, name in _ERROR_CLASSES if pattern.match(result)), "other")
 
 
 def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
@@ -195,9 +217,10 @@ def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outc
     """
     arguments = call.arguments if isinstance(call.arguments, dict) else {}
     logger.info(
-        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} result_chars={}",
+        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} error={} result_chars={}",
         request.fork_id, kind.name, _token(call.name, _TOOL_NAME),
-        _token(arguments.get("operation"), _OPERATION), outcome, len(result),
+        _token(arguments.get("operation"), _OPERATION), outcome,
+        _error_class(outcome, result), len(result),
     )
 
 

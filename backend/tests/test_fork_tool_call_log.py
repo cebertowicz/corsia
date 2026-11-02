@@ -66,13 +66,13 @@ async def test_each_call_logs_its_operation_and_outcome_without_contents(monkeyp
     assert fits_room
     prefix = "fork.tool_call fork=checkpoint-1 kind=checkpoint tool="
     assert lines == [
-        prefix + "read_file operation=- outcome=refused result_chars="
+        prefix + "read_file operation=- outcome=refused error=- result_chars="
         + str(len(CHECKPOINT_KIND.tool_refusal)),
-        prefix + f"continuity_edit operation=inspect outcome=ok result_chars={len(SECRET)}",
-        prefix + "continuity_edit operation=add outcome=error result_chars=45",
-        prefix + "continuity_edit operation=other outcome=ok result_chars=6",
-        prefix + "continuity_edit operation=- outcome=ok result_chars=6",
-        prefix + "other operation=- outcome=refused result_chars="
+        prefix + f"continuity_edit operation=inspect outcome=ok error=- result_chars={len(SECRET)}",
+        prefix + "continuity_edit operation=add outcome=error error=other result_chars=45",
+        prefix + "continuity_edit operation=other outcome=ok error=- result_chars=6",
+        prefix + "continuity_edit operation=- outcome=ok error=- result_chars=6",
+        prefix + "other operation=- outcome=refused error=- result_chars="
         + str(len(CHECKPOINT_KIND.tool_refusal)),
     ]
     assert not any(SECRET in line or "/secret" in line or "forged" in line for line in lines)
@@ -87,5 +87,36 @@ async def test_a_result_over_the_room_logs_as_over_room(monkeypatch):
     assert fits_room
     assert lines == [
         "fork.tool_call fork=checkpoint-1 kind=checkpoint tool=continuity_edit "
-        "operation=inspect outcome=over_room result_chars=50",
+        "operation=inspect outcome=over_room error=- result_chars=50",
     ]
+
+
+@pytest.mark.parametrize(("result", "expected"), [
+    ("Error: Invalid parameters for tool 'continuity_edit': 'body' is a required property",
+     "invalid_params"),
+    ("Error: next_actions takes no new entries. Drop a finished one here.", "next_actions"),
+    ("Error: place records an in-turn fact; use it outside a checkpoint", "in_turn_op"),
+    ("Error: continuity entry 9 does not exist", "missing_entry"),
+    ("Error: continuity entry 9 is retired", "inactive_entry"),
+    ("Error: decisions already holds the maximum active entries", "field_full"),
+    ("Error: decisions already holds the maximum 12 active entries", "field_full"),
+    ("Error: checkpoint execution is no longer running", "fork_ended"),
+    ("Error: replace requires entry_id", "missing_arg"),
+    ("Error: " + SECRET, "other"),
+    # Runtime state and model-written values never borrow a known class.
+    ("Error: checkpoint ckpt-1 does not exist", "other"),
+    ("Error: thread t-1 does not exist", "other"),
+    ("Error: unknown continuity field: 'x does not exist'", "other"),
+    ("Error: verdict written requires placement", "other"),
+])
+@pytest.mark.asyncio
+async def test_an_error_logs_its_fixed_class_never_its_text(monkeypatch, result, expected):
+    response = _calls((CHECKPOINT_TOOL_NAME, {"operation": "add"}))
+
+    _fits, lines = await _batch(monkeypatch, response, [result], [True, True])
+
+    assert lines == [
+        "fork.tool_call fork=checkpoint-1 kind=checkpoint tool=continuity_edit "
+        f"operation=add outcome=error error={expected} result_chars={len(result)}",
+    ]
+    assert SECRET not in lines[0]
