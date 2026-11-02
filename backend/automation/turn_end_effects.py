@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from loguru import logger
+
 from infra.database import get_db, is_lock_refusal, write_transaction
 from infra.db_async import run_in_db
 from infra.lock_retry import LockRefused, retry_until_committed
@@ -104,6 +106,12 @@ async def record_turn_end(complete, thread_id: str, **outcome) -> TurnEndEffects
 
     # Best-effort and never awaited: a Claude Code slot may have freed, a rule's worker may be done.
     worker_runner.poke(if_open=True)
+    try:
+        from onboarding.community_card import raise_when_next
+
+        await run_in_db(raise_when_next, thread_id)
+    except Exception as error:  # noqa: BLE001 - a committed Turn end never fails on the card; the next one retries
+        logger.warning(f"community card not raised after turn end: {error}")
     return effects
 
 

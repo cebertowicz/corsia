@@ -64,10 +64,11 @@ def _intros(conductor_id: str) -> list[dict]:
 
 
 async def _turn_end(thread_id: str) -> None:
-    """End a Turn for the thread through the production seam."""
-    from core.plan_turn_end import record_turn_end_logged
+    """End a Turn for the thread through the one writer every harness's terminal goes through."""
+    from automation.plan_liveness_terminal import on_thread_turn_complete
+    from automation.turn_end_effects import record_turn_end
 
-    await record_turn_end_logged(thread_id, "arm failed", "drive failed")
+    await record_turn_end(on_thread_turn_complete, thread_id)
 
 
 def _raised() -> list[dict]:
@@ -129,6 +130,30 @@ async def test_a_failed_raise_is_finished_at_the_next_turn_end(conductor, monkey
     await _turn_end(conductor)
 
     assert len(_cards()) == 1 and len(_raised()) == 1 and len(_intros(conductor)) == 1
+
+
+async def test_an_external_harness_turn_end_raises_the_card(conductor):
+    from automation.turn_end_effects import record_external_turn_end
+
+    for title in _earlier():
+        _close(conductor, title)
+    await record_external_turn_end(conductor)
+
+    assert len(_raised()) == 1 and len(_intros(conductor)) == 1
+
+
+async def test_a_card_failure_does_not_stop_a_turn_end_returning_its_effects(conductor, monkeypatch):
+    from automation.turn_end_effects import TurnEndEffects, record_turn_end
+
+    def boom(thread_id):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(community_card, "raise_when_next", boom)
+    from automation.plan_liveness_terminal import on_thread_turn_complete
+
+    effects = await record_turn_end(on_thread_turn_complete, conductor)
+
+    assert isinstance(effects, TurnEndEffects)
 
 
 async def test_another_threads_turn_end_raises_nothing(conductor):
