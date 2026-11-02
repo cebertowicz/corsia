@@ -271,6 +271,66 @@ for (const size of widths) {
 		expect(await heldSpace(page), 'collapsing a step after the turn left more blank space than the turn did').toBeLessThanOrEqual(afterTurn + 2);
 	});
 
+	test(`@surface:chat-live-scroll older history loaded after a turn ends moves no text (${size.name})`, async ({ page, request }, testInfo) => {
+		test.setTimeout(150_000);
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
+		// The thread says it has older history; the page of it is held until the reader is at the top, after the turn.
+		let releaseOlder!: () => void;
+		const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+		let olderAsked = false;
+		await page.route('**/api/threads/*/messages**', async (route) => {
+			const url = route.request().url();
+			if (!url.includes('before=')) {
+				const response = await route.fetch();
+				const body = await response.json();
+				await route.fulfill({ response, json: { ...body, has_more: true, oldest_id: body.oldest_id ?? 'older-cursor' } });
+				return;
+			}
+			olderAsked = true;
+			await olderGate;
+			const threadId = /\/api\/threads\/([^/]+)\/messages/.exec(url)![1];
+			const messages = Array.from({ length: 8 }, (_, index) => ({
+				id: `older-${index}`, thread_id: threadId, role: index % 2 === 0 ? 'user' : 'assistant',
+				content: `Older message ${index}. ${LINE.repeat(10)}`, created_at: `2026-06-12T00:00:00.00000${index}`, metadata: null,
+				// Sequence 1 is the lowest a row can have; rows with the same one are ordered by time, so these come first.
+				seq: 1,
+			}));
+			await route.fulfill({ json: { messages, has_more: true, oldest_id: messages[0].id } });
+		});
+		try {
+			await openEndThread(page, request, size);
+			const gate = `hold-older-${Date.now()}`;
+			const many = Array.from({ length: 30 }, (_, index) => ({ id: `older-call-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
+			await seedMockResponses(request, [
+				{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
+				{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
+			]);
+			await sendChatMessage(page, 'start the live turn');
+			await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+			await page.waitForTimeout(3500);
+			await releaseMockGate(request, gate);
+			await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
+			await page.waitForTimeout(800);
+			const heldBefore = await heldSpace(page);
+			expect(heldBefore, 'the space the live row lost is held after the turn ends').toBeGreaterThan(30);
+			await page.locator('.messages').evaluate((el) => { el.scrollTop = 0; });
+			await expect.poll(() => olderAsked, { message: 'reaching the top asks for older history' }).toBe(true);
+			const sampling = sampleAnchor(page, 200, 2500);
+			await page.waitForTimeout(300);
+			// The row at the top that says it is loading is replaced by the one that offers more; a browser without scroll anchoring
+			// moves the text by the difference in their heights, which is not what is measured here.
+			const rowHeight = () => page.locator('.loading-older').first().evaluate((el) => el.getBoundingClientRect().height).catch(() => 0);
+			const loadingRow = await rowHeight();
+			releaseOlder();
+			const seen = moves(await sampling);
+			await expect(page.getByText('Older message 0.', { exact: false })).toHaveCount(1);
+			const rowChange = Math.abs((await rowHeight()) - loadingRow);
+			expect(seen.filter((move) => Math.abs(move.by) > rowChange + LIVE_DROP_PX), 'the text under the reader moved when older history loaded').toEqual([]);
+		} finally {
+			releaseOlder();
+		}
+	});
+
 	test(`@surface:chat-live-scroll jump to latest ignores the held space (${size.name})`, async ({ page, request }, testInfo) => {
 		test.setTimeout(150_000);
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');

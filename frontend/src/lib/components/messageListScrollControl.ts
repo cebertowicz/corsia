@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
-import { contentEnd } from '$lib/actions/holdTail';
+import { contentEnd, followTop } from '$lib/actions/holdTail';
 
 /** The scrollTop that leaves `offset` px of content below the view, measured to where the content ends (not the floor). */
 function bottomTop(el: HTMLElement, offset: number): number {
@@ -59,18 +59,8 @@ export class MessageListScrollControl {
 			const el = this.element();
 			if (!el) return;
 			// Never back up: a live edge that got shorter leaves the blank floor below, and the text stays put.
-			const floored = contentEnd(el) < el.scrollHeight;
-			el.scrollTop = floored ? Math.max(el.scrollTop, bottomTop(el, 0)) : el.scrollHeight;
+			el.scrollTop = Math.max(el.scrollTop, followTop(el));
 		});
-	}
-
-	/** The band under the transcript got `by` px shorter under a pinned reader: the view comes down with it to the content's end, and no further. */
-	shedBand(by: number): void {
-		const el = this.element();
-		if (!el) return;
-		const end = bottomTop(el, 0);
-		if (el.scrollTop <= end) return;
-		this.beginProgrammaticScroll(() => { el.scrollTop = Math.max(end, el.scrollTop - by); });
 	}
 
 	captureBottomOffset(): void {
@@ -84,7 +74,7 @@ export class MessageListScrollControl {
 		this.beginProgrammaticScroll(() => {
 			const el = this.element();
 			if (!el) return;
-			el.scrollTop = this.#savedBottomOffset <= 0 && contentEnd(el) >= el.scrollHeight ? el.scrollHeight : bottomTop(el, this.#savedBottomOffset);
+			el.scrollTop = followTop(el, this.#savedBottomOffset);
 		});
 	}
 

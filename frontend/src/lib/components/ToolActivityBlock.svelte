@@ -278,11 +278,15 @@
 		animation: ta-in var(--dur-tight) ease-out;
 	}
 	.ta-rows.capped { max-height: var(--live-box-max-height); overflow-y: auto; }
-	.ta-rows::before {
+	.ta-rows::before, .ta-rows.capped .ta-row-wrap::before {
 		content: ''; position: absolute;
 		left: 17px; top: 8px; bottom: 8px; width: 1px;
 		background: var(--border-subtle);
 	}
+	/* The rail is sized to the box, so in a box that scrolls it would scroll away: each row carries its own stretch. */
+	.ta-rows.capped::before { display: none; }
+	.ta-rows.capped .ta-row-wrap { position: relative; }
+	.ta-rows.capped .ta-row-wrap::before { top: 0; bottom: 0; }
 	.ta-row-wrap { display: flex; flex-direction: column; }
 	.ta-row {
 		display: flex; align-items: center; gap: 8px;

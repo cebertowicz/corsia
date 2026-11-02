@@ -9,7 +9,7 @@
 	import { threadPlanStates, waitsOutside } from '$lib/stores/threadPlanStates';
 	import EmptyChatState from './EmptyChatState.svelte';
 	import MessageListBody from './MessageListBody.svelte';
-	import { LOAD_OLDER_TRIGGER_PX, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
+	import { contentFitsView, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
 	import Button from '$lib/components/ui/Button.svelte';
 	import OlderHistoryRow from './OlderHistoryRow.svelte';
 	import { activeCheckpoint, checkpointsByThread, latestCheckpoint } from '$lib/stores/checkpoints';
@@ -243,7 +243,7 @@
 		if (!el || messageRows.length === 0 || autoPaged) return;
 		tick().then(() => {
 			const needsVisibleEntry = focusMode && countVisibleEntries(transcriptEntries) === 0;
-			const requested = needsVisibleEntry ? requestOlderForVisibleEntry({ hasMore: hasMoreMessages, loading: loadingOlderMessages, error: olderLoadFailed }, loadOlderForVisibleEntry) : el.scrollHeight - el.clientHeight <= LOAD_OLDER_TRIGGER_PX && loadOlderIfTopInView();
+			const requested = needsVisibleEntry ? requestOlderForVisibleEntry({ hasMore: hasMoreMessages, loading: loadingOlderMessages, error: olderLoadFailed }, loadOlderForVisibleEntry) : contentFitsView(el) && loadOlderIfTopInView();
 			if (requested) autoPaged = true;
 		});
 	});
@@ -273,7 +273,7 @@
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
 	});
-	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom, (by) => scrollControl.shedBand(by)));
+	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom));
 	export const captureBottomOffset = () => scrollControl.captureBottomOffset();
 	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
 </script>

@@ -1,3 +1,5 @@
+import { anchorPrepend, contentEnd, type Scroller } from '$lib/actions/holdTail';
+
 export type TurnSummary = {
 	started_at: string | null;
 	ended_at: string | null;
@@ -23,11 +25,7 @@ export interface PagerState {
 	error: boolean;
 }
 
-export interface ScrollAnchor {
-	scrollTop: number;
-	readonly scrollHeight: number;
-	readonly clientHeight: number;
-}
+export type ScrollAnchor = Scroller;
 
 export const PAGER_ABORT = Symbol('pager-abort');
 
@@ -73,6 +71,11 @@ export function adoptFirstPage(state: PagerState, page: MessagePage): void {
 
 export function canLoadOlder(state: Pick<PagerState, 'hasMore' | 'loading' | 'error'>): boolean {
 	return state.hasMore && !state.loading && !state.error;
+}
+
+/** The content does not fill the view by more than the trigger band, so the top is already in reach and no scroll can ask for older history. */
+export function contentFitsView(el: Scroller): boolean {
+	return contentEnd(el) - el.clientHeight <= LOAD_OLDER_TRIGGER_PX;
 }
 
 export function shouldLoadOlder(state: Pick<PagerState, 'hasMore' | 'loading' | 'error'>, scrollTop: number): boolean {
@@ -125,8 +128,7 @@ export async function loadOlder(
 			if (page.oldest_id) state.oldestId = page.oldest_id;
 		} else {
 			const el = port.getScrollEl();
-			const prevHeight = el?.scrollHeight ?? 0;
-			const prevTop = el?.scrollTop ?? 0;
+			const keepPlace = el ? anchorPrepend(el) : null;
 
 			port.prepend(older);
 			prepended = older.length;
@@ -134,10 +136,7 @@ export async function loadOlder(
 			state.oldestId = page.oldest_id ?? null;
 
 			await port.afterRender();
-			const after = port.getScrollEl();
-			if (after) {
-				after.scrollTop = prevTop + (after.scrollHeight - prevHeight);
-			}
+			if (port.getScrollEl()) keepPlace?.();
 		}
 	} catch (e) {
 		console.error('loadOlderMessages failed:', e);
