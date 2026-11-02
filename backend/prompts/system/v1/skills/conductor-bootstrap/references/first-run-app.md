@@ -54,13 +54,9 @@ The server posts `references/first-run-opening.md` as your first message, with `
    - **Something else:** follow skill `mail-host-setup` from its step 1.
 
    On "not now" to the question: `Ask me any time to connect your email.` This is CORSIA's own platform sign-in; it creates no agent.
-7. **Learning from the community.** Always. Post, word for word:
-
-   > CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose.
-
-   Then raise the one decision from `setup.setup_decisions` titled `Use and share improvements with the CORSIA community?` as **Raising a decision** in `references/first-run.md` says, with the `source_node_id` of the task it names if your plan has one, else your current plan task. Using the community's improvements needs no account.
+7. **Learning from the community.** When this step comes up, CORSIA posts its message and raises its decision, `Use and share improvements with the CORSIA community?`; never post or raise them yourself. Using the community's improvements needs no account.
    - **The answer** is written to the profile for you when the decision is answered: **Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No. On "not now", post `Ask me any time.`, write no line, and agents share nothing and take nothing until it is answered.
-   - **An answer given in chat instead of the card:** write it yourself, as two lines in the workspace's `context/50-USER-PROFILE.md`, replacing any line with the same label: `- **Use community improvements:** Yes` or `- **Use community improvements:** No`, and `- **Share improvements with the community:** Yes` or `- **Share improvements with the community:** No`. If they say they would only share, write No and Yes and treat it as sharing.
+   - **An answer given in chat instead of the card:** post `Pick your answer on the card so it's saved.` Never write these profile lines yourself.
    - **Neither:** post `Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that.` and skip the rest of this step: no GitHub.
    - **Only use:** no GitHub question. Skip the rest of this step.
    - **Use and share, or only share, and not `github_ready`:** post one message, `Sharing goes through GitHub. A separate account keeps your agents' posts apart from yours. You'd accept GitHub's terms for it and answer for what it does.` Then raise the decision titled `How should your agents post on GitHub?` the same way. If they already said they have no GitHub account, raise the one titled `Make an account for your agents on GitHub?` instead. Never ask in chat whether they have an account. When `github_ready`, skip the rest of this step: the account is already set up. On "not now" post `Ask me any time.`

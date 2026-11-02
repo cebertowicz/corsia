@@ -406,19 +406,21 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
 def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_lines():
     step = _step(7)
 
-    assert step.startswith("Learning from the community.** Always.")
-    assert "CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose." in step
+    from onboarding import setup_strings
+
+    assert step.startswith("Learning from the community.** When this step comes up, CORSIA posts its message and raises its decision")
+    assert "never post or raise them yourself" in step
+    # The intro is CORSIA's, not the agent's: it lives in the setup strings, not in the step.
+    assert "CORSIA learns from your corrections" not in step
+    assert setup_strings.COMMUNITY_INTRO == "CORSIA learns from your corrections. It tests changes to the workflows and skills behind them and keeps what works. You can use improvements other people have proven, and share yours if you choose."
     assert "Measurement" not in step
     assert "chart button" not in step
     assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
-    assert "would only share, write No and Yes" in step
-    for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
-                 "`- **Share improvements with the community:** Yes`", "`- **Share improvements with the community:** No`",
-                 "write no line, and agents share nothing and take nothing until it is answered"):
-        assert line in step, line
-    assert "context/50-USER-PROFILE.md" in step
+    assert "post `Pick your answer on the card so it's saved.` Never write these profile lines yourself." in step
+    assert "write no line, and agents share nothing and take nothing until it is answered" in step
+    assert "- **Use community improvements:**" not in step
     assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
     assert "no GitHub" in step
     assert "**Only use:** no GitHub question." in step

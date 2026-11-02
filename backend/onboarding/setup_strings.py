@@ -89,6 +89,11 @@ AGENTS_ADDRESS = "{address} to use"
 
 # The community card comes first: whether agents use and offer the community's proven improvements.
 # It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.
+# Posted by the server just before the community card is raised.
+COMMUNITY_INTRO = (
+    "CORSIA learns from your corrections. It tests changes to the workflows and skills behind them "
+    "and keeps what works. You can use improvements other people have proven, and share yours if you choose."
+)
 COMMUNITY = {
     "title": "Use and share improvements with the CORSIA community?",
     "context": ("An improvement is a change to a workflow or skill that tested better. If one would "

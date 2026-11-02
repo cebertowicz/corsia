@@ -1,0 +1,158 @@
+"""The server raises the community card when first-run-app step 7 becomes the next step."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from infra import user_profile
+from onboarding import community_card, setup_strings
+from tests.test_app_first_run_seed import PASSWORD, _conductor_id, _rows, app_seed_facts, fresh_install  # noqa: F401
+
+TITLE = setup_strings.COMMUNITY["title"]
+STEP_7 = "How CORSIA gets better"
+
+
+def _earlier() -> list[str]:
+    """Titles of the app plan's top-level steps before step 7, in order."""
+    rows = _rows(
+        "SELECT title, workflow_step FROM plan_nodes WHERE workflow_ref='first-run-app' "
+        "AND parent_id IS NULL AND archived_at IS NULL")
+    numbered = sorted((int(row["workflow_step"].split(":")[0]), row["title"]) for row in rows)
+    return [title for number, title in numbered if number < 7]
+
+
+@pytest.fixture
+def conductor(fresh_install, app_seed_facts):  # noqa: F811 - shared fixtures
+    from infra import accounts
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    return _conductor_id()
+
+
+def _close(conductor_id: str, title: str) -> None:
+    """Close the step with this title, after any open step beneath it."""
+    from infra.database import get_db
+    from plans import public
+
+    db = get_db()
+    try:
+        actor = public.PlanActor(conductor_id, "newcomer", None)
+        plan_id = public.ensure_current_plan(actor=actor, include_folded=True, db=db)["plan"]["id"]
+        top = db.execute("SELECT id FROM plan_nodes WHERE plan_id=? AND title=?", (plan_id, title)).fetchone()
+        below = db.execute(
+            "SELECT id FROM plan_nodes WHERE parent_id=? AND state NOT IN "
+            "('accepted','accepted_with_followup','failed','closed')", (top["id"],)).fetchall()
+        for row in [*below, top]:
+            node = db.execute("SELECT id, revision FROM plan_nodes WHERE id=?", (row["id"],)).fetchone()
+            public.mutate(
+                plan_id, "close_node",
+                {"node_id": node["id"], "expected_revision": node["revision"], "reason": "settled for the test"},
+                actor=actor, provenance="test", mutation_id=f"close:{node['id']}", db=db,
+            )
+    finally:
+        db.close()
+
+
+def _cards() -> list[dict]:
+    return _rows("SELECT id, metadata FROM artifact_identities WHERE type='plan-decision'")
+
+
+def _intros(conductor_id: str) -> list[dict]:
+    return _rows("SELECT content, metadata FROM messages WHERE id=?", f"community-card:{conductor_id}:intro")
+
+
+def test_card_is_raised_once_when_step_7_becomes_next_and_not_before(conductor):
+    earlier = _earlier()
+    for title in earlier[:-1]:
+        _close(conductor, title)
+    assert _cards() == [] and _intros(conductor) == []
+
+    _close(conductor, earlier[-1])
+
+    [card] = _cards()
+    body = json.loads(card["metadata"])["plan_decision"]
+    assert (body["title"], body["state"]) == (TITLE, "raised")
+    [step] = _rows("SELECT id FROM plan_nodes WHERE title=?", STEP_7)
+    assert body["source_node_id"] == step["id"]
+    [intro] = _intros(conductor)
+    assert intro["content"] == setup_strings.COMMUNITY_INTRO
+    assert json.loads(intro["metadata"])["turn_unbound_reason"] == "server_scripted"
+
+
+def test_skip_the_rest_raises_nothing(conductor):
+    earlier = _earlier()
+    for title in earlier[:-1]:
+        _close(conductor, title)
+    _close(conductor, STEP_7)
+    _close(conductor, earlier[-1])
+
+    assert _cards() == [] and _intros(conductor) == []
+
+
+def test_a_second_trigger_raises_nothing_more(conductor, monkeypatch):
+    for title in _earlier():
+        _close(conductor, title)
+    assert community_card.raise_when_next() is False
+    _close(conductor, "Your files, and when agents ask first")
+
+    # A restart forgets what the card already shows: the fixed ids still make it a replay.
+    monkeypatch.setattr(community_card, "_card_present", lambda node, db: False)
+    community_card.raise_when_next()
+
+    assert len(_cards()) == 1 and len(_intros(conductor)) == 1
+
+
+def test_a_card_the_model_already_drafted_is_not_raised_again(conductor):
+    from infra.database import get_db
+    from plans import public
+
+    earlier = _earlier()
+    for title in earlier[:-1]:
+        _close(conductor, title)
+    db = get_db()
+    try:
+        actor = public.PlanActor(conductor, "newcomer", None)
+        listing = public.ensure_current_plan(actor=actor, include_folded=True, db=db)
+        step = next(item for item in listing["nodes"] if item["title"] == STEP_7)
+        fields = {key: setup_strings.COMMUNITY[key] for key in ("title", "context", "tradeoff", "rationale")}
+        fields |= {"recommendation": "A", "other_enabled": True, "options": [
+            {"id": "A", "label": "x", "detail": "y"}, {"id": "B", "label": "z", "detail": "w"}]}
+        public.deliver_deferred(public.draft_decision(
+            listing["plan"]["id"], source_node_id=step["id"], mutation_id="model-draft",
+            actor=actor, provenance="test", db=db, **fields))
+    finally:
+        db.close()
+
+    _close(conductor, earlier[-1])
+
+    assert len(_cards()) == 1 and _intros(conductor) == []
+
+
+def test_a_script_path_account_raises_nothing(fresh_install, app_seed_facts, monkeypatch):  # noqa: F811
+    from infra import accounts
+    from onboarding import first_run_wake
+
+    monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: False)
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    for title in ("Getting started", "Additional provider setup", "Configuration checks", "Connect web search"):
+        _close(conductor_id, title)
+
+    assert _cards() == [] and _intros(conductor_id) == []
+
+
+@pytest.mark.parametrize("line", [
+    "- **Learning:** Yes",
+    "- **Use community improvements** Yes",
+    "- **Use improvements:** Yes",
+    "- **Share improvements with the community:** Yes",
+    "- **Use community improvements:** Maybe",
+    "**Use community improvements:** Yes",
+])
+def test_near_miss_profile_lines_do_not_turn_the_library_on(tmp_path, line):
+    (tmp_path / user_profile.PROFILE_RELATIVE_PATH).parent.mkdir(parents=True)
+    (tmp_path / user_profile.PROFILE_RELATIVE_PATH).write_text(f"# User profile\n\n{line}\n", encoding="utf-8")
+
+    assert user_profile.uses_community_improvements(tmp_path) is False
