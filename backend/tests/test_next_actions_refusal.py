@@ -41,6 +41,14 @@ def test_adding_a_next_action_in_a_checkpoint_points_at_the_narrative_not_the_pl
     assert "plan_update" not in result
 
 
+def test_the_field_schema_says_add_refuses_a_next_action() -> None:
+    from tools.continuity import ContinuityEditTool
+
+    description = ContinuityEditTool().parameters["properties"]["field"]["description"]
+
+    assert "add refuses next_actions" in description
+
+
 def test_other_fields_still_take_an_add(setup) -> None:
     result = setup._run("thread-1", "add", {"field": "facts", "body": _lesson("a plain fact")})
 

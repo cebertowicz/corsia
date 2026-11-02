@@ -94,7 +94,7 @@ async def test_a_result_over_the_room_logs_as_over_room(monkeypatch):
 @pytest.mark.parametrize(("result", "expected"), [
     ("Error: Invalid parameters for tool 'continuity_edit': 'body' is a required property",
      "invalid_params"),
-    ("Error: next_actions takes no new entries. Drop a finished one here.", "next_actions"),
+    ("Error: next_actions takes no new entries. Name it in your narrative.", "next_actions"),
     ("Error: place records an in-turn fact; use it outside a checkpoint", "in_turn_op"),
     ("Error: continuity entry 9 does not exist", "missing_entry"),
     ("Error: continuity entry 9 is retired", "inactive_entry"),

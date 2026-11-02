@@ -26,6 +26,7 @@ import tools.continuity_runtime as continuity_runtime
 from tools.base import Tool
 from tools.continuity_place import _place, _place_error, _queued, _trial_text
 from tools.continuity_schema import (
+    NO_NEW_ENTRIES_FIELD,
     _FIELD_SCHEMAS,
     _OPERATIONS,
     VERDICTS,
@@ -146,7 +147,7 @@ def _run(
     checkpoint_id: str | None = None,
 ) -> str:
     """Apply one transaction, returning individual refusals as tool results."""
-    if operation == "add" and params.get("field") == "next_actions":
+    if operation == "add" and params.get("field") == NO_NEW_ENTRIES_FIELD:
         return continuity_runtime.next_actions_refusal(checkpoint_id)
     db = get_db()
     try:
