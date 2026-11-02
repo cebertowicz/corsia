@@ -66,6 +66,7 @@
 		if (type.startsWith('checkpoint.')) return 'Checkpoint';
 		if (type === 'context.digest') return 'Context';
 		if (type.startsWith('system.restart.')) return 'Restart';
+		if (type === 'system.turn.unanswered_input') return 'Error';
 		if (type.includes('review')) return 'Review';
 		if (type.includes('comment')) return 'PR comment';
 		if (type.includes('check')) return 'Check';

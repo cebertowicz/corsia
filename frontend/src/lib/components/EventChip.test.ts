@@ -158,6 +158,22 @@ describe('EventChip', () => {
 		expect(chip.querySelector('.ev-summary')?.textContent).toBe('Context saved');
 	});
 
+	it('labels the wake for a reply an error stopped as Error', () => {
+		const summary = 'An error stopped the reply to your message, so the agent is trying again';
+		const chip = renderChip({
+			...RESTART_WAKE_MSG,
+			id: 'unanswered-wake-1',
+			content: '[EVENT: system.turn.unanswered_input]',
+			metadata: {
+				...RESTART_WAKE_MSG.metadata,
+				event_type: 'system.turn.unanswered_input',
+				summary,
+			},
+		});
+		expect(chip.querySelector('.ev-label')?.textContent).toBe('Error');
+		expect(chip.querySelector('.ev-summary')?.textContent).toBe(summary);
+	});
+
 	it('renders no link when url is null', () => {
 		const chip = renderChip(CHECK_CHIP_MSG);
 		expect(chip.tagName).toBe('DIV');

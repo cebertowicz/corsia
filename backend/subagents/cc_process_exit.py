@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TypeAlias
 
+from core.plan_turn_end import settlement_with_turn_end
 from core.stop_causes import PlanLimitStop, frame_cause
 from core.turn_core import (
     TerminalSettlement,
@@ -97,7 +98,6 @@ def remember_process_exit(
         return False
     live.pending_process_exit = pending
     return True
-
 
 
 async def _settle_process_exit(
@@ -199,25 +199,33 @@ async def finish_process_exit(
     pending = live.pending_process_exit
     assert pending is not None
     barrier = live.turn_terminal
+    # Settle undriven: the successor starts after the Turn end, outside event_lock.
     terminal, resolved, complete = await _settle_process_exit(
         child_thread_id, live, identity, pending, detail, broadcast, db,
         replaying=replaying,
-        defer_drive=defer_drive,
+        defer_drive=defer_drive or db is None,
     )
     if complete and resolved:
         try:
-            await _publish_process_exit(
-                child_thread_id, live, identity, pending.code, detail,
-                broadcast, db,
-            )
+            try:
+                await _publish_process_exit(child_thread_id, live, identity, pending.code, detail, broadcast, db)
+            finally:
+                # After the exit marker and any sign-out, or a failed publish of the committed
+                # terminal; db is None on production paths (record_turn_end opens its own write).
+                terminal = await settlement_with_turn_end(
+                    terminal, child_thread_id, identity, str(retained_error(pending.stderr, detail)), db,
+                )
         except BaseException as error:
-            if defer_drive:
-                assert isinstance(terminal, TerminalSettlement)
-                raise _CommittedTerminalFailure(terminal, error) from error
+            if isinstance(terminal, TerminalSettlement):
+                if defer_drive:
+                    raise _CommittedTerminalFailure(terminal, error) from error
+                await drive_turn_settlement(terminal)
             raise
         finally:
             if barrier is not None:
                 barrier.set()
+    if isinstance(terminal, TerminalSettlement) and not defer_drive:
+        return await drive_turn_settlement(terminal)
     return terminal
 
 

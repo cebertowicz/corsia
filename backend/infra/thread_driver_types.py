@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from infra.idle_checkpoints import IdleCheckpointDue
 from infra.input_admission import AcceptedInput
 from infra.thread_input_types import TurnAdmission
+
+if TYPE_CHECKING:
+    from automation.turn_end_effects import TurnEndEffects
 
 
 class TerminalResult(str, Enum):
@@ -32,6 +36,9 @@ class TerminalSettlement:
     idle_checkpoint: IdleCheckpointDue | None = None
     failed_message_ids: tuple[str, ...] = ()
     probe_outcome: str | None = None
+    # Set only by a process-exit terminal, which has no result event to record
+    # it; driven with the settlement by ``turn_core.drive_turn_settlement``.
+    turn_end_effects: TurnEndEffects | None = None
 
 
 @dataclass(frozen=True, slots=True)

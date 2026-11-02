@@ -116,6 +116,7 @@ async def test_inbox_trigger_does_not_settle_a_turn_while_adoption_is_pending(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_failed_adoption_and_inbox_trigger_settle_one_exit_once(
     isolated_db, monkeypatch,
 ) -> None:
@@ -154,6 +155,7 @@ async def test_failed_adoption_and_inbox_trigger_settle_one_exit_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_cancelled_retirement_settles_with_a_named_reason_and_releases_exit(
     isolated_db, monkeypatch,
 ) -> None:
@@ -182,6 +184,7 @@ async def test_cancelled_retirement_settles_with_a_named_reason_and_releases_exi
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_adoption_that_never_finishes_is_bounded_and_settled(
     isolated_db, monkeypatch,
 ) -> None:
