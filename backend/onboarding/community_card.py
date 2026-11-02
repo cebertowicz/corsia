@@ -2,7 +2,7 @@
 
 Whether the library turns on rides on the card's answer (``infra.community_answer``),
 so the card is raised here, by code, rather than left to the model to remember.
-Runs at the end of the CORSIA agent's Turn (``core.plan_turn_end``), so a run of closes in one Turn, such as "skip the rest", is settled first. Every write carries a
+Runs at the end of the CORSIA agent's Turn (``automation.turn_end_effects.record_turn_end``), so a run of closes in one Turn, such as "skip the rest", is settled first. Every write carries a
 fixed id, so a repeat is a replay and changes nothing.
 """
 
@@ -16,33 +16,25 @@ _PROVENANCE = "onboarding.community_card"
 _STEP = 7
 
 
-def _step_node(conductor_id: str, db: sqlite3.Connection) -> sqlite3.Row | None:
+def _step_node(conductor_id: str, db: sqlite3.Connection) -> dict | None:
     """The open first-run-app step 7 node, only while every earlier top-level step is settled."""
-    from plans.node_states import _TERMINAL_STATES
+    from plans import public
 
-    rows = db.execute(
-        "SELECT n.id, n.plan_id, n.state, n.workflow_step FROM plan_nodes n "
-        "JOIN plans p ON p.id = n.plan_id WHERE p.owner_kind='thread' AND p.owner_id=? "
-        "AND n.workflow_ref='first-run-app' AND n.parent_id IS NULL AND n.archived_at IS NULL",
-        (conductor_id,),
-    ).fetchall()
-    steps = [(int(row["workflow_step"].split(":", 1)[0]), row) for row in rows]
-    if any(row["state"] not in _TERMINAL_STATES for number, row in steps if number < _STEP):
+    steps = [
+        (int(step["workflow_step"].split(":", 1)[0]), step)
+        for step in public.workflow_steps(db, thread_id=conductor_id, workflow_ref="first-run-app")
+    ]
+    if any(not step["settled"] for number, step in steps if number < _STEP):
         return None
-    return next(
-        (row for number, row in steps if number == _STEP and row["state"] not in _TERMINAL_STATES), None,
-    )
+    return next((step for number, step in steps if number == _STEP and not step["settled"]), None)
 
 
-def _card_shown(node: sqlite3.Row, db: sqlite3.Connection) -> bool:
+def _card_shown(node: dict, db: sqlite3.Connection) -> bool:
     """Whether the card already reached the person; a draft or reviewed one is still to be finished."""
-    from plans.decision_projection import rows_for_plans
+    from plans import public
 
-    return any(
-        item["source_node_id"] == node["id"] and item["title"] == text.COMMUNITY["title"]
-        and item["state"] in ("raised", "answered")
-        for item in rows_for_plans([node["plan_id"]], db=db)
-    )
+    states = public.decision_states(db, source_node_id=node["id"], title=text.COMMUNITY["title"])
+    return any(state in ("raised", "answered") for state in states)
 
 
 def raise_when_next(thread_id: str) -> bool:
