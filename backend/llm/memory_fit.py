@@ -15,14 +15,23 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, NamedTuple
 
-_GIB = 2 ** 30
+_UNITS = {"GB": 2 ** 30, "MB": 2 ** 20, "KB": 2 ** 10}
+_AMOUNT = r"([\d.]+)\s*(GB|MB|KB)"
 
-_CURRENT_AND_KV = re.compile(
-    r"current\s+([\d.]+)\s*GB\s*\+\s*KV\+SDPA\s+([\d.]+)\s*GB", re.IGNORECASE
-)
-# The scheduler's guard says "the prefill limit is L"; the memory monitor's says
-# "<binding> ceiling is L". Both carry the same current and KV+SDPA terms.
-_LIMIT = re.compile(r"(?:prefill limit|ceiling) is\s+([\d.]+)\s*GB", re.IGNORECASE)
+# oMLX 0.7.1rc1 refuses in four wordings, all "prefill memory guard rejected":
+# the scheduler's "(current C + KV+SDPA K) but the prefill limit is L"; the memory
+# monitor's "... but <binding> ceiling is L"; the preflight safety guard's
+# "(current C + KV K + min-chunk transient T) but prefill safety cap is L"; and
+# the chunked-step guard's "pre-chunk guard at N tokens ... prefill safety cap L",
+# which names no current or KV term and so teaches nothing.
+_CURRENT = re.compile(r"current\s+" + _AMOUNT, re.IGNORECASE)
+_KV = re.compile(r"\+\s*KV(?:\+SDPA)?\s+" + _AMOUNT, re.IGNORECASE)
+_TRANSIENT = re.compile(r"\+\s*min-chunk transient\s+" + _AMOUNT, re.IGNORECASE)
+_LIMIT = re.compile(r"(?:prefill limit|ceiling|prefill safety cap) is\s+" + _AMOUNT, re.IGNORECASE)
+
+
+def _bytes(match: re.Match[str]) -> int:
+    return int(float(match.group(1)) * _UNITS[match.group(2).upper()])
 
 
 class _Observation(NamedTuple):
@@ -47,16 +56,20 @@ def split_omlx_selector(selector: Any) -> tuple[str, str] | None:
 
 
 def parse_guard_refusal(text: str) -> tuple[int, int, int] | None:
-    """(limit, current, kv) in bytes from a prefill-guard refusal, else None."""
-    current_kv = _CURRENT_AND_KV.search(text)
-    limit = _LIMIT.search(text)
-    if not current_kv or not limit:
+    """(limit, current, kv) in bytes from a prefill-guard refusal, else None.
+
+    A min-chunk transient does not grow with the prompt, so it counts as memory
+    already in use rather than as KV.
+    """
+    current, kv, limit = _CURRENT.search(text), _KV.search(text), _LIMIT.search(text)
+    if not current or not kv or not limit:
         return None
+    transient = _TRANSIENT.search(text)
     try:
         return (
-            int(float(limit.group(1)) * _GIB),
-            int(float(current_kv.group(1)) * _GIB),
-            int(float(current_kv.group(2)) * _GIB),
+            _bytes(limit),
+            _bytes(current) + (_bytes(transient) if transient else 0),
+            _bytes(kv),
         )
     except ValueError:
         return None
