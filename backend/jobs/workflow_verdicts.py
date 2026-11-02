@@ -65,7 +65,7 @@ def _detail(db, snapshot: Snapshot, read: TrialRead, evaluations: list, lessons:
     found: dict[str, object] = {
         "by_kind": detail.by_kind({"workflow": len(snapshot.subjects or ()), "lesson": len(lessons)}, evaluations),
         "reached_detail": detail.reached_detail(evaluations),
-        **detail.lesson_halves((len(arms.with_runs), len(arms.without_runs)) for arms in read.arms.values()),
+        **detail.lesson_halves(arms.inputs() for arms in read.arms.values()),
         "sent_back": detail.sent_back(db, keys, run_ids),
         "delegated_receipts": detail.delegated_receipts(
             db, keys, min((item.first_at for item in read.trials), default=None))}

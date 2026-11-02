@@ -30,7 +30,7 @@ from core.skill_validation import is_skill_file
 from core.token_estimation import _text_tokens
 from core.workflow_step_binding import StepBinding, declared_binding
 
-Variant = Literal["with", "without", "crossover"]
+Variant = Literal["with", "without"]
 
 #: Most trials and tokens one task start may admit; excess trials are omitted.
 START_TRIAL_CAP = 40
@@ -47,15 +47,13 @@ OMISSION_REASONS = frozenset({OMIT_COUNT_CAP, OMIT_TOKEN_CAP, OMIT_MISSING_SECTI
                               OMIT_TARGET_NOT_IN_CONTEXT, OMIT_TARGET_OUTSIDE,
                               OMIT_TARGET_UNREADABLE, OMIT_SECTION_EXISTS, OMIT_RECEIPT_FAILURE})
 NOTICE = "Task-local trial guidance only; never authority or a disk change."
-#: This task's receipts and the thread's earlier with receipts for the given trials.
-#: A task keeps one receipt, so a with on a step this thread works counts as its own.
-RECEIPTS_SQL = """SELECT g.lesson_id, g.lesson_behavioral_sha256, g.node_id, g.variant
+#: This task's receipts for the given trials. A task keeps one receipt per trial.
+RECEIPTS_SQL = """SELECT g.lesson_id, g.lesson_behavioral_sha256, g.variant
     FROM json_each(?) k
     JOIN guidance_loads g
       ON g.lesson_id=json_extract(k.value, '$[0]')
      AND g.lesson_behavioral_sha256=json_extract(k.value, '$[1]')
-    WHERE g.node_id=? OR (g.variant='with' AND (
-        g.thread_id=? OR g.node_id IN (SELECT id FROM plan_nodes WHERE spawned_thread_id=?)))
+    WHERE g.node_id=?
     ORDER BY g.created_at, g.id"""
 DELIVERY_ERROR = (
     "Trial guidance was not delivered; this task is left out of every trial's comparison."
@@ -213,19 +211,14 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
 
 
 def _receipts(
-    db: sqlite3.Connection, *, thread_id: str, node_id: str, trials: list[TrialDelivery],
-) -> tuple[dict[tuple[str, str], Variant | None], set[tuple[str, str]]]:
-    """This task's recorded variant per trial, and the trials this thread already had with."""
+    db: sqlite3.Connection, *, node_id: str, trials: list[TrialDelivery],
+) -> dict[tuple[str, str], Variant | None]:
+    """This task's recorded variant per trial."""
     keys = json.dumps([[trial.lesson_id, trial.behavioral_sha256] for trial in trials])
     recorded: dict[tuple[str, str], Variant | None] = {}
-    prior_with: set[tuple[str, str]] = set()
-    for row in db.execute(RECEIPTS_SQL, (keys, node_id, thread_id, thread_id)):
-        key = (str(row["lesson_id"]), str(row["lesson_behavioral_sha256"]))
-        if row["node_id"] == node_id:
-            recorded.setdefault(key, row["variant"])
-        else:
-            prior_with.add(key)
-    return recorded, prior_with
+    for row in db.execute(RECEIPTS_SQL, (keys, node_id)):
+        recorded.setdefault((str(row["lesson_id"]), str(row["lesson_behavioral_sha256"])), row["variant"])
+    return recorded
 
 
 def _insert(
@@ -261,9 +254,7 @@ def start_trials(
     from infra.database import write_transaction
 
     admitted, omitted = _resolve(db, thread_id, node_id)
-    recorded, prior_with = _receipts(
-        db, thread_id=thread_id, node_id=node_id, trials=[*admitted, *omitted],
-    )
+    recorded = _receipts(db, node_id=node_id, trials=[*admitted, *omitted])
     pending: list[tuple[TrialDelivery, Variant | None]] = [
         (trial, None) for trial in omitted
         if (trial.lesson_id, trial.behavioral_sha256) not in recorded
@@ -276,8 +267,6 @@ def start_trials(
             variant = recorded[key]
         else:
             variant = draw(*key, node_id)
-            if variant == "without" and key in prior_with:
-                variant = "crossover"
             pending.append((trial, variant))
         if variant == "with":
             delivered.append({
@@ -289,7 +278,7 @@ def start_trials(
 
     def unrecorded(tx) -> list[tuple[TrialDelivery, Variant | None]]:
         # Re-read under the write lock: an overlapping start of this task may have recorded first.
-        now, _prior = _receipts(tx, thread_id=thread_id, node_id=node_id, trials=[trial for trial, _ in pending])
+        now = _receipts(tx, node_id=node_id, trials=[trial for trial, _ in pending])
         return [(trial, variant) for trial, variant in pending
                 if (trial.lesson_id, trial.behavioral_sha256) not in now]
 
