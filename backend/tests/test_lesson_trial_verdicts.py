@@ -73,12 +73,12 @@ def task(db, node_id: str, *, state: str = "accepted", sent_back: bool = False, 
 
 
 def receipt(db, open_trial: lessons.OpenTrial, node_id: str | None, variant: str | None, *, at: str = "2026-10-02T00:00:00Z",
-            omission: str | None = None) -> None:
+            omission: str | None = None, thread: str | None = None, generation: str | None = None) -> None:
     db.execute("INSERT INTO guidance_loads (id,thread_id,path,raw_sha256,git_blob_oid,delivered_sha256,byte_count,"
-               "partial,created_at,node_id,variant,lesson_id,lesson_behavioral_sha256,omission_reason) "
-               "VALUES (?,?,?,'r','g','d',1,0,?,?,?,?,?,?)",
-               (f"load-{node_id}-{variant}-{at}", f"thread-{node_id}", str(open_trial.path), at, node_id, variant,
-                open_trial.lesson_id, open_trial.sha, omission))
+               "partial,created_at,node_id,variant,lesson_id,lesson_behavioral_sha256,omission_reason,"
+               "checkpoint_generation_id) VALUES (?,?,?,'r','g','d',1,0,?,?,?,?,?,?,?)",
+               (f"load-{node_id}-{variant}-{at}", thread or f"thread-{node_id}", str(open_trial.path), at, node_id,
+                variant, open_trial.lesson_id, open_trial.sha, omission, generation))
 
 
 def read_of_file(db, open_trial: lessons.OpenTrial, node_id: str, *, at: str, thread: str | None = None) -> None:
@@ -179,7 +179,8 @@ def test_crossed_over_omitted_and_opened_without_tasks_belong_to_neither_half(db
     arms = lessons.read_arms(db, trial)
     assert [run.run_id for run in arms.with_runs] == ["w-0"]
     assert sorted(run.run_id for run in arms.without_runs) == ["late-0", "o-0"]
-    assert (arms.crossed_over, arms.omitted) == (2, 1)
+    assert arms.dropped == {"revision": 0, "legacy_crossover": 1, "prior_with": 0, "late_open": 1, "omitted": 1}
+    assert arms.crossed_over == 2
 
 
 def test_a_worker_the_task_was_handed_to_that_opens_the_lesson_crosses_it_over(db, workspace) -> None:
@@ -195,7 +196,82 @@ def test_a_worker_the_task_was_handed_to_that_opens_the_lesson_crosses_it_over(d
     read_of_file(db, trial, "held-0", at="2026-10-03T00:00:00Z", thread="worker-held")
     arms = lessons.read_arms(db, trial)
     assert [run.run_id for run in arms.without_runs] == ["kept-0"]
-    assert arms.crossed_over == 1
+    assert arms.dropped["late_open"] == 1
+
+
+def _exposed_thread(db, trial: lessons.OpenTrial, nodes: list[tuple[str, str]], *, thread: str = "shared",
+                    generations: tuple[str | None, ...] = ()) -> None:
+    """Tasks on one thread, one receipt each in order: ``nodes`` is (node id, variant)."""
+    for index, (node_id, variant) in enumerate(nodes):
+        task(db, node_id)
+        receipt(db, trial, node_id, variant, at=f"2026-10-02T00:00:0{index}Z", thread=thread,
+                generation=generations[index] if generations else None)
+
+
+def test_a_task_after_a_with_on_its_thread_counts_in_neither_arm_whichever_arm_it_drew(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with"), ("w2", "with"), ("o3", "without")])
+    arms = lessons.read_arms(db, trial)
+    assert [run.run_id for run in arms.with_runs] == ["w1"] and arms.without_runs == ()
+    assert arms.dropped["prior_with"] == 2  # the old rule dropped only the without task and kept w2
+
+
+def test_a_with_in_an_earlier_checkpoint_generation_does_not_exclude(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with"), ("o2", "without"), ("w3", "with")],
+                    generations=(None, "gen-1", "gen-1"))
+    arms = lessons.read_arms(db, trial)
+    # w1 is in the generation before the first checkpoint; neither later task has a with in its own generation
+    assert [run.run_id for run in arms.with_runs] == ["w1", "w3"]
+    assert [run.run_id for run in arms.without_runs] == ["o2"] and arms.dropped["prior_with"] == 0
+
+
+def test_a_with_in_an_unrelated_thread_does_not_exclude(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with")], thread="one")
+    task(db, "o2")
+    receipt(db, trial, "o2", "without", at="2026-10-02T00:00:09Z", thread="two")
+    arms = lessons.read_arms(db, trial)
+    assert [run.run_id for run in arms.without_runs] == ["o2"] and arms.dropped["prior_with"] == 0
+
+
+def test_a_with_by_a_node_spawned_into_the_thread_excludes_a_later_task_on_it(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with")], thread="parent")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='worker' WHERE id='w1'")
+    task(db, "o2")
+    receipt(db, trial, "o2", "without", at="2026-10-02T00:00:09Z", thread="worker")
+    arms = lessons.read_arms(db, trial)
+    assert arms.without_runs == () and arms.dropped["prior_with"] == 1
+
+
+def test_a_revision_of_a_sent_back_task_is_out_and_its_root_stays(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    deliver(db, trial, "root", "with", 1, flagged=1)
+    task(db, "rev")
+    receipt(db, trial, "rev", "without")
+    task(db, "plain-follow-up")
+    receipt(db, trial, "plain-follow-up", "with")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET follow_up_of='root-0' WHERE id='rev'")
+        db.execute("UPDATE plan_nodes SET follow_up_of='w-0' WHERE id='plain-follow-up'")
+    deliver(db, trial, "w", "with", 1)  # a follow-up of an ordinary task is not a revision
+    arms = lessons.read_arms(db, trial)
+    assert sorted(run.run_id for run in arms.with_runs) == ["plain-follow-up", "root-0", "w-0"]
+    assert arms.without_runs == () and arms.dropped["revision"] == 1
+    (root,) = [run for run in arms.with_runs if run.run_id == "root-0"]
+    assert root.kpi_rows[lessons.SENT_BACK][0].value == 1.0
+
+
+def test_a_late_open_without_task_is_counted_as_late_open_after_the_exposure_rule(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    _exposed_thread(db, trial, [("w1", "with"), ("o2", "without")])
+    deliver(db, trial, "peek", "without", 1)
+    read_of_file(db, trial, "peek-0", at="2026-10-03T00:00:00Z")
+    arms = lessons.read_arms(db, trial)
+    assert arms.dropped["prior_with"] == 1 and arms.dropped["late_open"] == 1
+    assert arms.inputs()["crossed_over"] == 2
 
 
 def test_an_open_task_is_a_run_without_facts_and_a_restart_is_a_failed_or_changed_attempt(db, workspace) -> None:
@@ -483,9 +559,11 @@ def test_the_job_line_reports_the_batch_by_kind_with_halves_send_backs_and_deleg
         "lesson": {"open": 1, "evaluated": 1, "by_word": {"keep": 1}}}
     (reached,) = detail["reached_detail"]
     assert reached == {"kind": "lesson", "word": "keep", "reason": "quality_better", "look": 1, "new": 20, "base": 20}
-    # with: 20 + the revision; without: 20 + the delegated step's receipt + the sent-back task's second receipt,
-    # which the arms count as a second run.
-    assert detail["lesson_halves"] == [[21, 22]] and detail["lesson_both_20"] == 1
+    # with: 20 (the revision of a sent-back task is out, the root task being the unit); without: 20 + the delegated
+    # step's receipt + the sent-back task's second receipt, which the arms count as a second run.
+    assert detail["lesson_halves"] == [{"with": 20, "without": 22, "prior_with": 0, "late_open": 0,
+                                        "legacy_crossover": 0, "revision": 1, "omitted": 0}]
+    assert detail["lesson_both_20"] == 1
     assert detail["sent_back"] == {
         "lesson_arms": {"receipt_rows": 43, "on_sent_back_nodes": 22, "nodes_with_many": 1, "revision_receipts": 1,
                         "revision_after_source_receipt": 1, "revision_in_other_arm": 1},

@@ -161,5 +161,5 @@ async def test_a_worker_on_a_step_the_owner_started_crosses_over_on_its_next_tas
     assert "trial_lessons" not in await read(worker, second)
     assert _trial_rows(run, row) == [
         {"thread_id": run.thread_id, "node_id": first, "variant": "with"},
-        {"thread_id": worker, "node_id": second, "variant": "crossover"},
+        {"thread_id": worker, "node_id": second, "variant": "without"},  # the raw draw; the verdict read drops it
     ]

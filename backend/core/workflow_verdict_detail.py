@@ -20,6 +20,7 @@ from core.workflow_verdict_types import Evaluation, split_subject
 from core.workflow_verdicts import DEFAULT_MINIMUM
 
 HALVES_CAP = 50
+HALVES_KEYS = ("with", "without", "prior_with", "late_open", "legacy_crossover", "revision", "omitted")
 _KEYS = "keys AS (SELECT json_extract(value,'$[0]') AS lesson, json_extract(value,'$[1]') AS sha FROM json_each(:keys))"
 # Every receipt row of the open trials, with its task's send-back count and the task it revises (a send-back's
 # revision is a follow-up of the sent-back task and draws its own receipt).
@@ -90,11 +91,13 @@ def reached_detail(evaluations: Sequence[Evaluation]) -> list[dict[str, Any]]:
     return found
 
 
-def lesson_halves(sizes: Iterable[tuple[int, int]]) -> dict[str, Any]:
-    """Each open lesson trial's (with tasks, without tasks) as the verdict counts them, largest first."""
-    pairs = sorted(sizes, reverse=True)
-    return {"lesson_halves": [list(pair) for pair in pairs[:HALVES_CAP]],
-            "lesson_both_20": sum(min(pair) >= DEFAULT_MINIMUM for pair in pairs)}
+def lesson_halves(trials: Iterable[Mapping[str, int]]) -> dict[str, Any]:
+    """Each open lesson trial's with and without tasks as the verdict counts them, plus the tasks left out of both
+    by cause (``Arms.inputs`` keys), largest first."""
+    found = sorted(({key: trial[key] for key in HALVES_KEYS} for trial in trials),
+                   key=lambda item: (item["with"], item["without"]), reverse=True)
+    return {"lesson_halves": found[:HALVES_CAP],
+            "lesson_both_20": sum(min(item["with"], item["without"]) >= DEFAULT_MINIMUM for item in found)}
 
 
 def sent_back(db: sqlite3.Connection, keys: Sequence[tuple[str, str]], run_ids: Iterable[str]) -> dict[str, Any]:
