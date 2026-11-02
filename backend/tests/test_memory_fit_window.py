@@ -97,11 +97,30 @@ def test_parse_reads_the_memory_monitor_wording():
     )
 
 
+def test_parse_counts_the_preflight_safety_transient_as_memory_in_use():
+    # oMLX scheduler._preflight_safety_rejection: "(current C + KV K + min-chunk
+    # transient T) but prefill safety cap is L"; the transient does not grow with
+    # the prompt, so only KV scales.
+    text = (
+        "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
+        "available memory (preflight safety guard, kv_len=35288, min_chunk=288): "
+        "predicted peak would require ~20.61 GB (current 18.30 GB + KV 1.66 GB + "
+        "min-chunk transient 665.00 MB) but prefill safety cap is 20.25 GB (93% of "
+        "metal_cap ceiling 21.77 GB). Raise kernel iogpu.wired_limit_mb."
+    )
+    assert memory_fit.parse_guard_refusal(text) == (
+        int(20.25 * GIB), int(18.30 * GIB) + int(665.00 * 2 ** 20), int(1.66 * GIB),
+    )
+
+
 def test_parse_fails_safe_on_refusals_without_the_memory_terms():
-    # The pre-chunk guard names no current or KV+SDPA term to learn from.
+    # The chunked-step guard names no current or KV term to learn from.
     assert memory_fit.parse_guard_refusal(
-        "Prefill context too large for available memory (pre-chunk guard at 4096 tokens, "
-        "kv_len=4096): predicted peak would exceed prefill safety cap 20.0GB"
+        "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
+        "available memory (pre-chunk guard at 288 tokens, kv_len=35576): predicted peak "
+        "would exceed prefill safety cap 20.3GB (93% of metal_cap ceiling 21.8GB). Raise "
+        "kernel iogpu.wired_limit_mb in Terminal (currently caps Metal at 21.33 GB), or "
+        "reduce context length."
     ) is None
     assert memory_fit.parse_guard_refusal("anything else") is None
 

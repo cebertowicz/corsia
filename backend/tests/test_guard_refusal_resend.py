@@ -33,6 +33,23 @@ GUARD = (
     "1.81 GB) but the prefill limit is 20.75 GB (metal_cap ceiling 22.55 GB - "
     "safety margin 1.80 GB)"
 )
+# The chunked-step guard's wording, as a local Turn received it on a 32 GiB Mac (#1219 c11).
+CHUNKED_STEP = (
+    "litellm.MidStreamFallbackError: litellm.APIConnectionError: APIConnectionError: "
+    "OpenAIException - oMLX prefill memory guard rejected this prompt: Prefill context "
+    "too large for available memory (pre-chunk guard at 288 tokens, kv_len=35576): "
+    "predicted peak would exceed prefill safety cap 20.3GB (93% of metal_cap ceiling "
+    "21.8GB). Raise kernel iogpu.wired_limit_mb in Terminal (currently caps Metal at "
+    "21.33 GB), or reduce context length."
+)
+# The preflight safety guard's wording (oMLX 0.7.1rc1 scheduler._preflight_safety_rejection).
+PREFLIGHT_SAFETY = (
+    "litellm.BadRequestError: OpenAIException - oMLX prefill memory guard rejected this "
+    "prompt: Prefill context too large for available memory (preflight safety guard, "
+    "kv_len=35288, min_chunk=288): predicted peak would require ~20.61 GB (current "
+    "18.30 GB + KV 1.66 GB + min-chunk transient 665.00 MB) but prefill safety cap is "
+    "20.25 GB (93% of metal_cap ceiling 21.77 GB). Raise kernel iogpu.wired_limit_mb."
+)
 OVERFLOW = "maximum context length is 8192 tokens, however you requested 9000 tokens"
 
 
@@ -99,13 +116,14 @@ async def test_wait_until_quiet(monkeypatch, readings, timeout, quiet, reads):
 
 
 @pytest.mark.asyncio
-async def test_first_guard_refusal_waits_for_the_seat_and_learns_nothing(monkeypatch):
+@pytest.mark.parametrize("guard", [GUARD, CHUNKED_STEP, PREFLIGHT_SAFETY])
+async def test_first_guard_refusal_waits_for_the_seat_and_learns_nothing(monkeypatch, guard):
     from llm.provider_overflow import OverflowDisposition, overflow_disposition
 
     seen = _seat(monkeypatch, [_status(active=1), _status()])
     monkeypatch.setattr("llm.provider_overflow.GUARD_QUIET_INTERVAL_SECONDS", 0)
     disposition = await overflow_disposition(
-        Exception(GUARD), f"openai/{MODEL}", messages=[{"role": "user", "content": "hi"}],
+        Exception(guard), f"openai/{MODEL}", messages=[{"role": "user", "content": "hi"}],
         omlx_server_id=SID,
     )
     assert disposition is OverflowDisposition.RETRY
@@ -146,7 +164,8 @@ async def test_other_overflows_never_wait(monkeypatch, error, server_id):
 
 
 @pytest.mark.asyncio
-async def test_turn_call_refused_while_the_seat_is_busy_is_resent_and_answers(monkeypatch):
+@pytest.mark.parametrize("guard", [GUARD, CHUNKED_STEP])
+async def test_turn_call_refused_while_the_seat_is_busy_is_resent_and_answers(monkeypatch, guard):
     """The c8 shape: another ~30k call holds memory; the turn's call is refused once.
 
     Rediscovery reads this Turn's capped window, so a learned refusal would end the
@@ -162,7 +181,7 @@ async def test_turn_call_refused_while_the_seat_is_busy_is_resent_and_answers(mo
     async def acompletion(**_kwargs):
         calls.append(1)
         if len(calls) == 1:
-            raise Exception(GUARD)
+            raise Exception(guard)
         message = SimpleNamespace(content="answered", tool_calls=None, reasoning_content=None)
         return SimpleNamespace(
             choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None,
