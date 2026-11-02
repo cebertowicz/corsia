@@ -177,6 +177,18 @@ def assistant_message(response: Any) -> dict[str, Any]:
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _OPERATION = re.compile(r"[a-z_]{1,24}")
+# Fixed error classes keyed by the tool's own wording; the text itself is never logged.
+_ERROR_CLASSES = (
+    ("Error: Invalid parameters for tool", "invalid_params"),
+    ("Error: next_actions takes no new entries", "next_actions"),
+    ("records an in-turn fact", "in_turn_op"),
+    ("does not exist", "missing_entry"),
+    ("is retired", "inactive_entry"),
+    ("is not active", "inactive_entry"),
+    ("already holds the maximum active entries", "field_full"),
+    ("checkpoint execution is no longer running", "fork_ended"),
+    (" requires ", "missing_arg"),
+)
 
 
 def _token(value: Any, pattern: re.Pattern[str]) -> str:
@@ -184,6 +196,16 @@ def _token(value: Any, pattern: re.Pattern[str]) -> str:
     if isinstance(value, str) and pattern.fullmatch(value):
         return value
     return "-" if value is None else "other"
+
+
+def _error_class(outcome: str, result: str) -> str:
+    """The fixed class of an error result, ``other`` when unknown, ``-`` for non-errors.
+
+    Deleted with :func:`_log_tool_call`.
+    """
+    if outcome != "error":
+        return "-"
+    return next((name for marker, name in _ERROR_CLASSES if marker in result), "other")
 
 
 def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
@@ -195,9 +217,10 @@ def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outc
     """
     arguments = call.arguments if isinstance(call.arguments, dict) else {}
     logger.info(
-        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} result_chars={}",
+        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} error={} result_chars={}",
         request.fork_id, kind.name, _token(call.name, _TOOL_NAME),
-        _token(arguments.get("operation"), _OPERATION), outcome, len(result),
+        _token(arguments.get("operation"), _OPERATION), outcome,
+        _error_class(outcome, result), len(result),
     )
 
 
