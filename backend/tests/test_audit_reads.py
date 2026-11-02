@@ -598,11 +598,12 @@ def test_seat_usage_sums_per_account_scoped_to_user(isolated_db, monkeypatch):
     assert result["scope"] == "caller_user"
     assert result["rows"] == [
         {"account_id": None, "account_name": None, "harness": "claude-code", "calls": 1,
-         "prompt": 3, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 4},
+         "excluded_calls": 0, "prompt": 3, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 4},
         {"account_id": None, "account_name": None, "harness": "codex", "calls": 1,
-         "prompt": 7, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 8},
-        {"account_id": "acct-a", "account_name": "Seat A", "harness": None, "calls": 2,
-         "prompt": 120, "completion": 12, "cache_write": 40, "cache_read": 1500,
+         "excluded_calls": 0, "prompt": 7, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 8},
+        # u9 fails the contract: counted as a call and excluded, its tokens left out.
+        {"account_id": "acct-a", "account_name": "Seat A", "harness": None, "calls": 3,
+         "excluded_calls": 1, "prompt": 120, "completion": 12, "cache_write": 40, "cache_read": 1500,
          "total": 1672},
     ]
     assert "steve-p" not in json.dumps(result)

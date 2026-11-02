@@ -71,29 +71,34 @@ def _seat_usage_cursor(
     # _window requires both bounds for this metric.
     assert since is not None and until is not None
     # Subscription accounts are shared across projects, so scope is the
-    # user only and archived threads still count. Rows follow Measurement's
-    # priceable-token contract so both readers agree. Unattributed rows split
+    # user only and archived threads still count. Token sums follow
+    # Measurement's priceable-token contract so both readers agree; calls
+    # counts every row and excluded_calls the rows that contract drops, so a
+    # meter gap from unpriceable rows stays visible. Unattributed rows split
     # by harness, since each harness bills a different vendor's meter.
     # llm_usage.created_at is naive UTC ISO text; compare as text for its index.
     since_text = datetime.fromisoformat(since).replace(tzinfo=None).isoformat()
     until_text = datetime.fromisoformat(until).replace(tzinfo=None).isoformat()
     return db.execute(
-        "SELECT u.vendor_account_id AS account_id, a.name AS account_name, "
+        "SELECT r.account_id, a.name AS account_name, r.harness, "
+        "count(*) AS calls, sum(1-r.priced) AS excluded_calls, "
+        "coalesce(sum(r.priced*r.prompt_tokens),0) AS prompt, "
+        "coalesce(sum(r.priced*r.completion_tokens),0) AS completion, "
+        "coalesce(sum(r.priced*r.cache_creation_tokens),0) AS cache_write, "
+        "coalesce(sum(r.priced*r.cache_read_tokens),0) AS cache_read, "
+        "coalesce(sum(r.priced*r.total_tokens),0) AS total "
+        "FROM (SELECT u.vendor_account_id AS account_id, "
         "CASE WHEN u.vendor_account_id IS NULL "
         "THEN substr(u.model,1,instr(u.model,'/')-1) END AS harness, "
-        "count(*) AS calls, "
-        "coalesce(sum(u.prompt_tokens),0) AS prompt, "
-        "coalesce(sum(u.completion_tokens),0) AS completion, "
-        "coalesce(sum(u.cache_creation_tokens),0) AS cache_write, "
-        "coalesce(sum(u.cache_read_tokens),0) AS cache_read, "
-        "coalesce(sum(u.total_tokens),0) AS total "
+        f"CASE WHEN {priceable_usage_predicate('u')} THEN 1 ELSE 0 END AS priced, "
+        "u.prompt_tokens, u.completion_tokens, u.cache_creation_tokens, "
+        "u.cache_read_tokens, u.total_tokens "
         "FROM llm_usage u JOIN threads t ON t.id=u.thread_id "
-        "LEFT JOIN vendor_accounts a ON a.id=u.vendor_account_id "
         "WHERE t.user_id=? AND u.created_at>=? AND u.created_at<? "
         "AND (u.vendor_account_id IS NOT NULL "
-        "OR substr(u.model,1,12)='claude-code/' OR substr(u.model,1,6)='codex/') "
-        f"AND {priceable_usage_predicate('u')} "
-        "GROUP BY account_id, harness ORDER BY account_id, harness LIMIT ?",
+        "OR substr(u.model,1,12)='claude-code/' OR substr(u.model,1,6)='codex/')) r "
+        "LEFT JOIN vendor_accounts a ON a.id=r.account_id "
+        "GROUP BY r.account_id, r.harness ORDER BY r.account_id, r.harness LIMIT ?",
         (user_id, since_text, until_text, MAX_ROWS + 1),
     )
 
