@@ -25,7 +25,7 @@ from tools.agent_roster_update import AgentRosterEntryTool, AgentRosterUpdateToo
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 168
+    assert SCHEMA_VERSION == 169
 
 
 def test_roster_revision_migration_backfills_existing_threads(tmp_path):

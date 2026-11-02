@@ -146,6 +146,9 @@ class CheckpointRecord:
     captured_at: str | None
     installed_at: str | None
     ended_at: str | None
+    #: The continuation's size at first adoption; written once. NULL: never
+    #: adopted, or a row from before this column.
+    adopted_input_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

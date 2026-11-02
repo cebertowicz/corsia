@@ -43,7 +43,7 @@ def _accepted(db, when: str) -> None:
 
 
 def test_v147_fresh_schema_has_no_install_history_rows() -> None:
-    assert SCHEMA_VERSION == 168
+    assert SCHEMA_VERSION == 169
     assert MIGRATIONS[146] is migrate_146_to_147
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
@@ -74,7 +74,7 @@ def test_v147_failure_after_the_step_rolls_back_every_v147_object(monkeypatch) -
 def test_v147_upgrade_leaves_a_history_free_install_empty() -> None:
     db = _legacy_db()
     try:
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 168
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 169
         assert _breaks(db) == []
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
     finally:
