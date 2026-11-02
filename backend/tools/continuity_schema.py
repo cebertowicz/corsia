@@ -29,9 +29,6 @@ from tools.continuity_learning_schema import (
 
 _OPERATIONS = ("inspect", "add", "replace", "drop", "review", "place", *LEARNING_OPERATIONS)
 
-#: The one field ``add`` refuses: a next step goes on the plan (RT-5).
-NO_NEW_ENTRIES_FIELD = "next_actions"
-
 #: Which verdicts each placement operation takes.
 VERDICTS = {"review": REVIEW_VERDICTS, "place": PLACE_VERDICTS}
 
@@ -271,7 +268,7 @@ def _field_description() -> str:
     )
     return (
         "The continuity field for the entry. Required on add, selecting "
-        f"the new entry's field; add refuses {NO_NEW_ENTRIES_FIELD}. Optional on " + ", ".join(optional) + ": "
+        "the new entry's field; add refuses next_actions. Optional on " + ", ".join(optional) + ": "
         "on inspect without entry_id it filters the listing to that field; "
         "on inspect with entry_id, and on replace and drop, it is a "
         "redundant but correct confirmation that must match the entry's "
