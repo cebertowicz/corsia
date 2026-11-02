@@ -1,12 +1,32 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { sendChatMessage, TEST_SESSION_TOKEN, TEST_TOKEN } from './corsia';
+import { createSession, loginByUrl, sendChatMessage, TEST_SESSION_TOKEN, TEST_TOKEN } from './corsia';
 import type { LiveDocument } from './liveDocument';
 import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from './mock';
 
 /** The approved category the shared fixture lives in; the first seed creates it. */
 export const SHARED_CATEGORY = 'live-typing';
+
+/** A new agent thread shown on a new page in `beside`'s browser context; `promoted` collects it for the spec's demote when given. */
+export async function openAgentBeside(request: APIRequestContext, beside: Page, title: string, promoted?: string[]): Promise<{ id: string; title: string; page: Page }> {
+	const id = await createSession(request, title);
+	promoted?.push(id);
+	const page = await beside.context().newPage();
+	await loginByUrl(page);
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await page.locator('.thread-item').filter({ hasText: title }).click({ timeout: 10_000 });
+	return { id, title, page };
+}
+
+/** A doc_comment_create call's JSON input cut the way a provider streams it: the quote whole, then the replacement in three pieces. */
+export function streamedPieces(input: string): string[] {
+	const start = input.indexOf('"replacement":"') + '"replacement":"'.length;
+	const end = input.indexOf('","client_id"');
+	const value = input.slice(start, end);
+	const third = Math.ceil(value.length / 3);
+	return [input.slice(0, start), value.slice(0, third), value.slice(third, third * 2), value.slice(third * 2) + input.slice(end)];
+}
 
 /**
  * A live document an agent creates, and so owns, in an approved shared/<category>/. Shared documents
