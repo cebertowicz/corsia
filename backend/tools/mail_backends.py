@@ -8,6 +8,7 @@ the draft's reply target and host copy, delivery through the shared claimed-deli
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
@@ -16,6 +17,7 @@ from typing import Any, Protocol
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
 from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
+from connections.mail.received_attachments import Attachment
 from tools.mail_guard import Message
 from tools.gmail_backend import GMAIL
 from tools.mailhost_backend import MAIL_HOST
@@ -40,6 +42,9 @@ class MailReader(Protocol):
     async def fetch(self, account_id: str, message_id: str) -> Any: ...
 
     def check_message_id(self, value: object, account_id: str) -> str: ...
+
+    async def attachment_bytes(self, account_id: str, message_id: str, attachments: Sequence[Attachment]) -> list[bytes | None]:
+        """Each listed attachment's bytes, None for one that could not be fetched."""
 
 
 class MailBackend(Protocol):
