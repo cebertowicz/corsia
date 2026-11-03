@@ -236,7 +236,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
             "head": inputs.head_source(project, facts, db),
-            "intent": review_intent.attach(row, db=db)}
+            "intent": review_intent.attach(row, skill, db=db)}
 
 
 def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, Any]) -> tuple[list[str], str]:
