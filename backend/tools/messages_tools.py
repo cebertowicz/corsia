@@ -76,16 +76,16 @@ class MessagesConnectTool(Tool):
         except ApiCallError:
             return texts.ONLY_CORSIA
         try:
-            row, created = await account.connect(thread_id)
+            row, _created = await account.connect(thread_id)
         except Exception:
             log.exception("messages_connect could not add the Messages row")
             return "Error: Couldn't turn on Messages."
         if row is None:
             return f"Error: {texts.NOT_REACHING}"
+        if row["state"] != "connected":
+            return texts.WAITING
         counted = await read_messages(thread_id, lambda db: str(db.execute("SELECT COUNT(*) FROM chat").fetchone()[0]))
-        if counted.startswith("Error: "):
-            return f"{texts.ADDED if created else ''} {counted}".strip()
-        return texts.READABLE.format(count=counted)
+        return counted if counted.startswith("Error: ") else texts.READABLE.format(count=counted)
 
 
 class MessagesChatsTool(Tool):

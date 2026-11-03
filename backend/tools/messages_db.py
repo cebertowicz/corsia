@@ -64,6 +64,11 @@ def open_db() -> sqlite3.Connection:
     return db
 
 
+def check_readable() -> None:
+    """Raise the fixed state sentence unless ``chat.db`` opens read-only with the columns the tools need."""
+    open_db().close()
+
+
 def decode(text: str | None, blob: bytes | None) -> str:
     """A text's words: its ``text`` column, else the string inside its ``attributedBody`` typedstream."""
     if text:

@@ -364,6 +364,24 @@ describe('ConnectedAppsSettings', () => {
 		expect(signIn?.className).toContain('primary');
 	});
 
+	it('shows an agent-added Messages row as waiting for Sign in and keeps the Full Disk Access step on the row when macOS blocks reading', async () => {
+		const step = 'CORSIA can’t read your Messages yet. Open System Settings › Privacy & Security › Full Disk Access, turn on CORSIA, quit and reopen CORSIA, then press Sign in again.';
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'needs_sign_in' as const };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/messages/connect')
+			? { ok: false, status: 409, headers: new Headers(), json: async () => ({ detail: step }), text: async () => JSON.stringify({ detail: step }), clone() { return this; } }
+			: { ok: true, json: async () => ({ servers: [], accounts: [messages] }) }));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
+		expect(host.textContent).toContain('Needs you to sign in');
+		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
+		flushSync();
+		const signIn = [...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="messages-row"] button')].find((button) => button.textContent?.trim() === 'Sign in')!;
+		expect(signIn.className).toContain('primary');
+		signIn.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"] .error')?.textContent).toBe(step));
+		expect(host.textContent).toContain('Needs you to sign in');
+	});
+
 	it('turns a signed-out Messages row back on in place when Sign in answers with no link', async () => {
 		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'signed_out' as const };
 		let on = false;

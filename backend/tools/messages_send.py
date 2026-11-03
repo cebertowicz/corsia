@@ -1,7 +1,7 @@
 """Hand one approved text to the Messages app with ``osascript`` and confirm it appeared in ``chat.db``.
 
 The person's text and the recipient travel as ``argv``, never inside the script source. A run that
-fails with one of the codes below proves nothing was sent; every other outcome is unknown.
+exits with an AppleScript error number proves nothing was sent; a timeout or a missing confirmation is unknown.
 """
 
 from __future__ import annotations
@@ -16,8 +16,10 @@ OSASCRIPT = "/usr/bin/osascript"
 CONFIRM_SECONDS = 5.0
 POLL_SECONDS = 0.5
 RUN_SECONDS = 30.0
-#: AppleScript error numbers that mean Messages never got the text: Automation denied, app can't start, no such chat.
+#: AppleScript error numbers with their own sentence: Automation denied, app can't start, no such chat.
 NEVER_SENT = {"-1743": texts.NO_AUTOMATION, "-600": texts.NO_MESSAGES_APP, "-1728": texts.NO_SUCH_CHAT}
+#: Errors that can come after Messages took the event (reply timed out, app quit mid-event): outcome unknown.
+MAYBE_SENT = {"-1712", "-609"}
 _TO_CHAT = (
     "on run argv",
     'tell application "Messages" to send (item 2 of argv) to chat id (item 1 of argv)',
@@ -32,16 +34,20 @@ _TO_HANDLE = (
 
 
 class SendFailed(Exception):
-    """osascript exited non-zero; ``never_sent`` says whether that proves nothing went out."""
+    """osascript exited non-zero. An AppleScript error number means Messages refused before taking the text."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         code = re.search(r"\((-\d+)\)", detail)
-        self.fixed = NEVER_SENT.get(code.group(1)) if code else None
+        self.code = code.group(1) if code and code.group(1) not in MAYBE_SENT else None
 
     @property
     def never_sent(self) -> bool:
-        return self.fixed is not None
+        return self.code is not None
+
+    @property
+    def fixed(self) -> str | None:
+        return NEVER_SENT.get(self.code, texts.REFUSED.format(code=self.code)) if self.code else None
 
 
 async def _osascript(lines: tuple[str, ...], *args: str) -> None:

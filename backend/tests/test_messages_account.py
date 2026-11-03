@@ -82,8 +82,11 @@ async def test_connect_adds_one_row_at_the_adding_scope_and_never_a_second(isola
         again, created_again = await account.connect(thread)
         assert created and not created_again and again["id"] == first["id"]
         assert len(visible_accounts(None, db=db, provider=MESSAGES_PROVIDER)) == 1
-        assert (await account.usable_for_thread(thread))["id"] == first["id"]
+        assert first["state"] == "needs_sign_in"
+        assert await account.usable_for_thread(thread) is None
         assert await account.usable_for_thread(None) is None
+        assert await account.turn_on(str(first["id"]), ("person", "person-1"))
+        assert (await account.usable_for_thread(thread))["id"] == first["id"]
     finally:
         db.close()
 

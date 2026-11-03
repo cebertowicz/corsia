@@ -174,7 +174,7 @@ class MessagesSendTool(Tool):
             never_sent=lambda exc: isinstance(exc, messages_send.SendFailed) and exc.never_sent,
             still_sending=texts.STILL_SENDING,
             claim_error=texts.CLAIM_ERROR,
-            unconfirmed=texts.UNCONFIRMED,
+            unconfirmed=texts.UNCONFIRMED.format(seconds=messages_send.CONFIRM_SECONDS),
             label="messages_send",
         )
 

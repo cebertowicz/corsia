@@ -17,6 +17,7 @@ import tools.messages_texts as texts
 from tools import action_gate, messages_db
 from tools.action_drafts import create_draft
 from tools.messages_draft_tools import MessagesDraftTool, MessagesSendTool
+from tools.reviewed_drafts import NO_OPEN_DRAFT
 
 ALL = {"mode": "all", "project_ids": [], "outside_projects": False}
 
@@ -82,7 +83,7 @@ async def test_draft_refusals(env, deleg_db, tmp_path, monkeypatch) -> None:
     for bad in ("John", "5555550101", "+1 555"):
         assert await run(_thread_id=THREAD, to=bad, body="x") == texts.BAD_TO
     assert await run(_thread_id=THREAD, chat_id="99", body="x") == f"Error: {texts.NO_CHAT}"
-    assert await run(_thread_id=THREAD, chat_id="1", body="x", draft_id="nope") == f"Error: {texts.NO_OPEN_DRAFT}"
+    assert await run(_thread_id=THREAD, chat_id="1", body="x", draft_id="nope") == f"Error: {NO_OPEN_DRAFT}"
     make_chat_db(tmp_path / "dup.db", duplicate_number=True)
     monkeypatch.setattr(messages_db, "CHAT_DB", tmp_path / "dup.db")
     assert await run(_thread_id=THREAD, to="+15555550101", body="x") == texts.AMBIGUOUS.format(ids="1, 4")
@@ -108,6 +109,16 @@ async def test_new_number_goes_to_a_new_chat_and_is_confirmed(env) -> None:
     assert json.loads(argv.read_text().splitlines()[0])[-2:] == ["+15555550177", "hello"]
 
 
+async def test_a_number_with_an_sms_chat_goes_to_that_chat_by_sms(env, workspace) -> None:
+    argv = env("silent")
+    draft = await _draft(to="+15555550103")
+    assert "SMS;-;+15555550103" in _row(draft["draft_id"])["target_json"]
+    assert (workspace / draft["path"]).read_text().startswith("To: +15555550103 · SMS")
+    _approved_turn(get_db())
+    await _send(draft)
+    assert json.loads(argv.read_text().splitlines()[0])[-2:] == ["SMS;-;+15555550103", "hello"]
+
+
 @pytest.mark.parametrize(("code", "fixed"), [("-1743", texts.NO_AUTOMATION), ("-600", texts.NO_MESSAGES_APP), ("-1728", texts.NO_SUCH_CHAT)])
 async def test_proven_not_sent_releases_the_claim_and_a_retry_can_send(env, code, fixed) -> None:
     env(f"fail:{code}")
@@ -123,17 +134,34 @@ async def test_unconfirmed_send_stays_claimed_and_a_retry_refuses(env) -> None:
     env("silent")
     draft = await _draft(chat_id="1")
     _approved_turn(get_db())
-    assert await _send(draft) == f"Error: {texts.UNCONFIRMED}"
+    assert await _send(draft) == f"Error: {_unconfirmed()}"
     assert _row(draft["draft_id"])["state"] == "sending"
     assert await _send(draft) == f"Error: {texts.STILL_SENDING}"
 
 
-async def test_an_unrecognized_failure_is_unknown_not_proven(env) -> None:
+def _unconfirmed() -> str:
+    return texts.UNCONFIRMED.format(seconds=messages_send.CONFIRM_SECONDS)
+
+
+async def test_an_applescript_error_without_its_own_sentence_is_never_sent_and_names_the_number(env) -> None:
     env("fail:-9999")
+    draft = await _draft(to="+15555550177")
+    _approved_turn(get_db())
+    assert await _send(draft) == f"Error: Not sent: {texts.REFUSED.format(code='-9999')}"
+    assert _row(draft["draft_id"])["state"] == "open"
+
+
+@pytest.mark.parametrize("failure", ["crashed", "-1712", "-609"])
+async def test_a_failure_with_no_error_number_or_after_the_handover_is_unknown_not_proven(env, failure) -> None:
+    env(f"fail:{failure}")
     draft = await _draft(chat_id="1")
     _approved_turn(get_db())
-    assert await _send(draft) == f"Error: {texts.UNCONFIRMED}"
+    assert await _send(draft) == f"Error: {_unconfirmed()}"
     assert _row(draft["draft_id"])["state"] == "sending"
+
+
+def test_the_unconfirmed_text_states_the_wait_the_code_uses() -> None:
+    assert f"within {messages_send.CONFIRM_SECONDS:g} seconds" in _unconfirmed()
 
 
 async def test_gate_refuses_an_agent_started_turn(env) -> None:
