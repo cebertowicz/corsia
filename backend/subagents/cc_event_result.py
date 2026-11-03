@@ -274,7 +274,9 @@ async def _handle_result_error(
         return
     from subagents.turn_account_error import claude_turn_signed_out
 
-    await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db)
+    if await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db) is None:
+        # The login still answers, so the row shows the CLI's own text, not the sign-in-expired line.
+        metadata.pop("cause", None)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 
