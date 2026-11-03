@@ -509,7 +509,7 @@ def _emitter_run(world, monkeypatch, repo, *, registered, before_sweep=None):
     if before_sweep:
         before_sweep()
     _sweep()
-    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert _outcomes(rule["id"]) == [("ran", NO_ACCOUNT)]
     return rule
 
 
