@@ -72,14 +72,19 @@ function sameComposerDraft(left: ComposerDraft, right: ComposerDraft): boolean {
 }
 
 /**
+ * Every composer's unsent drafts, by thread. Module scope so a draft outlives
+ * the InputBar it was typed in: leaving the chat (for Settings, say) unmounts it.
+ */
+export const composerThreadDrafts = new Map<string, ComposerDraft>();
+
+/**
  * Per-thread composer drafts plus the recovery copy of each submitted draft.
  *
  * Recovery state only: the durable FIFO owns ordering, persistence, and
  * delivery; a submitted draft is kept until its receipt so a socket failure
  * cannot erase the user's text.
  */
-export function createComposerDrafts(port: ComposerPort) {
-	const threadDrafts = new Map<string, ComposerDraft>();
+export function createComposerDrafts(port: ComposerPort, threadDrafts = composerThreadDrafts) {
 	const pendingSubmitDrafts = new Map<string, PendingSubmitDraft>();
 	let lastThreadId: string | null = null;
 
@@ -104,6 +109,11 @@ export function createComposerDrafts(port: ComposerPort) {
 			}
 		}
 		lastThreadId = sid;
+	}
+
+	/** Keep the draft of the thread on screen when the composer goes away. */
+	function leave(): void {
+		if (lastThreadId) saveCurrentDraft(lastThreadId);
 	}
 
 	function restoreSubmittedDraft(pending: PendingSubmitDraft): void {
@@ -163,5 +173,5 @@ export function createComposerDrafts(port: ComposerPort) {
 		});
 	}
 
-	return { threadDrafts, switchThread, saveCurrentDraft, settlePendingSubmit, trackSubmit };
+	return { threadDrafts, switchThread, leave, saveCurrentDraft, settlePendingSubmit, trackSubmit };
 }

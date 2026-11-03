@@ -31,6 +31,7 @@ vi.mock('$lib/stores/warmToast', () => ({
 }));
 
 import InputBar from './InputBar.svelte';
+import { composerThreadDrafts } from './composerDrafts';
 import { QUEUE_ARM_MS as ARM_MS } from './InputBarActionRow.svelte';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
@@ -60,6 +61,7 @@ beforeEach(() => {
 		value: vibrate, configurable: true, writable: true,
 	});
 	vibrate.mockClear();
+	composerThreadDrafts.clear();
 	_resetTurnStateForTests();
 	resetUpdateStoreForTests();
 	token.set('token');
@@ -336,6 +338,30 @@ describe('InputBar send and queue preparation', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ comment_count: 2, reply_count: 1 }));
 		expect(wsMocks.sendMessage.mock.calls[0][6]).toHaveLength(2);
+	});
+
+	it('keeps typed text and a reply when the composer leaves and comes back', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
+		component.getDrafts().set('thread-2', { content: '', attachments: [], comments: [{ ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
+		activeThreadId.set('thread-2'); flushSync();
+		const input = host.querySelector<HTMLElement>('[contenteditable]')!;
+		input.textContent = 'typed after the reply';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		// Opening Settings unmounts the chat's composer; returning mounts a new one.
+		unmount(component);
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+
+		expect(component.getInputText()).toBe('typed after the reply');
+		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
+		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
+		expect(wsMocks.sendMessage.mock.calls[0][1]).toBe('typed after the reply');
+		expect(wsMocks.sendMessage.mock.calls[0][6]).toEqual([expect.objectContaining({ id: 'reply', root_cid: 'c1' })]);
 	});
 
 	it('clears the composer after the local send and keeps its draft for recovery', async () => {
