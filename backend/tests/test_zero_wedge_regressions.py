@@ -187,22 +187,24 @@ def test_retry_accepts_vendor_login_stamped_input(isolated_db, monkeypatch, stat
 
 
 @pytest.mark.parametrize(
-    ("copy_update", "second_status"),
+    ("copy_update", "copy_ended"),
     [
-        (None, 200),
+        (None, False),
         # Taken into a Turn: the copy's metadata gains stamps after admission.
         ("delivery_state='delivered',"
-         "metadata=json_set(metadata,'$.plan_paused_since','2026-11-02T00:00:00Z')", 200),
-        ("delivery_state='failed'", 409),
-        ("delivery_state='cancelled'", 409),
+         "metadata=json_set(metadata,'$.plan_paused_since','2026-11-02T00:00:00Z')", False),
+        ("delivery_state='failed'", True),
+        ("delivery_state='ambiguous'", True),
+        ("delivery_state='cancelled'", True),
     ],
 )
 def test_a_second_retry_of_one_failed_input_sends_no_second_copy(
-    isolated_db, monkeypatch, copy_update, second_status,
+    isolated_db, monkeypatch, copy_update, copy_ended,
 ) -> None:
     """Pressing Retry twice on the same failed row used to send it twice.
 
-    The second press never reports a send it didn't make: an ended copy answers 409.
+    A live copy answers the second press. An ended copy is retried once, as its
+    own Retry would, and a third press answers with that newer copy.
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -223,32 +225,38 @@ def test_a_second_retry_of_one_failed_input_sends_no_second_copy(
     monkeypatch.setattr(thread_messages, "authenticate", lambda _token: {"id": "user-1"})
     app = FastAPI()
     app.include_router(thread_messages.router)
+    url = "/api/threads/retry-twice/messages/failed-once/retry"
     with TestClient(app) as client:
-        first = client.post("/api/threads/retry-twice/messages/failed-once/retry")
+        first = client.post(url)
         assert first.status_code == 200, first.text
+        first_copy = first.json()["revived_message_id"]
         if copy_update is not None:
             db = get_db()
             try:
-                db.execute(
-                    f"UPDATE messages SET {copy_update} WHERE id=?",
-                    (first.json()["revived_message_id"],),
-                )
+                db.execute(f"UPDATE messages SET {copy_update} WHERE id=?", (first_copy,))
                 db.commit()
             finally:
                 db.close()
-        second = client.post("/api/threads/retry-twice/messages/failed-once/retry")
-    assert second.status_code == second_status, second.text
-    if second_status == 200:
-        assert second.json()["revived_message_id"] == first.json()["revived_message_id"]
+        second = client.post(url)
+        third = client.post(url)
+    assert second.status_code == 200, second.text
+    assert third.status_code == 200, third.text
+    second_copy = second.json()["revived_message_id"]
+    assert (second_copy != first_copy) == copy_ended
+    assert third.json()["revived_message_id"] == second_copy
     db = get_db()
     try:
-        copies = db.execute(
-            "SELECT COUNT(*) FROM messages WHERE thread_id='retry-twice' "
-            "AND json_extract(metadata,'$.retried_from_message_id')='failed-once'",
-        ).fetchone()[0]
+        sources = [
+            row[0] for row in db.execute(
+                "SELECT json_extract(metadata,'$.retried_from_message_id') FROM messages "
+                "WHERE thread_id='retry-twice' "
+                "AND json_extract(metadata,'$.retried_from_message_id') IS NOT NULL "
+                "ORDER BY rowid",
+            )
+        ]
     finally:
         db.close()
-    assert copies == 1
+    assert sources == (["failed-once", first_copy] if copy_ended else ["failed-once"])
 
 
 def test_retry_drops_the_ended_attempts_turn_and_input_identity() -> None:
