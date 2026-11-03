@@ -39,7 +39,7 @@ OFFER_OPTIONS = (
     "Keep reviewing it myself",
 )
 OFFER_RECOMMENDATION = "A"
-DROP_REASON = "dropped by the person on {date}"
+DROP_REASON = "Dropped by you on {date}"
 GATE_REJECTED = "The person rejected this gate: ask for their review again, and close it only after a later answer."
 GATE_NOTICE = "Gate step {step} was handed off by the person, so {how}."
 GATE_HOW = {
@@ -99,7 +99,8 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
             if state.open_offer is not None:
                 state.voided_offer, state.open_offer = state.open_offer, None
             _hand_back(state)
-        elif name != "start" and data.version == current:
+        elif name != "start" and (data.version == current or _failed_spot(data)):
+            # Counts are per version, but a failed spot check hands back on any version, like a correction.
             _apply_run(state, name, data)
     if version != current and current is not None:
         state.streak = state.spot_clean = 0
@@ -116,6 +117,10 @@ def _apply_answer(state: GateState, option: str | None, stamp: str) -> None:
     else:
         state.kind, state.streak, state.spot_clean = _HANDED[option], 0, 0
         state.handed_on = datetime.fromisoformat(stamp).astimezone().date().isoformat()
+
+
+def _failed_spot(run: Run) -> bool:
+    return run.mode == "spot" and not _clean(run.answer)
 
 
 def _hand_back(state: GateState) -> None:

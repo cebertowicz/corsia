@@ -281,6 +281,20 @@ async def test_a_spot_check_that_is_not_approved_hands_the_gate_back(isolated_db
     assert "gate_mode" not in reply["steps"][1]
 
 
+async def test_a_failed_spot_check_answered_after_a_new_version_started_hands_the_gate_back(
+    isolated_db, tmp_path, monkeypatch,
+):
+    run = _make(tmp_path, monkeypatch)
+    await _hand_off(run, "A")
+    monkeypatch.setattr(gate_handoff, "drawn", lambda *_: True)
+    _reply, old_gate = await _go(run, None)
+    _bump("v2")
+    await _go(run, None)
+    assert _state().kind == "spot"
+    _answer(old_gate, "changes_requested")
+    assert _state().kind == "person"
+
+
 async def test_a_correction_hands_the_gate_back(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     await _hand_off(run, "B")
@@ -408,7 +422,7 @@ async def test_drop_closes_the_gate_step_at_once_and_the_run_records_the_skip(is
     work, gate = (step["id"] for step in reply["steps"])
     assert reply["steps"][1]["gate_mode"] == "dropped"
     today = datetime.now().astimezone().date().isoformat()
-    reason = f"dropped by the person on {today}"
+    reason = f"Dropped by you on {today}"
     assert _run_db("SELECT state FROM plan_nodes WHERE id=?", gate) == [{"state": "closed"}]
     assert any(json.loads(row["payload_json"]).get("reason") == reason for row in _run_db(
         "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='state_transition' AND new_state='closed'", gate,
