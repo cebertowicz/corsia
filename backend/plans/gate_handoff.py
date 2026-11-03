@@ -28,13 +28,13 @@ _REJECTED = "changes_requested"
 #: The offer's option ids, in the order the person reads them, and what each hands the gate.
 _HANDED = {"A": "spot", "B": "none", "C": "drop"}
 
-OFFER_TITLE = "Hand off the {step} review in {workflow}?"
+OFFER_TITLE = "Hand the {step} review in {workflow} to an agent?"
 OFFER_CONTEXT = "You approved {step} in {workflow} {count} times in a row with no changes."
 OFFER_TRADEOFF = "Handing it off saves your review time, and any correction on it hands it back to you."
 OFFER_RATIONALE = "Spot checks keep some review of it without asking you every time."
 OFFER_OPTIONS = (
     "Hand it off, with spot checks",
-    "Hand it off, with no checks",
+    "Hand it off, with no spot checks",
     "Drop the review",
     "Keep reviewing it myself",
 )

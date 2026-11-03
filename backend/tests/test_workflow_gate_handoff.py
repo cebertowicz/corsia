@@ -464,7 +464,7 @@ async def test_the_offer_renders_as_the_owners_decision_and_the_person_can_answe
         (card,) = attention_detail.queue(attention_detail.annotate(items, db=db))
         assert card["renderer"] == "decision"
         assert card["detail"]["source"]["thread_id"] == run.thread_id
-        assert card["detail"]["title"].startswith("Hand off the ")
+        assert card["detail"]["title"].startswith("Hand the ")
         authored = _run_db("SELECT DISTINCT actor_id FROM plan_node_events WHERE event IN ('decision_drafted','decision_raised')")
         assert authored == [{"actor_id": None}]
     finally:
