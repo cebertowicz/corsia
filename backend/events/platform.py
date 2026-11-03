@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from events import dead_letter, rules
+from events import dead_letter, rule_zero, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
@@ -171,13 +171,12 @@ def _deliver_target(
     return PlatformDelivery(event_id, thread, DIGESTED)
 
 
-def rule_event(
-    envelope: EventEnvelope, watch_event: str | None = None, *, ends_artifact: bool = False,
-) -> rules.RuleEvent:
+def rule_event(envelope: EventEnvelope, watch_event: str | None = None, *, ends_artifact: bool = False) -> rules.RuleEvent:
     """The envelope as rules see it; ``watch_event`` is the name watches use for it."""
     return rules.RuleEvent(
         envelope.event_id, envelope.connector or "", envelope.type,
-        watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
+        watch_event or (f"{envelope.connector}.{envelope.type}" if envelope.origin in ("emitter", "agent")
+                        else envelope.type), envelope.facts, envelope.artifact_ref, ends_artifact,
         trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
         origin=envelope.origin,
     )
@@ -214,7 +213,7 @@ def _rule_target(
         routed.relationship, event_class, state, rule_wake=True))
 
 
-def _resolve_watches(db: sqlite3.Connection, event: rules.RuleEvent, thread: str) -> None:
+def resolve_watches(db: sqlite3.Connection, event: rules.RuleEvent, thread: str) -> None:
     """A watch on this event ends once a rule delivered it; Plans owns the settlement."""
     ref = event.artifact_ref
     if not ref:
@@ -236,7 +235,7 @@ def settle_rule_delivery(
     added ends that recipient's watches; routing ends them for one it rode."""
     outcome = _RULE_OUTCOMES.get(made, rules.DEAD_LETTERED)
     if not ride and outcome in (rules.WOKE, rules.DIGESTED):
-        _resolve_watches(db, plan.event, thread)
+        resolve_watches(db, plan.event, thread)
     return delivery.outcomes(thread, outcome, ride=ride)
 
 
@@ -329,13 +328,13 @@ def deliver_envelope_sync(
         targets = resolve(conn)
         filtered = [target_filter(target, conn) if target_filter is not None else None for target in targets]
         skipped = [target.thread for target, reason in zip(targets, filtered) if reason is not None]
-        event = rule_event(envelope)
-        plan = None
+        event, plan = rule_event(envelope), None
         if repository_projects is None and rules.routed(targets, skipped)[2] is None:
             rules.record(conn, event, rules.lookup_failed(conn, event))
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
+            rules.record(conn, event, plan.settled if plan else ())  # rule_zero reads a script's claim
 
         def deliver(pairs: Iterable[tuple[Target, str | None]]) -> list[PlatformDelivery]:
             return [_deliver_routed(conn, envelope, target, decl, plan) if reason is None
@@ -343,11 +342,11 @@ def deliver_envelope_sync(
                     for target, reason in pairs]
 
         # The no-owner fallback waits until rules' own deliveries say whether one took the event.
-        pairs = list(zip(targets, filtered))
+        pairs = rule_zero.hold(conn, decl, event, plan, list(zip(targets, filtered)))
         fallback = [pair for pair in pairs if pair[0].no_owner]
         deliveries = deliver(pair for pair in pairs if not pair[0].no_owner)
         if plan is not None:
-            outcomes = list(plan.settled)
+            outcomes = []
             for made in deliveries:
                 if (made.thread_id is not None and made.thread_id in plan.rides
                         and made.outcome != FILTERED):

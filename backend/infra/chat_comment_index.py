@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, visible_answer_content
+from infra.chat_comment_answers import (
+    SHOWN_ANSWERS_FROM, UNREAD_FROM, UNREAD_WHERE, parse_answers, visible_answer_content,
+)
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
@@ -54,11 +56,8 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
     answer_rows = db.execute(
-        "SELECT a.assistant_message_id,a.cid,answer.content FROM chat_comment_answers a "
+        f"SELECT a.assistant_message_id,a.cid,answer.content {SHOWN_ANSWERS_FROM} "
         "JOIN messages answer ON answer.id=a.assistant_message_id AND answer.thread_id=a.thread_id "
-        "JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id "
-        "JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id "
-        "JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id "
         "WHERE a.thread_id=? AND a.assistant_message_id IN (SELECT value FROM json_each(?))",
         (thread_id, json.dumps(list(by_id))),
     ).fetchall()

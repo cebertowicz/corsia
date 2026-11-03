@@ -53,6 +53,15 @@ def waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
     ).fetchone()[0]
 
 
+def took(db: sqlite3.Connection, event_id: str, owner: str) -> bool:
+    """Whether one of ``owner``'s own rules queued a run with the event (R24); read it once
+    the event's outcomes are recorded."""
+    return db.execute(
+        "SELECT 1 FROM event_route_decisions WHERE event_id=? AND thread_id=? AND outcome=? LIMIT 1",
+        (event_id, owner, QUEUED),
+    ).fetchone() is not None
+
+
 def queue(
     db: sqlite3.Connection, event: RuleEvent, matched: Iterable[Rule],
     dropped_by: Mapping[str, str],

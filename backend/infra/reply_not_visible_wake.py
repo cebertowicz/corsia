@@ -1,8 +1,9 @@
 """The one Focus nudge a person's message gets when a Turn ends with nothing they can see.
 
 Focus shows an agent's words only when it sends them with ``post_update``. When
-a Turn ends while the person's newest message has no such reply after it, the
-agent is woken once, for that message, with the text below; it answers with
+a Turn ends while the person's newest message has no such reply after it, and its
+last words are not wholly answers shown in the message's comment threads, the agent
+is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
 its last words become the reply (``for_user``), so the person still sees them.
 
@@ -21,6 +22,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, visible_answer_content
 
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
@@ -84,11 +86,29 @@ def _newest_person_input(
     ).fetchone()
 
 
-def _replied_after(db: sqlite3.Connection, thread_id: str, seq: int) -> bool:
-    return db.execute(
+def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
+    """The row's words minus the answers the page shows in comment threads."""
+    placed = [cid for (cid,) in db.execute(
+        f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.assistant_message_id=?",
+        (thread_id, row["id"]),
+    )]
+    return visible_answer_content(str(row["content"]), placed).strip()
+
+
+def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) -> bool:
+    """A reply after the message, or answers in its comment threads with no other last words."""
+    if db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
-        (thread_id, seq),
-    ).fetchone() is not None
+        (thread_id, person["seq"]),
+    ).fetchone() is not None:
+        return True
+    if db.execute(
+        f"SELECT 1 {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.user_message_id=? LIMIT 1",
+        (thread_id, person["id"]),
+    ).fetchone() is None:
+        return False
+    hidden = _last_hidden(db, thread_id, person["seq"])
+    return hidden is None or not _unseen(db, thread_id, hidden)
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:
@@ -135,7 +155,7 @@ def _settle_nudged_turn(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row,
 ) -> None:
     """At the nudged Turn's end: NO_REPLY stays hidden; any other last words show."""
-    if _replied_after(db, thread_id, person["seq"]):
+    if _replied_after(db, thread_id, person):
         logger.info("focus.nudge_settled thread={} result=sent", thread_id)
         return
     hidden = _last_hidden(db, thread_id, nudge["seq"])
@@ -153,7 +173,7 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     hidden = _last_hidden(db, thread_id, person["seq"])
     text = nudge_text(
         _clock(str(person["created_at"])),
-        str(hidden["content"]).strip() if hidden is not None else None,
+        (_unseen(db, thread_id, hidden) or None) if hidden is not None else None,
     )
     try:
         enqueue_event_wake(
@@ -193,7 +213,7 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
         return False  # The person stopped the Turn their message started.
     if status == "running" and person["active_turn_id"] != ending_turn:
         return False  # A later Turn is answering it; that Turn's end decides.
-    if _replied_after(db, thread_id, person["seq"]):
+    if _replied_after(db, thread_id, person):
         return False
     if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.

@@ -368,3 +368,63 @@ async def test_a_failure_in_the_nudge_never_loses_the_turn_end(db, monkeypatch) 
 
     assert _nudges(db) == []
     assert effects is not None
+
+
+def _comment_on(db, typed: str) -> str:
+    """The person's message carries one chat comment on an earlier reply; returns its cid."""
+    target = _say(db, "Earlier agent message", turn="t0", for_user=True)
+    _take_in(db)
+    (order,) = db.execute("SELECT input_order FROM messages WHERE id='m1'").fetchone()
+    cid = f"c{order}.1"
+    db.execute("UPDATE messages SET content=?, metadata=json_set(metadata,'$.reply_context',json(?)) "
+               "WHERE id='m1'", (typed, json.dumps({"comments": [{"cid": cid}]})))
+    db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) "
+               "VALUES (?,?,?,?,?)", (_THREAD, target, "m1", cid, _AT))
+    db.commit()
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_answers_shown_in_the_messages_comment_threads_are_a_visible_reply(db) -> None:
+    # A comments-only send answered in tags shows in its threads; nudging would show it twice.
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, monkeypatch) -> None:
+    # The renderer shows an answer in its thread only while the comment row joins; else it is inline text.
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    text = f"[{cid}] Moved. Tonight runs at 4 AM."
+    _say(db, text)
+    db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
+    db.commit()
+
+    await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(nudge_text("1:19", text))
+
+
+@pytest.mark.asyncio
+async def test_words_left_outside_the_thread_answers_still_nudge_quoting_only_them(db, monkeypatch) -> None:
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "Also, can we skip Friday?")
+    _say(db, f"Yes, Friday is skipped.\n\n[{cid}] Moved. Tonight runs at 4 AM.")
+
+    effects = await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(nudge_text("1:19", "Yes, Friday is skipped."))
+    assert effects.drives.count(_THREAD) == 1
