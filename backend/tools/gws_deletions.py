@@ -3,8 +3,8 @@
 Google can't restore a deleted event or a cleared calendar. Before the delete runs, every event it
 removes is written in full, as one JSON list, to
 ``<workspace>/google-deletions/<account>/<UTC timestamp>-<event|calendar>-<id>.json``; if anything
-can't be saved, nothing is deleted. Only removals are logged: deletes, and updates that cancel an
-event or set a series' recurrence.
+can't be saved, nothing is deleted. Only removals are logged: deletes, and updates that
+``gws_check.update_removes_events`` can't show keep every occurrence.
 
 Scale: one gws call per 2,500 events and one file per delete, so clearing a 10,000-event calendar
 is four list calls and one file.
@@ -50,13 +50,13 @@ def _write(folder: Path, name: str, events: list[dict]) -> Path:
     return path
 
 
-def _json_object(done: Completed) -> dict:
+def _json_object(done: Completed, refusal: str = NOT_SAVED) -> dict:
     try:
         value = json.loads(done.stdout) if done.code == 0 else None
     except ValueError:
         value = None
     if not isinstance(value, dict):
-        raise NotSaved(NOT_SAVED.format(detail=failure_text(done)))
+        raise NotSaved(refusal.format(detail=failure_text(done)))
     return value
 
 
@@ -75,15 +75,21 @@ async def _list_events(run: Run, params: dict) -> list[dict]:
             return events
 
 
-async def save_event(run: Run, folder: Path, calendar_id: str, event_id: str) -> Path:
-    """Save an event before it is deleted; raises :class:`NotSaved` when it can't be.
+async def read_event(run: Run, calendar_id: str, event_id: str, refusal: str = NOT_SAVED) -> dict:
+    """The event as Google holds it now; raises :class:`NotSaved` with ``refusal`` when it can't be read."""
+    return _json_object(await run([
+        "calendar", "events", "get", "--params", json.dumps({"calendarId": calendar_id, "eventId": event_id}),
+    ]), refusal)
+
+
+async def save_event(run: Run, folder: Path, calendar_id: str, event_id: str, event: dict | None = None) -> Path:
+    """Save an event (``event`` when already read) before it is removed; raises :class:`NotSaved` when it can't be.
 
     Deleting a recurring series also deletes its changed occurrences, which Google stores as
     separate events sharing the series' iCalUID, so the series and all of them are saved.
     """
-    event = _json_object(await run([
-        "calendar", "events", "get", "--params", json.dumps({"calendarId": calendar_id, "eventId": event_id}),
-    ]))
+    if event is None:
+        event = await read_event(run, calendar_id, event_id)
     events = [event]
     if event.get("recurrence") and isinstance(event.get("iCalUID"), str):
         series = await _list_events(run, {"calendarId": calendar_id, "iCalUID": event["iCalUID"]})

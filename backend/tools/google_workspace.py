@@ -24,7 +24,7 @@ import tools.gws_check as gws_check
 from tools import gws_messages
 from tools.base import Tool
 from tools.filesystem_gate import resolve_path
-from tools.gws_deletions import NotSaved, failure_text, log_dir, save_calendar, save_event
+from tools.gws_deletions import NotSaved, failure_text, log_dir, read_event, save_calendar, save_event
 from tools.gws_run import Completed, GwsUnavailable, build_args, run_gws
 
 log = logging.getLogger(__name__)
@@ -132,6 +132,12 @@ class GoogleWorkspaceTool(Tool):
         decision = gws_check.decide(preview)
         if decision.refusal:
             return decision.refusal
+        return await self._checked(account, words, kwargs, preview, decision)
+
+    async def _checked(
+        self, account: dict, words: list[str], kwargs: dict[str, Any], preview: dict, decision: gws_check.Decision,
+    ) -> str:
+        account_id = str(account["id"])
         token = await client.access_token(account_id)
         run = partial(run_gws, account_id=account_id, token=token, workdir=self._workspace)
         if decision.kind == gws_check.TRASH_FILE:
@@ -139,10 +145,17 @@ class GoogleWorkspaceTool(Tool):
             done = await run(build_args(["drive", "files", "update"], params, {"trashed": True}, None, None))
             return f"{gws_messages.TRASHED}\n{_text(done)}" if done.code == 0 else _text(done)
         folder = log_dir(self._workspace, str(account["address"]))
-        if decision.kind == gws_check.DELETE_EVENT:
-            saved = await save_event(run, folder, decision.calendar_id or "", decision.event_id or "")
+        calendar_id, event_id = decision.calendar_id or "", decision.event_id or ""
+        if decision.kind == gws_check.UPDATE_EVENT:
+            # An event that can't be read can't be checked, so the update doesn't run.
+            event = await read_event(run, calendar_id, event_id, refusal="Error: {detail}")
+            if not gws_check.update_removes_events(preview["method"], event, preview.get("body")):
+                return _text(await run(words)) or "Done."
+            saved = await save_event(run, folder, calendar_id, event_id, event)
+        elif decision.kind == gws_check.DELETE_EVENT:
+            saved = await save_event(run, folder, calendar_id, event_id)
         elif decision.kind == gws_check.SAVE_CALENDAR:
-            saved = await save_calendar(run, folder, decision.calendar_id or "")
+            saved = await save_calendar(run, folder, calendar_id)
         else:
             return _text(await run(words)) or "Done."
         done = await run(words)

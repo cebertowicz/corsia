@@ -1,8 +1,9 @@
 """The check before every ``google_workspace`` call.
 
 gws's ``--dry-run`` prints the one request a command would send (method, address, query
-parameters, body) without sending it. The check reads only Google's method and address from
+parameters, body) without sending it. The check reads only Google's method and path from
 that preview, so gws's shortcuts and future commands are covered with nothing built for them.
+The host is not read: Google serves each API under more than one host, and a path names its API.
 """
 
 from __future__ import annotations
@@ -16,8 +17,10 @@ from tools import gws_messages
 
 RUN = "run"
 TRASH_FILE = "trash_file"
-# Removing an event, outright or through an update: the event (and its series) is saved first.
+# Deleting an event: the event (and its series) is saved first.
 DELETE_EVENT = "delete_event"
+# Updating an event: saved first unless the update keeps every occurrence (``update_removes_events``).
+UPDATE_EVENT = "update_event"
 # Clearing or deleting a calendar: every event in it is saved first.
 SAVE_CALENDAR = "save_calendar"
 
@@ -35,6 +38,13 @@ _REDOABLE_DELETES = (
 # A Docs request that removes or rewrites content, today's or a future one, which Google can
 # refuse if someone edited since: its name starts with one of these.
 _DESTRUCTIVE_DOCS_PREFIXES = ("delete", "replace")
+# The fields a series can be changed in without dropping an occurrence; any other change to a
+# series, today's field or a future one, saves it first.
+_KEEPS_OCCURRENCES = frozenset({
+    "summary", "description", "location", "colorId", "attendees", "reminders", "visibility",
+    "transparency", "attachments", "conferenceData", "extendedProperties", "source",
+    "guestsCanInviteOthers", "guestsCanModify", "guestsCanSeeOtherGuests", "anyoneCanAddSelf",
+})
 
 
 @dataclass(frozen=True)
@@ -66,9 +76,7 @@ def _refuse(message: str) -> Decision:
 
 
 def _is_mail(host: str, path: str) -> bool:
-    if host == "gmail.googleapis.com":
-        return True
-    return host == "www.googleapis.com" and path.startswith(("/gmail/", "/upload/gmail/"))
+    return host == "gmail.googleapis.com" or path.startswith(("/gmail/", "/upload/gmail/"))
 
 
 def _unguarded_docs_delete(preview: dict) -> bool:
@@ -85,45 +93,49 @@ def _unguarded_docs_delete(preview: dict) -> bool:
     return destructive and not (isinstance(revision, str) and revision)
 
 
-def _removes_events(body: object) -> bool:
-    """True when an event update cancels the event or sets its ``recurrence``, which can drop later occurrences.
+def update_removes_events(method: str, current: dict, body: object) -> bool:
+    """False only when an update to ``current`` provably keeps every occurrence; anything else is saved first.
 
-    A full update (PUT) that sends ``recurrence`` unchanged is saved too: the request can't say what changed.
+    A cancel removes the event. A full update (PUT) of a series replaces the whole series, and a
+    change to a series outside ``_KEEPS_OCCURRENCES`` (its recurrence, start or end) can drop
+    occurrences or its changed occurrences.
     """
-    return isinstance(body, dict) and (body.get("status") == "cancelled" or "recurrence" in body)
+    if not isinstance(body, dict) or body.get("status") == "cancelled":
+        return True
+    if not current.get("recurrence"):
+        return False
+    return method.upper() == "PUT" or not set(body) <= _KEEPS_OCCURRENCES
 
 
-def _delete(host: str, path: str) -> Decision:
+def _delete(path: str) -> Decision:
     """A delete runs only where it can be put back; any other delete, today's or a future one, is refused."""
-    if host == "www.googleapis.com":
-        if path == "/drive/v3/files/trash":
-            return _refuse(gws_messages.TRASH)
-        if found := _DRIVE_FILE.match(path):
-            return Decision(TRASH_FILE, file_id=unquote(found.group(1)))
-        if found := _CALENDAR_EVENT.match(path):
-            return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
-        if found := _CALENDAR.match(path):
-            return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
-        if any(pattern.match(path) for pattern in _REDOABLE_DELETES):
-            return Decision()
+    if path == "/drive/v3/files/trash":
+        return _refuse(gws_messages.TRASH)
+    if found := _DRIVE_FILE.match(path):
+        return Decision(TRASH_FILE, file_id=unquote(found.group(1)))
+    if found := _CALENDAR_EVENT.match(path):
+        return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
+    if found := _CALENDAR.match(path):
+        return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
+    if any(pattern.match(path) for pattern in _REDOABLE_DELETES):
+        return Decision()
     return _refuse(gws_messages.CANT_UNDO)
 
 
 def decide(preview: dict) -> Decision:
-    """The decision for one previewed request, from Google's method and address alone."""
+    """The decision for one previewed request, from Google's method and path alone."""
     method = preview["method"].upper()
     url = urlparse(preview["url"])
     host, path = (url.hostname or "").lower(), url.path
     if _is_mail(host, path):
         return _refuse(gws_messages.MAIL)
     if method == "DELETE":
-        return _delete(host, path)
-    if method in ("PATCH", "PUT") and host == "www.googleapis.com" and _removes_events(preview.get("body")):
-        if found := _CALENDAR_EVENT.match(path):
-            return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
-    if method == "POST" and host == "www.googleapis.com" and (found := _CALENDAR_CLEAR.match(path)):
+        return _delete(path)
+    if method in ("PATCH", "PUT") and (found := _CALENDAR_EVENT.match(path)):
+        return Decision(UPDATE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
+    if method == "POST" and (found := _CALENDAR_CLEAR.match(path)):
         return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
-    if method == "POST" and host == "docs.googleapis.com" and _DOCS_BATCH.match(path):
+    if method == "POST" and _DOCS_BATCH.match(path):
         if _unguarded_docs_delete(preview):
             return _refuse(gws_messages.DOCS_GUARD)
     return Decision()

@@ -24,7 +24,7 @@ def preview(name: str) -> dict:
 
 
 @pytest.mark.parametrize("name", [
-    "drive_list", "drive_trash_update", "drive_share", "calendar_insert", "calendar_patch", "docs_create",
+    "drive_list", "drive_trash_update", "drive_share", "calendar_insert", "docs_create",
     "docs_insert", "docs_insert_target_revision", "docs_delete_guarded", "sheets_update", "sheets_append",
 ])
 def test_allowed_calls_run_unchanged(name):
@@ -89,7 +89,6 @@ def test_event_delete_and_calendar_clear_or_delete_name_their_calendar():
     "https://www.googleapis.com/drive/v3/files/F1/comments/C1",
     "https://www.googleapis.com/drive/v3/files/F1/comments/C1/replies/R1",
     "https://www.googleapis.com/drive/v3/drives/D1",
-    "https://drive.googleapis.com/drive/v3/files/F1",
     "https://example.googleapis.com/v1/anything/new",
 ])
 def test_a_delete_that_cannot_be_put_back_is_refused(url):
@@ -103,6 +102,17 @@ def test_a_delete_that_cannot_be_put_back_is_refused(url):
 ])
 def test_removing_a_share_or_a_listed_calendar_runs_unchanged(url):
     assert gws_check.decide({"method": "DELETE", "url": url}) == gws_check.Decision()
+
+
+def test_the_check_reads_the_path_on_any_google_host():
+    trashed = gws_check.decide({"method": "DELETE", "url": "https://drive.googleapis.com/drive/v3/files/F1"})
+    assert (trashed.kind, trashed.file_id) == (gws_check.TRASH_FILE, "F1")
+    cleared = gws_check.decide({"method": "POST", "url": "https://calendar.googleapis.com/calendar/v3/calendars/primary/clear"})
+    assert (cleared.kind, cleared.calendar_id) == (gws_check.SAVE_CALENDAR, "primary")
+    updated = gws_check.decide({**preview("calendar_patch"), "url": "https://calendar.googleapis.com/calendar/v3/calendars/primary/events/EV1"})
+    assert (updated.kind, updated.event_id) == (gws_check.UPDATE_EVENT, "EV1")
+    docs = {**preview("docs_delete_unguarded"), "url": preview("docs_delete_unguarded")["url"].replace("docs.", "www.")}
+    assert gws_check.decide(docs).refusal == gws_messages.DOCS_GUARD
 
 
 def test_the_address_is_unquoted_before_it_is_used():
@@ -136,9 +146,9 @@ def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named(tm
     assert index.count('- 1 more for a connected account: tools_load(pack="google_workspace")') == 1
 
 
-def test_gws_is_pinned_with_a_checksum_for_each_mac_and_linux_machine():
+def test_gws_is_pinned_with_a_checksum_for_each_supported_machine():
     pins = RUNTIME_PINS["gws"]
-    assert set(pins) == {"arm64", "x86_64", "linux-arm64", "linux-x86_64"}
+    assert set(pins) == {"arm64", "linux-arm64", "linux-x86_64"}
     for pin in pins.values():
         assert pin.version == "0.22.5" and "/v0.22.5/" in pin.url and pin.executable == "gws"
         assert re.fullmatch(r"[0-9a-f]{64}", pin.sha256)

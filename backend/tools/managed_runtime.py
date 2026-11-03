@@ -18,6 +18,7 @@ import urllib.request
 import zipfile
 
 from infra.platform_paths import APP_FOLDER
+from tools.gws_release import GWS_MAC_ARM64_SHA256, GWS_VERSION as _GWS_VERSION
 
 
 class ManagedRuntimeError(RuntimeError):
@@ -40,7 +41,6 @@ class RuntimePin:
 _NODE_VERSION = "26.12.0"
 _UV_VERSION = "0.13.2"
 _GH_VERSION = "2.102.0"
-_GWS_VERSION = "0.22.5"
 
 # Update pins only in source review: replace URL and maker-published SHA together.
 RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
@@ -61,8 +61,7 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
         "x86_64": RuntimePin(_GH_VERSION, f"https://github.com/cli/cli/releases/download/v{_GH_VERSION}/gh_{_GH_VERSION}_macOS_amd64.zip", "b245f24eb2bf5f75b426b4c26da3651a107f8d5b6f4fddfbfccc5679041378b3", "zip", f"gh_{_GH_VERSION}_macOS_amd64/bin/gh"),
     },
     "gws": {
-        "arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-apple-darwin.tar.gz", "1d2a9ffd5bc9b2c2c4b48630daf082fad13d9e57d741988a2c248eed562f7dac", "tar.gz", "gws"),
-        "x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-apple-darwin.tar.gz", "51f9bd731404d4bba26c36e2e30dd68c56dccd1f834c01252cb0b14d6a6544b2", "tar.gz", "gws"),
+        "arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-apple-darwin.tar.gz", GWS_MAC_ARM64_SHA256, "tar.gz", "gws"),
         "linux-x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-unknown-linux-musl.tar.gz", "4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920", "tar.gz", "gws"),
         "linux-arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-unknown-linux-musl.tar.gz", "e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a", "tar.gz", "gws"),
     },

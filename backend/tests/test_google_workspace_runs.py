@@ -1,11 +1,9 @@
-"""google_workspace: removals through updates are saved first, a failed preview shows gws's error,
-output is capped, and the Mac gws pin is stored once. No Google call is made."""
+"""google_workspace runs: event updates that can remove occurrences are saved first, a failed
+preview shows gws's error, and output is capped. No Google call is made."""
 
 from __future__ import annotations
 
 import json
-import re
-from pathlib import Path
 
 import pytest
 
@@ -13,33 +11,64 @@ import tools.gws_check as gws_check
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from tools import gws_messages
 from tools.gws_run import Completed
-from tools.managed_runtime import RUNTIME_PINS
 
 from test_google_workspace import FakeGws, recorded, tool, use, workspace  # noqa: F401
 
-REPO = Path(__file__).resolve().parents[2]
+SINGLE = {"id": "EV1", "summary": "Lunch"}
+SERIES = {"id": "S1", "iCalUID": "S1@google.com", "recurrence": ["RRULE:FREQ=WEEKLY"]}
 
 
 def _preview(name: str) -> dict:
     return json.loads(recorded(name))
 
 
-@pytest.mark.parametrize("name,event", [("calendar_patch_cancel", "EV1"), ("calendar_patch_recurrence", "S1")])
-def test_removing_events_through_an_update_is_saved_first(name, event):
-    decision = gws_check.decide(_preview(name))
-    assert decision == gws_check.Decision(gws_check.DELETE_EVENT, calendar_id="primary", event_id=event)
+@pytest.mark.parametrize("name", ["calendar_patch", "calendar_patch_cancel", "calendar_patch_recurrence"])
+@pytest.mark.parametrize("method", ["PATCH", "PUT"])
+def test_every_event_update_is_checked_against_the_event(name, method):
+    decision = gws_check.decide({**_preview(name), "method": method})
+    assert decision.kind == gws_check.UPDATE_EVENT and decision.calendar_id == "primary"
 
 
-def test_creates_and_ordinary_edits_still_log_nothing():
-    for name in ("calendar_patch", "calendar_insert"):
-        assert gws_check.decide(_preview(name)) == gws_check.Decision()
-    put = {**_preview("calendar_patch"), "method": "PUT", "body": {"summary": "x", "status": "confirmed"}}
-    assert gws_check.decide(put) == gws_check.Decision()
+@pytest.mark.parametrize("method,current,body", [
+    ("PATCH", SINGLE, {"status": "cancelled"}),
+    ("PUT", SINGLE, {"summary": "x", "status": "cancelled"}),
+    ("PATCH", SERIES, {"recurrence": ["RRULE:FREQ=WEEKLY;COUNT=2"]}),
+    ("PATCH", SERIES, {"start": {"dateTime": "2026-11-10T09:00:00Z"}}),
+    ("PATCH", SERIES, {"summary": "x", "anyFieldGoogleAddsLater": 1}),
+    ("PUT", SERIES, {"summary": "x"}),
+    ("PUT", SERIES, {**SERIES, "summary": "x"}),
+    ("PATCH", SINGLE, None),
+])
+def test_an_update_that_may_remove_occurrences_is_saved_first(method, current, body):
+    assert gws_check.update_removes_events(method, current, body)
 
 
-def test_a_cancelling_put_is_saved_first():
-    put = {**_preview("calendar_patch_cancel"), "method": "PUT"}
-    assert gws_check.decide(put).kind == gws_check.DELETE_EVENT
+@pytest.mark.parametrize("method,current,body", [
+    ("PATCH", SINGLE, {"summary": "x", "start": {"dateTime": "2026-11-10T09:00:00Z"}}),
+    ("PUT", SINGLE, {"summary": "x", "status": "confirmed"}),
+    ("PATCH", SINGLE, {"recurrence": ["RRULE:FREQ=DAILY"]}),
+    ("PATCH", SERIES, {"summary": "x", "attendees": [], "reminders": {"useDefault": True}}),
+])
+def test_an_update_that_keeps_every_occurrence_logs_nothing(method, current, body):
+    assert not gws_check.update_removes_events(method, current, body)
+
+
+async def test_an_ordinary_edit_reads_the_event_and_runs_with_nothing_logged(tool, workspace, monkeypatch):
+    def real(words):
+        return json.dumps(SINGLE) if words[:3] == ["calendar", "events", "get"] else '{"id": "EV1"}'
+
+    fake = use(monkeypatch, FakeGws(recorded("calendar_patch"), real))
+    result = await tool.execute(args=["calendar", "events", "patch"], body={"summary": "x"})
+    assert result == '{"id": "EV1"}'
+    assert [words[:3] for words in fake.real_runs()] == [["calendar", "events", "get"], ["calendar", "events", "patch"]]
+    assert not (workspace / "google-deletions").exists()
+
+
+async def test_an_event_that_cant_be_read_is_not_updated(tool, monkeypatch):
+    fake = use(monkeypatch, FakeGws(recorded("calendar_patch_cancel"), lambda words: Completed(1, "", "notFound")))
+    result = await tool.execute(args=["calendar", "events", "patch"], body=_preview("calendar_patch_cancel")["body"])
+    assert result == "Error: notFound"
+    assert [words[:3] for words in fake.real_runs()] == [["calendar", "events", "get"]]
 
 
 async def test_a_cancelling_patch_and_a_truncating_patch_write_the_log_before_they_run(tool, workspace, monkeypatch):
@@ -95,17 +124,3 @@ async def test_output_under_the_cap_is_returned_whole(tool, monkeypatch):
     use(monkeypatch, FakeGws(recorded("drive_list"), {"drive files list": '{"files": []}'}))
     assert await tool.execute(args=["drive", "files", "list"]) == '{"files": []}'
 
-
-def test_the_mac_build_script_ships_the_pinned_gws():
-    script = (REPO / "desktop" / "scripts" / "build-macos-bundle.sh").read_text()
-    pin = RUNTIME_PINS["gws"]["arm64"]
-
-    def value(name: str) -> str:
-        found = re.search(rf'^readonly {name}="([^"]+)"$', script, re.MULTILINE)
-        assert found, name
-        return found.group(1)
-
-    version, archive = value("GWS_VERSION"), value("GWS_ARCHIVE")
-    assert version == pin.version
-    assert value("GWS_URL").replace("${GWS_VERSION}", version).replace("${GWS_ARCHIVE}", archive) == pin.url
-    assert value("GWS_SHA256") == pin.sha256
