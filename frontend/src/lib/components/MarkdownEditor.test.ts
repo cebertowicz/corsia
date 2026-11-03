@@ -105,15 +105,15 @@ describe('MarkdownEditor edits', () => {
 			expect(host.querySelector('.cm-suggestion-insert')).toBeNull();
 		});
 
-		it('focuses the card for a press on the insert, and for a caret in the struck text, marked as a suggestion', () => {
+		it('focuses the card for a press on the insert, and never for a caret in the struck text', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [suggestion('red')], onAnchorFocus });
 			host.querySelector('.cm-suggestion-insert')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
 			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true);
 			onAnchorFocus.mockClear();
 			view.dispatch({ selection: { anchor: 8 } }); flushSync();
-			expect(onAnchorFocus).toHaveBeenCalledOnce();
-			expect(onAnchorFocus).toHaveBeenCalledWith('sug', expect.anything(), true);
+			view.dispatch({ selection: { anchor: 9 } }); flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 

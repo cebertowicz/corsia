@@ -197,10 +197,8 @@
 		if (r.empty) {
 			onSelect?.(null);
 			const hit = curHighlights.find((h) => r.from >= h.from && r.from <= h.to);
-			if (hit && v.coordsAtPos(r.from)) {
-				if (hit.suggestion) onAnchorFocus?.(hit.id, liveAnchor(hit.id), true);
-				else onAnchorFocus?.(hit.id, liveAnchor(hit.id));
-			}
+			// A suggestion's card opens on a press on its insert (suggestionMarks), never on a caret move: the caret is editing.
+			if (hit && !hit.suggestion && v.coordsAtPos(r.from)) onAnchorFocus?.(hit.id, liveAnchor(hit.id));
 		} else {
 			emitSelection(v);
 		}
