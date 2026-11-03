@@ -174,11 +174,7 @@ async def retry_thread_delivery_now(
     # duplicate check can't: a copy's metadata gains stamps once a Turn takes it in.
     message = await run_in_db(_latest_attempt, thread_id, message)
     if message["delivery_state"] not in _ENDED_ATTEMPT_STATES:
-        return {
-            "thread_id": thread_id,
-            "retried": True,
-            "revived_message_id": str(message["id"]),
-        }
+        return _revived(thread_id, str(message["id"]))
     retry_id = _retry_id(str(message["id"]))
     content, metadata = _retry_content(message)
     # send_thread_input owns the empty-input rule.
@@ -201,12 +197,19 @@ async def retry_thread_delivery_now(
         )
     except SendRejected as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError:
+        # A concurrent press admitted this copy first and a Turn stamped it
+        # before this press reached admission's duplicate check.
+        latest = await run_in_db(_latest_attempt, thread_id, message)
+        if str(latest["id"]) != retry_id:
+            raise
+        return _revived(thread_id, retry_id)
     receipt = getattr(result, "receipt", None)
     revived_id = getattr(result, "message_id", None) or getattr(
         receipt, "message_id", None,
     )
-    return {
-        "thread_id": thread_id,
-        "retried": True,
-        "revived_message_id": revived_id,
-    }
+    return _revived(thread_id, revived_id)
+
+
+def _revived(thread_id: str, message_id: str | None) -> dict:
+    return {"thread_id": thread_id, "retried": True, "revived_message_id": message_id}
