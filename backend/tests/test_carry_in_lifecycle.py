@@ -708,6 +708,18 @@ async def _hangs():
     await asyncio.sleep(5)
 
 
+async def _hangs_then_ends_on_cancel():
+    """A Turn that handles its cancel the way the real loop does: it ends normally, never re-raising."""
+    try:
+        await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        return None
+
+
+async def _finishes_in_time():
+    await asyncio.sleep(0)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("route", "kind"), [
     ({"admit": RuntimeError("timed out acquiring lock")}, "admission"),
@@ -716,6 +728,7 @@ async def _hangs():
     ({"execute": RuntimeError("Eval turn errored")}, "handoff"),
     ({"task": _raises_timed_out}, "provider"),
     ({"task": _hangs}, "timeout"),
+    ({"task": _hangs_then_ends_on_cancel}, "timeout"),
 ])
 async def test_the_eval_route_names_its_failure_kind_by_step(isolated_db, monkeypatch, route, kind):
     from core.carry_in_facts import COVERAGE_REASONS
@@ -727,6 +740,40 @@ async def test_the_eval_route_names_its_failure_kind_by_step(isolated_db, monkey
     )
     assert turn_id is None and failure.kind == kind
     assert set(EVAL_FAILURES) <= set(COVERAGE_REASONS)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_finishes_inside_its_deadline_returns_its_turn(isolated_db, monkeypatch):
+    from eval.endpoint import run_eval_turn
+
+    _eval_route(monkeypatch, task=_finishes_in_time)
+    turn_id, failure = await run_eval_turn(
+        thread_id="t", thread_row={"user_id": "steve"}, prompt="p", model="m", timeout_seconds=5,
+    )
+    assert (turn_id, failure) == ("turn-1", None)
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_sample_ends_the_case_in_timeout_coverage_and_is_never_scored(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    _write_lesson(c1)
+    _save(c1, "rule v1\n")
+    await _make_pending(c1)
+    _local(monkeypatch)
+    _eval_route(monkeypatch, task=_hangs_then_ends_on_cancel)
+    monkeypatch.setattr(carry_in_drain, "SAMPLE_TIMEOUT_SECONDS", 0.05)
+    scored = []
+    monkeypatch.setattr("core.carry_in_scoring.sample_passes", lambda *a: scored.append(a) or False)
+
+    await carry_in_drain.wake(c1.workspace)
+
+    terminal = _events()[-1]
+    assert (terminal["event"], terminal["reason"], terminal["samples_completed"]) == (
+        "lesson.carry_in.coverage", "timeout", 0,
+    )
+    assert scored == []
+    assert _events("lesson.carry_in.result") == []
 
 
 @pytest.mark.asyncio
