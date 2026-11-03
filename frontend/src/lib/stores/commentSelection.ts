@@ -20,12 +20,12 @@ export function selectComment(session: LiveDocumentSession, from: number, to: nu
 	return { session, from: Y.createRelativePositionFromTypeIndex(session.text, from, 0),
 		to: Y.createRelativePositionFromTypeIndex(session.text, to, -1), quote: session.text.toString().slice(from, to) };
 }
-export function selectionRange(selection: CommentSelection): { from: number; to: number } | null {
+/** Where the selection is now, with the text there now: an edit inside it changes its quote, and only a gone or empty range is lost. */
+export function selectionRange(selection: CommentSelection): { from: number; to: number; quote: string } | null {
 	const { session } = selection;
 	const from = Y.createAbsolutePositionFromRelativePosition(selection.from, session.doc)?.index;
 	const to = Y.createAbsolutePositionFromRelativePosition(selection.to, session.doc)?.index;
-	return from !== undefined && to !== undefined && from < to && session.text.toString().slice(from, to) === selection.quote
-		? { from, to } : null;
+	return from !== undefined && to !== undefined && from < to ? { from, to, quote: session.text.toString().slice(from, to) } : null;
 }
 /** How long a capture keeps asking the server to track its range, counted from its first ask, on a document that keeps moving. */
 export const RESERVE_BUDGET_MS = 3000;
@@ -100,7 +100,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 				const range = selectionRange(selection);
 				if (!range) { finish(undefined, new Error(SELECTION_LOST)); return; }
 				const vector = encodeUpdate(Y.encodeStateVector(session.doc));
-				sent = { ...range, quote: selection.quote, clientId };
+				sent = { ...range, clientId };
 				requestId = session.requestPositions(seq, false, { client_id: clientId, from_off: range.from, to_off: range.to,
 					vector, digest, text_length_utf16: text.length });
 				if (!requestId) finish(undefined, new Error(OFFLINE));

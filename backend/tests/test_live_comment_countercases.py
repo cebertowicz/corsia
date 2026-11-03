@@ -41,21 +41,19 @@ async def test_http_live_capture_must_be_a_boolean_and_never_reserves_or_creates
 
 
 @pytest.mark.asyncio
-async def test_missing_reservation_and_wrong_quote_bounds_refuse_live_http(ownership_scope, tmp_path, monkeypatch):
+async def test_missing_reservation_refuses_and_the_reserved_range_not_the_quote_decides_the_anchor(ownership_scope, tmp_path, monkeypatch):
     manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
     app_loop.capture(asyncio.get_running_loop())
     try:
         response = await post(entry)
         assert response.status_code == 409
-        # The reserved range covers a different UTF-16 character than the submitted quote.
-        reserve(ownership_scope, entry, 'wrong-bounds', 0, 1)
-        value = doc_comments.CommentCreate(body='bad bounds', anchor_text='b', from_off=0, to_off=1,
-                                          live_capture=True, client_id='wrong-bounds', delivery_policy='immediate')
-        with pytest.raises(HTTPException) as refused:
-            await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, value, BackgroundTasks())
-        assert refused.value.status_code == 409
-        assert 'wrong-bounds' not in entry.live.ranges
-        assert await run_in_db(comments.get_comment, 'wrong-bounds') is None
+        # The submitted quote is not what anchors the comment: the reserved range is, read from the live text.
+        reserve(ownership_scope, entry, 'other-quote', 0, 1)
+        value = doc_comments.CommentCreate(body='other quote', anchor_text='b', from_off=0, to_off=1,
+                                          live_capture=True, client_id='other-quote', delivery_policy='immediate')
+        await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, value, BackgroundTasks())
+        row = await run_in_db(comments.get_comment, 'other-quote')
+        assert row['anchor_text'] == entry.live.text[0:1] != 'b'
     finally:
         await manager.close()
         app_loop.clear()

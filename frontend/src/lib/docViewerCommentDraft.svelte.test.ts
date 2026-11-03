@@ -2,7 +2,8 @@ import { flushSync } from 'svelte';
 import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { commentDraft, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
-import { SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
+import { captureComment, SELECTION_RECONNECTED } from '$lib/stores/commentSelection';
+import { addComment } from '$lib/stores/docComments';
 import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
@@ -158,5 +159,37 @@ describe('the pending mark before and while the composer is open', () => {
 		expect(current.controller.pendingComment).toBe(owned);
 		current.controller.select(selection(6, 10, false)); flushSync();
 		expect(current.controller.pendingComment).toBe(owned);
+	});
+});
+
+describe('a save the server refuses because the document changed', () => {
+	const begin = () => {
+		current = setup(false);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); flushSync();
+		vi.mocked(captureComment).mockClear(); vi.mocked(addComment).mockClear();
+	};
+
+	it('is captured again from the still-tracked selection and posts without the person retrying', async () => {
+		begin();
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('409 The text you selected changed'));
+		expect(await current!.controller.submit('body')).toBe('posted');
+		expect(captureComment).toHaveBeenCalledTimes(2);
+		expect(addComment).toHaveBeenCalledTimes(2);
+	});
+
+	it('fails with the existing message only when the second attempt is refused too', async () => {
+		begin();
+		vi.mocked(addComment).mockRejectedValue(new Error('409 The text you selected changed'));
+		await expect(current!.controller.submit('body')).rejects.toThrow('409');
+		expect(addComment).toHaveBeenCalledTimes(2);
+		vi.mocked(addComment).mockResolvedValue('posted');
+	});
+
+	it('is not captured again for any other failure', async () => {
+		begin();
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
+		await expect(current!.controller.submit('body')).rejects.toThrow('500');
+		expect(captureComment).toHaveBeenCalledTimes(1);
 	});
 });
