@@ -87,6 +87,19 @@ def _login(item: Any) -> str | None:
     return login if isinstance(login, str) and login else None
 
 
+def reply_envelope_facts(raw: dict[str, Any], facts: dict[str, Any], content: dict[str, Any],
+                         payload_facts: tuple[str, ...]) -> None:
+    """Add content and preserve one PR-fact source for each reply event type."""
+    facts.update(content)
+    kind = content_kind(raw)
+    if kind in REPLY_TYPES:
+        facts.update(reply_facts(raw))
+        facts.pop("sha", None)
+        if kind == "pr_comment.created":
+            for name in payload_facts:
+                facts.pop(name, None)
+
+
 def reply_facts(raw: dict[str, Any]) -> dict[str, Any]:
     """Facts of a created PR comment or submitted review; never include its body."""
     review = raw.get("review") if isinstance(raw.get("review"), dict) else None

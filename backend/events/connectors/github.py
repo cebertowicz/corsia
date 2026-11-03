@@ -32,7 +32,7 @@ from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_pr_facts import HEAD_FACTS, PAYLOAD_FACTS, READ_FACTS, pull_facts
 from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
-from events.connectors.github_content_facts import REPLY_FILTERABLE, REPLY_TYPES, content_facts, content_kind, reply_facts, repository_name
+from events.connectors.github_content_facts import REPLY_FILTERABLE, REPLY_TYPES, content_facts, content_kind, reply_envelope_facts, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.connectors.github_screen.workflow import triage_capture, triage_validate, triage_version, triage_workflow
 from events.identity_formula import MalformedEventError, RelationshipDecl
@@ -162,15 +162,7 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
     facts.update(change.facts if change else {})
-    facts.update(content)
-    kind = content_kind(raw)
-    if kind in REPLY_TYPES:
-        facts.update(reply_facts(raw))
-        # A reply does not have its own PR head; comments mix two webhook payload shapes.
-        facts.pop("sha", None)
-        if kind == "pr_comment.created":
-            for name in PAYLOAD_FACTS:
-                facts.pop(name, None)
+    reply_envelope_facts(raw, facts, content, PAYLOAD_FACTS)
     if (pr and not raw.get("comment") and not raw.get("review")
             and content.get("author_origin") == "inside" and pr.get("title") is not None):
         facts["title"] = pr["title"]
@@ -306,8 +298,7 @@ MANIFEST = register(ConnectorManifest(
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
                                  routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
-        **{name: EventTypeDecl(name, ("repo", "item_version"),
-                                (*REPLY_FILTERABLE, *PAYLOAD_FACTS, *READ_FACTS) if name in REPLY_TYPES else _CONTENT_FILTERABLE,
+        **{name: EventTypeDecl(name, ("repo", "item_version"), (*REPLY_FILTERABLE, *PAYLOAD_FACTS, *READ_FACTS) if name in REPLY_TYPES else _CONTENT_FILTERABLE,
                                 routed_event=GITHUB_ROUTED_EVENTS.get(name))
            for name in ("issue.edited", "issue_comment.created", "issue_comment.edited",
                         "pr_comment.created", "pr_comment.edited", "review.submitted", "review.edited")},
