@@ -228,13 +228,20 @@ def test_a_failed_fresh_read_says_so_and_never_copies_the_old_revision(db, monke
     assert "intent_current_revision" not in facts
 
 
-def test_a_result_settled_without_a_connection_still_carries_its_stamp(db):
+def test_a_result_settled_without_a_connection_reads_the_revision_on_its_own(db):
+    thread_id, plan = _plan(db)
+    task = _task(db, plan.id, "Open the PR", intent="First goal")
+    _registered_from(db, thread_id, plan.id, task.id)
+    _, record = review_intent.attach(ROW, OPTED_IN, db=db)
+    db.commit()
     row = {"thread_id": "owner", "rule_id": "r", "event_id": "e", "request_identity": "pr@a", "id": 1,
            "connector": "qa", "event_type": "request", "artifact_external_id": PR[2],
            "artifact_integration": PR[0], "artifact_type": PR[1]}
-    facts = worker_settle.settlement(row, {"workflow": "review@1", "intent": RECORD}, RETURNED,
+    facts = worker_settle.settlement(row, {"workflow": "review@1", "intent": record}, RETURNED,
                                      {"result": "{}"}).facts
-    assert facts["intent_node"] == "n1" and facts["intent_text"]["intent"] == "Goal"
+    assert facts["intent_node"] == task.id
+    assert facts["intent_current_revision"] == record["requirements_revision"]
+    assert "intent_reason" not in facts
 
 
 def test_a_start_that_was_not_a_pull_request_carries_no_stamp(db):

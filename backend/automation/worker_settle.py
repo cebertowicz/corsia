@@ -157,7 +157,7 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
         # The start's own record of what it spawned; a start that never spawned has none.
         "model": (check.get("settings") or {}).get("model"),
-        # Without a connection the revision read fails and says so; the stamp is never left out.
+        # Without a connection the revision read opens its own; the stamp is never left out.
         **(review_intent.stamp(check.get("intent"), db=db) if outcome == RETURNED else {}),
     }
     if context:
