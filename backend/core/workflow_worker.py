@@ -61,6 +61,9 @@ def worker_errors(workflow: Mapping[str, Any]) -> list[str]:
     if not isinstance(profiles, dict):
         return [*errors, "corsia.workflow.worker.profiles must be a mapping of profile names"]
     for name, profile in profiles.items():
+        if not isinstance(name, str):
+            errors.append(f"corsia.workflow.worker.profiles has a name that is not text: {name!r}")
+            continue
         errors.extend(_settings_errors(profile, f"corsia.workflow.worker.profiles.{name}", profiles_allowed=False))
     return errors
 

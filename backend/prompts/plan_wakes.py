@@ -38,6 +38,8 @@ WAKE_INTENT_REVISED = (
 )
 WAKE_INTENT_INPUT = ("[CORSIA plan] New words from the person may bear on {title} (revision {requirements_revision}). "
                      "If they change the task, revise its intent and add these words; if not, carry on.")
+#: Added to ``WAKE_INTENT_INPUT`` once per reply that joined a task its owner is working (``plans.feedback_join``).
+INTENT_INPUT_ANSWER_REPLY = "Answer comment {comment_id} in its thread before you finish this task."
 #: The revision_requested text for a delegated worker, which works a step seeded in its own plan.
 REVISION_WORKER_STEP = (
     "[CORSIA plan] Your returned work on {title} was rejected. Work step {worker_step_id} "
