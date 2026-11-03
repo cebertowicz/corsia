@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Field, ListRow, Toggle } from '$lib/components/ui';
-	import { USAGE_SHARING_LINE } from '$lib/setupAccountSave';
+	import { USAGE_SHARING_LABEL, USAGE_SHARING_LINE } from '$lib/usageSharing';
 	import { EMAIL_HINT } from '$lib/setupWelcome';
 	interface Props {
 		name: string; username: string; password: string; confirmation: string; email: string; sharing: boolean;
@@ -31,9 +31,9 @@
 	</div>
 	<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email" hint={EMAIL_HINT}><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
 	<div class="sharing">
-		<ListRow name="Share usage counts" centered>
+		<ListRow name={USAGE_SHARING_LABEL} centered>
 			{#snippet detail()}<span id="setup-sharing-line">{USAGE_SHARING_LINE}</span>{/snippet}
-			{#snippet actions()}<Toggle size="sm" checked={sharing} ariaLabel="Share usage counts" describedBy="setup-sharing-line" onchange={(next) => (sharing = next)} />{/snippet}
+			{#snippet actions()}<Toggle size="sm" checked={sharing} ariaLabel={USAGE_SHARING_LABEL} describedBy="setup-sharing-line" onchange={(next) => (sharing = next)} />{/snippet}
 		</ListRow>
 	</div>
 	{#if accountError}<p class="error-text" role="alert">{accountError}</p>{/if}

@@ -14,6 +14,7 @@ const ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let settingsStatus = 200;
+let sharingDefault: boolean | undefined;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label);
@@ -24,7 +25,8 @@ function setInput(id: string, value: string) {
 	input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 async function openAccount() {
-	await settle(); button('Continue')?.click(); await settle();
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	flushSync(); await settle(); button('Continue')?.click(); await settle();
 	setInput('setup-name', 'Ada Lovelace'); setInput('setup-username', 'ada'); setInput('setup-password', 'password1'); setInput('setup-confirm-password', 'password1');
 	await settle();
 }
@@ -35,10 +37,10 @@ const settingsWrites = () => vi.mocked(fetch).mock.calls
 const accountPuts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/setup/account' && init?.method === 'PUT');
 
 beforeEach(() => {
-	token.set(null); user.set(null); settingsStatus = 200;
+	token.set(null); user.set(null); settingsStatus = 200; sharingDefault = undefined;
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET';
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA', usage_sharing_default: sharingDefault });
 		if (url === '/api/setup/first-account') return json({ token: 'session-one', user: { id: 'ada', name: 'Ada Lovelace' } });
 		if (url === '/api/settings' && method === 'PATCH') return json({}, settingsStatus);
 		if (url.includes('/sources')) return json({ sources: [] });
@@ -46,12 +48,11 @@ beforeEach(() => {
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-	flushSync();
 });
 
 afterEach(async () => {
 	if (component) await unmount(component);
+	component = null;
 	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
@@ -71,6 +72,20 @@ describe('usage sharing on the account step', () => {
 		expect(settingsWrites()).toEqual([{ body: { usage_sharing: false }, auth: 'Bearer session-one' }]);
 		expect(get(token)).toBe('session-one');
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+	});
+
+	it('starts off where the region needs opt-in, and leaving it off writes false', async () => {
+		sharingDefault = false;
+		await openAccount();
+		expect(toggle().getAttribute('aria-pressed')).toBe('false');
+		button('Continue')?.click(); await settle();
+		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: false }]);
+	});
+
+	it('starts on where the region default is on', async () => {
+		sharingDefault = true;
+		await openAccount();
+		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('writes true explicitly when it was left on', async () => {

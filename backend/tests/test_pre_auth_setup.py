@@ -305,6 +305,15 @@ def test_first_account_accepts_the_required_data_owner_name(client, monkeypatch)
     assert [user["id"] for user in accounts.list_users()] == ["legacy-owner"]
 
 
+@pytest.mark.parametrize(("region", "expected"), [("DE", False), ("NO", False), ("GB", True), ("US", True), (None, True)])
+def test_status_starts_usage_sharing_from_the_region_default(client, monkeypatch, region, expected):
+    import infra.settings as settings
+
+    monkeypatch.setattr(setup_api, "_setup_status", setup_api._setup_status)
+    monkeypatch.setattr(settings, "os_region", lambda: region)
+    assert client.get("/api/setup/status", headers=LOOPBACK_HEADERS).json()["usage_sharing_default"] is expected
+
+
 def test_status_names_the_data_owner_only_when_there_is_exactly_one(client, monkeypatch):
     monkeypatch.setattr(setup_api, "_setup_status", setup_api._setup_status)
     assert client.get("/api/setup/status", headers=LOOPBACK_HEADERS).json()["required_username"] is None
