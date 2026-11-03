@@ -389,17 +389,23 @@ it('logs a refused live comment post\'s status and raw reason once, as the share
 	expect(logged.mock.calls.filter(call => call[0] === '[api] request rejected')).toEqual([['[api] request rejected', 400, 'live_capture_refused']]);
 	logged.mockRestore();
 });
-it('keeps the body and enabled Comment after HTTP refusal, then dismisses its toast on retry success', async () => {
+it('keeps the body and enabled Comment after an HTTP refusal that a second capture does not fix, then dismisses its toast on retry success', async () => {
 	await open(); await select(); await compose();
-	api.postComment.mockRejectedValueOnce(new Error('409 {"detail":"The document changed. Try Comment again; your draft is kept."}'));
+	const refusal = new Error('409 {"detail":"The document changed. Try Comment again; your draft is kept."}');
+	api.postComment.mockRejectedValueOnce(refusal).mockRejectedValueOnce(refusal);
 	const dismiss = vi.spyOn(toasts, 'dismiss');
 	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 	submit.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const refusedAsk = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
 	await answer(refusedAsk);
+	// The refusal captures the still-tracked selection once more before the person sees an error.
+	await vi.waitFor(() => expect(wire.frames.filter(frame => frame.type === 'doc_positions')).toHaveLength(2));
+	expect(toasts.show).not.toHaveBeenCalled();
+	const secondAsk = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	await answer(secondAsk);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
-	expect(released()).toEqual([expect.objectContaining({ client_id: refusedAsk.reserve.client_id })]);
+	expect(released()).toEqual([expect.objectContaining({ client_id: refusedAsk.reserve.client_id }), expect.objectContaining({ client_id: secondAsk.reserve.client_id })]);
 	expect(submit.textContent).toBe('Comment');
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
 	expect(get(commentDraft)?.body).toBe('Keep my body');

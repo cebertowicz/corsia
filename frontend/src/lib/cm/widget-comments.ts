@@ -196,11 +196,18 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			event.preventDefault();
 			const selection = document.getSelection()!;
 			selection.setBaseAndExtent(start.node, start.offset, start.node, start.offset);
+			// Painting the pending mark rewraps the cell's text and detaches start.node, which freezes the drag, so paint once on release.
+			this.dragging = true;
 			const move = (e: MouseEvent) => {
+				// A release outside the window sends no mouseup, so the drag ends when a move arrives with no button held.
+				if (e.buttons === 0) {
+					up();
+					return;
+				}
 				const at = caretAt(e.clientX, e.clientY);
 				if (at && widget.contains(at.node)) selection.setBaseAndExtent(start.node, start.offset, at.node, at.offset);
 			};
-			const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.listen(); };
+			const up = () => { this.dragging = false; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.listen(); };
 			window.addEventListener('mousemove', move);
 			window.addEventListener('mouseup', up);
 		};
@@ -231,7 +238,10 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			this.view.dom.removeEventListener('click', this.click);
 		}
 
+		private dragging = false;
+
 		private read() {
+			if (this.dragging) return;
 			const selection = document.getSelection();
 			const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 			const el = range && widgetOf(this.view, range.commonAncestorContainer);

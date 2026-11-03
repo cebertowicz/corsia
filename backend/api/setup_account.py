@@ -17,6 +17,7 @@ from infra import account_validation, accounts, setup_progress
 from infra.account_update import update_account
 from infra.db_async import run_in_db
 from infra.failure_reference import new_error_reference
+from infra.settings import save_usage_sharing
 from infra.time import utc_storage_iso_to_api
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,13 @@ async def apply_create(request: Request) -> dict | Response:
         body = FirstAccountRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
+    sharing = body.usage_sharing
     try:
+        # The choice is saved in the account's own transaction, so a refused or failed account leaves it unchanged.
         user_id = await run_in_db(
             accounts.create_first_account, body.username, body.password,
             full_name=body.name, email=body.email or "", first_run_path="app",
+            with_account=None if sharing is None else lambda conn: save_usage_sharing(sharing, db=conn),
         )
     except account_validation.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
@@ -64,10 +68,11 @@ async def apply_update(user_id: str, request: Request) -> dict | Response:
         return JSONResponse(status_code=409, content={"code": "setup_complete"})
     fields = body.model_fields_set
     try:
-        session = await run_in_db(lambda: update_account(
-            user_id, full_name=body.name if "name" in fields else None,
+        session = await run_in_db(
+            update_account, user_id, full_name=body.name if "name" in fields else None,
             email=(body.email or "") if "email" in fields else None,
-            password=body.password if "password" in fields else None))
+            password=body.password if "password" in fields else None, usage_sharing=body.usage_sharing,
+        )
     except account_validation.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
     except FileNotFoundError:

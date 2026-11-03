@@ -100,6 +100,31 @@ async def run_inbox_message_action(
     return {"thread_id": thread_id, "message": projected}
 
 
+_ENDED_ATTEMPT_STATES = frozenset({"failed", "ambiguous", "cancelled"})
+
+
+def _retry_id(message_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:retry:{message_id}"))
+
+
+def _latest_attempt(thread_id: str, message: dict) -> dict:
+    """Follow a row's Retry copies to the newest; one read per earlier Retry that sent."""
+    db = get_db()
+    try:
+        while True:
+            row = db.execute(
+                "SELECT * FROM messages WHERE id=? AND thread_id=?",
+                (_retry_id(str(message["id"])), thread_id),
+            ).fetchone()
+            if row is None:
+                return message
+            message = dict(row)
+            if message["delivery_state"] not in _ENDED_ATTEMPT_STATES:
+                return message
+    finally:
+        db.close()
+
+
 def _retry_content(message: dict) -> tuple[str, dict]:
     try:
         metadata = json.loads(message.get("metadata") or "{}")
@@ -143,6 +168,14 @@ async def retry_thread_delivery_now(
         return {"thread_id": thread_id, "retried": True, "message": message}
     if state not in {"failed", "ambiguous"}:
         raise HTTPException(409, "This message has no retryable delivery outcome.")
+    # One copy per Retry that sends: a second Retry on the same row, from a
+    # double press or another device, answers with its live copy instead of
+    # sending again, and retries the copy if that one ended too. Admission's
+    # duplicate check can't: a copy's metadata gains stamps once a Turn takes it in.
+    message = await run_in_db(_latest_attempt, thread_id, message)
+    if message["delivery_state"] not in _ENDED_ATTEMPT_STATES:
+        return _revived(thread_id, str(message["id"]))
+    retry_id = _retry_id(str(message["id"]))
     content, metadata = _retry_content(message)
     # send_thread_input owns the empty-input rule.
     from infra.send_service import SendRejected, send_thread_input
@@ -155,7 +188,8 @@ async def retry_thread_delivery_now(
             user={"id": user_id},
             role=str(message["role"]),
             metadata=metadata,
-            input_id=str(uuid.uuid4()),
+            # A concurrent second press lands on admission's duplicate path.
+            input_id=retry_id,
             native_mode="event",
             # The stored content was normalized when first accepted; the
             # retry resends that exact input.
@@ -163,12 +197,19 @@ async def retry_thread_delivery_now(
         )
     except SendRejected as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError:
+        # A concurrent press admitted this copy first and a Turn stamped it
+        # before this press reached admission's duplicate check.
+        latest = await run_in_db(_latest_attempt, thread_id, message)
+        if str(latest["id"]) != retry_id:
+            raise
+        return _revived(thread_id, retry_id)
     receipt = getattr(result, "receipt", None)
     revived_id = getattr(result, "message_id", None) or getattr(
         receipt, "message_id", None,
     )
-    return {
-        "thread_id": thread_id,
-        "retried": True,
-        "revived_message_id": revived_id,
-    }
+    return _revived(thread_id, revived_id)
+
+
+def _revived(thread_id: str, message_id: str | None) -> dict:
+    return {"thread_id": thread_id, "retried": True, "revived_message_id": message_id}

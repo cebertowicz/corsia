@@ -250,6 +250,40 @@ describe('SettingsSystem', () => {
 		});
 	});
 
+	it('shows the saved usage-sharing choice and turns it off with one switch', async () => {
+		const shared = { ...settingsPayload, usage_sharing: true };
+		coreSettings.set(shared);
+		const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'PATCH') return { ok: true, json: async () => ({ ok: true, usage_sharing: false }) };
+			return { ok: true, json: async () => ({ ...shared, usage_sharing: false }) };
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Share usage counts"]');
+		expect(toggle?.getAttribute('aria-pressed')).toBe('true');
+		expect(host.textContent).toContain('It sends counts of what you use, tagged with a random number that changes every week. It never sends your name, email or anything you write. Turn it off to stop.');
+
+		toggle!.click();
+		await tick();
+
+		await vi.waitFor(() => {
+			const patch = fetchMock.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === 'PATCH');
+			expect(JSON.parse(String((patch?.[1] as RequestInit).body))).toEqual({ usage_sharing: false });
+			expect(get(coreSettings)?.usage_sharing).toBe(false);
+		});
+	});
+
+	it('keeps the usage-sharing switch inert until the server has said what is saved', () => {
+		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Share usage counts"]');
+		expect(toggle?.disabled).toBe(true);
+	});
+
 	it('uses the canonical toggle to persist host-access auto approval', async () => {
 		const configured = {
 			...settingsPayload,

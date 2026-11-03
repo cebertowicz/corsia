@@ -35,22 +35,23 @@
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
+	import { putSetupAccount, withReference, type AccountChanges } from '$lib/setupAccountSave';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean | null; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean | null; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState; usage_sharing_default?: boolean };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	const warm = createSetupWarm();
 	$effect(() => { warm.start(catalog, $token); });
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
-	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
+	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state(''), sharing = $state(false);
 	let folder = $state(''), defaultFolder = $state(''), defaultFolderPath = $state(''), folderApplyPath = $state(''), savedFolder = $state(false), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
-	let accountKnown = $state(false), savedName = '', savedEmail = '';
+	let accountKnown = $state(false), savedName = '', savedEmail = '', savedSharing = false;
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state(''), sourceRetry = $state<{ error: string; vendors: string[] } | null>(null);
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
@@ -185,7 +186,7 @@
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
-			status = await response.json(); setFolderState(status);
+			status = await response.json(); setFolderState(status); sharing = status.usage_sharing_default === true; // the server owns the default (off only where the region needs opt-in); a missing one never reads as a yes
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
@@ -244,17 +245,16 @@
 				if (!folderApplyPath) throw new Error('work folder path is unavailable');
 				await applyWorkFolder(folderApplyPath); folderChanged = false;
 			}
-			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
+			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null, usage_sharing: sharing }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
 			if (!response.ok) {
 				if (response.status === 422) { page = 'account'; accountError = accountRefusal(result?.detail) ?? 'Couldn’t create your account. Try again.'; }
-				else accountError = 'Couldn’t create your account. Try again.';
+				else accountError = withReference('Couldn’t create your account. Try again.', result);
 				return;
 			}
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
-			password = ''; confirmation = '';
-			accountKnown = true; savedName = name.trim(); savedEmail = email.trim();
+			accountKnown = true; savedName = name.trim(); savedEmail = email.trim(); savedSharing = sharing; password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
 			afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
@@ -263,32 +263,24 @@
 	/** Back on the account screen: writes only the fields that differ from what setup saved, and nothing at all when none do. */
 	async function updateAccount() {
 		if (accountBusy) return;
-		const changes: { name?: string; email?: string; password?: string } = {};
+		const changes: AccountChanges = {};
 		if (name.trim() !== savedName) changes.name = name.trim();
 		if (email.trim() !== savedEmail) changes.email = email.trim();
 		if (password) changes.password = password;
+		if (sharing !== savedSharing) changes.usage_sharing = sharing;
 		if (Object.keys(changes).length === 0) { afterAccount(); return; }
 		accountBusy = true; accountError = '';
 		try {
-			const send = () => fetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
-			let response = await send();
-			let result = await response.json().catch(() => null);
-			// An email has nowhere to go until the profile exists, and the name on screen is what builds it.
-			if (response.status === 422 && result?.code === 'profile_missing' && changes.name === undefined) {
-				changes.name = name.trim();
-				response = await send();
-				result = await response.json().catch(() => null);
-			}
+			const { response, result } = await putSetupAccount(changes, name.trim());
 			// Setup finished elsewhere: the account step is over, and trying again would only loop.
 			if (response.status === 409) { onFinished(); return; }
 			if (!response.ok) {
-				const reference = typeof result?.ref === 'string' && result.ref ? ` Reference: ${result.ref}` : '';
-				accountError = (response.status === 422 ? accountRefusal(result?.detail) : null) ?? `Couldn’t save your account. Try again.${reference}`;
+				accountError = (response.status === 422 ? accountRefusal(result?.detail) : null) ?? withReference('Couldn’t save your account. Try again.', result);
 				return;
 			}
 			// A new password ends the old session, so the reply carries the next one.
 			if (result?.token) { token.set(result.token); user.set(result.user ?? get(user)); connect(); }
-			savedName = name.trim(); savedEmail = email.trim(); password = ''; confirmation = '';
+			savedName = name.trim(); savedEmail = email.trim(); savedSharing = changes.usage_sharing ?? savedSharing; password = ''; confirmation = '';
 			afterAccount();
 		} catch { accountError = 'Couldn’t save your account. Try again.'; }
 		finally { accountBusy = false; }
@@ -380,9 +372,9 @@
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
 		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email bind:sharing busy={accountBusy} {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
 		<!-- Creating the account scaffolds the work folder, so after it the folder is read back, not offered. -->
-		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
+		{#if editing}<p class="folder-line" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
 	{:else if page === 'subscriptions'}<SetupSubscriptions {eligible} localActive={localModelActive} answer={picks} onAnswer={answerSubscriptions} />
@@ -397,4 +389,5 @@
 <style>
 	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
+	.folder-line { margin: 0; color: var(--text-secondary); }
 </style>

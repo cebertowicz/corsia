@@ -27,6 +27,7 @@ from infra import accounts, config, setup_progress
 from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
+from infra.settings import usage_sharing_default
 from onboarding.app_first_run import SetupOwnerError
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -165,6 +166,8 @@ def _setup_status() -> dict:
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
+        # The account step's switch starts here; the account doesn't exist yet to read the setting.
+        "usage_sharing_default": usage_sharing_default(),
     }
 
 

@@ -339,3 +339,50 @@ def test_a_profile_that_appears_during_setup_is_never_overwritten(workspace):
     staged.undo()
     assert _profile(workspace).read_text(encoding="utf-8") == "mine\n"
     assert [entry.name for entry in _profile(workspace).parent.iterdir()] == [_profile(workspace).name]
+
+
+def _stored_sharing() -> bool | None:
+    """The saved usage sharing choice, or None when none is saved (the region default then applies)."""
+    from infra.settings import USAGE_SHARING_KEY, get_setting
+
+    saved = get_setting(USAGE_SHARING_KEY)
+    return None if saved is None else saved["enabled"]
+
+
+@pytest.mark.parametrize("choice", [False, True])
+def test_the_usage_sharing_choice_is_stored_with_the_account(client, workspace, choice):
+    assert _post(client, {**REQUEST, "usage_sharing": choice}).status_code == 200
+    assert accounts.get_user("pat") is not None
+    assert _stored_sharing() is choice
+
+
+@pytest.mark.parametrize(("refusal", "status"), [("an account exists", 409), ("another name owns the data", 422)])
+def test_a_refused_first_account_stores_no_usage_sharing_choice(client, workspace, refusal, status):
+    if refusal == "an account exists":
+        accounts.create_user("existing", PASSWORD, first_run_wake=False)
+    else:
+        _own_data("legacy-owner")
+    assert _post(client, {**REQUEST, "usage_sharing": False}).status_code == status
+    assert _stored_sharing() is None
+
+
+def test_a_failed_first_account_commit_stores_no_usage_sharing_choice(client, workspace, monkeypatch, caplog):
+    monkeypatch.setattr(accounts, "write_transaction", _failing_commit(accounts.write_transaction))
+    before = _state()
+    response = _post(client, {**REQUEST, "usage_sharing": False})
+    _assert_nothing_left(response, workspace, before, caplog)
+    assert _stored_sharing() is None
+
+
+def test_writes_with_the_account_that_fail_make_no_account_and_take_the_profile_back(workspace):
+    def refuse(_conn):
+        raise sqlite3.OperationalError("write refused")
+
+    before = _state()
+    with pytest.raises(sqlite3.OperationalError):
+        accounts.create_first_account(
+            "pat", PASSWORD, full_name="Pat Example", first_run_path="app", with_account=refuse,
+        )
+    assert _state() == before
+    folder = _profile(workspace).parent
+    assert not folder.exists() or list(folder.iterdir()) == []
