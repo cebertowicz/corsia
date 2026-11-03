@@ -1,8 +1,9 @@
 """The one Focus nudge a person's message gets when a Turn ends with nothing they can see.
 
 Focus shows an agent's words only when it sends them with ``post_update``. When
-a Turn ends while the person's newest message has no such reply after it, nor an
-answer shown in one of its comment threads, the agent is woken once, for that message, with the text below; it answers with
+a Turn ends while the person's newest message has no such reply after it, and its
+last words are not wholly answers shown in the message's comment threads, the agent
+is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
 its last words become the reply (``for_user``), so the person still sees them.
 
@@ -21,6 +22,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from infra.chat_comment_answers import visible_answer_content
 
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
@@ -84,14 +86,28 @@ def _newest_person_input(
     ).fetchone()
 
 
+def _unseen(db: sqlite3.Connection, row: sqlite3.Row) -> str:
+    """The row's words minus the answers it placed in comment threads, which the person sees."""
+    placed = [cid for (cid,) in db.execute(
+        "SELECT cid FROM chat_comment_answers WHERE assistant_message_id=?", (row["id"],),
+    )]
+    return visible_answer_content(str(row["content"]), placed).strip()
+
+
 def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) -> bool:
-    """A reply after the message, or an answer shown in one of its comment threads."""
-    return db.execute(
-        f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} "
-        "UNION ALL SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? "
-        "LIMIT 1",
-        (thread_id, person["seq"], thread_id, person["id"]),
-    ).fetchone() is not None
+    """A reply after the message, or answers in its comment threads with no other last words."""
+    if db.execute(
+        f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
+        (thread_id, person["seq"]),
+    ).fetchone() is not None:
+        return True
+    if db.execute(
+        "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? LIMIT 1",
+        (thread_id, person["id"]),
+    ).fetchone() is None:
+        return False
+    hidden = _last_hidden(db, thread_id, person["seq"])
+    return hidden is None or not _unseen(db, hidden)
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:
@@ -156,7 +172,7 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     hidden = _last_hidden(db, thread_id, person["seq"])
     text = nudge_text(
         _clock(str(person["created_at"])),
-        str(hidden["content"]).strip() if hidden is not None else None,
+        (_unseen(db, hidden) or None) if hidden is not None else None,
     )
     try:
         enqueue_event_wake(
