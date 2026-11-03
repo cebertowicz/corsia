@@ -31,13 +31,14 @@ MAIL = 'Not available here: email goes through the email tools.'
 NO_PREVIEW = "This command can't be checked before it runs, so it isn't available here."
 PATHS = 'upload and output must be files in your workspace.'
 TRASH = "Emptying the trash isn't available here; Google empties it after 30 days."
+CANT_UNDO = "This delete can't be undone, so it isn't available here."
 DOCS_GUARD = (
     'Read the document just before, then send its revisionId as '
     'writeControl.requiredRevisionId to delete or replace text.'
 )
 ACCOUNT = 'Name the account: one of {addresses}.'
 
-# Results that carry out the approved design's "nothing is lost" and bundling rows.
+# Results of a delete made recoverable (tools.gws_deletions) and of running gws itself.
 TRASHED = "Moved to the trash, not deleted: Google keeps it for 30 days and the person can restore it."
 SAVED_FIRST = "Done. What was deleted was saved first in {where}."
 NOT_SAVED = "Not deleted: it couldn't be saved first. {detail}"

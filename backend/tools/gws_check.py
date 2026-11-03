@@ -25,6 +25,12 @@ _DRIVE_FILE = re.compile(r"^/drive/v3/files/([^/]+)$")
 _CALENDAR_EVENT = re.compile(r"^/calendar/v3/calendars/([^/]+)/events/([^/]+)$")
 _CALENDAR_CLEAR = re.compile(r"^/calendar/v3/calendars/([^/]+)/clear$")
 _CALENDAR = re.compile(r"^/calendar/v3/calendars/([^/]+)$")
+# Deletes that can simply be redone: a file's share, a calendar's sharing rule, a calendar in the list.
+_REDOABLE_DELETES = (
+    re.compile(r"^/drive/v3/files/[^/]+/permissions/[^/]+$"),
+    re.compile(r"^/calendar/v3/calendars/[^/]+/acl/[^/]+$"),
+    re.compile(r"^/calendar/v3/users/me/calendarList/[^/]+$"),
+)
 # A Docs request that removes or rewrites text, which Google can refuse if someone edited since.
 _DESTRUCTIVE_DOCS_REQUESTS = (
     "deleteContentRange", "replaceAllText", "replaceNamedRangeContent", "deleteTab",
@@ -79,6 +85,22 @@ def _guarded_docs_write(preview: dict) -> bool:
     return destructive and not (isinstance(revision, str) and revision)
 
 
+def _delete(host: str, path: str) -> Decision:
+    """A delete runs only where it can be put back; any other delete, today's or a future one, is refused."""
+    if host == "www.googleapis.com":
+        if path == "/drive/v3/files/trash":
+            return _refuse(gws_messages.TRASH)
+        if found := _DRIVE_FILE.match(path):
+            return Decision(TRASH_FILE, file_id=unquote(found.group(1)))
+        if found := _CALENDAR_EVENT.match(path):
+            return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
+        if found := _CALENDAR.match(path):
+            return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
+        if any(pattern.match(path) for pattern in _REDOABLE_DELETES):
+            return Decision()
+    return _refuse(gws_messages.CANT_UNDO)
+
+
 def decide(preview: dict) -> Decision:
     """The decision for one previewed request, from Google's method and address alone."""
     method = preview["method"].upper()
@@ -86,15 +108,8 @@ def decide(preview: dict) -> Decision:
     host, path = (url.hostname or "").lower(), url.path
     if _is_mail(host, path):
         return _refuse(gws_messages.MAIL)
-    if method == "DELETE" and host == "www.googleapis.com":
-        if path == "/drive/v3/files/trash":
-            return _refuse(gws_messages.TRASH)
-        if found := _DRIVE_FILE.match(path):
-            return Decision(TRASH_FILE, file_id=unquote(found.group(1)))
-    if method == "DELETE" and host == "www.googleapis.com" and (found := _CALENDAR_EVENT.match(path)):
-        return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
-    if method == "DELETE" and host == "www.googleapis.com" and (found := _CALENDAR.match(path)):
-        return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
+    if method == "DELETE":
+        return _delete(host, path)
     if method == "POST" and host == "www.googleapis.com" and (found := _CALENDAR_CLEAR.match(path)):
         return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
     if method == "POST" and host == "docs.googleapis.com" and _DOCS_BATCH.match(path):

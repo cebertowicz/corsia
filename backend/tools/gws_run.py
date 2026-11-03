@@ -86,12 +86,10 @@ def _launch(words: list[str], account_id: str, token: str | None, workdir: Path 
         env[TOKEN_ENV] = token
     try:
         params, profile = safehouse_stdio_parameters(
-            CACHE_NAME, {"connected_app_id": CACHE_NAME}, program, words, env,
+            CACHE_NAME, {"connected_app_id": CACHE_NAME}, program, words, env, cwd=workdir,
         )
     except MCPConfigError as error:
         raise GwsUnavailable(str(error)) from None
-    if workdir is not None:
-        params.args = [f"--workdir={workdir}" if word.startswith("--workdir=") else word for word in params.args]
     return params, profile, {**get_default_environment(), **params.env}
 
 
@@ -99,7 +97,7 @@ def _run(words: list[str], account_id: str, token: str | None, workdir: Path | N
     params, profile, env = _launch(words, account_id, token, workdir)
     try:
         done = subprocess.run(
-            [params.command, *params.args], env=env, cwd=workdir or params.cwd, capture_output=True,
+            [params.command, *params.args], env=env, cwd=params.cwd, capture_output=True,
             text=True, timeout=TIMEOUT_SECONDS, check=False,
         )
     except subprocess.TimeoutExpired:

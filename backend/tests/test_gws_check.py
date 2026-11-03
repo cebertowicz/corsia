@@ -74,6 +74,27 @@ def test_event_delete_and_calendar_clear_or_delete_name_their_calendar():
     assert (removed.kind, removed.calendar_id) == (gws_check.SAVE_CALENDAR, "abc@group.calendar.google.com")
 
 
+@pytest.mark.parametrize("url", [
+    "https://www.googleapis.com/drive/v3/files/F1/revisions/R1",
+    "https://www.googleapis.com/drive/v3/files/F1/comments/C1",
+    "https://www.googleapis.com/drive/v3/files/F1/comments/C1/replies/R1",
+    "https://www.googleapis.com/drive/v3/drives/D1",
+    "https://drive.googleapis.com/drive/v3/files/F1",
+    "https://example.googleapis.com/v1/anything/new",
+])
+def test_a_delete_that_cannot_be_put_back_is_refused(url):
+    assert gws_check.decide({"method": "DELETE", "url": url}).refusal == gws_messages.CANT_UNDO
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.googleapis.com/drive/v3/files/F1/permissions/P1",
+    "https://www.googleapis.com/calendar/v3/calendars/primary/acl/user%3Aa%40b.com",
+    "https://www.googleapis.com/calendar/v3/users/me/calendarList/abc%40group.calendar.google.com",
+])
+def test_removing_a_share_or_a_listed_calendar_runs_unchanged(url):
+    assert gws_check.decide({"method": "DELETE", "url": url}) == gws_check.Decision()
+
+
 def test_the_address_is_unquoted_before_it_is_used():
     request = {"method": "DELETE", "url": "https://www.googleapis.com/calendar/v3/calendars/a%40b.com/events/e%5F1"}
     decision = gws_check.decide(request)
