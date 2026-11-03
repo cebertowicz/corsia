@@ -145,9 +145,13 @@ async def retry_thread_delivery_now(
         raise HTTPException(409, "This message has no retryable delivery outcome.")
     # One copy per ended input: a second Retry on the same row, from a double
     # press or another device, answers with the copy instead of sending again.
+    # Admission's duplicate check can't: the copy's metadata gains stamps once a
+    # Turn takes it in. An ended copy answers 409, as admission's duplicate does.
     retry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:retry:{message['id']}"))
     _thread, copy = await run_in_db(_owned_input, thread_id, retry_id, user_id)
     if copy is not None:
+        if copy["delivery_state"] in {"failed", "cancelled"}:
+            raise HTTPException(409, "This message has no retryable delivery outcome.")
         return {"thread_id": thread_id, "retried": True, "revived_message_id": retry_id}
     content, metadata = _retry_content(message)
     # send_thread_input owns the empty-input rule.
@@ -161,6 +165,7 @@ async def retry_thread_delivery_now(
             user={"id": user_id},
             role=str(message["role"]),
             metadata=metadata,
+            # A concurrent second press lands on admission's duplicate path.
             input_id=retry_id,
             native_mode="event",
             # The stored content was normalized when first accepted; the
