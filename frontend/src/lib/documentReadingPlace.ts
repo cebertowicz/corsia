@@ -142,6 +142,10 @@ function holdReadingPlace(view: EditorView, place: TextDocumentPlace, transactio
  * moves nothing. While a restore owns the offset the observation is the restore's: the text it watches rewrap is
  * observed here too, and the move is left to it.
  *
+ * A reader at the very start of the document is left there: the text moves with the header, as the browser's own scroll
+ * anchoring leaves it at offset 0. The review bar reads its ask after the editor opens, and holding the text would scroll
+ * the title and first lines out of view by the bar's height.
+ *
  * Near the end of the document the browser moves the offset itself: an editor that grows past the text left below the
  * view has its offset pulled back to the new end at layout, which holds the text by as much as it pulls. Only the rest
  * of the move is the editor's to make, so the distance to the end is kept as of the last scroll. A scroll that comes
@@ -168,6 +172,10 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 		const restore = restores.get(view);
 		if (restore) {
 			restore.layout();
+			end = toEnd();
+			return;
+		}
+		if (scroller.scrollTop <= 0) {
 			end = toEnd();
 			return;
 		}

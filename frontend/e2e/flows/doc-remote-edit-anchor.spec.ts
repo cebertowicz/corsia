@@ -384,3 +384,56 @@ for (const [width, height] of LAYOUTS) {
 		}
 	});
 }
+
+/** The document's first line and how far below the scroller's top edge it is, in the next painted frame. */
+async function firstLine(page: Page): Promise<{ text: string; offset: number; scrollTop: number; height: number }> {
+	return page.evaluate(() => new Promise((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const line = scroller.querySelector<HTMLElement>('.cm-line')!;
+			return { text: (line.textContent ?? '').trim(), offset: line.getBoundingClientRect().top - scroller.getBoundingClientRect().top, scrollTop: scroller.scrollTop, height: scroller.clientHeight };
+		}, (first) => {
+			resolve(first);
+			return false;
+		});
+	}));
+}
+
+for (const [width, height] of LAYOUTS) {
+	// The review bar reads its ask after the editor opens. A reader still at the start keeps the title in view as the bar
+	// arrives; the text moves down with the header instead of being scrolled up under it.
+	test(`@surface:live-document a review ask that arrives after the editor opens leaves the start of the document in view at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
+		test.setTimeout(120_000);
+		const document = await seedLiveDocument(request, `top-${width}`, body());
+		raiseAsk(document.threadId, document.artifactId, 'Is this right?');
+		const context = await browser.newContext({ viewport: { width, height } });
+		try {
+			const reader = await context.newPage();
+			let answer = () => {};
+			const answered = new Promise<void>((resolve) => { answer = resolve; });
+			await reader.route('**/api/attention/*/review', async (route) => {
+				await answered;
+				await route.fallback();
+			});
+			await openLiveDocument(reader, document, '# Anchor document');
+			await installPaintedFrames(reader);
+			await expect(reader.locator('.review-bar')).toHaveCount(0);
+			const opened = await firstLine(reader);
+			expect(opened.text).toBe('Anchor document');
+			expect(opened.scrollTop).toBe(0);
+			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-before-ask.png`) });
+			answer();
+			await expect(reader.locator('.review-bar')).toBeVisible({ timeout: 10_000 });
+			await reader.waitForTimeout(800);
+			const shown = await firstLine(reader);
+			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-ask-shown.png`) });
+			expect(shown.scrollTop, 'the reader is still at the start').toBe(0);
+			expect(shown.text).toBe('Anchor document');
+			expect(Math.abs(shown.offset - opened.offset), 'the first line is still at the top of the scroller').toBeLessThanOrEqual(2);
+			expect(shown.offset + 20, 'the first line is in view').toBeLessThanOrEqual(shown.height);
+		} finally {
+			await context.close();
+		}
+	});
+}

@@ -114,6 +114,9 @@ function widgetReader(root: HTMLElement, scroller: HTMLElement, place: OpenImage
  * re-measures unrendered text: each frame's correction runs inside the editor's measure pass for that frame, and a
  * rewrap the pane's width causes later in the frame is corrected before it paints, so no painted frame shows the
  * document out of place. An image whose markdown moved falls back to the offset alone.
+ *
+ * The rewrap correction runs from the editor's one resize observation, so it needs `keepPlaceWhenEditorMoves` installed
+ * on the same editor (MarkdownEditor does); without it a rewrap later in the frame goes uncorrected until the next frame.
  */
 export async function restoreDocumentPlace(
 	root: HTMLElement | undefined,
