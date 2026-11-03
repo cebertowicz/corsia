@@ -343,11 +343,7 @@ async def _spawn_claude_code_child(
     max_turns: int | None = None,
     window_suffix: str | None = None,
 ) -> dict[str, Any] | str:
-    """Spawn a Claude Code child. A rule worker's ``window_suffix`` (``[1m]``) asks for the
-    larger-context variant of the same model: it is added to the transport selector, which
-    has no catalog row of its own."""
-    from dataclasses import replace
-
+    """Spawn a Claude Code child; a rule worker's ``window_suffix`` asks for its larger-context variant."""
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
     from infra.subagent_caps import LiveSpawnCapExceeded
@@ -373,8 +369,7 @@ async def _spawn_claude_code_child(
             f"{target.catalog_id} is unavailable ({target.availability_reason})"
         )
     if window_suffix:
-        target = replace(target, transport_model=f"{target.transport_model}{window_suffix}",
-                         context_window=target.discovered_context_window or target.context_window)
+        target = target.with_window_suffix(window_suffix)
     working_dir, project_id = resolve_spawn_working_dir(parent_thread_id)
     add_dirs: tuple[str, ...] = ()
     if confinement != CONFINEMENT_NONE:
