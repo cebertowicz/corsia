@@ -365,7 +365,7 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('shows an agent-added Messages row as waiting for Sign in and keeps the Full Disk Access step on the row when macOS blocks reading', async () => {
-		const step = 'CORSIA can’t read your Messages yet. Open System Settings › Privacy & Security › Full Disk Access, turn on CORSIA, quit and reopen CORSIA, then press Sign in again.';
+		const step = 'CORSIA can’t read your Messages. Open System Settings › Privacy & Security › Full Disk Access, turn on CORSIA, quit and reopen CORSIA, then press Sign in again.';
 		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'needs_sign_in' as const };
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/messages/connect')
 			? { ok: false, status: 409, headers: new Headers(), json: async () => ({ detail: step }), text: async () => JSON.stringify({ detail: step }), clone() { return this; } }
@@ -386,7 +386,7 @@ describe('ConnectedAppsSettings', () => {
 		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'signed_out' as const };
 		let on = false;
 		const open = vi.spyOn(window, 'open');
-		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).endsWith('/api/messages/connect') ? { url: '', account_id: 'messages-row' } : { servers: [], accounts: [{ ...messages, state: on ? 'connected' : 'signed_out' }] } }));
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).endsWith('/api/messages/connect') ? { url: '', account_id: 'messages-row' } : { servers: [], accounts: [{ ...messages, state: on ? 'connected' : 'signed_out' }], sign_in_here: true } }));
 		vi.stubGlobal('fetch', fetch);
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());

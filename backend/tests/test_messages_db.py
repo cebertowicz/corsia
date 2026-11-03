@@ -93,6 +93,52 @@ async def test_schema_mismatch_names_the_table_and_columns(chat_db) -> None:
     assert await MessagesChatsTool().execute(_thread_id="t") == f"Error: {expected}"
 
 
+@pytest.mark.parametrize(("error", "line"), [
+    ("database is locked", texts.UNREADABLE), ("disk I/O error", texts.UNREADABLE),
+    ("unable to open database file", texts.NO_FDA), ("authorization denied", texts.NO_FDA),
+])
+def test_a_busy_or_damaged_database_is_not_reported_as_missing_access(chat_db, monkeypatch, error, line) -> None:
+    class Failing:
+        def execute(self, *_args):
+            raise sqlite3.OperationalError(error)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(messages_db.sqlite3, "connect", lambda *_a, **_k: Failing())
+    with pytest.raises(messages_db.MessagesError) as raised:
+        messages_db.open_db()
+    assert str(raised.value) == line
+
+
+async def test_a_group_chat_without_a_name_is_labelled_by_its_members(chat_db) -> None:
+    db = sqlite3.connect(chat_db)
+    db.execute("UPDATE chat SET display_name=NULL WHERE ROWID=2")
+    db.commit()
+    db.close()
+    line = (await MessagesChatsTool().execute(_thread_id="t")).splitlines()[1]
+    assert "chat123" not in line and "friend@example.com" in line and "+15555550101" in line
+    db = messages_db.open_db()
+    try:
+        label = messages_db.chat_by_id(db, "2")["label"]
+    finally:
+        db.close()
+    assert "chat123" not in label and "friend@example.com" in label and label.endswith("(group chat, 3 people)")
+
+
+def test_a_handle_never_starts_with_a_dash() -> None:
+    assert messages_db.normalize_handle("-e@example.com") is None
+    assert messages_db.normalize_handle("Friend@Example.com") == "friend@example.com"
+
+
+async def test_search_shows_the_words_that_matched_in_a_long_text(chat_db) -> None:
+    db = sqlite3.connect(chat_db)
+    db.execute("UPDATE message SET text=? WHERE ROWID=1", ("a" * 400 + " needle here",))
+    db.commit()
+    db.close()
+    assert "needle here" in await MessagesSearchTool().execute(_thread_id="t", query="needle")
+
+
 async def test_not_a_mac_answers_every_tool(chat_db, monkeypatch) -> None:
     monkeypatch.setattr(messages_db, "is_mac", lambda: False)
     for tool, args in ((MessagesChatsTool(), {}), (MessagesReadTool(), {"chat_id": "1"}),

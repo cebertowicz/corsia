@@ -51,7 +51,8 @@ class SendFailed(Exception):
 
 
 async def _osascript(lines: tuple[str, ...], *args: str) -> None:
-    # getopt stops at the first argument (a chat guid or handle, never ``-…``), so the text after it stays an argument.
+    # getopt stops at the first argument, a chat guid or a handle (``normalize_handle`` refuses a leading ``-``),
+    # so the text after it stays an argument.
     command = [OSASCRIPT, *(part for line in lines for part in ("-e", line)), *args]
     process = await asyncio.create_subprocess_exec(
         *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,

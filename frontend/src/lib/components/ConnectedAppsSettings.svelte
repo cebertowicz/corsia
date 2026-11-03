@@ -137,7 +137,8 @@
 	}
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
-		const page = signInHere ? window.open('', '_blank') : null;
+		// Messages has no page to open; its Sign in only checks access and answers with no link.
+		const page = signInHere && account.provider !== 'messages' ? window.open('', '_blank') : null;
 		try {
 			const started = await startAccountSignIn(account);
 			if (!started.url) { page?.close(); await refresh(); }

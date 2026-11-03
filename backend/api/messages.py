@@ -20,16 +20,19 @@ from tools import messages_db
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 MAX_BODY_BYTES = 2048
 BAD_REQUEST = "Couldn’t turn on Messages: the request was incomplete. Reload Settings › Connected apps and try again."
-NOT_FOUND = "Messages isn’t in Connected apps any more. Reload Settings › Connected apps."
+NOT_FOUND = "Messages isn’t in Connected apps. Reload Settings › Connected apps."
 PERSON_ONLY = "Only the signed-in person can turn Messages on; open Connected apps."
 NO_FDA = (
-    "CORSIA can’t read your Messages yet. Open System Settings › Privacy & Security › Full Disk Access, "
+    "CORSIA can’t read your Messages. Open System Settings › Privacy & Security › Full Disk Access, "
     "turn on CORSIA, quit and reopen CORSIA, then press Sign in again."
 )
-NO_HISTORY = "There are no Messages on this computer yet. Open Messages and sign in, then press Sign in again."
+NO_HISTORY = "There are no Messages on this computer. Open Messages and sign in, then press Sign in again."
 NOT_A_MAC = "Messages is only available on a Mac running CORSIA."
-UNREADABLE = "CORSIA can’t read Messages on this version of macOS yet. Update CORSIA, then press Sign in again."
-FOR_THE_PERSON = {texts.NO_FDA: NO_FDA, texts.NO_HISTORY: NO_HISTORY, texts.NOT_A_MAC: NOT_A_MAC}
+UNREADABLE = "CORSIA can’t read Messages on this version of macOS. Update CORSIA, then press Sign in again."
+BUSY = "CORSIA couldn’t read Messages just now. Press Sign in again in a moment."
+FOR_THE_PERSON = {
+    texts.NO_FDA: NO_FDA, texts.NO_HISTORY: NO_HISTORY, texts.NOT_A_MAC: NOT_A_MAC, texts.UNREADABLE: BUSY,
+}
 
 
 async def _account_id(request: Request) -> str:

@@ -25,7 +25,10 @@ NEEDED = {
     "chat_message_join": {"chat_id", "message_id"},
     "chat_handle_join": {"chat_id", "handle_id"},
 }
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# No leading ``-``: the handle is an osascript argument, and a leading dash would read as an option.
+_EMAIL = re.compile(r"^[^@\s-][^@\s]*@[^@\s]+\.[^@\s]+$")
+# The errors SQLite gives when macOS withholds the file (no Full Disk Access), as opposed to a busy or damaged one.
+_DENIED = ("unable to open", "authorization denied", "not authorized")
 
 
 class MessagesError(Exception):
@@ -55,9 +58,10 @@ def open_db() -> sqlite3.Connection:
             missing = columns - {str(row[1]) for row in db.execute(f"PRAGMA table_info({table})")}
             if missing:
                 raise MessagesError(texts.SCHEMA.format(table=table, columns=", ".join(sorted(missing))))
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
         db.close()
-        raise MessagesError(texts.NO_FDA) from None
+        denied = any(word in str(exc).lower() for word in _DENIED)
+        raise MessagesError(texts.NO_FDA if denied else texts.UNREADABLE) from None
     except MessagesError:
         db.close()
         raise
@@ -99,20 +103,33 @@ def _cut(body: str, limit: int) -> str:
     return body if len(body) <= limit else body[:limit] + texts.MORE_CHARS.format(count=len(body) - limit)
 
 
-def chat_label(name: str | None, identifier: str, people: int) -> str:
-    return f"{name} (group chat, {people} people)" if people > 1 else (name or identifier)
+def chat_label(name: str | None, identifier: str, people: int, members: str | None = None) -> str:
+    """A group chat with no name is labelled by its members, never its internal identifier."""
+    if people > 1:
+        return f"{name or members or identifier} (group chat, {people} people)"
+    return name or identifier
+
+
+# The members' numbers and emails, for a group chat that has no name.
+_MEMBERS = (
+    "(SELECT group_concat(hm.id, ', ') FROM chat_handle_join hj JOIN handle hm ON hm.ROWID=hj.handle_id "
+    "WHERE hj.chat_id=c.ROWID)"
+)
 
 
 def chats(db: sqlite3.Connection, limit: int) -> str:
     rows = db.execute(
-        "SELECT c.ROWID, COALESCE(NULLIF(c.display_name,''), c.chat_identifier), "
+        f"SELECT c.ROWID, NULLIF(c.display_name,''), c.chat_identifier, {_MEMBERS}, "
         "(SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID), MAX(m.date) "
         "FROM chat c JOIN chat_message_join j ON j.chat_id=c.ROWID JOIN message m ON m.ROWID=j.message_id AND m.associated_message_type=0 "
         "GROUP BY c.ROWID ORDER BY MAX(m.date) DESC LIMIT ?", (limit,),
     ).fetchall()
     if not rows:
         return texts.NO_CHATS
-    lines = (f"{r[0]} | {r[1]} | {r[2]} {'person' if r[2] == 1 else 'people'} | {when(r[3])}" for r in rows)
+    lines = (
+        f"{r[0]} | {r[1] or (r[3] if r[4] > 1 else None) or r[2]} | {r[4]} {'person' if r[4] == 1 else 'people'} | {when(r[5])}"
+        for r in rows
+    )
     return "\n".join((texts.DATA_RULE, *lines))
 
 
@@ -140,8 +157,12 @@ def search(db: sqlite3.Connection, query: str, limit: int) -> str:
     )
     for chat_id, date, mine, who, text, blob in cursor:
         body = decode(text, blob)
-        if needle in body.lower():
-            out.append(f"chat {chat_id} | {when(date)} {'me' if mine else who}: {_cut(body, 200)}")
+        at = body.lower().find(needle)
+        if at >= 0:
+            # Start shortly before the match so a long text still shows the words that matched.
+            start = max(0, at - 60)
+            shown = ("…" if start else "") + _cut(body[start:], 200)
+            out.append(f"chat {chat_id} | {when(date)} {'me' if mine else who}: {shown}")
             if len(out) >= limit:
                 break
     return "\n".join((texts.DATA_RULE, *out)) if out else texts.NO_MATCH
@@ -159,13 +180,14 @@ def normalize_handle(value: str) -> str | None:
 def chat_by_id(db: sqlite3.Connection, chat_id: object) -> dict | None:
     """One chat by its ``chat_id``: guid, label and service, or None."""
     row = db.execute(
-        "SELECT c.ROWID, c.guid, COALESCE(NULLIF(c.display_name,''), c.chat_identifier), c.service_name, "
-        "(SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID) FROM chat c WHERE c.ROWID=?",
+        f"SELECT c.ROWID, c.guid, NULLIF(c.display_name,''), c.service_name, "
+        f"(SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID), c.chat_identifier, {_MEMBERS} "
+        "FROM chat c WHERE c.ROWID=?",
         (int(str(chat_id)) if str(chat_id).isdigit() else -1,),
     ).fetchone()
     if row is None:
         return None
-    return {"chat_id": str(row[0]), "guid": row[1], "label": chat_label(row[2], row[2], row[4]),
+    return {"chat_id": str(row[0]), "guid": row[1], "label": chat_label(row[2], row[5], row[4], row[6]),
             "service": row[3] or "iMessage"}
 
 

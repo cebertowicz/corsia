@@ -152,7 +152,9 @@ async def test_sign_in_turns_a_signed_out_app_back_on_at_its_reach(isolated_db, 
         db.close()
 
 
-@pytest.mark.parametrize(("missing", "line"), [("denied", messages_route.NO_FDA), ("absent", messages_route.NO_HISTORY)])
+@pytest.mark.parametrize(("missing", "line"), [
+    ("denied", messages_route.NO_FDA), ("absent", messages_route.NO_HISTORY), ("busy", messages_route.BUSY),
+])
 async def test_sign_in_leaves_the_app_off_and_gives_the_next_step_when_messages_cannot_be_read(
     isolated_db, tmp_path, monkeypatch, missing, line,
 ) -> None:
@@ -163,6 +165,11 @@ async def test_sign_in_leaves_the_app_off_and_gives_the_next_step_when_messages_
             raise PermissionError
 
         monkeypatch.setattr(messages_db.os, "stat", deny)
+    if missing == "busy":
+        def busy() -> None:
+            raise messages_db.MessagesError(texts.UNREADABLE)
+
+        monkeypatch.setattr(messages_db, "check_readable", busy)
     db = get_db()
     try:
         row = create_account(
