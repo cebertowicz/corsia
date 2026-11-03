@@ -18,6 +18,10 @@ _HEADING = re.compile(r"^(?P<marks>#{1,6})\s+")
 _LESSONS = re.compile(r"^##\s+Lessons\b")
 _ITEM = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(.+)$")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+#: The fields a trial review tells the lesson's owner to edit in the file
+#: (``lesson_outcomes.TRIAL_STEPS``: retire, promote, extend).
+_LIFECYCLE_FIELDS = frozenset({"state", "review_after", "destination"})
+_FINISHED_STATES = ("retired", "promoted")
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,30 @@ def _lesson_block(text: str) -> object | None:
     return lesson_block(validate_skill_text(text).metadata or {})
 
 
-def _lesson_change(path: Path, data: bytes) -> LessonSaveChange:
+def _lifecycle_edit(old: object, new: object, saver: str | None) -> bool:
+    """Whether the lesson's own owner retired, promoted or extended the same lesson, and nothing else.
+
+    A new or re-identified lesson, a move back to watch or trial, or another
+    agent's edit still goes through ``place``.
+    """
+    if not isinstance(old, dict) or not isinstance(new, dict) or old.get("id") in (None, ""):
+        return False
+    if saver is None or str(old.get("owner") or "").strip() != saver:
+        return False
+    changed = {key for key in old.keys() | new.keys() if old.get(key) != new.get(key)}
+    return (
+        old.get("id") == new.get("id") and changed <= _LIFECYCLE_FIELDS
+        and new.get("state") in (old.get("state"), *_FINISHED_STATES)
+    )
+
+
+def _block_change_blocks(old: str, new: str, saver: str | None) -> bool:
+    """Whether a SKILL.md's lesson block is new or changed beyond its owner's review edit."""
+    before, after = _lesson_block(old), _lesson_block(new)
+    return after is not None and after != before and not _lifecycle_edit(before, after, saver)
+
+
+def _lesson_change(path: Path, data: bytes, saver: str | None) -> LessonSaveChange:
     """Compare only the target's old and proposed bytes for one pending write."""
     new = data.decode("utf-8", errors="replace")
     old = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
@@ -85,13 +112,16 @@ def _lesson_change(path: Path, data: bytes) -> LessonSaveChange:
     removed = old_items - new_items
     blocks = items_after > items_before
     if path.name == "SKILL.md":
-        blocks = blocks or (_lesson_block(new) is not None and _lesson_block(new) != _lesson_block(old))
+        blocks = blocks or _block_change_blocks(old, new, saver)
     return LessonSaveChange(path, blocks, new_items != old_items, bool(removed), items_before, items_after)
 
 
-def lesson_changes(writes: dict[Path, bytes]) -> tuple[LessonSaveChange, ...]:
-    """Calculate target-only gate changes once for a pending save."""
-    return tuple(_lesson_change(path, data) for path, data in writes.items())
+def lesson_changes(writes: dict[Path, bytes], author: str | None = None) -> tuple[LessonSaveChange, ...]:
+    """Calculate target-only gate changes once for a pending save by ``author``."""
+    from infra.guidance_messages import saver_thread
+
+    saver = saver_thread(author)
+    return tuple(_lesson_change(path, data, saver) for path, data in writes.items())
 
 
 def lesson_refusal(
@@ -103,7 +133,7 @@ def lesson_refusal(
     from infra.guidance_git import SaveResult
     from infra.skill_save_validation import REFUSED
 
-    assessed = tuple(changes) if changes is not None else lesson_changes(writes)
+    assessed = tuple(changes) if changes is not None else lesson_changes(writes, author)
     refused = next(((change.path, change.removed) for change in assessed if change.blocks), None)
     if refused is None:
         return None

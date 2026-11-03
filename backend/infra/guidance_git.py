@@ -257,7 +257,7 @@ def save_guidance(
     if lesson_gate and not is_person_author(author):
         from infra.lesson_save_gate import lesson_changes as assess_lesson_changes
 
-        lesson_changes = assess_lesson_changes(writes)
+        lesson_changes = assess_lesson_changes(writes, author)
     if (refused := refused_save(
         writes, author=author, lesson_gate=lesson_gate, lesson_changes=lesson_changes,
     )) is not None:
