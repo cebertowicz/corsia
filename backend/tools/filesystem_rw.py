@@ -20,6 +20,7 @@ from tools.file_write_completion import (
     save_guided_write_and_announce,
 )
 from tools.filesystem_gate import _resolve_path_for_action
+from tools import pdf_read
 from doceditor.live_tools import record_read_base, write_live
 
 _WRITE_SUCCESS = re.compile(
@@ -49,6 +50,7 @@ class _ReadOutcome:
     text: str
     data: bytes | None = None
     whole: bool = False
+    pdf: bool = False
 
 
 class ReadFileTool(Tool):
@@ -71,7 +73,7 @@ class ReadFileTool(Tool):
             "By default reads the entire file. For large files, use offset and limit to read "
             "specific line ranges (e.g., offset=100, limit=50 reads lines 100-149).\n\n"
             "Output includes line numbers for easy reference.\n"
-            "Output is capped at ~30K characters. For large files, use offset/limit to read sections.\n\n"
+            f"Output is capped at ~30K characters. For large files, use offset/limit to read sections. {pdf_read.READ_FILE_NOTE}\n\n"
             "USE THIS when you need to:\n"
             "- Examine file contents before modifying them\n"
             "- Check configuration files, code, or documentation\n"
@@ -99,6 +101,7 @@ class ReadFileTool(Tool):
                     "description": "Maximum number of lines to read. Only use for large files.",
                     "minimum": 1
                 },
+                "page": pdf_read.PAGE_PARAMETER,
             },
             "required": ["path"]
         }
@@ -128,6 +131,8 @@ class ReadFileTool(Tool):
                 size_mb = size / (1024 * 1024)
                 return _ReadOutcome(f"Error: File too large ({size_mb:.0f}MB). Max readable size is {self._MAX_READ_BYTES // (1024*1024)}MB. Use offset/limit for partial reads, or a different tool.")
             data = handle.read()
+        if pdf_read.is_pdf(data):
+            return _ReadOutcome("", data, pdf=True)
         content = data.decode("utf-8")
         source_safe = sanitize_source(content, file_path.suffix)
         text, whole = self._render_lines(
@@ -180,7 +185,8 @@ class ReadFileTool(Tool):
 
         return result, whole
 
-    async def execute(self, path: str, offset: int | None = None, limit: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, path: str, offset: int | None = None, limit: int | None = None,
+                      page: int | None = None, **kwargs: Any) -> str:
         try:
             authorized = await _resolve_path_for_action(
                 tool=self,
@@ -204,6 +210,8 @@ class ReadFileTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error reading file: {str(e)}"
+        if outcome.pdf:
+            return await pdf_read.read_pdf(outcome.data, authorized.resolved, offset, limit, page, kwargs, self._render_lines)
         # The observer touches only loop-owned document and read-base state.
         record_read_base(kwargs.get("_thread_id"), authorized.resolved, outcome.data)
         await self._record_skill_read(authorized.resolved, outcome, kwargs)
