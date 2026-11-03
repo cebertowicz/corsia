@@ -356,6 +356,7 @@
 		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetUp}
+		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface
