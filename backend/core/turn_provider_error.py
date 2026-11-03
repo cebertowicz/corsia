@@ -24,11 +24,15 @@ def terminal_payload(state, **fields) -> dict:
 
 
 async def check_provider_error(state, response, turn_model, thread_id, provider_on_step, retry_available: bool) -> bool:
-    """End the Turn on a provider error; True when a first overflow goes back to the boundary.
+    """End the Turn on a provider error; True when an overflow goes back to the boundary.
 
-    ``retry_available`` is whether an iteration remains for the retry: without one the refusal ends the Turn here.
+    Each overflow gets one checkpoint and retry; a successful call since the last
+    retry earns the next refusal its own, since the Turn grew again rather than the
+    fold failing. ``retry_available`` is whether an iteration remains for the retry:
+    without one the refusal ends the Turn here.
     """
     if response.finish_reason != "error":
+        state.overflowed = None
         return False
     turn = getattr(runtime_state._current_turn_identity.get(None), "turn_id", None)
     logger.warning("run_turn_with_steps: LLM returned error for session {} turn {} kind={}: {}",
