@@ -322,3 +322,37 @@ describe('Focus review boundary', () => {
 		expect(canMergeRows(optimistic, ordinary)).toBe(false);
 	});
 });
+
+describe('the re-run of a Turn refused for size is for the agent only', () => {
+	/** As `plan_limit_continue.queue_overflow_continue` writes it. */
+	function overflowContinue(state: string) {
+		return {
+			id: 'overflow-continue:t1', thread_id: THREAD, role: 'system', delivery_state: state,
+			content: 'The provider refused your previous turn because the chat no longer fit its context window. '
+				+ 'CORSIA checkpointed the chat. Continue the work that turn was doing.',
+			created_at: '2026-11-03T11:00:00',
+			metadata: {
+				type: 'context_event', event_type: 'context_overflow.continue', event_disposition: 'wake',
+				summary: 'Resumed after plan limit pause', sender_kind: 'system', stopped_turn_id: 't1',
+			},
+		};
+	}
+
+	for (const state of ['queued', 'delivered']) {
+		it(`shows no row, chip or delivery line while ${state}, Focus or not`, () => {
+			const rows = [
+				{ id: 'ask', thread_id: THREAD, role: 'user', content: 'Go on.' },
+				overflowContinue(state),
+				{ id: 'reply', thread_id: THREAD, role: 'assistant', content: 'Done.', metadata: { turn_id: 't2', for_user: true } },
+			];
+			const { visibleMessages } = buildMessageListPresentation(rows);
+
+			expect(visibleMessages.map((row) => row.id)).toEqual(['ask', 'reply']);
+			for (const focus of [true, false]) {
+				const shown = JSON.stringify(buildTranscriptPresentation(visibleMessages, focus));
+				expect(shown).not.toContain('Continue the work');
+				expect(shown).not.toContain('Resumed after');
+			}
+		});
+	}
+});

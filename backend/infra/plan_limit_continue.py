@@ -1,16 +1,18 @@
-"""The one continue input a limit-stopped Turn leaves behind.
+"""The one continue input a limit-stopped or size-refused Turn leaves behind.
 
-Two causes share it: CORSIA's own plan-limit Stop (#2477 amendment 12) and a
-vendor's usage-limit refusal. Written inside the terminal transaction, before
-the successor claim, so the claim rolls it to a usable account or the held
-scope keeps it queued until the limit is lifted.
+Three causes share it: CORSIA's own plan-limit Stop (#2477 amendment 12), a
+vendor's usage-limit refusal, and a harness provider refusing the Turn for size.
+Written inside the terminal transaction, before the successor claim, so the
+claim rolls it to a usable account or the held scope keeps it queued until the
+limit is lifted; a size refusal's successor starts in a fresh session whose
+boundary folds what no longer fits.
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from core.stop_causes import PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON
+from core.stop_causes import CONTEXT_OVERFLOW_REASON, PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON
 
 #: The transcript chip line for the continue input (approved copy).
 CONTINUE_CHIP = "Resumed after plan limit pause"
@@ -22,15 +24,29 @@ _VENDOR_CONTENT = (
     "CORSIA stopped your previous turn because its account reached a usage limit. "
     "Continue the work that turn was doing."
 )
-_CONTENT_BY_CAUSE = {PLAN_LIMIT_REASON: _CONTENT, VENDOR_LIMIT_REFUSAL_REASON: _VENDOR_CONTENT}
+_OVERFLOW_CONTENT = (
+    "The provider refused your previous turn because the chat no longer fit its "
+    "context window. CORSIA checkpointed the chat. Continue the work that turn was doing."
+)
+_CONTENT_BY_CAUSE = {
+    PLAN_LIMIT_REASON: _CONTENT,
+    VENDOR_LIMIT_REFUSAL_REASON: _VENDOR_CONTENT,
+    CONTEXT_OVERFLOW_REASON: _OVERFLOW_CONTENT,
+}
 
 
 _CONTINUE_ID_PREFIX = "overage-continue:"
+_OVERFLOW_ID_PREFIX = "overflow-continue:"
 
 
 def continue_message_id(turn_id: str) -> str:
     """Stable id of the one continue input written for a limit-stopped turn."""
     return f"{_CONTINUE_ID_PREFIX}{turn_id}"
+
+
+def overflow_continue_message_id(turn_id: str) -> str:
+    """Stable id of the one continue input written for a size-refused turn."""
+    return f"{_OVERFLOW_ID_PREFIX}{turn_id}"
 
 
 def _turn_starting_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
@@ -49,7 +65,9 @@ def queue_plan_limit_continue(db: sqlite3.Connection, turn_id: str, thread_id: s
     _queue_continue(db, turn_id, thread_id, cause=PLAN_LIMIT_REASON)
 
 
-def _queue_continue(db: sqlite3.Connection, turn_id: str, thread_id: str, *, cause: str) -> None:
+def _queue_continue(
+    db: sqlite3.Connection, turn_id: str, thread_id: str, *, cause: str, message_id: str | None = None,
+) -> None:
     """Queue one system continue input unless real input already restarts the thread.
 
     A held prefix is delivered as one batch, so a continue input beside real
@@ -64,7 +82,7 @@ def _queue_continue(db: sqlite3.Connection, turn_id: str, thread_id: str, *, cau
         role="system",
         content=_CONTENT_BY_CAUSE[cause],
         intent="apply_now",
-        message_id=continue_message_id(turn_id),
+        message_id=message_id or continue_message_id(turn_id),
         metadata={
             "type": "context_event",
             "event_type": cause,
@@ -149,3 +167,31 @@ def queue_limit_refusal_continue(db: sqlite3.Connection, turn_id: str, thread_id
     if _repeats_refusal_on_same_login(db, turn_id) or _refusal_chain_reached_account_cap(db, turn_id):
         return
     _queue_continue(db, turn_id, thread_id, cause=VENDOR_LIMIT_REFUSAL_REASON)
+
+
+def overflow_rerun_queued(turn_id: str, *, db: sqlite3.Connection | None = None) -> bool:
+    """True when the size-refused Turn left its re-run: its notice then waits on that run."""
+    from infra.database import get_db
+
+    connection = db or get_db()
+    return connection.execute(
+        "SELECT 1 FROM messages WHERE id=?", (overflow_continue_message_id(turn_id),),
+    ).fetchone() is not None
+
+
+def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
+    """Queue the one re-run of a Turn its provider refused for size; never for a re-run.
+
+    A re-run the provider refuses again ends visibly: the fold did not make room,
+    so another run would only repeat the refusal.
+    """
+    rerun = db.execute(
+        "SELECT 1 FROM messages WHERE active_turn_id=? AND id LIKE ?",
+        (turn_id, f"{_OVERFLOW_ID_PREFIX}%"),
+    ).fetchone()
+    if rerun is not None:
+        return
+    _queue_continue(
+        db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
+        message_id=overflow_continue_message_id(turn_id),
+    )

@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 
 from automation.turn_end_effects import TurnEndEffects, record_external_turn_end
 from connections.auth_failure import auth_failure_kind
+from core.stop_causes import ContextOverflowEnd
 from core.turn_core import TurnIdentity, TurnTerminalResult
 from infra.db_async import run_in_db_unless_owned
+from infra.plan_limit_continue import overflow_rerun_queued
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
 from llm.error_cause import cause_fields
@@ -279,6 +281,21 @@ async def _handle_result_error(
         await _retire_poisoned_session(ctx, metadata)
 
 
+def _terminal_error(ev: dict, metadata: dict, outcome: str) -> str | ContextOverflowEnd | None:
+    """The terminal error; a size refusal is typed so the Turn leaves its one re-run."""
+    if outcome != "error":
+        return None
+    text = _turn_error(ev)
+    return ContextOverflowEnd(text) if metadata.get("cause") == "context_window_exceeded" else text
+
+
+async def _rerun_owns_notice(ctx: CCEventContext, turn_id: str, metadata: dict) -> bool:
+    """A size refusal with its re-run queued writes no notice; the re-run answers instead."""
+    if metadata.get("cause") != "context_window_exceeded":
+        return False
+    return await run_in_db_unless_owned(ctx.db, overflow_rerun_queued, turn_id, db=ctx.db)
+
+
 async def on_result(ctx: CCEventContext, ev: dict) -> None:
     ingress_event = ev
     if not ctx.live.turn_active:
@@ -313,10 +330,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     )
     outcome = _result_outcome(is_error, metadata)
     await _handle_result_error(ctx, ev, metadata, is_error=is_error)
-    settlement = await claim_terminal(
-        identity, outcome,
-        _turn_error(ev) if outcome == "error" else None,
-    )
+    settlement = await claim_terminal(identity, outcome, _terminal_error(ev, metadata, outcome))
     if settlement.result is not TurnTerminalResult.APPLIED:
         log.debug(
             "cc_runtime: suppressed non-owning terminal for %s: %s",
@@ -326,7 +340,9 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     ingress_event["_corsia_terminal_committed"] = True
     ingress_event["_corsia_terminal_settlement"] = settlement
     _clear_terminal_live_state(ctx)
-    marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
+    marker_id, created_at = None, ""
+    if not await _rerun_owns_notice(ctx, identity.turn_id, metadata):
+        marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
     context_message_id = ctx.live.last_assistant_message_id or marker_id
     payload_body = {"type": "turn_complete", "thread_id": ctx.child_id}
     if context_message_id is not None:

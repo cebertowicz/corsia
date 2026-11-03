@@ -24,6 +24,9 @@ ACTIVITY_SYSTEM_TYPES = (
 # One is not visible, so it never splits a run or holds back an error's recovery,
 # and a Focus read neither counts it in a run nor sends it (`NEVER_DRAWN_FILTER`).
 NEVER_DRAWN_SYSTEM_TYPES = ("seed",)
+# Events the transcript never draws: the continue input that re-runs a Turn its
+# provider refused for size is the agent's, and the checkpoint row already shows it.
+NEVER_DRAWN_EVENT_TYPES = ("context_overflow.continue",)
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.
 ERROR_SYSTEM_TYPES = (
@@ -117,6 +120,7 @@ def _meta_json_type(path: str) -> str:
 
 _ACTIVITY_TYPE_LIST = _sql_list(ACTIVITY_SYSTEM_TYPES)
 _NEVER_DRAWN_TYPE_LIST = _sql_list(NEVER_DRAWN_SYSTEM_TYPES)
+_NEVER_DRAWN_EVENT_LIST = _sql_list(NEVER_DRAWN_EVENT_TYPES)
 _ERROR_TYPE_LIST = _sql_list(ERROR_SYSTEM_TYPES)
 _TYPE_SQL = _meta_text("$.type")
 
@@ -137,7 +141,8 @@ CASE WHEN (CASE role
 
 # A `WHERE` clause continuation that drops the rows the transcript never draws.
 NEVER_DRAWN_FILTER = (
-    f"AND NOT (role = 'system' AND {_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST})) "
+    f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
+    f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
 )
 
 
