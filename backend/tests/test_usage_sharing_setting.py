@@ -62,6 +62,66 @@ def test_the_region_is_read_from_the_locale(locale_id, code):
     assert _region_of(locale_id) == code
 
 
+@pytest.fixture
+def mac_preferences(tmp_path, monkeypatch):
+    """os_region() on a Mac whose preferences file is `tmp_path`'s, with no locale variables."""
+    from infra import os_region as module
+
+    path = tmp_path / ".GlobalPreferences.plist"
+    monkeypatch.setattr(module.sys, "platform", "darwin")
+    monkeypatch.setattr(module, "_MAC_GLOBAL_PREFERENCES", path)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LANG", raising=False)
+    module.os_region.cache_clear()
+    yield path
+    module.os_region.cache_clear()
+
+
+def test_the_mac_region_setting_wins_over_lang(mac_preferences, monkeypatch):
+    import plistlib
+
+    from infra.os_region import os_region
+
+    mac_preferences.write_bytes(plistlib.dumps({"AppleLocale": "en_US@rg=dezzzz"}))
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+
+    assert os_region() == "DE"
+
+
+def test_preferences_without_a_region_fall_back_to_lang(mac_preferences, monkeypatch):
+    import plistlib
+
+    from infra.os_region import os_region
+
+    mac_preferences.write_bytes(plistlib.dumps({"AppleLanguages": ["fr"]}))
+    monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+
+    assert os_region() == "FR"
+
+
+def test_an_unreadable_preferences_file_is_logged_and_falls_back(mac_preferences, monkeypatch, caplog):
+    from infra.os_region import os_region
+
+    mac_preferences.write_bytes(b"not a plist")
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+
+    with caplog.at_level("WARNING", logger="infra.os_region"):
+        assert os_region() == "DE"
+    assert "macOS region setting unreadable" in caplog.text
+
+
+def test_the_region_is_read_once_per_process(mac_preferences):
+    import plistlib
+
+    from infra.os_region import os_region
+
+    mac_preferences.write_bytes(plistlib.dumps({"AppleLocale": "de_DE"}))
+    assert os_region() == "DE"
+    mac_preferences.unlink()
+
+    assert os_region() == "DE"
+
+
 def test_a_non_boolean_is_refused_and_nothing_is_saved(isolated_db):
     from infra.settings import USAGE_SHARING_KEY, get_setting
 

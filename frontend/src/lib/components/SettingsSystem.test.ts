@@ -264,7 +264,7 @@ describe('SettingsSystem', () => {
 
 		const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Share usage counts"]');
 		expect(toggle?.getAttribute('aria-pressed')).toBe('true');
-		expect(host.textContent).toContain('It sends counts with a random number that changes every week, never your name, email or anything you write. Turn it off to stop.');
+		expect(host.textContent).toContain('It sends counts of what you use, tagged with a random number that changes every week. It never sends your name, email or anything you write. Turn it off to stop.');
 
 		toggle!.click();
 		await tick();

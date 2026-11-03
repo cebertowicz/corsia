@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import os
 import plistlib
 import re
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 #: The 27 EU member states plus Iceland, Liechtenstein and Norway.
 EU_EEA_REGIONS = frozenset({
@@ -32,11 +36,15 @@ def _locale_id() -> str:
                 value = plistlib.load(handle).get("AppleLocale")
             if isinstance(value, str):
                 return value
-        except (OSError, plistlib.InvalidFileException, ValueError):
-            pass
+        except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+            log.warning("os_region: macOS region setting unreadable (%s); falling back to LC_ALL/LANG", type(exc).__name__)
     return os.environ.get("LC_ALL") or os.environ.get("LANG") or ""
 
 
+@functools.cache
 def os_region() -> str | None:
-    """The Region in macOS settings, else the region part of LC_ALL or LANG; None when unreadable."""
+    """The Region in macOS settings, else the region part of LC_ALL or LANG; None when unreadable.
+
+    Read once per process, so `GET /api/settings` never reads the preferences file per call.
+    """
     return _region_of(_locale_id())
