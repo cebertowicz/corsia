@@ -100,13 +100,46 @@ async def test_login_check_timeout_signs_out_as_before(claude, monkeypatch):
 async def test_result_marker_drops_the_expired_cause_only_when_the_login_answered(claude, monkeypatch, result, cause):
     """A login that answered must not show the sign-in-expired line on its result row."""
     from subagents.cc_event_result import _handle_result_error
+    from subagents.turn_account_error import claude_login_verdict
 
     turn_on_other(claude)
     check = login_check(monkeypatch, result)
     metadata = {'turn_id': 'claude-turn', 'cause': 'sign_in_expired', 'cause_kind': 'sign_in_expired'}
-    await _handle_result_error(SimpleNamespace(db=claude.db), {'result': EXPIRED}, metadata, is_error=True)
+    # on_event stashes the verdict before it takes event_lock.
+    ev = {'result': EXPIRED, '_corsia_login_verdict': await claude_login_verdict('claude-turn', EXPIRED, db=claude.db)}
+    await _handle_result_error(SimpleNamespace(db=claude.db), ev, metadata, is_error=True)
     assert metadata.get('cause') == cause
     check.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stop_takes_the_event_lock_while_the_login_check_runs(claude, monkeypatch):
+    """The result's login check runs before event_lock, so a Stop or steer never waits on the CLI."""
+    from connections import harness_usage_check
+    from core.turn_core import TurnIdentity
+    from subagents.cc_runtime_events import _make_on_event
+    from subagents.cc_runtime_state import _Live
+
+    turn_on_other(claude)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def parked_check(*_args, **_kwargs):
+        started.set()
+        await release.wait()
+        return 'pass'
+
+    monkeypatch.setattr(harness_usage_check, 'check_login', parked_check)
+    live = _Live(session=None, parent_thread_id=None, name='cc', corsia_turn=TurnIdentity('claude-turn', 1))
+    on_event = _make_on_event(live, 'claude-thread', lambda *_args: None, claude.db)
+    pending = asyncio.create_task(on_event({'kind': 'result', 'is_error': True, 'result': EXPIRED}))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        assert not live.event_lock.locked()
+        await asyncio.wait_for(live.event_lock.acquire(), 0.1)
+        live.event_lock.release()
+    finally:
+        release.set()
+        await pending
 
 
 @pytest.mark.asyncio

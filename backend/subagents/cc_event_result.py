@@ -272,9 +272,10 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    from subagents.turn_account_error import claude_turn_signed_out
+    from subagents.turn_account_error import sign_out_on_verdict
 
-    if await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db) is None:
+    # on_event checked the login before taking event_lock, so a Stop or steer never waits on the CLI.
+    if await sign_out_on_verdict(ev.get("_corsia_login_verdict"), db=ctx.db) is None:
         # The login still answers, so the row shows the CLI's own text, not the sign-in-expired line.
         metadata.pop("cause", None)
     if is_empty_text_block_rejection(ev.get("result")):

@@ -39,25 +39,44 @@ def sign_out_turn_login(receipt, *, db=None, include_account: bool = False):
     return updated if include_account else True
 
 
-async def claude_turn_signed_out(turn_id: str | None, detail: str | None, *, db=None, include_account: bool = False):
-    """Sign out the Turn's added Claude login on the exact expired-login error, before the Turn completes.
+async def claude_login_verdict(turn_id: str | None, detail: str | None, *, db=None):
+    """On the exact expired-login error, check the Turn's added Claude login once.
 
-    The CLI can report an expired login while the account's login still answers,
-    so the login is checked once first. Returns False when no added account ran
-    the Turn on that error, None when its login answered and stays signed in,
-    and otherwise True (or the account, with ``include_account``).
+    The CLI can report an expired login while the account's login still answers.
+    Returns None when no added account ran the Turn on that error, else
+    ``(receipt, answered)``. The check can take its full bound, so callers run it
+    outside any lock another action waits on.
     """
     from connections.auth_failure import auth_failure_kind
     from connections.harness_usage_check import check_login
     from infra.db_async import run_in_db_unless_owned
 
     if not auth_failure_kind("claude-code", detail):
-        return False
+        return None
     receipt = await run_in_db_unless_owned(db, _turn_login, turn_id, "claude-code", db=db)
     if receipt is None:
+        return None
+    return receipt, await check_login("claude-code", receipt.account_id) == "pass"
+
+
+async def sign_out_on_verdict(verdict, *, db=None, include_account: bool = False):
+    """Act on a ``claude_login_verdict``: False when no added account ran the Turn,
+    None when its login answered and stays signed in, otherwise True (or the
+    account, with ``include_account``) after signing out the receipt's login.
+    """
+    from infra.db_async import run_in_db_unless_owned
+
+    if verdict is None:
         return False
-    if await check_login("claude-code", receipt.account_id) == "pass":
+    receipt, answered = verdict
+    if answered:
         return None
     return await run_in_db_unless_owned(
         db, sign_out_turn_login, receipt, db=db, include_account=include_account,
     )
+
+
+async def claude_turn_signed_out(turn_id: str | None, detail: str | None, *, db=None, include_account: bool = False):
+    """Sign out the Turn's added Claude login on the exact expired-login error, before the Turn completes."""
+    verdict = await claude_login_verdict(turn_id, detail, db=db)
+    return await sign_out_on_verdict(verdict, db=db, include_account=include_account)

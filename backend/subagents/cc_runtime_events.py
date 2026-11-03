@@ -139,6 +139,12 @@ def _make_on_event(live: _Live, child_id: str, bcast: Broadcast, db):
 
             if not await quiesce_result_tools(child_id, live, event.get("_corsia_turn_identity")):
                 return None
+            from subagents.turn_account_error import claude_login_verdict
+
+            # The login check can take its full bound; Stop and accept take event_lock, so it runs first.
+            event["_corsia_login_verdict"] = await claude_login_verdict(
+                getattr(event.get("_corsia_turn_identity"), "turn_id", None), event.get("result"), db=ctx.db,
+            )
         try:
             await _handle_locked_event(ctx, kind, event, handler)
         except _CommittedTerminalFailure:
