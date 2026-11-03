@@ -92,6 +92,27 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+#: The person's usage-sharing choice, made in setup's account step or Settings.
+#: It gates only a future upload; local usage recording never reads it.
+USAGE_SHARING_KEY = "usage_sharing"
+
+
+def usage_sharing_default() -> bool:
+    """Sharing is on until the person turns it off: the one rule for the default."""
+    return True
+
+
+def get_usage_sharing(*, db: sqlite3.Connection | None = None) -> bool:
+    """The saved choice, or the default when none is saved."""
+    saved = (get_setting(USAGE_SHARING_KEY, db=db) or {}).get("enabled")
+    return saved if isinstance(saved, bool) else usage_sharing_default()
+
+
+def save_usage_sharing(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
+    """Save the person's choice."""
+    set_setting(USAGE_SHARING_KEY, {"enabled": enabled}, db=db)
+
+
 def get_agent_defaults() -> dict:
     """Get agent default settings."""
     agents = get_setting("agents") or {}

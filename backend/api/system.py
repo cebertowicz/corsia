@@ -25,8 +25,10 @@ from infra.settings import (
     get_feature_flags,
     get_host_access_auto_approve,
     get_host_access_reviewer_fallback,
+    get_usage_sharing,
     save_agent_defaults,
     save_setting_merge,
+    save_usage_sharing,
 )
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -39,6 +41,7 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_reviewer_fallback",
 })
 _EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
+_BOOLEAN_SETTINGS = ("host_access_auto_approve", "host_access_reviewer_fallback", "usage_sharing")
 
 def _debug_version_overlay_default() -> bool:
     """Hide the checkout build stamp in an immutable packaged app by default.
@@ -177,6 +180,7 @@ def _settings_snapshot() -> dict:
         "host_access_auto_approve": get_host_access_auto_approve(),
         "corrections_classifier": corrections_classifier,
         "host_access_reviewer_fallback": get_host_access_reviewer_fallback(),
+        "usage_sharing": get_usage_sharing(),
         "features": _features_snapshot(flags),
         "capabilities": {"browser_automation": browser_available()},
         "live_bulletins": live_bulletins,
@@ -262,23 +266,19 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
     if any(key in body for key in _EXACT_REVIEWER_MODELS) and not _conductor_sets_reviewer(user, body):
         require_human_user(user)
 
-    updated = {}
+    booleans = {key: body[key] for key in _BOOLEAN_SETTINGS if key in body}
+    if invalid := next((key for key, value in booleans.items() if not isinstance(value, bool)), None):
+        raise HTTPException(400, f"{invalid} must be a boolean")
+
+    updated: dict = {}
     if any(key in body for key in _EXACT_REVIEWER_MODELS):
         updated.update(await run_in_db(_save_exact_model_defaults, body))
 
-    if "host_access_auto_approve" in body:
-        auto_approve = body["host_access_auto_approve"]
-        if not isinstance(auto_approve, bool):
-            raise HTTPException(400, "host_access_auto_approve must be a boolean")
-        save_agent_defaults({"host_access_auto_approve": auto_approve})
-        updated["host_access_auto_approve"] = auto_approve
-
-    if "host_access_reviewer_fallback" in body:
-        fallback = body["host_access_reviewer_fallback"]
-        if not isinstance(fallback, bool):
-            raise HTTPException(400, "host_access_reviewer_fallback must be a boolean")
-        await run_in_db(save_agent_defaults, {"host_access_reviewer_fallback": fallback})
-        updated["host_access_reviewer_fallback"] = fallback
+    if agent_defaults := {key: value for key, value in booleans.items() if key in _HUMAN_ONLY_HOST_ACCESS_SETTINGS}:
+        await run_in_db(save_agent_defaults, agent_defaults)
+    if "usage_sharing" in booleans:
+        await run_in_db(save_usage_sharing, booleans["usage_sharing"])
+    updated.update(booleans)
 
     if "live_bulletins" in body:
         live_bulletins = body["live_bulletins"]
