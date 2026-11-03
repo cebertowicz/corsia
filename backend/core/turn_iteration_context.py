@@ -15,6 +15,11 @@ from history.types import HistoryBoundary
 from infra.db_async import run_in_db
 from infra.runtime_truth import provider_boundary_snapshot
 from core.checkpoint_native_admission import effective_input_tokens
+from core.checkpoint_fold_blocks import COLD_FOLD_OLD_TOOL_BUDGET_TOKENS, COLD_FOLD_TOOL_REFERENCE_BUDGET_TOKENS
+
+# Tool-result preview sizes an installed tail tries in turn, the cold fold's own rungs;
+# ``None`` first, so the selection as installed renders at the harness budget.
+_INSTALLED_TOOL_BUDGETS = (None, COLD_FOLD_OLD_TOOL_BUDGET_TOKENS, COLD_FOLD_TOOL_REFERENCE_BUDGET_TOKENS)
 
 _effective_input_tokens = effective_input_tokens
 
@@ -160,7 +165,13 @@ async def _refresh_native_window(state, thread_id: str) -> int | None:
             model=target.expected_reported_model or target.transport_model,
         )
         state.context_usage["model_context_window"] = target.context_window
-    return target.configured_context_window if target.context_window_source == "memory" else None
+    if target.context_window_source != "memory":
+        state.context_usage.pop("provider_reported_model_context_window", None)
+        return None
+    # The memory fit is physical runtime evidence: the meter caps the snapshot's
+    # selected window with it, so it reads against the window this check uses.
+    state.context_usage["provider_reported_model_context_window"] = target.context_window
+    return target.configured_context_window
 
 
 def _minimum_native_input(ledger) -> int:
@@ -187,34 +198,42 @@ async def _render_native_installed(
     from core.turn_context import NativePreparedContext
 
     selection = await run_in_db(installed_replay, record)
-    prefix, info = await build_real_send_prefix(
-        agent=agent,
-        thread_id=thread_id,
-        turn_model=turn_model,
-        fresh_context=False,
-        project_id=project_id,
-        model_context_window=state.fit_ledger.effective_window_tokens,
-        replay_selection=selection,
-        tool_definitions=state.tool_definitions,
-        selected_model=state.fit_ledger.target_catalog_id,
-    )
     # Delivered history cannot contain the FIFO frame this Turn still owns.
     # Preserve its already-rendered text/media without rebuilding or resequencing it.
     pending = (
         not state.provider_delivery_settled or state.active_boundary_input is not None
     )
-    messages = sanitize_messages(sanitize_empty_content([
-        *prefix, *([deepcopy(state.messages[-1])] if pending else []),
-    ]))
-    fit = attach_native_provider_fit_ledger(
-        model=turn_model,
-        target_catalog_id=state.fit_ledger.target_catalog_id,
-        proven_target_window_tokens=state.fit_ledger.effective_window_tokens,
-        messages=messages,
-        tools=state.tool_definitions,
-        input_identity=state.fit_ledger.input_identity,
-        current_input=current_fit_input(messages),
-    ).fit_ledger
+    # The tail keeps the newest Step, which no fold can cover, so a batch of tool
+    # results may only fit as shorter previews; each stays retrievable in full.
+    for budget in _INSTALLED_TOOL_BUDGETS:
+        if budget is not None:
+            selection = replace(selection, tool_result_budget_tokens=budget)
+        prefix, info = await build_real_send_prefix(
+            agent=agent,
+            thread_id=thread_id,
+            turn_model=turn_model,
+            fresh_context=False,
+            project_id=project_id,
+            model_context_window=state.fit_ledger.effective_window_tokens,
+            replay_selection=selection,
+            tool_definitions=state.tool_definitions,
+            selected_model=state.fit_ledger.target_catalog_id,
+        )
+        messages = sanitize_messages(sanitize_empty_content([
+            *prefix, *([deepcopy(state.messages[-1])] if pending else []),
+        ]))
+        fit = attach_native_provider_fit_ledger(
+            model=turn_model,
+            target_catalog_id=state.fit_ledger.target_catalog_id,
+            proven_target_window_tokens=state.fit_ledger.effective_window_tokens,
+            messages=messages,
+            tools=state.tool_definitions,
+            input_identity=state.fit_ledger.input_identity,
+            current_input=current_fit_input(messages),
+        ).fit_ledger
+        assert fit is not None  # the Native attach always measures the payload
+        if fit.rendered_input_tokens <= state.fit_ledger.effective_window_tokens:
+            break
     # The install is a second Native delivery step: it replaces the accounting.
     usage = with_continuity(
         deepcopy(state.context_usage), info["continuity_accounting"],

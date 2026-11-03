@@ -722,6 +722,21 @@ describe("reading time before a decision opens", () => {
     expect(verdict.state).toBe("open");
   });
 
+  it("reads the server's zoneless message times as UTC, whatever the device's zone", () => {
+    // Messages arrive as naive UTC ("2026-10-09T12:00:00.000"); the decision's raised_at carries +00:00.
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    try {
+      noteLoad([], VIEWED);
+      const verdict = judgeAutoOpen([from("d1", 10)], {
+        ...idle, viewedThreadId: VIEWED, now: ms(10),
+        messages: [{ ...say(0, 100), created_at: at(0).replace("Z", "") }],
+      });
+      expect(verdict).toEqual({ state: "wait", retryInMs: 14_000 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("reads consecutive messages one after another", () => {
     noteLoad([], VIEWED);
     const verdict = judgeAutoOpen([from("d1", 5)], {

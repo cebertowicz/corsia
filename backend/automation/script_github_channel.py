@@ -1,9 +1,12 @@
 """Run-scoped GitHub broker endpoint for sandboxed scripts.
 
-A channel opens only for a script run a rule started from an event a connector
-or CORSIA itself recorded whose stored facts name a repository
-(``bound_repository``); the claim reads it from the stored run input, so nothing
-a script sends or emits can choose it. Each request is
+A channel opens only for a script run a rule started from a stored connector,
+platform or emitter event whose facts name a repository (``bound_repository``) that
+the run's project registers when the run starts (``script_rule_runs.
+execution_input``). That registration test is the access limit: a script, the
+owner's or an agent's, can emit an event naming any repository, and only a
+registered one binds. The claim reads it from the stored run input, so nothing a
+running script sends can choose it. Each request is
 vetted by the broker's read policy, then limited to ``repos/<that repo>/...``,
 and goes through the pollers' shared read budget: asked before, told after.
 """
@@ -33,19 +36,20 @@ SOCKET_ENV = "CORSIA_SCRIPT_GITHUB_SOCKET"
 log = logging.getLogger(__name__)
 _REPOSITORY = re.compile(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$")
 _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
-#: Event origins whose facts CORSIA wrote; an emitter's or agent's facts are theirs.
-_RECORDED_ORIGINS = frozenset({"connector", "platform"})
+#: Event origins whose run may open a channel. An agent's direct emit is left out only
+#: because no rule needs a read from one; it is not an access limit, since an agent's own
+#: script emits as ``emitter``. The limit is the registration test above.
+_REPO_ORIGINS = frozenset({"connector", "platform", "emitter"})
 
 
 def bound_repository(event: Any) -> str | None:
     """The ``owner/name`` a stored event's ``repo`` fact names, or None when it names none
-    or a script or agent wrote the event.
+    or an agent wrote the event.
 
-    A platform event can carry a repo a script chose earlier: ``worker.result`` copies its
-    ``repo`` from the declared event that started the worker, which a script emits. The
-    start rule's ``repo in <registered repositories>`` test keeps that inside the owning
-    project's registered repositories."""
-    if not isinstance(event, Mapping) or event.get("origin") not in _RECORDED_ORIGINS:
+    A script may have chosen the repo (an emitter event, or a ``worker.result`` copying it),
+    so this is only a candidate: ``execution_input`` keeps it to the registered repositories
+    of the run's project, for every origin."""
+    if not isinstance(event, Mapping) or event.get("origin") not in _REPO_ORIGINS:
         return None
     facts = event.get("facts")
     repo = facts.get("repo") if isinstance(facts, Mapping) else None

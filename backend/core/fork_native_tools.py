@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, NamedTuple
+
+from loguru import logger
 
 from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
 from infra import state
 from infra.send_target import omlx_seat_and_model
+from infra.tool_result_errors import is_error_result
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -171,6 +175,55 @@ def assistant_message(response: Any) -> dict[str, Any]:
     }
 
 
+_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_OPERATION = re.compile(r"[a-z_]{1,24}")
+# Fixed error classes, each anchored to one tool message template so a model-written value
+# or a runtime-state error never borrows a class; the text itself is never logged.
+_ERROR_CLASSES = tuple((re.compile(pattern), name) for pattern, name in (
+    (r"Error: Invalid parameters for tool ", "invalid_params"),
+    (r"Error: next_actions takes no new entries\. ", "next_actions"),
+    (r"Error: [a-z_]+ records an in-turn fact; use it outside a checkpoint\Z", "in_turn_op"),
+    (r"Error: continuity entry \d+ does not exist\Z", "missing_entry"),
+    (r"Error: continuity entry \d+ is (?:retired|not active)\Z", "inactive_entry"),
+    (r"Error: [a-z_]+ already holds the maximum (?:\d+ )?active entries\Z", "field_full"),
+    (r"Error: checkpoint execution is no longer running\Z", "fork_ended"),
+    (r"Error: [a-z_]+ requires [a-z_]+\Z", "missing_arg"),
+))
+
+
+def _token(value: Any, pattern: re.Pattern[str]) -> str:
+    """A model-written value as one log token: itself when well-formed, else a marker."""
+    if isinstance(value, str) and pattern.fullmatch(value):
+        return value
+    return "-" if value is None else "other"
+
+
+def _error_class(outcome: str, result: str) -> str:
+    """The fixed class of an error result, ``other`` when unknown, ``-`` for non-errors.
+
+    Deleted with :func:`_log_tool_call`.
+    """
+    if outcome != "error":
+        return "-"
+    return next((name for pattern, name in _ERROR_CLASSES if pattern.match(result)), "other")
+
+
+def _log_tool_call(request: ProviderForkRequest, kind: ForkKind, call: Any, outcome: str,
+                   result: str) -> None:
+    """One content-free line per fork tool call: which call, its outcome, its size.
+
+    Diagnosis for checkpoints that make many tool rounds and stage nothing.
+    Delete it in the change that fixes those rounds.
+    """
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
+    logger.info(
+        "fork.tool_call fork={} kind={} tool={} operation={} outcome={} error={} result_chars={}",
+        request.fork_id, kind.name, _token(call.name, _TOOL_NAME),
+        _token(arguments.get("operation"), _OPERATION), outcome,
+        _error_class(outcome, result), len(result),
+    )
+
+
 async def run_tool_calls(
     agent: Any,
     response: Any,
@@ -195,6 +248,7 @@ async def run_tool_calls(
         for call in response.tool_calls:
             if call.name not in kind.tool_allowlist:
                 result = kind.tool_refusal
+                outcome = "refused"
             else:
                 try:
                     result = await kind.tool_executor(
@@ -217,6 +271,7 @@ async def run_tool_calls(
                     thread_id=request.thread_id, invocation_id=call.id,
                     provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
+                outcome = "error" if is_error_result(result) else "ok"
             reply = {
                 "role": "tool",
                 "tool_call_id": call.id,
@@ -232,8 +287,11 @@ async def run_tool_calls(
                     f"Error: this result ({len(result)} characters) is "
                     + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
+                _log_tool_call(request, kind, call, "over_room", result)
                 if not await input_fits_off_loop(request, messages, tools, 0, measured):
                     return False
+            else:
+                _log_tool_call(request, kind, call, outcome, result)
         return True
     except CompletedToolFailure:
         raise

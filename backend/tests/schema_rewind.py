@@ -5,11 +5,11 @@ from __future__ import annotations
 import sqlite3
 
 #: Columns of ``checkpoints`` added after the version a ladder test rewinds to:
-#: the snapshot columns by migration 42 -> 43 (#1602) and ``through_at`` by
-#: 73 -> 74 (#3196). Step 37 -> 38 copies the table's current columns into a
-#: table with its own frozen shape, so a column added later has to go before a
-#: ladder that runs through it.
-_LATER_COLUMNS = ("artifact_snapshot_json", "plan_status_snapshot_json", "through_at")
+#: the snapshot columns by migration 42 -> 43 (#1602), ``through_at`` by
+#: 73 -> 74 (#3196) and ``adopted_input_tokens`` by 168 -> 169. Step 37 -> 38
+#: copies the table's current columns into a table with its own frozen shape,
+#: so a column added later has to go before a ladder that runs through it.
+_LATER_COLUMNS = ("artifact_snapshot_json", "plan_status_snapshot_json", "through_at", "adopted_input_tokens")
 
 
 def rewind_plan_aggregates(db: sqlite3.Connection) -> None:

@@ -97,13 +97,50 @@ def test_parse_reads_the_memory_monitor_wording():
     )
 
 
+def test_parse_counts_the_preflight_safety_transient_as_memory_in_use():
+    # oMLX scheduler._preflight_safety_rejection: "(current C + KV K + min-chunk
+    # transient T) but prefill safety cap is L"; the transient does not grow with
+    # the prompt, so only KV scales.
+    text = (
+        "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
+        "available memory (preflight safety guard, kv_len=35288, min_chunk=288): "
+        "predicted peak would require ~20.61 GB (current 18.30 GB + KV 1.66 GB + "
+        "min-chunk transient 665.00 MB) but prefill safety cap is 20.25 GB (93% of "
+        "metal_cap ceiling 21.77 GB). Raise kernel iogpu.wired_limit_mb."
+    )
+    assert memory_fit.parse_guard_refusal(text) == (
+        int(20.25 * GIB), int(18.30 * GIB) + int(665.00 * 2 ** 20), int(1.66 * GIB),
+    )
+
+
+# The chunked-step guard, as a local Turn received it on a 32 GiB Mac (#1219 c11 20:10).
+CHUNKED_STEP = (
+    "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
+    "available memory (pre-chunk guard at 288 tokens, kv_len=35576): predicted peak "
+    "would exceed prefill safety cap 20.3GB (93% of metal_cap ceiling 21.8GB). Raise "
+    "kernel iogpu.wired_limit_mb in Terminal (currently caps Metal at 21.33 GB), or "
+    "reduce context length."
+)
+
+
 def test_parse_fails_safe_on_refusals_without_the_memory_terms():
-    # The pre-chunk guard names no current or KV+SDPA term to learn from.
-    assert memory_fit.parse_guard_refusal(
-        "Prefill context too large for available memory (pre-chunk guard at 4096 tokens, "
-        "kv_len=4096): predicted peak would exceed prefill safety cap 20.0GB"
-    ) is None
+    # The chunked-step guard names no current or KV term; its held tokens are read apart.
+    assert memory_fit.parse_guard_refusal(CHUNKED_STEP) is None
     assert memory_fit.parse_guard_refusal("anything else") is None
+
+
+def test_chunked_step_refusal_caps_the_window_to_the_tokens_it_held():
+    _refuse(40_000, text=CHUNKED_STEP)
+    assert (_live().effective, _live().source) == (35_576, "memory")
+
+
+def test_chunked_step_cap_recovers_like_any_other():
+    _refuse(40_000, text=CHUNKED_STEP)
+    _refuse(33_270, text=PINNED)  # a later refusal in the Turn replaces it
+    assert _live().effective == PINNED_FIT
+    _refuse(40_000, text=CHUNKED_STEP)
+    memory_fit.end_turn("refused")  # and the Turn's end drops it
+    assert _live().source == "provider"
 
 
 def test_no_observation_leaves_the_window_untouched():
@@ -296,3 +333,56 @@ async def test_the_native_boundary_sizes_at_the_cap_and_settles_on_the_configure
     finally:
         db.close()
     assert (await _native_boundary("t-mem", "next", monkeypatch)).configured_window is None
+
+
+@pytest.mark.asyncio
+async def test_the_meter_reads_the_window_the_fit_check_uses(isolated_db, monkeypatch):
+    """Inside a refused Turn the meter's window is the memory fit, then the configured one again."""
+    from dataclasses import dataclass
+
+    from core import turn_iteration_context as iteration_context
+    from core.turn_measured_usage import context_usage_from_latest_call
+    from infra.database import get_db
+    from tests.unavailable_model_support import seed_model
+
+    @dataclass(frozen=True)
+    class Ledger:
+        target_catalog_id: str
+        effective_window_tokens: int
+        input_identity: str = "i"
+
+    seed_model(SELECTOR)  # configured window 32,768
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at)"
+            " VALUES ('t-meter','user-1',?,'t0','t0')", (SELECTOR,),
+        )
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(iteration_context, "refit_provider_payload", lambda ledger, *_a, **_k: ledger)
+    snapshot = {"harness_model_facts": {"harness": "native", "model": SELECTOR,
+                                        "model_context_window": 32_768}}
+
+    async def meter(turn_id: str) -> tuple[int, dict]:
+        state = SimpleNamespace(
+            fit_ledger=Ledger(SELECTOR, 32_768), messages=[], tool_definitions=[],
+            fit_current_input="go",
+            context_usage={"model_context_window": 32_768, "context_snapshot": snapshot},
+        )
+        with _turn(turn_id):
+            await iteration_context._refresh_native_window(state, "t-meter")
+        usage = context_usage_from_latest_call(state.context_usage, {"prompt_tokens": 24_000})
+        return state.fit_ledger.effective_window_tokens, usage
+
+    _refuse(33_270, turn_id="refused", text=PINNED)
+    checked, usage = await meter("refused")
+    assert checked == PINNED_FIT
+    assert usage["model_context_window"] == PINNED_FIT
+    assert usage["utilization"] == round(24_000 / PINNED_FIT, 3)
+
+    memory_fit.end_turn("refused")
+    checked, usage = await meter("next")
+    assert checked == usage["model_context_window"] == 32_768
+    assert "provider_reported_model_context_window" not in usage

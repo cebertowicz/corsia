@@ -7,13 +7,16 @@ import sqlite3
 import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from core.measurement_token_contract import priceable_usage_predicate
 from host_access.failure_reasons import safe_rejection
 from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
 
-AUDIT_METRICS = ("checkpoint_health", "lease_reviews", "stored_message_pressure")
+AUDIT_METRICS = (
+    "checkpoint_health", "lease_reviews", "seat_usage", "stored_message_pressure"
+)
 MAX_WINDOW = timedelta(days=7)
 MAX_ROWS = 50
 TOP_PRESSURE_ROWS = 10
@@ -62,6 +65,44 @@ def _timeout_error(metric: str, since: str | None) -> AuditReadError:
     return AuditReadError("timeout", detail)
 
 
+def _seat_usage_cursor(
+    db: sqlite3.Connection, user_id: str, since: str | None, until: str | None
+) -> sqlite3.Cursor:
+    # _window requires both bounds for this metric.
+    assert since is not None and until is not None
+    # Subscription accounts are shared across projects, so scope is the
+    # user only and archived threads still count. Token sums follow
+    # Measurement's priceable-token contract so both readers agree; calls
+    # counts every row and excluded_calls the rows that contract drops, so a
+    # meter gap from unpriceable rows stays visible. Unattributed rows split
+    # by harness, since each harness bills a different vendor's meter.
+    # llm_usage.created_at is naive UTC ISO text; compare as text for its index.
+    since_text = datetime.fromisoformat(since).replace(tzinfo=None).isoformat()
+    until_text = datetime.fromisoformat(until).replace(tzinfo=None).isoformat()
+    return db.execute(
+        "SELECT r.account_id, a.name AS account_name, r.harness, "
+        "count(*) AS calls, sum(1-r.priced) AS excluded_calls, "
+        "coalesce(sum(r.priced*r.prompt_tokens),0) AS prompt, "
+        "coalesce(sum(r.priced*r.completion_tokens),0) AS completion, "
+        "coalesce(sum(r.priced*r.cache_creation_tokens),0) AS cache_write, "
+        "coalesce(sum(r.priced*r.cache_read_tokens),0) AS cache_read, "
+        "coalesce(sum(r.priced*r.total_tokens),0) AS total "
+        "FROM (SELECT u.vendor_account_id AS account_id, "
+        "CASE WHEN u.vendor_account_id IS NULL "
+        "THEN substr(u.model,1,instr(u.model,'/')-1) END AS harness, "
+        f"CASE WHEN {priceable_usage_predicate('u')} THEN 1 ELSE 0 END AS priced, "
+        "u.prompt_tokens, u.completion_tokens, u.cache_creation_tokens, "
+        "u.cache_read_tokens, u.total_tokens "
+        "FROM llm_usage u JOIN threads t ON t.id=u.thread_id "
+        "WHERE t.user_id=? AND u.created_at>=? AND u.created_at<? "
+        "AND (u.vendor_account_id IS NOT NULL "
+        "OR substr(u.model,1,12)='claude-code/' OR substr(u.model,1,6)='codex/')) r "
+        "LEFT JOIN vendor_accounts a ON a.id=r.account_id "
+        "GROUP BY r.account_id, r.harness ORDER BY r.account_id, r.harness LIMIT ?",
+        (user_id, since_text, until_text, MAX_ROWS + 1),
+    )
+
+
 def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
            since: str | None, until: str | None, deadline: float) -> list[dict]:
     scope = (user_id, project_id)
@@ -85,6 +126,8 @@ def _query(db: sqlite3.Connection, metric: str, user_id: str, project_id: str,
             "GROUP BY c.trigger,c.status ORDER BY c.trigger,c.status LIMIT ?",
             (*scope, since, until, MAX_ROWS + 1),
         )
+    elif metric == "seat_usage":
+        cursor = _seat_usage_cursor(db, user_id, since, until)
     elif metric == "lease_reviews":
         cursor = db.execute(
             "SELECT l.state, CASE WHEN l.state='rejected' THEN "
@@ -152,7 +195,7 @@ def _read_audit_metric(
 ) -> dict:
     """Read one fixed metric after binding the actor to its owned project."""
     if metric not in AUDIT_METRICS:
-        raise AuditReadError("invalid_metric", "Choose checkpoint_health, lease_reviews, or stored_message_pressure.")
+        raise AuditReadError("invalid_metric", "Choose checkpoint_health, lease_reviews, seat_usage, or stored_message_pressure.")
     start, end = _window(metric, since, until)
     if not actor_thread_id:
         raise AuditReadError("scope_denied", "An authenticated caller thread is required.")
@@ -192,7 +235,7 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "caller_user_and_project",
+        "scope": "caller_user" if metric == "seat_usage" else "caller_user_and_project",
         "window": [start, end] if start is not None else None,
         "rows": rows,
     }

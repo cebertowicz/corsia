@@ -117,7 +117,9 @@ def usage_verdict(response: object) -> dict[str, Any]:
     }
     if not windows:
         return {"verdict": "unknown", "error": "Claude Code reported no plan usage windows"}
-    exhausted = [name for name, window in windows.items() if window["utilization"] >= 100]
+    # The vendor's own refusal spends a window whatever its percentage reads.
+    exhausted = [name for name, window in windows.items()
+                 if window["utilization"] >= 100 or window.get("status") == "rejected"]
     if not exhausted:
         return {"verdict": "allowed"}
     extra = _extra_usable(limits.get("extra_usage"))
@@ -189,6 +191,9 @@ def apply_rate_limit_event(info: object, *, receipt: ReceiptFence | None, db=Non
         verdict: dict[str, Any] | None = (
             {"state": "allowed", "source": "rate_limit_event"} if plan_meter else None
         )
+        if verdict is not None and scope is not None:
+            # A named window speaks only for itself, never for another window's refusal.
+            verdict["window"] = kind
     elif status == "rejected" and scope is not None:
         verdict = {
             "state": "limited", "reason": f"{kind}_limit",

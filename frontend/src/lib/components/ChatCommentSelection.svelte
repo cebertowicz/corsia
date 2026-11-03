@@ -16,11 +16,14 @@
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
 	let editingId = $state<string | null>(null);
+	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
+	let typed = $state<{ target: string | number; text: string } | null>(null);
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 	const editing = $derived(comments.find(comment => comment.id === editingId));
 	const open = $derived(!!draft || !!editing);
+	const target = $derived(editing?.id ?? draft?.anchor.from_off);
 	const isReply = $derived(!!(editing?.root_cid ?? draft?.root_cid));
 	const heading = $derived(editing ? isReply ? 'Edit reply' : 'Edit comment' : isReply ? 'Reply' : 'New comment');
 	let returnFocus: HTMLElement | null = null;
@@ -44,7 +47,7 @@
 		return row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
 	}
 	function close() {
-		pick = null; draft = null; editingId = null;
+		pick = null; draft = null; editingId = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
@@ -185,15 +188,15 @@
 	</button>
 {/if}
 {#if open}
-	{#key editing?.id ?? draft?.anchor.from_off}
+	{#key target}
 		{#if narrow}
 			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
 			</AdaptiveDrawer>
 		{:else}
 			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
 				<div role="dialog" aria-label={heading}>
-					<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+					<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
 				</div>
 			</Popover>
 		{/if}

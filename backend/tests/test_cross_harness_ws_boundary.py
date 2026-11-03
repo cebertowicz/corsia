@@ -343,7 +343,6 @@ async def test_provider_main_ws_wrapper_passes_socket_to_shared_send(
             is_edited=False,
             input_id=None,
             send_thread_input_fn=_send,
-            cc_attachment_block_fn=lambda *_args: "",
         )
     else:
         await message_dispatch.handle_codex_main_message(

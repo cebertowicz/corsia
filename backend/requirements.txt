@@ -22,9 +22,13 @@ anthropic==0.100.0
 openai==2.30.0
 loguru==0.7.3
 httpx==0.28.1
+# The trusted-roots file handed to gws, which can't read the macOS keychain inside the sandbox.
+certifi==2026.5.20
 # Keyless web search (MIT).
 ddgs==9.16.1
 cryptography==48.0.0
+# Opens PDFs for read_file: page text, form values and page pictures (PDFium).
+pypdfium2==5.14.0
 spake2==0.9
 packaging==26.0
 semver==3.0.4

@@ -74,7 +74,7 @@ async def test_event_turn_setup_preserves_supported_reasoning_effort(
     )
 
     prepared = await ws_turn._setup_turn(
-        "event-effort", "input", [], target=target, turn_id="event-turn",
+        "event-effort", "input", target=target, turn_id="event-turn",
         ingress="event", reasoning_effort="medium", broadcast=AsyncMock(),
         preadmitted_turn=TurnIdentity("event-turn", 1),
     )
@@ -1014,7 +1014,6 @@ async def test_external_anthropic_response_persists_and_replays_transport_identi
     ) = await ws_turn._setup_turn(
         thread_id,
         "Begin.",
-        [],
         target=target,
         turn_id=turn_id,
         ingress="delegation",

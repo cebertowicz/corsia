@@ -322,6 +322,7 @@
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
+					textCurrent={liveConnection === null || liveConnection === 'connected' || liveConnection === 'refused'}
 					bind:ranges={presenceRanges} {onPrepareCleanReload}
 					onArrival={(frame) => void activity?.arrive(frame)}
 					onFeedback={(id, feedback) => feedbackStatus?.sync(id, feedback)} />
@@ -355,6 +356,7 @@
 		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetUp}
+		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface

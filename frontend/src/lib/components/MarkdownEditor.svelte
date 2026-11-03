@@ -41,6 +41,7 @@
 		onSave,
 		onSelect,
 		onAnchorFocus,
+		commentsAsSheet = false,
 		onSuggestionHover,
 		onEdit,
 		onLayout,
@@ -66,6 +67,8 @@
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
+		/** Cards open as the phone sheet here, so a caret in a suggestion opens none and the editor keeps the focus to edit. */
+		commentsAsSheet?: boolean;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
 		onLayout?: (mapPos?: (pos: number) => number) => void;
@@ -197,7 +200,8 @@
 		if (r.empty) {
 			onSelect?.(null);
 			const hit = curHighlights.find((h) => r.from >= h.from && r.from <= h.to);
-			if (hit && v.coordsAtPos(r.from)) {
+			// Where cards open as the phone sheet, a caret in a suggestion is editing: only a press on its insert (suggestionMarks) opens the card.
+			if (hit && !(hit.suggestion && commentsAsSheet) && v.coordsAtPos(r.from)) {
 				if (hit.suggestion) onAnchorFocus?.(hit.id, liveAnchor(hit.id), true);
 				else onAnchorFocus?.(hit.id, liveAnchor(hit.id));
 			}
@@ -297,6 +301,8 @@
 		const previous = binding;
 		binding = text ? liveDocumentBinding(text) : undefined;
 		activeText = text;
+		// A different live text (a reset or replacement) cannot be trusted to still hold what was typing.
+		if (previous) settleTypedReveals(view);
 		const next = text?.toString() ?? value;
 		syncing = true;
 		try {
@@ -330,8 +336,8 @@
 	});
 
 	$effect(() => {
+		// A drop or reconnect decides whether a new arrival types, not whether the ones already typing finish.
 		typingOk = typingAllowed;
-		if (!typingAllowed && view) settleTypedReveals(view);
 	});
 
 	let lastPainted = '';

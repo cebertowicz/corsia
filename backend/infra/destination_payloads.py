@@ -120,15 +120,10 @@ async def _render_native_destination(
 ):
     """Render a native destination payload."""
     from core.turn_context import prepare_native_context_payload
-    from ws.turn_helpers import build_agent_content
 
-    agent_content, _legacy_media = build_agent_content(
-        current_user_content,
-        attachments or [],
-    )
     prepared_native = await prepare_native_context_payload(
         thread_id=thread_id,
-        user_content=agent_content,
+        user_content=current_user_content,
         target=target,
         project_id=(
             thread_row["project_id"]

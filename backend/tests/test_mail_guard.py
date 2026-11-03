@@ -76,3 +76,25 @@ def test_relay_address_matching_and_email_count():
     result = check(target=relay, sender=[relay, newer, other])
     assert len(result.stale) == 2
     assert result.info[0].startswith("3 emails")
+
+
+def test_own_target_replies_to_original_to_without_count_or_no_reply_stop():
+    own = replace(TARGET, sender="Me <me@example.test>", to="Pat <pat@example.test>, ME@example.test", own=True)
+    result = check(target=own, to=["pat@example.test"])
+    assert result.recipients == ["pat@example.test"]
+    assert not result.warnings and not result.info and not result.stops
+    assert check(target=own, to=["other@example.test"]).warnings
+    assert check(target=replace(own, to="me@example.test")).stops
+    assert not check(target=replace(own, sender="No Reply <noreply@example.test>")).stops
+
+
+def test_own_target_later_other_warns_and_later_own_stops():
+    own = replace(TARGET, sender="Me <me@example.test>", to="pat@example.test", own=True)
+    other = replace(TARGET, message_id="b", sender="Pat <pat@example.test>", date=NOW)
+    assert check(target=own, thread=[other]).warnings
+    assert check(target=own, thread=[replace(other, sender="Me <me@example.test>")]).stops
+
+
+def test_from_the_account_without_own_flag_is_still_counted():
+    forged = replace(TARGET, sender="Me <me@example.test>", to="pat@example.test")
+    assert check(target=forged).info

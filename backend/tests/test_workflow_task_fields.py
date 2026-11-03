@@ -350,7 +350,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             "plan_id": plan.id, "mutation_id": "phase", "operation": "add",
             "params": {
                 "kind": "phase", "title": "Run sample", "acceptance_criteria": "Run recorded",
-                "workflow_ref": "sample",
+                "workflow_ref": "sample", "size": "M",
             },
         },
     ))
@@ -388,7 +388,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             "plan_id": plan.id, "mutation_id": "unknown-version", "operation": "add",
             "params": {
                 "kind": "phase", "title": "Run unversioned",
-                "acceptance_criteria": "Run recorded", "workflow_ref": "unversioned",
+                "acceptance_criteria": "Run recorded", "workflow_ref": "unversioned", "size": "M",
             },
         },
     ))
@@ -462,7 +462,7 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
         return json.loads(await execute_as(
             registry, identity, thread_id, "plan_update",
             {"plan_id": plan.id, "mutation_id": mutation_id, "operation": "add",
-             "params": {"kind": "phase", "title": mutation_id, "acceptance_criteria": "Recorded", **params}},
+             "params": {"kind": "phase", "title": mutation_id, "acceptance_criteria": "Recorded", "size": "M", **params}},
         ))
 
     plain = await add("no-workflow")
@@ -517,7 +517,7 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
             "params": {
                 "kind": "phase", "title": "Run system",
                 "acceptance_criteria": "System run recorded",
-                "workflow_ref": "task-discipline",
+                "workflow_ref": "task-discipline", "size": "M",
             },
         },
     ))

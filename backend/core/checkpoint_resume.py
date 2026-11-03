@@ -158,6 +158,19 @@ async def _installed_candidate(
     return candidate
 
 
+async def _adopt(
+    boundary: ProviderBoundary, record_id: str, installed: InstalledContinuation,
+) -> ProviderContinuation:
+    """Adopt an installed continuation, keeping the size it first measured (once)."""
+    from infra.checkpoint_adoption import record_adopted_input_tokens
+    from infra.db_async import run_in_db
+
+    await run_in_db(record_adopted_input_tokens, record_id, installed.input_tokens)
+    return ProviderContinuation(
+        BoundaryDecision.ADOPT_AND_PROCEED, boundary.turn, installed.payload, record_id,
+    )
+
+
 def _payload(
     boundary: ProviderBoundary,
     active: CheckpointRecord | None,
@@ -180,6 +193,10 @@ def _payload(
         checkpoint_admissible=boundary.prepare_checkpoint is not None,
         recovery_input_tokens=boundary.recovery_input_tokens,
         fixed_tokens=boundary.fixed_input_tokens,
+        adopted_input_tokens=(
+            boundary.installed_checkpoint.adopted_input_tokens
+            if boundary.installed_checkpoint is not None else None
+        ),
     )
 
 
@@ -215,12 +232,7 @@ async def _await_installed(
             started,
             allow_newer_fold=False,
         )
-    return ProviderContinuation(
-        BoundaryDecision.ADOPT_AND_PROCEED,
-        boundary.turn,
-        installed.payload,
-        completed.id,
-    )
+    return await _adopt(boundary, completed.id, installed)
 
 
 async def _required_checkpoint_continuation(
@@ -230,12 +242,8 @@ async def _required_checkpoint_continuation(
 ) -> ProviderContinuation:
     installed = await _installed_candidate(boundary, installed_record)
     if installed is not None and installed.input_tokens <= boundary.context_window:
-        return ProviderContinuation(
-            BoundaryDecision.ADOPT_AND_PROCEED,
-            boundary.turn,
-            installed.payload,
-            installed_record.id if installed_record is not None else None,
-        )
+        assert installed_record is not None  # a candidate renders only from a record
+        return await _adopt(boundary, installed_record.id, installed)
     if active is not None:
         return await _await_installed(boundary, active)
     if installed is not None:
@@ -287,9 +295,7 @@ async def maintain_before_provider_call(
         return ProviderContinuation(decision, boundary.turn)
     if decision is BoundaryDecision.ADOPT_AND_PROCEED:
         assert installed_record is not None and installed is not None
-        return ProviderContinuation(
-            decision, boundary.turn, installed.payload, installed_record.id
-        )
+        return await _adopt(boundary, installed_record.id, installed)
     if decision is BoundaryDecision.PROCEED_AND_FOLD:
         started = await _start_checkpoint(boundary, required=False)
         return ProviderContinuation(

@@ -1,4 +1,4 @@
-"""A cold Native fork's input ends on a user turn, whatever the source ends on."""
+"""A cold Native fork's input closes on the instruction itself, as a warm one does."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from core import fork_native as fork
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
-INSTRUCTION = "fold\n\n[CORSIA frozen continuity index]\n## facts (index)"
+INSTRUCTION = "[CORSIA frozen continuity index]\n## facts (index)\n\nWrite the checkpoint narrative."
 
 
 def _roles(messages):
@@ -17,8 +17,9 @@ def _roles(messages):
 
 
 @pytest.mark.asyncio
-async def test_source_ending_on_an_assistant_reply_gets_a_closing_user_turn(monkeypatch):
-    """A manual checkpoint's range ended on a reply and the model echoed the index."""
+async def test_source_ending_on_an_assistant_reply_closes_on_the_instruction(monkeypatch):
+    """A manual checkpoint's range ended on a reply; a closing pointer to a
+    system instruction got a turn-ending agent note instead of a narrative."""
     source = (
         {"role": "user", "content": "[CORSIA checkpoint] prior narrative"},
         {"role": "assistant", "content": "[msg a] Correction triaged; replied noted."},
@@ -37,14 +38,12 @@ async def test_source_ending_on_an_assistant_reply_gets_a_closing_user_turn(monk
     messages, _tools, first_seq = await fork._messages_and_tools(request, agent, CHECKPOINT_KIND)
 
     assert first_seq == 64
-    assert messages[0] == {"role": "system", "content": INSTRUCTION}
-    assert messages[1:3] == list(source)
-    assert messages[-1] == fork.COLD_CLOSING_TURN
-    assert _roles(messages) == ["system", "user", "assistant", "user"]
+    assert messages == [*source, {"role": "user", "content": INSTRUCTION}]
+    assert all(message["content"] != INSTRUCTION for message in messages[:-1])
 
 
-def test_source_ending_on_a_user_turn_keeps_alternation():
-    """A range ending on a tool result (quoted as user) merges the close into it."""
+def test_source_ending_on_a_user_turn_ends_on_the_instruction():
+    """A range ending on a tool result (quoted as user) merges the instruction after it."""
     source = (
         {"role": "assistant", "content": "[msg b] calling a tool"},
         {"role": "user", "content": "[msg c] Entry 2 retired."},
@@ -52,8 +51,7 @@ def test_source_ending_on_a_user_turn_keeps_alternation():
 
     messages = fork.cold_messages(INSTRUCTION, source)
 
-    assert _roles(messages) == ["system", "assistant", "user"]
-    assert messages[-1]["content"] == (
-        "[msg c] Entry 2 retired.\n\n" + fork.COLD_CLOSING_TURN["content"]
-    )
+    assert _roles(messages) == ["assistant", "user"]
+    assert messages[-1]["content"] == "[msg c] Entry 2 retired.\n\n" + INSTRUCTION
+    assert messages[-1]["content"].endswith("Write the checkpoint narrative.")
     assert source[-1]["content"] == "[msg c] Entry 2 retired."

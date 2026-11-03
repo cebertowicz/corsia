@@ -118,11 +118,15 @@ def _learn_memory_fit(
 async def _resend_after_guard_refusal(
     error: Exception, model: str, omlx_server_id: str | None,
 ) -> bool:
-    """True after a first prefill-guard refusal, once the seat has gone quiet or the wait ended."""
-    from infra.carry_in_capacity import wait_until_quiet
-    from llm.memory_fit import parse_guard_refusal
+    """True after a first prefill-guard refusal, once the seat has gone quiet or the wait ended.
 
-    if not omlx_server_id or parse_guard_refusal(str(error)) is None:
+    Every guard wording qualifies, including those that carry no memory terms to
+    learn a fit from.
+    """
+    from infra.carry_in_capacity import wait_until_quiet
+    from subagents.provider_context_limits import is_omlx_guard_refusal
+
+    if not omlx_server_id or not is_omlx_guard_refusal(str(error)):
         return False
     quiet = await wait_until_quiet(
         omlx_server_id,

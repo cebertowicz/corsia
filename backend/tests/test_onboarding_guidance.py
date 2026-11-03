@@ -441,18 +441,17 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
     posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on.**" in step
-    assert "**Auto-approve is on.** A reviewer model checks each request" in step
-    assert "every command that uses it" in step and "Most requests start without asking you" in step
-    assert "turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review" in step
-    assert "Anything that would change a repository's rules still asks you" in step
+    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on:**" in step
+    assert "**Auto-approve is on:** a reviewer model checks each request to use files outside your work folder, and most start without asking you." in step
+    assert "To approve each one yourself, turn it off in [Settings › System](/settings/system#host-access-review)." in step
+    assert "Access covers one chat" not in step and "still asks you" not in step
     assert "No safeguard is perfect" in step and "its own macOS user account" in step
     assert "safe" not in posted.replace("safeguard", "") and "secure" not in posted
     assert "A chat on a cloud model sends what you say to that provider" in posted
     assert "Apps you connect, like your email, follow their own privacy terms" in posted
     assert "helpers" not in step and "application" not in step
     assert "Claim no safeguard beyond those stated here" in step
-    assert "Auto-approve follows `auto_approve`. When it is false" in step and "**Auto-approve is off.**" in step
+    assert "Auto-approve follows `auto_approve`. When it is false, replace the Auto-approve line with `**Auto-approve is off:** you approve each request to use files outside your work folder." in step
     # An unreadable Auto-approve state drops only the Auto-approve advice; the own-account advice stays.
     assert 'When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.' in step
     assert len("\n".join(line for line in posted.splitlines() if line.lstrip().startswith(">"))) < 1900

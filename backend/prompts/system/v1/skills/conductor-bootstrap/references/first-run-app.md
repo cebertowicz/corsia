@@ -72,14 +72,13 @@ The server posts `references/first-run-opening.md` as your first message, with `
    > - send or post as you
    > - spend money
    >
-   > **Auto-approve is on.** A reviewer model checks each request for access outside your work folder, and every command that uses it. Most requests start without asking you, so agents keep working while you're away. Access covers one chat and ends when its time is up. Anything that would change a repository's rules still asks you.
-   > To approve each request yourself instead, turn off Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.
+   > **Auto-approve is on:** a reviewer model checks each request to use files outside your work folder, and most start without asking you. To approve each one yourself, turn it off in [Settings › System](/settings/system#host-access-review).
    >
    > Your keys, passwords and sign-ins, and CORSIA's own data, stay closed to agents. No safeguard is perfect: if this computer holds very sensitive information, turn Auto-approve off, or give CORSIA its own macOS user account.
    >
    > A chat on a cloud model sends what you say to that provider. Apps you connect, like your email, follow their own privacy terms; CORSIA can't control what they do with what they receive.
 
-   Auto-approve follows `auto_approve`. When it is false, replace the two Auto-approve lines with `**Auto-approve is off.** A reviewer model checks each request for access outside your work folder, and every command that uses it, and you approve each request yourself. To let most requests start without asking you, turn on Auto-approve in [Settings › System](/settings/system#host-access-review), under Host access review.` and write `leave` for `turn` in the next paragraph's "turn Auto-approve off". When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.
+   Auto-approve follows `auto_approve`. When it is false, replace the Auto-approve line with `**Auto-approve is off:** you approve each request to use files outside your work folder. To let the reviewer approve most of them, turn it on in [Settings › System](/settings/system#host-access-review).` and write `leave` for `turn` in the next paragraph's "turn Auto-approve off". When it is `unavailable`, leave out those lines, and in the next paragraph drop "turn Auto-approve off, or " so it still says to give CORSIA its own macOS user account.
 
    Only when `local_eligible` is true, add this to the same post:
 

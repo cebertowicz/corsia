@@ -236,6 +236,15 @@ def test_sidebar_summary_uses_readable_marked_message_text_only(db):
     assert thread_updates.latest_by_thread(db, ["worker"])["worker"]["summary"] is None
 
 
+def test_sidebar_summary_hides_comment_answer_tags(db):
+    message_id = _message(db, "owner", 1)
+    db.execute("UPDATE messages SET content='[c5.1] Moved to 4 AM.' WHERE id=?", (message_id,))
+    thread_updates.record_marked(
+        db, thread_id="owner", message_id=message_id, node_id=None, created_at=_AT,
+    )
+    assert thread_updates.latest_by_thread(db, ["owner"])["owner"]["summary"] == "Moved to 4 AM."
+
+
 def test_latest_display_preview_and_attention_are_independent_for_passive_outcomes(db):
     message_id = _message(db, "owner", 1)
     db.execute("UPDATE messages SET content='Needs a decision' WHERE id=?", (message_id,))

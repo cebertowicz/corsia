@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { LiveDocumentSession } from './liveDocumentSession';
-import { captureComment, selectComment, RESERVE_BUDGET_MS, SELECTION_LOST } from './commentSelection';
+import { captureComment, selectComment, selectionRange, RESERVE_BUDGET_MS, SELECTION_LOST } from './commentSelection';
 import { encodeUpdate, type DocumentFrame } from './documentWire';
 
 const documents: Y.Doc[] = [], sessions: LiveDocumentSession[] = [];
@@ -230,4 +230,30 @@ it('rejects equal text with deleted and reinserted character identity without as
 	value.remote(text => { text.delete(6, 4); text.insert(6, 'beta'); });
 	await refused;
 	expect(value.asks()).toHaveLength(0);
+});
+it.each([
+	['a case change inside', (text: Y.Text) => { text.delete(7, 1); text.insert(7, 'E'); }, 'bEta'],
+	['an insert inside', (text: Y.Text) => text.insert(8, 'xx'), 'bexxta'],
+	['a partial delete', (text: Y.Text) => text.delete(8, 2), 'be'],
+	['an edit outside', (text: Y.Text) => text.insert(0, 'zz '), 'beta'],
+])('keeps the selection after %s, quoting the text now there', (_name, edit, quote) => {
+	const value = opened();
+	value.remote(edit);
+	const range = selectionRange(value.selection);
+	expect(range).toMatchObject({ quote });
+	expect(value.session.text.toString().slice(range!.from, range!.to)).toBe(quote);
+});
+it('loses the selection once all of it is deleted', () => {
+	const value = opened();
+	value.remote(text => text.delete(6, 4));
+	expect(selectionRange(value.selection)).toBeNull();
+});
+it('asks the server for the range and the text an agent edit left, not the text first selected', async () => {
+	const value = opened();
+	value.remote(text => text.insert(8, 'xx'));
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	await value.asked(1);
+	expect(value.reserve()).toMatchObject({ from_off: 6, to_off: 12 });
+	value.answer();
+	await expect(request).resolves.toMatchObject({ from: 6, to: 12, quote: 'bexxta' });
 });

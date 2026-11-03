@@ -9,7 +9,8 @@ in ``metadata_json['image_input']``. A user's choice wins over detection and
 survives rediscovery; nothing is inferred from a model's name.
 
 Probes run only for a model never checked, or when the user tests the endpoint
-or asks to detect again; never on a timer.
+or asks to detect again; never on a timer, and never for a model the user
+turned off.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ async def probe_image_input(server_id: str, pmid: str) -> tuple[str, str]:
 
 def _rows(db, server_id: str) -> list:
     return db.execute(
-        "SELECT id, litellm_model, metadata_json FROM models "
+        "SELECT id, litellm_model, metadata_json, enabled FROM models "
         "WHERE provider = ? AND litellm_model LIKE ? AND available = 1",
         (PROVIDER, f"{PREFIX}{server_id}/%"),
     ).fetchall()
@@ -129,9 +130,10 @@ def image_input_state(metadata_json: str | None) -> dict | None:
 def models_to_probe(server_id: str) -> list[str]:
     """Served ids whose image support detection should settle now.
 
-    A user's choice is never probed over; a checked row only when marked for
-    a re-check. Probing a row replaces its record, which clears the mark, so
-    one Test connection never probes a model twice."""
+    A user's choice is never probed over, and a row they turned off is never
+    called; a checked row only when marked for a re-check. Probing a row
+    replaces its record, which clears the mark, so one Test connection never
+    probes a model twice."""
     db = get_db()
     try:
         rows = _rows(db, server_id)
@@ -139,6 +141,8 @@ def models_to_probe(server_id: str) -> list[str]:
         db.close()
     ids = []
     for row in rows:
+        if not row["enabled"]:
+            continue
         state = _meta(row).get("image_input") or {}
         if state.get("source") == USER:
             continue

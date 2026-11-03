@@ -40,11 +40,6 @@ from core.fork_types import (
 # still covers the largest local checkpoint call measured (7,336 tokens).
 SMALL_WINDOW_OUTPUT_DIVISOR = 5
 
-COLD_CLOSING_TURN = {
-    "role": "user",
-    "content": "Carry out the system instruction now, using the conversation above as its source.",
-}
-
 
 def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
     """Bound the fork's output allowance by its writer's window."""
@@ -134,19 +129,16 @@ async def _messages_and_tools(
 def cold_messages(
     instruction: str, source: tuple[dict[str, Any], ...] | list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Frame a cold source so the fork's next turn answers the instruction.
+    """Close a cold source on the instruction itself, as the warm branch does.
 
-    The source quotes history in its own roles. One that ends on an assistant
-    reply (a manual, idle or model-switch checkpoint) left the system text as
-    the last instruction, and a model echoed its frozen continuity index
-    instead of writing; the warm branch already closes with a user turn.
+    The source quotes history in its own roles. With the instruction in a
+    system message ~14k tokens back, a local model either echoed its frozen
+    continuity index (source ending on a reply) or, given only a closing
+    pointer to it, wrote a turn-ending note in the agent's voice.
     """
     from history.adapters import merge_checkpoint_source_blocks
 
-    return [
-        {"role": "system", "content": instruction},
-        *merge_checkpoint_source_blocks([*source, COLD_CLOSING_TURN]),
-    ]
+    return merge_checkpoint_source_blocks([*source, {"role": "user", "content": instruction}])
 
 
 async def warm_input_fits(

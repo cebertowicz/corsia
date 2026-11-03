@@ -3,7 +3,7 @@
 Source: the learning-loop mental model, "Side by side: with and without a lesson" and "What happens to a
 lesson". The unit is the plan task. Each task a trial was delivered to is one ``Run`` whose version is the half
 it was drawn into (``with`` or ``without``) and whose group is its workflow step, so the existing within-group
-pooling does the step split. Tasks that crossed over and tasks the trial skipped (omitted) belong to neither
+pooling does the step split. Tasks left out for a cause (see ``DROP_CAUSES``) belong to neither
 half. ``core.workflow_verdict_rules.decide_arms`` makes the call; this module only selects the arms, freezes
 the plan, finds the owner and reads back what the nightly job needs.
 
@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-import time
 from collections import defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -47,6 +46,8 @@ SENT_BACK, RESTARTED = "sent_back", "restarted"
 OBSERVED = "observed"  # both measures are read straight from the plan: a row fact, not an owner's label
 WITH, WITHOUT = "with", "without"
 NO_STEP = "none"
+# Why a task is in neither half, in precedence order: the first cause that matches is the one counted.
+DROP_CAUSES = ("revision", "prior_with", "late_open", "omitted")
 # Open trials: a delivered (lesson, version) with no reached verdict yet. Whether the trial file still says
 # `trial` at that version is confirmed against the file, so a retired or edited lesson drops out.
 OPEN_TRIALS_SQL = """
@@ -61,9 +62,25 @@ OPEN_TRIALS_SQL = """
     GROUP BY g.lesson_id, g.lesson_behavioral_sha256
     ORDER BY first_at, g.lesson_id
 """
+# ``prior_with``: the task's thread (or a node spawned into it) already had a with receipt for this trial earlier in
+# the same checkpoint generation. A generation id is a per-thread checkpoint record, so "the same generation" is
+# read against the task's own thread: the with came at or after the install of the checkpoint the task sits in
+# (NULL is the generation before the first checkpoint, so any earlier with counts; a missing checkpoint row or
+# install time counts as exposed). Decided here, on the read side, for both halves alike; delivery records the raw
+# draw. ``revision``: a revision of a sent-back task, so the root task stays the unit. This differs from a workflow
+# run (``run_roots``), which a same-``workflow_ref`` follow-up continues: a lesson trial is not scoped to a
+# workflow, and each task draws its own receipt, so only a send-back's revision repeats a task already counted.
 ARM_ROWS_SQL = """
-    SELECT g.node_id, g.thread_id, g.variant, g.created_at AS received_at, n.state, n.created_at, n.updated_at,
-      n.workflow_step, n.sent_back
+    SELECT g.node_id, g.thread_id, g.variant,
+      g.created_at AS received_at, n.state, n.created_at, n.updated_at, n.workflow_step, n.sent_back,
+      EXISTS (SELECT 1 FROM guidance_loads w LEFT JOIN plan_nodes wn ON wn.id=w.node_id
+        WHERE w.lesson_id=g.lesson_id AND w.lesson_behavioral_sha256=g.lesson_behavioral_sha256
+          AND w.variant='with' AND w.node_id IS NOT g.node_id
+          AND (w.thread_id=g.thread_id OR wn.spawned_thread_id=g.thread_id)
+          AND (g.checkpoint_generation_id IS NULL OR julianday(w.created_at) >= COALESCE(julianday(
+            (SELECT c.installed_at FROM checkpoints c WHERE c.id=g.checkpoint_generation_id)), 0))
+          AND (w.created_at<g.created_at OR (w.created_at=g.created_at AND w.id<g.id))) AS prior_with,
+      EXISTS (SELECT 1 FROM plan_nodes root WHERE root.id=n.follow_up_of AND root.sent_back>0) AS revision
     FROM guidance_loads g LEFT JOIN plan_nodes n ON n.id=g.node_id
     WHERE g.lesson_id=:lesson AND g.lesson_behavioral_sha256=:sha AND g.node_id IS NOT NULL
 """
@@ -101,12 +118,11 @@ class Arms:
 
     with_runs: tuple[Run, ...]
     without_runs: tuple[Run, ...]
-    crossed_over: int
-    omitted: int
+    dropped: Mapping[str, int]
 
     def inputs(self) -> dict[str, object]:
         return {"with": len(self.with_runs), "without": len(self.without_runs),
-                "crossed_over": self.crossed_over, "omitted": self.omitted}
+                **{cause: self.dropped[cause] for cause in DROP_CAUSES}}
 
 
 def open_trials(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LIMIT) -> list[OpenTrial]:
@@ -140,7 +156,7 @@ def _kpi_rows(sent_back: bool, restarted: bool, at: str) -> dict[str, tuple[KpiR
 
 
 def read_arms(db: sqlite3.Connection, open_trial: OpenTrial) -> Arms:
-    """Each delivered task as a run in its half; crossed-over and omitted tasks are counted and left out."""
+    """Each delivered task as a run in its half; tasks left out of both are counted by cause (``DROP_CAUSES``)."""
     params = {"lesson": open_trial.lesson_id, "sha": open_trial.sha}
     rows = [dict(row) for row in db.execute(ARM_ROWS_SQL, params).fetchall()]
     ids = [row["node_id"] for row in rows if row["variant"] in (WITH, WITHOUT) and row["state"]]
@@ -150,21 +166,31 @@ def read_arms(db: sqlite3.Connection, open_trial: OpenTrial) -> Arms:
     for row in db.execute(OPENED_SQL, params).fetchall():
         opened[row["node_id"]].append(row["created_at"])
     halves: dict[str, list[Run]] = {WITH: [], WITHOUT: []}
-    crossed = omitted = 0
+    dropped = dict.fromkeys(DROP_CAUSES, 0)
     for row in rows:
         node = {"id": row["node_id"], "state": row["state"], "updated_at": row["updated_at"]}
         end = node_terminal_at(node, times) if row["state"] else None
-        if row["variant"] == "crossover" or (row["variant"] == WITHOUT and any(
-                end is None or parse_ts(at) <= parse_ts(end) for at in opened.get(row["node_id"], ()))):
-            crossed += 1
-        elif row["variant"] not in (WITH, WITHOUT) or not row["state"]:
-            omitted += 1
+        cause = _drop_cause(row, end, opened.get(row["node_id"], ()))
+        if cause:
+            dropped[cause] += 1
         else:
             facts = _kpi_rows(bool(row["sent_back"]), row["node_id"] in restarted, end) if end else {}
             group = (row["workflow_step"] or NO_STEP, NO_STEP, NO_STEP)
             halves[row["variant"]].append(Run(row["node_id"], row["variant"], group, row["created_at"], end,
                                               row["state"], kpi_rows=facts))
-    return Arms(_settled_first(halves[WITH]), _settled_first(halves[WITHOUT]), crossed, omitted)
+    return Arms(_settled_first(halves[WITH]), _settled_first(halves[WITHOUT]), dropped)
+
+
+def _drop_cause(row: Mapping[str, object], end: str | None, opened: Sequence[str]) -> str | None:
+    """The first ``DROP_CAUSES`` match for one receipt row, or None when the task counts in its half."""
+    drawn = row["variant"] in (WITH, WITHOUT)
+    if row["revision"]:
+        return "revision"
+    if drawn and row["prior_with"]:
+        return "prior_with"
+    if drawn and row["variant"] == WITHOUT and any(end is None or parse_ts(at) <= parse_ts(end) for at in opened):
+        return "late_open"
+    return None if drawn and row["state"] else "omitted"
 
 
 def _settled_first(runs: Sequence[Run]) -> tuple[Run, ...]:
@@ -236,37 +262,15 @@ def _project_of(path: Path, workspace: Path, db: sqlite3.Connection) -> str | No
     return project_id_for_root(workspace / "projects" / relative.parts[0], workspace, db) if relative.parts else None
 
 
-@dataclass
-class TrialRead:
-    """What one ``evaluate_trials`` call read, for a caller that reports it: seconds per phase, the open trials
-    and each one's halves before pricing. Filled in place; asking for it changes no verdict."""
-
-    seconds: dict[str, float] = field(default_factory=dict)
-    trials: list[OpenTrial] = field(default_factory=list)
-    arms: dict[str, Arms] = field(default_factory=dict)
-
-    def lap(self, phase: str, started: float) -> float:
-        now = time.monotonic()
-        self.seconds[phase] = self.seconds.get(phase, 0.0) + now - started
-        return now
-
-
-def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_BATCH_LIMIT,
-                    read: TrialRead | None = None) -> list[Evaluation]:
+def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_BATCH_LIMIT) -> list[Evaluation]:
     """Every open trial's evaluation, with the cost of each task priced; nothing is written."""
-    read = read if read is not None else TrialRead()
-    lap = time.monotonic()
-    opened = read.trials = open_trials(db, limit=limit)
-    lap = read.lap("lesson_open_trials", lap)
+    opened = open_trials(db, limit=limit)
     if not opened:
         return []
     plans, reached = recorded_verdicts(db, [item.subject for item in opened])
     definitions, _owners = workflow_definitions(db)
-    lap = read.lap("lesson_setup", lap)
-    arms = read.arms = {item.subject: read_arms(db, item) for item in opened}
-    lap = read.lap("lesson_read_arms", lap)
+    arms = {item.subject: read_arms(db, item) for item in opened}
     priced = _priced(db, now, arms)
-    lap = read.lap("lesson_pricing", lap)
     evaluations = []
     for item in opened:
         if item.subject in reached:
@@ -279,7 +283,6 @@ def evaluate_trials(db: sqlite3.Connection, now: datetime, *, limit: int = OPEN_
         verdict = decide_arms(plan, TwoArms(halves.without_runs, halves.with_runs, matched=True), now,
                               inputs=halves.inputs())
         evaluations.append(Evaluation(item.subject, trial_owner(db, item), plan, verdict, existing is None))
-    read.lap("lesson_decide", lap)
     return evaluations
 
 

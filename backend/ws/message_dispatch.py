@@ -203,7 +203,6 @@ async def handle_cc_main_message(
     target: ExecutionTarget | None = None,
     delivery_intent: str = "apply_now",
     send_thread_input_fn: Callable[..., Awaitable[Any]],
-    cc_attachment_block_fn: Callable[[list, str], str],
 ) -> None:
     metadata: dict = {}
     if attachments:

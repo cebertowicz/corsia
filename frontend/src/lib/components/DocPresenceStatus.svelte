@@ -43,6 +43,7 @@
 		onPrepareCleanReload,
 		onFeedback,
 		onArrival,
+		textCurrent = true,
 	}: {
 		target: DocViewerTarget;
 		artifactId?: string | null;
@@ -53,6 +54,8 @@
 		onPrepareCleanReload: () => Promise<CleanReload | null>;
 		onFeedback: (artifactId: string, feedback: CommentFeedback) => void;
 		onArrival?: (frame: DocActivityFrame) => void;
+		/** False while the canvas's live text is away (opening or reconnecting), when an arrival cannot type in it. */
+		textCurrent?: boolean;
 	} = $props();
 
 	let clock = $state(Date.now());
@@ -173,12 +176,14 @@
 			prepare: (frame) => prepare(frame, currentArtifactId),
 			reveal: (frame, payload) => reveal(frame, payload, currentArtifactId),
 			select: (frame, prepared) => select(frame, prepared, currentArtifactId),
+			textCurrent: () => textCurrent,
 		});
 	});
 
 	$effect(() => {
 		$displayedDocument;
 		visibility;
+		textCurrent;
 		notifyDocPresenceViewingChanged(artifactId);
 	});
 

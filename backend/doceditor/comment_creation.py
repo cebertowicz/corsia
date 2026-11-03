@@ -50,11 +50,20 @@ class CreateReceipt:
                 self.rolled_back = True
 
 
-def browser_anchor(live, identifier: str | None, quote: str) -> Anchor:
-    """The span this comment's own capture reserved, which the live text has carried since."""
+def _text_at(text: str, start: int, end: int) -> str | None:
+    """The text of a UTF-16 span, or None when it splits a character."""
+    try:
+        return text.encode("utf-16-le")[start * 2:end * 2].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+
+
+def browser_anchor(live, identifier: str | None) -> Anchor:
+    """The span this comment's own capture reserved, anchored on the text the live document holds there now."""
     span = live.held_span(identifier)
-    context = anchor_context(live.text, *span, quote) if span is not None else None
-    if context is None:
+    quote = _text_at(live.text, *span) if span is not None else None
+    context = anchor_context(live.text, *span, quote) if span is not None and quote else None
+    if span is None or not quote or context is None:
         live.release(identifier)
         raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
     return Anchor(quote, *span, *context)
@@ -150,7 +159,7 @@ async def create_validated_comment(request, client_id):
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:
-            prepare = lambda live: browser_anchor(live, client_id, request.quote)
+            prepare = lambda live: browser_anchor(live, client_id)
         elif request.region is not None:
             prepare = lambda live: image_anchor(live, request.quote, request.near)
         else:

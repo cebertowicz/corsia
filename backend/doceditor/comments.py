@@ -197,8 +197,8 @@ def create_with_status(
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
         if created:
-            # Only a new top-level agent comment names itself; replies, suggestions and user comments do not.
-            named = author_kind == "agent" and author_thread_id and not parent_id and replacement is None
+            # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
+            named = author_kind == "agent" and author_thread_id and not parent_id
             if announce:  # a person's comment is announced by its delivery instead
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,

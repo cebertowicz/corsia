@@ -3,8 +3,10 @@
 oMLX refuses a prompt whose prefill would not fit in memory before doing any
 work. The refusal states the limit L, the memory already in use C and the
 KV+SDPA cost K of this prompt of P tokens, so it teaches how many tokens fit:
-``P * (L - C) / K``. C includes whatever else the server is doing at that
-moment, so the fact holds only while the refused Turn recovers: it lives in
+``P * (L - C) / K``. A refusal between prefill chunks instead names the N tokens
+already held when the next chunk would not fit, so N fit. C includes whatever
+else the server is doing at that moment, so the fact holds only while the
+refused Turn recovers: it lives in
 process memory, keyed by (server, model), and ``end_turn`` drops it when that
 Turn ends. ``context_window.resolve_live_window_facts`` caps the runtime window
 with it; settings and catalog surfaces keep the configured one.
@@ -15,14 +17,24 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, NamedTuple
 
-_GIB = 2 ** 30
+_UNITS = {"GB": 2 ** 30, "MB": 2 ** 20, "KB": 2 ** 10}
+_AMOUNT = r"([\d.]+)\s*(GB|MB|KB)"
 
-_CURRENT_AND_KV = re.compile(
-    r"current\s+([\d.]+)\s*GB\s*\+\s*KV\+SDPA\s+([\d.]+)\s*GB", re.IGNORECASE
-)
-# The scheduler's guard says "the prefill limit is L"; the memory monitor's says
-# "<binding> ceiling is L". Both carry the same current and KV+SDPA terms.
-_LIMIT = re.compile(r"(?:prefill limit|ceiling) is\s+([\d.]+)\s*GB", re.IGNORECASE)
+# oMLX 0.7.1rc1 refuses in four wordings, all "prefill memory guard rejected":
+# the scheduler's "(current C + KV+SDPA K) but the prefill limit is L"; the memory
+# monitor's "... but <binding> ceiling is L"; the preflight safety guard's
+# "(current C + KV K + min-chunk transient T) but prefill safety cap is L"; and
+# the chunked-step guard's "pre-chunk guard at P tokens, kv_len=N ... prefill safety
+# cap L", which names no current or KV term but N, the tokens already held.
+_CURRENT = re.compile(r"current\s+" + _AMOUNT, re.IGNORECASE)
+_KV = re.compile(r"\+\s*KV(?:\+SDPA)?\s+" + _AMOUNT, re.IGNORECASE)
+_TRANSIENT = re.compile(r"\+\s*min-chunk transient\s+" + _AMOUNT, re.IGNORECASE)
+_LIMIT = re.compile(r"(?:prefill limit|ceiling|prefill safety cap) is\s+" + _AMOUNT, re.IGNORECASE)
+_HELD = re.compile(r"pre-chunk guard at \d+ tokens, kv_len=(\d+)", re.IGNORECASE)
+
+
+def _bytes(match: re.Match[str]) -> int:
+    return int(float(match.group(1)) * _UNITS[match.group(2).upper()])
 
 
 class _Observation(NamedTuple):
@@ -47,16 +59,20 @@ def split_omlx_selector(selector: Any) -> tuple[str, str] | None:
 
 
 def parse_guard_refusal(text: str) -> tuple[int, int, int] | None:
-    """(limit, current, kv) in bytes from a prefill-guard refusal, else None."""
-    current_kv = _CURRENT_AND_KV.search(text)
-    limit = _LIMIT.search(text)
-    if not current_kv or not limit:
+    """(limit, current, kv) in bytes from a prefill-guard refusal, else None.
+
+    A min-chunk transient does not grow with the prompt, so it counts as memory
+    already in use rather than as KV.
+    """
+    current, kv, limit = _CURRENT.search(text), _KV.search(text), _LIMIT.search(text)
+    if not current or not kv or not limit:
         return None
+    transient = _TRANSIENT.search(text)
     try:
         return (
-            int(float(limit.group(1)) * _GIB),
-            int(float(current_kv.group(1)) * _GIB),
-            int(float(current_kv.group(2)) * _GIB),
+            _bytes(limit),
+            _bytes(current) + (_bytes(transient) if transient else 0),
+            _bytes(kv),
         )
     except ValueError:
         return None
@@ -77,14 +93,23 @@ def record_refusal(
     Outside a Turn nothing would end the observation, so nothing is recorded.
     """
     key = (server_id, model_id)
-    parsed = parse_guard_refusal(error_text)
     turn_id = _current_turn_id()
-    if not all(key) or turn_id is None or parsed is None or prompt_tokens <= 0 or parsed[2] <= 0:
+    fit = _fit_tokens(error_text, prompt_tokens)
+    if not all(key) or turn_id is None or fit is None:
         return
-    limit, current, kv = parsed
-    fit = int(prompt_tokens * (limit - current) / kv) if limit > current else 0
     # Never zero: callers treat a zero window as "no window known".
     _OBSERVATIONS[key] = _Observation(turn_id, max(1, fit))
+
+
+def _fit_tokens(error_text: str, prompt_tokens: int) -> int | None:
+    parsed = parse_guard_refusal(error_text)
+    if parsed is None:
+        held = _HELD.search(error_text)
+        return int(held.group(1)) if held else None
+    limit, current, kv = parsed
+    if prompt_tokens <= 0 or kv <= 0:
+        return None
+    return int(prompt_tokens * (limit - current) / kv) if limit > current else 0
 
 
 def end_turn(turn_id: str) -> None:

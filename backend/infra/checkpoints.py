@@ -78,6 +78,7 @@ def checkpoint_record(row: sqlite3.Row) -> CheckpointRecord:
         captured_at=row["captured_at"],
         installed_at=row["installed_at"],
         ended_at=row["ended_at"],
+        adopted_input_tokens=row["adopted_input_tokens"],
     )
 
 

@@ -26,6 +26,8 @@ _TRANSPORT = (OSError, EOFError, ssl.SSLError, socket.timeout, imaplib.IMAP4.err
 _IMAP_OFF = re.compile(r"imap.{0,40}(disabled|not enabled|turned off|not allowed|not activated)|disabled.{0,40}imap", re.I)
 _TEMPORARY = re.compile(r"\[(?:UNAVAILABLE|SERVERBUG|LIMIT|INUSE)\]|too many connections|try again later", re.I)
 FETCHED = re.compile(rb"UID (\d+)")
+SIZED = re.compile(rb"RFC822\.SIZE (\d+)")
+_LITERAL = re.compile(rb"\{\d+\}$")
 # What the person's own mail app sets: a draft it can open and edit, and sent mail already read.
 _APPEND_FLAGS = {folders.DRAFTS: r"(\Draft \Seen)", folders.SENT: r"(\Seen)"}
 _locks: dict[str, threading.Lock] = {}
@@ -275,12 +277,56 @@ def added_after(
         return current_validity, wanted[-1], [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
 
 
-def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int, folder: str = MAILBOX) -> bytes | None:
-    """One inbox message's raw bytes (up to ``max_bytes``), or None when it is gone or its mailbox was rebuilt."""
+def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int | None, folder: str = MAILBOX) -> bytes | None:
+    """One inbox message's raw bytes (up to ``max_bytes``, all of it for None), or None when it is gone or its mailbox was rebuilt."""
     with session(ep, username, password) as conn:
         if select(conn, ep, folder) != validity:
             return None
-        status, data = conn.uid("FETCH", str(uid), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
+        window = "" if max_bytes is None else f"<0.{max_bytes}>"
+        status, data = conn.uid("FETCH", str(uid), f"(UID BODY.PEEK[]{window})")
         if status != "OK":
             raise unreachable(ep)
         return dict(items(data)).get(uid)
+
+
+def _size(data: list) -> int | None:
+    for part in data:
+        found = SIZED.search(part[0] if isinstance(part, tuple) else part) if part else None
+        if found:
+            return int(found.group(1))
+    return None
+
+
+def _flat(data: list) -> bytes:
+    """A reply with each literal folded into a quoted string, so one parser reads it."""
+    out = b""
+    for part in data:
+        if isinstance(part, tuple):
+            quoted = part[1].replace(b"\\", b"\\\\").replace(b'"', b'\\"')
+            out += _LITERAL.sub(b"", part[0]) + b'"' + quoted + b'"'
+        elif isinstance(part, bytes):
+            out += part
+    return out
+
+
+def fetch_listed(
+    ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int,
+) -> tuple[bytes | None, bytes | None]:
+    """``(raw up to max_bytes, BODYSTRUCTURE reply)``; the structure only when the message is larger than max_bytes.
+
+    A message that fits comes whole, so its attachments are listed from it; a larger one is cut off,
+    and its structure says what the cut part held.
+    """
+    with session(ep, username, password) as conn:
+        if select(conn, ep) != validity:
+            return None, None
+        status, data = conn.uid("FETCH", str(uid), f"(UID RFC822.SIZE BODY.PEEK[]<0.{max_bytes}>)")
+        if status != "OK":
+            raise unreachable(ep)
+        raw, size = dict(items(data)).get(uid), _size(data)
+        if raw is None or not (size > max_bytes if size is not None else len(raw) >= max_bytes):
+            return raw, None
+        status, data = conn.uid("FETCH", str(uid), "(UID BODYSTRUCTURE)")
+        if status != "OK":
+            raise unreachable(ep)
+        return raw, _flat(data)

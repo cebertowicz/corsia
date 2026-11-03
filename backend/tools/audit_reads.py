@@ -25,14 +25,19 @@ class AuditReadTool(Tool):
             "UTC window. lease_reviews groups each lease's state at read time "
             "by safe category, selecting leases created in the UTC window; "
             "it does not count verdicts issued during that window. "
+            "seat_usage returns, per vendor account, call count and token sums, "
+            "plus one row per harness with a null account for unattributed "
+            "claude-code/ and codex/ usage; it covers this user's usage across "
+            "all projects. Its token sums cover only calls Measurement can price; "
+            "excluded_calls counts the rest. "
             "stored_message_pressure returns the top "
             "ten stored-message sizes as a proxy for unfolded backlog. Its "
             "rank_limit field is 10; matching threads beyond it are omitted. "
             "Each pressure row labels whether a current installed checkpoint "
             "exists. It does not "
             "estimate the exact rendered provider tail. The backend includes "
-            "only this thread's user and project, with no raw messages, error "
-            "text, or SQL. checkpoint_health and lease_reviews require since "
+            "only this thread's user and project (seat_usage: user), with no raw messages, error "
+            "text, or SQL. checkpoint_health, lease_reviews and seat_usage require since "
             "and until as UTC ISO 8601 timestamps no more than seven days apart. "
             "For stored_message_pressure, omit both for the full current scope "
             "or supply both to rank threads whose updated_at is in that window. "
@@ -53,7 +58,7 @@ class AuditReadTool(Tool):
                     "type": "string",
                     "description": (
                         "UTC ISO 8601 inclusive start: checkpoint started_at, "
-                        "lease created_at, or thread updated_at by metric."
+                        "lease created_at, llm_usage created_at, or thread updated_at by metric."
                     ),
                 },
                 "until": {

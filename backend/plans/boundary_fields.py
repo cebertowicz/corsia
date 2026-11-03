@@ -307,9 +307,11 @@ def _user_step_description(params: dict[str, Any]) -> None:
 
 def node_fields(
     params: dict[str, Any], *, workflow_version: str | None = None,
-    include_before: bool = True, intent_required: bool = True,
+    include_before: bool = True, intent_required: bool = True, run: bool = False,
 ) -> dict[str, Any]:
     """Read common creation fields and reject absent durable intent.
+
+    A task needs a size, and so does a workflow run's phase (``run``): a run is sized once, there.
 
     ``workflow_version`` is resolved by the server from the named workflow
     skill, never read from caller params.
@@ -322,7 +324,7 @@ def node_fields(
         raise PlanInputError("task creation requires size and intent")
     if missing_intent:
         raise PlanInputError("task creation requires intent")
-    size = require_task_size(params.get("size")) if kind == "task" else validate_size(params.get("size"))
+    size = require_task_size(params.get("size")) if kind == "task" or run else validate_size(params.get("size"))
     return {
         "kind": kind,
         "title": text(params, "title"),
