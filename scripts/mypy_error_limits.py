@@ -28,6 +28,14 @@ _SUMMARY = re.compile(r"^Found (\d+) errors? in ", re.MULTILINE)
 def count_errors(report: str) -> int:
     """Return the error count mypy reported, preferring its own summary line."""
     match = _SUMMARY.search(report)
+    if "errors prevented further checking" in report:
+        # A blocking error (such as a dependency stub mypy cannot parse) stops the
+        # run early, so its count is not the backlog's and must not read as a drop.
+        raise SystemExit(
+            "mypy stopped early (errors prevented further checking); the count "
+            "is not comparable to the limit. Check with the Python version CI "
+            f"uses:\n{report[-2000:]}"
+        )
     if match is not None:
         return int(match.group(1))
     if "Success: no issues found" in report:
