@@ -2,8 +2,10 @@
 
 Both come from the reads Measurement's Cost and Models use (``grouped_usage_sql``,
 ``IdentityResolver``, ``classify_usage_rows``). A value CORSIA does not know is left out:
-a model that is not one identity, or a cost with a call Measurement cannot price or a
-local model that has no API price, is absent, never a partial sum or a guess.
+a model that is not one identity is absent, and so is a cost while any API call can't be
+priced or any measurement is still owed to the ledger; never a partial sum or a guess. A
+local model's call has no API price, so it adds no dollars, and a worker that made only
+such calls has no cost.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from typing import Any
 
 from core.cost_identity import IdentityResolver
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
+from infra.turn_usage_remainder import thread_owes_measurements
 
 
 def facts(db: sqlite3.Connection, worker: str) -> dict[str, Any]:
@@ -30,6 +33,7 @@ def facts(db: sqlite3.Connection, worker: str) -> dict[str, Any]:
     known: dict[str, Any] = {"model": models.pop()} if len(models) == 1 else {}
     classified = [row for row in classify_usage_rows(rows, endpoint_listings(db))
                   if row["outcome"] != "not_api_priced"]
-    if classified and all(row["outcome"] == "priced" for row in classified):
+    if (classified and all(row["outcome"] == "priced" for row in classified)
+            and not thread_owes_measurements(db, worker)):
         known["cost_usd"] = sum(row["dollars"] for row in classified)
     return known

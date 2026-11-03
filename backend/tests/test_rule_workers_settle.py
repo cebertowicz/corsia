@@ -449,6 +449,30 @@ def test_a_workers_unknown_model_or_cost_is_left_out(usage_db):
     assert worker_usage.facts(usage_db, "nobody") == {}
 
 
+def test_a_local_call_adds_no_dollars_to_a_workers_api_cost(usage_db):
+    from automation import worker_usage
+
+    _worker_thread(usage_db)
+    _call(usage_db, "c1", "claude-code/opus", manifest="m")
+    api_only = worker_usage.facts(usage_db, "w1")["cost_usd"]
+    _call(usage_db, "c2", "omlx@local/qwen")
+    assert worker_usage.facts(usage_db, "w1")["cost_usd"] == pytest.approx(api_only)
+
+
+def test_a_worker_with_a_measurement_still_owed_has_no_cost(usage_db):
+    from automation import worker_usage
+
+    _worker_thread(usage_db)
+    _call(usage_db, "c1", "claude-code/opus", manifest="m")
+    usage_db.execute(
+        "INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,"
+        "usage_receipts_json) VALUES ('t1','w1',0,'claude-code/opus','completed','now','boot',?)",
+        (json.dumps({"receipt-1": {"binding": {}}}),))
+    assert "cost_usd" not in worker_usage.facts(usage_db, "w1")
+    usage_db.execute("UPDATE active_turns SET usage_receipts_json='{}' WHERE id='t1'")
+    assert worker_usage.facts(usage_db, "w1")["cost_usd"] > 0
+
+
 @pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
 def test_model_and_cost_reach_both_worker_events(outcome, kind, monkeypatch):
     from automation import worker_settle

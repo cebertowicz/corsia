@@ -103,6 +103,19 @@ def pending_measurement_counts(
     return owed
 
 
+def thread_owes_measurements(db: Any, thread_id: str) -> bool:
+    """Whether ``thread_id`` has a measurement committed but not yet in ``llm_usage``: a
+    receipt still pending on one of its Turns, or a call held until its Turn ends. While
+    one is owed, a total read from ``llm_usage`` for the thread is short."""
+    if any(entry.thread_id == thread_id for entry in held_turn_usage()):
+        return True
+    return db.execute(
+        "SELECT 1 FROM active_turns INDEXED BY idx_active_turns_pending_usage "
+        "WHERE usage_receipts_json <> '{}' AND thread_id=? LIMIT 1",
+        (thread_id,),
+    ).fetchone() is not None
+
+
 def _held_commitment(db: Any, entry: HeldUsage) -> str | None:
     """The commitment a held call's row will bill, or None when nothing is owed.
 
