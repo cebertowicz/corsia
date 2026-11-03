@@ -101,7 +101,9 @@ def test_the_mac_build_script_ships_the_pinned_gws():
     pin = RUNTIME_PINS["gws"]["arm64"]
 
     def value(name: str) -> str:
-        return re.search(rf'^readonly {name}="([^"]+)"$', script, re.MULTILINE).group(1)
+        found = re.search(rf'^readonly {name}="([^"]+)"$', script, re.MULTILINE)
+        assert found, name
+        return found.group(1)
 
     version, archive = value("GWS_VERSION"), value("GWS_ARCHIVE")
     assert version == pin.version
