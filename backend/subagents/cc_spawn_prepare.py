@@ -41,6 +41,7 @@ class CCSpawnRequest:
     account_id: str | None = None
     confinement: str = CONFINEMENT_NONE
     add_dirs: tuple[str, ...] = ()
+    max_turns: int | None = None
 
 
 @dataclass

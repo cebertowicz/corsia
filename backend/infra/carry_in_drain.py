@@ -3,10 +3,15 @@
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
 settles a claim no running wake owns, reaps finished eval threads, then either
 matches the oldest saved target or advances the oldest pending case.
-It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
-shows ``no_ready_local_model`` and waits for the next save or restart. The
-same check, on the claimed model only, runs again just before every sample's
-provider call; failing it ends the claimed case in coverage, never a call.
+It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle.
+Before the claim it waits, up to the prefill-guard bound, for the seat's other
+clients to go quiet, proving idle once per try; a seat still busy leaves that oldest
+case at ``no_ready_local_model`` until the next save or restart. The same proof, on
+the claimed model only, runs again just before every sample's provider call.
+Refused there for a busy seat, the sample reruns on a fresh eval thread once the
+seat is quiet, within the same bound; only a seat that stays busy past it, or an
+unreadable or lost one, ends the claimed case in coverage, never a call. The wait
+sits outside the Turn, so its timeout never counts it.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
 A candidate sample of a ``trial`` lesson carries the lesson the way task start
@@ -35,6 +40,7 @@ from infra.carry_in_arm import (
     turn_input as _turn_input,
 )
 from infra.db_async import run_in_db, run_off_db
+from infra.guidance_history_paths import commit_parent, committed_bytes
 
 SAMPLES = 3
 NEEDED = 2
@@ -170,9 +176,9 @@ def _blobs(workspace: Path, fact: CarryInFact, delivered: bool) -> tuple[bytes |
     None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
     A Git fault reading the history raises ``GitFault``: that is no fact about the case.
     """
-    parent = facts.commit_parent(workspace, fact.target_commit)
-    before = None if delivered or not parent else facts.committed_bytes(workspace, parent, fact.target_path)
-    after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
+    parent = commit_parent(workspace, fact.target_commit)
+    before = None if delivered or not parent else committed_bytes(workspace, parent, fact.target_path)
+    after = committed_bytes(workspace, fact.target_commit, fact.target_path)
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
     return before, after
@@ -182,7 +188,33 @@ async def _sample(
     fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
     created: list[tuple[str, str]],
 ) -> bool:
-    """Run one isolated fresh Turn and score it; raise when it cannot be scored."""
+    """Score one sample, rerunning it while a busy seat goes quiet; raise when it cannot be scored.
+
+    A dispatch-time refusal made no provider call, so the sample waits for quiet
+    (:func:`capacity.ready_idle`, bounded overall by the prefill-guard bound) and reruns on a
+    fresh eval thread. Past the bound, or on a lost or unreadable seat, it ends the case.
+    """
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
+
+    clock = asyncio.get_running_loop().time
+    deadline = clock() + GUARD_QUIET_TIMEOUT_SECONDS
+    attempt = 1
+    while True:
+        try:
+            return await _attempt(
+                fact, owner, model, actions, arm, label if attempt == 1 else f"{label}r{attempt}", created,
+            )
+        except _Unavailable:
+            if (left := deadline - clock()) <= 0 or await capacity.ready_idle(model, wait=left) is None:
+                raise
+            attempt += 1
+
+
+async def _attempt(
+    fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
+    created: list[tuple[str, str]],
+) -> bool:
+    """Run one isolated fresh Turn and score it."""
     from core.carry_in_scoring import sample_passes
     from eval.endpoint import open_eval_thread, run_eval_turn
     from eval.tool_allowlist import carry_in_tool_isolation
@@ -213,7 +245,7 @@ async def _sample(
         if refused:
             raise refused[0]
 
-    with carry_in_tool_isolation():
+    with carry_in_tool_isolation(arm.unseen):
         turn_id, failure = await run_eval_turn(
             thread_id=thread_id, thread_row=row, prompt=arm.prompt, model=model,
             timeout_seconds=SAMPLE_TIMEOUT_SECONDS, after_manifest_before_dispatch=before_dispatch,
@@ -301,6 +333,7 @@ async def wake(workspace: Path) -> bool:
     """
     from core.turn_core import BOOT_EPOCH
     from infra.guidance_git import GitFault
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
 
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
     await _delete_threads(await run_in_db(_read, _stranded_threads))
@@ -333,7 +366,7 @@ async def wake(workspace: Path) -> bool:
             scope="carry_in_retired", reason=reason or "target_unavailable",
         ))
         return True
-    model = await capacity.ready_idle()
+    model = await capacity.ready_idle(wait=GUARD_QUIET_TIMEOUT_SECONDS)
     if model is None:
         await run_in_db(partial(
             _write, facts.record_waiting, fact, _now(), UNAVAILABLE, scope="carry_in_waiting",

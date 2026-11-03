@@ -1,0 +1,16 @@
+{
+  "body": {
+    "end": {
+      "dateTime": "2026-12-01T11:00:00Z"
+    },
+    "start": {
+      "dateTime": "2026-12-01T10:00:00Z"
+    },
+    "summary": "t"
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [],
+  "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+}

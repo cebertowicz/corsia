@@ -357,17 +357,21 @@ async def discover_external_models(server_id: str) -> dict:
     shapes, levels_error = await discovery_shapes(dialect, api_base, model_ids)
     if levels_error:
         result["reasoning_levels_error"] = levels_error
+    host = urlsplit(api_base).hostname or ""
+    from llm.external_windows import reference_namespaces
+
+    if reference_namespaces(host):  # Only these hosts read LiteLLM's map.
+        from llm.live_cost_map import wait_for_refresh
+
+        await wait_for_refresh()
     try:
         result = await run_in_db(
             _reconcile_external_models,
-            server_id,
-            server,
-            dialect,
-            model_ids,
+            server_id, server, dialect, model_ids,
             caps or {},
             _now(),
             result,
-            urlsplit(api_base).hostname or "",
+            host,
             target,
             shapes,
             windows,

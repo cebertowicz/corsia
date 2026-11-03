@@ -130,8 +130,9 @@ def safehouse_stdio_parameters(
     command: str,
     args: list[str],
     env: dict[str, str],
+    *, cwd: Path | None = None,
 ):
-    """Build a fail-closed direct-exec Safehouse launch for one local app."""
+    """Build a fail-closed direct-exec Safehouse launch for one local app, working in ``cwd`` or its cache."""
     from mcp import StdioServerParameters
 
     from infra.config import STATE_ROOT, WORKSPACE
@@ -150,7 +151,7 @@ def safehouse_stdio_parameters(
     if not isinstance(cache_identity, str) or not cache_identity:
         raise MCPConfigError("connected app identity must be a nonempty string")
     cache_dir = _mcp_cache_dir(cache_identity, workspace, Path(STATE_ROOT))
-    cwd = cache_dir / "cwd"
+    cwd = cwd or cache_dir / "cwd"
     cwd.mkdir(parents=True, exist_ok=True)
     shim_path = write_no_proctitle_shim(cache_dir)
     node_options = f"--require {shlex.quote(str(shim_path))}"
