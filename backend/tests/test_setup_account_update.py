@@ -157,3 +157,42 @@ def test_a_machine_credential_cannot_change_the_account_or_take_a_session(client
     assert response.status_code == 403
     assert "Someone Else" not in _profile(workspace)
     assert accounts.get_user("pat") is not None and _put(client, session, {"name": "Pat Example"}).status_code == 200
+
+
+@pytest.mark.parametrize("choice", [False, True])
+def test_the_account_step_stores_its_usage_sharing_choice_with_the_account(client, choice):
+    from infra import settings
+
+    settings.save_usage_sharing(not choice)
+    response = client.post("/api/setup/first-account", json={**CREATE, "usage_sharing": choice}, headers=HEADERS)
+    assert response.status_code == 200
+    assert settings.get_usage_sharing() is choice
+
+
+def test_a_first_account_post_after_setup_made_one_never_changes_the_choice(client, session):
+    from infra import settings
+
+    settings.save_usage_sharing(True)
+    response = client.post("/api/setup/first-account", json={**CREATE, "username": "other", "usage_sharing": False}, headers=HEADERS)
+    assert response.status_code == 409
+    assert settings.get_usage_sharing() is True
+
+
+def test_back_on_the_account_step_saves_only_a_changed_choice(client, workspace, session):
+    from infra import settings
+
+    before = _profile(workspace)
+    settings.save_usage_sharing(True)
+    response = _put(client, session, {"usage_sharing": False})
+    assert response.status_code == 200 and "token" not in response.json()
+    assert settings.get_usage_sharing() is False
+    assert _profile(workspace) == before
+
+
+def test_a_refused_account_change_leaves_the_choice_as_it_was(client, session):
+    from infra import settings
+
+    settings.save_usage_sharing(True)
+    response = _put(client, session, {"usage_sharing": False, "password": "x"})
+    assert response.status_code == 422
+    assert settings.get_usage_sharing() is True

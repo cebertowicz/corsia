@@ -3,25 +3,24 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
 import { token, user } from '$lib/stores/auth';
-import { SERVER_UNREACHABLE } from '$lib/plainError';
 
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const LINE = 'This helps improve CORSIA. It sends counts of what you use, tagged with a random number that changes every week. It never sends your name, email or anything you write. Turn it off to stop.';
-const ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
-let settingsStatus = 200;
+let createStatus = 200, putStatus = 200;
 let sharingDefault: boolean | undefined = true;
-/** Held settings writes wait on this before answering; null answers at once. */
-let holdSettings: Promise<void> | null = null;
+/** A held account create waits on this before answering; null answers at once. */
+let holdCreate: Promise<void> | null = null;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label);
 const toggle = () => host.querySelector<HTMLButtonElement>('button[aria-label="Share usage counts"]')!;
+const heading = () => host.querySelector('h1')?.textContent;
 function setInput(id: string, value: string) {
 	const input = host.querySelector<HTMLInputElement>(`#${id}`)!;
 	input.value = value;
@@ -33,22 +32,26 @@ async function openAccount() {
 	setInput('setup-name', 'Ada Lovelace'); setInput('setup-username', 'ada'); setInput('setup-password', 'password1'); setInput('setup-confirm-password', 'password1');
 	await settle();
 }
-/** The writes to the settings route: its body and the session it carried. */
-const settingsWrites = () => vi.mocked(fetch).mock.calls
-	.filter(([url, init]) => String(url) === '/api/settings' && init?.method === 'PATCH')
-	.map(([, init]) => ({ body: JSON.parse(String(init?.body)), auth: (init?.headers as Record<string, string>).Authorization }));
-const accountPuts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/setup/account' && init?.method === 'PUT');
+const bodies = (path: string, method: string) => vi.mocked(fetch).mock.calls
+	.filter(([url, init]) => String(url) === path && init?.method === method)
+	.map(([, init]) => JSON.parse(String(init?.body)));
+const creates = () => bodies('/api/setup/first-account', 'POST');
+const puts = () => bodies('/api/setup/account', 'PUT');
+const settingsWrites = () => bodies('/api/settings', 'PATCH');
 
 beforeEach(() => {
-	token.set(null); user.set(null); settingsStatus = 200; sharingDefault = true; holdSettings = null;
+	token.set(null); user.set(null); createStatus = 200; putStatus = 200; sharingDefault = true; holdCreate = null;
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET';
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA', usage_sharing_default: sharingDefault });
-		if (url === '/api/setup/first-account') return json({ token: 'session-one', user: { id: 'ada', name: 'Ada Lovelace' } });
-		if (url === '/api/settings' && method === 'PATCH') {
-			if (holdSettings) await holdSettings;
-			// The app's catch-all 500 reply: a generic line and the reference its log entry carries.
-			return settingsStatus === 500 ? json({ detail: 'Something went wrong in CORSIA. Try again.', reference: 'ref-7' }, 500) : json({}, settingsStatus);
+		if (url === '/api/setup/first-account') {
+			if (holdCreate) await holdCreate;
+			return createStatus === 500
+				? json({ code: 'setup_failed', detail: 'Your account was not created. Try again.', ref: 'ref-7' }, 500)
+				: json({ token: 'session-one', user: { id: 'ada', name: 'Ada Lovelace' } });
+		}
+		if (url === '/api/setup/account' && method === 'PUT') {
+			return putStatus === 500 ? json({ code: 'setup_failed', detail: 'Your account was not changed. Try again.', ref: 'ref-8' }, 500) : json({ ok: true });
 		}
 		if (url.includes('/sources')) return json({ sources: [] });
 		if (url.includes('/models')) return json({ models: [] });
@@ -71,28 +74,24 @@ describe('usage sharing on the account step', () => {
 		expect(host.querySelector('#setup-sharing-line')?.textContent).toBe(LINE);
 	});
 
-	it('creating the account with it off writes false with the new session, then moves on', async () => {
+	it('creating the account with it off sends false with the account, and nothing else writes it', async () => {
 		await openAccount();
 		toggle().click(); await settle();
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 		button('Continue')?.click(); await settle();
-		expect(settingsWrites()).toEqual([{ body: { usage_sharing: false }, auth: 'Bearer session-one' }]);
+		expect(creates()).toHaveLength(1);
+		expect(creates()[0].usage_sharing).toBe(false);
+		expect(settingsWrites()).toHaveLength(0);
 		expect(get(token)).toBe('session-one');
-		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(heading()).toBe('Your subscriptions');
 	});
 
-	it('starts off where the region needs opt-in, and leaving it off writes false', async () => {
+	it('starts off where the region needs opt-in, and leaving it off sends false', async () => {
 		sharingDefault = false;
 		await openAccount();
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 		button('Continue')?.click(); await settle();
-		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: false }]);
-	});
-
-	it('starts on where the region default is on', async () => {
-		sharingDefault = true;
-		await openAccount();
-		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+		expect(creates()[0].usage_sharing).toBe(false);
 	});
 
 	it('starts off when the status carries no default', async () => {
@@ -101,50 +100,33 @@ describe('usage sharing on the account step', () => {
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 	});
 
-	it('writes true explicitly when it was left on', async () => {
+	it('sends true explicitly when it was left on', async () => {
 		await openAccount();
 		button('Continue')?.click(); await settle();
-		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }]);
+		expect(creates()[0].usage_sharing).toBe(true);
 	});
 
-	it('shows the error and stays on the account step when the write fails, and a retry writes it again', async () => {
-		await openAccount();
-		toggle().click(); await settle();
-		settingsStatus = 500;
-		button('Continue')?.click(); await settle();
-		expect(host.querySelector('[role="alert"]')?.textContent).toBe(`${ERROR} Reference: ref-7`);
-		expect(host.querySelector('h1')?.textContent).toBe('Your account');
-		settingsStatus = 200;
-		button('Continue')?.click(); await settle();
-		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: false }, { usage_sharing: false }]);
-		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
-		expect(accountPuts()).toHaveLength(0);
-	});
-
-	it('names a known cause when the server can’t be reached', async () => {
-		await openAccount();
-		const answer = vi.mocked(fetch).getMockImplementation()!;
-		vi.mocked(fetch).mockImplementation(async (input, init) => {
-			if (String(input) === '/api/settings' && init?.method === 'PATCH') throw new TypeError('Failed to fetch');
-			return answer(input, init);
-		});
-		button('Continue')?.click(); await settle();
-		expect(host.querySelector('[role="alert"]')?.textContent).toBe(SERVER_UNREACHABLE);
-		expect(host.querySelector('h1')?.textContent).toBe('Your account');
-	});
-
-	it('a flip while the write is in flight is not counted as saved', async () => {
+	it('holds the switch still while the account is being made', async () => {
 		let release!: () => void;
-		holdSettings = new Promise((done) => { release = done; });
+		holdCreate = new Promise((done) => { release = done; });
 		await openAccount();
 		button('Continue')?.click(); await settle();
-		toggle().click(); await settle();
+		expect(toggle().disabled).toBe(true);
 		release(); await settle();
-		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }]);
-		button('Back')?.click(); await settle();
-		expect(toggle().getAttribute('aria-pressed')).toBe('false');
+		expect(heading()).toBe('Your subscriptions');
+	});
+
+	it('a failed create shows its reference and stays, and a retry sends the choice again', async () => {
+		await openAccount();
+		toggle().click(); await settle();
+		createStatus = 500;
 		button('Continue')?.click(); await settle();
-		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }, { usage_sharing: false }]);
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t create your account. Try again. Reference: ref-7');
+		expect(toggle().disabled).toBe(false);
+		createStatus = 200;
+		button('Continue')?.click(); await settle();
+		expect(creates().map((body) => body.usage_sharing)).toEqual([false, false]);
+		expect(heading()).toBe('Your subscriptions');
 	});
 
 	describe('Back to the account step', () => {
@@ -152,24 +134,34 @@ describe('usage sharing on the account step', () => {
 			await openAccount();
 			button('Continue')?.click(); await settle();
 			button('Back')?.click(); await settle();
-			expect(host.querySelector('h1')?.textContent).toBe('Your account');
+			expect(heading()).toBe('Your account');
 		}
 
-		it('writes the switch when only it changed', async () => {
+		it('sends only the switch when only it changed', async () => {
 			await backToAccount();
 			toggle().click(); await settle();
 			button('Continue')?.click(); await settle();
-			expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }, { usage_sharing: false }]);
-			expect(accountPuts()).toHaveLength(0);
-			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+			expect(puts()).toEqual([{ usage_sharing: false }]);
+			expect(heading()).toBe('Your subscriptions');
 		});
 
-		it('writes nothing when nothing changed', async () => {
+		it('sends nothing when nothing changed', async () => {
 			await backToAccount();
 			button('Continue')?.click(); await settle();
-			expect(settingsWrites()).toHaveLength(1);
-			expect(accountPuts()).toHaveLength(0);
-			expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+			expect(puts()).toHaveLength(0);
+			expect(heading()).toBe('Your subscriptions');
+		});
+
+		it('a failed save keeps the change unsaved, so the retry sends it again', async () => {
+			await backToAccount();
+			toggle().click(); await settle();
+			putStatus = 500;
+			button('Continue')?.click(); await settle();
+			expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t save your account. Try again. Reference: ref-8');
+			putStatus = 200;
+			button('Continue')?.click(); await settle();
+			expect(puts()).toEqual([{ usage_sharing: false }, { usage_sharing: false }]);
+			expect(heading()).toBe('Your subscriptions');
 		});
 	});
 });

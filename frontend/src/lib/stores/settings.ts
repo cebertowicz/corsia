@@ -58,10 +58,10 @@ export async function loadSettings(): Promise<void> {
 		if (settingsSnapshotGate.acceptsRead(ticket)) settingsLoading.set(false);
 	}
 }
-export function updateSettings(patch: SettingsPatch): Promise<{ ok: boolean; error?: string; reference?: string }> {
+export function updateSettings(patch: SettingsPatch): Promise<{ ok: boolean; error?: string }> {
 	return patch.features ? enqueueFeaturePatch(() => submitSettingsPatch(patch)) : submitSettingsPatch(patch);
 }
-async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean; error?: string; reference?: string }> {
+async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings`, {
 			method: 'PATCH',
@@ -95,7 +95,6 @@ async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean;
 		return {
 			ok: false,
 			error: plainErrorText(data?.detail, 'Couldn’t save these settings. Try again.'),
-			reference: typeof data?.reference === 'string' && data.reference ? data.reference : undefined,
 		};
 	} catch (e) {
 		console.error('Failed to update settings:', e);

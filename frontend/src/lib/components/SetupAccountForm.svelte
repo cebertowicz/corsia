@@ -7,10 +7,12 @@
 		usernameError: string; confirmationError: string; requiredUsername?: string | null;
 		/** The account exists already: the username is its id and stays as made, and a blank password keeps the current one. */
 		editing?: boolean;
+		/** The account is being saved with the switch's value, so the switch holds still until it is. */
+		busy?: boolean;
 		accountError: string; onSubmit: () => void; onValidateConfirmation: () => void;
 	}
 	let { name = $bindable(), username = $bindable(), password = $bindable(), confirmation = $bindable(),
-		email = $bindable(), sharing = $bindable(), usernameError, confirmationError, requiredUsername, editing = false, accountError, onSubmit,
+		email = $bindable(), sharing = $bindable(), busy = false, usernameError, confirmationError, requiredUsername, editing = false, accountError, onSubmit,
 		onValidateConfirmation }: Props = $props();
 	// The username follows the first name until the person types in it; after that, even a cleared field stays cleared.
 	// A username already there on arrival (Back to this step) counts as the person's own.
@@ -33,7 +35,7 @@
 	<div class="sharing">
 		<ListRow name={USAGE_SHARING_LABEL} centered>
 			{#snippet detail()}<span id="setup-sharing-line">{USAGE_SHARING_LINE}</span>{/snippet}
-			{#snippet actions()}<Toggle size="sm" checked={sharing} ariaLabel={USAGE_SHARING_LABEL} describedBy="setup-sharing-line" onchange={(next) => (sharing = next)} />{/snippet}
+			{#snippet actions()}<Toggle size="sm" checked={sharing} ariaLabel={USAGE_SHARING_LABEL} describedBy="setup-sharing-line" disabled={busy} onchange={(next) => (sharing = next)} />{/snippet}
 		</ListRow>
 	</div>
 	{#if accountError}<p class="error-text" role="alert">{accountError}</p>{/if}

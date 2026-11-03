@@ -15,11 +15,34 @@ from pydantic import ValidationError
 from api.setup_requests import AccountUpdateRequest, FirstAccountRequest
 from infra import account_validation, accounts, setup_progress
 from infra.account_update import update_account
+from infra.database import write_transaction
 from infra.db_async import run_in_db
 from infra.failure_reference import new_error_reference
+from infra.settings import save_usage_sharing
 from infra.time import utc_storage_iso_to_api
 
 logger = logging.getLogger(__name__)
+
+
+def _save_sharing_before_account(enabled: bool) -> None:
+    """Store the account step's usage sharing choice just before the account it belongs to is made.
+
+    The account owner commits its rows in a transaction of its own, so the choice cannot join it; saving first means the
+    account never exists without the choice. A refused account leaves only the choice the screen showed, which the next
+    try overwrites. The check is in the same transaction, so once an account exists this pre-account route changes nothing.
+    """
+    with write_transaction(None, scope="setup_first_sharing") as conn:
+        if accounts.has_users(db=conn):
+            raise account_validation.FirstAccountExists("An account already exists.")
+        save_usage_sharing(enabled, db=conn)
+
+
+def _save_sharing_with(enabled: bool | None, change_account):
+    """Save a changed usage sharing choice and the account fields in one transaction, so a refusal changes neither."""
+    with write_transaction(None, scope="setup_account_update") as conn:
+        if enabled is not None:
+            save_usage_sharing(enabled, db=conn)
+        return change_account(conn)
 
 
 async def apply_create(request: Request) -> dict | Response:
@@ -29,6 +52,8 @@ async def apply_create(request: Request) -> dict | Response:
     except (ValidationError, ValueError):
         return Response(status_code=422)
     try:
+        if body.usage_sharing is not None:
+            await run_in_db(_save_sharing_before_account, body.usage_sharing)
         user_id = await run_in_db(
             accounts.create_first_account, body.username, body.password,
             full_name=body.name, email=body.email or "", first_run_path="app",
@@ -63,11 +88,12 @@ async def apply_update(user_id: str, request: Request) -> dict | Response:
     if await run_in_db(lambda: setup_progress.view()["setup_completed"]):
         return JSONResponse(status_code=409, content={"code": "setup_complete"})
     fields = body.model_fields_set
+    account_fields = fields - {"usage_sharing"}
     try:
-        session = await run_in_db(lambda: update_account(
+        session = await run_in_db(lambda: _save_sharing_with(body.usage_sharing, lambda conn: update_account(
             user_id, full_name=body.name if "name" in fields else None,
             email=(body.email or "") if "email" in fields else None,
-            password=body.password if "password" in fields else None))
+            password=body.password if "password" in fields else None, db=conn) if account_fields else None))
     except account_validation.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
     except FileNotFoundError:
