@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -330,7 +329,7 @@ async def test_drop_closes_the_gate_step_at_once_and_the_run_records_the_skip(is
     reply = await run.start("gated")
     work, gate = (step["id"] for step in reply["steps"])
     assert reply["steps"][1]["gate_mode"] == "dropped"
-    today = datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    today = datetime.now().astimezone().date().isoformat()
     reason = f"dropped by the person on {today}"
     assert _run_db("SELECT state FROM plan_nodes WHERE id=?", gate) == [{"state": "closed"}]
     assert any(json.loads(row["payload_json"]).get("reason") == reason for row in _run_db(

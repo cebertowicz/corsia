@@ -19,7 +19,6 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import plans.service as service
 
@@ -32,7 +31,6 @@ _ANSWERED_BY_PERSON = "user.ask_cleared"
 _REJECTED = "changes_requested"
 #: The offer's option ids, in the order the person reads them, and what each hands the gate.
 _HANDED = {"A": "spot", "B": "none", "C": "drop"}
-_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 OFFER_TITLE = "Hand off the {step} review in {workflow}?"
 OFFER_CONTEXT = "You approved {step} in {workflow} {count} runs in a row with no changes."
@@ -240,7 +238,7 @@ def _apply_answer(state: GateState, option: str | None, stamp: str) -> None:
         state.streak = 0
     else:
         state.kind, state.streak, state.spot_clean = _HANDED[option], 0, 0
-        state.dropped_on = datetime.fromisoformat(stamp).astimezone(_PACIFIC).date().isoformat()
+        state.dropped_on = datetime.fromisoformat(stamp).astimezone().date().isoformat()
 
 
 def _hand_back(state: GateState) -> None:
