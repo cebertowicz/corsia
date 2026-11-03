@@ -172,17 +172,9 @@
 	$effect(() => {
 		const id = renderedThreadId;
 		const cards = id ? $threadUpdateCards[id]?.cards : undefined;
-		if (!renderedCards.changed(id, cards) || !cards?.length || !userIsNearBottom
+		if (!renderedCards.arrived(id, cards, transcriptCheckpoint) || !userIsNearBottom
 			|| $openAtDivider === id || (focusMode && landedVisit !== id && hasLandingTarget) || initialLanding.blocksLiveEdge(id)) return;
 		scrollToBottom();
-	});
-	// The live checkpoint row lands below the last row; a pinned reader must see it, not have it under the composer.
-	let shownCheckpoint: string | null = null;
-	$effect(() => {
-		const key = transcriptCheckpoint ? `${transcriptCheckpoint.id}:${transcriptCheckpoint.status}` : null;
-		if (key === shownCheckpoint) return;
-		shownCheckpoint = key;
-		if (key && userIsNearBottom && !initialLanding.blocksLiveEdge(renderedThreadId)) scrollToBottom();
 	});
 	const hasLandingTarget = $derived(hasLandingTargetIn(transcriptEntries));
 	$effect(() => {

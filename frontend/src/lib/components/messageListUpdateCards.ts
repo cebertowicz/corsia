@@ -5,16 +5,32 @@ export type InitialLanding = { threadId: string; generation: number; target: 'di
 type Frame = (callback: FrameRequestCallback) => number;
 type BeginProgrammaticScroll = (write: () => void) => void;
 
-/** Tracks asynchronous card references without owning any transcript behavior. */
+/**
+ * Tracks what lands below the transcript's last row (update cards and the live
+ * checkpoint row) without owning any transcript behavior.
+ */
 export class RenderedUpdateCards {
 	#threadId: string | null = null;
 	#cards: UpdateCard[] | undefined;
+	#checkpoint: string | null = null;
 
 	changed(threadId: string | null, cards: UpdateCard[] | undefined): boolean {
 		const changed = threadId !== this.#threadId || cards !== this.#cards;
 		this.#threadId = threadId;
 		this.#cards = cards;
 		return changed;
+	}
+
+	/** Whether new cards or a new live checkpoint state arrived: a pinned reader follows either into view. */
+	arrived(
+		threadId: string | null, cards: UpdateCard[] | undefined,
+		checkpoint: { id: string; status: string } | null | undefined,
+	): boolean {
+		const cardsArrived = this.changed(threadId, cards) && Boolean(cards?.length);
+		const key = checkpoint ? `${checkpoint.id}:${checkpoint.status}` : null;
+		const checkpointArrived = key !== null && key !== this.#checkpoint;
+		this.#checkpoint = key;
+		return cardsArrived || checkpointArrived;
 	}
 }
 
