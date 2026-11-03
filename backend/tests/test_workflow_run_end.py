@@ -441,3 +441,10 @@ async def test_the_persons_wont_do_on_a_required_step_fails_the_run(isolated_db,
     assert (record["outcome"], {entry["step"]: entry["state"] for entry in record["steps"]}) == (
         "failed", {"draft": "done", "review": "closed", "polish": "not_run"},
     )
+    from plans import closure, service
+
+    db = get_db()
+    try:
+        assert closure.settled_reasons(db, [service._node_row(db, polish)]) == {polish: "Closed because required task review was not done."}
+    finally:
+        db.close()

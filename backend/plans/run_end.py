@@ -15,7 +15,10 @@ import plans.service as service
 from plans import node_states
 
 EVENT = "workflow_run_ended"
-RUN_FAILED = "Closed because required task {title} failed."
+RUN_FAILED = "Closed because required task {title} {how}."
+#: How the required step ended, by its state: it failed, or it was closed (the person's Won't do).
+_HOW = {"failed": "failed"}
+_NOT_DONE = "was not done"
 #: Why the reply to a failed required step says the run is still open.
 RUN_LEFT_OPEN = "The run stays open until these settle, since their workers still have open work: {titles}."
 _PROVENANCE = "plans.workflow_run"
@@ -56,10 +59,10 @@ def open_nodes(db, phase_id: str) -> list[str]:
     )]
 
 
-def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
+def fail_run(node_id: str, common: dict, how: str | None = None) -> tuple[list[str], list[str]]:
     """After a required step ends not done, close the run's other open work with the reason.
 
-    A run that is itself a required step of an outer run fails that run too.
+    A run that is itself a required step of an outer run fails that run too, for the same ``how``.
     Returns the ids closed and the ids whose close was refused. The closes carry
     this module's provenance, which is how the run's record tells a step never
     reached from one an agent chose to skip. Work whose close is refused (a
@@ -78,7 +81,8 @@ def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
         return [], []
     if not _run_phase(db, service._node_row(db, node["parent_id"])):
         return [], []
-    reason = RUN_FAILED.format(title=node["title"])
+    how = how or _HOW.get(node["state"], _NOT_DONE)
+    reason = RUN_FAILED.format(title=node["title"], how=how)
     closed: list[str] = []
     refused: set[str] = set()
     progress = True
@@ -98,7 +102,7 @@ def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
             closed.append(open_id)
             progress = True
     still_open = [open_id for open_id in refused if service._node_row(db, open_id)["state"] not in service._TERMINAL_STATES]
-    outer_closed, outer_open = fail_run(node["parent_id"], common)
+    outer_closed, outer_open = fail_run(node["parent_id"], common, how)
     return closed + outer_closed, still_open + outer_open
 
 
