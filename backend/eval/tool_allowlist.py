@@ -8,6 +8,8 @@ import os
 from collections.abc import Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
 
 
@@ -23,24 +25,60 @@ CARRY_IN_READ_ONLY_TOOLS = frozenset({
     "plan_read",  # Reads delivery state without changing the plan.
     "read_file",  # Reads target content without changing the file.
 })
-_carry_in_tool_isolation: ContextVar[bool] = ContextVar(
-    "carry_in_tool_isolation", default=False,
-)
+
+
+@dataclass(frozen=True)
+class CarryInUnseen:
+    """What one sample side's read tools may not observe.
+
+    Nothing under a ``hidden`` path exists for them: not listed, not searched, not read. ``shown``
+    is the one file under them that ``read_file`` still opens, and ``view`` the bytes it shows
+    (the lesson as its candidate side receives it, without its case). Paths are resolved.
+    """
+
+    hidden: tuple[Path, ...] = ()
+    shown: Path | None = None
+    view: bytes | None = None
+
+
+_carry_in_unseen: ContextVar[CarryInUnseen | None] = ContextVar("carry_in_unseen", default=None)
 
 
 @contextmanager
-def carry_in_tool_isolation() -> Iterator[None]:
-    """Make this task and its child tasks record non-read-only eval calls."""
-    reset_handle = _carry_in_tool_isolation.set(True)
+def carry_in_tool_isolation(unseen: CarryInUnseen = CarryInUnseen()) -> Iterator[None]:
+    """Make this task and its child tasks record non-read-only eval calls and observe no more than ``unseen`` allows."""
+    reset_handle = _carry_in_unseen.set(unseen)
     try:
         yield
     finally:
-        _carry_in_tool_isolation.reset(reset_handle)
+        _carry_in_unseen.reset(reset_handle)
 
 
 def is_carry_in_record_only(tool_name: str) -> bool:
     """True when a carry-in turn must retain, but not execute, this call."""
-    return _carry_in_tool_isolation.get() and tool_name not in CARRY_IN_READ_ONLY_TOOLS
+    return _carry_in_unseen.get() is not None and tool_name not in CARRY_IN_READ_ONLY_TOOLS
+
+
+def carry_in_hides(path: Path, *, reading: bool = False) -> bool:
+    """Whether a carry-in sample's read tool must treat ``path`` as absent.
+
+    ``reading`` is a read of the file's own content, which the ``shown`` file allows.
+    """
+    unseen = _carry_in_unseen.get()
+    if unseen is None or not unseen.hidden:
+        return False
+    resolved = path.resolve(strict=False)
+    if reading and resolved == unseen.shown:
+        return False
+    return any(resolved.is_relative_to(root) for root in unseen.hidden)
+
+
+def carry_in_view(path: Path, data: bytes) -> bytes:
+    """The bytes a carry-in sample's ``read_file`` shows of ``path`` whose content ``data`` is."""
+    unseen = _carry_in_unseen.get()
+    if unseen is None or unseen.view is None or path.resolve(strict=False) != unseen.shown:
+        return data
+    return unseen.view
 
 
 async def record_only_result(tool_name: str, params: dict) -> str | None:

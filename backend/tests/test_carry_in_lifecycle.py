@@ -66,12 +66,12 @@ def _lesson_path(c1, name="demo-lesson") -> Path:
 def _write_lesson(
     c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial",
     name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section="Read first",
-    review_after="2099-01-01",
+    review_after="2099-01-01", right_call="Read first.",
 ) -> Path:
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
-    case = {"what_happened": "A node closed unread.", "right_call": "Read first.", "does_not_apply": "No rule."}
+    case = {"what_happened": "A node closed unread.", "right_call": right_call, "does_not_apply": "No rule."}
     if actions is not None:
         case["actions"] = actions
     path = _lesson_path(c1, name)
