@@ -140,9 +140,9 @@ async def _dispatch_prepared(
         persist_prepared_installed_context,
         batch.thread_id, prepared.prepared_context,
     )
-    manifest_id = await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
+    await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
     if after_manifest_before_dispatch is not None:  # refusing here leaves no provider write
-        await after_manifest_before_dispatch(manifest_id, batch.turn_id)
+        await after_manifest_before_dispatch(batch.turn_id)
     context = _dispatch_context(
         send_dispatch,
         batch,

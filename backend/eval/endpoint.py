@@ -156,8 +156,8 @@ async def run_eval_turn(
     request, and the perf scenarios record their prefill and cache numbers from
     exactly this path.
 
-    ``after_manifest_before_dispatch`` gets the manifest and Turn ids before the
-    provider call; raising there refuses the Turn with no write.
+    ``after_manifest_before_dispatch`` gets the Turn id once its manifest is
+    recorded, before the provider call; raising there refuses the Turn with no write.
     """
     from core.turn_core import BOOT_EPOCH
     from infra.db_async import run_in_db

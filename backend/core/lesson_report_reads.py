@@ -145,7 +145,7 @@ def _loads_by_group(db, candidates):
     for load in json_row_chunks(
         db, "SELECT " + ",".join(f"g.{name} AS {name}" for name in _LOAD_COLUMNS) + " FROM guidance_loads g "
         "JOIN (SELECT json_extract(value,'$[0]') AS thread_id,json_extract(value,'$[1]') AS turn_id "
-        "FROM json_each(?)) w ON g.thread_id=w.thread_id AND g.turn_id=w.turn_id AND g.lesson_id IS NULL",
+        "FROM json_each(?)) w ON g.thread_id=w.thread_id AND g.turn_id=w.turn_id",
         (wanted,), _LOAD_COLUMNS, "created_at,id",
     ):
         grouped[(str(load["thread_id"]), str(load["turn_id"]), str(load["path"]))].append(load)

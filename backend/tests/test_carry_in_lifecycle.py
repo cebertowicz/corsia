@@ -155,7 +155,7 @@ def _admitting_turn(hooked: list):
         )
         assert admission.batch is not None and admission.batch.turn_id == turn_id
         try:
-            await after_manifest_before_dispatch("m1", turn_id)
+            await after_manifest_before_dispatch(turn_id)
         except Exception as exc:
             return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
         hooked.append(turn_id)
@@ -167,16 +167,6 @@ def _admitting_turn(hooked: list):
         return turn_id, None
 
     return run_eval_turn
-
-
-def _receipts() -> list[dict]:
-    from infra.database import get_db
-
-    rows = get_db().execute(
-        "SELECT thread_id, turn_id, node_id, variant, lesson_id, lesson_behavioral_sha256, delivered_sha256, path "
-        "FROM guidance_loads WHERE lesson_id IS NOT NULL ORDER BY created_at, id"
-    ).fetchall()
-    return [dict(row) for row in rows]
 
 
 # --- committed-save recorder ------------------------------------------------
@@ -556,7 +546,7 @@ async def test_a_sample_is_a_fresh_isolated_child_of_the_owner_checked_before_di
     async def run_eval_turn(*, thread_id, thread_row, prompt, model, timeout_seconds, after_manifest_before_dispatch):
         seen.update(thread=dict(thread_row), model=model, isolated=is_carry_in_record_only("write_file"))
         try:
-            await after_manifest_before_dispatch("absent-manifest", "absent-turn")
+            await after_manifest_before_dispatch("absent-turn")
         except Exception as exc:
             return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
         return "turn-1", None
@@ -603,7 +593,7 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
             fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=True), "c1", [],
         )
     assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1")]
-    assert dispatched == [] and _receipts() == []
+    assert dispatched == []
 
 
 @pytest.mark.asyncio
@@ -987,8 +977,8 @@ async def test_the_manifest_hook_runs_after_recording_and_can_refuse_dispatch(mo
     monkeypatch.setattr("infra.send_dispatch.dispatch", dispatch)
     monkeypatch.setattr(thread_execution, "_dispatch_context", lambda *a, **k: None)
 
-    async def refuse(manifest_id, turn_id):
-        order.append(f"hook:{manifest_id}:{turn_id}")
+    async def refuse(turn_id):
+        order.append(f"hook:{turn_id}")
         raise RuntimeError("missing lesson")
 
     batch = SimpleNamespace(thread_id="t", turn_id="u")
@@ -998,4 +988,4 @@ async def test_the_manifest_hook_runs_after_recording_and_can_refuse_dispatch(mo
             batch, prepared, SimpleNamespace(), attempt_id="a", user=None, ws=None,
             after_persist_before_dispatch=None, after_manifest_before_dispatch=refuse,
         )
-    assert order == ["manifest", "hook:m1:u"]
+    assert order == ["manifest", "hook:u"]

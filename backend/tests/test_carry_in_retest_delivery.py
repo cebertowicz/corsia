@@ -1,18 +1,15 @@
-"""C1 re-test delivery: each side's input, the turn-bound receipt, own-file lessons, and the readers."""
+"""C1 re-test delivery: each side's input, the turn-bound check, own-file lessons, and same-input cases."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from tests.registry_helpers import make_session
 from tests.test_carry_in_lifecycle import (  # noqa: F401 - c1 is the shared fixture
     ACTIONS, LESSON_ID, TARGET, _admitting_turn, _arm, _call, _events, _git, _local, _make_pending,
-    _pending_fact, _receipts, _save, _write_lesson, c1,
+    _pending_fact, _save, _write_lesson, c1,
 )
 
 LESSON_BODY = "Never close a node before reading its rule (distinctive lesson body)."
@@ -28,25 +25,19 @@ def _read_turn_result(passing):
     return read
 
 
-def _record_prompts(monkeypatch, passing, *, receipts_seen=None):
+def _record_prompts(monkeypatch, passing):
     """Route samples through a fake Turn that admits the real prompt; returns each sample thread's prompt."""
     from eval import endpoint, turn_result
 
     prompts: dict[str, str] = {}
     admitting = _admitting_turn([])
-    reading = _read_turn_result(passing)
 
     async def run_eval_turn(**kwargs):
         prompts[kwargs["thread_id"]] = kwargs["prompt"]
         return await admitting(**kwargs)
 
-    async def read(thread_id, turn_id):
-        if receipts_seen is not None:
-            receipts_seen.append(len(_receipts()))
-        return await reading(thread_id, turn_id)
-
     monkeypatch.setattr(endpoint, "run_eval_turn", run_eval_turn)
-    monkeypatch.setattr(turn_result, "read_turn_result", read)
+    monkeypatch.setattr(turn_result, "read_turn_result", _read_turn_result(passing))
     return prompts
 
 
@@ -55,7 +46,7 @@ def _sides(prompts: dict[str, str], side: str) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_each_side_is_receipted_only_once_its_recorded_input_matches(c1, monkeypatch):
+async def test_each_side_dispatches_once_its_recorded_input_matches(c1, monkeypatch):
     from core.lesson_delivery import NOTICE
     from eval import endpoint, turn_result
     from infra import carry_in_drain
@@ -75,17 +66,8 @@ async def test_each_side_is_receipted_only_once_its_recorded_input_matches(c1, m
     await carry_in_drain._sample(fact, owner, "omlx@srv/m0", ACTIONS, candidate, "c1", [])
 
     prefix = f"eval-c1-{fact.identity[:16]}"
-    without, with_ = _receipts()
-    assert (without["thread_id"], without["turn_id"], without["node_id"], without["variant"]) == (
-        f"{prefix}-b1", f"turn-{prefix}-b1", None, "without")
-    assert (with_["thread_id"], with_["turn_id"], with_["node_id"], with_["variant"]) == (
-        f"{prefix}-c1", f"turn-{prefix}-c1", None, "with")
-    for receipt in (without, with_):
-        assert (receipt["lesson_id"], receipt["lesson_behavioral_sha256"]) == (LESSON_ID, fact.behavioral_sha256)
-    payload = candidate.delivery.payload
-    assert with_["delivered_sha256"] == hashlib.sha256(payload.encode()).hexdigest()
-    assert without["delivered_sha256"] == hashlib.sha256(b"").hexdigest()
     assert dispatched == [f"turn-{prefix}-b1", f"turn-{prefix}-c1"]
+    payload = json.loads(candidate.block)["trial_lessons"][0]["guidance"]
     # The delivery is the plan result's shape, and the two prompts differ only by it.
     assert json.loads(candidate.block) == {"trial_lessons": [{
         "lesson_id": LESSON_ID, "target": TARGET, "guidance": payload, "notice": NOTICE,
@@ -96,7 +78,7 @@ async def test_each_side_is_receipted_only_once_its_recorded_input_matches(c1, m
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("arm_delivers", "input_delivers"), [(True, False), (False, True)])
-async def test_a_turn_whose_input_does_not_match_its_side_is_refused_without_a_receipt(
+async def test_a_turn_whose_input_does_not_match_its_side_is_refused_before_dispatch(
     c1, monkeypatch, arm_delivers, input_delivers,
 ):
     from eval import endpoint, turn_result
@@ -122,7 +104,7 @@ async def test_a_turn_whose_input_does_not_match_its_side_is_refused_without_a_r
             fact, {"user_id": "steve", "project_id": None}, "omlx@srv/m0", ACTIONS,
             _arm(c1, fact, deliver=arm_delivers), "c1", [],
         )
-    assert dispatched == [] and _receipts() == []
+    assert dispatched == []
 
 
 @pytest.mark.asyncio
@@ -139,15 +121,14 @@ async def test_a_baseline_whose_target_text_mentions_the_key_is_still_a_baseline
 
 
 @pytest.mark.asyncio
-async def test_a_retest_runs_baseline_without_and_candidate_with_the_delivery_then_leaves_no_receipts(c1, monkeypatch):
+async def test_a_retest_runs_baseline_without_and_candidate_with_the_delivery(c1, monkeypatch):
     from infra import carry_in_drain
 
     _write_lesson(c1, text=LESSON_BODY)
     _save(c1, "rule v1\n")
     await _make_pending(c1)
     _local(monkeypatch)
-    seen: list[int] = []
-    prompts = _record_prompts(monkeypatch, "c", receipts_seen=seen)
+    prompts = _record_prompts(monkeypatch, "c")
 
     assert await carry_in_drain.wake(c1.workspace) is True
 
@@ -157,8 +138,6 @@ async def test_a_retest_runs_baseline_without_and_candidate_with_the_delivery_th
     assert all("trial_lessons" not in text for text in _sides(prompts, "b"))
     assert all('"trial_lessons"' in text and LESSON_ID in text and "Read first." not in text
                for text in _sides(prompts, "c"))
-    assert seen == [1, 2, 3, 4]  # one receipt per sample, there before its Turn is read
-    assert _receipts() == []  # deleted with their sample threads
 
 
 @pytest.mark.asyncio
@@ -227,6 +206,29 @@ async def test_saving_a_lesson_that_has_a_target_starts_its_case_on_the_target_a
     assert fact.lesson_path == path.relative_to(c1.workspace).as_posix()
 
 
+@pytest.mark.parametrize("target", [None, TARGET])
+@pytest.mark.asyncio
+async def test_a_case_whose_sides_would_see_the_same_input_retires_before_any_sample(c1, monkeypatch, target):
+    """A non-trial lesson gets no delivery: with no target, or on a lesson save that left
+    its target unchanged, both sides would read the same prompt and could show no effect."""
+    from core.carry_in_facts import record_committed_save
+    from infra import carry_in_drain
+
+    _save(c1, "rule v1\n")
+    await _make_pending(c1)  # the target save, before any lesson names it, matches nothing
+    path = _write_lesson(c1, state="watch", target=target)
+    record_committed_save(c1.workspace, [path], _git(["rev-parse", "HEAD"], cwd=c1.workspace).strip())
+    await _make_pending(c1)
+    _pending_fact()
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+    terminal = _events()[-1]
+    assert (terminal["event"], terminal["reason"]) == ("lesson.carry_in.retired", "same_input")
+    assert prompts == {}
+
+
 @pytest.mark.asyncio
 async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_isolation(c1, monkeypatch):
     """The index line is all a target-less or skill-target trial delivers: its path must open in a sample."""
@@ -270,33 +272,3 @@ async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_i
         state._current_turn_identity.reset(turn_token)
         state._current_thread_id.reset(thread_token)
     assert LESSON_BODY in result and "record_only" not in result
-
-
-def _insert_receipt_row(db, *, thread_id, turn_id, node_id, variant, lesson_id):
-    from core.guidance_loads import insert_guidance_load
-
-    insert_guidance_load(
-        db, thread_id=thread_id, turn_id=turn_id, path=Path("/p/SKILL.md"), data=b"x", returned_text="t",
-        partial=False, node_id=node_id, variant=variant, lesson_id=lesson_id, lesson_behavioral_sha256="v1",
-    )
-
-
-def test_a_retest_receipt_opens_no_trial_and_counts_as_no_delivery(isolated_db):
-    from core.lesson_trial_receipts import PERIOD_SQL
-    from core.lesson_trial_verdicts import OPEN_TRIALS_SQL
-    from infra.database import get_db
-
-    db = get_db()
-    owner = make_session(db, title="Owner", prefix="own")
-    user = db.execute("SELECT user_id FROM threads WHERE id=?", (owner,)).fetchone()[0]
-    reached = {"reached": "measurement.verdict.reached"}
-    period = (json.dumps([owner]), user, "", "9")
-    _insert_receipt_row(db, thread_id=owner, turn_id="turn-1", node_id=None, variant="with", lesson_id="sample")
-    db.commit()
-    assert db.execute(OPEN_TRIALS_SQL, reached).fetchall() == []
-    assert db.execute(PERIOD_SQL, period).fetchall() == []
-
-    _insert_receipt_row(db, thread_id=owner, turn_id=None, node_id="task-1", variant="with", lesson_id="real")
-    db.commit()
-    assert [row["lesson_id"] for row in db.execute(OPEN_TRIALS_SQL, reached)] == ["real"]
-    assert [row["task_id"] for row in db.execute(PERIOD_SQL, period)] == ["task-1"]

@@ -11,8 +11,9 @@ Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
 A candidate sample of a ``trial`` lesson carries the lesson the way task start
 delivers it (``core.lesson_delivery``); a baseline sample carries none. Just
-before each provider call the Turn's own recorded input must match its side,
-and only then does one ``guidance_loads`` receipt record the arm.
+before each provider call the Turn's own recorded input must match its side.
+A case whose two sides would get the same input retires as ``same_input``: it
+cannot show the lesson's effect.
 """
 
 from __future__ import annotations
@@ -25,13 +26,11 @@ from typing import Any
 from loguru import logger
 
 from core import carry_in_facts as facts
-from core.carry_in_facts import CarryInFact, EligibleCase
+from core.carry_in_facts import CarryInFact
 from infra import carry_in_capacity as capacity
 from infra.carry_in_arm import (
     Arm as _Arm,
     arm as _arm,
-    drop_receipts as _drop_receipts,
-    insert_receipt as _insert_receipt,
     sample_prompt,
     turn_input as _turn_input,
 )
@@ -154,8 +153,6 @@ async def _delete_threads(threads: list[tuple[str, str]]) -> None:
             status = await delete_owned_thread(thread_id, user_id, [])
             if status != "ok":
                 logger.warning("carry-in eval thread {} not deleted: {}", thread_id, status)
-            else:  # a receipt never outlives the sample thread it describes
-                await run_in_db(partial(_write, _drop_receipts, thread_id, scope="carry_in_receipts"))
         except Exception:
             logger.opt(exception=True).warning("carry-in eval thread {} not deleted", thread_id)
 
@@ -200,11 +197,11 @@ async def _sample(
     created.append((thread_id, owner["user_id"]))
     refused: list[RuntimeError] = []
 
-    async def before_dispatch(_manifest_id: str | None, turn_id: str) -> None:
+    async def before_dispatch(turn_id: str) -> None:
         """The last step before this sample's provider call.
 
         The Turn's own recorded input must hold exactly this side's delivery and
-        capacity must still be exact and idle; only then is the arm receipted.
+        capacity must still be exact and idle.
         """
         recorded = await run_in_db(_read, _turn_input, thread_id, turn_id)
         if not arm.carried_by(recorded):
@@ -213,9 +210,6 @@ async def _sample(
             refused.append(_Unavailable(f"{model} is not the one ready, idle local model"))
         if refused:
             raise refused[0]
-        await run_in_db(partial(
-            _write, _insert_receipt, thread_id, turn_id, arm, fact, scope="carry_in_receipt",
-        ))
 
     with carry_in_tool_isolation():
         turn_id, failure = await run_eval_turn(
@@ -247,29 +241,20 @@ async def _run_side(fact, owner, model, actions, arm, side, created, completed) 
 
 
 async def _evaluate(
-    fact: CarryInFact, case: EligibleCase, owner: dict, model: str,
-    before: bytes | None, after: bytes,
+    fact: CarryInFact, actions: dict, owner: dict, model: str, baseline: _Arm, candidate: _Arm,
 ) -> None:
     """Sample and settle one claimed case; eval threads go once its terminal fact commits."""
     created: list[tuple[str, str]] = []
     completed = [0]
     terminal: dict[str, Any]
     try:
-        actions = case.actions
-        assert actions is not None
-        baseline_passes = await _run_side(
-            fact, owner, model, actions, _arm(fact, case, before, deliver=False),
-            "b", created, completed,
-        )
+        baseline_passes = await _run_side(fact, owner, model, actions, baseline, "b", created, completed)
         baseline_failures = completed[0] - baseline_passes
         if baseline_failures < NEEDED:
             terminal = {"event": facts.RESULT, "verdict": "not_discriminating",
                         "baseline_failures": baseline_failures, "candidate_passes": 0}
         else:
-            candidate_passes = await _run_side(
-                fact, owner, model, actions, _arm(fact, case, after, deliver=case.deliver),
-                "c", created, completed,
-            )
+            candidate_passes = await _run_side(fact, owner, model, actions, candidate, "c", created, completed)
             terminal = {
                 "event": facts.RESULT,
                 "verdict": "passed" if candidate_passes >= NEEDED else "failed",
@@ -337,7 +322,12 @@ async def wake(workspace: Path) -> bool:
             _write, facts.record_waiting, fact, _now(), "history_unavailable", scope="carry_in_waiting",
         ))
         return False
-    if reason is not None or blobs is None:
+    arms = None if reason is not None or blobs is None else (
+        _arm(fact, case, blobs[0], deliver=False), _arm(fact, case, blobs[1], deliver=case.deliver),
+    )
+    if arms is not None and arms[0].prompt == arms[1].prompt:
+        reason = "same_input"
+    if reason is not None or arms is None:
         await run_in_db(partial(
             _write, facts.record_terminal, fact, _now(), facts.RETIRED,
             scope="carry_in_retired", reason=reason or "target_unavailable",
@@ -353,7 +343,7 @@ async def wake(workspace: Path) -> bool:
         _write, facts.record_claim, fact, _now(), model, BOOT_EPOCH, scope="carry_in_claim",
     )):
         return True
-    await _evaluate(fact, case, owner, model, *blobs)
+    await _evaluate(fact, case.actions, owner, model, *arms)
     return True
 
 

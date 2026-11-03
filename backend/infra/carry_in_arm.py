@@ -1,4 +1,4 @@
-"""One carry-in sample side: its prompt, the lesson delivery inside it, and its receipt.
+"""One carry-in sample side: its prompt and the lesson delivery inside it.
 
 Split from ``infra.carry_in_drain``, which runs the samples. A candidate prompt
 carries the delivery the way task start returns it (``core.lesson_delivery``); a
@@ -33,7 +33,6 @@ class Arm:
     """One side's prompt; ``block`` is the lesson delivery inside it, None for a side with none."""
 
     prompt: str
-    delivery: TrialDelivery
     block: str | None
 
     def carried_by(self, recorded: str | None) -> bool:
@@ -51,22 +50,6 @@ def turn_input(db, thread_id: str, turn_id: str) -> str | None:
         (thread_id, turn_id),
     ).fetchall()
     return "\n".join(str(row[0]) for row in rows) if rows else None
-
-
-def insert_receipt(db, thread_id: str, turn_id: str, arm: Arm, fact: CarryInFact) -> None:
-    from core.guidance_loads import insert_guidance_load
-
-    delivery = arm.delivery
-    insert_guidance_load(
-        db, thread_id=thread_id, turn_id=turn_id, path=delivery.source_path, data=delivery.source_data,
-        returned_text=delivery.payload if arm.block else "", partial=False,
-        variant="with" if arm.block else "without",
-        lesson_id=fact.lesson_id, lesson_behavioral_sha256=fact.behavioral_sha256,
-    )
-
-
-def drop_receipts(db, thread_id: str) -> None:
-    db.execute("DELETE FROM guidance_loads WHERE thread_id=?", (thread_id,))
 
 
 def sample_prompt(
@@ -94,7 +77,7 @@ def sample_prompt(
 def arm(fact: CarryInFact, case: EligibleCase, blob: bytes | None, *, deliver: bool) -> Arm:
     block = delivery_block(case.delivery) if deliver else None
     prompt = sample_prompt(case.case, fact.target_path, blob, block, show_file=fact.target_path != fact.lesson_path)
-    return Arm(prompt, case.delivery, block)
+    return Arm(prompt, block)
 
 
 def _longest_backtick_run(text: str) -> int:
