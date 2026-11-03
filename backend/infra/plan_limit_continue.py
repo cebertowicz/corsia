@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.stop_causes import CONTEXT_OVERFLOW_REASON, PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON
+from core.stop_causes import (
+    CONTEXT_OVERFLOW_REASON, PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON, ContextOverflowEnd, PlanLimitStop,
+)
 
 #: The transcript chip line for the continue input (approved copy).
 CONTINUE_CHIP = "Resumed after plan limit pause"
@@ -195,3 +197,16 @@ def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str
         db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
         message_id=overflow_continue_message_id(turn_id),
     )
+
+
+def queue_terminal_continue(
+    db: sqlite3.Connection, turn_id: str, thread_id: str, *,
+    outcome: str, error: object, limit_recorded: bool,
+) -> None:
+    """Queue the continue input a Turn's terminal cause leaves behind, if it leaves one."""
+    if outcome == "cancelled" and isinstance(error, PlanLimitStop):
+        queue_plan_limit_continue(db, turn_id, thread_id)
+    elif outcome == "error" and limit_recorded:
+        queue_limit_refusal_continue(db, turn_id, thread_id)
+    elif outcome == "error" and isinstance(error, ContextOverflowEnd):
+        queue_overflow_continue(db, turn_id, thread_id)

@@ -5,11 +5,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from core.stop_causes import ContextOverflowEnd, PlanLimitStop
 from infra.database import write_transaction
-from infra.plan_limit_continue import (
-    queue_limit_refusal_continue, queue_overflow_continue, queue_plan_limit_continue,
-)
+from infra.plan_limit_continue import queue_terminal_continue
 from infra.completed_tool_results import (
     persist_completed_tool_results,
     persist_completed_tool_results_in_transaction as _persist_completed_tool_results,
@@ -229,12 +226,9 @@ def finish_turn(
             connection, turn_id, outcome=outcome, error=error,
         )
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
-        if outcome == "cancelled" and isinstance(error, PlanLimitStop):
-            queue_plan_limit_continue(connection, turn_id, thread_id)
-        elif outcome == "error" and isinstance(limits.limit, Recorded):
-            queue_limit_refusal_continue(connection, turn_id, thread_id)
-        elif outcome == "error" and isinstance(error, ContextOverflowEnd):
-            queue_overflow_continue(connection, turn_id, thread_id)
+        queue_terminal_continue(
+            connection, turn_id, thread_id, outcome=outcome, error=error,
+            limit_recorded=isinstance(limits.limit, Recorded))
         successor, switch_transition, switch_request, idle = _claim_after_terminal(
             connection,
             thread_id=thread_id,

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from core.stop_causes import CONTEXT_OVERFLOW_REASON, ContextOverflowEnd
 from infra.database import get_db
 from infra.input_admission import accept_thread_input
-from infra import thread_execution  # noqa: F401  # imported before the driver, so it binds the real one
+import infra.thread_execution  # noqa: F401  # imported before the driver, so it binds the real one
 from infra.plan_limit_continue import overflow_continue_message_id, overflow_rerun_queued
 from infra.thread_driver import finish_turn
 from infra.thread_input_types import ClaimedBatch
@@ -40,7 +40,7 @@ def _accept(db, thread: str, message: str) -> None:
                         message_id=message, created_at=_now(), db=db)
 
 
-def _refuse(db, turn: str = "t1", error: object = None):
+def _refuse(db, turn: str = "t1", error: str | BaseException | None = None):
     return finish_turn(turn, outcome="error", ended_at=_now(), successor_turn_id=f"next-{turn}",
                        boot_epoch="boot", error=ContextOverflowEnd(_REFUSAL) if error is None else error, db=db)
 

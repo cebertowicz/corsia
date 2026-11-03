@@ -564,8 +564,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
     reset_at = ev.get("reset_at")
     msg = ev.get("message") or f"Codex turn failed: {cause}"
     overflow = cause == "context_window_exceeded"
-    settlement = await commit_turn_terminal(
-        identity.turn_id, "error", ContextOverflowEnd(msg) if overflow else msg)
+    settlement = await commit_turn_terminal(identity.turn_id, "error", ContextOverflowEnd(msg) if overflow else msg)
     if settlement.result is not TurnTerminalResult.APPLIED:
         return
     ev["_corsia_terminal_committed"] = True
@@ -583,17 +582,11 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
             **codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded),
             "turn_id": identity.turn_id,
         }
-        marker_id = None
         # A size refusal with its re-run queued writes no notice; the re-run answers instead.
-        if not (overflow and await run_in_db(overflow_rerun_queued, identity.turn_id)):
-            marker_id = await record_terminal_marker(
-                ctx.thread_id,
-                content=f"⚠️ {msg}",
-                metadata=meta_f,
-                bcast=ctx.bcast,
-                label="failure",
-                best_effort_announcement=True,
-            )
+        queued = overflow and await run_in_db(overflow_rerun_queued, identity.turn_id)
+        marker_id = None if queued else await record_terminal_marker(
+            ctx.thread_id, content=f"⚠️ {msg}", metadata=meta_f, bcast=ctx.bcast,
+            label="failure", best_effort_announcement=True)
         await _publish_claimed_terminal(
             thread_id=ctx.thread_id,
             live=ctx.live,
