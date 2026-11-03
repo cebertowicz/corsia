@@ -35,14 +35,19 @@ def discovered_window(
     return user_window or reported or reference_context_window(host, model_id)
 
 
-def reference_context_window(host: str, model_id: str) -> int | None:
-    """The provider-published input window for ``model_id`` on ``host``, if known."""
+def reference_namespaces(host: str) -> tuple[str, ...]:
+    """Where ``host``'s models sit in litellm's table; empty for a host that never reads it."""
     host = (host or "").lower().rstrip(".")
-    namespaces = next(
+    return next(
         (ns for suffix, ns in _REFERENCE_NAMESPACES.items()
          if host == suffix or host.endswith("." + suffix)),
         (),
     )
+
+
+def reference_context_window(host: str, model_id: str) -> int | None:
+    """The provider-published input window for ``model_id`` on ``host``, if known."""
+    namespaces = reference_namespaces(host)
     if not namespaces:
         return None
     import litellm
