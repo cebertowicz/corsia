@@ -1,0 +1,11 @@
+{
+  "body": {
+    "role": "reader",
+    "type": "anyone"
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [],
+  "url": "https://www.googleapis.com/drive/v3/files/F1/permissions"
+}

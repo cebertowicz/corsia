@@ -123,13 +123,15 @@ async def _resend_after_guard_refusal(
     Every guard wording qualifies, including those that carry no memory terms to
     learn a fit from.
     """
-    from infra.carry_in_capacity import wait_until_quiet
+    from functools import partial
+
+    from infra.carry_in_capacity import omlx_state, wait_until_quiet
     from subagents.provider_context_limits import is_omlx_guard_refusal
 
     if not omlx_server_id or not is_omlx_guard_refusal(str(error)):
         return False
     quiet = await wait_until_quiet(
-        omlx_server_id,
+        partial(omlx_state, omlx_server_id),
         timeout=GUARD_QUIET_TIMEOUT_SECONDS,
         interval=GUARD_QUIET_INTERVAL_SECONDS,
     )

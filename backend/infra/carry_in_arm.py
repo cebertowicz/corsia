@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from core.carry_in_facts import CarryInFact, EligibleCase
-from core.lesson_files import has_section
 
 if TYPE_CHECKING:
     from core.lesson_delivery import TrialDelivery
@@ -78,15 +77,17 @@ def arm(fact: CarryInFact, case: EligibleCase, blob: bytes | None, *, deliver: b
 def arms(fact: CarryInFact, case: EligibleCase, before: bytes | None, after: bytes) -> tuple[Arm, Arm]:
     """The baseline and candidate sides of one re-test; they differ in exactly one thing.
 
-    A trial lesson's candidate carries the delivery unless the target already has its
-    section (task start omits it then, and the equal prompts retire the case); a
-    lesson in any other state compares ``before`` with ``after`` and delivers nothing.
+    A trial lesson's candidate carries the delivery unless task start would omit it
+    for this target text (``core.lesson_delivery.target_omission``; the equal prompts
+    then retire the case); a lesson in any other state compares ``before`` with
+    ``after`` and delivers nothing.
     """
+    from core.lesson_delivery import target_omission
+
     if not case.deliver:
         return arm(fact, case, before, deliver=False), arm(fact, case, after, deliver=False)
-    section = case.delivery.section
-    present = section is not None and has_section(after.decode("utf-8", errors="replace"), section)
-    return arm(fact, case, after, deliver=False), arm(fact, case, after, deliver=not present)
+    omitted = target_omission(case.delivery, after.decode("utf-8", errors="replace")) is not None
+    return arm(fact, case, after, deliver=False), arm(fact, case, after, deliver=not omitted)
 
 
 def _longest_backtick_run(text: str) -> int:

@@ -18,7 +18,7 @@ def shape(rule: rules.Rule) -> dict[str, Any]:
         "event_type": rule.event_type, "match": list(rule.match), "action": rule.action,
         "to": rule.to, "mode": rule.mode, "note": rule.note, "written_by": rule.created_by,
         "script_id": rule.script_id, "workflow_id": rule.workflow_id,
-        "request_identity_fact": rule.request_identity_fact,
+        "request_identity_fact": rule.request_identity_fact, "worker_profile": rule.worker_profile,
     }
 
 

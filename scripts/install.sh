@@ -283,6 +283,15 @@ ensure_python_env() {
         -r "$CORSIA_HOME/backend/requirements.lock"
 }
 
+# gws is reached only through its tool, so it is installed to the runtime cache and not linked onto PATH.
+# A failed download warns and continues: the rest of CORSIA works without it. Linux: install_gws_linux.
+install_gws() {
+    say "     Installing Google Workspace support…"
+    (cd "$CORSIA_HOME/backend" && "$CORSIA_HOME/.venv/bin/python" -c \
+        'from tools.managed_runtime import ensure_runtime; ensure_runtime("gws")') > /dev/null 2>&1 \
+        || say "     Couldn’t install Google Workspace support. Run this again."
+}
+
 is_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 start_corsia() {
@@ -428,6 +437,13 @@ install_python_linux() {
     ln -sfn "$python" "$LINUX_LOCAL_BIN/python3.11"
 }
 
+# gws is reached only through its tool, so it is installed to the runtime cache and not linked onto PATH.
+# A failed download warns and continues: the rest of CORSIA works without it.
+install_gws_linux() {
+    say "     Installing Google Workspace support…"
+    managed_runtime_linux gws > /dev/null || say "     Couldn’t install Google Workspace support. Run this again."
+}
+
 link_managed_node_linux() {
     local node tool
     say "     Installing Node…"
@@ -566,6 +582,7 @@ linux_ensure_prereqs() {
     check_prereqs
     [ "${#INVISIBLE[@]}" -eq 0 ] || stop "${INVISIBLE[@]}"
     [ "${#NEEDED[@]}" -eq 0 ] || stop "Still not ready: ${NEEDED[*]%%|*}. Install it by hand, then run this again."
+    install_gws_linux
 }
 
 link_corsia_command_linux() {
@@ -643,6 +660,7 @@ main() {
         || stop "$CORSIA_HOME exists but is not a CORSIA checkout. Move it aside, then run this again."
     say "2/4  Using CORSIA $(installed_version) in ~/.corsia"
     ensure_python_env
+    install_gws
     local brew
     if brew="$(find_brew)"; then
         add_homebrew_shellenv "$brew"

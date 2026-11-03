@@ -90,6 +90,8 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
         return NO_RESULT, {"reason": "the agent was stopped"}
     if turn["status"] != "completed":
         error = str(turn["error"] or "")
+        if error == "error_max_turns":  # the CLI's code for an exhausted turn cap
+            return NO_RESULT, {"reason": "the agent reached its turn limit"}
         if _ERROR_CODE.match(error):
             return NO_RESULT, {"reason": f"the agent's turn failed ({error})"}
         logger.warning("rule-started agent turn {} failed: {}", turn["id"], error)

@@ -65,7 +65,8 @@ def _lesson_path(c1, name="demo-lesson") -> Path:
 
 def _write_lesson(
     c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial",
-    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section=None,
+    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section="Read first",
+    review_after="2099-01-01",
 ) -> Path:
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -77,11 +78,11 @@ def _write_lesson(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_trial(
         lesson_id=lesson_id, owner=c1.owner, name=name, description="Use when closing a node.",
-        text=text, trial=Trial(kind="hypothesis", review_after="2099-01-01", state=state),
+        text=text, trial=Trial(kind="hypothesis", review_after=review_after, state=state),
         source_refs=[{"kind": "message", "reference": "m1"}],
         case_metadata={
             **({"target_file": target} if target else {}), "case": case,
-            **({"target_section": section} if section else {}),
+            **({"target_section": section} if section is not None else {}),
             **({"destination": {"path": TARGET, "version": "1"}} if state == "promoted" else {}),
         },
     ))
@@ -306,7 +307,7 @@ def no_samples(monkeypatch):
 def _local(monkeypatch, value="omlx@srv/model"):
     from infra import carry_in_capacity
 
-    async def ready_idle(bound=None, exclude_thread=None):
+    async def ready_idle(bound=None, exclude_thread=None, wait=0.0):
         return value
 
     monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
@@ -580,11 +581,11 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
     fact = _pending_fact()
     checks, dispatched = [], []
 
-    async def ready_idle(bound=None, exclude_thread=None):
-        checks.append((bound, exclude_thread))
-        return None  # a person started a local Turn after the claim
+    async def row(_fn, exclude_thread):
+        checks.append(exclude_thread)
+        return (None, False)  # the ready local row was lost after the claim: lasting, never waited out
 
-    monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
+    monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
     monkeypatch.setattr(endpoint, "run_eval_turn", _admitting_turn(dispatched))
     monkeypatch.setattr(turn_result, "read_turn_result", lambda *_a: pytest.fail("read an undispatched turn"))
     owner = {"user_id": "steve", "project_id": None}
@@ -593,32 +594,35 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         await carry_in_drain._sample(
             fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=True), "c1", [],
         )
-    assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1")]
+    # The dispatch-time check (excluding the sample's own thread) refuses; the one wait that follows
+    # finds the row still lost and ends at once. A local Turn, by contrast, is waited out
+    # (test_carry_in_quiet_seat).
+    assert checks == [f"eval-c1-{fact.identity[:16]}-c1", None]
     assert dispatched == []
 
 
 @pytest.mark.asyncio
 async def test_a_git_fault_reading_the_target_waits_instead_of_retiring_the_case(c1, monkeypatch, no_samples):
-    from core import carry_in_facts
     from infra import carry_in_capacity
+    from infra import carry_in_drain
     from infra.carry_in_drain import wake
     from infra.guidance_git import GitFault
 
     _write_lesson(c1)
     _save(c1, "rule v1\n")
     await _make_pending(c1)
-    committed_bytes = carry_in_facts.committed_bytes
+    committed_bytes = carry_in_drain.committed_bytes
 
     def fault(*_args):
         raise GitFault("cat-file: object store unreadable")
 
-    monkeypatch.setattr(carry_in_facts, "committed_bytes", fault)
+    monkeypatch.setattr(carry_in_drain, "committed_bytes", fault)
     monkeypatch.setattr(carry_in_capacity, "ready_idle", lambda *a, **k: pytest.fail("selected a model"))
     assert await wake(c1.workspace) is False
     assert [(e["event"], e.get("reason")) for e in _events()][-1] == ("lesson.carry_in.waiting", "history_unavailable")
     assert _events("lesson.carry_in.retired") == []
 
-    monkeypatch.setattr(carry_in_facts, "committed_bytes", committed_bytes)
+    monkeypatch.setattr(carry_in_drain, "committed_bytes", committed_bytes)
     _local(monkeypatch, None)
     await wake(c1.workspace)  # the history is back: the same case advances
     assert _events()[-1]["reason"] == "no_ready_local_model"
@@ -704,6 +708,18 @@ async def _hangs():
     await asyncio.sleep(5)
 
 
+async def _hangs_then_ends_on_cancel():
+    """A Turn that handles its cancel the way the real loop does: it ends normally, never re-raising."""
+    try:
+        await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        return None
+
+
+async def _finishes_in_time():
+    await asyncio.sleep(0)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("route", "kind"), [
     ({"admit": RuntimeError("timed out acquiring lock")}, "admission"),
@@ -712,6 +728,7 @@ async def _hangs():
     ({"execute": RuntimeError("Eval turn errored")}, "handoff"),
     ({"task": _raises_timed_out}, "provider"),
     ({"task": _hangs}, "timeout"),
+    ({"task": _hangs_then_ends_on_cancel}, "timeout"),
 ])
 async def test_the_eval_route_names_its_failure_kind_by_step(isolated_db, monkeypatch, route, kind):
     from core.carry_in_facts import COVERAGE_REASONS
@@ -723,6 +740,40 @@ async def test_the_eval_route_names_its_failure_kind_by_step(isolated_db, monkey
     )
     assert turn_id is None and failure.kind == kind
     assert set(EVAL_FAILURES) <= set(COVERAGE_REASONS)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_finishes_inside_its_deadline_returns_its_turn(isolated_db, monkeypatch):
+    from eval.endpoint import run_eval_turn
+
+    _eval_route(monkeypatch, task=_finishes_in_time)
+    turn_id, failure = await run_eval_turn(
+        thread_id="t", thread_row={"user_id": "steve"}, prompt="p", model="m", timeout_seconds=5,
+    )
+    assert (turn_id, failure) == ("turn-1", None)
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_sample_ends_the_case_in_timeout_coverage_and_is_never_scored(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    _write_lesson(c1)
+    _save(c1, "rule v1\n")
+    await _make_pending(c1)
+    _local(monkeypatch)
+    _eval_route(monkeypatch, task=_hangs_then_ends_on_cancel)
+    monkeypatch.setattr(carry_in_drain, "SAMPLE_TIMEOUT_SECONDS", 0.05)
+    scored = []
+    monkeypatch.setattr("core.carry_in_scoring.sample_passes", lambda *a: scored.append(a) or False)
+
+    await carry_in_drain.wake(c1.workspace)
+
+    terminal = _events()[-1]
+    assert (terminal["event"], terminal["reason"], terminal["samples_completed"]) == (
+        "lesson.carry_in.coverage", "timeout", 0,
+    )
+    assert scored == []
+    assert _events("lesson.carry_in.result") == []
 
 
 @pytest.mark.asyncio
@@ -748,7 +799,7 @@ def _rows(*statuses):
 
 
 def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_turn(isolated_db, monkeypatch):
-    from infra.carry_in_capacity import local_row
+    from infra.carry_in_capacity import _local_state
     from infra.database import get_db
 
     target = SimpleNamespace(harness="native", provider="omlx", available=True, catalog_id="m0")
@@ -756,11 +807,11 @@ def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_t
     db = get_db()
 
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("ready", "ready"))
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("available"))
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("ready"))
-    assert local_row(db) == ("omlx@srv/m0", "srv")
+    assert _local_state(None) == (("omlx@srv/m0", "srv"), False)
 
     owner = make_session(db, prefix="busy")
     db.execute(
@@ -769,13 +820,13 @@ def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_t
         (owner,),
     )
     db.commit()
-    assert local_row(db) is None
-    assert local_row(db, exclude_thread=owner) == ("omlx@srv/m0", "srv")  # a sample's own Turn
+    assert _local_state(None) == (("omlx@srv/m0", "srv"), True)
+    assert _local_state(owner) == (("omlx@srv/m0", "srv"), False)  # a sample's own Turn
 
     target.harness = "codex"
     db.execute("DELETE FROM active_turns")
     db.commit()
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
 
 
 def _status(active=0, waiting=0, total=7):
@@ -783,15 +834,16 @@ def _status(active=0, waiting=0, total=7):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("readings", "idle"), [
-    ([_status(), _status()], True),
-    ([_status(active=1), _status()], False),
-    ([_status(), _status(waiting=1)], False),
-    ([_status(total=7), _status(total=8)], False),  # a request started and finished between reads
-    ([{"status": "ok"}, _status()], False),  # no activity fields: unproven, so not idle
-    ([None, _status()], False),  # unauthenticated or unreachable
+@pytest.mark.parametrize(("readings", "state", "reads"), [
+    ([_status(), _status()], "idle", 2),
+    ([_status(active=1), _status()], "busy", 1),
+    ([_status(), _status(waiting=1)], "busy", 2),
+    ([_status(total=7), _status(total=8)], "busy", 2),  # a request started and finished between reads
+    ([{"status": "ok"}, _status()], "unreadable", 1),  # no activity fields: unproven
+    ([None, _status()], "unreadable", 1),  # unauthenticated or unreachable
+    ([_status(), {"active_requests": 0, "waiting_requests": 0}], "unreadable", 2),  # no total to compare
 ])
-async def test_omlx_idle_needs_two_authenticated_idle_reads_with_no_new_request(monkeypatch, readings, idle):
+async def test_omlx_state_needs_two_authenticated_idle_reads_with_no_new_request(monkeypatch, readings, state, reads):
     from infra import carry_in_capacity
 
     seen = []
@@ -808,13 +860,13 @@ async def test_omlx_idle_needs_two_authenticated_idle_reads_with_no_new_request(
     monkeypatch.setattr(carry_in_capacity, "run_in_db", address)
     monkeypatch.setattr(carry_in_capacity, "IDLE_GAP_SECONDS", 0)
 
-    assert await carry_in_capacity.omlx_idle("srv") is idle
+    assert await carry_in_capacity.omlx_state("srv", reads=2) == state
     assert seen[0] == ("srv", "127.0.0.1", 8210)
-    assert len(seen) == (1 if carry_in_capacity.idle_reading(readings[0]) is None else 2)
+    assert len(seen) == reads
 
 
 @pytest.mark.asyncio
-async def test_omlx_idle_fails_closed_without_a_live_registered_endpoint(monkeypatch):
+async def test_omlx_state_is_unreadable_without_a_live_registered_endpoint(monkeypatch):
     from infra import carry_in_capacity
 
     async def no_address(*_a):
@@ -824,7 +876,7 @@ async def test_omlx_idle_fails_closed_without_a_live_registered_endpoint(monkeyp
     monkeypatch.setattr(
         "llm.providers.omlx_public_probe.probe_registered_status", lambda *a: pytest.fail("probed"),
     )
-    assert await carry_in_capacity.omlx_idle("srv") is False
+    assert await carry_in_capacity.omlx_state("srv", reads=2) == "unreadable"
 
 
 @pytest.mark.asyncio
@@ -834,14 +886,14 @@ async def test_ready_idle_keeps_the_bound_model_and_never_substitutes_another_ro
     probed = []
 
     async def row(_fn, exclude_thread):
-        return ("omlx@srv/other", "srv")
+        return (("omlx@srv/other", "srv"), False)
 
-    async def idle(server_id):
+    async def state(server_id, **_kwargs):
         probed.append(server_id)
-        return True
+        return "idle"
 
     monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
-    monkeypatch.setattr(carry_in_capacity, "omlx_idle", idle)
+    monkeypatch.setattr(carry_in_capacity, "omlx_state", state)
 
     assert await carry_in_capacity.ready_idle("omlx@srv/model") is None
     assert probed == []

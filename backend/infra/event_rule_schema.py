@@ -68,6 +68,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
                                 AND json_type(argv_prefix) = 'array'
                                 AND json_array_length(argv_prefix) > 0)),
         item_type TEXT,
+        -- start_worker: the workflow profile its worker runs under (none: the workflow's base settings).
+        worker_profile TEXT CHECK (worker_profile IS NULL OR action = 'start_worker'),
         -- A route rule names its event type, action and recipient and an observe rule names its tool
         -- and artifact type, never both. (No semicolon in these comments: migration 139 runs this
         -- text statement by statement.)

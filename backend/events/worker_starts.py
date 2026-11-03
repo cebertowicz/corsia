@@ -101,7 +101,7 @@ def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
     return db.execute(
         "SELECT d.id, d.rule_id, d.thread_id, d.request_identity, d.event_id, d.connector, "
         "d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
-        "r.workflow_id, r.enabled, r.origin, d.run_input "
+        "r.workflow_id, r.worker_profile, r.enabled, r.origin, d.run_input "
         "FROM event_route_decisions d LEFT JOIN event_rules r ON r.id=d.rule_id "
         "WHERE d.outcome=? AND d.request_identity IS NOT NULL ORDER BY d.id LIMIT ?", (QUEUED, limit),
     ).fetchall()
