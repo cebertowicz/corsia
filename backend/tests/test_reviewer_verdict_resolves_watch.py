@@ -30,7 +30,7 @@ def _artifact_id(db, external_id: str) -> str:
 
 def _watching_verdict(db, actor, *, external_id: str):
     """A task of the owner's, waiting on the PR's reviewer verdict."""
-    plan = service.ensure_plan("thread", "owner", db=db)
+    plan = service.ensure_plan("thread", actor.thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title="Await reviewer verdict",
         acceptance_criteria="The reviewer verdict resolves this wait", db=db,

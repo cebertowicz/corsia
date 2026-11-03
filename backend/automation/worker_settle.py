@@ -29,9 +29,9 @@ from loguru import logger
 
 from automation import worker_usage
 from core.workflow_result import ResultInvalid, check_result
-from events import worker_starts
+from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
-from events.rule_outcomes import INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED
+from events.rule_outcomes import INVALID, NO_RESULT, REFUSED, RETURNED
 from infra.database import write_transaction
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
@@ -203,7 +203,7 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
     with write_transaction(db, scope="worker_settle") as conn:
         if not worker_starts.end(conn, item.decision_id, outcome, stored):
             return None
-        if outcome == RETURNED or _owner_took(conn, item):
+        if outcome == RETURNED or rule_runs.took(conn, item.event_id, item.owner):
             return outcome, False
         workflow = item.facts.get("workflow") or "a workflow"
         said = (f"A rule couldn’t start {workflow}: {stored}" if outcome == REFUSED
@@ -215,10 +215,3 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
         )
         return outcome, True
 
-
-def _owner_took(conn: sqlite3.Connection, item: Settle) -> bool:
-    """Whether one of the owner's own rules queued a run with the event (R24)."""
-    return conn.execute(
-        "SELECT 1 FROM event_route_decisions WHERE event_id=? AND thread_id=? AND outcome=? LIMIT 1",
-        (item.event_id, item.owner, QUEUED),
-    ).fetchone() is not None

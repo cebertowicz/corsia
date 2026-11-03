@@ -11,12 +11,11 @@ from uuid import uuid4
 
 from loguru import logger
 
-from events import rule_declarations, rule_reads, rules
+from events import intake_routing, rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
-from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
 from events.platform import deliver_envelope_sync
-from events.resolve import Target, resolve_targets
+from events.resolve import resolve_targets
 from infra.database import get_db, write_transaction
 from infra.measure_admission import admit as admit_measure
 from infra.measure_admission import count_unversioned
@@ -201,7 +200,7 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
         EventEnvelope(
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
             artifact_ref=artifact_ref, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
-            event_class="informational", ownerless_ok=False, origin=origin,
+            event_class=entry.event_class, ownerless_ok=False, origin=origin,
         ),
         None,
         owner,
@@ -213,21 +212,6 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
 def _owner_project(conn, owner: str) -> str | None:
     row = conn.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     return row["project_id"] if row and row["project_id"] else None
-
-
-def _registered_owner_targets(owner: str, envelope: EventEnvelope, conn) -> list[Target]:
-    """Routing for a declared type: its declaring thread is the registered owner, so
-    rules read that owner from the routing state whether it is live or dead-lettered."""
-    from events.delivery import thread_exists_and_active
-
-    state = {"owner": {"parent_thread_id": owner}}
-    if thread_exists_and_active(owner, db=conn):
-        return [Target(
-            owner, "declared_owner", "owner", routing_state=state,
-            disposition=delivery_disposition("owner", envelope.event_class),
-        )]
-    return [Target(None, "dead_letter", "none", reason="owner_inactive", routing_state=state,
-                   disposition="dead_letter")]
 
 
 def _unrouted_projects(event_type: str, facts: dict[str, Any]) -> frozenset[str] | None:
@@ -300,6 +284,16 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
     return None
 
 
+def _routing(owner: str | None, envelope: EventEnvelope):
+    """Rule 0's routing: a connector's by its artifact; a declared type's to its declarer,
+    or, when a rule's run emitted it on an artifact, to that artifact's registered owner."""
+    if owner is None:
+        return lambda db: resolve_targets(envelope, db=db)
+    if envelope.artifact_ref:
+        return lambda db: intake_routing.artifact_targets(owner, envelope, db)
+    return lambda db: intake_routing.declarer_targets(owner, envelope, db)
+
+
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
                 stamps: MeasureStamps | None = None, trace: tuple[str, ...] = (),
                 rule_decision_id: int | None = None) -> IntakeResult:
@@ -334,18 +328,19 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             refused = _store(conn, event_type, facts, owner, event_id, stamps)
             if refused is not None:
                 return refused
-        target_filter = None
         # Only the emit tool knows its sender; a CLI emit names a session, which a hook or script may also claim.
+        target_filter = None
         if origin == "agent":
             target_filter = lambda target, _db: (
                 rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
-            (lambda db: _registered_owner_targets(owner, envelope, db)) if owner
-            else (lambda db: resolve_targets(envelope, db=db)),
+            _routing(owner, envelope),
             target_filter=target_filter,
             repository_projects=projects, db=conn,
         )
+        if envelope.artifact_ref and owner:
+            intake_routing.resolve_delivered_watches(conn, envelope, deliveries)
         matched = _rules_matched(plan)
         _record_acceptance(
             conn, event_id=event_id, event_type=event_type, origin=origin,

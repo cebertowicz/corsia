@@ -45,6 +45,8 @@ class EventTypeDecl:
     # The name the platform's own router gives this event (a webhook's internal
     # event), when one routes it; agent-written rules on that path read this type.
     routed_event: str | None = None
+    # "none": rule 0 adds no owner target; only the declaring rule set's rules deliver it.
+    default_delivery: str = "owner"
 
 
 @dataclass(frozen=True)

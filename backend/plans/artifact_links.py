@@ -170,3 +170,35 @@ def list_for_node(node_id: str, *, db=None) -> list[dict]:
             (node_id,),
         ).fetchall()
         return [_projection(row) for row in rows]
+
+
+def linked_node_for_artifact(integration: str, type: str, external_id: str, *, db) -> dict:
+    """The one open plan node a registered artifact (a PR) is attached to.
+
+    The candidates are the owner registration's node (registered with a node)
+    and every node that took the artifact as a result (``review_evidence``).
+    Only open work counts. ``lookup_failed`` covers an identity that is unknown
+    or not active, and a read that fails.
+    """
+    import sqlite3
+
+    from registry.registration_events import routing_registrations
+
+    try:
+        with service._connection(db) as connection:
+            routing = routing_registrations(integration, type, external_id, db=connection)
+            if routing["identity"] is None:
+                return {"status": "lookup_failed", "node_id": None}
+            owner = routing["owner"]
+            rows = connection.execute(
+                f"SELECT n.id FROM plan_nodes n WHERE {node_states.open_sql('n')} AND (n.id=? OR n.id IN ("
+                "SELECT node_id FROM plan_node_artifact_links WHERE artifact_id=? AND role='result'))",
+                (owner["origin_plan_node_id"] if owner else None, routing["identity"]["id"]),
+            ).fetchall()
+    except sqlite3.Error:
+        return {"status": "lookup_failed", "node_id": None}
+    if not rows:
+        return {"status": "no_linked_task", "node_id": None}
+    if len(rows) > 1:
+        return {"status": "several_linked_tasks", "node_id": None}
+    return {"status": "ok", "node_id": str(rows[0]["id"])}

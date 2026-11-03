@@ -4,8 +4,8 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
-import { CREEP_STALE_MS, remoteCeiling } from './screenProgress';
-import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
+import { CREEP_STALE_MS, PHASE_SECONDS, remoteCeiling } from './screenProgress';
+import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, NO_HISTORY_LONGER_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
@@ -223,14 +223,23 @@ describe('update screen store', () => {
 		warning.mockRestore();
 	});
 
-	it('does not invent a remote estimate without history and retains a known usual time', () => {
+	it('does not invent a remote estimate without history, still says when it is taking longer, and retains a known usual time', () => {
 		const shell = window as ShellWindow;
 		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
 		updateStatus.set(status(inFlight(), null));
 		tickUpdateScreen(0);
 		updateUnreachable.set(true);
-		tickUpdateScreen(120_000);
+		tickUpdateScreen(1_000);
 		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		// A normal restart and one with a data upgrade both stay in progress, with no instructions.
+		const plain = (PHASE_SECONDS.restarting + PHASE_SECONDS.starting + PHASE_SECONDS.verifying) * 1_000;
+		const upgrade = plain + (PHASE_SECONDS.backing_up + PHASE_SECONDS.upgrading + PHASE_SECONDS.checking_data) * 1_000;
+		tickUpdateScreen(1_000 + plain);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		tickUpdateScreen(1_000 + upgrade);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		tickUpdateScreen(1_000 + NO_HISTORY_LONGER_MS);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', estimated: false });
 
 		stopUpdateScreen();
 		updateScreenView.set(null);
