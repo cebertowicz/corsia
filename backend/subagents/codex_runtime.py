@@ -779,7 +779,7 @@ async def _accept_spec_app_server_input(
 async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
     require_owned_accept_db(spec.db)
     bcast = spec.broadcast or _default_broadcast
-    session = _reusable_app_session(spec.thread_id)
+    session = await _reusable_app_session(spec.thread_id)
     tool_registry, dynamic_tools = _resolve_app_server_tools(
         session, working_dir=spec.working_dir, tool_registry=spec.tool_registry,
         dynamic_tools=spec.dynamic_tools,

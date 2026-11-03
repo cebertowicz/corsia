@@ -373,9 +373,12 @@ async def test_codex_admitted_failure_keeps_one_owner_and_drives_after_unlock(
     monkeypatch.setattr(execution, "drive_terminal_settlement", drive)
     monkeypatch.setattr(dispatch, "dispatch", send)
     monkeypatch.setattr(writes, "_settle_evidence", reject_outer)
+    async def reusable(_id):
+        return session
+
     monkeypatch.setattr(runtime, "_prepare_dispatch_context", prepare_context)
     monkeypatch.setattr(runtime, "_dispatch_prepared_codex", spawn_locked)
-    monkeypatch.setattr(runtime, "_reusable_app_session", lambda _id: session)
+    monkeypatch.setattr(runtime, "_reusable_app_session", reusable)
     monkeypatch.setattr(runtime, "_resolve_app_server_tools", resolve_tools)
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda _model, **_kwargs: target)
     monkeypatch.setattr(runtime, "_configure_spec_app_server_input", configure)
@@ -925,8 +928,11 @@ async def test_codex_checkpoint_stop_transfers_no_write_before_stop_terminal(
     monkeypatch.setattr(execution, "_broadcast_batch", maybe_fail_terminal_publication)
     monkeypatch.setattr(execution, "run_in_db", maybe_fail_input_settlement)
     monkeypatch.setattr(input_writes, "_settle_evidence", reject_outer_settlement)
+    async def reusable(_id):
+        return session
+
     monkeypatch.setattr(send_dispatch, "dispatch", dispatch_codex)
-    monkeypatch.setattr(codex_runtime, "_reusable_app_session", lambda _id: session)
+    monkeypatch.setattr(codex_runtime, "_reusable_app_session", reusable)
     monkeypatch.setattr(
         codex_runtime,
         "_resolve_spawn_payload",
