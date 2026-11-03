@@ -130,12 +130,12 @@ async def test_real_script_reads_a_rule_runs_event_on_stdin_and_the_input_is_rem
 
 @pytest.mark.asyncio
 async def test_real_script_with_no_agents_account_runs_in_the_locked_state(sandbox) -> None:
-    from connections.github_agent_home import LOCKED_HOME
+    from connections.github_agent_home import GIT_CONFIG_SLOTS, LOCKED_HOME
 
     path = _script(
         sandbox,
         "locked.sh",
-        f'test "$GH_CONFIG_DIR" = {shlex.quote(LOCKED_HOME)} && test "$GIT_CONFIG_COUNT" = 7\n',
+        f'test "$GH_CONFIG_DIR" = {shlex.quote(LOCKED_HOME)} && test "$GIT_CONFIG_COUNT" = {GIT_CONFIG_SLOTS}\n',
     )
     run = await _run(path)
     assert run.returncode == 0, run.stderr
