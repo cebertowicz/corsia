@@ -960,9 +960,7 @@ async def test_the_manifest_hook_runs_after_recording_and_can_refuse_dispatch(mo
         raise RuntimeError("missing lesson")
 
     batch = SimpleNamespace(thread_id="t", turn_id="u")
-    prepared = SimpleNamespace(
-        provider="codex", target=None, prepared_context=None, attachment_notes="",
-    )
+    prepared = SimpleNamespace(provider="codex", target=None, prepared_context=None)
     with pytest.raises(RuntimeError, match="missing lesson"):
         await thread_execution._dispatch_prepared(
             batch, prepared, SimpleNamespace(), attempt_id="a", user=None, ws=None,

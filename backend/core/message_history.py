@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from core.attachment_notes import with_attachment_notes
 from core.message_row import call_id, parse_meta
 from core.reasoning_provenance import reasoning_content_for_typed_replay
 from core.reply_context import REPLY_CONTEXT_KEY, reply_context_lines
@@ -212,7 +211,6 @@ def db_to_llm_history(
             runtime_context = meta.get("runtime_context")
             if runtime_context:
                 content = f"{content}\n\n{runtime_context}"
-            content = with_attachment_notes(content, meta.get("attachment_notes") or "")
             messages.append({"role": "user", "content": content})
             continue
         if role != "assistant":

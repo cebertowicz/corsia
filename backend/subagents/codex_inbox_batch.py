@@ -86,7 +86,6 @@ async def _steer_claimed(batch: ClaimedBatch, live, thread_row: dict, target) ->
         batch,
         attempt_id=attempt_id,
         started_at=utc_now_iso(),
-        attachment_notes=rendered.attachment_notes,
     )
     _begin_event_buffer(live)
     try:

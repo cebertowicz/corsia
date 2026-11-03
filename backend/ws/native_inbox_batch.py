@@ -30,14 +30,12 @@ class _BoundaryWrite:
         self.batch = batch
         self.thread_row = thread_row
         self.attempt_id = str(uuid.uuid4())
-        self.attachment_notes = ""
 
     async def before_write(self) -> None:
         await fence_batch_write(
             self.batch,
             attempt_id=self.attempt_id,
             started_at=utc_now_iso(),
-            attachment_notes=self.attachment_notes,
         )
         if any(
             bool(item.delivery_options.get("touch_session_on_insert"))
@@ -84,7 +82,6 @@ class _BoundaryWrite:
             )
         finally:
             db.close()
-        self.attachment_notes = rendered.attachment_notes
         content = ContextBuilder(WORKSPACE)._build_user_content(
             rendered.content, rendered.media_projection, model=target.transport_model,
         )

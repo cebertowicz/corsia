@@ -64,7 +64,6 @@ async def _feed_claimed(batch: ClaimedBatch, live, thread_row: dict, target) -> 
             batch,
             attempt_id=attempt_id,
             started_at=utc_now_iso(),
-            attachment_notes=rendered.attachment_notes,
         )
     except BaseException:
         await _release_after_failure(batch)

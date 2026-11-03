@@ -19,7 +19,6 @@ from infra.turn_errors import apply_error_next_steps, last_turn_error_id
 
 _PRIVATE_METADATA_KEYS = (
     "runtime_context",
-    "attachment_notes",
     "_corsia_send_delivery_state",
     "_corsia_queued_accepted_effects",
     "_corsia_queued_runtime_context",

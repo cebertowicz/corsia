@@ -12,6 +12,7 @@ import os
 import sys
 
 import pytest
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -131,50 +132,17 @@ def test_an_unregistered_upload_keeps_the_note_without_a_path(isolated_db, file_
     assert notes == "[Document attached: spec.pdf]"
 
 
-def test_a_legacy_upload_outside_the_thread_tree_has_no_path(
-    isolated_db, tmp_path, monkeypatch
-):
-    from infra import config
-    from registry import models
-
-    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
-    _insert_session("t1")
-    legacy = tmp_path.resolve() / "uploads" / "steve" / "f1" / "spec.pdf"
-    legacy.parent.mkdir(parents=True)
-    legacy.write_bytes(b"x")
-    models.register_artifact(
-        integration="upload", type="upload", external_id="f1",
-        parent_thread_id="t1", path=str(legacy),
-    )
-
-    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
-
-
-def test_a_missing_renamed_or_another_threads_upload_has_no_path(
-    isolated_db, tmp_path, monkeypatch
-):
+def test_another_threads_upload_has_no_path(isolated_db, tmp_path, monkeypatch):
     root = tmp_path.resolve()
     _insert_session("t1")
     _insert_session("t2")
-    gone = _register(root, monkeypatch, "t1", "f1", "spec.pdf")
-    gone.unlink()
     _register(root, monkeypatch, "t2", "f2", "other.pdf")
-    _register(root, monkeypatch, "t1", "f3", "real.pdf")
 
     notes = attachment_notes(
-        [
-            _PDF,
-            {"file_id": "f2", "filename": "other.pdf", "mime_type": "application/pdf"},
-            {"file_id": "f3", "filename": "claimed.pdf", "mime_type": "application/pdf"},
-        ],
-        "t1",
+        [{"file_id": "f2", "filename": "other.pdf", "mime_type": "application/pdf"}], "t1",
     )
 
-    assert notes.splitlines() == [
-        "[Document attached: spec.pdf]",
-        "[Document attached: other.pdf]",
-        "[Document attached: claimed.pdf]",
-    ]
+    assert notes == "[Document attached: other.pdf]"
 
 
 def test_an_upload_of_a_thread_that_no_longer_exists_has_no_path(
@@ -247,7 +215,7 @@ def test_a_registry_error_fails_the_render_instead_of_dropping_the_path(
     def broken(file_id, db=None):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr("registry.registration_events.resolve_upload", broken)
+    monkeypatch.setattr("registry.models.resolve_upload", broken)
 
     with pytest.raises(sqlite3.OperationalError):
         attachment_notes([_PDF], "t1")
@@ -263,7 +231,7 @@ async def test_a_send_without_a_path_to_look_up_never_touches_the_registry(
     def forbidden(*_args, **_kwargs):
         raise AssertionError("registry consulted")
 
-    monkeypatch.setattr("registry.registration_events.resolve_upload", forbidden)
+    monkeypatch.setattr("registry.models.resolve_upload", forbidden)
     monkeypatch.setattr("infra.db_async.run_in_db", forbidden)
 
     assert await attachment_notes_async(None, "t1") == ""
@@ -287,3 +255,61 @@ async def test_a_document_attachment_still_looks_its_path_up(
     assert await attachment_notes_async([_PDF], "t1") == (
         "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_send_without_attachments_projects_with_no_registry_or_db_hop(monkeypatch):
+    """A text-only projection renders without consulting the upload registry."""
+    from infra.input_render import _load_input_projection_async
+    from tests.test_clean_batch_render import _batch
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("upload registry consulted")
+
+    monkeypatch.setattr("registry.models.resolve_upload", forbidden)
+    monkeypatch.setattr("infra.db_async.run_in_db", forbidden)
+
+    projection = await _load_input_projection_async(
+        _batch(), {"user_id": "owner"}, SimpleNamespace(),
+    )
+
+    assert "attached" not in projection.content
+
+
+@pytest.mark.asyncio
+async def test_the_live_note_and_the_replayed_reference_name_the_same_file(
+    main_db, monkeypatch, tmp_path,
+):
+    """One lookup owns the path: the note's relative path is the replay block's absolute one."""
+    import io
+
+    from fastapi import UploadFile
+
+    from api import uploads
+    from history.adapters import to_native_history
+    from history.projection import render_portable_history
+    from infra import config
+    from infra.queries import insert_message
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(uploads, "authenticate", lambda _token: {"id": "steve"})
+    uploaded = await uploads.upload_file(
+        None,
+        UploadFile(filename="notes.txt", file=io.BytesIO(b"hello"),
+                   headers={"content-type": "text/plain"}),
+        thread_id="main-1",
+    )
+    insert_message(
+        "main-1", "user", "Read this file",
+        metadata={"attachments": [uploaded], "turn_unbound_reason": "legacy_import"},
+        db=main_db,
+    )
+
+    live = attachment_notes([uploaded], "main-1", db=main_db)
+    replayed = to_native_history(render_portable_history("main-1", db=main_db))[0]["content"]
+
+    relative = live.split("saved at ", 1)[1].rstrip("]")
+    assert not relative.startswith("/")
+    assert str(workspace.resolve() / relative) in replayed

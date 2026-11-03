@@ -77,7 +77,6 @@ def _prepared_batch(batch, target, prepared):
         prepared_context=prepared,
         refresh_prepared_context=None,
         runtime_truth={"codex_has_thread": True},
-        attachment_notes="",
     )
 
 

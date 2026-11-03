@@ -38,7 +38,6 @@ class InputProviderProjection:
     attachments: tuple[dict[str, Any], ...]
     media_projection: Any | None
     receipts: tuple[Any, ...]
-    attachment_notes: str = ""
 
 
 @dataclass(slots=True)
@@ -57,7 +56,6 @@ class PreparedBatch:
     refresh_prepared_context: Any
     runtime_truth: dict
     batch: ClaimedBatch | None = None
-    attachment_notes: str = ""
 
 
 def projected_input_tokens(projection: InputProviderProjection, target) -> int:
@@ -205,26 +203,26 @@ def _projection_identity(
 def _render_input_projection(
     batch: ClaimedBatch,
     *,
-    attachments, media_projection, notes: str,
+    attachments,
+    media_projection,
+    notes,
 ) -> InputProviderProjection:
     """Build the provider projection after attachment work has completed."""
     rendered = render_claimed_batch(batch)
     source = render_claimed_batch(batch, frame_agent_inputs=False)
-    envelope = _batch_agent_envelope(batch, source, rendered.content)
-    content = with_attachment_notes(envelope.content, notes)
+    envelope = _batch_agent_envelope(batch, source, with_attachment_notes(rendered.content, notes))
     return InputProviderProjection(
         _projection_identity(
             rendered,
-            content=content,
+            content=envelope.content,
             media_projection=media_projection,
         ),
-        content,
+        envelope.content,
         source.content,
         envelope,
         attachments,
         media_projection,
         batch.items,
-        notes,
     )
 
 
@@ -340,7 +338,8 @@ async def prepare_claimed_batch(
         batch.thread_id, thread_row, target=target,
     )
     if not truth.get("addressable", True):
-        raise SendRejected(409, str(truth.get("addressability_error") or "unavailable"))
+        detail = str(truth.get("addressability_error") or "unavailable")
+        raise SendRejected(409, detail)
     provider, is_subagent = provider_for(str(truth["execution_class"]))
     projection = await _load_input_projection_async(batch, thread_row, target)
     async def preflight(current_truth, current_thread_row):
@@ -391,10 +390,11 @@ async def prepare_claimed_batch(
         target,
         provider,
         is_subagent,
-        projection.content, projection.agent_envelope,
-        list(projection.attachments), projection.media_projection,
+        projection.content,
+        projection.agent_envelope,
+        list(projection.attachments),
+        projection.media_projection,
         _native_prepared_context(provider, result.get("prepared_context")),
         refresh_prepared_context,
         truth,
-        attachment_notes=projection.attachment_notes,
     )
