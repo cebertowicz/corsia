@@ -56,8 +56,9 @@ _ACCOUNTS = {
                "the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign in as "
                "the agents' own account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
-                   "CORSIA can't tell the agents' GitHub account from the person's own until the "
-                   "person signs in to GitHub on this computer"),
+                   "CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+                   "account from it; it checks again on a later run, and if the person isn't signed in "
+                   "to GitHub CLI on this computer, they need to sign in"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
                   "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again"),
     "absent": (AgentAccountView("not_installed", absent=True),
@@ -76,9 +77,9 @@ def test_no_two_account_causes_share_a_line():
     assert len(lines) == len(get_args(Cause))
 
 
-def test_only_an_unanswered_account_is_pending():
+def test_only_an_unanswered_verification_is_pending():
     pending = {cause for cause in get_args(Cause) if AgentAccountView("unverified", cause).answer_pending}
-    assert pending == {"verifying", "own_login_unknown"}
+    assert pending == {"verifying"}
 
 
 @pytest.mark.parametrize("state", sorted(_ACCOUNTS))

@@ -95,9 +95,11 @@ class AgentAccountView:
 
     @property
     def answer_pending(self) -> bool:
-        """No answer yet: the verification, or the person's own login it is told apart from,
-        is still being read. A caller that must not act locked waits on ``verify_now``."""
-        return self.cause in ("verifying", "own_login_unknown")
+        """No verification answer yet; a caller that must not act locked waits on ``verify_now``.
+
+        ``own_login_unknown`` is not pending: the person's login comes from a background probe
+        that ``verify_now`` does not wait for, so waiting cannot settle it."""
+        return self.cause == "verifying"
 
 
 # key -> result, and key -> in-flight verification. A key is an immutable fact:

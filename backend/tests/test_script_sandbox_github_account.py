@@ -35,6 +35,7 @@ def _views(agent_home: Path) -> dict[str, AgentAccountView]:
         "ready": AgentAccountView("ready", **base, login="agents-bot", user_id=77),
         "person": AgentAccountView("wrong_account", "person_account", **base),
         "unverified": AgentAccountView("unverified", "own_login_unknown", **base),
+        "verifying": AgentAccountView("unverified", "verifying", **base),
         "suspended": AgentAccountView("needs_auth", "token_rejected", **base),
         "absent": AgentAccountView("not_installed", absent=True),
     }
@@ -154,7 +155,7 @@ def test_a_verified_account_gives_the_script_exactly_the_shells_github(run):
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
-    seen = run("unverified", verified="ready")  # the cache says own_login_unknown; verifying says ready
+    seen = run("verifying", verified="ready")  # nothing cached yet; the verification says ready
     assert seen["reads"] == 1 and seen["waits"] == 1
     assert seen["env"]["GH_CONFIG_DIR"] == seen["view"].home
     assert seen["result"].github_locked is None
@@ -163,8 +164,9 @@ def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
 @pytest.mark.parametrize("state, reason", [
     ("person", "scripts get no GitHub login: the agents' GitHub sign-in is the person's own GitHub account; "
                "sign it out and sign in as the agents' own account"),
-    ("unverified", "scripts get no GitHub login: CORSIA can't tell the agents' GitHub account from the "
-                   "person's own until the person signs in to GitHub on this computer"),
+    ("unverified", "scripts get no GitHub login: CORSIA doesn't know the person's own GitHub login yet, so "
+                   "it can't tell the agents' account from it; it checks again on a later run, and if the "
+                   "person isn't signed in to GitHub CLI on this computer, they need to sign in"),
     ("suspended", "scripts get no GitHub login: GitHub rejected the sign-in for the agents' GitHub account; "
                   "sign it out and in again"),
     ("absent", "scripts get no GitHub login: there is no agents' GitHub account"),
@@ -173,6 +175,7 @@ def test_every_other_state_runs_the_script_in_the_shells_locked_state(run, state
     seen = run(state)
     env = seen["env"]
     assert seen["reads"] == 1
+    assert seen["waits"] == 0  # only a pending verification is worth waiting for
     assert env["GH_CONFIG_DIR"] == LOCKED_HOME
     assert _git(env) == _LOCKED_GIT
     assert set(BOT_ENV_NAMES) <= set(env)

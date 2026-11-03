@@ -184,7 +184,7 @@ async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo:
 
 #: One line per account cause: what is wrong, and who fixes it or what CORSIA does next.
 _NO_LOGIN: dict[Cause, str] = {
-    "read_failed": "CORSIA couldn't read the agents' GitHub account settings and reads them again on the next run",
+    "read_failed": "CORSIA couldn’t read the agents' GitHub account settings and reads them again on the next run",
     "multiple_accounts": "there are several agents' GitHub accounts; the person needs to remove all but one",
     "github_executable_missing": "GitHub CLI for the agents' GitHub account is missing; install it again",
     "signed_out": "the agents' GitHub account is signed out; sign it in again",
@@ -192,11 +192,12 @@ _NO_LOGIN: dict[Cause, str] = {
     "token_not_in_home": ("the sign-in for the agents' GitHub account isn't saved in the account's own settings; "
                           "sign it out and in again"),
     "token_rejected": "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again",
-    "verify_failed": ("CORSIA couldn't reach GitHub to check the agents' GitHub account and checks again "
+    "verify_failed": ("CORSIA couldn’t confirm the agents' GitHub account with GitHub and checks again "
                       "when a script next runs"),
     "verifying": "CORSIA is still checking the agents' GitHub account; a later run uses the answer",
-    "own_login_unknown": ("CORSIA can't tell the agents' GitHub account from the person's own until the "
-                          "person signs in to GitHub on this computer"),
+    "own_login_unknown": ("CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+                          "account from it; it checks again on a later run, and if the person isn't signed in "
+                          "to GitHub CLI on this computer, they need to sign in"),
     "person_account": ("the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign "
                        "in as the agents' own account"),
 }
