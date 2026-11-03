@@ -268,17 +268,15 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
     from tools.email_read import EmailReadTool, EmailSearchTool
+    from tools.google_workspace import GoogleWorkspaceTool
     from tools.mail_host_connect import MailHostConnectTool
 
-    for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):
+    for tool in (
+        MailHostConnectTool(), EmailSearchTool(), EmailReadTool(), GoogleConnectTool(), GoogleStatusTool(),
+        EmailDraftTool(), EmailSendTool(), CalendarListTool(), CalendarDraftInviteTool(), CalendarSendInviteTool(),
+        GoogleWorkspaceTool(workspace=agent.workspace),
+    ):
         agent.tools.register(tool)
-    agent.tools.register(GoogleConnectTool())
-    agent.tools.register(GoogleStatusTool())
-    agent.tools.register(EmailDraftTool())
-    agent.tools.register(EmailSendTool())
-    agent.tools.register(CalendarListTool())
-    agent.tools.register(CalendarDraftInviteTool())
-    agent.tools.register(CalendarSendInviteTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:

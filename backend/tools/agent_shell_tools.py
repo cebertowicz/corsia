@@ -16,7 +16,7 @@ import tempfile
 
 from infra.platform_paths import app_bundle_root
 from tools.managed_runtime import (
-    COMMAND_RUNTIME, RUNTIME_PINS, ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_cache_root,
+    COMMAND_RUNTIME, ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_cache_root,
     runtime_fetch_plan,
 )
 
@@ -26,6 +26,8 @@ CACHE_ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
 # The bundled Git's helper commands and templates, which Git finds relative to its own binary.
 _GIT_RUNTIME_DIRS = ("libexec/git-core", "share/git-core")
 _prefetch: asyncio.Task | None = None
+# The pinned runtimes agent shells get; gws is not one: agents reach it only through its tool.
+_SHELL_RUNTIMES = tuple(dict.fromkeys(COMMAND_RUNTIME.values()))
 
 
 def _bundle_resources() -> Path | None:
@@ -64,7 +66,7 @@ def _path_entries(path: str) -> list[str]:
     parts = [part for part in path.split(os.pathsep) if part]
     if (python_dir := _bundled_python_dir()) is not None:
         parts.insert(parts.index("/usr/bin") if "/usr/bin" in parts else len(parts), str(python_dir))
-    return [*parts, *(str(directory) for kind in RUNTIME_PINS if (directory := runtime_bin_dir(kind)) is not None)]
+    return [*parts, *(str(directory) for kind in _SHELL_RUNTIMES if (directory := runtime_bin_dir(kind)) is not None)]
 
 
 def shell_environment(path: str) -> dict[str, str]:
@@ -96,7 +98,7 @@ async def wait_for_prefetch() -> None:
 
 
 async def _fetch_missing() -> None:
-    for kind in RUNTIME_PINS:
+    for kind in _SHELL_RUNTIMES:
         try:
             # runtime_fetch_plan is the test the connected-app launcher uses: a command on the
             # person's PATH, or an installed pin, needs nothing.

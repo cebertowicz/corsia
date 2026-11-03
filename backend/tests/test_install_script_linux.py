@@ -37,6 +37,9 @@ def test_installer_probe_uses_renderer_namespace_flags():
 
 NODE_VERSION = RUNTIME_PINS["node"]["arm64"].version
 UV_VERSION = RUNTIME_PINS["uv"]["arm64"].version
+GWS_URL = {
+    arch: RUNTIME_PINS["gws"]["linux-" + ("arm64" if arch == "aarch64" else "x86_64")].url for arch in ("aarch64", "x86_64")
+}
 NODE_URL = {
     "aarch64": f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-linux-arm64.tar.xz",
     "x86_64": f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-linux-x64.tar.xz",
@@ -160,18 +163,22 @@ def env(tmp_path: Path) -> dict[str, str]:
             {f"uv-{arch}-unknown-linux-gnu/uv": UV, f"uv-{arch}-unknown-linux-gnu/uvx": "exit 0"},
         )
 
+    for arch, url in GWS_URL.items():
+        shas[("gws", arch)] = _tarball(downloads / url.rsplit("/", 1)[1], "w:gz", {"gws": "echo gws 0.22.5"})
+
     home = tmp_path / "home"
     checkout = home / ".corsia"
     (checkout / "scripts").mkdir(parents=True)
     (checkout / "backend").mkdir()
     shutil.copytree(REPO / "backend" / "infra", checkout / "backend" / "infra")
     (checkout / "backend" / "tools").mkdir()
+    shutil.copy2(REPO / "backend" / "tools" / "gws_release.py", checkout / "backend" / "tools" / "gws_release.py")
     runtime = checkout / "backend" / "tools" / "managed_runtime.py"
     shutil.copy2(REPO / "backend" / "tools" / "managed_runtime.py", runtime)
     with runtime.open("a") as file:
         file.write('''\n# Test-only local archive transport; the real verifier and extractor remain in use.
 from dataclasses import replace
-for _kind in ("node", "uv"):
+for _kind in ("node", "uv", "gws"):
     for _arch in ("arm64", "x86_64"):
         _key = "linux-" + _arch
         _pin_value = RUNTIME_PINS[_kind][_key]
@@ -227,6 +234,8 @@ def _download(url, destination):
         "STUB_SHA_NODE_X86_64": shas[("node", "x86_64")],
         "STUB_SHA_UV_ARM64": shas[("uv", "aarch64")],
         "STUB_SHA_UV_X86_64": shas[("uv", "x86_64")],
+        "STUB_SHA_GWS_ARM64": shas[("gws", "aarch64")],
+        "STUB_SHA_GWS_X86_64": shas[("gws", "x86_64")],
     }
 
 
@@ -271,6 +280,7 @@ FRESH_CALLS = [
     "uv python install 3.11",
     "uv python find 3.11",
     f"curl {NODE_URL['aarch64']}",
+    f"curl {GWS_URL['aarch64']}",
     "corsia start stdin=terminal-answer",
     "corsia sources --install-summary stdin=none",
 ]
@@ -345,7 +355,15 @@ def test_x86_64_downloads_the_x86_64_builds(env):
 
     assert result.returncode == 0, result.stderr
     curls = [call for call in _calls(env) if call.startswith("curl ")]
-    assert curls == [f"curl {UV_URL['x86_64']}", f"curl {NODE_URL['x86_64']}"]
+    assert curls == [f"curl {UV_URL['x86_64']}", f"curl {NODE_URL['x86_64']}", f"curl {GWS_URL['x86_64']}"]
+
+
+def test_a_failed_gws_download_warns_and_the_install_finishes(env):
+    result = _run(env, STUB_BAD_CHECKSUM="gws")
+
+    assert result.returncode == 0, result.stderr
+    assert "Couldn’t install Google Workspace support. Run this again." in result.stdout
+    assert _calls(env)[-2:] == ["corsia start stdin=terminal-answer", "corsia sources --install-summary stdin=none"]
 
 
 def test_a_second_run_changes_nothing_and_never_asks_for_sudo(env):
@@ -367,8 +385,10 @@ def test_supported_tools_already_present_are_left_alone(env):
     result = _run(_everything_installed(env))
 
     assert result.returncode == 0, result.stderr
-    assert not any(call.startswith(("curl", "uv", "sudo", "apt-get")) for call in _calls(env))
-    assert not (_local_bin(env) / "uv").exists()
+    assert not any(call.startswith(("uv", "sudo", "apt-get")) for call in _calls(env))
+    # Only gws is fetched: it is never a person's own install.
+    assert [call for call in _calls(env) if call.startswith("curl")] == [f"curl {GWS_URL['aarch64']}"]
+    assert not (_local_bin(env) / "uv").exists() and not (_local_bin(env) / "gws").exists()
 
 
 def test_a_python_with_an_old_sqlite_is_replaced_by_the_managed_one(env):
