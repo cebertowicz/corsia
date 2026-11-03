@@ -55,7 +55,8 @@ workflow:
             blocking: {type: boolean, default: false}
 """
 
-# Answers each input with the reply file: HANG answers nothing, CRASH exits.
+# Answers each input with the reply file: HANG answers nothing, CRASH exits, MAX_TURNS_ERROR and
+# MAX_TURNS_QUIET end the run on an exhausted turn cap (is_error true or false).
 _FAKE = textwrap.dedent(
     '''\
     #!{python}
@@ -72,6 +73,9 @@ _FAKE = textwrap.dedent(
             continue
         if reply == "CRASH":
             sys.exit(3)
+        if reply.startswith("MAX_TURNS"):
+            emit({{"type":"result","subtype":"error_max_turns","is_error":reply == "MAX_TURNS_ERROR","num_turns":3}})
+            continue
         emit({{"type":"assistant","message":{{"content":[{{"type":"text","text":reply}}]}}}})
         emit({{"type":"result","subtype":"success","is_error":False,"result":reply,"total_cost_usd":0.0,"num_turns":1,"stop_reason":"end_turn"}})
     '''

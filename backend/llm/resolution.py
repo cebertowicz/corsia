@@ -58,13 +58,6 @@ class ExecutionTarget:
             self.context_window_source,
         )
 
-    def with_window_suffix(self, suffix: str) -> ExecutionTarget:
-        """The same model's larger-context variant (``[1m]``): a transport selector with no catalog
-        row of its own, counted at the provider's discovered window."""
-        return replace(self, transport_model=f"{self.transport_model}{suffix}",
-                       context_window=self.discovered_context_window or self.context_window)
-
-
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
     from llm.harness_catalog import account_rows, project_stored_rows

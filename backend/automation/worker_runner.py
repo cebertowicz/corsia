@@ -206,7 +206,8 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
     if not model:
         raise inputs.StartRefused("refused: this chat has no model. Choose a model for this chat.")
     model_row = catalog_row(model, db=db)
-    rows = scoped_status_rows(**dispatch_scope({}, project))
+    scope = dispatch_scope({}, project)
+    rows = scoped_status_rows(**scope)
     status_row = next((item for item in rows if model in (item.get("id"), item.get("litellm_model"))), None)
     name = (status_row or {}).get("display_name") or (model_row or {}).get("display_name") or model
     cause = locality_refusal(model_row, thread_local_only=inherited_local_only((owner["id"],), db=db),
@@ -242,7 +243,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
 
     harness = resolve_execution_target(model, db=db).harness
     spawn_extra, applied = worker_settings.settings_for(
-        skill, dict(row).get("worker_profile"), model, model_row, status_row, name, harness, db)
+        skill, dict(row).get("worker_profile"), model, model_row, status_row, name, harness, scope, db)
     return {"owner": owner, "model": owner.get("model"),
             "harness": harness, "spawn_extra": spawn_extra, "settings": applied,
             "skill": skill, "schema": schema, "root": root, "facts": facts,
@@ -253,15 +254,11 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
 
 async def _enforce_limit(row: Mapping[str, Any]) -> None:
     """Stop a started worker that ran past its workflow's time limit and settle it once as
-    ``no_result``. A stop that fails settles nothing: the next pass tries again."""
+    ``no_result``, only when its turn ended by that stop. Anything else (a failed stop, a turn
+    still queued, another turn) settles nothing: the next pass checks again."""
     check = json.loads(row["run_input"] or "{}")
     limit = worker_settings.past_limit(check)
-    if limit is None:
-        return
-    try:
-        await worker_settings.stop_worker(row["worker_thread_id"])
-    except Exception:  # noqa: BLE001 - a stop that failed is tried again, never settled over
-        logger.exception("worker start {} could not be stopped past its limit", row["id"])
+    if limit is None or not await worker_settings.stop_worker(row["worker_thread_id"]):
         return
     await _end(row, check, NO_RESULT, f"ran past its {limit}-minute limit")
 

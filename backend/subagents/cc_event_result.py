@@ -63,7 +63,8 @@ def _result_metadata(
     identity: TurnIdentity,
     apply_now_interrupt_owns_result: bool,
 ) -> tuple[bool, dict]:
-    is_error = bool(ev.get("is_error"))
+    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
+    is_error = bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
     metadata: dict = {
         "cc": True,
         "type": "result",
@@ -144,6 +145,13 @@ def _marker_content(
         and not ctx.live.dropped_line_this_turn
     )
     return "" if suppress else (ev.get("result") or "")
+
+
+def _turn_error(ev: dict) -> str:
+    """The error a failed result records: the CLI's own code for an exhausted turn cap, else its text."""
+    if ev.get("subtype") == "error_max_turns":
+        return "error_max_turns"
+    return ev.get("result") or "Claude Code turn failed"
 
 
 def _result_outcome(is_error: bool, metadata: dict) -> str:
@@ -307,7 +315,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     await _handle_result_error(ctx, ev, metadata, is_error=is_error)
     settlement = await claim_terminal(
         identity, outcome,
-        (ev.get("result") or "Claude Code turn failed") if outcome == "error" else None,
+        _turn_error(ev) if outcome == "error" else None,
     )
     if settlement.result is not TurnTerminalResult.APPLIED:
         log.debug(

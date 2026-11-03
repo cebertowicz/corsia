@@ -1,9 +1,9 @@
 """A workflow's worker settings: the limits and requirements for the worker that runs it.
 
-The block states requirements, never a model: the standard model selection picks
-a ready, allowed model that meets them, and the runner refuses visibly at start
-when none does. Install checks the shape only, so a shared workflow installs on
-any machine whatever its catalog holds.
+The block states requirements, never a model: the worker runs on its rule owner's
+model (or that model's larger-context variant), and the runner refuses visibly at
+start when that model can't meet them. Install checks the shape only, so a shared
+workflow installs on any machine whatever its catalog holds.
 
     worker:
       effort: high

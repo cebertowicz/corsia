@@ -195,7 +195,6 @@ async def _spawn(
             model_id=model, account_id=kwargs.get("account_id"),
             confinement=confinement, read_paths=read_paths, rule_start=rule_start,
             effort=kwargs.get("effort"), max_turns=kwargs.get("max_turns"),
-            window_suffix=kwargs.get("window_suffix"),
         )
     if confinement == CONFINEMENT_UNTRUSTED and rule_start is None:
         from llm.resolution import resolve_execution_target
@@ -341,9 +340,8 @@ async def _spawn_claude_code_child(
     rule_start: RuleStart | None = None,
     effort: str | None = None,
     max_turns: int | None = None,
-    window_suffix: str | None = None,
 ) -> dict[str, Any] | str:
-    """Spawn a Claude Code child; a rule worker's ``window_suffix`` asks for its larger-context variant."""
+    """Spawn a Claude Code child."""
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
     from infra.subagent_caps import LiveSpawnCapExceeded
@@ -368,8 +366,6 @@ async def _spawn_claude_code_child(
             "Error: Claude Code delegation blocked: "
             f"{target.catalog_id} is unavailable ({target.availability_reason})"
         )
-    if window_suffix:
-        target = target.with_window_suffix(window_suffix)
     working_dir, project_id = resolve_spawn_working_dir(parent_thread_id)
     add_dirs: tuple[str, ...] = ()
     if confinement != CONFINEMENT_NONE:
