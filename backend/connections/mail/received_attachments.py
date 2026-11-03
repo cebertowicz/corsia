@@ -134,7 +134,11 @@ def _save_one(folder: Path, name: str, item: Attachment, data: bytes, taken: set
     if _is_pdf(item, name):
         text, note = pdf_text(data)
         if text is not None:
-            saved["text_path"] = str(_write(folder, clean_name(name + ".txt", taken), text.encode("utf-8")))
+            try:
+                saved["text_path"] = str(_write(folder, clean_name(name + ".txt", taken), text.encode("utf-8")))
+            except OSError:  # the PDF itself is saved; only its text file is missing
+                log.exception("email attachment text write failed")
+                note = NO_EXTRACT
         if note:
             saved["note"] = note
     return saved

@@ -221,6 +221,24 @@ async def test_saving_writes_inside_the_folder_and_never_through_a_symlink(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_a_pdf_whose_text_file_cannot_be_written_still_reports_the_saved_pdf(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    folder = tmp_path / "working" / "email-attachments" / "m1"
+    folder.mkdir(parents=True)
+    (folder / "attachment-1.pdf.txt").symlink_to(outside / "target.txt")
+    pdf = make_pdf(SENTENCE)
+
+    async def download(wanted):
+        return [pdf]
+
+    (saved,) = await ra.save(tmp_path / "working", "m1", [ra.Attachment("r.pdf", "application/pdf", 1)], download)
+    assert saved["note"] == ra.NO_EXTRACT and "text_path" not in saved
+    assert open(saved["path"], "rb").read() == pdf
+    assert not (outside / "target.txt").exists()
+
+
+@pytest.mark.asyncio
 async def test_saving_twice_overwrites_the_same_files(tmp_path):
     items = [ra.Attachment("n.pdf", "application/pdf", 1), ra.Attachment("n.pdf", "application/pdf", 1)]
 

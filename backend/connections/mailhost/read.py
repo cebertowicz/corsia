@@ -188,7 +188,7 @@ async def attachment_bytes(account_id: str, message_id: str, attachments: Sequen
     raw = await guarded(account_id, check, call)
     if raw is None:
         raise MessageNotFound(NOT_FOUND)
-    found = attachment_parts.contents(raw)
+    found = await asyncio.to_thread(attachment_parts.contents, raw)
     # A listing from BODYSTRUCTURE names parts by index; an index whose name differs is not that file.
     return [found[int(a.ref)][1] if a.ref.isdigit() and int(a.ref) < len(found) and found[int(a.ref)][0] == a.name
             else None for a in attachments]
