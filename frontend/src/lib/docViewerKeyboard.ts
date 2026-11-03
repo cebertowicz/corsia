@@ -25,7 +25,7 @@ export function handleDocumentEscape(
 export interface DocumentKeyState {
 	/** The canvas shows an image viewer over the document; the document answers no keys. */
 	covered: boolean;
-	commentUI: { state: { kind: string } | null; anchor: unknown; close: () => void; restoreFocus: () => void };
+	commentUI: { state: { kind: string } | null; anchor: unknown; sheetUp: boolean; close: () => void; restoreFocus: () => void };
 	draftController: { draft: unknown; cancel: () => void; pending: unknown; select: (selection: null) => void };
 	paneOpen: boolean;
 	isPaneDrawer: boolean;
@@ -37,7 +37,8 @@ export interface DocumentKeyState {
 export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState): void {
 	if (event.defaultPrevented || state.covered) return;
 	const { commentUI, draftController } = state;
-	if (event.key === 'Escape' && commentUI.state?.kind === 'list' && event.target === commentUI.anchor) {
+	// A raised phone sheet is the topmost layer even when focus has left it, so Escape closes it before the document.
+	if (event.key === 'Escape' && commentUI.state?.kind === 'list' && (commentUI.sheetUp || event.target === commentUI.anchor)) {
 		event.preventDefault();
 		commentUI.close();
 		commentUI.restoreFocus();
