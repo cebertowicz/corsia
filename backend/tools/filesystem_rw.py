@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from eval.tool_allowlist import carry_in_view
 from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
 from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
@@ -130,7 +131,7 @@ class ReadFileTool(Tool):
             if size > self._MAX_READ_BYTES and not pdf_read.starts_as_pdf(handle):  # a large scan still opens
                 size_mb = size / (1024 * 1024)
                 return _ReadOutcome(f"Error: File too large ({size_mb:.0f}MB). Max readable size is {self._MAX_READ_BYTES // (1024*1024)}MB. Use offset/limit for partial reads, or a different tool.")
-            data = handle.read()
+            data = carry_in_view(file_path, handle.read())
         if pdf_read.is_pdf(data):
             return _ReadOutcome("", data, pdf=True)
         content = data.decode("utf-8")

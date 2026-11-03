@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { openThreadView, postLinks, watchSocket } from '../support/documentOpen';
 import { TEST_TOKEN } from '../support/corsia';
+import { holdPersonBatches } from '../support/heldComments';
 
 test('@flow:artifact-tab-relocate keeps an open document tab at its relocated path', async ({ page, request }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'The tab strip is not present on mobile.');
@@ -13,10 +14,12 @@ test('@flow:artifact-tab-relocate keeps an open document tab at its relocated pa
 	const commentText = 'This comment survives relocation.';
 	const anchorText = 'Only in';
 	const from = `# ${a.name}\n\n`.length + a.body.indexOf(anchorText);
+	// Held, so it doesn't wake the agent: postLinks counts exactly one model call, the chat message's.
+	holdPersonBatches(true);
 	const comment = await request.post(`/api/artifacts/${a.artifactId}/comments`, {
 		params: { token: TEST_TOKEN },
-		data: { body: commentText, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length, delivery_policy: 'immediate' },
-	});
+		data: { body: commentText, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length, delivery_policy: 'document-held' },
+	}).finally(() => holdPersonBatches(false));
 	expect(comment.ok(), await comment.text()).toBeTruthy();
 	await postLinks(page, request, `[Open document](<${a.docPath}>)`);
 	await page.getByRole('link', { name: 'Open document', exact: true }).click();

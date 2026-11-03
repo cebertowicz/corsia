@@ -328,7 +328,8 @@ async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_i
     path = _write_lesson(c1, target=None, text=LESSON_BODY)
     record_committed_save(c1.workspace, [path], _git(["rev-parse", "HEAD"], cwd=c1.workspace).strip())
     await _make_pending(c1)
-    (entry,) = json.loads(_arm(c1, _pending_fact(), deliver=True, blob=None).prompt.rsplit("\n\n", 1)[1])["trial_lessons"]
+    candidate = _arm(c1, _pending_fact(), deliver=True, blob=None)
+    (entry,) = json.loads(candidate.prompt.rsplit("\n\n", 1)[1])["trial_lessons"]
     assert str(path.resolve()) in entry["guidance"] and entry["target"] == str(path.resolve())
 
     db = get_db()
@@ -346,12 +347,13 @@ async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_i
     thread_token = state._current_thread_id.set(thread_id)
     turn_token = state._current_turn_identity.set(admission.batch.identity)
     try:
-        with carry_in_tool_isolation():
+        with carry_in_tool_isolation(candidate.unseen):
             result = await registry.execute("read_file", {"path": str(path.resolve())})
     finally:
         state._current_turn_identity.reset(turn_token)
         state._current_thread_id.reset(thread_token)
     assert LESSON_BODY in result and "record_only" not in result
+    assert "right_call" not in result and "required_actions" not in result  # the delivered file, without its case
 
 
 @pytest.mark.asyncio
