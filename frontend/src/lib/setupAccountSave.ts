@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { updateSettings } from '$lib/stores/settings';
 
-export const USAGE_SHARING_LINE = 'This helps improve CORSIA. It sends counts and a random number for this install, never your name, email or anything you write.';
+export const USAGE_SHARING_LINE = 'This helps improve CORSIA. It sends counts and a random number for this install, never your name, email or anything you write. Turn it off to stop.';
 export const USAGE_SHARING_ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 
 /** Writes the choice through the settings route the Settings page uses, with the session already in the token store. */
