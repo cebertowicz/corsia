@@ -4,7 +4,7 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
-import { CREEP_STALE_MS, remoteCeiling } from './screenProgress';
+import { CREEP_STALE_MS, NO_PROCESS_WINDOW_MS, remoteCeiling } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
@@ -223,14 +223,16 @@ describe('update screen store', () => {
 		warning.mockRestore();
 	});
 
-	it('does not invent a remote estimate without history and retains a known usual time', () => {
+	it('does not invent a remote estimate without history, still says when it is taking longer, and retains a known usual time', () => {
 		const shell = window as ShellWindow;
 		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
 		updateStatus.set(status(inFlight(), null));
 		tickUpdateScreen(0);
 		updateUnreachable.set(true);
-		tickUpdateScreen(120_000);
+		tickUpdateScreen(1_000);
 		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		tickUpdateScreen(1_000 + NO_PROCESS_WINDOW_MS);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', estimated: false });
 
 		stopUpdateScreen();
 		updateScreenView.set(null);

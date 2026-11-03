@@ -103,7 +103,8 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 	l.downAt ??= now;
 	if (readError) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 	if (shellInfo()?.mode !== 'local') {
-		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
+		// With no usual time to compare against, a paired computer falls back to the same window a local one uses with no startup record.
+		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: now - l.downAt >= NO_PROCESS_WINDOW_MS, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
 		l.model.lift(remoteEstimate(l.estimateFrom, elapsed));
