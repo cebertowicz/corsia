@@ -313,3 +313,25 @@ async def test_the_live_note_and_the_replayed_reference_name_the_same_file(
     relative = live.split("saved at ", 1)[1].rstrip("]")
     assert not relative.startswith("/")
     assert str(workspace.resolve() / relative) in replayed
+
+
+def test_attachment_notes_never_count_as_agent_send_framing():
+    from core.attachment_notes import envelope_with_notes
+    from core.message_history import render_agent_envelope
+    from core.model_context_sources import agent_send_envelope_source_entry
+
+    meta = {"sender_kind": "agent", "from_thread": "peer-1", "from_title": "Peer"}
+    plain = render_agent_envelope("look at this", meta)
+    notes = "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
+    noted = envelope_with_notes(plain, notes)
+
+    def framing(envelope):
+        return agent_send_envelope_source_entry(
+            thread_id="t1", harness="native", agent_envelope=envelope,
+        )
+
+    assert noted.content.endswith(notes)
+    assert noted.body_content.endswith(notes)
+    assert framing(noted).prompt_content == framing(plain).prompt_content
+    assert framing(noted).prompt_tokens_override == framing(plain).prompt_tokens_override
+    assert envelope_with_notes(plain, "") is plain

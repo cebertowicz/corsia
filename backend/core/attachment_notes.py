@@ -12,12 +12,17 @@ image keeps its bare note.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from core.workspace_layout import resolve_project_root, resolve_workspace_root
 from history.message_attachments import registered_upload_path
 from infra import config
 from infra.config import DOCUMENT_MIME_TYPES
+
+if TYPE_CHECKING:
+    from core.message_history import AgentEnvelopeRender
 
 
 def _scope_root(thread_id: str, db) -> Path | None:
@@ -102,3 +107,18 @@ def with_attachment_notes(content: str, notes: str) -> str:
     if not notes:
         return content
     return f"{content}\n\n{notes}" if content else notes
+
+
+def envelope_with_notes(envelope: AgentEnvelopeRender, notes: str) -> AgentEnvelopeRender:
+    """Append the notes to the envelope's content and to its body.
+
+    The notes are part of the person's message, not CORSIA's framing, so content
+    minus body stays the framing alone.
+    """
+    if not notes:
+        return envelope
+    return replace(
+        envelope,
+        content=with_attachment_notes(envelope.content, notes),
+        body_content=with_attachment_notes(envelope.body_content, notes),
+    )

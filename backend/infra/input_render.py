@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
-from core.attachment_notes import attachment_notes, attachment_notes_async, with_attachment_notes
+from core.attachment_notes import attachment_notes, attachment_notes_async, envelope_with_notes
 from core.message_history import AgentEnvelopeRender, render_agent_envelope
 from infra.db_async import run_in_db
 from infra.send_types import SendRejected
@@ -210,7 +210,7 @@ def _render_input_projection(
     """Build the provider projection after attachment work has completed."""
     rendered = render_claimed_batch(batch)
     source = render_claimed_batch(batch, frame_agent_inputs=False)
-    envelope = _batch_agent_envelope(batch, source, with_attachment_notes(rendered.content, notes))
+    envelope = envelope_with_notes(_batch_agent_envelope(batch, source, rendered.content), notes)
     return InputProviderProjection(
         _projection_identity(
             rendered,
