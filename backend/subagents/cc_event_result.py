@@ -56,6 +56,12 @@ async def _flush_pending_reasoning(
     ctx.live.reasoning_provider_message_id = None
 
 
+def result_is_error(ev: dict) -> bool:
+    """Whether a CLI result ends its Turn in error."""
+    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
+    return bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
+
+
 def _result_metadata(
     ctx: CCEventContext,
     ev: dict,
@@ -63,8 +69,7 @@ def _result_metadata(
     identity: TurnIdentity,
     apply_now_interrupt_owns_result: bool,
 ) -> tuple[bool, dict]:
-    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
-    is_error = bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
+    is_error = result_is_error(ev)
     metadata: dict = {
         "cc": True,
         "type": "result",

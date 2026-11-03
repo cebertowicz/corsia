@@ -143,6 +143,21 @@ async def test_stop_takes_the_event_lock_while_the_login_check_runs(claude, monk
 
 
 @pytest.mark.asyncio
+async def test_a_successful_reply_quoting_the_error_checks_no_login(claude, monkeypatch):
+    """Only an error result can be an expired login; a reply that quotes the text is not held."""
+    from core.turn_core import TurnIdentity
+    from subagents.cc_runtime_events import _make_on_event
+    from subagents.cc_runtime_state import _Live
+
+    turn_on_other(claude)
+    check = login_check(monkeypatch, 'fail')
+    live = _Live(session=None, parent_thread_id=None, name='cc', corsia_turn=TurnIdentity('claude-turn', 1))
+    on_event = _make_on_event(live, 'claude-thread', lambda *_args: None, claude.db)
+    await on_event({'kind': 'result', 'is_error': False, 'result': f'The CLI said: {EXPIRED}'})
+    check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_newer_login_after_the_turn_stays_signed_in(claude, monkeypatch):
     """A sign-in made after the failed Turn started is not the login that expired."""
     from connections.account_evidence import invalidate_discovery
