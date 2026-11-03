@@ -52,15 +52,23 @@ async function readAt(page: Page, heading: string, margin = 40): Promise<void> {
 /**
  * The first line whose top is inside the pane: its text and where it is on screen. It is read against the viewport,
  * as the reader sees it, never against the pane: a notice or the review bar growing above the pane moves the pane too.
+ * It is read in a painted frame, like every sample after it. A read from a task can land between a notice coming or
+ * going in the header and the frame that holds the text against it, and take a place no frame ever painted.
  */
 async function anchorLine(page: Page): Promise<{ text: string; top: number }> {
-	return page.evaluate(() => {
-		const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-		const box = scroller.getBoundingClientRect();
-		const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => el.getBoundingClientRect().top >= box.top && (el.textContent ?? '').trim().length > 12);
-		if (!line) throw new Error('no line in view');
-		return { text: (line.textContent ?? '').trim(), top: line.getBoundingClientRect().top };
-	});
+	const found = await page.evaluate(() => new Promise<{ text: string; top: number } | null>((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const box = scroller.getBoundingClientRect();
+			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => el.getBoundingClientRect().top >= box.top && (el.textContent ?? '').trim().length > 12);
+			return line ? { text: (line.textContent ?? '').trim(), top: line.getBoundingClientRect().top } : null;
+		}, (line) => {
+			resolve(line);
+			return false;
+		});
+	}));
+	if (!found) throw new Error('no line in view');
+	return found;
 }
 
 /** Samples the anchor line's place on screen on every painted frame for `ms`. */
@@ -149,12 +157,13 @@ async function pair(browser: Browser, document: LiveDocument, width: number, hei
 /** Leaves the reader a measured distance from the live edge after CodeMirror has settled its scroll height. */
 async function readNearEnd(page: Page, remaining: number): Promise<void> {
 	const scroller = page.locator('.cm-scroller');
-	await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-	await expect.poll(() => scroller.evaluate((element) =>
-		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
-	)).toBeLessThanOrEqual(2);
+	// Measuring the lines that scroll into view can grow the scroll height after the jump, so scroll to the end again until it stays there.
+	await expect.poll(() => scroller.evaluate((element) => {
+		element.scrollTop = element.scrollHeight;
+		return Math.round(element.scrollHeight - element.scrollTop - element.clientHeight);
+	})).toBe(0);
 	await page.waitForTimeout(500);
-	await scroller.evaluate((element, distance) => { element.scrollTop -= distance; }, remaining);
+	await scroller.evaluate((element, distance) => { element.scrollTop = element.scrollHeight - element.clientHeight - distance; }, remaining);
 	await expect.poll(() => scroller.evaluate((element) =>
 		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
 	)).toBe(remaining);
@@ -307,6 +316,7 @@ for (const [width, height] of LAYOUTS) {
 		const document = await seedLiveDocument(request, `append-${width}`, body());
 		const live = await pair(browser, document, width, height);
 		try {
+			await installPaintedFrames(live.reader);
 			await readNearEnd(live.reader, 40);
 			await append(live.writer, `\n\n${BLOCK(3)}`);
 			await expect(live.reader.locator('.cm-content')).toContainText('Inserted paragraph 2');
@@ -323,6 +333,54 @@ for (const [width, height] of LAYOUTS) {
 			expect(Math.abs(after.top - before.top), 'the held top line stays in place').toBeLessThanOrEqual(3);
 		} finally {
 			await live.close();
+		}
+	});
+}
+
+/** Where the line reading `text` is on screen in the next painted frame. */
+async function paintedLineTop(page: Page, text: string): Promise<number | null> {
+	return page.evaluate((text) => new Promise<number | null>((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => (el.textContent ?? '').trim() === text);
+			return line ? line.getBoundingClientRect().top : null;
+		}, (top) => {
+			resolve(top);
+			return false;
+		});
+	}), text);
+}
+
+for (const [width, height] of LAYOUTS) {
+	// A notice comes and goes above a reader at or near the end: when the editor grows back past the text below the view,
+	// the browser already pulls the offset back by part of the move, and the hold makes only the rest of it.
+	test(`@surface:live-document a header change leaves a reader at the end in place at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
+		test.setTimeout(120_000);
+		const document = await seedLiveDocument(request, `edge-${width}`, body());
+		const context = await browser.newContext({ viewport: { width, height } });
+		try {
+			const reader = await context.newPage();
+			await openLiveDocument(reader, document, '# Anchor document');
+			await installPaintedFrames(reader);
+			for (const remaining of [0, 40, 200]) {
+				await readNearEnd(reader, remaining);
+				const anchor = await anchorLine(reader);
+				for (const shown of [true, false]) {
+					await reader.evaluate((shown) => {
+						if (!shown) return document.getElementById('anchor-notice')?.remove();
+						const notice = document.createElement('div');
+						notice.id = 'anchor-notice';
+						notice.style.height = '108px';
+						document.querySelector('.document-header')!.append(notice);
+					}, shown);
+					await reader.waitForTimeout(300);
+					const top = await paintedLineTop(reader, anchor.text);
+					expect(Math.abs((top ?? Infinity) - anchor.top), `${remaining}px from the end, notice ${shown ? 'shown' : 'gone'}: the text in view never moves`).toBeLessThanOrEqual(2);
+				}
+			}
+		} finally {
+			await context.close();
 		}
 	});
 }

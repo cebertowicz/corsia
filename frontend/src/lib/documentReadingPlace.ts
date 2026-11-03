@@ -76,29 +76,47 @@ function holdReadingPlace(view: EditorView, place: ReadingPlace, transactions: r
  * editor's box grows or shrinks by the same height, which is what the observer sees; the scroll offset moves with the
  * edge in the same frame, before it paints. Only the editor's position on the page counts, so scrolling the page itself
  * moves nothing.
+ *
+ * Near the end of the document the browser moves the offset itself: an editor that grows past the text left below the
+ * view has its offset pulled back to the new end at layout, which holds the text by as much as it pulls. Only the rest
+ * of the move is the editor's to make, so the distance to the end is kept as of the last scroll. A scroll that comes
+ * after the editor moved and before the observer saw it is that pull-back itself, and leaves the distance as it was.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	if (typeof ResizeObserver !== 'function') return () => {};
 	const scroller = view.scrollDOM;
 	const pageTop = () => scroller.getBoundingClientRect().top - document.documentElement.getBoundingClientRect().top;
+	const toEnd = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
 	let top = pageTop();
+	let end = toEnd();
+	const onScroll = () => {
+		if (Math.abs(pageTop() - top) < 0.5) end = toEnd();
+	};
 	// A header that eases open moves the edge by a fraction each frame, and the browser keeps whole pixels of each
 	// scroll; the part it dropped is carried into the next move so the frames add up to the edge's whole move.
 	let unscrolled = 0;
 	const observer = new ResizeObserver(() => {
 		const now = pageTop();
-		const moved = now - top + unscrolled;
+		let moved = now - top + unscrolled;
 		top = now;
 		unscrolled = 0;
+		// The editor grew upward with less text below the view than it grew by: the browser has already scrolled back.
+		if (moved < 0 && toEnd() < 0.5) moved = Math.min(0, moved + Math.max(0, -moved - end));
 		if (Math.abs(moved) < 0.5) {
 			unscrolled = moved;
+			end = toEnd();
 			return;
 		}
 		const before = scroller.scrollTop;
 		scroller.scrollTop = before + moved;
 		unscrolled = Math.abs(moved - (scroller.scrollTop - before)) < 1 ? moved - (scroller.scrollTop - before) : 0;
+		end = toEnd();
 		heldPlaces.delete(view);
 	});
 	observer.observe(scroller);
-	return () => observer.disconnect();
+	scroller.addEventListener('scroll', onScroll, { passive: true });
+	return () => {
+		observer.disconnect();
+		scroller.removeEventListener('scroll', onScroll);
+	};
 }
