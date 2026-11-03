@@ -39,6 +39,7 @@ _CONTENT_BY_CAUSE = {
 
 _CONTINUE_ID_PREFIX = "overage-continue:"
 _OVERFLOW_ID_PREFIX = "overflow-continue:"
+_UNANSWERED_ID_PREFIX = "overflow-unanswered:"
 
 
 def continue_message_id(turn_id: str) -> str:
@@ -64,12 +65,12 @@ def _turn_starting_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
 
 def queue_plan_limit_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
     """Queue the continue input for a Turn CORSIA stopped at the plan limit with overage off."""
-    _queue_continue(db, turn_id, thread_id, cause=PLAN_LIMIT_REASON)
+    _queue_continue(db, turn_id, thread_id, cause=PLAN_LIMIT_REASON, summary=CONTINUE_CHIP)
 
 
 def _queue_continue(
-    db: sqlite3.Connection, turn_id: str, thread_id: str, *, cause: str, message_id: str | None = None,
-    summary: str | None = CONTINUE_CHIP,
+    db: sqlite3.Connection, turn_id: str, thread_id: str, *, cause: str, summary: str | None,
+    message_id: str | None = None,
 ) -> None:
     """Queue one system continue input unless real input already restarts the thread.
 
@@ -171,7 +172,7 @@ def queue_limit_refusal_continue(db: sqlite3.Connection, turn_id: str, thread_id
     """
     if _repeats_refusal_on_same_login(db, turn_id) or _refusal_chain_reached_account_cap(db, turn_id):
         return
-    _queue_continue(db, turn_id, thread_id, cause=VENDOR_LIMIT_REFUSAL_REASON)
+    _queue_continue(db, turn_id, thread_id, cause=VENDOR_LIMIT_REFUSAL_REASON, summary=CONTINUE_CHIP)
 
 
 def overflow_rerun_queued(turn_id: str, *, db: sqlite3.Connection | None = None) -> bool:
@@ -200,6 +201,58 @@ def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str
         db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
         message_id=overflow_continue_message_id(turn_id), summary=_newest_person_line(db, turn_id),
     )
+
+
+def record_unanswered_overflow(db: sqlite3.Connection, message_id: str) -> None:
+    """Write the size-refused Turn's notice once its re-run input ended failed.
+
+    The refused Turn wrote no notice because its re-run would answer; a re-run
+    refused before it ran answers nothing, so the notice the Turn held back is
+    written now, in the settlement's transaction. The continue input itself
+    stays undrawn.
+    """
+    if not message_id.startswith(_OVERFLOW_ID_PREFIX):
+        return
+    turn_id = message_id[len(_OVERFLOW_ID_PREFIX):]
+    notice_id = f"{_UNANSWERED_ID_PREFIX}{turn_id}"
+    if db.execute("SELECT 1 FROM messages WHERE id=?", (notice_id,)).fetchone():
+        return
+    turn = db.execute(
+        "SELECT thread_id,model,error FROM active_turns WHERE id=?", (turn_id,),
+    ).fetchone()
+    if turn is None or not turn["error"]:
+        # Raising here would undo the settlement and leave the input queued.
+        from loguru import logger
+
+        logger.error("size-refused turn {} has no recorded error; no notice written", turn_id)
+        return
+    from infra.queries import insert_message
+    from infra.turn_errors import insert_turn_error
+    from llm.error_cause import cause_kind
+
+    metadata = {
+        "type": "llm_error", "model": turn["model"],
+        "cause": "context_window_exceeded", "cause_kind": cause_kind("context_window_exceeded"),
+    }
+    insert_turn_error(
+        insert_message, str(turn["thread_id"]), str(turn["error"]), metadata,
+        turn_id=turn_id, msg_id=notice_id, db=db,
+    )
+
+
+def unanswered_overflow_notices(message_ids: tuple[str, ...]) -> list[tuple[str, str]]:
+    """(thread, notice) for each failed re-run in ``message_ids`` whose notice was written."""
+    from infra.database import get_db
+
+    found: list[tuple[str, str]] = []
+    for message_id in message_ids:
+        if not message_id.startswith(_OVERFLOW_ID_PREFIX):
+            continue
+        notice_id = f"{_UNANSWERED_ID_PREFIX}{message_id[len(_OVERFLOW_ID_PREFIX):]}"
+        row = get_db().execute("SELECT thread_id FROM messages WHERE id=?", (notice_id,)).fetchone()
+        if row is not None:
+            found.append((str(row["thread_id"]), notice_id))
+    return found
 
 
 def _newest_person_line(db: sqlite3.Connection, turn_id: str) -> str | None:

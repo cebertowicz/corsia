@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 
+from core.stop_causes import CONTEXT_OVERFLOW_REASON
+
 # System rows that only record activity. Every other system row is a notice
 # (an error, interrupt, sandbox denial, or a type added later) and stays visible.
 ACTIVITY_SYSTEM_TYPES = (
@@ -26,7 +28,7 @@ ACTIVITY_SYSTEM_TYPES = (
 NEVER_DRAWN_SYSTEM_TYPES = ("seed",)
 # Events the transcript never draws: the continue input that re-runs a Turn its
 # provider refused for size is the agent's, and the checkpoint row already shows it.
-NEVER_DRAWN_EVENT_TYPES = ("context_overflow.continue",)
+NEVER_DRAWN_EVENT_TYPES = (CONTEXT_OVERFLOW_REASON,)
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.
 ERROR_SYSTEM_TYPES = (

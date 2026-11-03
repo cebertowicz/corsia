@@ -329,11 +329,11 @@ describe('the re-run of a Turn refused for size is for the agent only', () => {
 		return {
 			id: 'overflow-continue:t1', thread_id: THREAD, role: 'system', delivery_state: state,
 			content: 'The provider refused your previous turn because the chat no longer fit its context window. '
-				+ 'CORSIA checkpointed the chat. Continue the work that turn was doing.',
+				+ 'Continue the work that turn was doing.',
 			created_at: '2026-11-03T11:00:00',
 			metadata: {
 				type: 'context_event', event_type: 'context_overflow.continue', event_disposition: 'wake',
-				summary: 'Resumed after plan limit pause', sender_kind: 'system', stopped_turn_id: 't1',
+				cause: 'context_overflow.continue', summary: 'Go on.', sender_kind: 'system', stopped_turn_id: 't1',
 			},
 		};
 	}

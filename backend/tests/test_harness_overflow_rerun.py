@@ -122,6 +122,64 @@ def test_a_rerun_is_named_by_the_person_message_it_runs_again(isolated_db) -> No
     assert _rerun_summary(db) == "work"
 
 
+def _fail_rerun_write(db, rerun: ClaimedBatch) -> tuple[str, ...]:
+    from infra.input_writes import begin_batch_write, settle_batch_write
+
+    attempt = f"attempt-{rerun.turn_id}"
+    begin_batch_write(rerun, attempt_id=attempt, started_at=_now(), db=db)
+    failed = settle_batch_write(attempt, outcome="proved_no_write", error="refused at admission", db=db)
+    db.commit()
+    return failed
+
+
+def _notices(db, thread: str = "thread") -> list[tuple[str, str, str, str]]:
+    return [tuple(row) for row in db.execute(
+        "SELECT json_extract(metadata,'$.type'),json_extract(metadata,'$.turn_id'),content,"
+        "json_extract(metadata,'$.cause_kind') FROM messages WHERE thread_id=? AND role='system' "
+        "AND seq IS NOT NULL AND json_extract(metadata,'$.type')='llm_error'", (thread,))]
+
+
+def test_a_rerun_refused_before_it_runs_writes_the_notice_the_turn_held_back(isolated_db) -> None:
+    db = get_db()
+    _turn(db)
+    rerun = _refuse(db).successor
+    assert isinstance(rerun, ClaimedBatch)
+    assert _notices(db) == []
+
+    failed = _fail_rerun_write(db, rerun)
+
+    assert overflow_continue_message_id("t1") in failed
+    assert _notices(db) == [("llm_error", "t1", _REFUSAL, "context_overflow")]
+    from infra.focus_rows import is_focus_visible
+
+    row = db.execute("SELECT role,content,metadata FROM messages WHERE id='overflow-unanswered:t1'").fetchone()
+    assert is_focus_visible(dict(row))
+
+
+def test_the_held_back_notice_is_published_live_once(isolated_db, monkeypatch) -> None:
+    import asyncio
+
+    from infra.failed_wake_surface import drive_failed_wake_owners, record_failed_wakes
+
+    db = get_db()
+    _turn(db)
+    rerun = _refuse(db).successor
+    assert isinstance(rerun, ClaimedBatch)
+    failed = _fail_rerun_write(db, rerun)
+    record_failed_wakes(db, failed)  # a repeated report writes no second notice
+    db.commit()
+    published: list[tuple[str, tuple[str, ...]]] = []
+
+    async def _publish(thread_id, ids, **_kwargs):
+        published.append((thread_id, tuple(ids)))
+
+    monkeypatch.setattr("infra.send_broadcast.broadcast_message_rows", _publish)
+    asyncio.run(drive_failed_wake_owners(failed))
+
+    assert len(_notices(db)) == 1
+    assert published == [("thread", ("overflow-unanswered:t1",))]
+
+
 def test_a_rerun_of_a_wake_carries_no_summary(isolated_db) -> None:
     db = get_db()
     db.execute("INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES ('thread','user','native/test','t','t')")
