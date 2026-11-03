@@ -197,6 +197,21 @@ async def test_a_1m_variant_the_cli_runs_smaller_leaves_no_row(connections_db, m
 
 
 @pytest.mark.asyncio
+async def test_a_kept_1m_variant_the_cli_later_runs_smaller_is_dropped(connections_db, monkeypatch, caplog):
+    """A row kept at 1M is checked again on each refresh: losing 1M access retires it."""
+    from llm.resolution import resolve_execution_target
+
+    accepted = {"opus[1m]": "claude-opus-5-5[1m]"}
+    await _refresh(connections_db, monkeypatch, NEW_LIST, accepted)
+    assert resolve_execution_target("claude-code/opus[1m]", db=connections_db).available is True
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, accepted, window=200_000)
+
+    assert "reports a 200000-token window for it, not 1M" in caplog.text
+    assert resolve_execution_target("claude-code/opus[1m]", db=connections_db).available is False
+
+
+@pytest.mark.asyncio
 async def test_discovery_never_undoes_an_operator_show_or_hide(connections_db, monkeypatch):
     await _refresh(connections_db, monkeypatch, OLD_LIST + NEW_LIST, {})
     connections_db.execute(
