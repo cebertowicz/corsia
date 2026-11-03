@@ -96,22 +96,25 @@ def run(monkeypatch, tmp_path):
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     views = _views(agent_home)
 
-    def go(state: str):
+    def go(state: str, verified: str | None = None):
         reads: list[bool] = []
+        waits: list[bool] = []
         view = views[state]
+        answer = views[verified or state]
 
         def read(db=None):
             reads.append(True)
             return view
 
-        def cached(db=None):
-            raise AssertionError("a rule run waits for verification; it never reads the cache alone")
+        def verify(db=None):
+            waits.append(True)
+            return answer
 
-        monkeypatch.setattr(github_agent, "verify_now", read)
-        monkeypatch.setattr(github_agent, "view", cached)
+        monkeypatch.setattr(github_agent, "view", read)
+        monkeypatch.setattr(github_agent, "verify_now", verify)
         result = asyncio.run(script_sandbox.run_script(
             THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5))
-        return {**seen, "reads": len(reads), "result": result, "view": view,
+        return {**seen, "reads": len(reads), "waits": len(waits), "result": result, "view": answer,
                 "person_gh": person_gh.resolve(), "agent_home": agent_home.resolve(),
                 "home_gh": (home / ".config" / "gh").resolve()}
 
@@ -144,6 +147,14 @@ def test_a_verified_account_gives_the_script_exactly_the_shells_github(run):
     for person in (seen["person_gh"], seen["home_gh"]):
         assert _deny(person) in seen["profile"]
     assert not any(name in env for name in _TOKENS)
+    assert seen["result"].github_locked is None
+    assert seen["waits"] == 0  # a cached answer costs no GitHub round trip
+
+
+def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
+    seen = run("unverified", verified="ready")  # the cache says own_login_unknown; verifying says ready
+    assert seen["reads"] == 1 and seen["waits"] == 1
+    assert seen["env"]["GH_CONFIG_DIR"] == seen["view"].home
     assert seen["result"].github_locked is None
 
 

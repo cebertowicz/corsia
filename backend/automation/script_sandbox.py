@@ -44,7 +44,7 @@ from tools.shell_envelope import (
     execution_envelope_for_consumed_action,
     prepare_execution_envelope,
 )
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_off_db
 from tools.shell_environment import safehouse_subprocess_env
 from tools.shell_guard import (
     execution_envelope_profile,
@@ -189,6 +189,9 @@ _NO_LOGIN = {
     "wrong_account": "the agents' GitHub account is signed in as the person's own login",
 }
 
+#: The causes ``github_agent.view`` reports while no verification answer is cached yet.
+_UNSETTLED = frozenset({"verifying", "own_login_unknown"})
+
 
 def github_lock_reason(view: AgentAccountView) -> str | None:
     """Why a run gets no GitHub login, with the account's named cause; None once verified."""
@@ -226,9 +229,11 @@ async def _run_with_channel(
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     # The one read of the agents' account; the env, the grant and the denies below all use it.
-    # A rule run is never replayed, so it waits (bounded) for a cold verification instead of
-    # running locked the first time after a restart.
-    view = await run_in_db(github_agent.verify_now)
+    # A rule run is never replayed, so when no answer is cached yet (after a restart, say) it
+    # waits, bounded and off the DB pool, for the verification instead of running locked.
+    view = await run_in_db(github_agent.view)
+    if view.cause in _UNSETTLED:
+        view = await run_off_db(github_agent.verify_now)
     # A shell with no agents' account is left alone; a script still gets the locked state.
     env.update(github_agent.shell_env(replace(view, absent=False) if view.absent else view))
     env.pop(SOCKET_ENV, None)
