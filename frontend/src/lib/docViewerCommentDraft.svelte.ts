@@ -52,14 +52,24 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 	cancelCommentCapture(draft.scope);
 	const controller = new AbortController(), sequence = (draft.sequence ?? 0) + 1;
 	commentDraft.update(value => value && value.identity === draft.identity ? { ...value, request: controller, sequence } : value);
-	const captured = await captureComment(selection, sequence, controller.signal);
 	const session = selection.session;
+	const attempt = async (): Promise<string> => {
+		const captured = await captureComment(selection, sequence, controller.signal);
+		try {
+			if (!current() || controller.signal.aborted || context.session() !== session) throw aborted();
+			return await addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId);
+		} catch (error) {
+			session.releaseReservation(captured.clientId);
+			throw error;
+		}
+	};
 	try {
-		if (!current() || controller.signal.aborted || context.session() !== session) throw aborted();
-		return await addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId);
+		return await attempt();
 	} catch (error) {
-		session.releaseReservation(captured.clientId);
-		throw error;
+		// The server lost the range between capture and save: capture the still-tracked selection again before giving up.
+		const refused = error instanceof Error && error.message.startsWith('409 ');
+		if (!refused || !selectionRange(selection) || !current() || controller.signal.aborted) throw error;
+		return attempt();
 	}
 }
 
