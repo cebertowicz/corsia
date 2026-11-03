@@ -99,6 +99,10 @@ async def lifespan(app: FastAPI):
     with startup_progress.publishing():
         app_startup_init.initialize_startup(logger)
     app_loop.capture(asyncio.get_running_loop())
+    from llm.live_cost_map import start_refresh
+
+    if not getattr(app.state, "litellm_cost_map_offline", False):
+        start_refresh()
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:

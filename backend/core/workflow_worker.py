@@ -1,9 +1,9 @@
 """A workflow's worker settings: the limits and requirements for the worker that runs it.
 
-The block states requirements, never a model: the standard model selection picks
-a ready, allowed model that meets them, and the runner refuses visibly at start
-when none does. Install checks the shape only, so a shared workflow installs on
-any machine whatever its catalog holds.
+The block states requirements, never a model: the worker runs on its rule owner's
+model (or that model's larger-context variant), and the runner refuses visibly at
+start when that model can't meet them. Install checks the shape only, so a shared
+workflow installs on any machine whatever its catalog holds.
 
     worker:
       effort: high
@@ -61,6 +61,9 @@ def worker_errors(workflow: Mapping[str, Any]) -> list[str]:
     if not isinstance(profiles, dict):
         return [*errors, "corsia.workflow.worker.profiles must be a mapping of profile names"]
     for name, profile in profiles.items():
+        if not isinstance(name, str):
+            errors.append(f"corsia.workflow.worker.profiles has a name that is not text: {name!r}")
+            continue
         errors.extend(_settings_errors(profile, f"corsia.workflow.worker.profiles.{name}", profiles_allowed=False))
     return errors
 

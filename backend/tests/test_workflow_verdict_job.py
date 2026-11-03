@@ -16,34 +16,6 @@ def _snapshot() -> Snapshot:
     return Snapshot("2026-10-20T00:00:00+00:00", (), subjects=frozenset({"workflow:test@v1"}))
 
 
-def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch) -> None:
-    from jobs import workflow_verdicts
-
-    db = MagicMock()
-    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
-    read = MagicMock(return_value=_snapshot())
-    priced = MagicMock(return_value=_snapshot())
-    write = MagicMock(return_value=1)
-    monkeypatch.setattr(workflow_verdicts, "get_db", lambda: db)
-    monkeypatch.setattr(workflow_verdicts, "read_open_snapshot", read)
-    monkeypatch.setattr(workflow_verdicts, "price_snapshot", priced)
-    monkeypatch.setattr(workflow_verdicts, "compute", lambda _snapshot: [evaluation])
-    monkeypatch.setattr(workflow_verdicts, "evaluate_trials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(workflow_verdicts.evaluator, "VERDICT_WRITES_ENABLED", False)
-    monkeypatch.setattr(workflow_verdicts.evaluator, "write_verdicts", write)
-
-    report = workflow_verdicts.run_daily()
-
-    assert report.open_subjects == report.evaluated == report.reached == 1
-    assert report.recorded == 0
-    assert report.by_reason == {"quality_better": 1}
-    read.assert_called_once()
-    priced.assert_called_once_with(db, _snapshot())
-    db.close.assert_called_once_with()
-    write.assert_not_called()
-    assert report.woken == 0
-
-
 def test_run_counts_separate_all_runs_from_outcomes_by_run_and_version() -> None:
     from jobs.workflow_verdicts import run_counts
 
@@ -61,7 +33,7 @@ def test_run_counts_separate_all_runs_from_outcomes_by_run_and_version() -> None
         "versions": 4, "versions_priced": 1, "versions_outcomes_priced": 2}
 
 
-def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) -> None:
+def test_daily_verdict_batch_records_and_wakes_in_one_transaction(monkeypatch) -> None:
     from jobs import workflow_verdicts
 
     db = MagicMock()
@@ -78,7 +50,6 @@ def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) ->
     monkeypatch.setattr(workflow_verdicts, "price_snapshot", lambda _db, snapshot: snapshot)
     monkeypatch.setattr(workflow_verdicts, "compute", lambda _snapshot: [evaluation])
     monkeypatch.setattr(workflow_verdicts, "evaluate_trials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(workflow_verdicts.evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(workflow_verdicts, "write_transaction", transaction)
     monkeypatch.setattr(workflow_verdicts.evaluator, "write_verdicts", write)
     monkeypatch.setattr(workflow_verdicts.evaluator, "wake_owners", wake)
@@ -101,7 +72,6 @@ def test_a_workflow_version_with_runs_and_no_events_is_planned_once_and_a_reache
                "'2026-10-01','workflow:sdlc-process@v0','{}')")
     db.commit()
     assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='measurement.verdict.planned'").fetchone()[0] == 0
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
 
     for _ in range(2):
         report = workflow_verdicts.run_daily(now=NOW)

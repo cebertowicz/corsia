@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from core.carry_in_facts import CarryInFact, EligibleCase
-from core.lesson_files import has_section
+from eval.tool_allowlist import CarryInUnseen
 
 if TYPE_CHECKING:
     from core.lesson_delivery import TrialDelivery
@@ -27,11 +27,30 @@ def delivery_block(delivery: TrialDelivery) -> str:
     return json.dumps({"trial_lessons": [trial_lesson(delivery)]}, ensure_ascii=False, indent=2)
 
 
+def unseen_by(delivery: TrialDelivery, *, deliver: bool) -> CarryInUnseen:
+    """What this side's read tools may not observe of the lesson: never its case, and the baseline
+    not the lesson at all.
+
+    Both sides lose the lesson's skill directory and its owner's captured hypotheses
+    (``lesson_files``), which keep the case of a trial they became. A delivered side still reads the
+    lesson file, as it was when delivered, without its case.
+    """
+    from core import lesson_files
+
+    source = delivery.source_path
+    hidden = (source.parent, lesson_files.capture_path(source.parents[2], "-").parent)
+    if not deliver:
+        return CarryInUnseen(hidden)
+    view = lesson_files.without_case(delivery.source_data.decode("utf-8", errors="replace"))
+    return CarryInUnseen(hidden, source, view.encode("utf-8"))
+
+
 @dataclass(frozen=True)
 class Arm:
-    """One side's prompt."""
+    """One side's prompt and what its read tools may not observe."""
 
     prompt: str
+    unseen: CarryInUnseen = CarryInUnseen()
 
     def carried_by(self, recorded: str | None) -> bool:
         """Whether a Turn's recorded input is exactly this side's prompt."""
@@ -72,21 +91,24 @@ def sample_prompt(
 
 def arm(fact: CarryInFact, case: EligibleCase, blob: bytes | None, *, deliver: bool) -> Arm:
     block = delivery_block(case.delivery) if deliver else None
-    return Arm(sample_prompt(case.case, fact.target_path, blob, block, show_file=fact.target_path != fact.lesson_path))
+    prompt = sample_prompt(case.case, fact.target_path, blob, block, show_file=fact.target_path != fact.lesson_path)
+    return Arm(prompt, unseen_by(case.delivery, deliver=deliver))
 
 
 def arms(fact: CarryInFact, case: EligibleCase, before: bytes | None, after: bytes) -> tuple[Arm, Arm]:
     """The baseline and candidate sides of one re-test; they differ in exactly one thing.
 
-    A trial lesson's candidate carries the delivery unless the target already has its
-    section (task start omits it then, and the equal prompts retire the case); a
-    lesson in any other state compares ``before`` with ``after`` and delivers nothing.
+    A trial lesson's candidate carries the delivery unless task start would omit it
+    for this target text (``core.lesson_delivery.target_omission``; the equal prompts
+    then retire the case); a lesson in any other state compares ``before`` with
+    ``after`` and delivers nothing.
     """
+    from core.lesson_delivery import target_omission
+
     if not case.deliver:
         return arm(fact, case, before, deliver=False), arm(fact, case, after, deliver=False)
-    section = case.delivery.section
-    present = section is not None and has_section(after.decode("utf-8", errors="replace"), section)
-    return arm(fact, case, after, deliver=False), arm(fact, case, after, deliver=not present)
+    omitted = target_omission(case.delivery, after.decode("utf-8", errors="replace")) is not None
+    return arm(fact, case, after, deliver=False), arm(fact, case, after, deliver=not omitted)
 
 
 def _longest_backtick_run(text: str) -> int:

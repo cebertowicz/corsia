@@ -1,0 +1,20 @@
+{
+  "body": {
+    "values": [
+      [
+        "a",
+        "b"
+      ]
+    ]
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [
+    [
+      "valueInputOption",
+      "RAW"
+    ]
+  ],
+  "url": "https://sheets.googleapis.com/v4/spreadsheets/S1/values/A1:append"
+}

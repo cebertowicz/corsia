@@ -51,7 +51,7 @@ def prepare_spawn(
     error_type: type[Exception],
 ) -> SpawnSpec:
     """Validate and freeze the filesystem-bound part of one process launch."""
-    if not argv or not all(isinstance(part, str) and part for part in argv):
+    if not argv or not argv[0] or not all(isinstance(part, str) for part in argv):
         raise error_type("owned process argv is invalid")
     owned_cleanup_paths = tuple(
         dict.fromkeys(

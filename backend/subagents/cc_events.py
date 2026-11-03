@@ -42,7 +42,7 @@ def _rate_limit_event(raw: dict) -> list[dict]:
 
 def _result_event(raw: dict) -> list[dict]:
     return [{
-        "kind": "result", "result": raw.get("result"),
+        "kind": "result", "result": raw.get("result"), "subtype": raw.get("subtype"),
         "is_error": bool(raw.get("is_error")),
         "cost_usd": raw.get("total_cost_usd"), "num_turns": raw.get("num_turns"),
         "stop_reason": raw.get("stop_reason"), "aggregate_usage": raw.get("usage"),

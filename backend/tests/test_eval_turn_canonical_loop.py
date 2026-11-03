@@ -103,12 +103,12 @@ def eval_client(isolated_db, monkeypatch, tmp_path):
         yield client, dispatched, responses
 
 
-def _post(client):
+def _post(client, timeout_seconds=30):
     return client.post(
         "/api/eval/turn",
         params={"token": EVAL_TOKEN},
         json={"input": PROMPT, "metadata": {
-            "model": MODEL, "timeout_seconds": 30,
+            "model": MODEL, "timeout_seconds": timeout_seconds,
             "tools_in_scope": [NULL_TOOL_NAME],
         }},
     )
@@ -207,3 +207,22 @@ def test_eval_response_reports_the_canonical_usage(eval_client):
     assert body["error"] is None, body["error"]
     assert body["usage"]["prompt_tokens"] == 11
     assert body["usage"]["completion_tokens"] == 3
+
+
+def test_eval_turn_past_its_deadline_reports_a_timeout_not_a_finished_turn(eval_client, monkeypatch):
+    """The real loop handles the deadline's cancel and ends normally; the route must still say it timed out."""
+    import asyncio
+
+    from llm import router
+
+    client, _dispatched, _responses = eval_client
+
+    async def hangs(messages, tools, **kwargs):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(router, "_dispatch_openai", hangs)
+
+    body = _post(client, timeout_seconds=0.3).json()
+
+    assert body["error"] == "Eval turn timed out after 0.3s"
+    assert body["content"] is None and body["tool_calls"] == []

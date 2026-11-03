@@ -68,7 +68,9 @@ class Failed:
 
 @dataclass(frozen=True)
 class AgentAccountView:
-    """One read of the agents' account; ``absent`` is the only state that leaves shells alone."""
+    """One read of the agents' account; ``absent`` is the only state that leaves shells alone.
+
+    A rule-started script is locked even then (``script_env``)."""
 
     state: str  # not_installed | needs_auth | unverified | wrong_account | ready
     cause: str | None = None
@@ -287,8 +289,19 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     alias, the person's own ``pushInsteadOf`` to SSH, or a command that sets its own SSH
     command.
     """
-    if account.absent:
-        return {}
+    return {} if account.absent else _identity_env(account)
+
+
+def script_env(account: AgentAccountView) -> dict[str, str]:
+    """A rule-started script's GitHub identity: a shell's, but locked with no account too.
+
+    No person is at the keyboard to own a fallback to their own login, so an absent
+    account gets the locked state rather than the person's setup.
+    """
+    return _identity_env(account)
+
+
+def _identity_env(account: AgentAccountView) -> dict[str, str]:
     entries = _git_config(account)
     env = {"GH_CONFIG_DIR": account.home if account.ready and account.home else LOCKED_HOME,
            "GIT_CONFIG_COUNT": str(len(entries))}
